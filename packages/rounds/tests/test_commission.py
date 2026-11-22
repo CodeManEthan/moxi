@@ -289,6 +289,34 @@ def test_existing_on_a_branch_another_build_s_finish_brought_onto_the_target_is_
     assert events(path, "build.commissioned") == []
 
 
+def test_the_landed_branch_refusal_gives_a_way_that_commissions(repo, opened, tmp_path):
+    # The second way the refusal names is followed as written: the branch is deleted,
+    # and a commission without --existing cuts a new one.
+    path = opened()
+    other = log.round_log(tmp_path / "notes" / "rounds" / "b-round")
+    _other_build(repo, opened)
+    repo.git("branch", "work", "first~1")
+    before, tip = repo.rev("main"), repo.rev("first")
+    landing = repo.merge("first")
+    log.append(other, "finish.action",
+               {"stage": "B1", "tip": tip, "id": "merge", "kind": "merge", "state": "ok",
+                "landing": landing, "target_before": before}, by="coder")
+    log.append(other, "finish.done", {"stage": "B1", "tip": tip}, by="coder")
+    with pytest.raises(Refused) as caught:
+        commissioning.commission(ROUND, "B1", builder="coder", by="planner",
+                                 existing=True)
+    fix = caught.value.unmet[0].fix
+    delete = fix.split("git -C ", 1)[1].split(", then ", 1)[0]
+    root, _branch, gone, branch = delete.split(" ")
+
+    assert (gone, branch) == ("-d", "work")
+    assert fix.endswith(f"moxi rounds commission {ROUND} B1 --builder coder")
+    repo.git("-C", root, "branch", gone, branch)
+    made = commissioning.commission(ROUND, "B1", builder="coder", by="planner")
+    assert repo.git("-C", str(made.worktree), "rev-parse", "HEAD") == repo.rev("main")
+    assert len(events(path, "build.commissioned")) == 1
+
+
 def test_a_detached_root_with_no_into_is_refused(repo, opened):
     opened()
     repo.git("switch", "-q", "--detach", "main")

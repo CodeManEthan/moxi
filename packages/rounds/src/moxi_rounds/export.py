@@ -18,11 +18,14 @@ no view it holds both, the docket first:
 - **The docket**: every question of the round that reads as open, whatever else is
   set, and after them the parked ones, which are not put to him.
 - **The ratification**: the decisions not yet ruled of the builds that are finished
-  when the export is computed. It names those builds under `covers`. What it puts to
-  him is the project's `ratify` setting: `majors` (the default) each major decision,
-  each an entry of its own; `majors+minors` adds the minor ones as one group, whose
-  entries carry `group` and are drawn together under one heading that lists their
-  ids; `off` none. A group is a way to draw, not a thing to answer: each id in it is
+  when the export is computed, each the operator's by the one rule
+  (`decisions.not_put`). It names those builds under `covers`. What it puts to the
+  operator is the project's `ratify` setting: `majors` (the default) each major
+  decision, each an entry of its own; `majors+minors` adds the minor ones as one
+  group, whose entries carry `group` and are drawn together under one heading that
+  lists their ids; `off` none. A round whose flow has no `ratify` step, or whose
+  `ratify` is skipped, puts none either, and says why in `not_ratified`: the index
+  keeps that with each decision. A decision the lead settled is in neither. A group is a way to draw, not a thing to answer: each id in it is
   ruled on its own. The major decisions of builds that are not finished are listed
   under `later`, which are no entries: they come in a later export, once their build
   is finished. A build answers only for the decisions its own reports declared: a
@@ -40,8 +43,10 @@ end can leave one so) is listed apart, as waiting for a new round, and is no ent
 
 **A project's export** holds every open and every parked question on the project's list
 and in each open round of the project, and every major decision of those rounds not yet
-ruled, each entry naming its holder. A decision's entry adds its stage, its weight,
-whether it forecloses, and `not_put`, why it is not put to him, where it is not; one that forecloses is marked `alone`, an entry of its own. `waiting` gives
+ruled, and every minor one that is the operator's, each entry naming its holder. A
+decision's entry adds its stage, its weight, whether it forecloses, and `not_put`, why it
+is not put to the operator, where it is not; one that forecloses is marked `alone`, an
+entry of its own. `waiting` gives
 those rows, and is the one function anything that lists what waits in a project takes
 its question rows from.
 
@@ -134,7 +139,7 @@ class Entry:
     forecloses: bool = False
     #: The group it is drawn in (`MINORS`), or None for an entry of its own.
     group: str | None = None
-    #: For a decision in a project's rows: why it is not put to him
+    #: For a decision in a project's rows: why it is not put to the operator
     #: (`decisions.not_put`), or None when it is.
     not_put: str | None = None
 
@@ -191,6 +196,7 @@ class Rows:
     left: tuple[Entry, ...] = ()
     covers: tuple[str, ...] | None = None
     later: tuple[Entry, ...] = ()
+    not_ratified: str | None = None
 
 
 @dataclass(frozen=True)
@@ -202,8 +208,10 @@ class Export:
     logs could not be read. For a round that has ended, `ended` says how (`how`, `by`,
     `record`, `at`) and `left` holds its questions that wait for a new round, which
     are no entries. An export that holds the ratification gives the project's `ratify`
-    setting, the stages of the finished builds it `covers`, and the decisions put off
-    to a `later` one; for any other these are None, None and empty."""
+    setting, the stages of the finished builds it `covers`, the decisions put off to
+    a `later` one, and `not_ratified`, why the round's flow puts no decision to the
+    operator where it puts none; for any other these are None, None, empty and
+    None."""
 
     name: str
     project: str
@@ -218,6 +226,7 @@ class Export:
     ratify: str | None = None
     covers: tuple[str, ...] | None = None
     later: tuple[Entry, ...] = ()
+    not_ratified: str | None = None
 
     @property
     def has_docket(self) -> bool:
@@ -256,6 +265,7 @@ class Export:
                 "ratify": self.ratify,
                 "covers": None if self.covers is None else list(self.covers),
                 "later": [entry.data() for entry in self.later],
+                "not_ratified": self.not_ratified,
                 "ended": None if self.ended is None else dict(self.ended),
                 "left": [entry.data() for entry in self.left],
                 "unreadable": list(self.unreadable),
@@ -291,8 +301,8 @@ def _decision(holder: str, item: index.Item, on_closed: Callable[[str], bool]) -
     body = item.body
     return Entry(
         holder=holder, id=item.id, text=body.get("text"), origin=body.get("from"),
-        blocks=decisions.BLOCKS, state=questions.OPEN, by=body.get("by"),
-        at=body.get("at"),
+        blocks=decisions.BLOCKS, state=body.get("state") or questions.OPEN,
+        by=body.get("by"), at=body.get("at"),
         options=tuple(Option(key, line) for key, line in decisions.OPTIONS),
         stage=body.get("stage"), weight=body.get("weight"),
         forecloses=bool(body.get("forecloses")))
@@ -370,15 +380,19 @@ def waiting(home: folders.Home, *, settings=None, env=None) -> Rows:
             unreadable.append(summary.unreadable)
         elif summary.status == states.OPEN:
             covers, declared = _landed(summary)
-            # Of the decisions, only a major one waits here, each said to be put to
-            # him or not by the rule the ratification draws by.
-            entries += [entry if not entry.decision else replace(
-                            entry, not_put=decisions.not_put(
-                                entry.weight, setting=setting, stage=entry.stage,
-                                finished=entry.stage in covers,
-                                declared=entry.id in declared))
-                        for entry in _entries(summary, on_closed)
-                        if entry.weight in (None, report_block.MAJOR)]
+            unratified = _unratified(summary)
+            # Of the decisions, a major one waits here, said to be put to the operator
+            # or not by the rule the ratification draws by, and a minor one only where
+            # it is the operator's: any other minor one is the lead's to settle.
+            for entry in _entries(summary, on_closed):
+                if entry.decision:
+                    entry = replace(entry, not_put=decisions.not_put(
+                        entry.weight, setting=setting, stage=entry.stage,
+                        finished=entry.stage in covers, declared=entry.id in declared,
+                        unratified=unratified))
+                    if entry.weight != report_block.MAJOR and entry.not_put is not None:
+                        continue
+                entries.append(entry)
     return Rows(_ordered(entries), tuple(unreadable))
 
 
@@ -408,7 +422,8 @@ def of_round(home: folders.Home, slug: str, *, view: str | None = None, settings
     put, covers, later = _ratification(
         summary, [entry for entry in found if entry.decision],
         own.round_setting(settings, home.project, "ratify"))
-    return replace(rows, entries=rows.entries + put, covers=covers, later=later)
+    return replace(rows, entries=rows.entries + put, covers=covers, later=later,
+                   not_ratified=_unratified(summary))
 
 
 def _landed(summary: index.Summary) -> tuple[tuple[str, ...], set[str]]:
@@ -421,23 +436,32 @@ def _landed(summary: index.Summary) -> tuple[tuple[str, ...], set[str]]:
     return covers, {key for item in stages for key in item.body.get("decisions") or ()}
 
 
+def _unratified(summary: index.Summary) -> str | None:
+    """Why the round's flow puts no decision to the operator, as the index keeps it with
+    each decision (`decisions.not_ratified`), or None when it does or holds none."""
+    return next((item.body.get("not_ratified") for item in summary.of(index.DECISION)
+                 if item.body.get("not_ratified") is not None), None)
+
+
 def _ratification(summary: index.Summary, found: list[Entry], setting: str):
     """What a round's ratification holds, as `(entries, covers, later)`: of the
-    decisions not yet ruled, `found`, those of the finished builds that `setting` puts
-    to him, the major ones first and then the minor ones as one group; the stages of
-    the finished builds; and the major decisions of the builds not yet finished."""
+    decisions not yet ruled, `found`, those of the finished builds that are the
+    operator's (`decisions.not_put`), the major ones first and then the minor ones as
+    one group, a minor one that forecloses an entry of its own; the stages of the
+    finished builds; and the major decisions of the builds not yet finished. A round
+    whose flow puts no decision to the operator holds none of them."""
     covers, own = _landed(summary)
     unruled = [entry for entry in found
                if entry.state == questions.OPEN and entry.id in own]
-    if setting == OFF:
+    if setting == OFF or _unratified(summary) is not None:
         return (), covers, ()
     majors = [entry for entry in unruled
               if entry.stage in covers and entry.weight == report_block.MAJOR]
     minors = []
     if setting == MAJORS_AND_MINORS:
-        minors = [replace(entry, group=MINORS) for entry in unruled
-                  if entry.stage in covers and entry.weight != report_block.MAJOR
-                  and not entry.forecloses]
+        minors = [entry if entry.forecloses else replace(entry, group=MINORS)
+                  for entry in unruled
+                  if entry.stage in covers and entry.weight != report_block.MAJOR]
     later = tuple(entry for entry in unruled
                   if entry.stage not in covers and entry.weight == report_block.MAJOR)
     return tuple(majors + minors), covers, later
@@ -492,7 +516,8 @@ def questions_of(name: str, *, view: str | None = None, settings=None,
                   ended=rows.ended, left=rows.left,
                   ratify=(own.round_setting(settings, home.project, "ratify")
                           if slug is not None and view != DOCKET else None),
-                  covers=rows.covers, later=rows.later)
+                  covers=rows.covers, later=rows.later,
+                  not_ratified=rows.not_ratified)
 
 
 # -- the two forms -----------------------------------------------------------------------
@@ -556,17 +581,25 @@ _PUTS = {MAJORS: "each major decision not yet ruled",
 
 def _ratification_lines(export: Export) -> list[str]:
     covers = ", ".join(export.covers or ()) or "no build: none is finished"
-    majors = tuple(entry for entry in export.decisions if entry.group is None)
+    majors = tuple(entry for entry in export.decisions
+                   if entry.weight == report_block.MAJOR)
+    puts = (f"nothing: {export.not_ratified}" if export.not_ratified is not None
+            else _PUTS.get(export.ratify, export.ratify))
     lines = ["## Ratification", "",
-             f"Covers the finished builds: {covers}. It puts to the operator "
-             f"{_PUTS.get(export.ratify, export.ratify)}.", ""]
-    if export.ratify == OFF:
+             f"Covers the finished builds: {covers}. It puts to the operator {puts}.", ""]
+    if export.ratify == OFF or export.not_ratified is not None:
         return lines
     lines += ["## Ratification: major decisions", ""]
     lines += _group(majors, "No major decision of a finished build waits.")
     if export.ratify == MAJORS_AND_MINORS:
         grouped = export.grouped
         ids = ", ".join(entry.id for entry in grouped)
+        alone = tuple(entry for entry in export.decisions
+                      if entry.weight != report_block.MAJOR and entry.group is None)
+        if alone:
+            lines += ["## Ratification: minor decisions that foreclose, each on its own",
+                      ""]
+            lines += _group(alone, "")
         lines += [f"## Ratification: minor decisions, one group: {ids or 'none'}", ""]
         if grouped:
             lines += ["Drawn together, each ruled on its own:", "",

@@ -24,12 +24,30 @@
   `round_time_s`, open to close, and `longest_gap`, the longest stretch with nothing
   logged with the steps due across it. `show` computes both for a round that ended
   before them; `list --numbers` sums `round_time_s` and says how many rounds hold it.
-- A decision is labelled his to rule only where it is put to him: the project's
-  `ratify` setting names its weight and the build that finished its stage declared it.
-  Elsewhere `show`, the note, `verdict` and `list --waiting` say it is not put to him,
-  and why, and in an ended round that it is left open. The write that closes a round
-  lists each decision of a finished build it left open, and `show` of an ended round
-  keeps the list.
+- One rule says whose an open decision is: the operator's exactly when the close waits
+  for the operator's ruling of it, that is when the round's flow has a `ratify` step
+  that is not skipped, the project's `ratify` setting names its weight, its stage is
+  finished, and the build that finished it declared it. The close, the `ratify` step,
+  the labels, the ratify export and `list --waiting` all read it. Under each open
+  decision `show`, the note, `verdict` and `list --waiting` say `the operator's to
+  rule`, `not yet put to the operator` while only its stage is unfinished, `not put to
+  the operator (<why>)` for a major one, or `the lead's to settle` for a minor one, and
+  in an ended round that it is left open. Under `majors+minors` the minor decisions
+  of a finished build hold the close and the `ratify` step until the operator rules
+  them. A round whose flow has no `ratify` step, or whose `ratify` is skipped, puts no
+  decision in its export, which says why in `not_ratified`. The write that closes a
+  round lists each decision of a finished build it left open, and `show` of an ended
+  round keeps the list.
+- The lead settles a minor decision that is not the operator's:
+  `mark ROUND B<n>.M<k> --accept|--reject --record PTR`, one `decision.settled` event.
+  The close waits for every such one, in every flow, and a reject owes a fix as the
+  operator's does. `mark ROUND B<n>.M<k> --major --record PTR` raises a decision to
+  major, one `decision.raised` event; a settlement lapses once the weight rises. The
+  operator's ruling of a settled decision replaces it and names its line,
+  `settlement`. The numbers gain `settled`, read as zero in numbers written before it.
+- `commission --existing` refused on a branch another build's landing brought onto the
+  target now gives a second way that works: delete the branch, then commission without
+  `--existing`.
 - Tests: the rounds tests fail at setup when the test fence is not loaded, and a config
   path outside the test's own tmp fails the test.
 

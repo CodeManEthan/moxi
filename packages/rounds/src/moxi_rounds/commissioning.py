@@ -593,8 +593,10 @@ def _landed_already(found: _Look, git: Git, status: builds.Status, landed, *, na
                   f"{by.round} {by.landing.stage}, at {by.landing.landing[:12]}: a build "
                   "of it would hold nothing of its own and could not finish",
                   f"drop the round, as its work is on the target: moxi rounds drop {name} "
-                  "--by lead --record PTR; or, for work still to do, cut a branch of its "
-                  f"own: {again.replace(' --existing', '')}")]
+                  "--by lead --record PTR; or, for work still to do, delete the branch, "
+                  f"whose commits {found.target} holds, then cut one of its own: git -C "
+                  f"{found.root} branch -d {found.branch}, then "
+                  f"{again.replace(' --existing', '')}")]
 
 
 # -- the act ------------------------------------------------------------------------------

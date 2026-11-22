@@ -621,6 +621,7 @@ def record(name: str, report: Path | str, *, by: str, settings=None,
     why = decisions.why_not(after, str(own.round_setting(settings, home.project,
                                                          "ratify")))
     open_as = {decision.key: decisions.open_line(name, decision.key,
+                                                 weight=decision.weight,
                                                  why=why[decision.key], ended=False)
                for decision in declared if decision.key in why}
     return Recorded(name=name, verdict=one, standing=versions.standing(after),

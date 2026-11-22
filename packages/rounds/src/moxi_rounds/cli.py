@@ -30,6 +30,7 @@
     moxi rounds mark ROUND B<n>.L<k> --fixed --commit SHA [--commit SHA]...
                      --no-behaviour-change [--as NAME]
     moxi rounds mark ROUND B<n>.W<k>|B<n>.M<k> --done --record PTR [--as NAME]
+    moxi rounds mark ROUND B<n>.M<k> --accept|--reject|--major --record PTR [--as NAME]
     moxi rounds mark ROUND thread:NAME --close|--accept-risk --record PTR [--as NAME]
     moxi rounds mark ROUND C<n>[,C<n>...] --shown --record PTR [--as NAME]
     moxi rounds mark ROUND B<n> --resync [--as NAME]
@@ -118,10 +119,15 @@ report is recorded. It holds the round's close and is listed by `list --waiting`
 or the id of a commit the build's repo holds. A later report of the same build may list
 the item again with the same sentence; it is the same item. Each
 `[[decision]]`, an as-built choice the operator would notice, is a record of the round,
-`B<n>.M<k>`, with the options `accept` and `reject`, until he rules it with `rule ROUND
-B<n>.M<k>=accept|reject --record PTR`; a later report may list it again as heavy or
-heavier, never lighter. A rejected decision owes a fix, a waiting item `B<n>.M<k>`
-until `mark ... --done --record PTR` names it. A report of `kind = "majors"`, by a
+`B<n>.M<k>`, with the options `accept` and `reject`. One the close waits for the
+operator to rule (the flow has an unskipped `ratify` step, the project's `ratify`
+setting names its weight, and its build is finished and declared it) is the operator's
+to rule with `rule ROUND B<n>.M<k>=accept|reject --record PTR`; any other minor one of a
+finished build is the lead's to settle with `mark ROUND B<n>.M<k> --accept|--reject
+--record PTR`, and `mark ROUND B<n>.M<k> --major --record PTR` makes a decision major.
+A later report may list it again as heavy or heavier, never lighter. A rejected
+decision owes a fix, a waiting item `B<n>.M<k>` until `mark ... --done --record PTR`
+names it. A report of `kind = "majors"`, by a
 checker who built none of the stages it names, declares the decisions no build report
 carries.
 The lead repairs a record by deriving it again, never by giving a value: `mark ROUND
@@ -244,8 +250,8 @@ and decisions, its questions by state, its rulings and whether each was shown to
 its history and, once it has ended, its numbers. `list` with no flag lists the open
 rounds, each with its flow, its step and its counts, and with `--closed` the rounds
 that have ended; `list --waiting` lists what waits on the operator: the open and the
-parked questions, the open waiting items, the unruled major decisions, the builds to
-look at and the rulings not yet shown to him; `list --numbers` sums the numbers of
+parked questions, the open waiting items, the unruled major decisions and the minor ones
+that are the operator's, the builds to look at and the rulings not yet shown to him; `list --numbers` sums the numbers of
 the closed rounds. Each is of every project, or of the
 one named, and `--json` gives it as data. `show` and `list` record nothing. A verb
 that writes takes `--as NAME`, who is doing it; without it that is the user the
@@ -718,7 +724,9 @@ def _declare_mark(verbs) -> None:
     said = ("Change a record in a way that is not the operator's ruling: make a "
             "question of a round hold up more stages, reopen a parked one, make a "
             "stage wait for more stages, mark a minor finding of a build fixed, mark "
-            "a waiting item done, move a round up to a heavier flow, decide a thread of the design's "
+            "a waiting item done, settle a minor decision that is not the operator's "
+            "or make a decision major, move a round up to a heavier flow, decide a "
+            "thread of the design's "
             "verification, size a worker's brief, say that rulings were shown to the "
             "operator as recorded, with a pointer to where, or repair a record: "
             "read a build's base again from git, a recorded report again, or the "
@@ -733,7 +741,9 @@ def _declare_mark(verbs) -> None:
                              "stage, B<n>; with --fixed, a build's finding, "
                              "B<n>.L<k>; with --done, a waiting item, "
                              "B<n>.W<k>, or a rejected decision's fix, "
-                             "B<n>.M<k>; with --close or --accept-risk, a thread "
+                             "B<n>.M<k>; with --accept, --reject or --major, a "
+                             "decision, B<n>.M<k>; with --close or --accept-risk, a "
+                             "thread "
                              "of the design's verification, thread:NAME, the name "
                              "in letters, digits and . _ -; with --shown, the "
                              "rulings, C<n> of a round or S<n> of a project, "
@@ -770,6 +780,17 @@ def _declare_mark(verbs) -> None:
                       help="a waiting item is done: the work a build's report said "
                            "waits on the operator; needs --record, a pointer or "
                            "the id of a commit the build's repo holds")
+    form.add_argument("--accept", action="store_true",
+                      help="the lead's settlement of a minor decision that is not the "
+                           "operator's to rule: accepted as built; needs --record")
+    form.add_argument("--reject", action="store_true",
+                      help="the lead's settlement of a minor decision that is not the "
+                           "operator's to rule: rejected, which owes a fix, marked "
+                           "with --done; needs --record")
+    form.add_argument("--major", action="store_true",
+                      help="the lead's raise of a decision to major, as a later "
+                           "report listing it heavier would; a settlement of it "
+                           "lapses; needs --record")
     form.add_argument("--flow", metavar="NAME",
                       help="move the round up to this flow: one later in the tiers "
                            "that has every step the round follows, or the round's "
@@ -825,6 +846,8 @@ def _declare_mark(verbs) -> None:
                              "<session>@<UTC time>, an https:// URL, file:<path "
                              "in the round's folder>#<anchor>, or page:<page>/<act "
                              "id>@<UTC time>; "
+                             "with --accept, --reject or --major, a pointer to "
+                             "where the lead wrote why, of those shapes; "
                              "with --restamp, a pointer to where the lead named what "
                              "edited the design, of those shapes; "
                              "with --shown, a pointer to where he was shown them, one "
@@ -857,6 +880,8 @@ def _mark(args, out) -> int:
                           "finding with --fixed")
     if args.resync or args.reread:
         return _mark_repair(args, out)
+    if args.accept or args.reject or args.major:
+        return _mark_decision(args, out)
     if args.fixed:
         return _mark_fixed(args, out)
     if args.done:
@@ -909,6 +934,29 @@ def _mark_restamp(args, out) -> int:
                           "design, and names nothing else", "leave the ID out")
     done = repairs.restamp(args.target, record=args.record, by=_actor(args))
     print(f"{done.name}: {done.said}", file=out)
+    _warn_of(done.failed, args.prog, args.verb)
+    return codes.OK
+
+
+def _mark_decision(args, out) -> int:
+    """`mark B<n>.M<k> --accept|--reject|--major`: the lead's settlement of a minor
+    decision, or its raise to major."""
+    from . import decisions, settling
+
+    if args.major:
+        done = settling.make_major(args.target, args.id, record=args.record,
+                                   by=_actor(args))
+    else:
+        done = settling.settle(args.target, args.id,
+                               decisions.ACCEPT if args.accept else decisions.REJECT,
+                               record=args.record, by=_actor(args))
+    one = done.decision
+    print(f"{done.name} decision {one.key}: {one.weight}, {one.state}"
+          + (f"   {decisions.settled_line(one)}" if one.state == decisions.SETTLED
+             else ""), file=out)
+    if one.state == decisions.SETTLED and one.chose == decisions.REJECT:
+        print(f"a fix is owed: moxi rounds mark {done.name} {one.key} --done --record "
+              "PTR", file=out)
     _warn_of(done.failed, args.prog, args.verb)
     return codes.OK
 
@@ -1787,7 +1835,8 @@ def _declare_list(verbs) -> None:
             "step it is at, how many questions it has open and parked and how many of "
             "its rulings were not yet shown to him; with --closed, the rounds that "
             "have ended. With --waiting: every open question, every parked one, the "
-            "open waiting items, the unruled major decisions, the builds to look at "
+            "open waiting items, the unruled major decisions and the minor ones "
+            "that are the operator's, the builds to look at "
             "and the rulings not yet shown to him. With --numbers: the numbers of the "
             "closed rounds, summed. With --questions: the questions of one round or "
             "one project written out, the open ones, then the parked ones, then the "

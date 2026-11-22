@@ -121,8 +121,8 @@ def test_verdict_prints_each_decision_with_the_ruling_that_settles_it(built, cap
 
     out = capsys.readouterr().out
     assert f"decision B1.M1: major, open: {RETRIED}\n" in out
-    # B1 is not finished yet, so its decision is not put to him yet.
-    assert ("  not put to him (stage B1 is not finished); recorded only if he rules it: "
+    # B1 is not finished yet, so its decision is not yet put to the operator.
+    assert ("  not yet put to the operator (stage B1 is not finished): "
             f"moxi rounds rule {ROUND} B1.M1=accept|reject --record PTR\n") in out
 
 

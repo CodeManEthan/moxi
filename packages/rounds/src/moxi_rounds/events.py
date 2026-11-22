@@ -118,13 +118,15 @@ TYPES = _types(
     # of the round's flow holds the name the flow had (`was`), the new name (`flow`)
     # and its `steps`, and is the whole of the move. The operator's credit of a
     # fast-forward names the build by its commission's line (`build`) and holds the
-    # head it credits (`head`). A ruling
+    # head it credits (`head`). A ruling of a decision the lead settled names the
+    # settlement's line, `settlement`, which it replaces. A ruling
     # that replaces an earlier one names it in `supersedes`, and one that takes an
     # earlier one back in `revokes`; the earlier ruling's line is never changed.
     EventType("ruling.recorded",
               ("id", "text", "record", "reason", "scope", "stages", "kind", "rules",
                "chose", "question", "state", "until", "blocks", "covers", "supersedes",
-               "revokes", "moved_to", "was", "flow", "steps", "build", "head"),
+               "revokes", "moved_to", "was", "flow", "steps", "build", "head",
+               "settlement"),
               required=("id", "record", "kind")),
     # Rulings of this log were put in front of the operator: their ids, and the pointer
     # to where he was shown them.
@@ -153,6 +155,13 @@ TYPES = _types(
     # A finding or a waiting item moved to a new state.
     EventType("finding.marked", ("id", "state", "commits", "record")),
     EventType("wait.marked", ("id", "state", "commits", "record")),
+    # The lead settled a minor decision that is not the operator's to rule: its key
+    # (`id`), what was chosen of it (`accept` or `reject`), the pointer, and `by`, the
+    # role, `lead`. It is never the operator's ruling.
+    EventType("decision.settled", ("id", "chose", "record", "by"),
+              required=("id", "chose", "record", "by")),
+    # The lead made a decision major: its key (`id`), the pointer, and `by`, `lead`.
+    EventType("decision.raised", ("id", "record", "by"), required=("id", "record", "by")),
     # A brief was sized: the stage, the one slice or verification it is for, the file,
     # its digest and the result.
     EventType("brief.sized", ("stage", "slice", "verify", "brief", "sha256", "result")),

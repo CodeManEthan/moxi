@@ -61,6 +61,12 @@ differs from what he ruled or what the design said. The checker weighs it.
 When unsure, call it major. A later report can make a decision heavier and can never make
 it lighter, so an under-call is the mistake that stays.
 
+A minor decision the close does not put to the operator is the lead's to settle before
+the round closes. Accept it when it stands as built; where it promises a follow-up, the
+pointer names the task filed for it, and where nothing was filed, reject it, which owes
+a fix. A minor decision that names a difference the operator would see was under-called:
+raise it to major rather than settle it.
+
 ## Cutting slices
 
 A slice is one worker's piece of a build: one mechanism or one group of files, well under

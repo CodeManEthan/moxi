@@ -31,8 +31,10 @@ with a `retro` step or not.
   included.
 - `questions`: the round's questions by the shape of the pointer they came from
   (`comms`, `session`, `url`, `file`, `build`, or `other`).
-- `decisions`: the decisions ruled `accept` and ruled `reject`, as the rulings that
-  stand leave them.
+- `decisions`: the decisions the operator ruled `accept` and ruled `reject`, as the
+  rulings that stand leave them; `settled`: the minor ones the lead settled `accept`
+  and `reject`, as the settlements that stand leave them. Numbers written before
+  `settled` was counted read it as zero.
 - `skips`: skips of a step or of a finish action; `step_ups`: the lead's moves to a
   later flow; `repairs`; `corrections`: rulings that replace or take back another;
   `drops`: builds dropped; `cleared_locks`: finish locks of a dead holder cleared;
@@ -289,6 +291,8 @@ def of(state: states.State, *, ended_at: str | None = None,
     origins = Counter(pointers.shape(one.origin) or OTHER for one in state.questions)
     ruled = Counter(one.chose for one in decisions.of_round(state)
                     if one.state == decisions.RULED)
+    settled = Counter(one.chose for one in decisions.of_round(state)
+                      if one.state == decisions.SETTLED)
     flagged = Counter(flag for one in verdicts for flag in one.get("flags") or ())
     return {
         "design_passes": sum(one.get("kind") == report_block.DESIGN for one in verdicts),
@@ -307,6 +311,8 @@ def of(state: states.State, *, ended_at: str | None = None,
                              for one in history),
         "questions": dict(sorted(origins.items())),
         "decisions": {name: ruled[name] for name in (decisions.ACCEPT, decisions.REJECT)},
+        "settled": {name: settled[name]
+                    for name in (decisions.ACCEPT, decisions.REJECT)},
         "skips": sum(_rules(one).startswith((corrections.SKIP, corrections.SKIP_ACTION))
                      for one in rulings),
         "step_ups": sum(one.get("type") == "flow.changed" and one.get("by") == stepping.LEAD
@@ -347,7 +353,7 @@ def _duration(seconds: object) -> str:
 #: The keys `lines` gives a line of their own to; any other is given as it is.
 _SAID = ("design_passes", "fold_first", "folds", "records_only_folds", "lead_decisions",
          "step_time_s", "round_time_s", "longest_gap", "findings", "rechecks", "drift_rechecks", "checks_failed",
-         "questions", "decisions", "skips", "step_ups", "repairs", "corrections", "drops",
+         "questions", "decisions", "settled", "skips", "step_ups", "repairs", "corrections", "drops",
          "cleared_locks", "flags")
 
 
@@ -359,6 +365,8 @@ def lines(numbers: Mapping) -> list[str]:
              if isinstance(spent, Mapping) and spent else "none")
     decided = numbers.get("decisions")
     decided = decided if isinstance(decided, Mapping) else {}
+    settled = numbers.get("settled")
+    settled = settled if isinstance(settled, Mapping) else {}
     found = [
         f"design: passes {_count(numbers, 'design_passes')}, folds "
         f"{_count(numbers, 'folds')} (records only "
@@ -374,7 +382,9 @@ def lines(numbers: Mapping) -> list[str]:
         f"{_count(numbers, 'checks_failed')}",
         f"questions by origin: {_counts(numbers.get('questions'))}",
         f"decisions: accepted {_count(decided, decisions.ACCEPT)}, rejected "
-        f"{_count(decided, decisions.REJECT)}",
+        f"{_count(decided, decisions.REJECT)}; settled by the lead: accepted "
+        f"{_count(settled, decisions.ACCEPT)}, rejected "
+        f"{_count(settled, decisions.REJECT)}",
         f"skips {_count(numbers, 'skips')}, step-ups {_count(numbers, 'step_ups')}, "
         f"repairs {_count(numbers, 'repairs')}, corrections "
         f"{_count(numbers, 'corrections')}, dropped builds {_count(numbers, 'drops')}, "

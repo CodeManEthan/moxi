@@ -15,8 +15,9 @@ since nothing says which it belongs in.
 
 **What waits on the operator** (`waiting`): across every project, or in one, each open
 question, each parked question with what it waits for, each open waiting item of an
-open round, each major decision of one not yet ruled (labelled his to rule only where
-it is put to him, `decisions.not_put`), each project's rulings not yet
+open round, each major decision of one not yet ruled (labelled the operator's to rule
+only where it is put to the operator, `decisions.not_put`) and each minor one that is
+the operator's, each project's rulings not yet
 shown to him, and each open build of its rounds that is idle, gone, empty or unclear,
 that shares commits with another, or that git could not read. The question rows are the ones a project's questions export holds,
 from the same function, so the two never differ. A waiting item is no question, and is
@@ -293,7 +294,8 @@ def _decision_lines(entries: Sequence, now: str) -> list[str]:
                   f"    from: {entry.origin}   {weight}   by: {entry.by}   at: "
                   f"{entry.at}   age: {age(entry.at, now)}",
                   "    " + decisions.open_line(entry.holder, entry.id,
-                                                 why=entry.not_put, ended=False)]
+                                                 weight=entry.weight, why=entry.not_put,
+                                                 ended=False)]
     return lines
 
 

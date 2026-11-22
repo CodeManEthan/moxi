@@ -17210,11 +17210,26 @@ rounds	packages/rounds/src/moxi_rounds/cli.py	parser.add_argument("--lead", meta
 rounds	packages/rounds/src/moxi_rounds/cli.py	if written.closed is None:	keep	closed	closed
 rounds	packages/rounds/src/moxi_rounds/cli.py	help="re-stamp the design's current version: when design.md "	keep	help	help
 rounds	packages/rounds/src/moxi_rounds/cli.py	done = repairs.restamp(args.target, record=args.record, by=_actor(args))	keep	record	record
+rounds	packages/rounds/src/moxi_rounds/cli.py	help="the lead's settlement of a minor decision that is not the "	keep	help	help
+rounds	packages/rounds/src/moxi_rounds/cli.py	help="the lead's raise of a decision to major, as a later "	keep	help	help
+rounds	packages/rounds/src/moxi_rounds/cli.py	done = settling.make_major(args.target, args.id, record=args.record,	keep	record	record
+rounds	packages/rounds/src/moxi_rounds/decisions.py	record=event.get("record"), ruled=event["n"],	keep	record	record
+rounds	packages/rounds/src/moxi_rounds/decisions.py	chose, record = ((one.chose, one.record) if isinstance(one, Decision)	keep	record	record
+rounds	packages/rounds/src/moxi_rounds/decisions.py	else (one.get("chose"), one.get("record")))	keep	record	record
 rounds	packages/rounds/src/moxi_rounds/dropping.py	and the `record` given, the `event` written, the build's folders the removal	keep	record	record
 rounds	packages/rounds/src/moxi_rounds/dropping.py	((one.round, one.stage, one.relation) for one in found.shares),	keep	round	round
+rounds	packages/rounds/src/moxi_rounds/events.py	EventType("decision.settled", ("id", "chose", "record", "by"),	keep	record	record
+rounds	packages/rounds/src/moxi_rounds/events.py	required=("id", "chose", "record", "by")),	keep	record	record
+rounds	packages/rounds/src/moxi_rounds/events.py	EventType("decision.raised", ("id", "record", "by"), required=("id", "record", "by")),	keep	record	record
 rounds	packages/rounds/src/moxi_rounds/leads.py	ROUND = "round"	keep	round	round
 rounds	packages/rounds/src/moxi_rounds/leads.py	__all__ = ["NAME", "ROUND", "PROJECT", "CHANGED", "is_name", "check", "of", "chosen",	keep	NAME	NAME
 rounds	packages/rounds/src/moxi_rounds/settings.py	if len(set(jobs)) != len(jobs):	keep	set	set
+rounds	packages/rounds/src/moxi_rounds/settling.py	`reject`, `record` the pointer to where the lead wrote why.	keep	record	record
+rounds	packages/rounds/src/moxi_rounds/settling.py	f"{found.record}", f"moxi rounds show {name}")	keep	record	record
+rounds	packages/rounds/src/moxi_rounds/settling.py	"id": key, "chose": chose, "record": record,	keep	record	record
+rounds	packages/rounds/src/moxi_rounds/settling.py	"""Make the decision `key` of the round `target` major, `record` the pointer to	keep	record	record
+rounds	packages/rounds/src/moxi_rounds/settling.py	"id": key, "record": record, "by": decisions.LEAD}),	keep	record	record
+rounds	packages/rounds/src/moxi_rounds/steps.py	if seen is not None and seen.ratify == RATIFY_OFF and any(	keep	any	any
 rounds	packages/rounds/tests/test_ci.py	hooks.mkdir(exist_ok=True)	keep	exist_ok	exist_ok
 rounds	packages/rounds/tests/test_ci_refs.py	assert cli.main(["projects", "set", "proj-a", "--notes-root",	keep	set	set
 rounds	packages/rounds/tests/test_ci_refs.py	hooks.mkdir(exist_ok=True)	keep	exist_ok	exist_ok
@@ -17252,6 +17267,27 @@ rounds	packages/rounds/tests/test_page_acts.py	assert cli.main(["projects", "set
 rounds	packages/rounds/tests/test_page_acts.py	exclude.parent.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
 rounds	packages/rounds/tests/test_page_acts.py	if one["type"] == "build.dropped" and one["record"] == pointer] == ["B1"]	keep	record	record
 rounds	packages/rounds/tests/test_page_acts.py	return [one for one in folded(round_dir).rulings if one.record == pointer]	keep	record	record
+rounds	packages/rounds/tests/test_settling.py	if not any(one["type"] == "stage.declared" for one in log.read(path)):	keep	any	any
+rounds	packages/rounds/tests/test_settling.py	shown = run(capsys, "show", ROUND).splitlines()	keep	show	show
+rounds	packages/rounds/tests/test_settling.py	[data] = [one for one in json.loads(run(capsys, "show", ROUND, "--json"))["decisions"]	keep	show	show
+rounds	packages/rounds/tests/test_settling.py	assert {key: event[key] for key in ("id", "chose", "record", "by", "actor")} == {	keep	record	record
+rounds	packages/rounds/tests/test_settling.py	"id": "B1.M1", "chose": chose, "record": PTR, "by": "lead", "actor": "lead-agent"}	keep	record	record
+rounds	packages/rounds/tests/test_settling.py	assert (now.state, now.chose, now.record, now.ruling) == ("settled", chose, PTR, None)	keep	record	record
+rounds	packages/rounds/tests/test_settling.py	assert folded(round_dir).status == "closed"	keep	closed	closed
+rounds	packages/rounds/tests/test_settling.py	assert any(one.startswith(said) for one in reasons(caught)), reasons(caught)	keep	any	any
+rounds	packages/rounds/tests/test_settling.py	{"by": "lead", "record": PTR}, by="planner")	keep	record	record
+rounds	packages/rounds/tests/test_settling.py	{"id": "C1", "record": PTR, "kind": "process", "rules": "skip:ratify"},	keep	record	record
+rounds	packages/rounds/tests/test_settling.py	{"stage": "B1", "by": "lead", "record": PTR}, by="planner")	keep	record	record
+rounds	packages/rounds/tests/test_settling.py	assert {key: done.event[key] for key in ("type", "id", "record", "by", "actor")} == {	keep	record	record
+rounds	packages/rounds/tests/test_settling.py	"type": "decision.raised", "id": "B1.M1", "record": WHY, "by": "lead",	keep	record	record
+rounds	packages/rounds/tests/test_settling.py	data = json.loads(run(capsys, "show", ROUND, "--json"))["decisions"][0]	keep	show	show
+rounds	packages/rounds/tests/test_settling.py	assert (data["state"], data["chose"], data["record"]) == ("settled", "accept", PTR)	keep	record	record
+rounds	packages/rounds/tests/test_settling.py	{"id": "B1.M1", "chose": "accept", "record": PTR, "by": "lead"})	keep	record	record
+rounds	packages/rounds/tests/test_settling.py	events.check("decision.raised", {"id": "B1.M1", "record": PTR, "by": "lead"})	keep	record	record
+rounds	packages/rounds/tests/test_settling.py	("decision.settled", {"id": "B1.M1", "chose": "accept", "record": PTR,	keep	record	record
+rounds	packages/rounds/tests/test_settling.py	("decision.raised", {"id": "B1.M1", "record": PTR}),	keep	record	record
+rounds	packages/rounds/tests/test_settling.py	("decision.raised", {"id": "B1.M1", "record": PTR, "by": "lead",	keep	record	record
+rounds	packages/rounds/tests/test_settling.py	shown = run(capsys, "show", ROUND)	keep	show	show
 turns	packages/turns/tests/panel_kit.py	"identity": None, "where": {"target": target, "slot": slot, "project_key": project, "folder": segment},	keep	folder	folder
 turns	packages/turns/tests/panel_kit.py	shell = ui_shells(home=home, env=env, leave_out=others() if small else [])	keep	env	env
 turns	packages/turns/tests/panel_kit.py	target.parent.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok

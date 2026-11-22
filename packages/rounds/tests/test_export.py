@@ -159,7 +159,7 @@ def test_the_export_says_what_it_is_of_and_when_it_was_computed(rounds):
         "of": "proj-a", "project": "proj-a", "round": None, "view": None,
         "computed": NOW}
     assert list(of_round) == ["of", "project", "round", "view", "computed", "entries",
-                              "ratify", "covers", "later", "ended", "left",
+                              "ratify", "covers", "later", "not_ratified", "ended", "left",
                               "unreadable", "read_back"]
     assert (of_project["ratify"], of_project["covers"], of_project["later"]) == (
         None, None, [])

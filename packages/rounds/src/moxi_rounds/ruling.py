@@ -70,7 +70,8 @@ refused: it would be new work, and that is for a new round.
 **Decisions.** `B2.M1=accept` or `B2.M1=reject` rules a decision a report declared
 (`decisions`): of substance, applying to no stage, with or without a sentence. A
 second ruling of it replaces the first and names it, and one taken back leaves the
-decision open.
+decision open. A ruling of a decision the lead settled replaces the settlement and
+names its line (`settlement`).
 
 **Shown.** A ruling is recorded by someone else than the operator, so what is returned
 holds the sentence as the appended event has it, and the sentence of the question it
@@ -703,9 +704,17 @@ def _decide(item: str, asked: Asked) -> Form | None:
                      f"moxi rounds rule {asked.name} {item} --record PTR --supersedes "
                      f"{held.ruling}")
 
+    def replaced(view):
+        # A ruling of a decision the lead settled replaces the settlement, and names
+        # its line.
+        held = decisions.find(view.state, key)
+        if held is None or held.state != decisions.SETTLED:
+            return {}
+        return {"settlement": held.ruled}
+
     return Form(kind=SUBSTANCE, rules=item,
                 fields={**_said(asked), "chose": chose, "stages": decisions.BLOCKS},
-                gates=(is_on_record,))
+                gates=(is_on_record,), found=replaced)
 
 
 # -- skips, and the flow -----------------------------------------------------------------

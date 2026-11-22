@@ -743,7 +743,8 @@ def _decisions(found: Shown) -> list:
         if one.state == decisions.OPEN:
             more = {"put": why[one.key] is None, "not_put": why[one.key],
                     "open_as": decisions.open_line(found.name, one.key,
-                                                   why=why[one.key], ended=ended),
+                                                   weight=one.weight, why=why[one.key],
+                                                   ended=ended),
                     "to_rule": None if ended else decisions.rule_line(found.name,
                                                                       one.key)}
         listed.append({**one.data(), **more})
@@ -757,12 +758,15 @@ def decision_line(one: dict) -> str:
 
 
 def decision_facts(one: dict) -> list[str]:
-    """What is known of a decision beyond its line: where it came from, and his
-    ruling, or whether it is his to rule and the command that records it."""
+    """What is known of a decision beyond its line: where it came from, and the
+    operator's ruling, the lead's settlement, or whose it is and the command that
+    records that."""
     said = [f"from: {one['from']}   by: {one['by']}   at: {one['at']}"]
     if one["ruling"] is not None:
         said.append(f"ruled: {one['chose']} by {one['ruling']}   record: "
                     f"{one['record']}")
+    elif one["state"] == decisions.SETTLED:
+        said.append(decisions.settled_line(one))
     else:
         said.append(one["open_as"])
     return said

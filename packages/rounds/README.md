@@ -103,6 +103,8 @@ lower-case letters, digits and `-`.
 | `moxi rounds mark ROUND B<n> --brief FILE` | size a worker's brief before the worker gets it: one slice of the stage within `slice_minutes`, or one verification, or the whole of a stage that declares no slices |
 | `moxi rounds mark ROUND B<n>.L<k> --fixed --commit SHA... --no-behaviour-change` | the lead's mark of a minor or note finding fixed, naming every commit of the fix; run again with the same commits, it writes nothing |
 | `moxi rounds mark ROUND B<n>.W<k> --done --record PTR` | a waiting item is done, with a pointer to the report, commit or message that shows it |
+| `moxi rounds mark ROUND B<n>.M<k> --accept\|--reject --record PTR` | the lead's settlement of a minor decision that is not the operator's to rule; a reject owes a fix, a waiting item until `--done` names it |
+| `moxi rounds mark ROUND B<n>.M<k> --major --record PTR` | the lead's raise of a decision to major; a settlement of it lapses |
 | `moxi rounds mark ROUND thread:NAME --close\|--accept-risk --record PTR` | the lead's decision on a design that was sent back twice in a row |
 | `moxi rounds mark ROUND\|PROJECT C<n>\|S<n>[,...] --shown --record PTR` | say that rulings were shown to the operator as recorded |
 | `moxi rounds mark ROUND B<n> --resync` | read a build's base again from git: moved only after the target's history was rewritten under it |
@@ -454,7 +456,8 @@ open build's, so a stage stacked on another can be commissioned on purpose and g
 of `finish` orders the two. It refuses a branch that overlaps another open build's, or
 holds the same commits, naming the build and the relation, and a branch a recorded
 landing of another build already brought onto the target, naming that build: drop the
-round, or commission without `--existing`.
+round, or, for work still to do, delete the branch (`git branch -d`, as the target holds
+its commits) and commission without `--existing`, which cuts a new one.
 `next` warns once a round plans five or more stages that are builds, and refuses
 nothing for it: a part of the work that stands on its own can be a child round.
 
@@ -585,37 +588,73 @@ An as-built choice the operator would notice is a `[[decision]]`, with a `weight
 (`major` or `minor`) and whether it `forecloses` a capability (then it is major). Each
 is a record of the round, `B1.M1`, with the options `accept` and `reject`; it holds no
 stage. A later report may list it again with the same sentence, as heavy or heavier,
-never lighter; another sentence under its id is refused. He rules it
-with `rule ROUND B1.M1=accept|reject --record PTR`; a rejected one is also a waiting
-item, `B1.M1`, until `mark ROUND B1.M1 --done --record PTR` names the fix. A report of
+never lighter; another sentence under its id is refused. The operator rules it with
+`rule ROUND B1.M1=accept|reject --record PTR`; a rejected one is also a waiting item,
+`B1.M1`, until `mark ROUND B1.M1 --done --record PTR` names the fix. A report of
 `kind = "majors"`, by a checker who built none of the stages it names, declares
 decisions no build report carries, each with its `stage`, and names the builds it covers in
-`stages`. `list --waiting` and a project's export list each unruled major.
+`stages`. `list --waiting` and a project's export list each unruled major, and each
+minor one that is the operator's.
 
-A decision not yet ruled is put to the operator when the project's `ratify` setting
-names its weight (below) and it reached the target: its stage is finished and the build
-that finished it declared it, the rule the ratification draws by. Only then do `show`,
-the round note, `verdict`'s output and `list --waiting` label it `his to rule:` with the
-command. One that is not reads `not put to him (<why>); recorded only if he rules it:`
-with the command, the why being `ratify is majors`, `stage B1 is not finished` or `the
-build that finished B1 did not declare it`; a major decision under `ratify = "off"` reads
-so too. In a round that has ended none takes a ruling: each reads `left open, put to him
-and not ruled` or `left open, not put to him`, with no command. `show --json` gives an
-open decision `put`, `not_put` and the line as `open_as`; a row of `list --waiting
---json` that is not put has `not_put`.
+**Whose a decision is.** One rule says it, and the close, the `ratify` step, the
+labels, the export and `list --waiting` all read it. An open decision is the
+operator's exactly when the close waits for the operator's ruling of it: the round's
+flow has a `ratify` step (every flow with a `build` step has one) and it is not
+skipped, the project's `ratify` setting names its weight (below), its stage is finished,
+and the build that finished it declared it. Under each open decision `show`, the round
+note, `verdict`'s output and `list --waiting` print:
+
+| Open decision | Its line |
+|---|---|
+| the operator's (major or minor) | `the operator's to rule: <rule command>` |
+| its stage not finished, the rest of the rule holding | `not yet put to the operator (stage B1 is not finished): <rule command>` |
+| major, not the operator's | `not put to the operator (<why>); recorded only if the operator rules it: <rule command>` |
+| minor, not the operator's | `the lead's to settle: moxi rounds mark ROUND B1.M1 --accept, --reject or --major --record PTR` |
+
+The why is the first part of the rule that fails: `the flow has no ratify step`,
+`ratify is skipped`, `ratify is off` (or `ratify is majors`, for a minor one), `stage B1
+is not finished`, or `the build that finished B1 did not declare it`. A settled one
+reads `settled by the lead: accept, record PTR`. In a round that has ended none takes a
+ruling: each open one reads `left open, put to the operator and not ruled` or `left
+open, not put to the operator (<why>)`, with no command. `show --json` gives an open
+decision `put`, `not_put` and the line as `open_as`; a row of `list --waiting --json`
+that is not put has `not_put`.
+
+**The lead's settlement.** Every open minor decision of a finished build that is not the
+operator's holds the close until the lead settles it, in every flow:
+`mark ROUND B1.M1 --accept --record PTR`, or `--reject`, PTR a pointer to where the lead
+wrote why. Where the minor decision promises a follow-up, the pointer names the task
+filed for it; where nothing was filed, the lead rejects it. A settlement is one
+`decision.settled` event with `chose`, `record` and `by = "lead"`; the decision reads
+`settled`, never `ruled`. A reject owes a fix, the waiting item `B1.M1 rejected: fix
+owed`, until `mark ROUND B1.M1 --done --record PTR` names it. The settlement is refused
+for a key that is no decision of the round, a major decision, one ruled or settled
+already, a minor one that is the operator's or will be once its stage finishes, a
+missing or malformed pointer, and a round that has ended. The operator's ruling of a
+settled decision replaces the settlement and names its line (`settlement` in the
+ruling's event). `mark ROUND B1.M1 --major --record PTR` makes a decision major, one
+`decision.raised` event, as a later report listing it heavier does; it is refused for a
+major one, one the operator ruled, a missing pointer and an ended round. A settlement
+covers a minor decision only: once its weight rises, by `--major` or a later report, the
+decision is open again, as a major one, and a reject's fix is no longer owed (a `--done`
+already marked stays in the log). The index keeps a settled decision with the state
+`settled`, which no export draws.
 
 A round's export has two views. The docket (`--view docket`) is its open questions and,
 after them, the parked ones. The ratification (`--view ratify`) is the unruled decisions
-of the builds that are finished when it runs, named under `covers`; what it puts to the
-operator is the project's `ratify` setting: `majors` (the default) each major decision,
-`majors+minors` the minor ones too, drawn as one group that lists their ids and is
-still ruled one id at a time, and `off` none. The major decisions of builds not yet
+of the builds that are finished when it runs, named under `covers`, each the operator's
+by the rule above; what it puts to the operator is the project's `ratify` setting:
+`majors` (the default) each major decision, `majors+minors` the minor ones too, drawn as
+one group that lists their ids and is still ruled one id at a time, and `off` none. A
+round whose flow has no `ratify` step, or whose `ratify` is skipped, puts none either,
+and its export says why under `not_ratified`. The major decisions of builds not yet
 finished are listed under `later`, and come in an export run once their build is
 finished. A build answers only for the decisions its own reports declared: a dropped
 build counts for nothing, so a decision only a dropped build declared is in neither
 list until a report of a later build of its stage lists it again. A decision that
 forecloses a capability is an entry of its own everywhere:
-`alone` in the data, its own heading in the markdown, never in a group.
+`alone` in the data, its own heading in the markdown, never in a group, a minor one
+from a log written before reports refused that pairing included.
 
 A verdict records the head it read and that head's merge-base with the target. When the
 target moves on, `show` reads whether the move touches the build: `target moved 4
@@ -733,28 +772,37 @@ one it takes no new question and no new ruling; a correction of one of its rulin
 still recorded, and its rulings are still marked as shown.
 
 A round whose flow has a `build` step closes once every stage in its plan is finished,
-no build is open, and its decisions are settled: every major decision of a finished
-build is ruled, and every finished build has a report that declares its decisions (a
-build report, or a majors report naming its stage). The operator's skip of `ratify`, or
-the project's `ratify = "off"`, lets the decisions past. While a major decision of a
-finished build is unruled, `next`, `show` and `list` give the round's `ratify` step as
+no build is open, and its decisions are done with: every decision of a finished build
+that is the operator's (the rule under Verifying a build) is ruled, every finished build
+has a report that declares its decisions (a build report, or a majors report naming
+its stage), and every other minor decision of a finished build is settled by the lead,
+each open one read as `decision B1.M1, minor, not yet settled by the lead` (the command
+is under the decision in `show`). The operator's skip of `ratify`, the project's
+`ratify = "off"`, or a flow with no `ratify` step puts no decision to the operator; the
+lead's settlements are waited for in every flow. While a decision that is the
+operator's is unruled, `next`, `show` and `list` give the round's `ratify` step as
 ready and the operator's, with the command that rules each.
 
 The write that closes a round prints, after its `closed ROUND: ...` line, a line for each
 decision of a finished build still open, worded by the rule under Verifying a build:
-`left open, put to him and not ruled: decision B1.M1, major: <text>` (past a skip of
-`ratify`) or `left open, not put to him: decision B1.M2, minor: <text>`. A decision only
-a dropped build declared is not among them. `show` of an ended round gives the same
-list under the line that says how it ended, with the `ratify` setting as it is now, and
-`--json` has it as the ending's `left_open`. Whether a close should wait for the minor
-decisions is not settled here: it does not.
+`left open, not put to the operator: decision B1.M1, major: <text>`. Since the close
+waits for every decision that is the operator's and for the lead's settlement of every
+other minor one, the list holds only major decisions the operator was not put (`ratify =
+"off"`, a skip of `ratify`, or no `ratify` step). `left open, put to the operator and not
+ruled` is said only of a round dropped with one open. A decision only a dropped build
+declared is not among them. `show` of an ended round gives the same list under the line
+that says how it ended, with the `ratify` setting as it is now, and `--json` has it as
+the ending's `left_open`. A round that ended before the close waited for the lead's
+settlements is read as it is: its open minor decisions keep their `left open` lines.
 
 The event that ends a round, its close or its drop, holds the round's numbers, counted
 from its log: design passes, `fold-first` verdicts of any kind, folds and records-only
 folds, the lead's decisions (on a thread, or a records-only fold that made a design
 sent back stand at `lead-decision`), the time spent at each step, findings by
 severity, re-checks and drift re-checks, failed check runs, questions by where they
-came from, decisions accepted and rejected, skips, step-ups, repairs, corrections,
+came from, decisions the operator accepted and rejected, the minor ones the lead
+settled (`settled`, accept and reject; numbers written before it read it as zero),
+skips, step-ups, repairs, corrections,
 dropped builds, cleared locks, and reports flagged `extra-full-pass` or
 `model-below-tier`. The time at each step is in whole seconds, under the step's name
 or `<step> B<n>` for a stage's: the log is read once at the end, and the time from

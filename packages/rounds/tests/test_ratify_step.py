@@ -128,9 +128,30 @@ def test_ratify_with_nothing_read_waits_on_a_read_where_a_decision_makes_it_due(
 
 
 def test_ratify_with_nothing_read_and_nothing_unruled_needs_no_read(round_dir):
-    built(round_dir, decisions=[("M1", "minor")])
+    built(round_dir, decisions=[("M1", "major")])
+    rule("B1.M1=accept")
     found = ratify(round_dir, read=False)
     assert found.state == steps.DONE and not found.unread
+
+
+def test_ratify_with_nothing_read_waits_on_a_read_for_a_minor_decision_too(round_dir):
+    # Whether an open minor decision is the operator's is the setting's to say.
+    built(round_dir, decisions=[("M1", "minor")])
+    found = ratify(round_dir, read=False)
+    assert found.state == steps.WAITING and found.unread
+
+
+def test_ratify_is_ready_for_a_minor_decision_under_majors_and_minors(
+        round_dir, write_config):
+    built(round_dir, decisions=[("M1", "minor")])
+    write_config('[defaults]\nratify = "majors+minors"\n')
+
+    found = ratify(round_dir)
+
+    assert found.state == steps.READY
+    assert [(one.reason, one.fix) for one in found.waits] == [
+        ("decision B1.M1, minor and not yet ruled: a choice",
+         f"moxi rounds rule {ROUND} B1.M1=accept|reject --record PTR")]
 
 
 def test_a_skip_of_ratify_reads_skipped(round_dir):
