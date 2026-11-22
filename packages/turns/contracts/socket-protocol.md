@@ -129,7 +129,7 @@ conditional question: "no, a turn is open" is its answer, not a failure of the r
 | -32700 | parse error | a line that is not JSON |
 | -32600 | invalid request | not a JSON-RPC request, a batch, or a line over the cap |
 | -32601 | method not found | a method turns does not have |
-| -32602 | invalid params | params that break this contract: an empty or missing `text`; a `ref` that is not a string, or longer than 256 bytes as UTF-8; `if_turn_number`, `refuse_draft` or `refuse_agents` without `only_if_idle: true`, or of the wrong type; `by` that is not a non-empty string or null; `senders` that is not a list of non-empty strings; a bad `until` or `timeout_ms`; a `wait` with both or neither of `delivery` and `ref`; an unknown command name; `stop_shells` not a boolean, or given with `exit`; `environ`'s `names` not a list, longer than 64, or holding something that is not a variable name; `cached` not a boolean; `keep` not a boolean, or true without a `ref`; an `ack` without a `ref` |
+| -32602 | invalid params | params that break this contract: an empty or missing `text`; a `ref` that is not a string, or longer than 256 bytes as UTF-8; `if_turn_number`, `refuse_draft` or `refuse_agents` without `only_if_idle: true`, or of the wrong type; `by` that is not a non-empty string or null; `senders` that is not a list of non-empty strings; a bad `until` or `timeout_ms`; a `wait` with both or neither of `delivery` and `ref`; an unknown command name; `stop_shells` not a boolean, or given with `exit`; `environ`'s `names` not a list, longer than 64, or holding something that is not a variable name; `cached` not a boolean; `keep` not a boolean, or true without a `ref`; a `round_timeout_ms` that is not a number above 0 and at most 2147483647, or null; an `ack` without a `ref` |
 | -32001 | hello refused | no version in both ranges; `data` names both |
 | -32002 | hello required | a first request other than `rpc.hello`; the connection closes |
 | 1001 | `gone` | the endpoint is ending or has ended |
@@ -307,7 +307,8 @@ adds `unanswered` for a command it wrote and got no answer to, and `not-exited` 
   for the first answer of a fork a plugin spawned, and the runner leaves that notice as
   Claude Code sends it. A refused spawn reads `lost` `denied`. A warm-up with no answer in
   30 s or one that ends other than with an answer, a task or round Claude Code does not
-  deliver, and a round with no end within 600 s read `lost` `gone`. `fork.continue` sends
+  deliver, and a round with no end within its bound (the asker's `round_timeout_ms`, or
+  600 s when it set none) read `lost` `gone`. `fork.continue` sends
   its text to the fork the same way. The runner holds the fork's agent id from the spawn
   (or the round's send) until that delivery has settled. While it holds it, the fork's
   tool calls are judged by the guards at the call and ask steps and get no after-tool
@@ -342,8 +343,8 @@ Params are an object; a missing optional param takes its default. In short:
 | `agents` | `{}` | `<agents>` |
 | `deliver` | `{text, ref?, only_if_idle?, if_turn_number?, refuse_draft?, refuse_agents?, keep?}` | `{delivery, ref, result?}` |
 | `steer` | `{text, ref?}` | `{delivery, ref, result?}` |
-| `fork` | `{text, by, ref?, keep?}` | `{delivery, ref, result?}` |
-| `fork.continue` | `{delivery, text, ref?, keep?}` | `{delivery, ref, result?}` |
+| `fork` | `{text, by, ref?, keep?, round_timeout_ms?}` | `{delivery, ref, result?}` |
+| `fork.continue` | `{delivery, text, ref?, keep?, round_timeout_ms?}` | `{delivery, ref, result?}` |
 | `wait` | `delivery` or `ref`, `until`, `timeout_ms` | `{result}` or `{pending: true}`, with `delivery` when asked by `ref` |
 | `ack` | `{ref}` | `{ref, removed}` |
 | `command` | `{name, if_turn_number?, timeout_ms?, stop_shells?}` | `{result}` |
@@ -457,7 +458,12 @@ refusal it received; on an unknown outcome it waits for the steer's value.
 ### `fork`
 
 Params: `text`, the fork's task; `by`, the asking module's name (a non-empty string,
-required); `ref`; `keep`, as `deliver`'s. Needs `fork`.
+required); `ref`; `keep`, as `deliver`'s; `round_timeout_ms`, a number of milliseconds above
+0 and at most 2147483647 (about 24.8 days, the longest timer a runner keeps), or null: how
+long the harness's half waits for the fork's answer to its task before the fork reads
+`lost` `gone`. Absent or null, the harness's half waits its own default (600 s on Claude
+Code). An endpoint of an older turns ignores it, as it ignores any param it does not know,
+and waits its default. Needs `fork`.
 
 Starts a fork of the session's main loop: an agent that holds the session's conversation
 up to now and runs `text` as its task beside the main loop. It holds no slot and waits on
@@ -471,7 +477,8 @@ Its values: `started` once the harness has started the fork, with `agent_id` nam
 `answer`, the fork's final text (`turn_id` null); or `lost`, with a reason starting
 `denied` when the harness refused to start the fork, or `gone` when the fork went away
 with no answer, the endpoint's end among them (`gone: ` and the endpoint's reason). A fork has no
-endpoint bound of 300 s: the harness's half bounds its own waits.
+endpoint bound of 300 s: the harness's half bounds its own waits, the wait for the task's
+answer by `round_timeout_ms`.
 
 `by` names the asker to turns. The fork's answer comes back to the session by the
 harness's own way, if it has one; turns adds no delivery of its own for it.
@@ -479,7 +486,9 @@ harness's own way, if it has one; turns adds no delivery of its own for it.
 ### `fork.continue`
 
 Params: `delivery`, the id of a fork's delivery (its `fork`, or an earlier
-`fork.continue`); `text`, the round's task; `ref`; `keep`, as `deliver`'s. Needs `fork`.
+`fork.continue`); `text`, the round's task; `ref`; `keep`, as `deliver`'s;
+`round_timeout_ms`, as `fork`'s, for this round's answer (a round asked without it waits the
+default, whatever bound the fork's own task had). Needs `fork`.
 
 Gives the fork, which has answered, its next round: a new delivery, asked by the fork's
 own asker, that runs `text` in the fork's conversation as it stands. It answers as `fork`

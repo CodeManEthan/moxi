@@ -25,9 +25,12 @@ out of the harness. This package is turns' whole public API, the announcement's
                              # by: the asking module; senders: the names the text speaks
                              # for; prompt listeners read them as delivery_by and
                              # delivery_senders
-    d = s.fork(text, *, by, ref=None, keep=False)   # a fork of the main loop (capability
-                             # fork); Started carries its agent_id, Ended its answer
-    d = s.fork_continue(delivery, text, *, ref=None, keep=False)   # the fork's next round
+    d = s.fork(text, *, by, ref=None, keep=False, round_timeout_s=None)
+                             # a fork of the main loop (capability fork); Started
+                             # carries its agent_id, Ended its answer; round_timeout_s
+                             # bounds the wait for its answer (None: 600 s on Claude Code)
+    d = s.fork_continue(delivery, text, *, ref=None, keep=False, round_timeout_s=None)
+                             # the fork's next round
     d.id, d.ref              # id None until a hand-in whose answer never came is found
     d.wait_started(timeout_s)  # Started | Refused | Lost
     d.wait_ended(timeout_s)    # Ended(turn_id, outcome, delivery, ref, answer) | Refused

@@ -283,8 +283,9 @@
 // answer; none in that time, or one whose reason is not `answer`, reports `fork.lost`
 // `gone: ...`. Then it sends the task with `$.session.send({to: {agentId}, text})`, and a
 // send that throws or is not delivered reports `fork.lost` `gone: ...`. The round's
-// turn.complete, within 600 s, reports `fork.done` with its answer; none in that time
-// reports `fork.lost` `gone: ...`. On a `fork.continue` line a fork that has answered gets
+// turn.complete, within the line's `round_timeout_ms` (the asker's bound; 600 s when the
+// line has none), reports `fork.done` with its answer; none in that time reports
+// `fork.lost` `gone: ...`. On a `fork.continue` line a fork that has answered gets
 // its next round: a fork the runner still holds (a round open) reports `fork.lost`
 // `denied: ...` and nothing is sent; else the runner holds the id for the new delivery and
 // sends the text the same way, `fork.started` once it is delivered, then `fork.done` or
@@ -336,8 +337,10 @@ export const WARM_UP = 'Answer with only the word READY. Your real task comes in
 const FORK_DESCRIPTION = 'subconscious'
 /** How long the runner waits for a fork's warm-up to complete. */
 const WARM_UP_WAIT_MS = 30_000
-/** How long the runner waits for a fork's task round to complete. */
+/** How long the runner waits for a fork's round to complete when its line sets no bound. */
 const ROUND_WAIT_MS = 600_000
+/** The longest round bound a line may set: the longest timer the runtime keeps. */
+const ROUND_WAIT_MAX_MS = 2 ** 31 - 1
 /** A guard's bound when its entry names none. */
 const GUARD_DEADLINE_MS = 500
 /** The catch's refusal: it decides at once and names no guard. */
@@ -773,9 +776,16 @@ export function noteForkEnd(forks: ReadonlyMap<string, Fork>, agentId: unknown, 
   f.wake?.()
 }
 
-/** The `fork` line: spawn with the warm-up, then give the task as the first resumed round.
- *  `forks` holds the fork's id from the spawn until its delivery settles. */
-export async function runFork(engine: ForkEngine, forks: Map<string, Fork>, delivery: string, text: string): Promise<void> {
+/** A line's `round_timeout_ms`: the asker's bound on the round, or the default when the
+ *  line has none or one that is not a number above 0 and within the runtime's timers. */
+export function roundWaitMs(value: unknown): number {
+  return typeof value === 'number' && Number.isFinite(value) && value > 0 && value <= ROUND_WAIT_MAX_MS ? value : ROUND_WAIT_MS
+}
+
+/** The `fork` line: spawn with the warm-up, then give the task as the first resumed round,
+ *  waiting `roundMs` for its answer. `forks` holds the fork's id from the spawn until its
+ *  delivery settles. */
+export async function runFork(engine: ForkEngine, forks: Map<string, Fork>, delivery: string, text: string, roundMs = ROUND_WAIT_MS): Promise<void> {
   const lostBefore = (reason: string) => engine.report('fork.lost', { delivery, reason })
   let agentId: string | undefined
   try {
@@ -792,18 +802,19 @@ export async function runFork(engine: ForkEngine, forks: Map<string, Fork>, deli
   const warm = await forkEnd(engine, f, WARM_UP_WAIT_MS)
   if (warm === undefined) return forkLost(engine, forks, agentId, f, `the warm-up did not complete within ${WARM_UP_WAIT_MS / 1000} s`)
   if (warm.reason !== 'answer' || warm.isAborted) return forkLost(engine, forks, agentId, f, `the warm-up ended ${warm.isAborted ? 'aborted' : String(warm.reason)}`)
-  await round(engine, forks, agentId, f, text, false)
+  await round(engine, forks, agentId, f, text, false, roundMs)
 }
 
-/** The `fork.continue` line: a fork that has answered gets `text` as its next round. */
-export async function runRound(engine: ForkEngine, forks: Map<string, Fork>, delivery: string, agentId: string, text: string): Promise<void> {
+/** The `fork.continue` line: a fork that has answered gets `text` as its next round,
+ *  waiting `roundMs` for its answer. */
+export async function runRound(engine: ForkEngine, forks: Map<string, Fork>, delivery: string, agentId: string, text: string, roundMs = ROUND_WAIT_MS): Promise<void> {
   if (forks.has(agentId)) {
     engine.report('fork.lost', { delivery, reason: 'denied: a round of the fork is still open' })
     return
   }
   const f: Fork = { delivery, ends: [], wake: null }
   forks.set(agentId, f)
-  await round(engine, forks, agentId, f, text, true)
+  await round(engine, forks, agentId, f, text, true, roundMs)
 }
 
 /** The fork's delivery settles lost, gone: the runner lets go of its id. */
@@ -812,9 +823,10 @@ function forkLost(engine: ForkEngine, forks: Map<string, Fork>, agentId: string,
   engine.report('fork.lost', { delivery: f.delivery, reason: `gone: ${why}` })
 }
 
-/** One round of a held fork: send `text`, then its turn.complete is the delivery's end.
- *  `started`: report the start once the engine took the text (a further round's). */
-async function round(engine: ForkEngine, forks: Map<string, Fork>, agentId: string, f: Fork, text: string, started: boolean): Promise<void> {
+/** One round of a held fork: send `text`, then its turn.complete within `ms` is the
+ *  delivery's end. `started`: report the start once the engine took the text (a further
+ *  round's). */
+async function round(engine: ForkEngine, forks: Map<string, Fork>, agentId: string, f: Fork, text: string, started: boolean, ms: number): Promise<void> {
   let sent: { isDelivered: boolean; reason?: string }
   try {
     sent = await engine.send({ to: { agentId }, text })
@@ -823,8 +835,8 @@ async function round(engine: ForkEngine, forks: Map<string, Fork>, agentId: stri
   }
   if (!sent.isDelivered) return forkLost(engine, forks, agentId, f, `the task was not delivered: ${sent.reason ?? 'no reason given'}`)
   if (started) engine.report('fork.started', { delivery: f.delivery, agent_id: agentId })
-  const end = await forkEnd(engine, f, ROUND_WAIT_MS)
-  if (end === undefined) return forkLost(engine, forks, agentId, f, `the fork did not answer within ${ROUND_WAIT_MS / 1000} s`)
+  const end = await forkEnd(engine, f, ms)
+  if (end === undefined) return forkLost(engine, forks, agentId, f, `the fork did not answer within ${ms / 1000} s`)
   if (forks.get(agentId) === f) forks.delete(agentId)
   engine.report('fork.done', { delivery: f.delivery, answer: typeof end.answer === 'string' ? end.answer : null, reason: end.reason, is_aborted: end.isAborted })
 }
@@ -1054,9 +1066,9 @@ async function onLine($: Dollar, line: string): Promise<void> {
   } else if (op === 'agents') {
     await agentList($, m.ask)
   } else if (op === 'fork' && delivery !== undefined) {
-    await runFork(forkEngine($), held, delivery, str(m.text) ?? '')
+    await runFork(forkEngine($), held, delivery, str(m.text) ?? '', roundWaitMs(m.round_timeout_ms))
   } else if (op === 'fork.continue' && delivery !== undefined && str(m.agent_id) !== undefined && m.agent_id !== '') {
-    await runRound(forkEngine($), held, delivery, m.agent_id as string, str(m.text) ?? '')
+    await runRound(forkEngine($), held, delivery, m.agent_id as string, str(m.text) ?? '', roundWaitMs(m.round_timeout_ms))
   } else if (op === 'command' && str(m.request) !== undefined && (m.name === 'clear' || m.name === 'exit' || m.name === 'compact')) {
     await command($, m.request as string, m.name, m.stop_shells === true && m.name !== 'exit')
   } else {

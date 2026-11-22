@@ -28,6 +28,10 @@
   endpoint knows no such fork, the fork never started or its round was lost, and `denied`
   while a round of the fork is still open. On Claude Code the runner sends the text to the
   finished fork, which answers again in its own conversation.
+- `fork` and `fork.continue` take `round_timeout_ms` (the client's `round_timeout_s=`): how
+  long the harness's half waits for the round's answer before the delivery reads `lost`
+  `gone`. With none, Claude Code's runner waits 600 s. An endpoint of an older turns
+  ignores it and waits its default.
 - A new option, `keep` (with a `ref`), on `deliver`, `fork` and `fork.continue`, a new
   request, `ack {ref}`, and a new capability, `keep`, which every session of this version
   offers. A kept delivery's end is written to turns' state folder when it settles, the

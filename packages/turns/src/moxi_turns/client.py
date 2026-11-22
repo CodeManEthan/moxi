@@ -59,6 +59,7 @@ from __future__ import annotations
 import concurrent.futures
 import contextlib
 import logging
+import math
 import threading
 import time
 import weakref
@@ -508,24 +509,27 @@ class Session:
             params["ref"] = ref
         return self._hand("steer", params, ref)
 
-    def fork(self, text: str, *, by: str, ref: str | None = None,
-             keep: bool = False) -> Delivery:
+    def fork(self, text: str, *, by: str, ref: str | None = None, keep: bool = False,
+             round_timeout_s: float | None = None) -> Delivery:
         """Start a fork of the session's main loop with `text` as its task. `by` is the
         asking module's name. The fork runs beside the main loop's turns, whatever turn
         runs. `wait_started` reads `Started` with the fork's `agent_id`; `wait_ended`
         reads `Ended` with the fork's answer, or `Lost` with a reason starting `denied`
         (the harness refused the fork) or `gone` (it went away with no answer). `keep` as
-        `deliver`'s. Raises `TurnsError` with the `capability` code on a session that
-        cannot fork."""
+        `deliver`'s. `round_timeout_s`: how long the harness's half waits for the task's
+        answer before the fork reads `Lost` `gone`; None for its default (600 s on Claude
+        Code). An endpoint older than this option ignores it and keeps its default.
+        Raises `TurnsError` with the `capability` code on a session that cannot fork."""
         _check_text(text)
         ref = check_ref(ref)
         if not isinstance(by, str) or not by:
             raise ValueError("by is the asking module's name, a non-empty string")
-        params: dict[str, Any] = {"text": text, "by": by, **_kept_params(ref, keep=keep)}
+        params: dict[str, Any] = {"text": text, "by": by, **_kept_params(ref, keep=keep),
+                                  **_round_params(round_timeout_s)}
         return self._hand("fork", params, ref, keep=keep)
 
     def fork_continue(self, delivery: str, text: str, *, ref: str | None = None,
-                      keep: bool = False) -> Delivery:
+                      keep: bool = False, round_timeout_s: float | None = None) -> Delivery:
         """Give the fork that `delivery` (its `fork`'s id or an earlier round's) started its
         next round, with `text` as the round's task. The fork must have answered: a new
         delivery whose `wait_started` reads `Started` with the fork's `agent_id` once the
@@ -533,14 +537,15 @@ class Session:
         `Lost` with a reason starting `gone` when the endpoint knows no such fork, the
         fork never started or its round was lost, or the fork went away with no answer,
         and `denied` while a round of the fork is still open. Its asker is the fork's.
-        `keep` as `deliver`'s. Raises `TurnsError` with the `capability` code on a session
-        that cannot fork."""
+        `keep` as `deliver`'s, and `round_timeout_s` as `fork`'s, for this round. Raises
+        `TurnsError` with the `capability` code on a session that cannot fork."""
         if not isinstance(delivery, str) or not delivery:
             raise ValueError("delivery is the fork's delivery id, a non-empty string")
         _check_text(text)
         ref = check_ref(ref)
         params: dict[str, Any] = {"delivery": delivery, "text": text,
-                                  **_kept_params(ref, keep=keep)}
+                                  **_kept_params(ref, keep=keep),
+                                  **_round_params(round_timeout_s)}
         return self._hand("fork.continue", params, ref, keep=keep)
 
     def _hand(self, method: str, params: dict[str, Any], ref: str | None, *,
@@ -732,6 +737,16 @@ class Session:
             client.close()
             raise _rpc_error(exc, self.address, "stops.handle") from None
         return StopHandler(client, on_stop)
+
+
+def _round_params(round_timeout_s: float | None) -> dict[str, Any]:
+    """The `round_timeout_ms` param of a fork or a round, when its asker set one."""
+    if round_timeout_s is None:
+        return {}
+    if (isinstance(round_timeout_s, bool) or not isinstance(round_timeout_s, (int, float))
+            or not math.isfinite(round_timeout_s) or round_timeout_s <= 0):
+        raise ValueError("round_timeout_s is a number of seconds above 0, or None")
+    return {"round_timeout_ms": max(1, round(round_timeout_s * 1000))}
 
 
 def _kept_params(ref: str | None, *, keep: bool) -> dict[str, Any]:

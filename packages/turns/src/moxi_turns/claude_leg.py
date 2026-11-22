@@ -93,7 +93,7 @@ Then, in any order:
         Every after-tool row's floor, sent each time one changes: at a `ready` (before
         its `/ask/context` answer) or after a call of the row's listener. It replaces the
         map the runner holds.
-    {"op": "fork", "delivery": id, "text": "…"}
+    {"op": "fork", "delivery": id, "text": "…", "round_timeout_ms"?: n}
         Start a fork of the main loop with `text` as its task (the `fork` request). The
         runner spawns it with `$.agent.spawn({subagentType: "fork", prompt: <warm-up>,
         description: "subconscious"})`, where the warm-up is the runner's own one-line
@@ -107,18 +107,21 @@ Then, in any order:
         complete in that time, or ends other than `answer`, reports `fork.lost`
         `gone: …`. Then it sends `text` with `$.session.send({to: {agentId}, text})`; a
         send that throws or is not delivered reports `fork.lost` `gone: …`. The round's
-        `turn.complete`, within `ROUND_WAIT_MS` (600 s), reports `fork.done`; none in
-        that time reports `fork.lost` `gone: …`.
+        `turn.complete`, within `round_timeout_ms` (the asker's bound, a positive number;
+        absent, `ROUND_WAIT_MS`, 600 s), reports `fork.done`; none in that time reports
+        `fork.lost` `gone: …`.
 
-    {"op": "fork.continue", "delivery": id, "agent_id": "…", "text": "…"}
+    {"op": "fork.continue", "delivery": id, "agent_id": "…", "text": "…",
+     "round_timeout_ms"?: n}
         Give the fork `agent_id`, which has answered, `text` as its next round (the
         `fork.continue` request), a delivery of its own. A fork the runner still holds
         (a round of it is open) reports `fork.lost` `denied: …` and nothing is sent.
         Else the runner holds the id again for this delivery and sends `text` with
         `$.session.send({to: {agentId}, text})`, which resumes the finished fork; a send
         that throws or is not delivered reports `fork.lost` `gone: …`. A delivered send
-        reports `fork.started`, and the round's `turn.complete`, within `ROUND_WAIT_MS`,
-        `fork.done`; none in that time reports `fork.lost` `gone: …`.
+        reports `fork.started`, and the round's `turn.complete`, within
+        `round_timeout_ms` as on a `fork` line, `fork.done`; none in that time reports
+        `fork.lost` `gone: …`.
 
         The runner holds a fork's agent id from its spawn, and from a further round's
         line, until that delivery has settled (`fork.done` or `fork.lost` reported). While it holds the id, each tool

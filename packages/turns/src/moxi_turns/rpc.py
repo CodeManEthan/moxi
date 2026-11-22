@@ -51,6 +51,9 @@ METHOD_NOT_FOUND = -32601
 INVALID_PARAMS = -32602
 #: A name `environ` may ask: an environment variable's name.
 ENV_NAME = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
+#: The longest `round_timeout_ms` a fork or a round may ask: the longest timer a
+#: JavaScript runtime keeps (a runner's clock), about 24.8 days.
+ROUND_TIMEOUT_MAX_MS = 2**31 - 1
 
 
 def gone(reason: str | None) -> ipc.RpcError:
@@ -160,9 +163,10 @@ class Rpc:
         by = _by(params)
         if by is None:
             raise invalid("by is the asking module's name, a non-empty string")
+        round_timeout_s = _round_timeout(params)
         self._needs("fork")
         keep = self._keep(params, ref)
-        d = self.ep.fork(text, ref=ref, by=by, keep=keep)
+        d = self.ep.fork(text, ref=ref, by=by, keep=keep, round_timeout_s=round_timeout_s)
         await self._hook("fork", d)
         return self._handed(d)
 
@@ -172,9 +176,11 @@ class Rpc:
             raise invalid("delivery is the fork's delivery id, a non-empty string")
         text = _text(params)
         ref = _ref(params)
+        round_timeout_s = _round_timeout(params)
         self._needs("fork")
         keep = self._keep(params, ref)
-        d = self.ep.fork_continue(of, text, ref=ref, keep=keep)
+        d = self.ep.fork_continue(of, text, ref=ref, keep=keep,
+                                  round_timeout_s=round_timeout_s)
         await self._hook("fork.continue", d)
         return self._handed(d)
 
@@ -408,6 +414,18 @@ def _timeout_ms(params: dict) -> float | None:
     if (isinstance(value, bool) or not isinstance(value, (int, float))
             or not math.isfinite(value) or value < 0):
         raise invalid("timeout_ms is a number of milliseconds of at least 0, or null")
+    return value / 1000
+
+
+def _round_timeout(params: dict) -> float | None:
+    """`round_timeout_ms` in seconds: None when absent or null."""
+    value = params.get("round_timeout_ms")
+    if value is None:
+        return None
+    if (isinstance(value, bool) or not isinstance(value, (int, float))
+            or not math.isfinite(value) or not 0 < value <= ROUND_TIMEOUT_MAX_MS):
+        raise invalid("round_timeout_ms is a number of milliseconds above 0 and at most "
+                      f"{ROUND_TIMEOUT_MAX_MS}, or null")
     return value / 1000
 
 

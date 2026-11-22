@@ -14033,6 +14033,7 @@ turns	packages/turns/src/moxi_turns/claude_endpoint.py	self._loaded = False	keep
 turns	packages/turns/src/moxi_turns/claude_endpoint.py	first, self._loaded = not self._loaded, True	keep	_loaded	_loaded
 turns	packages/turns/src/moxi_turns/claude_endpoint.py	"environ", "fork", "keep"})	keep	environ	environ
 turns	packages/turns/src/moxi_turns/claude_endpoint.py	self._forks: set[str] = set()	keep	set	set
+turns	packages/turns/src/moxi_turns/claude_endpoint.py	line["round_timeout_ms"] = max(1, round(delivery.round_timeout_s * 1000))	keep	round	round
 turns	packages/turns/src/moxi_turns/claude_leg.py	`ran`, `refused` or `failed`. With	keep	refused	refused
 turns	packages/turns/src/moxi_turns/claude_leg.py	`session.measure` whose `changed` names `context` or `rateLimits`, and at each main-loop	keep	changed	changed
 turns	packages/turns/src/moxi_turns/claude_leg.py	and any answer but `allow` reports `refused` `unsupported` with nothing run.	keep	refused	refused
@@ -14103,6 +14104,7 @@ turns	packages/turns/src/moxi_turns/client.py	wanted = [(directory, hello) for d
 turns	packages/turns/src/moxi_turns/client.py	`deliver`, `steer`, `fork`, `fork.continue`, `ack`, `environ`, and the look-up by `ref`	keep	environ	environ
 turns	packages/turns/src/moxi_turns/client.py	`TimeoutError` as the `Delivery` waits do, and `VersionError` as `find` does."""	keep	find	find
 turns	packages/turns/src/moxi_turns/client.py	"runtime_dir", "sessions", "find", "wait_ready", "wait_ref", "ack"]	keep	find	find
+turns	packages/turns/src/moxi_turns/client.py	return {"round_timeout_ms": max(1, round(round_timeout_s * 1000))}	keep	round	round
 turns	packages/turns/src/moxi_turns/codex.py	"""Apply a collab item's notices to `record`, in order. An agent's latest status is	keep	record	record
 turns	packages/turns/src/moxi_turns/codex.py	"mcp-token", "environ"})	keep	environ	environ
 turns	packages/turns/src/moxi_turns/codex.py	CodexHarness	name	_completed	_on_completed
@@ -14897,6 +14899,7 @@ turns	packages/turns/tests/test_endpoint.py	late = ep.command("exit", timeout=No
 turns	packages/turns/tests/test_endpoint.py	opened = (turns.DeliveryRef(d.id, None, "opened"),)	keep	opened	opened
 turns	packages/turns/tests/test_endpoint.py	started.set()	keep	set	set
 turns	packages/turns/tests/test_endpoint.py	t = threading.Thread(target=lambda: results.append(s.command("clear", timeout=3)))	use	timeout=	timeout_s=
+turns	packages/turns/tests/test_fork.py	@pytest.mark.parametrize("bad", [0, -1, float("inf"), float("nan"), True, "60"])	keep	bad	bad
 turns	packages/turns/tests/test_environ.py	"""`environ` and `Session.environ`: the named variables of the session's own environment,	keep	environ	environ
 turns	packages/turns/tests/test_environ.py	"""`environ` and `Session.environ`: the named variables of the session's own environment,	use	Session.environ	Session.env
 turns	packages/turns/tests/test_environ.py	answers[harness] = s.environ(ASKED)	keep	environ	environ

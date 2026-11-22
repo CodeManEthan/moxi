@@ -21,10 +21,12 @@ A caller can also fork a Claude Code session's main loop: `fork` starts an agent
 holds the conversation so far and runs a task beside the main loop's turns, and
 `fork_continue` gives that agent its next round once it has answered. Each round is a
 delivery whose end carries the round's answer; Claude Code tells the main loop of each
-answer itself, and turns adds nothing to that. The fork's tool calls are judged by the
-guards like any agent's, and get no after-tool ask. A delivery or fork asked with `keep`
-has its end kept in turns' state folder until the caller acks its `ref`: a later wait reads
-the same end, even after the session's endpoint has ended, and turns removes none by age.
+answer itself, and turns adds nothing to that. The caller sets how long each round may
+run before it reads lost (`round_timeout_s`), 600 s when it sets none. The fork's tool
+calls are judged by the guards like any agent's, and get no after-tool ask. A delivery or
+fork asked with `keep` has its end kept in turns' state folder until the caller acks its
+`ref`: a later wait reads the same end, even after the session's endpoint has ended, and
+turns removes none by age.
 
 Each session turns can reach has an endpoint with a Unix socket and a ledger of the
 session's turns (a small process of its own for a Claude Code session, and part of the

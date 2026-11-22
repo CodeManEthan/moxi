@@ -1225,16 +1225,19 @@ class Endpoint:
             self._worker.put(self._handoff(d, self.harness.append))
             return d
 
-    def fork(self, text: str, *, by: str, ref: str | None = None,
-             keep: bool = False) -> Handed:
+    def fork(self, text: str, *, by: str, ref: str | None = None, keep: bool = False,
+             round_timeout_s: float | None = None) -> Handed:
         """Start a fork of the session's main loop with `text` as its task. The fork runs
         beside the main loop's turns and holds no slot: it is handed on at once, whatever
         turn runs. `started` names the fork (`Started.agent_id`) once the harness has
         started it; `ended` carries its answer, or the fork's `Lost` (`denied`, `gone`).
         `unsupported` in the answer when the session cannot fork. `keep` as `deliver`'s.
-        Never waits on the harness, as `deliver`."""
+        `round_timeout_s`: how long the adapter waits for the task round's answer before
+        the fork reads `Lost` `gone`; None for the adapter's default. Never waits on the
+        harness, as `deliver`."""
         with self._lock:
-            d = self._new("fork", text, ref, keep=keep, by=by)
+            d = self._new("fork", text, ref, keep=keep, by=by,
+                          round_timeout_s=round_timeout_s)
             reason = self._unable("fork")
             if reason is not None:
                 self._refuse(d, reason, early=True)
@@ -1245,21 +1248,22 @@ class Endpoint:
             return d
 
     def fork_continue(self, of: str, text: str, *, ref: str | None = None,
-                      keep: bool = False) -> Handed:
+                      keep: bool = False, round_timeout_s: float | None = None) -> Handed:
         """Give the fork that delivery `of` (its `fork` or an earlier round) started its
         next round, with `text`. The fork must have answered: `of` ended with an answer
         and no later round of the fork is still open. A new delivery, a `fork` naming the
         fork's agent id, asked by the fork's own asker; its values are a fork's. `Lost`
         at once, `gone`, when `of` names no fork this endpoint still knows, one that never
         started, or one whose round was lost; `denied` while a round of the fork is still
-        open. `unsupported` in the answer when the session cannot fork. `keep` as
-        `deliver`'s."""
+        open. `unsupported` in the answer when the session cannot fork. `keep` and
+        `round_timeout_s` as `fork`'s, for this round."""
         with self._lock:
             prior = self._deliveries.get(of)
             fork = prior if prior is not None and prior.spec.kind == "fork" else None
             agent_id = fork.agent if fork is not None else None
             d = self._new("fork", text, ref, keep=keep,
-                          by=fork.spec.by if fork is not None else None, agent_id=agent_id)
+                          by=fork.spec.by if fork is not None else None, agent_id=agent_id,
+                          round_timeout_s=round_timeout_s)
             reason = self._unable("fork")
             if reason is not None:
                 self._refuse(d, reason, early=True)

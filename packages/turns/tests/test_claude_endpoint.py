@@ -581,6 +581,22 @@ def test_a_further_round_goes_on_a_fork_continue_line_naming_the_agent(claude):
     assert r.wait_ended(2).answer == "two"
 
 
+def test_the_askers_round_bound_rides_on_the_fork_and_fork_continue_lines(claude):
+    ep, runner = claude()
+    s = turns.find(session_id="s-1")
+    d = s.fork("recall", by="memory", round_timeout_s=1800)
+    assert runner.next_line() == {"op": "fork", "delivery": d.id, "text": "recall",
+                                  "round_timeout_ms": 1_800_000}
+    runner.report(leg.R_FORK_STARTED, delivery=d.id, agent_id="agent-7")
+    runner.report(leg.R_FORK_DONE, delivery=d.id, answer="one", reason="answer",
+                  is_aborted=False)
+    d.wait_ended(2)
+    r = s.fork_continue(d.id, "go on", round_timeout_s=2.5)
+    assert runner.next_line() == {"op": "fork.continue", "delivery": r.id,
+                                  "agent_id": "agent-7", "text": "go on",
+                                  "round_timeout_ms": 2500}
+
+
 def test_a_fork_round_that_ended_in_an_error_or_with_no_text_reads_so(claude):
     ep, runner = claude()
     s = turns.find(session_id="s-1")

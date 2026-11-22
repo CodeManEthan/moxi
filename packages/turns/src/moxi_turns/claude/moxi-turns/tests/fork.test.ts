@@ -10,7 +10,7 @@
 import { describe, expect, test } from 'claude-code/testing'
 import { world } from './world'
 import type { World } from './world'
-import { WARM_UP, heldFork, noteForkEnd, ownCall, runFork, runRound } from '../hooks/register'
+import { WARM_UP, heldFork, noteForkEnd, ownCall, roundWaitMs, runFork, runRound } from '../hooks/register'
 import type { Fork, ForkEngine } from '../hooks/register'
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -73,13 +73,13 @@ function stand(options: { spawn?: Json | 'throw'; send?: Json | 'throw' } = {}) 
     },
   }
   return Object.assign(s, {
-    /** The endpoint's `fork` line. */
-    fork(delivery = 'd1', text = 'recall what we said'): Promise<void> {
-      return runFork(engine, s.forks, delivery, text)
+    /** The endpoint's `fork` line; `roundMs` its bound, when the line carries one. */
+    fork(delivery = 'd1', text = 'recall what we said', roundMs?: number): Promise<void> {
+      return runFork(engine, s.forks, delivery, text, roundMs)
     },
     /** The endpoint's `fork.continue` line. */
-    round(delivery: string, agentId: string, text: string): Promise<void> {
-      return runRound(engine, s.forks, delivery, agentId, text)
+    round(delivery: string, agentId: string, text: string, roundMs?: number): Promise<void> {
+      return runRound(engine, s.forks, delivery, agentId, text, roundMs)
     },
   })
 }
@@ -187,6 +187,39 @@ describe('the fork', () => {
     expect(s.reports.at(-1)).toEqual({ kind: 'fork.lost', delivery: 'd1', reason: 'gone: the fork did not answer within 600 s' })
   })
 
+  test('a task round with the asker\'s bound is lost, gone, at that bound', async () => {
+    for (const ms of [5_000, 1_800_000]) {
+      const s = stand()
+      const done = s.fork('d1', 'recall', ms)
+      await s.settle()
+      await s.end('f1', 'READY')
+      await s.advance(ms - 1)
+      expect(s.kinds()).toEqual(['fork.started'])
+      await s.advance(1)
+      await done
+      expect(s.reports.at(-1)).toEqual({ kind: 'fork.lost', delivery: 'd1', reason: `gone: the fork did not answer within ${ms / 1000} s` })
+    }
+  })
+
+  test('a round past 600 s with a longer bound still answers', async () => {
+    const s = stand()
+    const done = s.fork('d1', 'recall', 3_600_000)
+    await s.settle()
+    await s.end('f1', 'READY')
+    await s.advance(900_000)
+    await s.end('f1', 'slow but answered')
+    await done
+    expect(s.reports.at(-1)).toMatchObject({ kind: 'fork.done', answer: 'slow but answered' })
+  })
+
+  test('a line\'s bound is taken when it is a number above 0 within the runtime\'s timers, else 600 s', () => {
+    expect(roundWaitMs(5_000)).toBe(5_000)
+    expect(roundWaitMs(2 ** 31 - 1)).toBe(2 ** 31 - 1)
+    for (const bad of [undefined, null, 0, -1, 2 ** 31, Number.NaN, Number.POSITIVE_INFINITY, '5000', true]) {
+      expect(roundWaitMs(bad)).toBe(600_000)
+    }
+  })
+
   test('the warm-up bound stops at the warm-up\'s end: the round gets its own', async () => {
     const s = stand()
     const done = s.fork()
@@ -269,6 +302,16 @@ describe('a further round', () => {
     s.sendAnswer = { isDelivered: false, reason: 'no such agent' }
     await s.round('d2', 'f1', 'go on')
     expect(s.reports).toEqual([{ kind: 'fork.lost', delivery: 'd2', reason: 'gone: the task was not delivered: no such agent' }])
+    expect(heldFork(s.forks, 'f1')).toBe(false)
+  })
+
+  test('a round takes its own line\'s bound, not the task\'s', async () => {
+    const s = await answered()
+    const done = s.round('d2', 'f1', 'go on', 2_000)
+    await s.settle()
+    await s.advance(2_000)
+    await done
+    expect(s.reports.at(-1)).toEqual({ kind: 'fork.lost', delivery: 'd2', reason: 'gone: the fork did not answer within 2 s' })
     expect(heldFork(s.forks, 'f1')).toBe(false)
   })
 

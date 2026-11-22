@@ -186,3 +186,37 @@ def test_a_further_round_with_no_fork_to_take_it_reads_lost(forking, how):
     prefix = results.LOST_DENIED if how == "open" else results.LOST_GONE
     assert reason.startswith(prefix), reason
     assert len(h.forked) == 1
+
+
+def test_the_asker_sets_each_rounds_bound_and_none_leaves_the_default(forking):
+    ep, h, s = forking()
+    d = s.fork("look", by="memory", round_timeout_s=1800)
+    assert until(lambda: len(h.forked) == 1)
+    assert h.forked[0].round_timeout_s == 1800
+    ep.fork_started(h.forked[0].id, "agent-1")
+    ep.fork_ended(h.forked[0].id, "first")
+    d.wait_ended(5)
+    s.fork_continue(d.id, "go on", round_timeout_s=0.25)
+    assert until(lambda: len(h.forked) == 2)
+    assert h.forked[1].round_timeout_s == 0.25
+    s.fork("look again", by="memory")
+    assert until(lambda: len(h.forked) == 3)
+    assert h.forked[2].round_timeout_s is None
+
+
+@pytest.mark.parametrize("bad", [0, -1, float("inf"), float("nan"), True, "60"])
+def test_a_rounds_bound_is_a_number_of_seconds_above_0(forking, bad):
+    ep, h, s = forking()
+    with pytest.raises(ValueError, match="round_timeout_s"):
+        s.fork("look", by="memory", round_timeout_s=bad)
+    with pytest.raises(ValueError, match="round_timeout_s"):
+        s.fork_continue("d", "go on", round_timeout_s=bad)
+    assert h.forked == []
+
+
+def test_a_bound_past_the_runners_longest_timer_is_invalid_params(forking):
+    ep, h, s = forking()
+    with pytest.raises(TurnsError) as caught:
+        s.fork("look", by="memory", round_timeout_s=30 * 24 * 3600)
+    assert caught.value.code == -32602
+    assert h.forked == []

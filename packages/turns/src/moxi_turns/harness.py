@@ -135,7 +135,8 @@ None when the harness gives no notice to read. A list it could not read whole is
 `complete` False, never a shorter list: an unknown count is not zero.
 
 A fork holds no slot and runs beside the main loop's turns; the core keeps no bound on
-it, so the adapter bounds each wait of its own (`PENDING_TTL_S` does not apply), and the
+it, so the adapter bounds each wait of its own (`PENDING_TTL_S` does not apply), the
+wait for a round's answer by `delivery.round_timeout_s` when the asker set it, and the
 endpoint's own end settles a fork still open `Lost`, its reason starting `gone`.
 
 A `submit`, `append`, `fork` or `command` that
@@ -219,7 +220,9 @@ class Delivery:
     for the adapter's logs; turns never acts on it. `by` is the module that asked and
     `senders` the names the text speaks for, as the caller gave them; the `prompt` event
     the delivery raises carries both. A fork's further round is a "fork" with
-    `agent_id` naming the fork."""
+    `agent_id` naming the fork. `round_timeout_s` is a fork's or a round's bound, in
+    seconds, as its asker set it: how long the adapter waits for the round's answer
+    before the delivery reads `Lost` `gone`; None for the adapter's own default."""
 
     id: str
     text: str
@@ -233,6 +236,9 @@ class Delivery:
     #: A fork's further round (`fork.continue`): the agent id of the fork it continues.
     #: None for every other delivery, a new fork's included.
     agent_id: str | None = None
+    #: A fork's or a round's bound in seconds, as its asker set it; None for the
+    #: adapter's default, and for every delivery that is no fork.
+    round_timeout_s: float | None = None
 
 
 @dataclass(frozen=True)

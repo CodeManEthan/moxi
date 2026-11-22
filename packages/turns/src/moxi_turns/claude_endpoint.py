@@ -85,8 +85,9 @@ window. It reads `Started`, with
 the fork's agent id, at the runner's `fork.started`; `Ended`, with the answer of the
 fork's task round, at `fork.done`; and `Lost` at `fork.lost`, its reason starting
 `denied` or `gone` (one starting with neither is read as `gone`). The runner bounds the
-fork's warm-up and its round (`claude_leg`, the `fork` line), so an open fork always
-settles; the endpoint's own end settles one still open `gone`.
+fork's warm-up and its round (`claude_leg`, the `fork` line), the round by the asker's
+`round_timeout_s` when it set one, so an open fork always settles; the endpoint's own end
+settles one still open `gone`.
 
 Session commands: the runner runs `/clear`, `/exit` and `/compact` through
 `$.command.run`, and the gate re-checks each (`/gate/command`). `exit` settles `passed` at
@@ -342,6 +343,8 @@ class ClaudeHarness(Harness):
         else:
             line = {"op": leg.LINE_FORK_CONTINUE, "delivery": delivery.id,
                     "agent_id": delivery.agent_id, "text": delivery.text}
+        if delivery.round_timeout_s is not None:
+            line["round_timeout_ms"] = max(1, round(delivery.round_timeout_s * 1000))
         if not self._lines.write(line):
             with self._lock:
                 self._forks.discard(delivery.id)
