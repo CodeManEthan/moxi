@@ -161,7 +161,7 @@ def open_round(name: str, *, description: str, by: str, flow: str | None = None,
         return unmet
 
     def opened(view, result):
-        fields = {"description": description, "flow": flow, "steps": steps}
+        fields = {"description": description, "flow": flow, "steps": flows.recorded(steps)}
         if inherited:
             fields["inherits"] = list(inherited)
         if record is not None:

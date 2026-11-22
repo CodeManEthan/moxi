@@ -23,6 +23,9 @@ Schema version 2 adds the acts on a launched session and changes two things of v
   copied as they were, in the same order;
 - `launches` gains `base_env_json`, null on every row made before version 2.
 
+Schema version 3 adds `park_entries`, one row per session park or crash discovery says
+belongs back in a slot, with at most one open entry per slot.
+
 Each later version adds through `migrate`; no row of an earlier one is lost.
 
 **A later step never moves a row's state back.** The states go forward in one order,
@@ -256,8 +259,32 @@ CREATE INDEX launches_relaunch_of ON launches(relaunch_of);
 CREATE INDEX launches_resume_of ON launches(resume_of);
 """
 
+SCHEMA_3 = """
+CREATE TABLE park_entries (
+  entry_id TEXT PRIMARY KEY,
+  park_id TEXT NOT NULL,
+  kind TEXT NOT NULL CHECK (kind IN ('park','crash')),
+  created_at TEXT NOT NULL,
+  actor TEXT NOT NULL,
+  slot INTEGER NOT NULL,
+  request_id TEXT NOT NULL,
+  session_id TEXT NOT NULL,
+  harness TEXT NOT NULL,
+  holder TEXT NOT NULL,
+  outcome TEXT CHECK (outcome IN ('exited','left-running','not-exited','crashed')
+                      OR outcome IS NULL),
+  detail TEXT,
+  state TEXT NOT NULL CHECK (state IN ('open','restored','dropped')),
+  restore_request_id TEXT,
+  closed_at TEXT
+);
+CREATE UNIQUE INDEX park_open ON park_entries(slot) WHERE state = 'open';
+CREATE INDEX park_entries_session ON park_entries(session_id);
+CREATE INDEX park_entries_closed_at ON park_entries(closed_at);
+"""
+
 #: The schema's steps, one per version; `PRAGMA user_version` counts those run.
-STEPS: tuple[str, ...] = (SCHEMA_1, SCHEMA_2)
+STEPS: tuple[str, ...] = (SCHEMA_1, SCHEMA_2, SCHEMA_3)
 
 
 class TooLarge(store.StoreError):
@@ -1708,13 +1735,195 @@ def exits_log(conn: sqlite3.Connection, *, limit: int | None = None,
     return [ExitRow(*values) for values in conn.execute(sql, params)]
 
 
+# -- park entries ------------------------------------------------------------------------
+
+#: What made a park entry: `park`, or crash discovery for a session that was running when
+#: its server went down.
+ENTRY_KINDS = ("park", "crash")
+#: What park did with an entry's session, or `crashed` for a crash entry.
+ENTRY_OUTCOMES = ("exited", "left-running", "not-exited", "crashed")
+#: An entry's states: `open` while its session belongs back in its slot; `restored` once a
+#: launch took it up; `dropped` when given up without one.
+ENTRY_STATES = ("open", "restored", "dropped")
+#: The prefix of a park reservation's holder name in slots.
+HOLDER_PREFIX = "park-"
+
+
+class EntryOpen(store.StoreError):
+    """A slot that already has an open park entry was given another."""
+
+    def __init__(self, slot: int):
+        super().__init__(f"slot {slot} already has an open park entry")
+        self.slot = slot
+
+
+@dataclass(frozen=True)
+class ParkEntry:
+    """One `park_entries` row, its columns by name."""
+
+    entry_id: str
+    park_id: str
+    kind: str
+    created_at: str
+    actor: str
+    slot: int
+    request_id: str
+    session_id: str
+    harness: str
+    holder: str
+    outcome: str | None
+    detail: str | None
+    state: str
+    restore_request_id: str | None
+    closed_at: str | None
+
+    @property
+    def open(self) -> bool:
+        return self.state == "open"
+
+    def as_json(self) -> dict[str, Any]:
+        return {f.name: getattr(self, f.name) for f in fields(self)}
+
+
+ENTRY_COLUMNS = tuple(f.name for f in fields(ParkEntry))
+_SELECT_ENTRY = "SELECT " + ", ".join(ENTRY_COLUMNS) + " FROM park_entries"
+
+
+def new_park_id() -> str:
+    """A park id: 8 hex digits from `secrets`."""
+    return secrets.token_hex(4)
+
+
+def park_holder(park_id: str) -> str:
+    """The slots holder name of a park's reservations."""
+    return HOLDER_PREFIX + park_id
+
+
+def add_entry(conn: sqlite3.Connection, *, park_id: str, kind: str, by: str, slot: int,
+              request_id: str, session_id: str, harness: str, holder: str | None = None,
+              outcome: str | None = None, detail: str | None = None,
+              at: str | None = None) -> ParkEntry:
+    """Write an open park entry and return it. `holder` defaults to the park's holder
+    name. A slot that already has an open entry raises `EntryOpen`."""
+    if kind not in ENTRY_KINDS:
+        raise ValueError(f"not a park entry's kind: {kind!r}")
+    if outcome is not None and outcome not in ENTRY_OUTCOMES:
+        raise ValueError(f"not a park entry's outcome: {outcome!r}")
+    made = ParkEntry(secrets.token_hex(8), park_id, kind, at or now(), by, int(slot),
+                     request_id, session_id, harness, holder or park_holder(park_id),
+                     outcome, cut(detail), "open", None, None)
+    try:
+        with _writing(conn):
+            conn.execute(f"INSERT INTO park_entries ({', '.join(ENTRY_COLUMNS)}) "
+                         f"VALUES ({', '.join('?' * len(ENTRY_COLUMNS))})",
+                         tuple(getattr(made, name) for name in ENTRY_COLUMNS))
+    except sqlite3.IntegrityError as exc:
+        if open_entry(conn, slot) is not None:
+            raise EntryOpen(int(slot)) from exc
+        raise
+    return made
+
+
+def get_entry(conn: sqlite3.Connection, entry_id: str) -> ParkEntry | None:
+    values = conn.execute(f"{_SELECT_ENTRY} WHERE entry_id = ?", (entry_id,)).fetchone()
+    return None if values is None else ParkEntry(*values)
+
+
+def open_entry(conn: sqlite3.Connection, slot: int) -> ParkEntry | None:
+    """The open park entry of a slot, or None."""
+    values = conn.execute(f"{_SELECT_ENTRY} WHERE state = 'open' AND slot = ?",
+                          (int(slot),)).fetchone()
+    return None if values is None else ParkEntry(*values)
+
+
+def open_entries(conn: sqlite3.Connection,
+                 slots: Iterable[int] | None = None) -> list[ParkEntry]:
+    """The open park entries in slot order, only those of `slots` when it is given."""
+    sql, params = f"{_SELECT_ENTRY} WHERE state = 'open'", []
+    if slots is not None:
+        wanted = [int(slot) for slot in slots]
+        sql += f" AND slot IN ({', '.join('?' * len(wanted))})"
+        params.extend(wanted)
+    return [ParkEntry(*values) for values in conn.execute(sql + " ORDER BY slot", params)]
+
+
+def entries_of(conn: sqlite3.Connection, request_ids: Iterable[str] = (),
+               session_ids: Iterable[str] = ()) -> list[ParkEntry]:
+    """The open park entries whose launch is one of `request_ids` or whose session is one
+    of `session_ids`, in slot order."""
+    ids, sessions = list(request_ids), list(session_ids)
+    if not ids and not sessions:
+        return []
+    clauses, params = [], []
+    if ids:
+        clauses.append(f"request_id IN ({', '.join('?' * len(ids))})")
+        params.extend(ids)
+    if sessions:
+        clauses.append(f"session_id IN ({', '.join('?' * len(sessions))})")
+        params.extend(sessions)
+    return [ParkEntry(*values) for values in conn.execute(
+        f"{_SELECT_ENTRY} WHERE state = 'open' AND ({' OR '.join(clauses)}) ORDER BY slot",
+        params)]
+
+
+def set_entry(conn: sqlite3.Connection, entry_id: str, *, outcome: str | None = None,
+              detail: str | None = None, request_id: str | None = None) -> bool:
+    """Write an open entry's outcome and detail, or the launch now last in its slot
+    (`request_id`). True when an open entry was written."""
+    if outcome is not None and outcome not in ENTRY_OUTCOMES:
+        raise ValueError(f"not a park entry's outcome: {outcome!r}")
+    sets, params = [], []
+    for name, value in (("outcome", outcome), ("detail", cut(detail)),
+                        ("request_id", request_id)):
+        if value is not None:
+            sets.append(f"{name} = ?")
+            params.append(value)
+    if not sets:
+        return False
+    with _writing(conn):
+        return conn.execute(f"UPDATE park_entries SET {', '.join(sets)} "
+                            "WHERE entry_id = ? AND state = 'open'",
+                            (*params, entry_id)).rowcount == 1
+
+
+def close_entry(conn: sqlite3.Connection, entry_id: str, state: str, *,
+                detail: str | None = None, restore_request_id: str | None = None,
+                at: str | None = None) -> bool:
+    """Close an open entry `restored` or `dropped`. True when this call closed it; an
+    entry already closed is left as it is."""
+    if state not in ENTRY_STATES or state == "open":
+        raise ValueError(f"not a closed park entry's state: {state!r}")
+    with _writing(conn):
+        return conn.execute(
+            "UPDATE park_entries SET state = ?, restore_request_id = ?, closed_at = ?, "
+            "detail = coalesce(?, detail) WHERE entry_id = ? AND state = 'open'",
+            (state, restore_request_id, at or now(), cut(detail), entry_id)).rowcount == 1
+
+
+def entries_log(conn: sqlite3.Connection, *, limit: int | None = None,
+                before: str | datetime | None = None) -> list[ParkEntry]:
+    """Every park entry, open or closed, newest first, at most `limit`, only those made
+    before `before` when it is given."""
+    sql, params = _SELECT_ENTRY, []
+    if before is not None:
+        moment = before if isinstance(before, datetime) else parse_time(before)
+        sql += " WHERE created_at < ?"
+        params.append(stamp(moment))
+    sql += " ORDER BY created_at DESC, entry_id DESC"
+    if limit is not None:
+        sql += " LIMIT ?"
+        params.append(int(limit))
+    return [ParkEntry(*values) for values in conn.execute(sql, params)]
+
+
 def prune(conn: sqlite3.Connection, keep_days: float, *, at: str | None = None,
           limit: int = PRUNE_LIMIT) -> dict[str, int]:
     """Delete what is older than `keep_days` and say how many rows of each table went:
     ended runs, with their events and `exits` rows, `exits` rows of an exit refused
-    before it had a run, and released holds. At most `limit` rows of each table go in
-    one call; a run whose events or exits are not all gone yet is kept for the next.
-    Open runs and open holds are never deleted by age."""
+    before it had a run, released holds, and closed park entries. At most `limit` rows
+    of each table go in one call; a run whose events or exits are not all gone yet is
+    kept for the next. Open runs, open holds and open park entries are never deleted by
+    age."""
     moment = parse_time(at) if at else datetime.now(timezone.utc)
     cutoff = stamp(moment - timedelta(days=keep_days))
     with _writing(conn):
@@ -1722,7 +1931,7 @@ def prune(conn: sqlite3.Connection, keep_days: float, *, at: str | None = None,
             "SELECT run_id FROM runs WHERE state = 'ended' AND updated_at < ? "
             "ORDER BY updated_at LIMIT ?", (cutoff, limit))]
         marks = ", ".join("?" * len(old))
-        gone = {"run_events": 0, "exits": 0, "runs": 0, "warm_holds": 0}
+        gone = {"run_events": 0, "exits": 0, "runs": 0, "warm_holds": 0, "park_entries": 0}
         if old:
             gone["run_events"] = conn.execute(
                 f"DELETE FROM run_events WHERE id IN (SELECT id FROM run_events "
@@ -1742,6 +1951,9 @@ def prune(conn: sqlite3.Connection, keep_days: float, *, at: str | None = None,
             "DELETE FROM warm_holds WHERE rowid IN (SELECT rowid FROM warm_holds "
             "WHERE released_at IS NOT NULL AND released_at < ? LIMIT ?)",
             (cutoff, limit)).rowcount
+        gone["park_entries"] = conn.execute(
+            "DELETE FROM park_entries WHERE entry_id IN (SELECT entry_id FROM park_entries "
+            "WHERE state <> 'open' AND closed_at < ? LIMIT ?)", (cutoff, limit)).rowcount
     return gone
 
 
@@ -1822,7 +2034,10 @@ def table_lines(name: str, *, limit: int | None = None, before: str | datetime |
         conn.close()
 
 
-__all__ = ["CAP", "COLUMNS", "DETAIL_CAP", "EXIT_COLUMNS", "FACTS", "FRESH_CONTEXT", "HARNESSES",
+__all__ = ["CAP", "COLUMNS", "DETAIL_CAP", "ENTRY_COLUMNS", "ENTRY_KINDS", "ENTRY_OUTCOMES",
+           "ENTRY_STATES", "EXIT_COLUMNS", "EntryOpen", "HOLDER_PREFIX", "ParkEntry",
+           "add_entry", "close_entry", "entries_log", "entries_of", "get_entry",
+           "new_park_id", "open_entries", "open_entry", "park_holder", "set_entry", "FACTS", "FRESH_CONTEXT", "HARNESSES",
            "HOWS", "JOB_GONE", "KINDS", "LAUNCHER", "LAUNCH_REFUSED", "LEAVES", "PLACES_SCAN",
            "PRUNE_LIMIT", "RECLAIMED",
            "RUN_COLUMNS",

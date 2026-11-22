@@ -3410,7 +3410,23 @@ launcher	packages/launcher/src/moxi_launcher/cli.py	run = verbs.add_parser("run"
 launcher	packages/launcher/src/moxi_launcher/cli.py	shown = {"key": key, "folder": str(folder)}	keep	folder	folder
 launcher	packages/launcher/src/moxi_launcher/cli.py	shown = {"key": key, "folder": str(handoff_dir)}	keep	folder	folder
 launcher	packages/launcher/src/moxi_launcher/cli.py	state.add_argument("--json", action="store_true", help="print one JSON object")	keep	help	help
-launcher	packages/launcher/src/moxi_launcher/cli.py	and list this session's named holds. `show` shows	keep	show	show
+launcher	packages/launcher/src/moxi_launcher/cli.py	return _said(park.park(wait_s=args.wait_s, dry_run=args.dry_run), args)	keep	dry_run	dry_run
+launcher	packages/launcher/src/moxi_launcher/cli.py	"park", help="exit the sessions in slots and reserve their slots",	keep	help	help
+launcher	packages/launcher/src/moxi_launcher/cli.py	park.add_argument("--wait-s", type=float, metavar="SECONDS",	keep	type	type
+launcher	packages/launcher/src/moxi_launcher/cli.py	help="how long to wait for each session to be quiet (park.wait_s, "	keep	help	help
+launcher	packages/launcher/src/moxi_launcher/cli.py	help="say what park would do; write nothing")	keep	help	help
+launcher	packages/launcher/src/moxi_launcher/cli.py	park.add_argument("--json", action="store_true", help="print one JSON object")	keep	help	help
+launcher	packages/launcher/src/moxi_launcher/cli.py	return _said(restore.restore(args.slots, dry_run=args.dry_run, warn=_warn), args)	keep	dry_run	dry_run
+launcher	packages/launcher/src/moxi_launcher/cli.py	"restore", help="bring parked sessions back into their slots", allow_abbrev=False,	keep	help	help
+launcher	packages/launcher/src/moxi_launcher/cli.py	restore.add_argument("slots", nargs="*", type=int, metavar="SLOT",	keep	type	type
+launcher	packages/launcher/src/moxi_launcher/cli.py	help="restore only these slots")	keep	help	help
+launcher	packages/launcher/src/moxi_launcher/cli.py	help="say what restore would do; write nothing")	keep	help	help
+launcher	packages/launcher/src/moxi_launcher/cli.py	restore.add_argument("--json", action="store_true", help="print one JSON object")	keep	help	help
+launcher	packages/launcher/src/moxi_launcher/cli.py	"unpark", help="give up parked slots without restoring them", allow_abbrev=False,	keep	help	help
+launcher	packages/launcher/src/moxi_launcher/cli.py	unpark.add_argument("slots", nargs="*", type=int, metavar="SLOT",	keep	type	type
+launcher	packages/launcher/src/moxi_launcher/cli.py	help="the slots to give up")	keep	help	help
+launcher	packages/launcher/src/moxi_launcher/cli.py	help="give up every parked slot")	keep	help	help
+launcher	packages/launcher/src/moxi_launcher/cli.py	unpark.add_argument("--json", action="store_true", help="print one JSON object")	keep	help	help
 launcher	packages/launcher/src/moxi_launcher/cli.py	return _said(keepwarm.keep_warm(args.session, dry_run=args.dry_run), args)	keep	dry_run	dry_run
 launcher	packages/launcher/src/moxi_launcher/cli.py	"clear-expired", help="ask now whether each session that recycles on expiry is due",	keep	help	help
 launcher	packages/launcher/src/moxi_launcher/cli.py	help="print each session's verdict and what a run would do; writes "	keep	help	help
@@ -3427,6 +3443,7 @@ launcher	packages/launcher/src/moxi_launcher/cli.py	help="the brief, sent as the
 launcher	packages/launcher/src/moxi_launcher/cli.py	help="a file holding the brief, sent as the resumed session's "	keep	help	help
 launcher	packages/launcher/src/moxi_launcher/cli.py	help="stop the run RUN: before the exit it ends stopped; from the exit "	keep	help	help
 launcher	packages/launcher/src/moxi_launcher/cli.py	if args.dry_run and (args.status is not None or args.stop is not None	keep	dry_run	dry_run
+launcher	packages/launcher/src/moxi_launcher/cli.py	and list this session's named holds. `show` shows a launched session's relaunch, recycle	keep	show	show
 launcher	packages/launcher/src/moxi_launcher/codex_trust.py	home = env.get("HOME") or os.path.expanduser("~")	keep	HOME	HOME
 launcher	packages/launcher/src/moxi_launcher/codex_trust.py	return path.resolve(strict=True)	keep	strict	strict
 launcher	packages/launcher/src/moxi_launcher/compose/__init__.py	"build", "compose", "context", "environment", "first_turn", "host_script",	keep	environment	environment
@@ -3708,6 +3725,7 @@ launcher	packages/launcher/src/moxi_launcher/page.py	topics={"sessions": _table(
 launcher	packages/launcher/src/moxi_launcher/page.py	updated_at=_text(), slot=_text(nullable=True), turn_number=Out("int", nullable=True),	keep	nullable=	nullable=
 launcher	packages/launcher/src/moxi_launcher/page.py	value_items=Out("list", items=Out("string"), nullable=True),	keep	nullable=	nullable=
 launcher	packages/launcher/src/moxi_launcher/page.py	values=Out("list", items=Out("string"), nullable=True),	keep	nullable=	nullable=
+launcher	packages/launcher/src/moxi_launcher/page.py	parked=Out("int", nullable=True),	keep	nullable	nullable
 launcher	packages/launcher/src/moxi_launcher/page.py	"slot": Field("string", required=False, max=QUERY_MAX),	keep	required	required
 launcher	packages/launcher/src/moxi_launcher/page.py	"brief": Field("string", required=False),	keep	required	required
 launcher	packages/launcher/src/moxi_launcher/page.py	"brief_file": Field("string", required=False, max=PATH_MAX),	keep	required	required
@@ -3802,6 +3820,13 @@ launcher	packages/launcher/src/moxi_launcher/pagehandlers.py	self.snapshots = (l
 launcher	packages/launcher/src/moxi_launcher/pagehandlers.py	session no launch holds is answered `refused` (`not-launched`), not an error."""	keep	refused	refused
 launcher	packages/launcher/src/moxi_launcher/pagehandlers.py	session_state	name	err	exc
 launcher	packages/launcher/src/moxi_launcher/pagehandlers.py	typed[name] = row.check(direct)	keep	ok	ok
+launcher	packages/launcher/src/moxi_launcher/pagehandlers.py	return set()	keep	set	set
+launcher	packages/launcher/src/moxi_launcher/park.py	gets an entry. A `changed` refusal (the run ended and something else took the slot) is	keep	changed	changed
+launcher	packages/launcher/src/moxi_launcher/park.py	return set()	keep	set	set
+launcher	packages/launcher/src/moxi_launcher/park.py	if exc.reason == "changed":	keep	changed	changed
+launcher	packages/launcher/src/moxi_launcher/park.py	result = call(one.session_id, deadline=deadline, conn=conn, turns=turns,	keep	deadline	deadline
+launcher	packages/launcher/src/moxi_launcher/parks.py	back), `released` (a park hold with no entry) or `unread` (slots could not say)."""	keep	released	released
+launcher	packages/launcher/src/moxi_launcher/parks.py	notes.append(Note("released", slot.number,	keep	released	released
 launcher	packages/launcher/src/moxi_launcher/pagehandlers.py	return any(getattr(entry, "name", None) == name	keep	any	any
 launcher	packages/launcher/src/moxi_launcher/pagehandlers.py	return {"refused": None, "command": _command(words)}	keep	refused	refused
 launcher	packages/launcher/src/moxi_launcher/pin.py	found = sessions.find(row.harness, session_id, root=root)	keep	find	find
@@ -3870,6 +3895,16 @@ launcher	packages/launcher/src/moxi_launcher/relaunch.py	offered	name	error	exc
 launcher	packages/launcher/src/moxi_launcher/relaunch.py	start_job	name	error	exc
 launcher	packages/launcher/src/moxi_launcher/relaunch.py	started = api.run_job(name, argv, env=common.scrub(env, modules.session_env()),	keep	env	env
 launcher	packages/launcher/src/moxi_launcher/relaunch.py	text = ARMED.format(run=run.run_id, slot=row.slot,	keep	run=	run=
+launcher	packages/launcher/src/moxi_launcher/restore.py	#: `liveness-unread`, `refused` and `kept` (the entry left open), `dropped` (closed with no	keep	refused	refused
+launcher	packages/launcher/src/moxi_launcher/restore.py	OUTCOMES = ("restored", "still-running", "liveness-unread", "refused", "kept", "dropped",	keep	refused	refused
+launcher	packages/launcher/src/moxi_launcher/restore.py	LEFT_OPEN = ("still-running", "liveness-unread", "refused", "kept", "failed")	keep	refused	refused
+launcher	packages/launcher/src/moxi_launcher/restore.py	return _restored(entry, "refused", f"slots could not answer about slot "	keep	refused	refused
+launcher	packages/launcher/src/moxi_launcher/restore.py	return _restored(entry, "refused", why, conn=conn)	keep	refused	refused
+launcher	packages/launcher/src/moxi_launcher/restore.py	found = api.show(entry.slot)	keep	show	show
+launcher	packages/launcher/src/moxi_launcher/restore.py	if any(COMMS_OFFLINE in s.why for s in said):	keep	any	any
+launcher	packages/launcher/src/moxi_launcher/restore.py	found = api.show(slot)	keep	show	show
+launcher	packages/launcher/src/moxi_launcher/restore.py	line: set[str] = set()	keep	set	set
+launcher	packages/launcher/src/moxi_launcher/restore.py	return _restored(entry, "refused", f"slots failed on slot {entry.slot}: {exc}",	keep	refused	refused
 launcher	packages/launcher/src/moxi_launcher/relaunch.py	or `error` after the exit, and a repair that failed so),	keep	error	error
 launcher	packages/launcher/src/moxi_launcher/relaunch.py	refused = (check(request) if check is not None	keep	ok	ok
 launcher	packages/launcher/src/moxi_launcher/resume.py	"""Whether `row`'s session is live, and, when that can't be read, why: turns' `find`	keep	find	find
@@ -3986,6 +4021,10 @@ launcher	packages/launcher/tests/launcher_fake_slots.py	make_slot	kwonly	launcha
 launcher	packages/launcher/tests/launcher_fake_slots.py	name="CLAUDE_TRUST_FOLDER",	use	CLAUDE_TRUST_FOLDER	CLAUDE_TRUST_DIR
 launcher	packages/launcher/tests/launcher_fake_slots.py	record	name	out	fh
 launcher	packages/launcher/tests/launcher_fake_slots.py	record("show", slot=slot)	keep	show	show
+launcher	packages/launcher/tests/launcher_fake_slots.py	"name-taken", "job-running", "unsupported", "changed")	keep	changed	changed
+launcher	packages/launcher/tests/launcher_fake_slots.py	hold, `changed` when `expect` is not the slot's last launch's `request_id`; otherwise it	keep	changed	changed
+launcher	packages/launcher/tests/launcher_fake_slots.py	raise Refused("changed", f"slot {slot}'s last launch is "	keep	changed	changed
+launcher	packages/launcher/tests/launcher_fake_slots.py	live hold (open-ended, or `until` not passed), `changed` when `expect` is not the slot's	keep	changed	changed
 launcher	packages/launcher/tests/launcher_fake_turns.py	#: The launcher's seam (`moxi_launcher.first.TURNS_SEAM`), named here so this module	use	moxi_launcher.first.TURNS_SEAM	moxi_launcher.first.TURNS_ENV
 launcher	packages/launcher/tests/launcher_fake_turns.py	- `reconnect`: `ok`, or `refused` (nothing serves any more: `Lost("unanswered")`).	keep	refused	refused
 launcher	packages/launcher/tests/launcher_fake_turns.py	- `sessions`: the live sessions `find` finds, by session id, each `{harness, endpoint_pid,	keep	find	find
@@ -4216,11 +4255,11 @@ launcher	packages/launcher/tests/test_cli.py	handoff_files	name	folder	handoffs_
 launcher	packages/launcher/tests/test_cli.py	return lambda name: handoffs_dir(name, create=True)	keep	create	create
 launcher	packages/launcher/tests/test_cli.py	store.path().parent.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
 launcher	packages/launcher/tests/test_cli.py	test_handoffs_lists_a_keys_files_newest_first_and_which_wait	name	folder	handoffs_dir
-launcher	packages/launcher/tests/test_cli.py	"sessions", "resume", "clear-expired", "keep-warm", "show"}	keep	show	show
 launcher	packages/launcher/tests/test_cli.py	assert any("Carry on with the build." in word for word in json.loads(out)["argv"])	keep	any	any
 launcher	packages/launcher/tests/test_cli.py	assert any(line.endswith("[posture-brief]") for line in err.splitlines())	keep	any	any
 launcher	packages/launcher/tests/test_cli.py	assert any(line.startswith("  MOXI_LAUNCHER_REQUEST=") for line in env_lines)	keep	any	any
 launcher	packages/launcher/tests/test_cli.py	assert set(shown["env"]) == {common.REQUEST_ENV, "MOXI_USAGE_WARN_AT"}	keep	set	set
+launcher	packages/launcher/tests/test_cli.py	"clear-expired", "keep-warm", "show"}	keep	show	show
 launcher	packages/launcher/tests/test_cli_acts.py	"""Through the real verb: the launch is found, so its refusal is logged `refused`."""	keep	refused	refused
 launcher	packages/launcher/tests/test_cli_acts.py	"from_record": None, "dry_run": False, "json": False}),	keep	dry_run	dry_run
 launcher	packages/launcher/tests/test_cli_acts.py	(["exit-session", SID, "--dry-run", "--json"], {"dry_run": True, "json": True}),	keep	dry_run	dry_run
@@ -4289,6 +4328,7 @@ launcher	packages/launcher/tests/test_compose_env.py	-	name	test_the_scrub_leave
 launcher	packages/launcher/tests/test_compose_env.py	assert not any(name.endswith("_") for name in found.session_env)	keep	any	any
 launcher	packages/launcher/tests/test_compose_env.py	assert not any(name.startswith("CLAUDE") for name in env) and "AI_AGENT" not in env	keep	any	any
 launcher	packages/launcher/tests/test_compose_env.py	assert set(found.session_env) == {"MOXI_LAUNCHER_REQUEST", "MOXI_LAUNCHER_RELAUNCH",	keep	set	set
+launcher	packages/launcher/tests/test_crash_discovery.py	assert [n.what for n in prepared.notes] == ["released"]	keep	released	released
 launcher	packages/launcher/tests/test_compose_env.py	path.parent.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
 launcher	packages/launcher/tests/test_doctor.py	-	name	test_a_system_that_cannot_read_an_environment_is_off	test_a_system_that_cannot_read_an_env_is_off
 launcher	packages/launcher/tests/test_doctor.py	assert set(rows) == {"catalog.claude", "catalog.codex"}	keep	set	set
@@ -4316,6 +4356,10 @@ launcher	packages/launcher/tests/test_exits.py	test_an_exits_run_makes_every_oth
 launcher	packages/launcher/tests/test_exits.py	test_an_unclaimed_launch_is_refused_and_logged_without_a_run	name	connection	conn
 launcher	packages/launcher/tests/test_exits.py	test_outside_a_slot_an_exit_turns_did_not_see_through_is_at_the_dialog	name	connection	conn
 launcher	packages/launcher/tests/test_exits.py	test_outside_a_slot_an_exit_turns_saw_through_is_exited	name	connection	conn
+launcher	packages/launcher/tests/test_exits.py	session = FakeSession(exits=(Result("refused", "busy-turn"), Result("ran")))	keep	refused	refused
+launcher	packages/launcher/tests/test_exits.py	store.end_run(conn, other.run_id, "expired")	keep	expired	expired
+launcher	packages/launcher/tests/test_exits.py	assert [r.verdict for r in reversed(logged(conn))] == ["refused", "exited"]	keep	refused	refused
+launcher	packages/launcher/tests/test_exits.py	assert {r.verdict for r in logged(conn)} == {"refused"}	keep	refused	refused
 launcher	packages/launcher/tests/test_first.py	"closed-reconnect": {"deliver": "unanswered", "connection": "closed"},	keep	closed	closed
 launcher	packages/launcher/tests/test_first.py	"closed-refused": {"deliver": "unanswered", "connection": "closed",	keep	closed	closed
 launcher	packages/launcher/tests/test_first.py	"delivered": {},	keep	delivered	delivered
@@ -4541,8 +4585,9 @@ launcher	packages/launcher/tests/test_page.py	monkeypatch.setenv("HOME", str(tmp
 launcher	packages/launcher/tests/test_page.py	out.setdefault(key, set()).add(sub.mark)	keep	set	set
 launcher	packages/launcher/tests/test_page.py	slot(1, "occupied", launchable=False), slot(2, "ended", launchable=True),	keep	launchable=	launchable=
 launcher	packages/launcher/tests/test_page.py	slot(3, "free", launchable=False, holder="planner", until=1900000000.5),	keep	launchable=	launchable=
-launcher	packages/launcher/tests/test_page.py	slot(4, "missing", launchable=False), slot(10, "free", launchable=True)]	keep	launchable=	launchable=
 launcher	packages/launcher/tests/test_page.py	where.parent.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
+launcher	packages/launcher/tests/test_page.py	slot(4, "missing", launchable=False, choosable=True),	keep	launchable	launchable
+launcher	packages/launcher/tests/test_page.py	slot(10, "free", launchable=True)]	keep	launchable	launchable
 launcher	packages/launcher/tests/test_page_joiner.py	"""A value with the fields of sessions' `Message` that the joiner reads; `injected`	keep	injected	injected
 launcher	packages/launcher/tests/test_page_joiner.py	"reasoning": False, "injected": "unknown", **more})	keep	injected	injected
 launcher	packages/launcher/tests/test_page_joiner.py	assert at < ended["at"] and set(facts) == {"quick"}	keep	set	set
@@ -4752,6 +4797,10 @@ launcher	packages/launcher/tests/test_page_waits.py	assert {c["session_id"] for 
 launcher	packages/launcher/tests/test_page_waits.py	release.set()	keep	set	set
 launcher	packages/launcher/tests/test_page_waits.py	started.set()	keep	set	set
 launcher	packages/launcher/tests/test_page_waits.py	wired.turns.find = slow("find", wired.turns.find)	keep	find	find
+launcher	packages/launcher/tests/test_park.py	raise fake.Refused("changed", f"slot {slot}'s last launch is r9, not {expect}")	keep	changed	changed
+launcher	packages/launcher/tests/test_parks.py	assert [(n.what, n.slot) for n in notes] == [("released", 2)]	keep	released	released
+launcher	packages/launcher/tests/test_parks.py	taken.set()	keep	set	set
+launcher	packages/launcher/tests/test_parks.py	let_go.set()	keep	set	set
 launcher	packages/launcher/tests/test_pin.py	base_env = ({"CLAUDE_CONFIG_DIR": str(tmp_path / "cfg"), "HOME": str(tmp_path)}	keep	HOME	HOME
 launcher	packages/launcher/tests/test_pin.py	"""sessions' `find` and `records_back` over hits and requests made up here: one entry	keep	find	find
 launcher	packages/launcher/tests/test_pin.py	new = sessions.testing.CodexRollout(root, thread_id=THREAD, start=old.clock + 86400 * 3)	keep	start	start
@@ -4927,6 +4976,8 @@ launcher	packages/launcher/tests/test_replay.py	looks = (any(word in name for wo
 launcher	packages/launcher/tests/test_replay.py	path.parent.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
 launcher	packages/launcher/tests/test_replay.py	rig	name	directory	slots_dir
 launcher	packages/launcher/tests/test_replay.py	rig.plan(respawn="refused", refused={"reason": "live-pane", "words": "the pane is live"})	keep	refused	refused
+launcher	packages/launcher/tests/test_restore.py	for entry, request in zip((three, five), launch.requests, strict=True):	keep	strict	strict
+launcher	packages/launcher/tests/test_restore.py	rig.plan(slots={"3": reserved("missing", "r3")}, placed=7, create="refused",	keep	refused	refused
 launcher	packages/launcher/tests/test_replay.py	assert not any("recycle_at_limit" in said for said in replayed.warnings)	keep	any	any
 launcher	packages/launcher/tests/test_resume.py	"""slots' `supported`, `show` and `create`, from a table of slots by number."""	keep	show	show
 launcher	packages/launcher/tests/test_resume.py	"""turns' `find`: live for the ids in `live`, raising for the ids in `failing`."""	keep	find	find
@@ -4961,6 +5012,7 @@ launcher	packages/launcher/tests/test_resume.py	self.sessions.append(Session())	
 launcher	packages/launcher/tests/test_resume.py	store.insert(conn, request_id="r2", actor="alice", harness="claude", target="slot",	use	actor=	by=
 launcher	packages/launcher/tests/test_resume.py	test_two_resumes_of_one_session_at_once_launch_it_once.one	name	error	exc
 launcher	packages/launcher/tests/test_resume.py	unread, fine = got.data["sessions"]	keep	sessions	sessions
+launcher	packages/launcher/tests/test_resume.py	"""slots' `supported`, `list_slots`, `show` and `create`, from a table of slots by	keep	show	show
 launcher	packages/launcher/tests/test_resume_store.py	-	name	test_the_base_environment_is_recorded_and_holds_no_credential	test_the_base_env_is_recorded_and_holds_no_credential
 launcher	packages/launcher/tests/test_resume_store.py	assert base == {"HOME": "/h", "PATH": "/bin", "LC_ALL": "C",	keep	HOME	HOME
 launcher	packages/launcher/tests/test_resume_store.py	child = {"HOME": "/h", "PATH": "/bin", "LC_ALL": "C", "XDG_RUNTIME_DIR": "/run/u",	keep	HOME	HOME
@@ -5031,6 +5083,8 @@ launcher	packages/launcher/tests/test_slot.py	rig.plan(start="refused", refused=
 launcher	packages/launcher/tests/test_slot.py	turns	name	directory	turns_dir
 launcher	packages/launcher/tests/test_slot.py	assert len(off) == 6 and not any(e.answer for e in off)	keep	any	any
 launcher	packages/launcher/tests/test_slot.py	assert set(startup.HINTS) == set(names)	keep	set	set
+launcher	packages/launcher/tests/test_slot.py	for name in ("supported", "list_slots", "show", "create", "start", "respawn",	keep	show	show
+launcher	packages/launcher/tests/test_slot.py	for name in ("supported", "list_slots", "show", "create", "start", "respawn", "hold",	keep	show	show
 launcher	packages/launcher/tests/test_state.py	"exited", "held", "expired", "not-held", "stopped",	keep	expired	expired
 launcher	packages/launcher/tests/test_state.py	@pytest.mark.parametrize("outcome", ["relaunched", "cleared", "compacted", "nudged",	keep	compacted	compacted
 launcher	packages/launcher/tests/test_state.py	assert got.relaunch.state == "stale" and got.relaunch.run.state == "stale"	keep	stale	stale
@@ -5065,7 +5119,7 @@ launcher	packages/launcher/tests/test_store_v2.py	assert row.as_json()["base_env
 launcher	packages/launcher/tests/test_store_v2.py	assert row.base_env == {"HOME": "/users/someone", "LANG": "C.UTF-8"}	keep	HOME	HOME
 launcher	packages/launcher/tests/test_store_v2.py	conn	name	connection	conn
 launcher	packages/launcher/tests/test_store_v2.py	for order in set(itertools.permutations(writes)):	keep	set	set
-launcher	packages/launcher/tests/test_store_v2.py	test_a_newer_store_than_version_2_is_refused	name	raw	conn
+launcher	packages/launcher/tests/test_store_v2.py	test_a_newer_store_than_this_launchers_is_refused	name	raw	conn
 launcher	packages/launcher/tests/test_store_v2.py	test_a_step_that_fails_leaves_the_version_1_log_whole	name	raw	conn
 launcher	packages/launcher/tests/test_store_v2.py	test_a_version_1_log_is_carried_forward_with_no_row_lost	name	raw	raw_conn
 launcher	packages/launcher/tests/test_store_v2.py	version_1	name	raw	conn
@@ -10901,6 +10955,14 @@ rounds	packages/rounds/tests/test_holds.py	test_one_parked_until_a_round_holds_i
 rounds	packages/rounds/tests/test_holds.py	{"id": "C81", "record": "comms:14", "kind": "process", names: "C80"},	keep	record	record
 rounds	packages/rounds/tests/test_holds.py	{"id": "C90", "record": "comms:13", "kind": "process",	keep	record	record
 rounds	packages/rounds/tests/test_holds.py	{"id": ruling_id, "record": "comms:13", "kind": "process",	keep	record	record
+rounds	packages/rounds/tests/test_home_paths.py	"record": "comms:1234567"}, by="planner")	keep	record	record
+rounds	packages/rounds/tests/test_home_paths.py	assert cli.main(["projects", "set", "proj-a", "--notes-root",	keep	set	set
+rounds	packages/rounds/tests/test_home_paths.py	assert main(["show", ROUND]) == 0	keep	show	show
+rounds	packages/rounds/tests/test_home_paths.py	monkeypatch.setenv("HOME", str(home))	keep	HOME	HOME
+rounds	packages/rounds/tests/test_home_paths.py	monkeypatch.setenv("HOME", str(tmp_path / "ann") + os.sep)	keep	HOME	HOME
+rounds	packages/rounds/tests/test_home_paths.py	proc.communicate(timeout=30)	keep	timeout	timeout
+rounds	packages/rounds/tests/test_home_paths.py	assert any(one.startswith(f"pid {proc.pid} (") for one in found.users)	keep	any	any
+rounds	packages/rounds/tests/test_home_paths.py	assert any(one.startswith(f"pid {proc.pid} (") for one in kept.work)	keep	any	any
 rounds	packages/rounds/tests/test_index.py	"build.dropped", {"stage": "B1", "by": "operator", "record": "comms:30"}))	keep	record	record
 rounds	packages/rounds/tests/test_index.py	"record": "comms:30", "at": AT, "numbers": None}	keep	record	record
 rounds	packages/rounds/tests/test_index.py	"record": "comms:30", "at": AT}	keep	record	record
@@ -13282,6 +13344,7 @@ slots	packages/slots/src/moxi_slots/answer.py	raise UsageError("screens is a Scr
 slots	packages/slots/src/moxi_slots/answer.py	save_mismatch	name	directory	mismatches_dir
 slots	packages/slots/src/moxi_slots/api.py	"Removed", "Placed", "Job", "Ended", "list_slots", "show", "create", "remove",	keep	show	show
 slots	packages/slots/src/moxi_slots/api.py	Reads (`list_slots`, `show`, `job`, `jobs`) take no lock and return typed results;	keep	show	show
+slots	packages/slots/src/moxi_slots/api.py	"Drift", "Removed", "Placed", "Job", "Ended", "list_slots", "show", "create",	keep	show	show
 slots	packages/slots/src/moxi_slots/cli.py	HEADER = ["SLOT", "NAME", "STATE", "ATTACHED", "HOLD", "LABEL", "LAST LAUNCH"]	keep	NAME	NAME
 slots	packages/slots/src/moxi_slots/cli.py	VERBS.update({"list": (_add_list, _run_list), "show": (_add_show, _run_show),	keep	show	show
 slots	packages/slots/src/moxi_slots/cli.py	__all__ = ["VERBS", "parser", "refused", "main"]	keep	refused	refused
@@ -13311,6 +13374,12 @@ slots	packages/slots/src/moxi_slots/cli.py	p.add_argument("--json", action="stor
 slots	packages/slots/src/moxi_slots/cli.py	p.add_argument("--name", help="name the one slot made")	keep	help	help
 slots	packages/slots/src/moxi_slots/cli.py	p.add_argument("name", nargs="?", metavar="NAME")	keep	NAME	NAME
 slots	packages/slots/src/moxi_slots/cli.py	p.add_argument("numbers", metavar="N", nargs="*", type=int)	keep	type	type
+slots	packages/slots/src/moxi_slots/cli.py	p = verbs.add_parser("hold", help="reserve a slot for a holder, for a while or until "	keep	help	help
+slots	packages/slots/src/moxi_slots/cli.py	how_long = p.add_mutually_exclusive_group(required=True)	keep	required	required
+slots	packages/slots/src/moxi_slots/cli.py	how_long.add_argument("--for", dest="seconds", type=float, metavar="S",	keep	type	type
+slots	packages/slots/src/moxi_slots/cli.py	help="seconds, at most a day")	keep	help	help
+slots	packages/slots/src/moxi_slots/cli.py	help="hold until `moxi slots release` ends it")	keep	help	help
+slots	packages/slots/src/moxi_slots/cli.py	"""How the last run ended, for `show`: its status or signal, or why it was settled,	keep	show	show
 slots	packages/slots/src/moxi_slots/doctor.py	launch_files_row	name	directory	launch_dir
 slots	packages/slots/src/moxi_slots/doctor.py	mismatches_row	name	directory	mismatches_dir
 slots	packages/slots/src/moxi_slots/health.py	__all__ = ["NAME", "expected_pid", "check"]	keep	NAME	NAME
@@ -13352,6 +13421,9 @@ slots	packages/slots/src/moxi_slots/slots.py	home = os.environ.get("HOME") or os
 slots	packages/slots/src/moxi_slots/slots.py	inside_this_server	name	environ	env
 slots	packages/slots/src/moxi_slots/slots.py	return panes.listing(reg).find(number)	keep	find	find
 slots	packages/slots/src/moxi_slots/slots.py	used = set(reg.rows) | {s.number for s in listing.unregistered} | set(taken)	keep	set	set
+slots	packages/slots/src/moxi_slots/slots.py	`expect`, a request id, makes the hold conditional: it is refused `changed` unless the	keep	changed	changed
+slots	packages/slots/src/moxi_slots/slots.py	raise Refused("changed", f"slot {number}'s last launch is "	keep	changed	changed
+slots	packages/slots/src/moxi_slots/slots.py	"""The last launch's label and meta from a registry row, for a `changed` refusal."""	keep	changed	changed
 slots	packages/slots/src/moxi_slots/tmux.py	client_env	name	environ	env
 slots	packages/slots/src/moxi_slots/tmux.py	return any(marker in low for marker in _NO_SERVER)	keep	any	any
 slots	packages/slots/tests/screen_program.py	ap.add_argument("--choices", default="")	keep	default	default
@@ -13374,6 +13446,7 @@ slots	packages/slots/tests/test_claude_live.py	replied = any(row.startswith("●
 slots	packages/slots/tests/test_doctor.py	-	name	test_the_socket_row_fails_on_an_open_runtime_directory	test_the_socket_row_fails_on_an_open_runtime_dir
 slots	packages/slots/tests/test_doctor.py	test_the_launch_files_row_removes_stale_ones	name	directory	launch_dir
 slots	packages/slots/tests/test_doctor.py	test_the_mismatches_row_counts	name	directory	mismatches_dir
+slots	packages/slots/tests/test_doctor.py	places.state_dir().mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
 slots	packages/slots/tests/test_launchfile.py	launch_file	name	f	fh
 slots	packages/slots/tests/test_live_launch.py	-	name	test_no_environment_bleeds_into_a_launch	test_no_env_bleeds_into_a_launch
 slots	packages/slots/tests/test_live_launch.py	failed = jobs.run_job("bad", ["true"], env=base, cwd=str(tmp_path / "gone"))	keep	bad	bad
@@ -13393,12 +13466,14 @@ slots	packages/slots/tests/test_live_slots.py	assert env == {"HOME": "/h"}	keep	
 slots	packages/slots/tests/test_live_slots.py	assert pane_field(target, "pane_current_path") == os.environ["HOME"]	keep	HOME	HOME
 slots	packages/slots/tests/test_live_slots.py	env = slots.attach_env(argv, {"TMUX": "/x,1,0", "TMUX_PANE": "%1", "HOME": "/h"})	keep	HOME	HOME
 slots	packages/slots/tests/test_live_slots.py	outs = [p.communicate(timeout=30) for p in procs]	keep	timeout	timeout
+slots	packages/slots/tests/test_live_slots.py	assert caught.value.reason == "changed"	keep	changed	changed
 slots	packages/slots/tests/test_panes.py	assert panes.join(reg, [home()]).find(1).hold.holder == "h"	keep	find	find
 slots	packages/slots/tests/test_panes.py	found = panes.join(reg, [home(), run(dead=True, status=3)], NOW).find(1)	keep	find	find
 slots	packages/slots/tests/test_registry.py	assert data["version"] == 1 and set(data["slots"]) == {"3", "12"}	keep	set	set
 slots	packages/slots/tests/test_registry.py	holder.wait(timeout=5)	keep	timeout	timeout
 slots	packages/slots/tests/test_registry.py	places.module_lock().parent.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
 slots	packages/slots/tests/test_registry.py	places.registry().parent.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
+slots	packages/slots/tests/test_registry.py	assert data["version"] == 2 and set(data["slots"]) == {"3", "12"}	keep	set	set
 slots	packages/slots/tests/test_server.py	-	name	test_the_server_environment_keeps_only_the_named_variables	test_the_server_env_keeps_only_the_named_variables
 slots	packages/slots/tests/test_server.py	assert env == {"HOME": "/h", "USER": "u", "LOGNAME": "u", "SHELL": "/bin/sh",	keep	HOME	HOME
 slots	packages/slots/tests/test_server.py	env = server.clean_env({"HOME": "/h", "USER": "u", "LOGNAME": "u", "SHELL": "/bin/sh",	keep	HOME	HOME
@@ -17100,6 +17175,15 @@ rounds	packages/rounds/src/moxi_rounds/settings.py	if len(set(jobs)) != len(jobs
 rounds	packages/rounds/tests/test_ci.py	hooks.mkdir(exist_ok=True)	keep	exist_ok	exist_ok
 rounds	packages/rounds/tests/test_ci_refs.py	assert cli.main(["projects", "set", "proj-a", "--notes-root",	keep	set	set
 rounds	packages/rounds/tests/test_ci_refs.py	hooks.mkdir(exist_ok=True)	keep	exist_ok	exist_ok
+slots	packages/slots/src/moxi_slots/errors.py	"name-taken", "job-running", "unsupported", "changed")	keep	changed	changed
+slots	packages/slots/tests/test_live_runs.py	places.module_lock().parent.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
+slots	packages/slots/tests/test_live_runs.py	holder.wait(timeout=10)	keep	timeout	timeout
+slots	packages/slots/tests/test_live_runs.py	holder.wait(timeout=5)	keep	timeout	timeout
+slots	packages/slots/tests/test_live_runs.py	assert cli.main(["show", "1"]) == 0	keep	show	show
+slots	packages/slots/tests/test_live_runs.py	assert cli.main(["show", "1", "--json"]) == 0	keep	show	show
+slots	packages/slots/tests/test_live_runs.py	old.wait(timeout=10)	keep	timeout	timeout
+slots	packages/slots/tests/test_live_runs.py	assert not any(s.crashed for s in slots.list_slots().slots)	keep	any	any
+slots	packages/slots/tests/test_live_runs.py	assert listing.ok and not any(s.crashed for s in listing.slots)	keep	any	any
 rounds	packages/rounds/tests/test_leads.py	"name": "kestrel", "from": "round"}	keep	round	round
 rounds	packages/rounds/tests/test_leads.py	argv = (["projects", "set", "atlas", "--no-lead"] if name is None	keep	set	set
 rounds	packages/rounds/tests/test_leads.py	else ["projects", "set", "atlas", "--lead", name])	keep	set	set

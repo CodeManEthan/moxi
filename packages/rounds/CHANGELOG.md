@@ -25,6 +25,19 @@ decisions and the round's close.
   and the settings page draws: a plain label, a line where the label can't carry it,
   the unit of each number, and words for each value of `defaults.ratify` and
   `defaults.check_on`. rounds needs moxi 0.1.9 or later.
+- A round's log writes a path under the home folder as `~/<rest>`, and the home folder
+  itself as `~`: a build's worktree and scratch folder, a check run's argv words and
+  output file, the argvs of a read of CI, the argv words of a command step in the
+  round's flow, and a report or brief kept outside the round's folder. A path read from
+  the log is expanded before it is used, so a log whose paths were written with `~` is
+  checked, finished and swept, and an older log that holds the whole paths reads as
+  before. Only `~` and a path that starts with `~` and a separator are expanded; `~user`
+  is read as written. A check run recorded with `~` counts against the command that
+  names the whole path, and the other way round. A word of a command step's argv in the
+  round's flow that is `~` or starts with `~/` runs as the path under the home folder.
+  A rounds without this change reads a log written with `~` paths as relative paths, so
+  it shows builds as not clean or not there and keeps their folders rather than
+  removing them; update rounds first on every machine that reads the same notes.
 - `moxi rounds finish` is refused while a process uses the build's scratch folder,
   naming the process. `finish` and `drop` don't move a scratch folder a process uses:
   it stays for the sweep of leftover folders, named with the process, and a drop goes

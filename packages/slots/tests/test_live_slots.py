@@ -209,20 +209,57 @@ def test_holds(server):
     assert slots.release(1, "run-1") is True
     assert slots.show(1).hold is None
     assert slots.release(1, "run-1") is False
-    tmux.call("kill-session", "-t", "=slot-2")
-    with pytest.raises(Refused) as caught:
-        slots.hold(2, "run-3", 60)
-    assert caught.value.reason == "missing"
     with pytest.raises(UsageError):
         slots.hold(1, "run-1", 24 * 3600 + 1)
+    with pytest.raises(UsageError):
+        slots.hold(1, "run-1", 0)
+    with pytest.raises(Refused) as caught:
+        slots.hold(5, "run-1", 60)
+    assert caught.value.reason == "no-slot"
 
 
-def test_a_missing_slot_cannot_be_held(server):
-    slots.create([1])
+def test_a_hold_until_released_sits_on_a_missing_slot_across_create(server):
+    slots.create(count=2)
+    tmux.call("kill-session", "-t", "=slot-1")
+    assert state(1) == MISSING
+    held = slots.hold(1, "park-1")
+    assert held.until is None
+    found = slots.show(1)
+    assert found.hold == held and not found.launchable
+    with pytest.raises(Refused) as caught:
+        slots.hold(1, "run-2", 60)
+    assert caught.value.reason == "held"
+    assert caught.value.holder == {"holder": "park-1", "until": None}
+    assert "until released by hand" in caught.value.words
+    slots.rename(2, "other")
+    assert slots.create([1]) == [1]
+    assert slots.show(1).hold == held and slots.show(1).state == FREE
+    assert json.loads(places.registry().read_text())["slots"]["1"]["hold"] == {
+        "holder": "park-1", "until": None}
+    with pytest.raises(Refused) as caught:
+        slots.remove([1])
+    assert caught.value.reason == "held"
+    assert dict(slots.remove(all_free=True).skipped)[1] == "held"
+    assert slots.release(1, "park-1") is True
+    assert slots.show(1).hold is None
+
+
+def test_a_hold_with_expect_needs_that_last_launch(server):
+    slots.create(count=2)
+    reg = registry.read()
+    reg.rows[1].last = Last(time.time(), "agent", {"request_id": "r-1"})
+    with registry.locked():
+        registry.write(reg)
     tmux.call("kill-session", "-t", "=slot-1")
     with pytest.raises(Refused) as caught:
-        slots.hold(1, "run-1", 60)
-    assert caught.value.reason == "missing"
+        slots.hold(1, "park-1", expect="r-2")
+    assert caught.value.reason == "changed"
+    assert caught.value.holder == {"label": "agent", "meta": {"request_id": "r-1"}}
+    assert slots.show(1).hold is None
+    assert slots.hold(1, "park-1", expect="r-1").until is None
+    with pytest.raises(Refused) as caught:
+        slots.hold(2, "park-1", expect="r-1")
+    assert caught.value.reason == "changed"
 
 
 def test_a_hold_past_until_reads_as_absent_and_the_doctor_warns(server):
@@ -309,10 +346,16 @@ def test_the_command(server, capsys):
     assert "moxi slots attach 1" in capsys.readouterr().out
     assert cli.main(["rename", "2", "review"]) == 0
     assert cli.main(["hold", "review", "--holder", "run-1", "--for", "60"]) == 0
+    assert cli.main(["hold", "1", "--holder", "park-1", "--until-released"]) == 0
+    assert "held by park-1 until released by hand" in capsys.readouterr().out
+    assert cli.main(["hold", "1", "--holder", "park-1"]) == 2
+    assert cli.main(["hold", "1", "--holder", "park-1", "--for", "5",
+                     "--until-released"]) == 2
     capsys.readouterr()
     assert cli.main(["list"]) == 0
     out = capsys.readouterr().out
     assert "SLOT" in out and "review" in out and "run-1 until" in out
+    assert "park-1 until released by hand" in out
     assert cli.main(["list", "--json"]) == 0
     data = json.loads(capsys.readouterr().out)
     assert data["ok"] and [s["number"] for s in data["slots"]] == [1, 2]
@@ -320,7 +363,9 @@ def test_the_command(server, capsys):
     assert cli.main(["show", "review", "--json"]) == 0
     assert json.loads(capsys.readouterr().out)["name"] == "review"
     assert cli.main(["show", "1"]) == 0
-    assert "state" in capsys.readouterr().out
+    out = capsys.readouterr().out
+    assert "state" in out and "park-1 until released by hand" in out
+    assert cli.main(["release", "1", "--holder", "park-1"]) == 0
     assert cli.main(["remove", "2"]) == 3
     assert capsys.readouterr().err.startswith("held: slot 2 is held by run-1")
     assert cli.main(["show", "9"]) == 3

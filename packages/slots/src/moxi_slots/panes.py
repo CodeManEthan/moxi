@@ -2,8 +2,13 @@
 
 `read()` runs the one call and returns a `Pane` per pane of the server (an empty list
 when no server answers, so every registered slot reads `missing`). `join()` turns the
-panes and the registry into a `Listing`: each slot's state, live hold, launchability and
-idleness, the live `slot-<n>` sessions with no row, and the drift between the two.
+panes and the registry into a `Listing`: each slot's state, live hold, launchability,
+idleness and crashed reading, the live `slot-<n>` sessions with no row, and the drift
+between the two.
+
+Each pane also carries the server's pid and start time, so the one call says which server
+answers; a server with no session at all is asked with one more call (`read_server`).
+With no server answering there is no current server, and no slot reads crashed.
 
 Drift is reported, never repaired: a registered slot with no session, a `slot-<n>`
 session with no row, a slot with two run windows.
@@ -25,7 +30,8 @@ from .registry import Registry
 #: `pane_current_command`, is last, so a tab in it can't shift the others.
 FIELDS = ("session_name", "session_id", "session_attached", "window_id", "window_index",
           "@moxi_slot_home", "@moxi_slot_run", "pane_id", "pane_index", "pane_dead",
-          "pane_dead_status", "pane_pid", "default-shell", "pane_current_command")
+          "pane_dead_status", "pane_pid", "default-shell", "pid", "start_time",
+          "pane_current_command")
 FORMAT = "\t".join(f"#{{{name}}}" for name in FIELDS)
 
 
@@ -47,6 +53,17 @@ class Pane:
     pid: int | None
     shell: str
     command: str
+    server_pid: int | None = None
+    server_start: int | None = None
+
+
+@dataclass(frozen=True)
+class ServerNow:
+    """The tmux server that answers now: its pid and start time (epoch seconds, None
+    when tmux gave none)."""
+
+    pid: int
+    start_time: float | None
 
 
 def _int(text: str) -> int | None:
@@ -66,11 +83,13 @@ def parse(out: str) -> list[Pane]:
         if len(parts) != len(FIELDS):
             continue
         (session, session_id, attached, window_id, window_index, home, run, pane_id,
-         pane_index, dead, dead_status, pid, shell, command) = parts
+         pane_index, dead, dead_status, pid, shell, server_pid, server_start,
+         command) = parts
         panes.append(Pane(session, session_id, _int(attached) or 0, window_id,
                           _int(window_index) or 0, home == "on", run == "on", pane_id,
                           _int(pane_index) or 0, dead == "1", _int(dead_status),
-                          _int(pid), shell, command))
+                          _int(pid), shell, command, _int(server_pid),
+                          _int(server_start)))
     return panes
 
 
@@ -79,18 +98,44 @@ def read(timeout: float = tmux.TIMEOUT) -> list[Pane]:
 
     Raises `TryAgain` when the call times out, `TmuxError` when it fails otherwise (and
     `settings.NotSetUp`, a `TmuxError`, when tmux's path is not recorded)."""
+    return _read(timeout, with_server=False)[0]
+
+
+def read_server(timeout: float = tmux.TIMEOUT) -> tuple[list[Pane], ServerNow | None]:
+    """Every pane of the server and the server that answers, or ([], None) when none
+    does. Raises as `read` does."""
+    return _read(timeout, with_server=True)
+
+
+def _read(timeout: float, *, with_server: bool) -> tuple[list[Pane], ServerNow | None]:
     result = tmux.attempt("list-panes", "-a", "-F", FORMAT, timeout=timeout)
     if result.ok:
-        return parse(result.out)
+        found = parse(result.out)
+        return found, server_of(found)
     err = result.err.strip()
     if tmux.no_server(err):
-        return []
+        return [], None
     # A server with no session at all has no target for `list-panes -a`, which then
-    # fails; only in that case is a second call made.
+    # fails; only in that case is a second call made, which also says which server it is.
     sessions = tmux.attempt("list-sessions", "-F", "#{session_id}", timeout=timeout)
     if sessions.ok and not sessions.out.strip():
-        return []
+        if not with_server:
+            return [], None
+        said = tmux.attempt("display-message", "-p", "#{pid} #{start_time}",
+                            timeout=timeout)
+        words = said.out.split() if said.ok else []
+        pid = _int(words[0]) if words else None
+        start = _int(words[1]) if len(words) > 1 else None
+        return [], None if pid is None else ServerNow(pid, start)
     raise TmuxError(f"tmux list-panes failed (exit {result.code}): {err or 'no message'}")
+
+
+def server_of(found: list[Pane]) -> ServerNow | None:
+    """The server the panes were read from, or None with no pane to say."""
+    pane = next((p for p in found if p.server_pid is not None), None)
+    if pane is None:
+        return None
+    return ServerNow(pane.server_pid, pane.server_start)
 
 
 def _shell_name(path: str) -> str:
@@ -156,8 +201,12 @@ def sessions(panes: list[Pane]) -> dict[int, list[Pane]]:
     return found
 
 
-def slot(number: int, f: Facts, row, now: float) -> Slot:
-    """A `Slot` from tmux's facts and the registry row (None when unregistered)."""
+def slot(number: int, f: Facts, row, now: float,
+         server: ServerNow | None = None) -> Slot:
+    """A `Slot` from tmux's facts and the registry row (None when unregistered), its
+    crashed reading taken against `server`, the server answering now."""
+    from . import runs
+
     hold: Hold | None = row.live_hold(now) if row is not None else None
     last = row.last if row is not None else None
     run = f.run
@@ -175,12 +224,16 @@ def slot(number: int, f: Facts, row, now: float) -> Slot:
                 current_command=run.command if run and not run.dead else None,
                 dead_status=run.dead_status if run and run.dead else None,
                 last=last,
-                created=row.created if row is not None else None)
+                created=row.created if row is not None else None,
+                crashed=row is not None and runs.crashed(f.state, last, server))
 
 
-def join(registry: Registry, panes: list[Pane], now: float | None = None) -> Listing:
-    """The listing of `registry` against the server's `panes`."""
+def join(registry: Registry, panes: list[Pane], now: float | None = None,
+         server: ServerNow | None = None) -> Listing:
+    """The listing of `registry` against the server's `panes`. `server` is the server
+    answering now, read from the panes when not given."""
     now = time.time() if now is None else now
+    server = server_of(panes) if server is None else server
     live = sessions(panes)
     slots, unregistered, drift = [], [], []
     for number in sorted(set(registry.rows) | set(live)):
@@ -191,7 +244,7 @@ def join(registry: Registry, panes: list[Pane], now: float | None = None) -> Lis
             drift.append(Drift(number, "no-row",
                                f"session slot-{number} runs with no registry row"))
             continue
-        slots.append(slot(number, f, row, now))
+        slots.append(slot(number, f, row, now, server))
         if f.state == MISSING:
             drift.append(Drift(number, "no-session",
                                f"slot {number} is registered but has no session; "
@@ -205,8 +258,9 @@ def join(registry: Registry, panes: list[Pane], now: float | None = None) -> Lis
 
 def listing(registry: Registry, now: float | None = None) -> Listing:
     """Read the server once and join it with `registry`. Raises as `read` does."""
-    return join(registry, read(), now)
+    found, server = read_server()
+    return join(registry, found, now, server)
 
 
-__all__ = ["FIELDS", "FORMAT", "Pane", "Facts", "parse", "read", "facts", "sessions",
-           "slot", "join", "listing"]
+__all__ = ["FIELDS", "FORMAT", "Pane", "ServerNow", "Facts", "parse", "read",
+           "read_server", "server_of", "facts", "sessions", "slot", "join", "listing"]
