@@ -45,7 +45,7 @@ close finds it.
 
 from __future__ import annotations
 
-from collections.abc import Callable, Iterator, Mapping
+from collections.abc import Callable, Iterator, Mapping, Sequence
 
 from . import builds as built
 from . import decisions, findings, flows, folders, holds, questions, report_block
@@ -79,16 +79,20 @@ def _never(_name: str) -> bool:
 
 def _plan_done(state: states.State, on_closed: Closed, ratify: str, *,
                but: tuple[str, ...] = (),
-               seen: Mapping[str | None, steps.Seen] | None = None) -> Iterator[str]:
+               seen: Mapping[str | None, steps.Seen] | None = None,
+               every: Sequence[steps.Step] | None = None) -> Iterator[str]:
     """The plan is done: each step of the flow is done or skipped, each stage of the
     plan is finished, and a round that builds has finished at least one. The steps in
     `but` are not read; `seen` is what was read of the open builds from git, as
-    `steps.of` takes it."""
-    # The setting is passed to the steps as their rows read it, under no stage, unless
-    # the caller read the settings there already.
-    read = dict(seen or {})
-    read.setdefault(None, steps.Seen(ratify=ratify))
-    for step in steps.of(state, on_closed=on_closed, but=but, seen=read):
+    `steps.of` takes it. `every` is the round's steps as `steps.of` already read them
+    with that `seen`, which are then not read again."""
+    if every is None:
+        # The setting is passed to the steps as their rows read it, under no stage,
+        # unless the caller read the settings there already.
+        read = dict(seen or {})
+        read.setdefault(None, steps.Seen(ratify=ratify))
+        every = steps.of(state, on_closed=on_closed, but=but, seen=read)
+    for step in every:
         # The questions step waits for exactly the open questions, and the ratify
         # step for exactly what the third part names; each is named one by one there.
         if step.step not in (steps.QUESTIONS, RATIFY) and not step.settled:
@@ -169,14 +173,17 @@ def builds(state: states.State) -> bool:
 
 def waits(state: states.State, *, on_closed: Closed | None = None,
           ratify: str | None = None,
-          seen: Mapping[str | None, steps.Seen] | None = None) -> tuple[str, ...]:
+          seen: Mapping[str | None, steps.Seen] | None = None,
+          every: Sequence[steps.Step] | None = None) -> tuple[str, ...]:
     """What the close of the round `state` is of waits for, a line each; empty when
     nothing is, which is when the round closes. It reads the state alone, unless `seen`
     gives what was read of the open builds from git (`checking.seen_of`): a caller that
     shows a round's step with that read gives it here too, so the close line reads each
     step as the step line does. Whether the round closes is decided without it: the
     close waits for every stage to be finished, and a finished stage's steps are done
-    on the log.
+    on the log. A caller that already read the round's steps with that `seen`, and with
+    the `ratify` setting under no stage where the flow has a `ratify` step, gives them
+    as `every`, and they are not read again.
 
     `on_closed` answers whether another round, by name, is closed, for how a question
     parked until one is reads in its line; left out, no round reads as closed and
@@ -184,7 +191,7 @@ def waits(state: states.State, *, on_closed: Closed | None = None,
     is the project's `ratify` setting (`ratify_of`), `majors` when left out."""
     asked = _never if on_closed is None else on_closed
     setting = RATIFY_DEFAULT if ratify is None else ratify
-    lines = list(_plan_done(state, asked, setting, seen=seen))
+    lines = list(_plan_done(state, asked, setting, seen=seen, every=every))
     for condition in CONDITIONS[1:]:
         lines += condition(state, asked, setting)
     return tuple(lines)
