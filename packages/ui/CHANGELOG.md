@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- A page may announce `band_unless`, a list of module names: while any of them is
+  installed, the page has no entry in the band of pages, and its address still opens it.
+  `/m/ui/api/modules` and `ComponentInfo` carry it on a page (`[]` when it names none) and
+  null on any other component. A value that is not a list of module names reads as none.
 - On the Modules view the Page servers block now sits last, under the Installed list, and
   its list is mostly drawn with the rest of the page. When the list arrives late it no
   longer pushes the blocks and links already on the page down by a few hundred pixels, so

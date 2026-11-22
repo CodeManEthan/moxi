@@ -90,6 +90,15 @@ the core's README lists them). [docs/settings.md](https://github.com/CodeManEtha
 says what each does on the page, what a save does, and the page's routes. The page is not
 on the phone.
 
+## A module's page in the band
+
+A module's component named `page`, with `place: "page"`, is a name in the band of pages
+under the top line. Its `group` is `daily` (the pages of a day's work) or `setup`, and its
+`order`, from 0 to 999, is its place in the group, lower first; a wrong or absent one reads
+as `setup` and 500. `band_unless`, a list of module names, takes the page out of the band
+while any of those modules is installed: another page then shows what it shows, and its
+address still opens it. turns' `Live sessions` names sessions this way.
+
 ## A module on Home
 
 Home, at `/m/ui/`, shows one main piece and a row per module with something to report. A

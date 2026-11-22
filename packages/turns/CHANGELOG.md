@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- With `moxi-sessions` installed, `Live sessions` leaves the browser UI shell's band of
+  pages: the Sessions page shows the running sessions with turns' live state. `/m/turns/`
+  still opens the panel. It needs a ui that reads `band_unless`; an older one keeps the
+  entry.
 - `question_mode.origins` is retired and replaced by `prompt.own_origins`, default still
   `["composer", "bridge"]`: the prompt origins that count as the person's own. Each
   `prompt` event carries `own`, true when its origin is on that list, and question mode's

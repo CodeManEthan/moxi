@@ -16022,6 +16022,7 @@ ui	packages/ui/tests/test_snapshot.py	assert set(value["modules"][0]) == set(MOD
 ui	packages/ui/tests/test_snapshot.py	assert status == 200 and listed["sntwo"]["mounted"] and listed["ui"]["page"]	keep	mounted	mounted
 ui	packages/ui/tests/test_snapshot.py	assert usage["mounted"] and usage["budget"] == {"rss": "120M", "fds": 64}	keep	mounted	mounted
 ui	packages/ui/tests/test_snapshot.py	assert {"home_as", "group", "order"} <= set(_COMPONENT.items)	keep	set	set
+ui	packages/ui/tests/test_snapshot.py	assert {"home_as", "group", "order", "band_unless"} <= set(_COMPONENT.items)	keep	set	set
 ui	packages/ui/tests/test_snapshot.py	session_id, key = shell.sessions.store.mint()	keep	sessions	sessions
 ui	packages/ui/tests/test_starter.py	-	name	test_every_child_runs_as_python_P_m_from_the_shells_runtime_dir	test_every_child_runs_as_python_p_m_from_the_shells_runtime_dir
 ui	packages/ui/tests/test_starter.py	_module	name	page	has_page

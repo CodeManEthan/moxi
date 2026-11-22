@@ -65,6 +65,9 @@ export interface ComponentInfo {
   /** From 0 to 999, lower first: a page's place in its group, a main piece's rank or a
    * row's place among rows. Null on any other component. */
   order: number | null;
+  /** The modules whose presence takes a page's entry out of the band; its address still
+   * opens it. Null on a component that is no page. */
+  band_unless: string[] | null;
   attributes: AttributeInfo[];
 }
 
