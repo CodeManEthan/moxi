@@ -18,7 +18,9 @@ answer.
    none: a re-check is that step's pass.
 6. **The target.** `P` is an ancestor of `T`, when the repo's `check_on` is `merged` and
    whenever gate 3 is met only by CI's form. With `check_on = "tip"` and gate 3 met by
-   the full check, a skip or no check at all, this gate is off.
+   the full check, a skip or no check at all, this gate is off. In a queue project
+   (`land = "queue"`) it is off too: the build joins the queue rather than landing, and
+   the lander's candidate holds the target by construction.
 7. **The worktree and the branch.** The worktree, while it exists, holds no change to a
    tracked file and no untracked path, read as the removal rule reads git, so no
    setting of the user's hides one; ignored paths are left to the removal. One made on
@@ -38,6 +40,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 
 from . import builds, checking, findings, flows, report_block, skips
+from .settings import LAND_QUEUE
 from . import state as states
 from .errors import Unmet
 
@@ -155,7 +158,8 @@ def unmet(state: states.State, stage: str, *, seen, tip: str | None = None,
                and seen.check is not None and seen.head is not None
                and not checking.passes(state, stage, checking.CHECK, tip=seen.head,
                                        argv=seen.check))
-    if (seen.check_on == MERGED or only_ci) and seen.holds_target is not True:
+    if (seen.land != LAND_QUEUE and (seen.check_on == MERGED or only_ci)
+            and seen.holds_target is not True):
         why = ("the check is met only by CI, which ran on the tip and not on the "
                "target merged with it" if only_ci else
                "the repo's check_on is merged: the check must have run on the tip "

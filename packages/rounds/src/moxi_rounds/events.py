@@ -162,6 +162,24 @@ TYPES = _types(
               ("stage", "tip", "id", "kind", "state", "landing", "target_before")),
     # A build's finish completed at this tip.
     EventType("finish.done", ("stage", "tip")),
+    # A build of a queue project joined its repo's queue at its tip `tip`, the target's
+    # head being `main`; `urgent` puts it ahead of every member that is not.
+    EventType("queue.join", ("stage", "tip", "main", "urgent", "by"),
+              required=("stage", "tip")),
+    # A member left the queue: by hand, because its branch moved, or a gate it failed.
+    EventType("queue.left", ("stage", "tip", "reason", "by", "batch"),
+              required=("stage", "reason")),
+    # A member was taken into a batch: the batch's id, the target's head it was built on
+    # and its candidate commit.
+    EventType("queue.batch", ("stage", "tip", "batch", "main", "candidate"),
+              required=("stage", "batch")),
+    # A member landed in its batch, at its landing commit.
+    EventType("queue.landed", ("stage", "tip", "batch", "landing"),
+              required=("stage", "batch")),
+    # A member was sent back: a conflict with an earlier member (`blocker`), a commit
+    # hook's or the publishing scan's refusal, or a new failure in its batch's CI run.
+    EventType("queue.ejected", ("stage", "tip", "batch", "reason", "blocker", "run",
+                                "failures", "output"), required=("stage", "reason")),
     # A dead holder's finish lock was cleared.
     EventType("lock.cleared", ("ref", "holder")),
     # A build or the whole round was withdrawn: by whom, the pointer, each open build's

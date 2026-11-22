@@ -695,6 +695,42 @@ wrong and what to change, with the block from `next --schema retro` (`kind`, `by
 record. A retro report is refused in a flow with no `retro` step, which gets the
 numbers only, and the operator's `skip:retro` lets the round close without one.
 
+## The merge queue
+
+A project whose table sets `land = "queue"` lands its builds through one queue per
+repo instead of each by its own finish. A builder's last step is still `moxi rounds
+finish`, which now joins the queue and returns; the repo's lander merges the queued
+builds onto the target together and runs CI once on the result.
+
+**The check.** In a queue project `moxi rounds check` runs the check's `scoped` command
+in the build's worktree, `{base}` filled in with the merge-base of the tip and the
+target: the check of the packages the build touched and their dependents. It pushes
+nothing and reads no CI, and `--full` is refused, since a queued build's full run is its
+candidate's CI. The merge-base of the tip and the target does not change as the target
+moves forward, so the record stays good while the build waits.
+
+**Joining.** `finish` reads the gates of finish at the branch's tip as a direct finish
+does, but for gate 6, the target, which is off: the lander's candidate holds the target
+by construction. Gate 3 is met by the scoped check at the tip, and gate 5 (drift) is
+read against the target's head now, once. A repo whose finish actions are anything but
+one merge is refused, since the lander only merges. When the gates hold, finish appends
+`join` to the repo's queue file and `queue.join` (the tip, the target's head, whether it
+is urgent) to the round's log, prints the build's position, and returns. A build already
+queued at its tip joins nothing new; one queued at an older tip leaves as moved and
+joins again at the back. `finish --urgent` joins ahead of every member that is not
+urgent; urgent members are batched only with each other, and even while the queue is
+paused. `finish --leave` takes the build out at once, and says so when it was inside a
+running batch, which the lander builds again without it. A direct finish in a queue
+project is refused: `land is queue: finish enqueues`.
+
+**The queue file** is `queue/<repo>/queue.jsonl` in rounds' state directory, one event a
+line, appended under its lock. The queue's state is read from it and nowhere else. Each
+event about a member is mirrored into the member's round log (`queue.join`,
+`queue.batch`, `queue.landed`, `queue.ejected`, `queue.left`), which `next` and the
+gates read: while the build is queued at its tip, its finish step waits on the lander,
+and `next` gives its position, its batch and a pause; once it was ejected or left, the
+reason is owed beside the step.
+
 ## Dropping a round
 
 `drop --by operator` ends any round, with a pointer to where he said so. `drop --by lead`

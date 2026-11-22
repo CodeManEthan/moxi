@@ -61,8 +61,8 @@ import json
 from collections.abc import Callable
 
 from . import (brake, builds, checking, ci, closing, commission_block, drift, flows,
-               model_tiers, places, rendering, report_block, showing, sizing, stages, steps,
-               tracing, versions)
+               model_tiers, places, queue_file, rendering, report_block, showing, sizing,
+               stages, steps, tracing, versions)
 from . import numbers as counted
 from . import settings as own
 from . import shown as showings
@@ -182,6 +182,10 @@ def _check(found: showing.Shown, step: steps.Step) -> dict:
                      "in the build's worktree"]}
     build = builds.current(found.state, step.stage)
     settings = own.load() if found.settings is None else found.settings
+    if build is not None and checking.queued(settings, build.repo):
+        said["then"] = [f"{said['then'][0]}: it runs the scoped local check, pushes "
+                        "nothing and reads no CI"]
+        return said
     if build is None or ci.declared(settings, build.repo) is None:
         return said
     newest = ci.newest(found.state, step.stage)
@@ -230,9 +234,25 @@ def _report(found: showing.Shown, step: steps.Step) -> dict:
 
 
 def _finish(found: showing.Shown, step: steps.Step) -> dict:
-    """A build's finish: the command that runs it, by name or in the build's worktree."""
-    return {"then": [f"moxi rounds finish {found.name} {step.stage}, or moxi rounds "
+    """A build's finish: the command that runs it, by name or in the build's worktree.
+    In a queue project the command joins the queue, and the group holds the member's
+    place as the queue file reads now (`queue`), while it is in the queue."""
+    said = {"then": [f"moxi rounds finish {found.name} {step.stage}, or moxi rounds "
                      "finish in the build's worktree"]}
+    build = builds.current(found.state, step.stage)
+    settings = own.load() if found.settings is None else found.settings
+    if build is None or not checking.queued(settings, build.repo):
+        return said
+    said["then"] = [f"{said['then'][0]}: it joins {build.repo}'s queue, and the lander "
+                    "merges it"]
+    queue = queue_file.read(build.repo)
+    member = queue.member(found.name, step.stage)
+    if member is not None and member.waiting:
+        said["queue"] = {"repo": build.repo, "position": queue.position(found.name,
+                                                                        step.stage),
+                         "batch": member.batch if member.state == queue_file.IN_BATCH
+                         else None, "paused": queue.paused}
+    return said
 
 
 def _retro(found: showing.Shown, step: steps.Step) -> dict:
@@ -476,6 +496,16 @@ def _pass_line(group: dict) -> str:
     return f"pass:  {group['pass']} of v{group['version']}: {group['why']}"
 
 
+def _queue_line(place: dict) -> str:
+    """A member's place in its queue, as the queue file reads now."""
+    said = [f"position {place['position']} in {place['repo']}'s queue"]
+    if place.get("batch") is not None:
+        said.append(f"in batch {place['batch']}, CI pending")
+    if place.get("paused") is not None:
+        said.append(f"queue paused: {place['paused']}")
+    return "; ".join(said)
+
+
 def _group_lines(said: dict, group: dict) -> list[str]:
     lines = [_head(said, group)]
     lines += [commission_block.line(one) for one in group.get("changed", ())]
@@ -499,6 +529,8 @@ def _group_lines(said: dict, group: dict) -> list[str]:
             for one in (read or {}).get("workflows") or ():
                 url = "" if one.get("url") is None else f"   {one['url']}"
                 lines.append(f"         {one['path']}: {one['reading']}{url}")
+        if group.get("queue") is not None:
+            lines.append(f"queue: {_queue_line(group['queue'])}")
         lines += [f"owes:  {line}" for line in group.get("owes", ())]
         if "numbers" in group:
             lines += ["numbers:", *(f"  {line}" for line in

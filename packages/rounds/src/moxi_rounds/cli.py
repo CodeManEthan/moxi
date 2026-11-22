@@ -10,7 +10,7 @@
                            [--as NAME]
     moxi rounds check [ROUND STAGE] [--step NAME | --full] [--timeout-s N] [--no-wait]
                       [--as NAME]
-    moxi rounds finish [ROUND STAGE] [--again ID] [--as NAME]
+    moxi rounds finish [ROUND STAGE] [--again ID | --urgent | --leave] [--as NAME]
     moxi rounds ask ROUND|PROJECT TEXT --from PTR [--blocks LIST|none] [--record PTR]
                     [--option K=TEXT]... [--as NAME]
     moxi rounds ask ROUND TEXT --build B<n> [--blocks LIST|none] [--option K=TEXT]...
@@ -175,7 +175,11 @@ by its commit id, into the target with a merge commit. A failed action is record
 undoes nothing; a conflict is aborted and refused with the way through. After a merge
 it removes the build's worktree, scratch folder and branch where rounds made them and
 nothing would be lost, and with no merge only the scratch folder. Run with no round in
-a build's worktree, it finishes that build.
+a build's worktree, it finishes that build. In a repo whose `land` is `queue` it merges
+nothing: it reads the same gates but the target's, the check met by the scoped local
+check, and joins the repo's queue at the tip, printing its position; the repo's lander
+merges it. `--urgent` joins it ahead of every member that is not urgent, and `--leave`
+takes it out of the queue at once.
 `mark ROUND thread:NAME --close` or `--accept-risk`, with `--record` naming where the
 lead wrote why, is the lead's decision on a thread of the design's verification, made
 once the last two verdicts each sent the design back and it was frozen since: no
@@ -1340,11 +1344,20 @@ def _declare_finish(verbs) -> None:
                         help="run once more the command action ID, which started and "
                              "has no result at the tip, once you have looked at what "
                              "it did; taken for no other action")
+    queued = parser.add_mutually_exclusive_group()
+    queued.add_argument("--urgent", action="store_true",
+                        help="in a repo that lands through its queue, join as an urgent "
+                             "member, for a fix to a red target: ahead of every member "
+                             "that is not urgent, and batched even while the queue is "
+                             "paused")
+    queued.add_argument("--leave", action="store_true",
+                        help="in a repo that lands through its queue, take the build "
+                             "out of the queue at once")
     _writes(parser)
 
 
 def _finish(args, out) -> int:
-    from . import finishing
+    from . import finishing, joining
 
     name, stage = args.round, args.stage
     if name is None:
@@ -1356,6 +1369,12 @@ def _finish(args, out) -> int:
         raise BadArgument(f"{name} is named with no stage, and a finish is of one build",
                           f"moxi rounds finish {name} B<n>, or moxi rounds finish in the "
                           "build's worktree")
+    repo = joining.queue_repo(name, stage)
+    joining.refuse_flags(urgent=args.urgent, leave_=args.leave, repo=repo, name=name,
+                         stage=stage)
+    if repo is not None:
+        return _queue_finish(args, name, stage, out)
+
     def on_action(one) -> None:
         # Said as it is recorded, so it is seen even when the finish is refused after.
         if one.hand_merge:
@@ -1399,6 +1418,33 @@ def _finish(args, out) -> int:
               "finish's own and was left as it is; moxi doctor rounds names it if it "
               "stays", file=sys.stderr)
     _warn_of(done.failed, args.prog, args.verb)
+    return codes.OK
+
+
+def _queue_finish(args, name: str, stage: str, out) -> int:
+    """`finish` in a repo that lands through its queue: join it, or with `--leave` leave
+    it."""
+    from . import joining
+
+    if args.again is not None:
+        raise BadArgument("--again runs a finish action again, and a queued build's "
+                          "finish runs none: the lander merges it",
+                          f"moxi rounds finish {name} {stage}")
+    if args.leave:
+        left = joining.leave(name, stage, by=_actor(args))
+        print(f"left the queue: {left.name} {left.stage} at {left.tip[:12]}", file=out)
+        if left.rebuilds is not None:
+            print(f"it was in batch {left.rebuilds}: the lander builds that batch again "
+                  "without it, and its members' CI runs again", file=out)
+        return codes.OK
+    joined = joining.join(name, stage, by=_actor(args), urgent=args.urgent)
+    if joined.moved is not None:
+        print(f"left the queue at {joined.moved[:12]}: the branch moved", file=out)
+    how = "already queued" if joined.already else "queued"
+    urgent = ", urgent" if joined.urgent else ""
+    print(f"{how}: position {joined.position}{urgent}, {joined.name} {joined.stage} at "
+          f"{joined.tip[:12]}; the lander merges it, and moxi rounds next names what "
+          "becomes of it", file=out)
     return codes.OK
 
 

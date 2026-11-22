@@ -234,13 +234,17 @@ def finish(name: str, stage: str, *, by: str, settings=None,
     rerun = f"moxi rounds finish {name} {stage}"
 
     view = write.look(where, wait_s=wait_s, env=env)
-    build = _open_build(view.state, name, stage)
-    seen = _seen(view, name, stage, settings)
+    build = open_build(view.state, name, stage)
+    if checking.queued(settings, build.repo):
+        raise Refused([Unmet(f"land is queue: finish enqueues, and {build.repo}'s "
+                             "lander makes every merge",
+                             f"join the queue: moxi rounds finish {name} {stage}")])
+    seen = seen_now(view, name, stage, settings)
     tip = seen.tip or seen.head
     # Read again at `T` after the actions only where `T` was the branch's tip: a build
     # whose branch was gone is read as gone.
     at_tip = None if seen.tip is None else {stage: tip}
-    found = [one.unmet for one in _gates(view, name, stage, seen, tip, settings)]
+    found = [one.unmet for one in gates_now(view, name, stage, seen, tip, settings)]
     actions = own.build_setting(settings, build.repo, "finish")
     if again is not None:
         found += finish_actions.again_refused(view.state, build, tip, actions, again,
@@ -267,11 +271,12 @@ def finish(name: str, stage: str, *, by: str, settings=None,
             recorded.append("the finish lock of a holder that had ended was cleared")
         view = write.look(where, wait_s=wait_s, env=env)
         read = open_builds.of_round(name, [build.repo], settings=settings)
-        seen = _seen(view, name, stage, settings, read=read)
+        seen = seen_now(view, name, stage, settings, read=read)
         status = read[stage].status
         target_head = Git(root).branch(build.target)
         moved = _moved(seen, tip, name=name, stage=stage)
-        unmet = moved or [one.unmet for one in _gates(view, name, stage, seen, tip, settings)
+        unmet = moved or [one.unmet for one in gates_now(view, name, stage, seen, tip,
+                                                          settings)
                           if one.number in UNDER_LOCK]
         if target_head is None:
             unmet.append(Unmet(f"the target {build.target} is no longer a branch of "
@@ -334,10 +339,10 @@ def finish(name: str, stage: str, *, by: str, settings=None,
         def after(view) -> list[Unmet]:
             if _ended(view.state, stage):
                 return []
-            now = _seen(view, name, stage, settings, refuse=False, tips=at_tip)
+            now = seen_now(view, name, stage, settings, refuse=False, tips=at_tip)
             if isinstance(now, Unmet):
                 return [now]
-            return [one.unmet for one in _gates(view, name, stage, now, tip, settings)
+            return [one.unmet for one in gates_now(view, name, stage, now, tip, settings)
                     if one.number in AFTER]
 
         def event(view, _result):
@@ -443,7 +448,7 @@ class _Cleaned:
 
 # -- reading the build -------------------------------------------------------------------
 
-def _open_build(state: states.State, name: str, stage: str) -> builds.Build:
+def open_build(state: states.State, name: str, stage: str) -> builds.Build:
     build = builds.current(state, stage)
     if state.status != states.OPEN:
         raise Refused([Unmet(f"the round {name} is {state.status}: it finishes no build",
@@ -463,7 +468,7 @@ def _ended(state: states.State, stage: str) -> bool:
     return build is not None and build.ended is not None
 
 
-def _seen(view, name: str, stage: str, settings, *, refuse: bool = True,
+def seen_now(view, name: str, stage: str, settings, *, refuse: bool = True,
           tips: Mapping[str, str] | None = None, read=None):
     """What git and the settings say now of the stage's build, at the tip `tips` gives
     it, else at its branch's tip now; `read` is the round's open builds as
@@ -481,7 +486,7 @@ def _seen(view, name: str, stage: str, settings, *, refuse: bool = True,
     raise Refused([problem])
 
 
-def _gates(view, name: str, stage: str, seen, tip: str, settings) -> tuple:
+def gates_now(view, name: str, stage: str, seen, tip: str, settings) -> tuple:
     return finish_gates.unmet(
         view.state, stage, seen=seen, tip=tip, name=name, register=view.project_state,
         on_closed=lambda round_name: questions.is_closed(round_name, settings))
@@ -751,4 +756,4 @@ class _MergeGit(Git):
 __all__ = ["ACTION", "DONE", "OK", "FAILED", "FOUND", "STARTED", "SETTLED", "REPEAT",
            "AGAIN", "SKIPPED", "UNDER_LOCK",
            "AFTER", "CHECKOUT_PREFIX", "MERGE_TIMEOUT_S", "PUSH_TIMEOUT_S", "ActionFailed",
-           "Action", "Finished", "finish"]
+           "Action", "Finished", "finish", "open_build", "seen_now", "gates_now"]
