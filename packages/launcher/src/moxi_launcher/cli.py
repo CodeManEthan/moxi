@@ -19,7 +19,10 @@ launched.
     moxi launcher exit-session SESSION_ID [--dry-run] [--json]
     moxi launcher exits [--limit N] [--before TIME] [--json]
     moxi launcher sessions [--limit N] [--before TIME] [--json]
-    moxi launcher resume SESSION_ID [--slot N]
+    moxi launcher resume SESSION_ID [--slot N] [--brief TEXT | --brief-file FILE | --plain]
+    moxi launcher clear-expired [--session ID] [--dry-run] [--json]
+    moxi launcher keep-warm --session ID [--dry-run] [--json]
+    moxi launcher keep-warm --dry-run [--json]
     moxi launcher keep-warm hold NAME | release NAME | holds [--json]
     moxi launcher show [SESSION_ID] [--json]
 
@@ -38,7 +41,12 @@ relaunches another as one of its directors, shows a run (`--status`), stops one
 back (`--from-record`).
 `exit-session` exits a launched session, and `exits` lists every exit tried. `sessions`
 lists past launches and whether each can be resumed; `resume` launches one again,
-resumed. `keep-warm` opens, releases and lists this session's named holds. `show` shows
+resumed, with `--brief` or `--brief-file` sent as its first turn (a `go` launch's resume
+needs one), or with `--plain` and no first turn, a `go` launch's too. `clear-expired`
+makes the expiry ask of every live launch that recycles on expiry, now, or with `--session ID` of the one whose current session is ID; `keep-warm --session ID` makes the keep-warm ask of one session, now, and
+`keep-warm --dry-run` of every live launch keep-warm is on for. With `--dry-run` each ask
+takes its reads and writes nothing. `keep-warm hold`, `release` and `holds` open, release
+and list this session's named holds. `show` shows
 a launched session's relaunch, recycle and keep-warm state, and whether it needs a look.
 
 `run` and `preview` keep what this parser does not know as `rest`, and read it again
@@ -109,7 +117,7 @@ def _errors() -> tuple[type[BaseException], ...]:
     from . import catalog, first, handoffs
 
     return (catalog.Refused, ConfigError, core_store.StoreError, handoffs.NoKey,
-            first.HandoffUnreadable, NoPreset)
+            handoffs.NoNotesDir, first.HandoffUnreadable, NoPreset)
 
 
 def refusal_lines(error: BaseException) -> tuple[str, str | None]:
@@ -164,6 +172,7 @@ def _request(args: argparse.Namespace):
         _warn(parsed.warning)
     return api.LaunchRequest(seat=args.seat, project_preset=args.project_preset,
                              typed=dict(parsed.values), extra=tuple(parsed.extra),
+                             tail=parsed.tail,
                              off_posture=args.off_posture, left_out=left_out,
                              cwd=os.getcwd())
 
@@ -609,14 +618,29 @@ def _sessions(args: argparse.Namespace, prog: str) -> int:
 
 
 def _resume(args: argparse.Namespace, prog: str) -> int:
-    from . import resume
+    from . import catalog, resume
 
-    return _said(resume.resume(args.session_id, slot=args.slot, warn=_warn), args)
+    if args.plain and (args.brief is not None or args.brief_file is not None):
+        raise catalog.BadValue("plain", "--plain resumes with no first turn, and a brief "
+                                        "was given",
+                               "drop --plain to send the brief, or drop the brief")
+    # A brief file is read against this directory, as a launch's is.
+    brief_file = catalog.cli_path(args.brief_file) if args.brief_file is not None else None
+    return _said(resume.resume(args.session_id, slot=args.slot, brief=args.brief,
+                               brief_file=brief_file, plain=args.plain, warn=_warn), args)
+
+
+def _clear_expired(args: argparse.Namespace, prog: str) -> int:
+    from . import recycle
+
+    return _said(recycle.clear_expired(args.session, dry_run=args.dry_run), args)
 
 
 def _keep_warm(args: argparse.Namespace, prog: str) -> int:
     from . import keepwarm
 
+    if args.action is None:
+        return _said(keepwarm.keep_warm(args.session, dry_run=args.dry_run), args)
     if args.action == "hold":
         return _said(keepwarm.hold(args.name), args)
     if args.action == "release":
@@ -644,6 +668,7 @@ VERBS: dict[str, Callable[[argparse.Namespace, str], int]] = {
     "exits": _exits,
     "sessions": _sessions,
     "resume": _resume,
+    "clear-expired": _clear_expired,
     "keep-warm": _keep_warm,
     "show": _state,
 }
@@ -800,13 +825,41 @@ def _act_parsers(verbs) -> None:
                     "that can take it, else the lowest that can, or this terminal.")
     resume.add_argument("session_id", metavar="SESSION_ID", help="the session to resume")
     resume.add_argument("--slot", metavar="N", help="resume it in slot N instead")
+    resume.add_argument("--brief", metavar="TEXT",
+                        help="the brief, sent as the resumed session's first turn; a "
+                             "resume of a go launch needs one, or --plain")
+    resume.add_argument("--brief-file", metavar="FILE",
+                        help="a file holding the brief, sent as the resumed session's "
+                             "first turn")
+    resume.add_argument("--plain", action="store_true",
+                        help="resume with no first turn, a go launch too; takes no brief")
+
+    clear = verbs.add_parser(
+        "clear-expired", help="ask now whether each session that recycles on expiry is due",
+        allow_abbrev=False,
+        description="Make the expiry ask of every live launch that recycles on expiry, now: "
+                    "each is cleared or compacted when its cache is cold and it is quiet. "
+                    "Exit 1 when an ask ended blocked, failed or unconfirmed.")
+    clear.add_argument("--session", metavar="ID",
+                       help="ask only of the launch whose current session is ID")
+    clear.add_argument("--dry-run", action="store_true",
+                       help="print each session's verdict and what a run would do; writes "
+                            "nothing")
+    clear.add_argument("--json", action="store_true", help="print one JSON object")
 
     keep_warm = verbs.add_parser(
-        "keep-warm", help="open, release or list this session's holds", allow_abbrev=False,
-        description="Open, release or list the named holds that keep this session's cache "
-                    "warm while work it handed out is running.")
+        "keep-warm", help="ask keep-warm about a session now, or open, release or list "
+                          "this session's holds", allow_abbrev=False,
+        description="With --session, make the keep-warm ask of that session now; with "
+                    "--dry-run alone, of every live launch keep-warm is on for. Or open, "
+                    "release or list the named holds that keep this session's cache warm "
+                    "while work it handed out is running.")
+    keep_warm.add_argument("--session", metavar="ID", help="the session to ask about")
+    keep_warm.add_argument("--dry-run", action="store_true",
+                           help="print each session's verdict and what a run would do; "
+                                "writes nothing")
+    keep_warm.add_argument("--json", action="store_true", help="print one JSON object")
     actions = keep_warm.add_subparsers(dest="action", metavar="ACTION")
-    actions.required = True
     for action, what in (("hold", "open the hold NAME"), ("release", "release the hold NAME")):
         one = actions.add_parser(action, help=what, allow_abbrev=False,
                                  description=what[0].upper() + what[1:] + ".")
@@ -842,6 +895,17 @@ def _check_relaunch(parser: argparse.ArgumentParser, args: argparse.Namespace) -
         parser.error("--dry-run goes with --self or a SESSION_ID or IDENTITY")
 
 
+def _check_keep_warm(parser: argparse.ArgumentParser, args: argparse.Namespace) -> None:
+    """Refuse (exit 2) a keep-warm that mixes the ask's flags with a hold action, or a live
+    ask that names no session."""
+    if args.action is not None:
+        if args.session is not None or args.dry_run:
+            parser.error(f"keep-warm {args.action} takes no --session or --dry-run")
+    elif args.session is None and not args.dry_run:
+        parser.error("keep-warm needs --session ID, or --dry-run to ask about every "
+                     "session, or one of hold, release or holds")
+
+
 def parse(argv: Sequence[str] | None = None, *, prog: str = "moxi launcher"
           ) -> argparse.Namespace:
     """Parse `argv`. For `run` and `preview` what the parser does not know is kept, in
@@ -856,6 +920,8 @@ def parse(argv: Sequence[str] | None = None, *, prog: str = "moxi launcher"
         parser.error("presets show needs a NAME")
     if args.verb == "relaunch":
         _check_relaunch(parser, args)
+    if args.verb == "keep-warm":
+        _check_keep_warm(parser, args)
     args.rest = rest
     return args
 

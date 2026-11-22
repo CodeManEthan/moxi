@@ -1205,13 +1205,14 @@ def _add_option(parser: argparse.ArgumentParser, row_: Row) -> None:
 @dataclass(frozen=True)
 class Parsed:
     """A launch's typed flags. `values` holds the rows typed, checked, by name;
-    `unknown` the flags the parser did not know, in order, and `extra` those with the
-    words after `--`, which go last on the harness's argv."""
+    `unknown` the flags the parser did not know, in order, `tail` the words after `--`,
+    and `extra` the unknown flags then the tail, which go last on the harness's argv."""
 
     harness: str
     values: Mapping[str, object]
     unknown: tuple[str, ...]
     extra: tuple[str, ...]
+    tail: tuple[str, ...] = ()
 
     @property
     def warning(self) -> str | None:
@@ -1246,7 +1247,8 @@ def parse(argv: Sequence[str], harness: str, *,
         values[name] = found.check(value) if found is not None else value
     extra = [*unknown, *tail]
     refuse_passthrough(harness, extra)
-    return Parsed(harness, MappingProxyType(values), tuple(unknown), tuple(extra))
+    return Parsed(harness, MappingProxyType(values), tuple(unknown), tuple(extra),
+                  tuple(tail))
 
 
 def typed_harness(argv: Sequence[str]) -> str | None:

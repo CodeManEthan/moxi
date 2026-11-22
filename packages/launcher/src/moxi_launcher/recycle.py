@@ -2,6 +2,7 @@
 prompt cache has expired or its context has passed its mark.
 
     ask_expiry(session_id)       # moxi-launcher-job expiry SESSION, asked by cache's timer
+    clear_expired(dry_run=...)   # moxi launcher clear-expired: the ask of each opted-in session
     on_crossing(crossing)        # usage's crossing of the launch's limit_at mark
     start_compact(conn, run)     # a limit compact's job, spawned detached
 
@@ -40,6 +41,12 @@ Each ask ends one way:
 **A repeated `blocked` updates one run** (`store.end_blocked`), so a draft left in an idle
 session is one run whose start is when the block began.
 
+**By hand.** `moxi launcher clear-expired` makes the same ask of every live launch that
+recycles on expiry, now. With `--dry-run` each ask takes its reads and stops before its
+first write: it ends as a live ask would, except that one that would act ends quietly as
+`would-clear` or `would-compact` (saying whether the clear would stop background shells),
+and one that would end `blocked` says so and writes no run. A stale open run is not ended.
+
 **Recycle at limit.** `on_crossing` is the launcher's entry on usage's `moxi.usage.crossings`
 group. usage calls it in turns' endpoint once per rise of the main session's context past
 the launch's `limit_at` mark, with at most 200 ms to answer. It
@@ -57,11 +64,13 @@ from __future__ import annotations
 import logging
 import os
 import sqlite3
-from collections.abc import Mapping
+from collections.abc import Iterator, Mapping, Sequence
+from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from moxi import exit as codes
 from moxi import modules, paths, proc
 from moxi.paths import Layout
 
@@ -90,6 +99,8 @@ STOP_SHELLS = "stop-shells"
 #: The crossing handler's wait for the store's write lock, in seconds: under usage's
 #: 200 ms bound.
 CROSSING_BUSY_S = 0.1
+#: A hand-run sweep's wait for the launch log, in seconds.
+SWEEP_BUSY_S = 5.0
 
 #: The line a `relaunch` crossing returns, filled by `relaunch_line` with `RELAUNCH_AFTER`
 #: when the crossing names its mark.
@@ -185,9 +196,11 @@ def _ran(command: str, result: Any) -> Verdict:
 def ask_expiry(session_id: str, *, conn: sqlite3.Connection | None = None,
                turns: Any | None = None, slots_api: Any = LOOK, cache: Any = LOOK,
                settings: Mapping[str, Any] | None = None,
-               caller_env: Mapping[str, str] | None = None) -> Verdict:
+               caller_env: Mapping[str, str] | None = None,
+               dry_run: bool = False) -> Verdict:
     """One expiry ask of the session `session_id`, to its end. Never raises for what it
-    reads; a fault after its run was written ends the run `exc`."""
+    reads; a fault after its run was written ends the run `exc`. With `dry_run` the ask
+    writes nothing and ends, where it would act, as `would-clear` or `would-compact`."""
     env = dict(os.environ if caller_env is None else caller_env)
     try:
         opened = conn if conn is not None else store.connect(create=False)
@@ -195,7 +208,8 @@ def ask_expiry(session_id: str, *, conn: sqlite3.Connection | None = None,
         return Verdict(None, "not-launched", f"the launch log could not be opened: "
                                              f"{_words(exc)}")
     try:
-        return _expiry(opened, session_id, turns, slots_api, cache, settings, env)
+        return _expiry(opened, session_id, turns, slots_api, cache, settings, env,
+                       dry_run=dry_run)
     finally:
         if conn is None:
             opened.close()
@@ -203,7 +217,7 @@ def ask_expiry(session_id: str, *, conn: sqlite3.Connection | None = None,
 
 def _expiry(conn: sqlite3.Connection, session_id: str, turns: Any, slots_api: Any,
             cache: Any, settings: Mapping[str, Any] | None,
-            env: Mapping[str, str]) -> Verdict:
+            env: Mapping[str, str], *, dry_run: bool) -> Verdict:
     from . import exits, job
 
     row = store.resolve(conn, session_id)
@@ -238,6 +252,8 @@ def _expiry(conn: sqlite3.Connection, session_id: str, turns: Any, slots_api: An
         verdict = _held(conn, row, command, reading)
         if verdict is not None and verdict.outcome is None:
             return verdict
+        if dry_run:
+            return verdict or _would(command, found.session, getattr(clock, "age_s", None))
         _prune(conn, current_settings)
         try:
             run = store.insert_run(
@@ -287,8 +303,7 @@ def _act(conn: sqlite3.Connection, run: store.Run, session: Any, command: str,
     """The command, right after the run is seen still open; its verdict ends the run, or
     drops it when it ended quietly."""
     try:
-        stop = (command == "clear" and isinstance(age, (int, float)) and age >= SHELLS_IDLE_S
-                and STOP_SHELLS in session.capabilities)
+        stop = stops_shells(command, session, age)
         if not store.advance_run(conn, run.run_id, "acting", leaving=("acting",)):
             ended = store.get_run(conn, run.run_id)
             return Verdict(None, "ended-under", f"run {run.run_id} was ended "
@@ -316,6 +331,22 @@ def _act(conn: sqlite3.Connection, run: store.Run, session: Any, command: str,
             raise
         log.exception("expiry run %s stopped on a fault", run.run_id)
         return Verdict("error", type(exc).__name__, _words(exc), run.run_id)
+
+
+def stops_shells(command: str, session: Any, age: float | None) -> bool:
+    """Whether `command` on `session` stops its background shells: a clear, after the
+    session has been idle `SHELLS_IDLE_S` by cache's `age` (seconds), where turns offers
+    the stop."""
+    return (command == "clear" and isinstance(age, (int, float)) and age >= SHELLS_IDLE_S
+            and STOP_SHELLS in session.capabilities)
+
+
+def _would(command: str, session: Any, age: float | None) -> Verdict:
+    """A dry run's end where a live ask would act."""
+    said = f"a run would {command} the session now"
+    if stops_shells(command, session, age):
+        said += ", stopping its background shells"
+    return Verdict(None, f"would-{command}", said)
 
 
 def end(conn: sqlite3.Connection, run: store.Run, verdict: Verdict) -> Verdict:
@@ -379,6 +410,74 @@ def codex_sessions(row: store.LaunchRow, env: Mapping[str, str]) -> str:
             or env.get("CODEX_HOME"))
     root = Path(home) if home else Path(env.get("HOME") or Path.home()) / ".codex"
     return str(root / "sessions")
+
+
+# -- by hand ----------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class Asked:
+    """One session a hand-run sweep asked about: its launch, the session id asked by, and
+    how the ask ended."""
+
+    request_id: str
+    session_id: str
+    verdict: Verdict
+
+    def as_json(self) -> dict[str, Any]:
+        return {"request_id": self.request_id, "session_id": self.session_id,
+                "outcome": self.verdict.outcome, "word": self.verdict.word,
+                "detail": self.verdict.detail, "run_id": self.verdict.run_id}
+
+
+def clear_expired(session: str | None = None, *, dry_run: bool = False,
+                  conn: sqlite3.Connection | None = None, turns: Any | None = None,
+                  slots_api: Any = LOOK, cache: Any = LOOK,
+                  settings: Mapping[str, Any] | None = None,
+                  caller_env: Mapping[str, str] | None = None) -> Any:
+    """`moxi launcher clear-expired [--session ID] [--dry-run]`: the expiry ask
+    (`ask_expiry`) of every live launch whose `recycle_on_expiry` acts, by the id it was
+    last known by, newest launch first; with `session`, only of the launch last known by
+    that id, and with none such a line saying so. Returns the verb's `relaunch.Result`:
+    exit 1 when an ask ended other than quietly or done, else 0."""
+    from . import live
+
+    with sweep_log(conn) as opened:
+        api = slots.api() if slots_api is LOOK and opened is not None else slots_api
+        rows = [] if opened is None else [
+            r for r in live.live(opened) if r.values.get("recycle_on_expiry") in EXPIRY
+            and r.newest_session_id and session in (None, r.newest_session_id)]
+        asked = [Asked(r.request_id, r.newest_session_id, ask_expiry(
+            r.newest_session_id, conn=opened, turns=turns, slots_api=api, cache=cache,
+            settings=settings, caller_env=caller_env, dry_run=dry_run))
+            for r in rows]
+    none = ("no live launch recycles on expiry" if session is None else
+            f"no live launch that recycles on expiry has current session {session}")
+    return swept(asked, dry_run=dry_run, none=none)
+
+
+def swept(asked: Sequence[Asked], *, dry_run: bool, none: str) -> Any:
+    """A hand-run sweep's `relaunch.Result`: a line per session, or `none` when there was
+    none; exit 1 when an ask ended other than quietly or done (`job.DONE`), else 0."""
+    from . import job, relaunch
+
+    lines = tuple(f"session {a.session_id} (launch {a.request_id}): {a.verdict.line}"
+                  for a in asked) or (none,)
+    bad = any(a.verdict.outcome not in (None, *job.DONE) for a in asked)
+    return relaunch.Result(codes.ERROR if bad else codes.OK, lines, data={
+        "outcome": "dry-run" if dry_run else "asked", "dry_run": dry_run,
+        "sessions": [a.as_json() for a in asked]})
+
+
+@contextmanager
+def sweep_log(conn: sqlite3.Connection | None) -> Iterator[sqlite3.Connection | None]:
+    """`conn`, or the launch log opened for the sweep and closed after it; None when there
+    is no launch log."""
+    if conn is not None:
+        yield conn
+        return
+    with store.reading(timeout=SWEEP_BUSY_S) as opened:
+        yield opened
 
 
 # -- recycle at limit --------------------------------------------------------------------
@@ -509,7 +608,8 @@ def _words(error: BaseException) -> str:
 
 __all__ = ["BLOCKED_REFUSALS", "BUSY_WORDS", "COMPACT_LINE", "CROSSING_BUSY_S", "EXPIRY",
            "FAILED_REFUSALS", "QUIET_REFUSALS", "RAN", "RELAUNCH_AFTER", "RELAUNCH_LINE",
-           "SCRATCH_RECYCLE", "SHELLS_IDLE_S", "STOP_SHELLS", "UNCONFIRMED", "Verdict",
-           "ask_expiry", "cache_read", "claude_projects", "codex_sessions", "crossing_line",
-           "end", "is_scratch_relaunch", "on_crossing", "relaunch_line", "start_compact",
+           "SCRATCH_RECYCLE", "SHELLS_IDLE_S", "STOP_SHELLS", "SWEEP_BUSY_S", "UNCONFIRMED",
+           "Asked", "Verdict", "ask_expiry", "cache_read", "claude_projects", "clear_expired",
+           "codex_sessions", "crossing_line", "end", "is_scratch_relaunch", "on_crossing",
+           "relaunch_line", "start_compact", "stops_shells", "sweep_log", "swept",
            "verdict_of"]
