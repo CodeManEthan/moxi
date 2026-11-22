@@ -493,7 +493,9 @@ was restored, else 1, and `--dry-run` says what it would do and writes nothing.
 `moxi launcher resume SESSION_ID` of a parked session takes the same path: it goes back
 into its reserved slot, or, with `--slot N`, into slot N with the reservation released.
 Its `--brief`, `--brief-file` or `--plain` goes with it, and a `go` launch's resume with
-none is refused before the slot is touched.
+none is refused before the whole-run park lock is taken and before its slot is touched.
+The launch's own crash discovery runs before that check, under the park lock it takes
+around itself, and may reserve crashed slots.
 
 **When the machine went down with no park**, the launcher still finds the sessions that
 were running in slots: slots records how each run in a slot ended, and a run that was

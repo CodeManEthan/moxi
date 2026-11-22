@@ -300,7 +300,10 @@ def resume(session_id: str, *, slot: int | str | None = None,
                 c, request_ids=[row.request_id], session_ids=[newest] if newest else []):
             from . import restore
 
-            # The brief is refused here, before the park lock or any slot is touched.
+            # Crash discovery above has run already, under the park lock it takes around
+            # itself, and may have reserved crashed slots. The brief is checked here,
+            # before `restore.resume_parked` takes the whole-run park lock and before the
+            # entry's slot is touched.
             checked_brief(row, brief, brief_file, plain=plain)
             return restore.resume_parked(
                 session_id, slot=slot, request_id=request_id, caller_env=caller_env,
