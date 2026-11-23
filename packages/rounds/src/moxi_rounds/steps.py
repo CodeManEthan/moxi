@@ -192,7 +192,8 @@ class Seen:
     `builds.Share` for each build it shares commits with; `ratify`, the project's
     setting of that name; `design`, what `commission` refuses on while `design.md`
     holds other bytes than its current version was frozen from (`versions.unchanged`),
-    None when it holds the same or that was not read;
+    None when it holds the same or that was not read; `private`, each private file of
+    the repo some commit finish would bring holds (`private_files.held`);
     `problem`, what kept the build from being read, in which case nothing else is
     known. What was read for the round's own steps is kept under no stage (`None`),
     with `ratify` and `design` alone filled, so it is there with no build open."""
@@ -217,6 +218,7 @@ class Seen:
     shares: tuple[builds.Share, ...] = ()
     ratify: str = "majors"
     design: Unmet | None = None
+    private: tuple = ()
     problem: Unmet | None = None
 
 
