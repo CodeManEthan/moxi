@@ -48,6 +48,21 @@ def fresh_page(monkeypatch, site, fake):
     table.close()
 
 
+@pytest.fixture
+def restart(monkeypatch):
+    """Put a new job table in, as a page server's restart does; each one it put in is
+    closed at the end, before `monkeypatch` puts the server's own table back."""
+    made: list[jobs.Jobs] = []
+
+    def _restart() -> None:
+        made.append(jobs.Jobs(LB.busy))
+        monkeypatch.setattr(pagehandlers, "JOBS", made[-1])
+
+    yield _restart
+    for table in made:
+        table.close()
+
+
 def get(path: str, query: str = "", app=None) -> tuple[int, dict | None]:
     return asyncio.run(send(app or served(), "GET", path, query=query))
 
@@ -418,11 +433,11 @@ def test_a_status_for_a_job_this_server_holds_no_record_of_is_unknown():
                                "code": None, "lines": [pagehandlers.UNKNOWN], "fix": None}
 
 
-def test_a_status_after_a_restart_is_unknown(monkeypatch):
+def test_a_status_after_a_restart_is_unknown(restart):
     a_daemon(enable=True)
     job = accepted(post("/api/stop", {"id": "web"}, key=KEY))
     assert ended(job)["state"] == "done"
-    monkeypatch.setattr(pagehandlers, "JOBS", jobs.Jobs(LB.busy))
+    restart()
     assert job_status(job)["state"] == "unknown"
 
 
@@ -611,21 +626,21 @@ def test_a_held_key_for_another_act_or_row_is_refused():
     assert refused(post("/api/stop", {"id": "api"}, key=KEY)) == pagehandlers.KEY_REUSED
 
 
-def test_a_key_after_a_restart_is_acted_on_anew(fake, monkeypatch):
+def test_a_key_after_a_restart_is_acted_on_anew(fake, restart):
     a_daemon(enable=True)
     ended(accepted(post("/api/stop", {"id": "web"}, key=KEY)))
-    monkeypatch.setattr(pagehandlers, "JOBS", jobs.Jobs(LB.busy))
+    restart()
     found = ended(accepted(post("/api/stop", {"id": "web"}, key=KEY)))
     # A stop again ends where the first did.
     assert found["state"] == "done" and not fake.written["web"].active
     assert len([c for c in fake.calls if c[0] == "stop"]) == 2
 
 
-def test_a_remove_job_after_a_restart_is_refused_for_the_removed_row(monkeypatch):
+def test_a_remove_job_after_a_restart_is_refused_for_the_removed_row(restart):
     a_daemon()
     remove = {"act": "remove", "id": "web", "job": "0" * 32}
     ended(accepted(post("/api/act", remove)))
-    monkeypatch.setattr(pagehandlers, "JOBS", jobs.Jobs(LB.busy))
+    restart()
     assert "no service is named web" in refused(post("/api/act", remove))
 
 
