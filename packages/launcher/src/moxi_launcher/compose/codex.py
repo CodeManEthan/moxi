@@ -56,8 +56,8 @@ check sees every posture: the host's `--permissions PROFILE` (until a permission
 has a row of its own), Codex's `--dangerously-bypass-approvals-and-sandbox` and
 `--approve-for-me` with their hidden aliases `--yolo` and `--not-so-yolo`, and a config override keyed `sandbox_mode` or `approval_policy`,
 passed on (`-c`, `--config`, `--option`) or as a `config` item (`catalog.POSTURE_FLAGS`,
-`catalog.POSTURE_KEYS`). The host's own `--resume`, `--no-window`, `--options-file` and
-`--instructions-file` are refused too (`catalog.HELD_FLAGS`).
+`catalog.POSTURE_KEYS`). The host's own `--resume`, `--fork`, `--no-window`,
+`--options-file` and `--instructions-file` are refused too (`catalog.HELD_FLAGS`).
 
 A resume (`Context.resume`, the session id the Codex thread's) is the host's own
 `--resume THREAD_ID`, after the rows. Only the host resumes a thread: a resume in another
@@ -65,6 +65,10 @@ mode is refused. An explicit resume of a launch with a comms name continues its 
 through comms' wrapper, which takes the same `--resume THREAD_ID` after its own flags; a
 comms whose wrapper can't resume a thread (`Context.comms_codex_resume` false) is
 refused. A relaunch, a repair and a recycle are not resumes, and start a new thread.
+
+A fork (`Context.fork_of`, the parent's thread id) is the host's own `--fork THREAD_ID`,
+after the rows: the host forks that thread into a new one and hosts the new one. Only
+the host forks a thread: a fork in another mode is refused.
 """
 
 from __future__ import annotations
@@ -149,6 +153,9 @@ def compose(values: Mapping[str, object], ctx: Context) -> Composition:
     posture = ctx.posture_of(values) or None
     if ctx.resume:
         _resumable(mode_, identity, ctx)
+    if ctx.fork_of and mode_ != "host":
+        raise NotYet("fork", "only turns' Codex host forks a Codex thread, and this launch "
+                     f"runs in {mode_} mode", "install moxi-turns with its codex extra")
     text = common.first_turn(ctx.actor, brief=ctx.brief,
                              handoff=values.get("handoff") or None,
                              handoff_text=ctx.handoff_text,
@@ -186,6 +193,8 @@ def compose(values: Mapping[str, object], ctx: Context) -> Composition:
             flags += rows[name].tokens(mode_, applied[name], cwd=cwd)
     if ctx.resume:
         flags += ["--resume", str(ctx.session_id)]
+    if ctx.fork_of:
+        flags += ["--fork", str(ctx.fork_of)]
 
     if identity:
         argv = [ctx.moxi, "comms", HARNESS, "--name", identity]

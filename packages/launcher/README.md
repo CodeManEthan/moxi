@@ -254,10 +254,11 @@ folder either (see "Handoffs").
 
 Another module can ask the launch log how a session was launched. The launcher offers
 interface 1, `moxi.modules.load("launcher", interface=1).api`, whose
-`launch_kind(session_id)` answers one of four kinds, the first that holds:
+`launch_kind(session_id)` answers one of five kinds, the first that holds:
 
 | Kind | When |
 |---|---|
+| `fork` | the launch is a fork (`moxi launcher fork`), or a resume of one: its row records `fork_of`, the session id it copies |
 | `scratch` | the launch works in a scratch folder, whatever its preset |
 | `seat` | the launch names a seat preset |
 | `project` | the launch names a project, by a project preset or a project key |
@@ -282,6 +283,16 @@ ended, with `live` false. It reads the launch log and the process table and noth
 it asks no other module, starts no process, and writes nothing but an older log's schema
 update. With no launch log it gives none; a log held past `timeout_s` (1 second) raises
 `Busy`.
+
+Interface 3 adds two acts. `fork(session_id, target="terminal", slot=None, stamps=None)`
+forks a session as `moxi launcher fork` does (below) and returns the launch's
+`LaunchResult`, whose `session_id` is the fork's. `stamps` are variables set on the
+fork's environment after the scrub. Each must be one a present module lists in its
+`SESSION_ENV`, and its own prefix (`MOXI_<MODULE>_`) says which module that is; the
+launcher's and turns' are refused, since the launch stamps those itself. A stamp that
+fails is refused, `bad-value`, before anything is written.
+`exit_session(session_id, dry_run=False)` exits a quiet launched session as `moxi
+launcher exit-session` does and returns its verdict; a refusal is raised.
 
 ## Handoffs
 
@@ -414,14 +425,18 @@ when the session itself is still live. A run left at the exit dialog (`exit-pend
 be repaired too, once a person has answered the dialog and the session has exited.
 
 **Exit-session** exits one launched session, once it is quiet: `moxi launcher
-exit-session SESSION_ID`. Anyone with a shell may run it; the consent is the launch's own,
-the commands it granted turns. A background shell or Monitor the session runs holds the
-exit (`held`, `shells`) until the session has been idle an hour, as cache reads its last
-request; with cache not installed the idle time is unknown and the shells hold. Past the
-hour, Claude's exit dialog stops them; park's exit doesn't wait on them (below). In a
-slot the exit dialog is answered too, with "Exit and stop tasks"; elsewhere the session
-is left at the dialog for a person (`at-dialog`). Every exit tried writes a row to the
-exit log, `moxi launcher exits`: `exited`, `held` (with what held it), `at-dialog`,
+exit-session SESSION_ID`. Anyone with a shell may run it. A Claude Code session is exited
+through turns, and the consent is the launch's own, the commands it granted turns. A
+background shell or Monitor the session runs holds the exit (`held`, `shells`) until the
+session has been idle an hour, as cache reads its last request; with cache not installed
+the idle time is unknown and the shells hold. Past the hour, Claude's exit dialog stops
+them; park's exit doesn't wait on them (below). In a slot the exit dialog is answered too,
+with "Exit and stop tasks"; elsewhere the session is left at the dialog for a person
+(`at-dialog`). A Codex session under turns' Codex host is exited by stopping its host:
+SIGTERM, then up to 15 seconds for the host to end (`not-exited` when it still runs); in
+a slot the pane ends with it. A Codex session without the host can't be exited
+(`no-exit`). Every exit tried writes a row to the exit log, `moxi launcher exits`:
+`exited`, `held` (with what held it), `at-dialog`,
 `not-exited` or `refused`.
 
 **Resume.** `moxi launcher sessions` lists past launches, newest first, each with whether
@@ -452,6 +467,37 @@ another launch of the session is still starting or running, the resume is refuse
 resumes of one session at once launch it once. While a relaunch, exit or recycle of the
 launch is under way, the resume is refused `run-open` (exit 3), naming the run.
 
+**Fork.** `moxi launcher fork SESSION_ID` starts a new session from a copy of a launched
+session's conversation, live or not, and prints the new session's id; the session forked
+goes on as it was. Claude Code gets `--resume PARENT --fork-session` beside the session id
+the launcher mints. Codex needs turns' Codex host, which forks the thread with `--fork
+THREAD_ID` from moxi-turns 0.2.6 on; with an older turns the fork is refused `not-yet`,
+naming the version it needs. The fork runs in this terminal (`--target terminal`, the
+default) or a slot (`--target slot`, `--slot N` for one, else the lowest free one).
+
+What the fork takes from the launch it copies is each catalog row's fork class. Every row
+of the shipped catalogs carries one, and a row without one fails the catalog check:
+
+- `copy`: the rows that shape the request the harness sends (the directory, the model,
+  the effort, the tools, the permission rows, `extra_flags` and the rest) are taken as
+  the session ran them, so the fork reads the session's prompt cache. A launch that names
+  no model may run another (after `/model`, or a relaunch on the model its transcript
+  last used); its fork runs the model the transcript last used, as a relaunch does, and
+  the harness's default when none can be read;
+- `drop`: the rows about who the session is, what its first turn says and how it lives
+  and ends (its name, comms identity, posture, instructions, brief, handoff, keep-warm,
+  recycle and usage marks) are unset;
+- `own`: the rows the launcher composes for each launch (the session id, the resume, the
+  target and slot) are composed again.
+
+So a fork has no comms name, no start posture, no brief and no preset. Its environment is
+built as a resume's is, from what the launch recorded, never from the shell that asks for
+the fork. Its row records `fork_of`, and its launch kind is `fork`; a resume of a fork is
+still one. A fork is pointed to no handoff at its start. It is refused when no launch holds
+the id (`not-launched`), the launch never learned a session id (`no-session-id`), the
+launcher no longer launches its harness (`not-catalogued`), or Codex can't fork here
+(`not-yet`).
+
 **Park.** `moxi launcher park` gets the slots ready for a reboot. It exits every session
 the launcher launched into a slot, records which session was in which slot (a park
 entry), and reserves each of those slots with a slots hold `park-<id>` that lasts until
@@ -468,8 +514,9 @@ subagents, a draft and a read that failed. Each slot gets one line:
 - `not-exited`, with the reason: the wait ran out or the exit failed. The session still
   runs; its entry and reservation stay, so a reboot ends it and running park again tries
   its exit again.
-- `left-running`: a Codex session, which offers no exit. It is recorded and reserved, and
-  the reboot ends it.
+- `left-running`: a Codex session. Park leaves it running: it is recorded and reserved,
+  and the reboot ends it. `moxi launcher exit-session` stops one under turns' Codex host
+  first, if you want it ended before the reboot.
 - The session park itself runs in is recorded `not-exited: the session running park` and
   left for you to exit.
 - A live run the launcher did not launch is `left alone`; a session launched into a
@@ -812,6 +859,7 @@ nothing has used it for a while.
 | `moxi launcher exits [--limit N] [--before TIME] [--json]` | the exit log, newest first |
 | `moxi launcher sessions [--limit N] [--before TIME] [--json]` | past launches, and which can be resumed |
 | `moxi launcher resume SESSION_ID [--slot N] [--brief TEXT \| --brief-file FILE \| --plain]` | launch a past session again, resumed, the brief its first turn; with `--plain`, none |
+| `moxi launcher fork SESSION_ID [--target slot\|terminal] [--slot N] [--json]` | start a new session from a copy of a session's conversation |
 | `moxi launcher park [--wait-s SECONDS] [--dry-run] [--json]` | exit the sessions in slots and reserve their slots |
 | `moxi launcher restore [SLOT ...] [--dry-run] [--json]` | resume parked sessions into their reserved slots |
 | `moxi launcher unpark SLOT ... \| --all [--json]` | give up parked slots without restoring them |
