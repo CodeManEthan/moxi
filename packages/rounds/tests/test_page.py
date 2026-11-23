@@ -274,3 +274,102 @@ def test_a_record_query_too_long_is_refused(kit):
     [(status, _sent)] = run(("/api/record", {"what": "card",
                                              "round": "k/" + "x" * page.QUERY_MAX}))
     assert status == 400
+
+
+# -- what acting on the page reads -------------------------------------------------------
+
+def _answer_file(tmp_path, question: str = "Q1") -> str:
+    """An answer prepared for `question`, recommending `new`."""
+    path = tmp_path / "answer.md"
+    options = "\n\n".join(f'[[option]]\nkey = "{key}"\ncosts = "a rename"\n'
+                          'forecloses = "nothing"' for key in ("old", "new"))
+    path.write_text(
+        '# An answer\n\n```toml rounds\nkind = "answer"\n'
+        f'question = "{question}"\nby = "scout"\nmodel = "a-model"\nrecommend = "new"\n'
+        'sure = "medium"\nwhy = "the old name is read nowhere"\n'
+        'flips = "a reader of the old name"\nread = ["file:design.md#which-name"]\n\n'
+        f"{options}\n```\n", encoding="utf-8")
+    return str(path)
+
+
+def _round(value: dict, name: str) -> dict:
+    return next(one for one in value["rounds"] if one["name"] == name)
+
+
+def test_each_round_and_its_card_name_its_lead(kit):
+    from moxi_rounds import leads
+
+    value = board_value(kit)
+    assert _round(value, BUSY)["lead"] is None
+    leads.mark(BUSY, "kestrel-lead", by="planner")
+    [(_, value), (_, card)] = run(("/api/rounds", None),
+                                  ("/api/record", {"what": "card", "round": BUSY}))
+    assert _round(value, BUSY)["lead"] == {"name": "kestrel-lead", "from": "round"}
+    assert _round(value, FRESH)["lead"] is None
+    assert card["record"]["lead"] == {"name": "kestrel-lead", "from": "round"}
+
+
+def test_parked_questions_are_listed_apart_and_not_put_to_the_operator(kit):
+    from moxi_rounds import ruling
+
+    ruling.rule(BUSY, item="park:Q2", record=page_kit.PTR, by="lead")
+    waiting = board_value(kit)["waiting"]
+    assert [one["id"] for one in waiting["parked_questions"]] == ["Q2"]
+    assert waiting["parked_questions"][0]["state"] == "parked"
+    assert "until" not in waiting["parked_questions"][0]
+    assert "Q2" not in [one["id"] for one in waiting["questions"] if one["holder"] == BUSY]
+    assert waiting["parked"] == 1
+
+
+def test_a_questions_record_holds_the_ruling_that_put_it_where_it_is(kit):
+    from moxi_rounds import ruling
+
+    ruled = ruling.rule(BUSY, item="Q1", chose="new", record=page_kit.PTR, by="lead")
+    parked = ruling.rule(BUSY, item="park:Q2", record=page_kit.PTR, by="lead")
+    [_, (_, q1), (_, q2), (_, project)] = run(
+        ("/api/rounds", None),
+        ("/api/record", {"what": "question", "round": BUSY, "id": "Q1"}),
+        ("/api/record", {"what": "question", "round": BUSY, "id": "Q2"}),
+        ("/api/record", {"what": "question", "round": "kestrel", "id": "P1"}))
+    lb = loopback()
+    shape = lb.Out("table", items={"gone": lb.Out("bool"), "record": page.RECORD})
+    assert all(conforms(one, shape) for one in (q1, q2, project))
+    assert q1["record"]["item"]["state"] == "ruled"
+    assert q1["record"]["ruling"] == {"id": ruled.id, "text": ruled.text,
+                                      "record": page_kit.PTR, "actor": "lead",
+                                      "at": ruled.event["at"], "shown": False}
+    assert (q2["record"]["item"]["state"], q2["record"]["ruling"]["id"]) == ("parked",
+                                                                            parked.id)
+    assert project["gone"] is False
+    assert (project["record"]["item"]["state"], project["record"]["ruling"]) == ("open", None)
+
+
+def test_a_ruled_project_question_answers_from_the_projects_log(kit):
+    from moxi_rounds import ruling
+
+    ruled = ruling.rule("kestrel", item="P1", text="The ledgers stay in kestrel.",
+                        record=page_kit.PTR, by="lead")
+    [_, (_, sent)] = run(("/api/rounds", None),
+                         ("/api/record", {"what": "question", "round": "kestrel", "id": "P1"}))
+    assert sent["record"]["item"]["state"] == "ruled"
+    assert sent["record"]["ruling"]["id"] == ruled.id
+
+
+def test_a_question_no_log_holds_is_gone(kit):
+    [_, (_, sent)] = run(("/api/rounds", None),
+                         ("/api/record", {"what": "question", "round": BUSY, "id": "Q9"}))
+    assert sent == {"gone": True, "record": None}
+
+
+def test_a_prepared_answer_rides_on_the_question_and_its_record(kit, tmp_path):
+    from moxi_rounds import preparing
+
+    assert all(one["prepared"] is None for one in board_value(kit)["waiting"]["questions"])
+    preparing.prepare(BUSY, "Q1", _answer_file(tmp_path), by="scout")
+    [(_, value), (_, record)] = run(("/api/rounds", None),
+                                    ("/api/record", {"what": "question", "round": BUSY,
+                                                     "id": "Q1"}))
+    [q1] = [one for one in value["waiting"]["questions"]
+            if one["holder"] == BUSY and one["id"] == "Q1"]
+    assert (q1["prepared"]["recommend"], q1["prepared"]["current"]) == ("new", True)
+    assert record["record"]["item"]["prepared"]["why"] == "the old name is read nowhere"

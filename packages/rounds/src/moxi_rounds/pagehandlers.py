@@ -69,7 +69,7 @@ from typing import Any
 from moxi import aio, modules
 
 from . import board, builds, checking, export, folders, index, listing, log, open_builds
-from . import paths, showing
+from . import paths, questions, showing
 from . import settings as own
 from . import state as states
 from .errors import RoundsError, UnfencedTest
@@ -409,7 +409,9 @@ class Board:
         """The record of one marker, item or card, from the last gather's parts; None
         for a round the last gather held no part of. Never gathers."""
         held = self.held
-        if what in (board.QUESTION, board.DECISION, board.WAIT, board.SHOWN):
+        if what == board.QUESTION:
+            return self._question(name, item_id)
+        if what in (board.DECISION, board.WAIT, board.SHOWN):
             entry = _item(held.waiting, what, name, item_id)
             if entry is None:
                 return None
@@ -430,6 +432,58 @@ class Board:
         made = board.record(part_, column, stage, items, now=held.reading.get(name),
                             settings=held.settings)
         return cut({**made, "rev": held.rev.get(name)})
+
+
+    def _question(self, name: str, item_id: str | None) -> dict | None:
+        """A question's record in whatever state it reads now: the entry as what waits
+        on the operator has it, or for one that no longer waits as its log gives it,
+        with the ruling that put it there. None when neither holds it."""
+        held = self.held
+        entry = _item(held.waiting, board.QUESTION, name, item_id)
+        found = _question_of(held, name, item_id)
+        if entry is None and found is None:
+            return None
+        if entry is None:
+            question, logged, _register, on_closed = found
+            entry = board.question_entry(name, question, logged, on_closed=on_closed)
+        made = board.item_record(board.QUESTION, entry, round_dir=held.round_dirs.get(name),
+                                 max_chars=PASSAGE_MAX_CHARS)
+        made["ruling"] = None if found is None else board.ruling_of(*found[:3])
+        return cut(made)
+
+
+def _question_of(held: Held, name: str, item_id: str | None):
+    """The question `item_id` of the round or project `name` as its log gives it:
+    `(question, the log's state, the project's state, on_closed)`, or None. A round's
+    comes from its part; a project's from the project's log as a part of one of its
+    rounds holds it, else read now."""
+    if not item_id:
+        return None
+    part_ = held.parts.get(name)
+    if part_ is not None:
+        logged, register, on_closed = part_.state, part_.found.register, part_.found.on_closed
+    elif "/" not in name:
+        register = next((one.found.register for one in held.parts.values()
+                         if one.found.project.casefold() == name.casefold()
+                         and one.found.register is not None), None)
+        if register is None:
+            register = _register(name, held.settings)
+        logged, on_closed = register, None
+    else:
+        return None
+    if logged is None:
+        return None
+    question = questions.find(logged, item_id)
+    return None if question is None else (question, logged, register, on_closed)
+
+
+def _register(project: str, settings) -> states.State | None:
+    """The project's own log as it reads now, or None when it can't be read."""
+    try:
+        home = folders.home(project, settings)
+        return states.fold(log.read(log.project_log(home.rounds_dir)))
+    except (RoundsError, OSError, ValueError):
+        return None
 
 
 def _make(name: str, settings, on_closed, *, read: Mapping) -> board.Part:
@@ -481,8 +535,8 @@ def _closed_card(name: str, settings) -> board.Part | None:
 def _empty(now: str) -> dict:
     return {"today": dt.date.today().isoformat(), "home": _home(), "read_at": now,
             "state": "up", "detail": None, "columns": [],
-            "waiting": {"questions": [], "decisions": [], "waits": [], "not_shown": [],
-                        "parked": 0},
+            "waiting": {"questions": [], "parked_questions": [], "decisions": [], "waits": [],
+                        "not_shown": [], "parked": 0},
             "recent": [], "rounds": [], "closed": [], "unreadable": []}
 
 
@@ -512,8 +566,10 @@ def _when(stat: tuple[int, int]) -> str:
 
 def _entry(data: Mapping) -> dict:
     """A question or decision as what waits on the operator gives it, with `blocks` a
-    list and `blocks_word` the word it may be instead."""
+    list and `blocks_word` the word it may be instead, and `prepared` None where no
+    answer was prepared."""
     made = {key: value for key, value in data.items() if key != "held"}
+    made["prepared"] = data.get("prepared")
     blocks = data.get("blocks")
     made["blocks"] = list(blocks) if isinstance(blocks, (list, tuple)) else []
     made["blocks_word"] = blocks if isinstance(blocks, str) else None
@@ -523,9 +579,11 @@ def _entry(data: Mapping) -> dict:
 def _waiting(waited: listing.Waiting) -> dict:
     """What waits on the operator, as the board carries it: the operator's open
     questions, the majors not ruled, the operator's jobs (not the fixes the lead owes),
-    the rulings not shown, and how many questions are parked."""
+    the rulings not shown, and how many questions are parked with each of them. Parked
+    questions are not put to the operator: they are listed apart."""
     found = dict(waited.found)
     return {"questions": [_entry(one.data()) for one in found["open"]],
+            "parked_questions": [_entry(one.data()) for one in found["parked"]],
             "decisions": [_entry(one.data()) for one in found["decisions"]],
             "waits": [one.data() for one in found["waits"] if board.is_job(one.id)],
             "not_shown": [{"project": back.project, **export.read_back_data(back)}

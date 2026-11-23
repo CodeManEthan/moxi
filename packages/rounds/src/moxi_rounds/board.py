@@ -55,14 +55,14 @@ from __future__ import annotations
 import hashlib
 import json
 import re
-from collections.abc import Iterable, Mapping, Sequence
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from . import (builds, checking, ci, closing, decisions, drift, findings, finish_actions,
-               flows, holds, next_step, pointers, questions, report_block, showing, skips, stages,
-               steps, versions, waits)
+from . import (builds, checking, ci, closing, corrections, decisions, drift, findings,
+               finish_actions, flows, holds, leads, next_step, pointers, questions, report_block,
+               showing, shown, skips, stages, steps, versions, waits)
 from . import state as states
 
 # -- the columns -------------------------------------------------------------------------
@@ -161,6 +161,12 @@ class Part:
         if self.state.status != states.OPEN:
             return None
         return next((one for one in self.every if not one.settled), None)
+
+    @property
+    def lead(self) -> dict | None:
+        """The round's lead, `{"name", "from"}` as `leads.of` gives it (its own, else
+        its project's), or None."""
+        return leads.of(self.state, self.found.project_lead)
 
 
 def step_of(part_: Part) -> dict | None:
@@ -666,8 +672,8 @@ def rev(value: Mapping) -> str:
 
 def round_value(part_: Part, columns_: Sequence[Mapping], items: Items, *,
                 step: Mapping | None, counts: Mapping) -> dict:
-    """The round as the board shows it: what its show says of it, `step` and `counts`
-    as the rounds listing gives them, its group, phrase, lines and folds."""
+    """The round as the board shows it: what its show says of it, its lead, `step` and
+    `counts` as the rounds listing gives them, its group, phrase, lines and folds."""
     state = part_.state
     found = cells(part_, items)
     made_lines, folds = lines(part_, columns_, items, found)
@@ -677,7 +683,7 @@ def round_value(part_: Part, columns_: Sequence[Mapping], items: Items, *,
              "standing": str(versions.standing(state)),
              "version": None if version is None else version.n,
              "step": None if step is None else dict(step), "counts": dict(counts),
-             "group": group(part_, found, items),
+             "lead": part_.lead, "group": group(part_, found, items),
              "phrase": phrase(part_, found, items), "mine": items.count,
              "last_at": last_at(part_), "lines": made_lines, "folds": folds}
     value["rev"] = rev(value)
@@ -1139,8 +1145,42 @@ def item_record(what: str, entry: Mapping, *, round_dir: Path | None,
     return made
 
 
+def question_entry(holder: str, question: states.Question, state: states.State, *,
+                   on_closed: Callable[[str], bool] | None = None) -> dict:
+    """A question of `state`, the log `holder` names, as an entry of what waits on the
+    operator has it, in whatever state it reads now: open, parked, ruled, withdrawn or
+    moved. `prepared` is the newest answer prepared for it, None when there is none."""
+    blocks = question.blocks
+    return {"holder": holder, "id": question.id, "text": question.text,
+            "from": question.origin,
+            "blocks": list(blocks) if isinstance(blocks, (list, tuple)) else [],
+            "blocks_word": blocks if isinstance(blocks, str) else None,
+            "state": questions.current(question, state, on_closed=on_closed),
+            "by": question.by, "at": question.at, "until": question.until,
+            "options": [{"key": key, "text": text} for key, text in question.options],
+            "prepared": questions.prepared_data(question)}
+
+
+def ruling_of(question: states.Question, state: states.State,
+              project_state: states.State | None) -> dict | None:
+    """The ruling that put `question` in the state it reads as (`corrections.put_by`):
+    its `id`, its sentence, its pointer (`record`), who recorded it (`actor`) and when,
+    and whether it is `shown`, read against the project's log `project_state`. None when
+    no ruling did: the question was asked so, or a change that is no ruling made it so."""
+    ruling_id = corrections.put_by(question)
+    if ruling_id is None:
+        return None
+    found = corrections.find(state, ruling_id)
+    if found is None:
+        return {"id": ruling_id, "text": None, "record": None, "actor": None, "at": None,
+                "shown": False}
+    return {"id": found.id, "text": found.text or found.rules, "record": found.record,
+            "actor": found.actor, "at": found.at,
+            "shown": project_state is not None and shown.is_shown(found, project_state)}
+
+
 def card(part_: Part, items: Items, found: Mapping | None = None) -> dict:
-    """A round's card: what it is for, its project, flow, when it opened, its
+    """A round's card: what it is for, its project, its lead, flow, when it opened, its
     standing, its stages counted, its rulings counted and the three newest, its phrase
     and its events; for a round that has ended, how and when, and how each stage
     ended."""
@@ -1150,7 +1190,7 @@ def card(part_: Part, items: Items, found: Mapping | None = None) -> dict:
     finished = questions.finished_stages(state)
     building = [one.id for one in plan if stages.build_of(state, one.id) == stages.BUILDING]
     opened = next((one for one in state.history if one.get("type") == "round.opened"), {})
-    made = {"name": part_.name, "project": part_.found.project,
+    made = {"name": part_.name, "project": part_.found.project, "lead": part_.lead,
             "description": state.description, "flow": state.flow,
             "opened": opened.get("at"), "standing": str(versions.standing(state)),
             "stages": {"finished": sum(one.id in finished for one in plan),
@@ -1215,5 +1255,5 @@ __all__ = ["ROUND_PART", "STAGE_PART", "END_PART", "CLOSE", "STATES", "YOURS", "
            "fixes_owed", "columns", "cell", "close_cell", "cells", "lead_stage", "lines",
            "group", "phrase", "round_value", "ordered", "acts", "ACT_WORDS", "act_words",
            "strip", "tenth_act", "EVENT_STEPS", "event_step", "events_of", "record",
-           "item_record", "answer_line", "card", "passage", "by_of", "design_moved", "design_holds", "last_at", "rev",
+           "item_record", "answer_line", "question_entry", "ruling_of", "card", "passage", "by_of", "design_moved", "design_holds", "last_at", "rev",
            "WHATS"]

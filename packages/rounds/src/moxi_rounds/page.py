@@ -6,7 +6,8 @@
     GET /api/record   `?what=&round=&column=&stage=&id=`: one marker's record, one waiting
                       item's or one round's card, from the last gather; `gone` is true,
                       and `record` null, for a round no longer open or an item no longer
-                      waiting
+                      waiting. A question is answered in every state, with the ruling
+                      that put it there
     GET /api/events   the stream; its one topic, `rounds`, is the board without `now`, so
                       time passing alone publishes nothing
 
@@ -68,9 +69,25 @@ COLUMN = lb.Out("table", items={"id": TEXT, "label": TEXT, "part": TEXT})
 
 OPTION = lb.Out("table", items={"key": TEXT, "text": lb.Out("string", mark="scrub")})
 
+#: A round's lead, its own or its project's (`from`: `round` or `project`).
+LEAD = lb.Out("table", nullable=True, items={"name": TEXT, "from": TEXT})
+
+#: The newest answer prepared for a question: who prepared it with which model, the
+#: option it recommends, how sure it is and why, what would flip it, what it read, each
+#: option's costs and what it forecloses, who recorded it and when, and whether it is
+#: `current` (prepared for the options the question offers now).
+PREPARED = lb.Out("table", nullable=True, items={
+    "by": _s(), "model": _s(), "recommend": _s(), "sure": _s(), "why": _s("scrub"),
+    "flips": _s("scrub"), "read": _list(lb.Out("string", mark="scrub")),
+    "options": _list(lb.Out("table", items={"key": TEXT, "text": _s("scrub"),
+                                            "costs": _s("scrub"),
+                                            "forecloses": _s("scrub")})),
+    "actor": _s(), "at": _s(), "current": BOOL,
+})
+
 #: A question or a decision as what waits on the operator gives it. `blocks` is the
 #: stages it holds; `blocks_word` is `all` or `none` where the item says that in place of
-#: a list.
+#: a list; `prepared` is a question's newest prepared answer, null when it has none.
 #: The keys after `at` are present only where the item has them.
 ENTRY = lb.Out("table", items={
     "holder": TEXT, "id": TEXT, "text": _s("scrub"), "from": _s("scrub"),
@@ -78,7 +95,7 @@ ENTRY = lb.Out("table", items={
     "builder": _s(), "left_as": _s(), "until": _s(), "options": _list(OPTION),
     "moved_from": _s(), "stage": _s(), "weight": _s(),
     "forecloses": lb.Out("bool", nullable=True), "alone": lb.Out("bool", nullable=True),
-    "not_put": _s(),
+    "not_put": _s(), "prepared": PREPARED,
 })
 
 #: A job for the operator: the round that holds it, its id (`B<n>.W<k>`), its stage and
@@ -94,8 +111,11 @@ SHOWN = lb.Out("table", items={
     "supersedes": _s(), "revokes": _s(), "at": _s(),
 })
 
+#: What waits on the operator. Parked questions are not put to the operator: they are
+#: listed apart, in `parked_questions`, and counted in `parked`.
 WAITING = lb.Out("table", items={
-    "questions": _list(ENTRY), "decisions": _list(ENTRY), "waits": _list(WAIT),
+    "questions": _list(ENTRY), "parked_questions": _list(ENTRY), "decisions": _list(ENTRY),
+    "waits": _list(WAIT),
     "not_shown": _list(lb.Out("table", items={"project": TEXT, "through": _s(),
                                               "rows": _list(SHOWN)})),
     "parked": INT,
@@ -122,7 +142,7 @@ FOLDS = lb.Out("table", items={
                                           "child": INT}),
 })
 
-#: One open round: what its show says of it, the step `next` reads for it and the
+#: One open round: what its show says of it, its lead, the step `next` reads for it and the
 #: rounds listing's counts, its group, phrase, how many of the operator's items it holds,
 #: its newest event, a short hash of the whole (`rev`), its lines and its folds.
 ROUND = lb.Out("table", items={
@@ -133,7 +153,7 @@ ROUND = lb.Out("table", items={
     "counts": lb.Out("table", items={"open": lb.Out("int", nullable=True),
                                      "parked": lb.Out("int", nullable=True),
                                      "not_shown": lb.Out("int", nullable=True)}),
-    "group": TEXT, "phrase": PHRASE, "mine": INT, "last_at": _s(), "rev": TEXT,
+    "lead": LEAD, "group": TEXT, "phrase": PHRASE, "mine": INT, "last_at": _s(), "rev": TEXT,
     "lines": _list(LINE), "folds": FOLDS,
 })
 
@@ -211,7 +231,7 @@ RECORD = lb.Out("table", nullable=True, items={
     "events": _list(EVENT),
     "rev": _s(),
     # a round's card
-    "name": TEXT, "project": TEXT, "description": _s("scrub"), "flow": _s(),
+    "name": TEXT, "project": TEXT, "lead": LEAD, "description": _s("scrub"), "flow": _s(),
     "opened": _s(), "standing": _s(),
     "stages": lb.Out("table", items={"finished": INT, "building": INT,
                                      "not_started": INT}),
@@ -222,13 +242,18 @@ RECORD = lb.Out("table", nullable=True, items={
     "ended": lb.Out("table", nullable=True, items={"how": _s(), "at": _s()}),
     "ends": _list(lb.Out("table", items={"stage": TEXT, "how": TEXT})),
     # a waiting item's record: the item as what waits on the operator has it, the command
-    # that records an answer today, and a question's passage
+    # that records an answer today, and a question's passage; a question's record is
+    # answered in every state, with the ruling that put it there (`ruling`, null when
+    # none did)
     "what": TEXT,
     "item": lb.Out("table", items={
         **ENTRY.items, **WAIT.items, **SHOWN.items, "project": _s(), "ruling": _s("scrub"),
         "chose": _s(), "holder": _s(), "round": _s(), "id": TEXT}),
     "answer": lb.Out("string", mark="scrub"),
     "passage": _s("scrub"),
+    "ruling": lb.Out("table", nullable=True, items={
+        "id": TEXT, "text": _s("scrub"), "record": _s("scrub"), "actor": _s(), "at": _s(),
+        "shown": BOOL}),
 })
 
 #: The longest value the record route's query takes, in characters.
