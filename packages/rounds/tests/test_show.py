@@ -9,7 +9,7 @@ import pytest
 from moxi import cli
 
 from moxi_rounds import (asking, dropping, index, leads, log, moving, numbers, opening,
-                         paths, ruling, showing, shown)
+                         options, paths, preparing, ruling, showing, shown)
 from moxi_rounds.cli import main
 from moxi_rounds.errors import BadName, NoRound, Refused
 
@@ -208,6 +208,49 @@ ruling: C3
     # A bare question is shown bare.
     assert found[2] == {"id": "Q3", "text": THIRD, "from": "https://example.test/q",
                         "blocks": "all", "state": "open", "by": "helper", "at": T4}
+
+
+def prepare(tmp_path, *keys, recommend="a", name="answer.md"):
+    """Record an answer prepared for Q1 of A, with an option under each key."""
+    lines = ['kind = "answer"', 'question = "Q1"', 'by = "builder-1"',
+             'model = "a-model"', f'recommend = "{recommend}"', 'sure = "high"',
+             'why = "prose is what a person reads."', 'flips = "a parsed row read aloud"',
+             'read = ["comms:4611686018427394085"]']
+    for key in keys:
+        lines += ["[[option]]", f'key = "{key}"', f'costs = "the cost of {key}"',
+                  'forecloses = "nothing"']
+    path = tmp_path / name
+    path.write_text("```toml rounds\n" + "\n".join(lines) + "\n```\n", encoding="utf-8")
+    return preparing.prepare(A, "Q1", path, by="helper", at=T3)
+
+
+def test_a_questions_newest_prepared_answer_is_shown_under_it(rounds, tmp_path, capsys):
+    ask(options=["a=prose yes, parsed rows no", "b=both follow the settings"])
+    prepare(tmp_path, "b", "a", recommend="b")
+
+    out = printed(capsys, A)
+
+    assert f"""\
+  Q1: {SAID}
+    from: comms:11   blocks: all   state: open   by: scout   at: {T2}
+    option a: prose yes, parsed rows no
+    option b: both follow the settings
+    prepared by builder-1 (a-model, sure: high): recommends b. prose is what a person \
+reads. Flips if: a parsed row read aloud.
+      b: costs the cost of b; forecloses nothing
+      a: costs the cost of a; forecloses nothing
+""" in out
+    [found] = data(capsys)["questions"]
+    assert found["prepared"]["recommend"] == "b"
+    assert found["prepared"]["current"] is True
+    assert (found["prepared"]["actor"], found["prepared"]["at"]) == ("helper", T3)
+
+    options.fill(A, "Q1", by="helper", retire=["b"], options=["c=neither does"])
+
+    out = printed(capsys, A)
+    assert "recommends b. prose is what a person reads. Flips if: a parsed row read " \
+           "aloud.\n    prepared for other options\n" in out
+    assert data(capsys)["questions"][0]["prepared"]["current"] is False
 
 
 def test_a_parked_question_whose_wait_is_over_is_shown_open_with_its_parking(

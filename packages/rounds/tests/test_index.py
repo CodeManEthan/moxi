@@ -628,3 +628,47 @@ def test_a_row_made_before_the_lead_was_kept_reads_the_lead_from_the_log(home):
     assert index.read("proj-a", home.rounds_dir, "a-round").lead == "atlas-lead"
     assert [one.problem for one in index.disagreements([home])] == [
         "has a log that changed since the index last read it"]
+
+
+# -- a question's prepared answer --------------------------------------------------------
+
+PREPARED = {"by": "builder-1", "model": "a-model", "recommend": "a", "sure": "low",
+            "why": "a guess", "flips": "a reading", "read": ["comms:1234567"],
+            "option": [{"key": "a", "costs": "time", "forecloses": "nothing"},
+                       {"key": "b", "costs": "more time", "forecloses": "nothing"}]}
+
+
+def ask_prepared(at: write.Where) -> None:
+    write.record(at, by="planner", at=AT, event=lambda view, result: write.Entry(
+        "question.asked", {"id": "Q1", "text": "Is it so?", "from": "comms:1",
+                           "blocks": "all", "state": "open", "asked_by": "planner",
+                           "asked_at": AT, "options": {"a": "yes", "b": "no"}}))
+    write.record(at, by="helper", at=AT, event=lambda view, result: write.Entry(
+        "question.changed", {"id": "Q1", "prepared": PREPARED}))
+
+
+def test_a_questions_row_keeps_its_newest_prepared_answer(home):
+    ask_prepared(open_round(home))
+
+    [item] = index.read("proj-a", home.rounds_dir, "a-round").items
+    prepared = item.body["prepared"]
+    assert (prepared["recommend"], prepared["actor"], prepared["at"]) == (
+        "a", "helper", AT)
+    assert prepared["current"] is True
+    assert [one["key"] for one in prepared["options"]] == ["a", "b"]
+
+
+def test_a_row_made_before_prepared_answers_were_kept_reads_them_from_the_log(home):
+    ask_prepared(open_round(home))
+    index.read("proj-a", home.rounds_dir, "a-round")
+    # As the version before left the row: no answer, made under the count before.
+    conn = sqlite3.connect(paths.index_file())
+    with conn:
+        body = json.loads(conn.execute("SELECT body FROM items").fetchone()[0])
+        body.pop("prepared", None)
+        conn.execute("UPDATE items SET body = ?", (json.dumps(body),))
+        conn.execute("UPDATE logs SET derived = ?", (index.DERIVED - 1,))
+    conn.close()
+
+    [item] = index.read("proj-a", home.rounds_dir, "a-round").items
+    assert item.body["prepared"]["recommend"] == "a"

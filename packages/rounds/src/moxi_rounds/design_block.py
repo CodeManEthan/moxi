@@ -379,21 +379,9 @@ def _between(found: Found) -> list[Problem]:
         problems += _twice(found, (name,), data.get(name, ()), "id", f"`[[{name}]]`")
     for number, question in enumerate(data.get("question", ())):
         prepared = question.get("prepared")
-        if prepared is None:
-            continue
-        at = ("question", number, "prepared")
-        offered = prepared.get("option", [])
-        problems += _twice(found, at + ("option",), offered, "key",
-                           "`[[question.prepared.option]]`")
-        keys = [one["key"] for one in offered]
-        if prepared["recommend"] not in keys:
-            lists = f"lists ({', '.join(keys)})" if keys else "lists: it lists none"
-            problems.append(Problem(
-                found.line_of(*at, "recommend"),
-                f"`recommend` is {datablock.shown(prepared['recommend'])}, which is "
-                f"none of the options the answer {lists}",
-                "add one [[question.prepared.option]] for each option of the question, "
-                "and recommend the key of one"))
+        if prepared is not None:
+            problems += prepared_between(found, ("question", number, "prepared"),
+                                         prepared, "[[question.prepared.option]]")
     for number, stage in enumerate(data.get("stage", ())):
         at = ("stage", number)
         problems += _form(found, at, stage)
@@ -404,6 +392,25 @@ def _between(found: Found) -> list[Problem]:
                 found.line_of(*at, "after"),
                 f"`after` names {stage['id']}, the stage it is in: a stage can't wait "
                 "for itself", f"take {stage['id']} out of its own after"))
+    return problems
+
+
+def prepared_between(found: Found, at: tuple, prepared: dict,
+                     header: str) -> list[Problem]:
+    """The problems between the entries of a prepared answer whose keys and values are
+    right, the answer being the table at `at` and its options written `header`: an
+    option's key used twice, and a `recommend` that is none of the keys."""
+    offered = prepared.get("option", [])
+    problems = _twice(found, at + ("option",), offered, "key", f"`{header}`")
+    keys = [one["key"] for one in offered]
+    if prepared["recommend"] not in keys:
+        lists = f"lists ({', '.join(keys)})" if keys else "lists: it lists none"
+        problems.append(Problem(
+            found.line_of(*at, "recommend"),
+            f"`recommend` is {datablock.shown(prepared['recommend'])}, which is "
+            f"none of the options the answer {lists}",
+            f"add one {header} for each option of the question, and recommend the key "
+            "of one"))
     return problems
 
 
@@ -461,11 +468,13 @@ def _question(found: Found, number: int, one: dict) -> Question:
         id=one["id"], text=one["text"],
         blocks=blocks if isinstance(blocks, str) else tuple(blocks),
         options=None if offered is None else tuple(offered.items()),
-        prepared=_prepared(found, at + ("prepared",), one.get("prepared")),
+        prepared=prepared_of(found, at + ("prepared",), one.get("prepared")),
         **_placed(found, at, one))
 
 
-def _prepared(found: Found, at: tuple, one: dict | None) -> Prepared | None:
+def prepared_of(found: Found, at: tuple, one: dict | None) -> Prepared | None:
+    """The prepared answer of the table `one` at `at`, a block that fits its schema,
+    or None when there is no table."""
     if one is None:
         return None
     return Prepared(
@@ -501,4 +510,5 @@ def _trace(found: Found, number: int, one: dict) -> Trace:
 __all__ = ["WHAT", "NONE", "ALL", "CARRIED", "AMENDED", "CUT", "TRACED", "SURE",
            "COMMITMENT_ID", "TRACE_ID", "SLICE_ID", "PreparedOption", "Prepared",
            "Question", "Slice", "Stage", "Trace", "Commitment", "DesignBlock",
-           "QUESTION", "STAGE", "TRACE", "COMMITMENT", "SCHEMA", "empty", "read"]
+           "QUESTION", "STAGE", "TRACE", "COMMITMENT", "SCHEMA", "PREPARED",
+           "PREPARED_OPTION", "empty", "read", "prepared_between", "prepared_of"]

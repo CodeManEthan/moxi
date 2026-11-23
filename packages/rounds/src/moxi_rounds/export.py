@@ -10,7 +10,10 @@ state. It writes nothing to a log or to the index, and nothing reads an export b
 holds it, the sentence, where it came from, what it holds up, its state as it reads now,
 who asked it and when; then, each only when the question has it, what a parked one waits
 for, the options it offers now, and the record it was moved from with what it held up
-there. A bare question is written out bare.
+there, and the newest answer prepared for it (`prepared`), with every field, who
+recorded it and when, and whether it is `current`. A bare question is written out
+bare. The markdown says who prepared it and what it recommends, then each option's costs and
+what it forecloses, or that it was prepared for other options.
 
 **A round's export** has two views, each a filter on the one kind of record, and with
 no view it holds both, the docket first:
@@ -135,6 +138,9 @@ class Entry:
     left_as: str | None = None
     #: The builder of the build it came up in, whom `by` asked it for, or None.
     builder: str | None = None
+    #: The newest answer prepared for it, as `questions.prepared_data` gives it, or
+    #: None.
+    prepared: Mapping | None = None
     #: For a decision: its stage, its weight and whether it forecloses a capability;
     #: None for a question.
     stage: str | None = None
@@ -166,6 +172,8 @@ class Entry:
         if self.options:
             data["options"] = [{"key": option.key, "text": option.text}
                                for option in self.options]
+        if self.prepared is not None:
+            data["prepared"] = dict(self.prepared)
         if self.moved_from is not None:
             data["moved_from"] = self.moved_from
         if self.held is not None:
@@ -297,7 +305,8 @@ def _question(holder: str, item: index.Item, on_closed: Callable[[str], bool]) -
         until=body.get("until"),
         options=tuple(Option(one["key"], one["text"])
                       for one in body.get("options", ())),
-        moved_from=body.get("moved_from"), held=_blocks(body.get("held")))
+        moved_from=body.get("moved_from"), held=_blocks(body.get("held")),
+        prepared=body.get("prepared"))
 
 
 def _decision(holder: str, item: index.Item, on_closed: Callable[[str], bool]) -> Entry:
@@ -652,6 +661,11 @@ def _entry_lines(entry: Entry) -> list[str]:
     if entry.options:
         lines.append("- options:")
         lines += [f"  - {option.key}: {option.text}" for option in entry.options]
+    said = questions.prepared_lines(entry.prepared)
+    if said:
+        lines.append(f"- {said[0]}")
+        lines += [f"  - {line.strip()}" if line.startswith(" ") else f"  - {line}"
+                  for line in said[1:]]
     return lines
 
 
