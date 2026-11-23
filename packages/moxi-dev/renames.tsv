@@ -669,6 +669,7 @@ comms	packages/comms/src/moxi_comms/adapters/codex_wrapper.py	nobody.add_argumen
 comms	packages/comms/src/moxi_comms/adapters/codex_wrapper.py	help="when the session ends (repeatable, the first to fire wins): "	keep	help	help
 comms	packages/comms/src/moxi_comms/adapters/codex_wrapper.py	nobody.add_argument("--brief", metavar="TEXT", help="the session's first turn")	keep	help	help
 comms	packages/comms/src/moxi_comms/adapters/codex_wrapper.py	help="a file whose text is the session's first turn")	keep	help	help
+comms	packages/comms/src/moxi_comms/adapters/codex_wrapper.py	help="take none of the box's policy directors ([policy] directors in "	keep	help	help
 comms	packages/comms/src/moxi_comms/adapters/harness.py	"""The head of a wrapper's plan: the identity, roster, cwd, `record` (the	keep	record	record
 comms	packages/comms/src/moxi_comms/adapters/harness.py	HarnessAdapter	name	delivered	on_delivered
 comms	packages/comms/src/moxi_comms/adapters/harness.py	HarnessAdapter._open_batch	name	e	exc
@@ -775,6 +776,7 @@ comms	packages/comms/src/moxi_comms/adapters/session.py	self.dir.mkdir(parents=T
 comms	packages/comms/src/moxi_comms/adapters/session.py	stamp_tools(env, tools_url, token=MINTED_AT_LAUNCH if args.dry_run else None)	keep	dry_run	dry_run
 comms	packages/comms/src/moxi_comms/adapters/session.py	tools_endpoint	name	e	exc
 comms	packages/comms/src/moxi_comms/adapters/session.py	unnamed = (any(t in RESUMES_UNNAMED or t.startswith(("--from-pr=", "--teleport="))	keep	any	any
+comms	packages/comms/src/moxi_comms/adapters/session.py	help="take none of the box's policy directors ([policy] directors in "	keep	help	help
 comms	packages/comms/src/moxi_comms/adapters/shim_roster.py	delta	name	now	current
 comms	packages/comms/src/moxi_comms/adapters/shim_roster.py	diff	name	now	current
 comms	packages/comms/src/moxi_comms/adapters/shim_roster.py	fetch	name	e	exc
@@ -996,6 +998,7 @@ comms	packages/comms/src/moxi_comms/config.py	raise bad("threads.reply_cap", f"i
 comms	packages/comms/src/moxi_comms/config.py	raise bad(f"{table}.agents", f"holds {name!r} as a value",	keep	bad	bad
 comms	packages/comms/src/moxi_comms/config.py	raise bad(key, f"holds {item!r}", 'list qualified names, e.g. ["name@scope"]')	keep	bad	bad
 comms	packages/comms/src/moxi_comms/config.py	super().__init__(MODULE, schema(), env=env, report=report)	keep	env	env
+comms	packages/comms/src/moxi_comms/config.py	raise bad("policy.directors", f"holds a bad name: {exc}",	keep	bad	bad
 comms	packages/comms/src/moxi_comms/connector/__init__.py	link, result=self.api.Result, on_refused=self.api.Result.refused,	keep	refused	refused
 comms	packages/comms/src/moxi_comms/connector/__init__.py	record=self.record, env=dict(env))	keep	record	record
 comms	packages/comms/src/moxi_comms/connector/__init__.py	return self.api.Result.refused("offline", tools_mod.OFFLINE_TEXT)	keep	refused	refused
@@ -1170,7 +1173,12 @@ comms	packages/comms/src/moxi_comms/daemon.py	w.closed = True	keep	closed	closed
 comms	packages/comms/src/moxi_comms/daemon.py	archive.skip_ids(self.record)	keep	record	record
 comms	packages/comms/src/moxi_comms/directors.py	-	name	ENV_VAR	DIRECTORS_ENV
 comms	packages/comms/src/moxi_comms/directors.py	if author.get("name") in set(directors or ()):	keep	set	set
+comms	packages/comms/src/moxi_comms/directors.py	policy = set(policy or ())	keep	set	set
+comms	packages/comms/src/moxi_comms/directors.py	if name in set(policy or ()):	keep	set	set
+comms	packages/comms/src/moxi_comms/directors.py	if name in set(directors or ()):	keep	set	set
 comms	packages/comms/src/moxi_comms/directory.py	conn = opener(path, env=env)	keep	env	env
+comms	packages/comms/src/moxi_comms/directory.py	return set()	keep	set	set
+comms	packages/comms/src/moxi_comms/directory.py	held = set()	keep	set	set
 comms	packages/comms/src/moxi_comms/glossary.py	"not told; `moxi comms explain <name> <id>` says `expired`. A message that has "	keep	expired	expired
 comms	packages/comms/src/moxi_comms/glossary.py	aliases=("expires", "--expires", "expired"),	keep	expired	expired
 comms	packages/comms/src/moxi_comms/glossary.py	aliases=("record", "backend"),	keep	record	record
@@ -2562,6 +2570,7 @@ comms	packages/comms/tests/test_ping_order.py	return c._client, digests	keep	_cl
 comms	packages/comms/tests/test_ping_order.py	return client._client	keep	_client	_client
 comms	packages/comms/tests/test_policy.py	-	name	test_the_policy_reads_a_given_environment	test_the_policy_reads_a_given_env
 comms	packages/comms/tests/test_policy.py	other = {"MOXI_COMMS_CONFIG_HOME": str(tmp_path / "cfg"), "HOME": str(tmp_path)}	keep	HOME	HOME
+comms	packages/comms/tests/test_policy_directors.py	lambda s, found, cmd, env, **_: seen.update(s=s, env=env) or 0)	keep	env	env
 comms	packages/comms/tests/test_posture.py	-	name	test_a_failed_directory_read_lets_the_single_reply_check_through	test_a_failed_dir_read_lets_the_single_reply_check_through
 comms	packages/comms/tests/test_posture.py	ARCHIVIST = dict(name="archivist", env={"MOXI_COMMS_GLOBAL": "1"})	keep	env	env
 comms	packages/comms/tests/test_posture.py	assert wait_until(lambda: any(p["message_id"] == ask.id for p in reviewer.queue))	keep	any	any
@@ -4957,6 +4966,9 @@ launcher	packages/launcher/tests/test_relaunch_job.py	got = go(conn, run, sessio
 launcher	packages/launcher/tests/test_relaunch_job.py	session = FakeSession([Result("refused", "rate"), Result("ran")])	keep	refused	refused
 launcher	packages/launcher/tests/test_relaunch_job.py	assert got.outcome == "expired" and got.run.word == "rate"	keep	expired	expired
 launcher	packages/launcher/tests/test_relaunch_job.py	assert released == {"slot": "3", "holder": old.run_id, "released": True}	keep	released	released
+launcher	packages/launcher/tests/test_relaunch_job.py	self.policy, self.never_bound = policy, set(never_bound)	keep	set	set
+launcher	packages/launcher/tests/test_relaunch_job.py	if self.never_bound & set(to):	keep	set	set
+launcher	packages/launcher/tests/test_relaunch_job.py	return SimpleNamespace(outcome="refused", message_id=None,	keep	refused	refused
 launcher	packages/launcher/tests/test_replay.py	"HOME": "/h", "PATH": "/bin", "TMPDIR": "/t", "LC_ALL": "C"}	keep	HOME	HOME
 launcher	packages/launcher/tests/test_replay.py	"SESSIONNAME"} & set(short)	keep	set	set
 launcher	packages/launcher/tests/test_replay.py	-	name	test_a_replay_writes_its_row_where_the_callers_environment_puts_the_store	test_a_replay_writes_its_row_where_the_callers_env_puts_the_store
