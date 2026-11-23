@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.2.8 (2026-11-23)
 
 - On the modules view, each block's card says `Reading…` until its block first takes up
   height, rather than showing an empty card while the block's script and first read
@@ -13,6 +13,16 @@
   (`moxi_ui.testing.browser.press`), a click that waits for the mark to go first, and
   `settled(page)`: press through it and a late answer can't move a control under the
   click. A page that never settles fails the press with the mark's count.
+
+## 0.2.7 (2026-11-22)
+
+- Past its 20 sessions, the shell's sign-in store now evicts the least recently used
+  session, not the oldest made, and never one that holds an open push stream or proxied
+  request. Twenty sign-ins (CLI tickets, a phone) no longer sign out a desktop tab in use
+  and end its live updates. When every session holds a stream, a sign-in still succeeds
+  and the store keeps more than 20 until a stream closes. A session's last use is the
+  last request it made, or the end of a stream it held. The gateway's phone sessions (4
+  per device, 16 in all) are evicted least recently used first too.
 - Settings compares a `path` key's value with its default as paths: a default under the
   home folder is joined with the platform's separator, and both sides are normalised
   (and case-folded on Windows) before the comparison. On Windows a path key left at its

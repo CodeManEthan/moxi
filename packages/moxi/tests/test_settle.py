@@ -941,6 +941,65 @@ def test_setup_ran_reads_a_broken_record_as_never_run(text):
     assert modules.setup_ran("demo") is False
 
 
+# -- the setup alone (`moxi install MODULE --setup-only`) ------------------------------------
+
+def setup_only(capsys, monkeypatch, *, setup="ok", module="demo"):
+    monkeypatch.setenv("MOXITEST_SETUP", setup)
+    code = _settle.setup_only(module)
+    out, err = capsys.readouterr()
+    return code, out + err
+
+
+def test_setup_only_runs_setup_and_records_the_version_and_nothing_else(w, capsys,
+                                                                        monkeypatch):
+    w.installed(DAEMONS=ONE)
+    w.module(DAEMONS=TWO, version="0.2.0")      # a unit the full settle step would add
+    old = w.legacy()
+    code, out = setup_only(capsys, monkeypatch)
+    assert code == 0, out
+    assert "setup demo: running moxi_demo.setup:run" in out and "setup demo: done" in out
+    assert _settle.setup_version("demo") == "0.2.0"
+    assert w.sup.calls == []                     # no unit stopped, written or started
+    assert (old / "data.txt").exists()           # no home move
+    assert not (w.root / "moxi-demo-aux.service").exists()
+
+
+@pytest.mark.parametrize("setup", ["fail", "exit"])
+def test_a_failed_setup_only_exits_1_names_itself_and_records_nothing(w, capsys,
+                                                                       monkeypatch, setup):
+    w.installed(DAEMONS=ONE)
+    before = _settle.setup_path().read_bytes()
+    w.module(DAEMONS=ONE, version="0.2.0")
+    code, out = setup_only(capsys, monkeypatch, setup=setup)
+    assert code == 1
+    assert "run `moxi install demo --setup-only` again once the cause is fixed" in out
+    assert _settle.setup_path().read_bytes() == before
+
+
+def test_setup_only_of_a_module_without_setup_says_so_and_records_nothing(w, capsys,
+                                                                         monkeypatch):
+    w.module(DAEMONS=ONE, SETUP="None")
+    code, out = setup_only(capsys, monkeypatch)
+    assert code == 0, out
+    assert "setup demo: the module declares no SETUP; nothing ran and nothing was " \
+           "recorded" in out
+    assert not _settle.setup_path().exists()
+
+
+def test_setup_only_of_a_module_not_installed_exits_1(w, capsys, monkeypatch):
+    code, out = setup_only(capsys, monkeypatch, module="nothere")
+    assert code == 1 and "setup nothere: not run, the module is absent" in out
+    assert not _settle.setup_path().exists()
+
+
+def test_the_setup_only_child_argv_and_its_parse():
+    argv = _settle.child_argv("/py", "demo", setup_only=True)
+    assert argv == ["/py", "-m", "moxi._settle", "--setup-only", "demo"]
+    args = _settle._parse(argv[3:])
+    assert args.setup_only and args.module == "demo" and not args.teardown
+    assert _settle.setup_command("demo") == "moxi install demo --setup-only"
+
+
 # -- the timer switches ------------------------------------------------------------------------
 
 def test_a_new_switched_timer_is_off_with_nobody_at_the_keyboard(w, capsys, monkeypatch):

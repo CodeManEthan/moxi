@@ -6259,6 +6259,7 @@ moxi	packages/moxi/src/moxi/install.py	help="install moxi-<module> from the inde
 moxi	packages/moxi/src/moxi/install.py	help="move a unit file or a placed skill moxi did not write out "	keep	help	help
 moxi	packages/moxi/src/moxi/install.py	help="place each module's skills without asking")	keep	help	help
 moxi	packages/moxi/src/moxi/install.py	help="place no module's skills, without asking")	keep	help	help
+moxi	packages/moxi/src/moxi/install.py	help="run the installed module's setup again and record it, "	keep	help	help
 moxi	packages/moxi/src/moxi/install.py	help="set how skills are placed (the core's skills.form) "	keep	help	help
 moxi	packages/moxi/src/moxi/install.py	if any(normalize(req.name) == own for req in self.froms):	keep	any	any
 moxi	packages/moxi/src/moxi/install.py	if any(r.url for r in reqs) or self.froms:	keep	any	any
@@ -15670,11 +15671,13 @@ ui	packages/ui/src/moxi_ui/session.py	if any(isinstance(t, bool) or not isinstan
 ui	packages/ui/src/moxi_ui/session.py	if any(key.lower() in _BROWSER_HEADERS or key.lower().startswith(b"sec-fetch-")	keep	any	any
 ui	packages/ui/src/moxi_ui/session.py	if now - r.created >= self.max_age or now - r.used >= self.idle]	keep	used	used
 ui	packages/ui/src/moxi_ui/session.py	key, created, used = item.get("key"), item.get("created"), item.get("used")	keep	used	used
+ui	packages/ui/src/moxi_ui/session.py	key=lambda h: self._sessions[h].used)	keep	used	used
 ui	packages/ui/src/moxi_ui/session.py	names = os.listdir(self.directory)	keep	directory	directory
 ui	packages/ui/src/moxi_ui/session.py	names = os.listdir(self.directory)	use	self.directory	self.tickets_dir
 ui	packages/ui/src/moxi_ui/session.py	path = self.directory / name	keep	directory	directory
 ui	packages/ui/src/moxi_ui/session.py	path = self.directory / name	use	self.directory	self.tickets_dir
 ui	packages/ui/src/moxi_ui/session.py	record.saved_used = record.used	keep	used	used
+ui	packages/ui/src/moxi_ui/session.py	record.used = max(record.used, self.clock())	keep	used	used
 ui	packages/ui/src/moxi_ui/session.py	record.used = now	keep	used	used
 ui	packages/ui/src/moxi_ui/session.py	return any(value.strip().lower() == b"script"	keep	any	any
 ui	packages/ui/src/moxi_ui/session.py	return self.directory / _hash(ticket)[:32]	keep	directory	directory
@@ -16644,7 +16647,6 @@ usage	packages/usage/src/moxi_usage/limits.py	a time it was already read at, nor
 usage	packages/usage/src/moxi_usage/limits.py	got = fn(timeout=PULL_TIMEOUT)	use	timeout=	timeout_s=
 usage	packages/usage/src/moxi_usage/limits.py	return any(word.lower() in ("dollar", "dollars", "usd") for word in _WORDS.split(key))	keep	any	any
 usage	packages/usage/src/moxi_usage/limits.py	there is none; `fit` counts the readings it fitted. `opened` is when the window	keep	opened	opened
-usage	packages/usage/src/moxi_usage/limits.py	"project", "period", "opened", "label", "model_family", "dollars", "harness_rows",	keep	opened	opened
 usage	packages/usage/src/moxi_usage/mark.py	-	name	CROSSING_AT	CROSSING_AT_ENV
 usage	packages/usage/src/moxi_usage/mark.py	-	name	WARN_AT	WARN_AT_ENV
 usage	packages/usage/src/moxi_usage/mark.py	_said: set[str] = set()	keep	set	set
@@ -16714,8 +16716,6 @@ usage	packages/usage/src/moxi_usage/page.py	query={"top": lb.Field("int", requir
 usage	packages/usage/src/moxi_usage/page.py	query={"top": lb.Field("int", required=False, max=TOP_MAX), **FILTERS},	keep	required	required
 usage	packages/usage/src/moxi_usage/page.py	ref=lb.Out("table", nullable=True, items=SESSION_REF))	keep	nullable	nullable
 usage	packages/usage/src/moxi_usage/page.py	values=("project", "folder")), **FILTERS},	keep	folder	folder
-usage	packages/usage/src/moxi_usage/page.py	#: names none. `used` is this machine's sessions of the harness with requests since the	keep	used	used
-usage	packages/usage/src/moxi_usage/page.py	#: models, with a null `opened`, and when there is no index to read.	keep	opened	opened
 usage	packages/usage/src/moxi_usage/page.py	`folder` each take one key or several, one to a line, and keep the files any of them	keep	folder	folder
 usage	packages/usage/src/moxi_usage/page.py	_PLACES = lb.Field("string", required=False, max=16384)	keep	required	required
 usage	packages/usage/src/moxi_usage/page.py	"folder": _PLACES,	keep	folder	folder
@@ -16754,9 +16754,6 @@ usage	packages/usage/src/moxi_usage/pagehandlers.py	origins = _origins(sorted(go
 usage	packages/usage/src/moxi_usage/pagehandlers.py	used = _used(harness, row.opened) if main and row.opened is not None else None	keep	opened	opened
 usage	packages/usage/src/moxi_usage/pagehandlers.py	with a known `opened`, else null. The sessions module is asked once, for the	keep	opened	opened
 usage	packages/usage/src/moxi_usage/pagehandlers.py	work_dir = item["folder"]	keep	folder	folder
-usage	packages/usage/src/moxi_usage/pagehandlers.py	names one. `used` is the sessions of the harness since the window opened, with a	keep	used	used
-usage	packages/usage/src/moxi_usage/pagehandlers.py	known `opened`, for the harness's main limit and for a limit with a `model_family`,	keep	opened	opened
-usage	packages/usage/src/moxi_usage/pagehandlers.py	used = _used(harness, row.opened, family) if counted and row.opened is not None else None	keep	opened	opened
 usage	packages/usage/src/moxi_usage/pagehandlers.py	# A `project` or `folder` the page sends: one key, or several on lines of their own.	keep	folder	folder
 usage	packages/usage/src/moxi_usage/pagehandlers.py	"work_dir": _places(query.get("folder")), "model": query.get("model"),	keep	folder	folder
 usage	packages/usage/src/moxi_usage/prices.py	"""Fetch, convert, compare and (unless `dry_run`) write the snapshot layer.	keep	dry_run	dry_run
@@ -17317,6 +17314,7 @@ usage	packages/usage/tests/test_page.py	assert count("/api/terms", by="agent", s
 usage	packages/usage/tests/test_page.py	assert get("/api/projects", by="folder")["home"] == "/home/alice"	keep	folder	folder
 usage	packages/usage/tests/test_page.py	assert get("/api/window", **asked)["used"] == {	keep	used	used
 usage	packages/usage/tests/test_page.py	assert get("/api/window", **asked)["used"] is None	keep	used	used
+usage	packages/usage/tests/test_page.py	assert main["used"] is not None	keep	used	used
 usage	packages/usage/tests/test_page.py	assert marked(path, "path") == set(), path	keep	set	set
 usage	packages/usage/tests/test_page.py	assert not any("title" in row for row in body["rows"])	keep	any	any
 usage	packages/usage/tests/test_page.py	assert not any(route["confirmed"] for route in routes.values())	keep	any	any
@@ -17397,12 +17395,7 @@ usage	packages/usage/tests/test_page.py	source(conn, "/p/s3.jsonl", [request("v1
 usage	packages/usage/tests/test_page.py	source(conn, "/p/typed.jsonl", [request("n1", T0, input=9000)],	use	input=	input_tokens=
 usage	packages/usage/tests/test_page.py	source(conn, f"/p/s{n:03d}.jsonl", [request(f"r{n}", T0 + n, input=1000 + n)],	use	input=	input_tokens=
 usage	packages/usage/tests/test_page.py	used = get("/api/window", harness="codex", limit_id="codex", minutes=300)["used"]	keep	used	used
-usage	packages/usage/tests/test_page.py	assert body["opened"] == limits.iso(opened) and body["model_family"] == "opus"	keep	opened	opened
-usage	packages/usage/tests/test_page.py	used = body["used"]	keep	used	used
-usage	packages/usage/tests/test_page.py	assert (week["used"]["count"], week["used"]["requests"]) == (2, 4)	keep	used	used
 usage	packages/usage/tests/test_page.py	assert body["opened"] is not None	keep	opened	opened
-usage	packages/usage/tests/test_page.py	assert (body["model_family"], body["used"]) == (None, None)	keep	used	used
-usage	packages/usage/tests/test_page.py	assert main["model_family"] is None and main["used"] is not None	keep	used	used
 usage	packages/usage/tests/test_page.py	assert count(folder="/w/tool") == 3 and count(folder="/w/loose-a") == 1	keep	folder	folder
 usage	packages/usage/tests/test_page.py	assert count(folder="/w/tool\n/w/loose-a") == 4	keep	folder	folder
 usage	packages/usage/tests/test_page.py	assert count(folder="\n") == count() == 8	keep	folder	folder

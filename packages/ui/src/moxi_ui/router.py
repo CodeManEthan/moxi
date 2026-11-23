@@ -23,8 +23,9 @@ The router, in order, for a request `check` passed:
 7. `/m/<module>/<rest>`: the proxy.
 
 A push stream or a proxied request ends when the session that admitted it ends (a
-signout, a worker's update check, an eviction or an expiry): from then on it reads as if
-the browser had left, and an open push stream's answer is finished.
+signout, a worker's update check or an expiry; the store never evicts a session while it
+holds one): from then on it reads as if the browser had left, and an open push stream's
+answer is finished.
 """
 
 from __future__ import annotations
