@@ -547,3 +547,325 @@ def test_a_kept_worktree_may_go_once_its_copy_is_restored(repo, opened):
     # The sweep reads the same rule, again at each run.
     shutil.copyfile(repo.root / "AGENTS.md", made.worktree / "AGENTS.md")
     assert isinstance(judge(event_of(opened)), removal.Proven)
+
+
+# -- no private file reaches the target -------------------------------------------------------
+
+@pytest.fixture
+def building(repo, tmp_path, write_config, capsys):
+    """`building(*entries)`: the round in `fix` with B1 commissioned on `work`, the repo
+    declaring a check and listing `entries` (`AGENTS.md` when none), and one commit of
+    work. Returns `(log, worktree repo)`."""
+    import sys
+
+    repo.git("config", "user.name", "coder")
+    repo.git("config", "user.email", "coder@example.test")
+    check = json.dumps(f'"{sys.executable}" -c "pass"')
+
+    def make(*entries: str):
+        configure(write_config, check, *(entries or ("AGENTS.md",)))
+        opening.open_round(ROUND, description="a placeholder round", by="planner",
+                           flow="fix")
+        path = log.round_log(tmp_path / "notes" / "rounds" / "a-round")
+        log.append(path, "stage.declared",
+                   {"id": "B1", "repo": "proj-a", "branch": "work", "after": []},
+                   by="planner")
+        made = commission()
+        tree = type(repo)(made.worktree)
+        tree.commit("work.txt", "the work")
+        capsys.readouterr()
+        return path, tree
+
+    make.check = check
+    return make
+
+
+def configure(write_config, check: str, *entries: str) -> None:
+    write_config(f"[projects.proj-a]\ncheck = {{ command = {check} }}\n"
+                 f"private_files = {json.dumps(list(entries))}\n")
+
+
+def verify(path: Path, head: str) -> None:
+    from moxi_rounds import verdicts
+
+    report = path.parent / "build-report.md"
+    report.write_text("# report\n\n```toml rounds\n" + "\n".join([
+        'kind = "build"', 'verdict = "publishable"', 'pass = "full"', 'by = "critic"',
+        'model = "a-model"', 'stage = "B1"', f'head = "{head}"']) + "\n```\n",
+        encoding="utf-8")
+    verdicts.record(ROUND, report, by="critic")
+
+
+def finish_gates_now(path: Path):
+    from moxi_rounds import checking, finish_gates
+    from moxi_rounds import settings as own
+    from moxi_rounds import state as states
+
+    state = states.fold(log.read_round(path))
+    seen = checking.seen_of(state, ROUND, settings=own.load())["B1"]
+    return finish_gates.unmet(state, "B1", seen=seen, name=ROUND)
+
+
+def refused_by_gate_11(path: Path, tree, repo, *said: str) -> str:
+    """Assert that the check, `next`'s finish step and `finish` each refuse on gate 11
+    with words holding each of `said`, that nothing was merged, and that the root's
+    private files are as they were. Gives gate 11's reason."""
+    from moxi_rounds import checking, finish_gates, finishing, steps
+    from moxi_rounds import settings as own
+    from moxi_rounds import state as states
+
+    with pytest.raises(Refused) as caught:
+        checking.check(ROUND, "B1", by="coder")
+    reasons = [one.reason for one in caught.value.unmet]
+    assert any(all(part in one for part in said) for one in reasons), reasons
+
+    [gate] = [one for one in finish_gates_now(path) if one.number == finish_gates.PRIVATE]
+    assert all(part in gate.unmet.reason for part in said), gate.unmet.reason
+    state = states.fold(log.read_round(path))
+    seen = checking.seen_of(state, ROUND, settings=own.load())
+    step = steps.one(state, "finish", "B1", name=ROUND, seen=seen)
+    assert finish_gates.PRIVATE in step.gates
+    assert gate.unmet.reason in [one.reason for one in step.waits]
+
+    verify(path, tree.rev())
+    before = repo.rev("main")
+    with pytest.raises(Refused) as caught:
+        finishing.finish(ROUND, "B1", by="coder")
+    assert gate.unmet.reason in [one.reason for one in caught.value.unmet]
+    assert repo.rev("main") == before
+    source = repo.root / "AGENTS.md"
+    assert not source.is_symlink() and source.read_text(encoding="utf-8") == SECRET
+    return gate.unmet.reason
+
+
+def test_a_copy_un_ignored_and_added_is_refused(building, repo):
+    path, tree = building()
+    tree.root.joinpath(".gitignore").write_text("!AGENTS.md\n", encoding="utf-8")
+    tree.git("add", "-A")
+    tree.git("commit", "-q", "-m", "un-ignore it")
+
+    reason = refused_by_gate_11(path, tree, repo, "AGENTS.md is a private file of "
+                                "proj-a (brought by commission, or listed in "
+                                "private_files), and commits finish would bring into "
+                                f"main hold it: {tree.rev()[:12]}")
+    assert "1 in all" not in reason
+
+
+def test_a_copy_added_by_force_is_refused_with_the_fix(building, repo):
+    path, tree = building()
+    tree.git("add", "-f", "AGENTS.md")
+    tree.git("commit", "-q", "-m", "add it")
+
+    refused_by_gate_11(path, tree, repo, f"main hold it: {tree.rev()[:12]}")
+    [gate] = [one for one in finish_gates_now(path) if one.number == 11]
+    assert gate.unmet.fix == (
+        "make a branch none of whose commits holds AGENTS.md. One way: git rm --cached "
+        "-- AGENTS.md if the tip holds it, then git reset --soft $(git merge-base main "
+        "HEAD), then git commit, which leaves one commit with the work. This rewrites "
+        "the branch: its tip changes, so the build "
+        "verification, the check and any report step read at the old tip are owed "
+        "again; and a commit it shared with "
+        "another build becomes a copy of it, so finish that build first. Then: moxi "
+        f"rounds next {ROUND}")
+
+
+def test_a_copy_added_then_untracked_is_refused_naming_the_first_commit(building, repo):
+    path, tree = building()
+    tree.git("add", "-f", "AGENTS.md")
+    tree.git("commit", "-q", "-m", "add it")
+    first = tree.rev()
+    tree.git("rm", "-q", "--cached", "AGENTS.md")
+    tree.git("commit", "-q", "-m", "untrack it")
+
+    reason = refused_by_gate_11(path, tree, repo, f"main hold it: {first[:12]}")
+    assert tree.rev()[:12] not in reason
+
+
+def test_a_rename_onto_the_path_is_refused(building, repo):
+    path, tree = building()
+    tree.commit("x.md", "renamed")
+    tree.git("mv", "-f", "x.md", "AGENTS.md")
+    tree.git("commit", "-q", "-m", "rename it")
+
+    refused_by_gate_11(path, tree, repo, f"main hold it: {tree.rev()[:12]}")
+
+
+def test_a_case_only_twin_is_refused_where_the_repo_ignores_case(building, repo):
+    repo.git("config", "core.ignorecase", "true")
+    path, tree = building()
+    (tree.root / "AGENTS.md").unlink()
+    force_commit(tree, "agents.md")
+
+    refused_by_gate_11(path, tree, repo, "AGENTS.md (as agents.md) is a private file")
+
+
+def test_a_side_commit_a_merge_dropped_is_refused_naming_it(building, repo):
+    path, tree = building()
+    tree.git("switch", "-q", "-c", "side", "main")
+    tree.git("add", "-f", "AGENTS.md")
+    tree.git("commit", "-q", "-m", "add it on the side")
+    side = tree.rev()
+    tree.git("switch", "-q", "work")
+    tree.git("merge", "-q", "--no-ff", "--no-commit", "side")
+    tree.git("rm", "-q", "--cached", "AGENTS.md")
+    tree.git("commit", "-q", "-m", "merge the side, less the file")
+    assert "AGENTS.md" not in tree.git("ls-tree", "-r", "--name-only", "HEAD")
+
+    refused_by_gate_11(path, tree, repo, f"main hold it: {side[:12]}")
+
+
+def test_a_non_ascii_private_file_committed_is_refused(building, repo):
+    exclude(repo, "é.md")
+    (repo.root / "é.md").write_text("accent\n", encoding="utf-8")
+    path, tree = building("AGENTS.md", "é.md")
+    tree.git("add", "-f", "é.md")
+    tree.git("commit", "-q", "-m", "add it")
+
+    refused_by_gate_11(path, tree, repo, "é.md is a private file of proj-a")
+
+
+def test_an_entry_listed_after_the_commission_counts(building, repo, write_config):
+    path, tree = building()
+    tree.commit("LATER.md", "later")
+    assert not [one for one in finish_gates_now(path) if one.number == 11]
+    configure(write_config, building.check, "AGENTS.md", "LATER.md")
+
+    refused_by_gate_11(path, tree, repo, "LATER.md is a private file of proj-a")
+
+
+def test_a_target_that_holds_the_path_is_named(building, repo):
+    path, tree = building()
+    repo.git("add", "-f", "AGENTS.md")
+    repo.git("commit", "-q", "-m", "the target takes it")
+    tree.git("merge", "-q", "--no-ff", "--no-edit", "main")
+
+    refused_by_gate_11(path, tree, repo, "and main holds it, so every commit finish "
+                       "would bring holds it")
+    [gate] = [one for one in finish_gates_now(path) if one.number == 11]
+    assert gate.unmet.fix == (
+        "take AGENTS.md out of private_files in [projects.proj-a], or out of main. "
+        f"Then: moxi rounds next {ROUND}")
+
+
+def test_after_the_fixs_squash_the_gate_holds_and_the_tip_reads_are_owed_again(
+        building, repo):
+    from moxi_rounds import finish_gates
+
+    path, tree = building()
+    tree.git("add", "-f", "AGENTS.md")
+    tree.git("commit", "-q", "-m", "add it")
+    verify(path, tree.rev())
+
+    tree.git("rm", "-q", "--cached", "--", "AGENTS.md")
+    base = tree.git("merge-base", "main", "HEAD")
+    tree.git("reset", "-q", "--soft", base)
+    tree.git("commit", "-q", "-m", "the work")
+
+    numbers = [one.number for one in finish_gates_now(path)]
+    assert finish_gates.PRIVATE not in numbers
+    assert finish_gates.VERIFIED in numbers and finish_gates.CHECKED in numbers
+    assert (tree.root / "AGENTS.md").read_text(encoding="utf-8") == SECRET
+
+
+def test_the_lock_reads_the_gate_against_the_targets_head_then(building, repo,
+                                                               monkeypatch):
+    from moxi_rounds import checking, finish_lock, finishing
+
+    path, tree = building()
+    base = repo.rev("main")
+    repo.git("add", "-f", "AGENTS.md")
+    repo.git("commit", "-q", "-m", "the target takes it")
+    held = repo.rev()
+    repo.git("rm", "-q", "--cached", "AGENTS.md")
+    repo.git("commit", "-q", "-m", "and lets it go")
+    tree.git("merge", "-q", "--no-ff", "--no-edit", "main")
+    checking.check(ROUND, "B1", by="coder")
+    verify(path, tree.rev())
+    assert not [one for one in finish_gates_now(path) if one.number == 11]
+    take = finish_lock.take
+
+    def moved_then_take(*args, **kwargs):
+        # The target moves back between the first read and the lock.
+        repo.git("update-ref", "refs/heads/main", base)
+        return take(*args, **kwargs)
+
+    monkeypatch.setattr(finish_lock, "take", moved_then_take)
+    with pytest.raises(Refused) as caught:
+        finishing.finish(ROUND, "B1", by="coder")
+
+    [reason] = [one.reason for one in caught.value.unmet if "private file" in one.reason]
+    assert held[:12] in reason
+    assert repo.rev("main") == base
+
+
+def test_the_lock_reads_gate_11_and_the_gates_number_eleven():
+    from moxi_rounds import finish_gates, finishing
+
+    assert finish_gates.PRIVATE in finishing.UNDER_LOCK
+    assert sorted(finish_gates.GATES) == list(range(1, 12))
+    assert finish_gates.GATES[finish_gates.PRIVATE] == "private files"
+
+
+def test_a_file_where_the_entrys_parent_would_be_is_refused(building, repo):
+    exclude(repo, "notes/local.md")
+    (repo.root / "notes").mkdir()
+    (repo.root / "notes" / "local.md").write_text("local\n", encoding="utf-8")
+    path, tree = building("AGENTS.md", "notes/local.md")
+    shutil.rmtree(tree.root / "notes")
+    tree.commit("notes", "a file")
+
+    refused_by_gate_11(path, tree, repo, "notes/local.md (as notes) is a private file")
+    assert (repo.root / "notes" / "local.md").read_text(encoding="utf-8") == "local\n"
+
+
+def test_a_path_under_the_entry_is_refused(building, repo):
+    path, tree = building()
+    (tree.root / "AGENTS.md").unlink()
+    force_commit(tree, "AGENTS.md/x")
+
+    refused_by_gate_11(path, tree, repo, "AGENTS.md is a private file", tree.rev()[:12])
+    assert (repo.root / "AGENTS.md").is_file()
+
+
+def test_a_tracked_sibling_of_an_entry_changed_on_the_branch_passes(building, repo):
+    from moxi_rounds import checking
+
+    repo.commit("notes/readme.md", "tracked")
+    exclude(repo, "notes/local.md")
+    (repo.root / "notes" / "local.md").write_text("local\n", encoding="utf-8")
+    path, tree = building("AGENTS.md", "notes/local.md")
+    tree.commit("notes/readme.md", "changed")
+
+    assert not [one for one in finish_gates_now(path) if one.number == 11]
+    checking.check(ROUND, "B1", by="coder")
+
+
+def test_the_read_walks_only_the_trees_on_the_private_paths(git_repo):
+    """A branch of 300 commits over 3,000 files under 60 subtrees: one root tree per commit
+    and the one `notes` tree they share are all that is read."""
+    dirs_n, files_n, commits_n = 60, 50, 300
+    lines = ["blob", "mark :1", "data 2", "x", ""]
+    lines += ["commit refs/heads/big", "mark :2", "committer c <c@e.t> 1700000000 +0000",
+              "data 4", "base", "from refs/heads/main"]
+    lines += [f"M 100644 :1 d{one}/f{two}" for one in range(dirs_n)
+              for two in range(files_n)]
+    lines += ["M 100644 :1 notes/readme.md", ""]
+    for at in range(commits_n):
+        lines += [f"blob", f"mark :{at + 10_000}", f"data {len(str(at)) + 1}", str(at), "",
+                  "commit refs/heads/big", f"committer c <c@e.t> {1700000001 + at} +0000",
+                  "data 1", "c",
+                  f"M 100644 :{at + 10_000} d{at % dirs_n}/f{at % files_n}", ""]
+    stream = ("\n".join(lines) + "\n").encode()
+    import subprocess
+
+    subprocess.run(["git", "-C", str(git_repo.root), "fast-import", "--quiet"],
+                   input=stream, env=git_repo.env(), check=True)
+    git = Git(git_repo.root)
+    tip, head = git_repo.rev("big"), git_repo.rev("main")
+
+    with private_files.Trees(git_repo.root) as trees:
+        found = private_files.held(git, ["AGENTS.md", "notes/local.md"], tip, head,
+                                   trees=trees)
+
+    assert found == []
+    assert trees.read == commits_n + 1 + 1

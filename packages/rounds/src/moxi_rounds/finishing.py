@@ -13,7 +13,8 @@ tip as read (its head, once the branch is gone), in this order:
    swapped out a dead holder.
 3. Read the round, the target's head `M` and the branch's tip again. Refuse when the
    tip is no longer `T`, or when a gate another finish may have changed by moving the
-   target (`UNDER_LOCK`: drift, the target, work, sharing) no longer holds.
+   target (`UNDER_LOCK`: drift, the target, work, sharing, private files) no longer
+   holds.
 4. Run the repo's finish actions in order, each under its `id`, and record each one's
    result as `finish.action` before the next starts; each record takes the round's
    lock for that write only. An action whose record at `T` is `ok` or `found` is not
@@ -126,7 +127,7 @@ SKIPPED = "skipped"
 #: The gates read again under the finish lock before any action is run: those another
 #: finish may have changed by moving the target.
 UNDER_LOCK = (finish_gates.DRIFT, finish_gates.TARGET, finish_gates.WORK,
-              finish_gates.SHARING)
+              finish_gates.SHARING, finish_gates.PRIVATE)
 #: The gates read again on the log after the actions, before `finish.done`.
 AFTER = (finish_gates.VERIFIED, finish_gates.FINDINGS, finish_gates.CHECKED,
          finish_gates.QUESTIONS, finish_gates.USER_STEPS)

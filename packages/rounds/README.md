@@ -509,7 +509,7 @@ build takes an id no earlier report of the stage used, a dropped build's include
 `verdict` prints the build's findings and what its finish still waits for; `show` and
 the round note give each build's newest verdict and its findings.
 
-A build's `finish` waits for ten gates, read at the tip being finished, and names each
+A build's `finish` waits for eleven gates, read at the tip being finished, and names each
 one that does not hold with its number and the command that meets it:
 
 1. its verification counts at the tip, or the operator skipped it, or the flow has none;
@@ -525,9 +525,10 @@ one that does not hold with its number and the command that meets it:
 8. each step of your own is done at the tip, or the operator skipped it;
 9. the build has work: it reads `building` or `merged`;
 10. it shares no commits with another build, unless one of the two is stacked inside
-    the other and this one goes first (below).
+    the other and this one goes first (below);
+11. no commit it would bring into the target holds a private file of the repo (below).
 
-No skip meets gates 9 and 10, and `finish` itself is never skipped.
+No skip meets gates 9, 10 and 11, and `finish` itself is never skipped.
 
 Gate 10 reads each other open build of the repo and target that shares commits with
 this one by the two spans, each the commits in `target_before..head`. This build is
@@ -558,6 +559,22 @@ target the first left. `next` gives a held finish as waiting with the held line;
 (finishes first)`, `contains ROUND B2 (held until its work is on the target)`, `shares
 with ROUND B3` for an overlap), and `--json` gives each share a `relation`: `inside`,
 `contains` or `overlaps`.
+
+Gate 11 reads every commit reachable from the tip and not from the target's head, over
+every parent of every merge, so a commit a later one undid, or one a merge dropped, is
+still read. A build's private files are the paths its commission copied in and the
+entries of the repo's `private_files` now. A commit holds one when its tree has that
+path, a path under it, or a file where a folder the path lies under would be; names
+compare by case folding where the repo's `core.ignorecase` is true. A commit that holds
+one is refused, as finish's merge at the root would overwrite the private file there
+and the commit would land in the target's history. The refusal names each path, the
+entry that matched and the commits that hold it, and the fix rewrites the branch so no
+commit holds it: `git rm --cached -- PATH` if the tip holds it, then `git reset --soft
+$(git merge-base TARGET HEAD)` and `git commit`. That changes the tip, so the
+verification and the check are owed again. Where the target itself holds the path, the
+fix is to take it out of `private_files` or out of the target. `moxi rounds check`
+refuses on the same read before it runs, and `finish` reads the gate again under the
+finish lock, against the target's head as it is then.
 
 The lead may mark a `minor` or `note` finding fixed without a re-check: `mark ROUND
 B<n>.L<n> --fixed --commit SHA [--commit SHA]... --no-behaviour-change`, naming every
