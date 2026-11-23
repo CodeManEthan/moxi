@@ -7,8 +7,6 @@ always have.
 
 * A Claude rate-limit kind names a window: `claude_window(kind)` gives its
   `(limit_id, window_minutes)`.
-* `model_family(harness, slot)` gives the family of models a scoped limit counts, where
-  the reading's own kind says it: `opus` for Claude's `seven_day_opus`.
 * `label(minutes, limit_id, slot)` gives a row's label: `5h`, `7d` or `<n>m`, with the
   limit beside it when it is not a harness's main one.
 * `row_state(used_percent, resets_at, now)` gives `fresh`, `reset` or `unavailable`, with
@@ -35,10 +33,6 @@ SEVEN_DAY = 10_080
 #: its own, not a second slot of the plan's.
 CLAUDE_KINDS = {"five_hour": (PLAN_LIMIT, FIVE_HOUR), "seven_day": (PLAN_LIMIT, SEVEN_DAY)}
 _SCOPED_WEEK = "seven_day_"
-#: Claude's rate-limit kinds that cap one family of models, and that family: a model whose
-#: id names the family (`claude-opus-4-5`) counts against the kind's limit. Any other
-#: scope (`seven_day_oauth_apps`, say) does not say which models it counts.
-CLAUDE_MODEL_KINDS = {"seven_day_opus": "opus", "seven_day_sonnet": "sonnet"}
 
 FRESH = "fresh"
 RESET = "reset"
@@ -60,15 +54,6 @@ def claude_window(kind: str) -> tuple[str, int | None]:
     if kind.startswith(_SCOPED_WEEK) and len(kind) > len(_SCOPED_WEEK):
         return kind[len(_SCOPED_WEEK):], SEVEN_DAY
     return kind, None
-
-
-def model_family(harness: str, slot: object) -> str | None:
-    """The family of models a limit counts, from the kind its reading named (`slot`):
-    `opus` for Claude's `seven_day_opus`; None where the kind does not say which models
-    count, a harness's main limit and every Codex limit among them."""
-    if harness != CLAUDE or not isinstance(slot, str):
-        return None
-    return CLAUDE_MODEL_KINDS.get(slot)
 
 
 def _finite(value: object) -> float | None:
@@ -114,6 +99,5 @@ def label(minutes: int | None, limit_id: str, slot: str | None = None) -> str:
 
 
 __all__ = ["CLAUDE", "CODEX", "PLAN_LIMIT", "CODEX_LIMIT", "FIVE_HOUR", "SEVEN_DAY",
-           "CLAUDE_KINDS", "CLAUDE_MODEL_KINDS", "FRESH", "RESET", "UNAVAILABLE", "ROW_STATES",
-           "NO_PERCENT", "MAIN_LIMIT", "LABELS", "claude_window", "model_family", "percent",
-           "row_state", "label"]
+           "CLAUDE_KINDS", "FRESH", "RESET", "UNAVAILABLE", "ROW_STATES", "NO_PERCENT",
+           "MAIN_LIMIT", "LABELS", "claude_window", "percent", "row_state", "label"]

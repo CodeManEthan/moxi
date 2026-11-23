@@ -72,7 +72,7 @@ from . import board, builds, checking, export, folders, index, listing, log, ope
 from . import paths, showing
 from . import settings as own
 from . import state as states
-from .errors import RoundsError
+from .errors import RoundsError, UnfencedTest
 
 _ui = modules.load("ui", interface=3)
 if not _ui.ok:
@@ -257,6 +257,8 @@ class Board:
         with self.lock:
             try:
                 token = take_token(self.memo)
+            except UnfencedTest:
+                raise
             except Exception as exc:  # noqa: BLE001 - the page shows it whole
                 _log_once(exc, "finding the rounds folders failed")
                 return self._failed(exc)
@@ -298,6 +300,8 @@ class Board:
         try:
             reading = open_builds.read(settings=settings, now=now)
             given = listing.projects(settings=settings, now=now, refresh=False)
+        except UnfencedTest:
+            raise
         except Exception as exc:  # noqa: BLE001 - the page shows it whole
             _log_once(exc, "reading the open builds or the projects failed")
             value.update(state="error", detail=_detail(exc))
@@ -330,6 +334,8 @@ class Board:
                     try:
                         kept = Kept(key, _make(summary.name, settings, on_closed,
                                                read=by_round.get(summary.name, {})))
+                    except UnfencedTest:
+                        raise
                     except Exception as exc:  # noqa: BLE001 - one round's, shown on its row
                         unreadable.append(_row(summary.name, exc))
                         continue
@@ -352,6 +358,8 @@ class Board:
                 rounds.append(board.round_value(
                     kept.part, columns, board.items_of(waiting, name),
                     step=board.step_of(kept.part), counts=counts.get(name, {})))
+            except UnfencedTest:
+                raise
             except Exception as exc:  # noqa: BLE001 - one round's, shown on its row
                 unreadable.append(_row(name, exc))
         ended = listing.rounds(given=given, now=now, ended=True)
@@ -385,6 +393,8 @@ class Board:
             if kept is None or kept.key != key:
                 try:
                     kept = Kept(key, _make(summary.name, token.settings, on_closed, read={}))
+                except UnfencedTest:
+                    raise
                 except Exception as exc:  # noqa: BLE001 - the strip goes on without it
                     _log_once(exc, "reading a closed round for the strip failed")
                     continue
@@ -618,6 +628,8 @@ class _Feed:
         while True:
             try:
                 await self.tick()
+            except UnfencedTest:
+                raise
             except Exception as exc:  # noqa: BLE001 - the poller outlives every failure
                 _log_once(exc, "the rounds poller's tick failed")
             await asyncio.sleep(PERIOD_S)

@@ -25,12 +25,14 @@ under the runtime directory is too long for a Unix socket (a long `MOXI_HOME`, s
 listens at a short hashed path instead. Claude Code sessions are reached through two
 Claude Code plugins that ship inside the package; Codex sessions run under a host turns
 launches, in its caller or as a process of its own (the internal entry
-`moxi-turns-codex-host`, installed with the `codex` extra); OpenCode sessions run under a
-host that is experimental: no real run has confirmed it yet.
+`moxi-turns-codex-host`, installed with the `codex` extra), which starts a thread, resumes
+one (`--resume THREAD_ID`) or forks one (`--fork THREAD_ID`: a new thread holding a copy
+of its conversation, live or not); OpenCode sessions run under a host that is
+experimental: no real run has confirmed it yet.
 
 turns is a library with no command of its own; `moxi doctor turns` checks it. Its API is
 the `moxi_turns` package, and the wire under it is described in
-[contracts/socket-protocol.md](https://github.com/CodeManEthan/moxi/blob/moxi-turns-v0.2.5/packages/turns/contracts/socket-protocol.md).
+[contracts/socket-protocol.md](https://github.com/CodeManEthan/moxi/blob/moxi-turns-v0.2.6/packages/turns/contracts/socket-protocol.md).
 
 ## Install
 
@@ -218,4 +220,4 @@ the panel.
 
 ## License
 
-MIT. See [LICENSE](https://github.com/CodeManEthan/moxi/blob/moxi-turns-v0.2.5/packages/turns/LICENSE).
+MIT. See [LICENSE](https://github.com/CodeManEthan/moxi/blob/moxi-turns-v0.2.6/packages/turns/LICENSE).

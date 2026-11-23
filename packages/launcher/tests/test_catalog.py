@@ -44,6 +44,27 @@ def test_each_shipped_catalog_holds_exactly_its_rows():
     assert set(catalog.launcher().rows) == LAUNCHER_ROWS
 
 
+#: What a fork does with each shipped row: the rows that shape the request are copied,
+#: the rows about who the session is, its first turn and its life are dropped, and the
+#: rows the launcher composes for each launch are its own.
+FORK_DROPPED = {"identity", "scope", "director", "takes_policy_directors", "posture",
+                "instructions", "instructions_file", "brief", "brief_file", "handoff",
+                "keep_warm", "recycle_on_expiry", "recycle_at_limit", "limit_at", "warn_at",
+                "headless_exit", "name", "native_name", "remote_control", "notes_dir"}
+FORK_OWN = {("launcher", "target"), ("launcher", "slot"), ("claude", "session_id"),
+            ("claude", "resume"), ("claude", "plugin_dir"),
+            ("claude", "append_system_prompt_file")}
+
+
+@pytest.mark.parametrize("harness", [catalog.LAUNCHER, *catalog.HARNESSES])
+def test_every_shipped_row_has_its_fork_class(harness):
+    rows = catalog.launcher() if harness == catalog.LAUNCHER else catalog.load(harness)
+    for row in rows:
+        want = ("own" if (harness, row.name) in FORK_OWN
+                else "drop" if row.name in FORK_DROPPED else "copy")
+        assert row.fork == want, (harness, row.name)
+
+
 def test_an_unknown_harness_has_no_catalog():
     with pytest.raises(ValueError, match="opencode"):
         catalog.load("opencode")
@@ -581,6 +602,7 @@ GOOD = """
 type = "string"
 default = ""
 doc = "The model."
+fork = "copy"
 flag = "-m"
 modes = ["interactive", "exec"]
 """
@@ -636,6 +658,10 @@ BAD_ROWS = [
     ('[Bad]\ntype = "string"\ndefault = ""\ndoc = "d"\nflag = "-x"\nmodes = ["exec"]\n',
      "not a row name"),
     ('x = 1\n', "not a row's table"),
+    ('[x]\ntype = "string"\ndefault = ""\ndoc = "d"\nflag = "-x"\nmodes = ["exec"]\n',
+     "has no fork class; class it copy, drop, own"),
+    ('[x]\ntype = "string"\ndefault = ""\ndoc = "d"\nflag = "-x"\nmodes = ["exec"]\n'
+     'fork = "keep"\n', "has fork 'keep'"),
 ]
 
 
@@ -670,7 +696,7 @@ def test_the_launcher_rows_take_no_flags_and_no_catalog_table():
 
 def test_a_retired_row_is_refused_when_typed_and_when_checked():
     text = ('[old]\ntype = "string"\ndefault = ""\ndoc = "d"\nflag = "-o"\n'
-            'modes = ["exec"]\nretired = "use --model"\n')
+            'modes = ["exec"]\nretired = "use --model"\nfork = "drop"\n')
     old = parse_codex(text)["old"]
     assert not old.offered(everything) and not old.settable
     with pytest.raises(BadValue, match="retired"):

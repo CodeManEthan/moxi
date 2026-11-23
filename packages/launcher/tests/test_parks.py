@@ -76,7 +76,7 @@ def test_a_version_2_log_moves_to_3_with_an_empty_park_entries_table(tmp_path):
     raw_conn.close()
     conn = store.connect(db)
     try:
-        assert conn.execute("PRAGMA user_version").fetchone()[0] == 3
+        assert conn.execute("PRAGMA user_version").fetchone()[0] == len(store.STEPS)
         assert conn.execute("SELECT count(*) FROM park_entries").fetchone()[0] == 0
         assert conn.execute("SELECT count(*) FROM warm_holds").fetchone()[0] == 1
     finally:

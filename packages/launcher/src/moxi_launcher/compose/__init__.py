@@ -98,7 +98,7 @@ def context(values: Mapping[str, object], *, request_id: str,
     `environ` is the caller's environment; `child_environ` the one the child's is built
     from, which turns' launch additions are asked with (default `environ`; a replay's
     differs). `replay` holds the `Context` fields a replay sets (`posture`, `resume`,
-    `relaunched`, `extra_stamps`)."""
+    `fork_of`, `relaunched`, `extra_stamps`)."""
     env = dict(os.environ if env is None else env)
     child = env if child_env is None else dict(child_env)
     links = installed() if modules is None else frozenset(modules)
@@ -211,7 +211,8 @@ def build(request, resolved, *, env: Mapping[str, str] | None = None,
     too, where a resumed session's transcript is found; its session id is the one it
     resumes when `request.resume_of` is set. It gives the identity block its `posture`,
     and a relaunch with a handoff (`relaunch_of` and `handoff` set) the relaunch's header
-    and, with `run`, the `RELAUNCH_ENV` stamp.
+    and, with `run`, the `RELAUNCH_ENV` stamp. A fork (`fork_of` set) names the session
+    it forks to its composer, and carries its `stamps` with the launch's own.
     """
     values = dict(resolved.values)
     request_id = getattr(request, "request_id", None) or str(uuid.uuid4())
@@ -251,10 +252,12 @@ def _replay(request) -> dict[str, object] | None:
     handoff = getattr(request, "handoff", None)
     relaunched = bool(getattr(request, "relaunch_of", None) and handoff)
     run = getattr(request, "run", None)
+    stamped = {common.RELAUNCH_ENV: str(run)} if relaunched and run else {}
+    stamped.update({str(k): str(v) for k, v in (getattr(request, "stamps", None) or {}).items()})
     return {"posture": getattr(request, "posture", None),
             "resume": bool(getattr(request, "resume_of", None)),
-            "relaunched": relaunched,
-            "extra_stamps": {common.RELAUNCH_ENV: str(run)} if relaunched and run else {}}
+            "fork_of": getattr(request, "fork_of", None) or None,
+            "relaunched": relaunched, "extra_stamps": stamped}
 
 
 def _read(row: str, name: object) -> str | None:

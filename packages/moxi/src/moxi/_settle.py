@@ -3,6 +3,7 @@
 
     python -m moxi._settle MODULE [--replace] [--skills | --no-skills]
                                                    the settle step of one module
+    python -m moxi._settle --setup-only MODULE     a module's SETUP alone, then its record
     python -m moxi._settle --teardown MODULE       a module's TEARDOWN
 
 The parent holds the core lock for the whole install (`moxi.files.lock(core_lock())`)
@@ -67,6 +68,11 @@ handlers that record each signal and, on POSIX, forward it to the child; on Wind
 console delivers Ctrl-C, Ctrl-Break and a close to the child itself. When the child
 exits interrupted, the parent runs nothing more and exits 1.
 
+`moxi install MODULE --setup-only` runs the third form: step 2 of the settle step alone
+(`SETUP` called, then its `setup.json` record) on the module as it is installed here, with
+no home move, units, skills, questions or listeners (`setup_only`). It takes the same
+signals, the same lock claim and the same exit codes.
+
 What stays the residual: SIGKILL, power loss, and on Windows a console close, after which
 Windows ends the process within about five seconds of the handler returning, whatever
 Python does. A child ended so runs no `finally`: what the move stopped stays stopped until
@@ -93,6 +99,16 @@ NOT_RUN = 4
 #: The file in the core's state directory that holds the version each module's `SETUP`
 #: last ran at: `{"<module>": {"version": <str or null>, "at": <UTC>}}`.
 SETUP_FILE = "setup.json"
+#: The `moxi install` flag that runs an installed module's `SETUP` alone and records it,
+#: installing nothing. Every line that names the command takes it from `setup_command`.
+SETUP_ONLY = "--setup-only"
+
+
+def setup_command(module: str) -> str:
+    """The command that runs `module`'s `SETUP` again and records it, installing nothing
+    and reaching no index: the doctor's fix for a stale setup, and the line a failed
+    `--setup-only` run names."""
+    return f"moxi install {module} {SETUP_ONLY}"
 
 
 class Interrupted(BaseException):
@@ -250,13 +266,16 @@ class Outcome:
 
 
 def child_argv(python: str, module: str, *, replace: bool = False,
-               teardown: bool = False, install_skills: bool | None = None) -> list[str]:
-    """The settle child's command line (or the teardown child's). `install_skills` is the
-    install's answer ahead to the skills question: True for `--skills`, False for
-    `--no-skills`, None to ask."""
+               teardown: bool = False, setup_only: bool = False,
+               install_skills: bool | None = None) -> list[str]:
+    """The settle child's command line (or the teardown child's, or the `--setup-only`
+    child's). `install_skills` is the install's answer ahead to the skills question: True
+    for `--skills`, False for `--no-skills`, None to ask."""
     argv = [str(python), "-m", "moxi._settle"]
     if teardown:
         return [*argv, "--teardown", module]
+    if setup_only:
+        return [*argv, SETUP_ONLY, module]
     argv += [module] + (["--replace"] if replace else [])
     if install_skills is not None:
         argv.append("--skills" if install_skills else "--no-skills")
@@ -420,6 +439,9 @@ class Settle:
     #: (other than the relative link above), a failed `SETUP`, or an exception in steps 1
     #: to 3.
     later: bool = True
+    #: The command a failed `SETUP`'s line says to run again; None for
+    #: `moxi install <module>`.
+    again: str | None = None
 
     @property
     def restart(self) -> bool:
@@ -512,6 +534,7 @@ def _move(step: Settle) -> bool:
 def _setup(step: Settle) -> bool:
     """Step 2: `SETUP`, imported and called, then `setup.json`."""
     module, target = step.module, step.found.setup
+    again = step.again or f"moxi install {module}"
     if target:
         say(f"setup {module}: running {target}")
         try:
@@ -524,7 +547,7 @@ def _setup(step: Settle) -> bool:
         except Exception as exc:
             check()
             say(f"setup {module}: failed ({_one_line(exc)}). The install stays; run "
-                f"`moxi install {module}` again once the cause is fixed.", err=True)
+                f"`{again}` again once the cause is fixed.", err=True)
             return False
         check()
         code = _exit_code(result)
@@ -532,7 +555,7 @@ def _setup(step: Settle) -> bool:
             if isinstance(result, str):
                 say(result, err=True)
             say(f"setup {module}: failed (exit {code}). The install stays; run "
-                f"`moxi install {module}` again once the cause is fixed.", err=True)
+                f"`{again}` again once the cause is fixed.", err=True)
             return False
         say(f"setup {module}: done")
     with held():
@@ -1123,6 +1146,46 @@ def _listeners(step: Settle) -> bool:
     return ok
 
 
+# -- the setup alone --------------------------------------------------------------------------
+
+def setup_only(module: str) -> int:
+    """Run `module`'s `SETUP` in this process and record it, as step 2 of the settle step
+    does, on the module as it is installed here; nothing else of the settle step runs.
+    Returns 0 when it ran, and when the module declares no `SETUP`, which is said and
+    records nothing; 1 when the module isn't present or `SETUP` failed, its record
+    untouched; `INTERRUPTED` on a stop request."""
+    from . import modules
+
+    found = modules.load(module)
+    if found.state != modules.PRESENT:
+        say(f"setup {module}: not run, the module is {found.state}"
+            + (f": {found.reason}" if found.reason else ""), err=True)
+        return 1
+    if not found.setup:
+        say(f"setup {module}: the module declares no SETUP; nothing ran and nothing was "
+            f"recorded")
+        return 0
+    step = Settle(module, found, again=setup_command(module))
+    ok = False
+    try:
+        try:
+            _state.raising = True
+            ok = _setup(step)
+        except Interrupted:
+            pass
+        except Exception as exc:
+            _state.raising = False
+            say(f"setup {module}: failed ({_one_line(exc)})", err=True)
+        finally:
+            _state.raising = False
+    except Interrupted:  # a signal in an except clause above
+        pass
+    if _state.request is not None:
+        say(f"setup {module}: interrupted", err=True)
+        return INTERRUPTED
+    return 0 if ok else 1
+
+
 # -- the teardown ----------------------------------------------------------------------------
 
 def teardown(module: str) -> int:
@@ -1218,6 +1281,7 @@ def _parse(argv: list[str]):
     parser.add_argument("module")
     parser.add_argument("--replace", action="store_true")
     parser.add_argument("--teardown", action="store_true")
+    parser.add_argument(SETUP_ONLY, dest="setup_only", action="store_true")
     answer = parser.add_mutually_exclusive_group()
     answer.add_argument("--skills", dest="skills", action="store_true", default=None)
     answer.add_argument("--no-skills", dest="skills", action="store_false")
@@ -1242,6 +1306,8 @@ def main(argv: list[str] | None = None,
     try:
         if args.teardown:
             return teardown(args.module)
+        if args.setup_only:
+            return setup_only(args.module)
         return settle(args.module, replace=args.replace, install_skills=args.skills)
     finally:
         _ignore_signals()
