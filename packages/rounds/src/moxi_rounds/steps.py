@@ -135,8 +135,9 @@ from collections.abc import Callable, Collection, Iterator, Mapping, Sequence
 from dataclasses import dataclass
 
 from . import (brake, builds, checking, decisions, findings, finish_actions, finish_gates,
-               flows, holds, questions, skips, stages, tracing, versions)
+               flows, holds, queue_log, questions, skips, stages, tracing, versions)
 from . import ci as ci_reads
+from . import settings as own
 from . import state as states
 from .errors import Unmet
 
@@ -186,8 +187,8 @@ class Seen:
     build is off it); `holds_target`, whether `P` is the tip or an ancestor of it, None
     when that could not be read; `tree`, the worktree as `finish` reads it: None where
     it no longer exists, else `clean`, `changed` (a tracked change or an untracked path)
-    or `elsewhere` (made on another machine); `check_on`, the repo's setting of that
-    name; `actions`, the repo's finish actions, each with its `id`; `shares`, a
+    or `elsewhere` (made on another machine); `check_on` and `land`, the repo's settings
+    of those names; `actions`, the repo's finish actions, each with its `id`; `shares`, a
     `builds.Share` for each build it shares commits with; `ratify`, the project's
     setting of that name; `design`, what `commission` refuses on while `design.md`
     holds other bytes than its current version was frozen from (`versions.unchanged`),
@@ -211,6 +212,7 @@ class Seen:
     holds_target: bool | None = None
     tree: str | None = None
     check_on: str = "merged"
+    land: str = "finish"
     actions: tuple[Mapping, ...] = ()
     shares: tuple[builds.Share, ...] = ()
     ratify: str = "majors"
@@ -446,6 +448,12 @@ def _check(state: states.State, about: Asked) -> Step:
     if seen.head is not None and seen.check is not None and checking.passes(
             state, stage, CHECK, tip=seen.head, argv=seen.check):
         return Step(CHECK, DONE, stage=stage)
+    # A queue member the lander landed is met by its candidate's records at the tip.
+    if (seen.land == own.LAND_QUEUE and seen.head is not None
+            and ci_reads.candidate_why_not(
+                state, stage, tip=seen.head,
+                has_local=seen.ci is not None and seen.ci.local is not None) is None):
+        return Step(CHECK, DONE, stage=stage)
     owes: tuple[str, ...] = ()
     if seen.ci is not None and seen.head is not None and seen.check is not None:
         by_ci = ci_reads.why_not(state, stage, tip=seen.head, now=seen.ci)
@@ -529,12 +537,36 @@ def _finish(state: states.State, about: Asked) -> Step:
     waits = [one.unmet for one in found]
     build = builds.current(state, stage)
     tip = seen.tip or seen.head
+    if seen.land == own.LAND_QUEUE and build is not None:
+        return _queued_finish(stage, build, seen, found, waits, about.name,
+                              queue_log.standing(state, stage))
     if build is not None and tip is not None:
         # The verb refuses these before it runs anything, so the row waits for them.
         waits += finish_actions.blocked(state, build, tip, seen.actions,
                                         name=about.name, worktree_gone=seen.tree is None)
     return Step(FINISH, WAITING if waits else READY, stage=stage, waits=tuple(waits),
                 gates=tuple(one.number for one in found))
+
+
+def _queued_finish(stage: str, build, seen, found, waits: list, name: str,
+                   standing) -> Step:
+    """The finish of a build in a queue project: it waits on the lander while the build
+    is queued at its branch's tip; else it is the step that joins the queue, and what
+    became of an earlier join is owed in words."""
+    gates = tuple(one.number for one in found)
+    tip = seen.tip or seen.head
+    if standing is not None and standing.queued and standing.tip == tip:
+        return Step(FINISH, WAITING, stage=stage, gates=gates, waits=(Unmet(
+            f"{standing.line()}; {build.repo}'s lander merges it",
+            f"moxi rounds queue --repo {build.repo}"),))
+    owes: tuple[str, ...] = ()
+    if standing is not None and standing.queued:
+        owes = (f"{standing.line()}, and the branch moved to {str(tip)[:12]} since: the "
+                "lander leaves it out; check and finish again to join at the tip",)
+    elif standing is not None and standing.last != queue_log.LANDED:
+        owes = (standing.line(),)
+    return Step(FINISH, WAITING if waits else READY, stage=stage, waits=tuple(waits),
+                gates=gates, owes=owes)
 
 
 

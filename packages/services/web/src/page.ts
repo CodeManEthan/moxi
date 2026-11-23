@@ -60,7 +60,7 @@
 import { css, html, LitElement, nothing, unsafeCSS } from "lit";
 import { keyed } from "lit/directives/keyed.js";
 import { repeat } from "lit/directives/repeat.js";
-import { api, components, confirm, gateway, gatewayActs, installed, navigate, subscribe } from "/m/ui/client.js";
+import { api, components, confirm, gateway, gatewayActs, installed, navigate, subscribe, WaitClock } from "/m/ui/client.js";
 
 import { NO_SUCH_ADDRESS, NOTHING_OPEN, parseRoute, pathToWrite, resolve } from "./address.ts";
 import type { Address } from "./address.ts";
@@ -327,9 +327,8 @@ export class ServicesPage extends LitElement {
   #menu = false;
   /** What was opened by its address takes the view once drawn. */
   #scrollTo: "row" | null = null;
-  /** When the page was connected, for the first read's `Reading…`. */
-  #since = Date.now();
-  #readingTimer: ReturnType<typeof setTimeout> | undefined;
+  /** The first read's wait, for its `Reading…`. */
+  #waited = new WaitClock(READING_AFTER_MS);
   #reads: OpenReads | null = null;
   /** The text whose `Copy` reads `Copied` for a while. */
   #copied: string | null = null;
@@ -343,8 +342,7 @@ export class ServicesPage extends LitElement {
     super.connectedCallback();
     this.#phone = gateway();
     const changed = (): void => this.requestUpdate();
-    this.#since = Date.now();
-    this.#readingTimer = setTimeout(changed, READING_AFTER_MS);
+    this.#waited.start(changed);
     this.#take(this.route);
     const rows = new Feed<Rows>(() => api("services", "api/rows"), parseRows, () => this.#listed());
     this.#rows = rows;
@@ -368,7 +366,7 @@ export class ServicesPage extends LitElement {
     this.#stop?.();
     this.#stop = null;
     clearTimeout(this.#jobTimer);
-    clearTimeout(this.#readingTimer);
+    this.#waited.stop();
     clearTimeout(this.#reloadTimer);
     document.removeEventListener("visibilitychange", this.#shown);
   }
@@ -814,7 +812,7 @@ export class ServicesPage extends LitElement {
     const rows = this.#rows;
     if (rows === null) return nothing;
     const when = { now: Date.now() / 1000 };
-    const state = pageState(rows, Date.now() - this.#since, this.#phone, when);
+    const state = pageState(rows, this.#waited.waitedMs(), this.#phone, when);
     if (state.state === "gone") return html`<p class="state problem" data-line="gone">${state.line}</p>`;
     const told = this.#told;
     const value = rows.value;

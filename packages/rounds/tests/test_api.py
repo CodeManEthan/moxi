@@ -363,7 +363,7 @@ def _name(requirement: str) -> str:
     return requirement.split(";")[0].split("<")[0].split(">")[0].split("=")[0].strip()
 
 
-def test_the_package_requires_none_of_repo_turns_or_comms_and_turns_only_as_its_extra():
+def test_the_package_requires_none_of_repo_turns_or_comms_and_each_only_as_its_extra():
     declared = tomllib.loads((PACKAGE / "pyproject.toml").read_text(encoding="utf-8"))
     project = declared["project"]
     extras = project.get("optional-dependencies", {})
@@ -372,16 +372,18 @@ def test_the_package_requires_none_of_repo_turns_or_comms_and_turns_only_as_its_
     assert not required & {"moxi-repo", "moxi-turns", "moxi-comms"}
     for extra, named in extras.items():
         names = {_name(one) for one in named}
-        assert not names & {"moxi-repo", "moxi-comms"}
+        assert "moxi-repo" not in names
         assert ("moxi-turns" in names) == (extra == "turns")
-    assert "turns" in extras
+        assert ("moxi-comms" in names) == (extra == "comms")
+    assert "turns" in extras and "comms" in extras
 
     installed = metadata.distribution("moxi-rounds").requires or []
     for requirement in installed:
         name = _name(requirement)
-        assert name not in {"moxi-repo", "moxi-comms"}
-        if name == "moxi-turns":
-            assert "extra == 'turns'" in requirement.replace('"', "'")
+        assert name != "moxi-repo"
+        for module in ("turns", "comms"):
+            if name == f"moxi-{module}":
+                assert f"extra == '{module}'" in requirement.replace('"', "'")
 
 
 def test_the_package_registers_its_module_its_listener_its_refusal_and_no_git_hook():

@@ -183,6 +183,21 @@ test("without launcher, sessions' Session line: its words, linked to its transcr
   assert.deepEqual(opened(r, mail(), "reviewer", { hasSessions: true, session: null }).before, []);
 });
 
+test("while a read that can bring the Session line is out, the line holds its place reading", () => {
+  const r = roster([bound("reviewer")]);
+  assert.deepEqual(opened(r, mail(), "reviewer", { hasSessions: true, session: null, sessionOut: true }).before, [
+    { key: "session", label: "Session", value: READING, tail: null, link: null },
+  ]);
+  // Its words, once they come, take the same place.
+  const session = { value: "reviewer · started today 15:50 · claude", route: "claude/s-reviewer" };
+  assert.deepEqual(opened(r, mail(), "reviewer", { hasSessions: true, session, sessionOut: false }).before
+    .map((line) => line.value), ["reviewer · started today 15:50 · claude"]);
+  // An unbound address has no session to read.
+  const idle = roster([row("docs-writer")], [{ qualified: "docs-writer", count: 1, since: at("17:40") }]);
+  assert.deepEqual(opened(idle, mail(), "docs-writer", { hasSessions: true, session: null, sessionOut: true }).before
+    .filter((line) => line.key === "session"), []);
+});
+
 test("launcher's Session line wins over sessions'; an unbound address takes neither", () => {
   const r = roster([bound("planner")]);
   const launched = join(r, [entry("planner")]);

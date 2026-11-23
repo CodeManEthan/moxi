@@ -31,12 +31,18 @@ worker count or base stops it there, before any step runs. Then, in order:
    is printed as `path:line: word`, with the fix: reword it, or mark a genuine use.
 3. Pick the packages. The changed paths are the commits since the branch left `main`
    (`git merge-base main HEAD`, or `--base REV` in place of `main`) plus the working
-   tree's staged, unstaged and untracked files. A path under `packages/<p>/` picks `p`;
-   any other path (the root files, the lock, the workflow) picks every package. Then
-   every package that depends on a picked one, by its declared dependencies, optional
-   dependencies or dependency groups, is picked too, and so on until nothing is added:
-   a plain path filter would skip a dependent's tests and its contract check. `--full`
-   picks every package.
+   tree's staged, unstaged and untracked files. A path under `packages/<p>/` picks `p`,
+   and one under `packages/moxi-dev/`, the check itself, picks every package; its
+   rename table, which the renames step above reads whatever the pick, picks only
+   `moxi-dev`. A root path a package's tests read picks that package (`READ_BY`):
+   `README.md` picks `memory`, and publishing's two workflow files pick `publishing`.
+   The other workflows (`.github/`), `docs/` and `CONTRIBUTING.md` pick nothing; any
+   other path (the lock, the root `pyproject.toml`, the other root files) picks every
+   package. Then every package that depends on a picked one, by its declared
+   dependencies, optional dependencies or dependency groups, is picked too, and so on
+   until nothing is added: a plain path filter would skip a dependent's tests and its
+   contract check. An edge to `moxi-dev` is left out of that, since every package lists
+   it in its dev group. `--full` picks every package.
 4. Check the build stamps of the picked packages that have a web page
    (`moxi-dev stamp`, on the working tree): built files that lag their sources fail here,
    with no Node.
@@ -250,21 +256,52 @@ def load_workspace(root: Path) -> list[Package]:
             for path, dist, requires, browser in loaded]
 
 
+# The check's own distribution. Every package lists it in its dev group, so picking
+# ignores edges to it; a change to it picks every package, but for its rename table,
+# which only the renames step reads, and that runs whatever the pick.
+CHECK_DIST = "moxi-dev"
+CHECK_TABLE = "packages/moxi-dev/renames.tsv"
+
+# Root paths that hold no package's code, tests or declarations: a change to one picks
+# no package (the whole-tree steps still read it), unless `READ_BY` names it. Any other
+# path outside a package, the lock and the root pyproject.toml among them, picks every
+# package.
+PICKS_NOTHING = frozenset({".github", "docs", "CONTRIBUTING.md", "README.md"})
+
+# Root paths a package's tests read, each with that package's folder in `packages/`: a
+# change to one picks the package. memory's contract test reads the package table in the
+# root README; publishing's tests hold its workflow files equal to its templates.
+READ_BY = {"README.md": "memory",
+           ".github/workflows/publishing.yml": "publishing",
+           ".github/workflows/release.yml": "publishing"}
+
+
 def pick(packages: Sequence[Package], paths: Sequence[str]) -> list[Package]:
-    """The packages the changed paths pick, with every package that depends on them."""
+    """The packages the changed paths pick, with every package that depends on them.
+
+    A dependent is found through every edge a package declares but one to `CHECK_DIST`;
+    a path in `CHECK_DIST` itself picks every package (`CHECK_TABLE` picks it alone),
+    a root path in `READ_BY` picks the package whose tests read it, and any other root
+    path in `PICKS_NOTHING` picks none."""
     by_dir = {package.dir: package for package in packages}
     picked: set[str] = set()
     for path in paths:
         parts = path.split("/")
         if len(parts) >= 3 and parts[0] == "packages" and parts[1] in by_dir:
-            picked.add(by_dir[parts[1]].dist)
-        else:
+            dist = by_dir[parts[1]].dist
+            if dist == CHECK_DIST and path != CHECK_TABLE:
+                return list(packages)
+            picked.add(dist)
+        elif path in READ_BY:
+            if READ_BY[path] in by_dir:
+                picked.add(by_dir[READ_BY[path]].dist)
+        elif parts[0] not in PICKS_NOTHING:
             return list(packages)
     grew = True
     while grew:
         grew = False
         for package in packages:
-            if package.dist not in picked and package.requires & picked:
+            if package.dist not in picked and (package.requires - {CHECK_DIST}) & picked:
                 picked.add(package.dist)
                 grew = True
     return [package for package in packages if package.dist in picked]

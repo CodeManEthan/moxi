@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+- An opened row of a bound agent draws its `Session` line as it opens, reading `Reading…`
+  until launcher's and sessions' reads answer, and then their words in the same place.
+  Before, the line arrived late above `Cache`, `Waits on` and the send box and pushed
+  them down a line, so a press of `Thread` or the box's `Reply wanted` just then could
+  miss. A session sessions doesn't list loses the line once that read answers.
+- The page's `Reading…` line, while its first read is out, shows once that read has
+  been out 400 ms in every browser. In Firefox it could stay blank until something
+  else redrew the page, since the page checked the wait against `Date.now()`, which
+  Firefox coarsens. It now takes the wait from moxi-ui's `WaitClock`, so the `ui` extra
+  asks for moxi-ui 0.2.6 or later.
 - The notes, refusals, docstrings and docs name the operator neutrally, never "he" or
   "him": the `--held` and `--interrupt` notes for the operator end "so it went as an
   ordinary message".
