@@ -12,7 +12,9 @@ from pathlib import Path
 
 import pytest
 from moxi_dev.testing import short_dir, wait_for
+from moxi_ui.session import LIMIT
 from moxi_ui.testing import WAIT_S
+from moxi_ui.testing.shell import Session
 from playwright.sync_api import expect
 
 import fixture_kit
@@ -89,6 +91,29 @@ def test_the_test_shell_serves_the_fixture_and_reaches_its_page_server(ui_shell)
         assert events.until(lambda name, data: name == "moxi.state"
                             and data["state"] == "up")[1]["module"] == "fixture"
     assert ui_shell.wait_server("fixture", lambda r: r["crashes"] >= 1)["crashes"] == 1
+
+
+def test_the_shells_reads_reuse_one_sign_in_so_a_browsers_session_outlives_them(ui_shell):
+    # A sign-in of its own stands in for a browser's, made after the shell's first.
+    browser = Session.sign_in(ui_shell.port, ui_shell.ticket())
+    first = ui_shell.session()
+    for _ in range(LIMIT + 5):
+        again = ui_shell.session(timeout=10)
+        assert again.get("/m/ui/api/modules")[0] == 200
+        assert again.timeout == 10
+    assert (again.cookie, again.key) == (first.cookie, first.key)
+    assert browser.get("/m/ui/api/modules")[0] == 200
+
+
+def test_the_shells_session_signs_in_again_once_the_shell_drops_it(ui_shells, fixture_site):
+    shell = ui_shells(site=[fixture_site])
+    kept = shell.session()
+    for _ in range(LIMIT):
+        Session.sign_in(shell.port, shell.ticket())
+    assert kept.get("/m/ui/api/modules")[0] != 200
+    again = shell.session()
+    assert again.cookie != kept.cookie
+    assert again.get("/m/ui/api/modules")[0] == 200
 
 
 def test_a_fixture_that_fails_its_start_is_a_502_naming_exit_3(ui_shells, fixture_site):

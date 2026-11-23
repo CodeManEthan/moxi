@@ -13,6 +13,15 @@ the `argv` of the step's entry in the round's recorded flow (`step_entry`). A pa
 older commit, a run of another step, and a pass of a command the repo no longer declares
 do not count. A run of one step is never read for another.
 
+**A queue project's check** (`land = "queue"`) is the repo's `check.scoped` command,
+`{base}` filled in with the merge-base of `T` and the target's head: the check of the
+packages the build touched and their dependents. It pushes nothing and reads no CI, and
+`--full` is refused, since the full run of a queue project's build is its candidate's
+CI. The gate's argv fills `{base}` with the newest run's own `merge_base` when that run
+is at `T`, and with the merge-base read from git otherwise; the merge-base of `T` and
+the target does not change as the target moves forward, so the record stays good while
+the build waits in the queue.
+
 **The command line** is split as a shell would split it and run with no shell; a step of
 the user's own gives its words as a list. Each word may hold the placeholders `{round}`, `{stage}`, `{repo}`, `{root}`, `{branch}`, `{tip}`
 and `{into}`, filled in for the build (`fill`); any other text in braces is left as it is.
@@ -128,14 +137,46 @@ def values(name: str, build: builds.Build, *, root: str | os.PathLike,
             "branch": build.branch, "tip": tip, "into": build.target}
 
 
+def queued(settings, repo: str) -> bool:
+    """Whether the repo's builds land through its queue (`land = "queue"`)."""
+    return own.build_setting(settings, repo, "land") == own.LAND_QUEUE
+
+
+def scoped(settings, repo: str) -> list[str] | None:
+    """The words of a queue project's `check.scoped`, placeholders and `{base}` as
+    written; None when the repo is no queue project or names no scoped command."""
+    found = own.build_setting(settings, repo, "check")
+    if not queued(settings, repo) or not isinstance(found, Mapping) or not isinstance(
+            found.get("scoped"), str):
+        return None
+    return shlex.split(found["scoped"])
+
+
+def fill_base(words: Sequence[str], base: str | None) -> list[str]:
+    """`words` with `{base}` replaced by the merge-base `base`; kept where it is None."""
+    if base is None:
+        return list(words)
+    return [str(word).replace(own.BASE_FIELD, base) for word in words]
+
+
 def argv_now(settings, name: str, build: builds.Build, *, root: str | os.PathLike,
-             tip: str) -> list[str] | None:
+             tip: str, state: states.State | None = None) -> list[str] | None:
     """The argv the repo's check gives now for the build at `tip`, placeholders filled;
-    None when the repo declares no check."""
-    words = declared(settings, build.repo)
+    None when the repo declares no check. In a queue project it is the scoped command,
+    `{base}` filled in with the newest run's own merge-base when that run is at `tip`
+    and `state` is given, else with the merge-base git reads now."""
+    words = scoped(settings, build.repo) or declared(settings, build.repo)
     if words is None:
         return None
-    return fill(words, values(name, build, root=root, tip=tip))
+    filled = fill(words, values(name, build, root=root, tip=tip))
+    if not queued(settings, build.repo):
+        return filled
+    run = None if state is None else newest(state, build.stage, CHECK)
+    if run is not None and run.get("commit") == tip and run.get("merge_base"):
+        return fill_base(filled, run["merge_base"])
+    target_head = Git(root).branch(build.target)
+    bases = () if target_head is None else Git(root).merge_bases(tip, target_head)
+    return fill_base(filled, bases[0] if len(bases) == 1 else None)
 
 
 def runs(state: states.State, stage: str, step: str) -> list[dict]:
@@ -313,16 +354,18 @@ def seen_of(state: states.State, name: str, *, settings,
         # The check is read at the head, which is the tip while the branch is there:
         # a build whose branch is gone is finished at its head, so a run there counts.
         argv = None if head is None else argv_now(settings, name, build, root=root,
-                                                  tip=head)
+                                                  tip=head, state=state)
         found[build.stage] = steps.Seen(
             state=now.status.state, tip=tip, clean=clean,
             check=None if argv is None and declared(settings, build.repo) is None
             else tuple(argv or ()),
             values=None if head is None else values(name, build, root=root, tip=head),
-            ci=_ci_now(settings, build, name=name, root=root, tip=head),
+            ci=(None if queued(settings, build.repo)
+                else _ci_now(settings, build, name=name, root=root, tip=head)),
             head=head, since=since, drift=moved, reported=reported,
             target_before=before, holds_target=holds, tree=tree,
             check_on=own.build_setting(settings, build.repo, "check_on"),
+            land=own.build_setting(settings, build.repo, "land"),
             actions=tuple(own.build_setting(settings, build.repo, "finish")),
             shares=tuple(now.shares), ratify=ratify)
     return found
@@ -460,7 +503,7 @@ def check(name: str, stage: str, *, by: str, step: str | None = None,
         if id(view) not in looked:
             looked[id(view)] = _look(view, name=name, stage=stage, step=step,
                                      settings=settings, again=again, timeout_s=timeout_s,
-                                     by_ci=step is None and not full)
+                                     by_ci=step is None and not full, full=full)
         return looked[id(view)]
 
     held = _Held(wait=wait, say=say, again=again, env=env)
@@ -818,7 +861,7 @@ def _command(state: states.State, build: builds.Build, step: str | None, *, name
     """The words of the command a run of `step` (the repo's check when None) runs,
     placeholders as written, and its own time limit; or why there is none."""
     if step is None:
-        words = declared(settings, build.repo)
+        words = scoped(settings, build.repo) or declared(settings, build.repo)
         if words is None:
             return None, None, Unmet(
                 f"{build.repo} declares no check, so a build in it has no check step",
@@ -840,7 +883,7 @@ def _command(state: states.State, build: builds.Build, step: str | None, *, name
 
 
 def _look(view, *, name: str, stage: str, step: str | None, settings, again: str,
-          timeout_s: float | None, by_ci: bool) -> _Look:
+          timeout_s: float | None, by_ci: bool, full: bool = False) -> _Look:
     found = _Look(unmet=[])
     state = view.state
     show = f"moxi rounds show {name}"
@@ -891,9 +934,33 @@ def _look(view, *, name: str, stage: str, step: str | None, settings, again: str
         found.values = values(name, build, root=root, tip=found.tip)
         found.argv = fill(words, found.values)
     found.timeout_s = _limit(timeout_s, own_timeout_s)
+    if step is None and queued(settings, build.repo):
+        _queue_look(found, full=full, name=name, stage=stage)
+        return found
     if by_ci:
         _by_ci_look(found, state, settings, timeout_s=timeout_s, name=name)
     return found
+
+
+def _queue_look(found: _Look, *, full: bool, name: str, stage: str) -> None:
+    """A queue project's check: `{base}` filled in with the merge-base read at the
+    tip; refused with `--full`, or where the merge-base is not one commit."""
+    build = found.build
+    if full:
+        found.unmet.append(Unmet(
+            f"{build.repo} lands through its queue, so a build's full run is its "
+            "candidate's CI and its own check is the scoped one",
+            f"moxi rounds check {name} {stage}"))
+        return
+    if found.argv is None:
+        return
+    if found.merge_base is None:
+        found.unmet.append(Unmet(
+            f"the merge-base of {stage}'s tip and {build.target} is not one commit, and "
+            "the scoped check runs against it",
+            f"merge {build.target} into the branch, then moxi rounds check {name} {stage}"))
+        return
+    found.argv = fill_base(found.argv, found.merge_base)
 
 
 def _limit(given_s: float | None, own_s: float | None) -> float:
@@ -973,6 +1040,6 @@ def _read_git(found: _Look, git: Git, worktree: Path, build: builds.Build, *, na
 
 __all__ = ["CHECK", "RAN", "PLACEHOLDERS", "WITH_WORK", "OUTPUT", "DEFAULT_TIMEOUT_S",
            "GRACE_S", "LOCK_FILE", "lock_file", "fill", "declared",
-           "values", "argv_now", "runs", "newest", "why_not", "passes", "recorded_argv",
+           "values", "queued", "scoped", "fill_base", "argv_now", "runs", "newest", "why_not", "passes", "recorded_argv",
            "step_entry", "report_steps", "commission_of",
            "Tip", "read_tip", "seen_of", "Ran", "CiChecked", "PUSH_TIMEOUT_S", "check"]

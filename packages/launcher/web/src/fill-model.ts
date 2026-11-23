@@ -25,7 +25,7 @@
 //
 // A filled value is not a change. It is named on its own item on the line above the box,
 // with what it is, where it came from and `Clear`, and under its row in the panel. One the
-// user edits becomes his change and leaves the item. A filled value that can do harm asks
+// user edits becomes a change and leaves the item. A filled value that can do harm asks
 // nothing: the launch it came from confirmed it, and the page draws it in the warning
 // colour wherever it is named.
 //

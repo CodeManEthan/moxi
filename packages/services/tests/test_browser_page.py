@@ -284,7 +284,7 @@ def test_the_groups_go_by_project_then_no_project_then_moxi(seeded, ui_shell, ui
     expect(web).not_to_have_attribute("lead", re.compile(".*"))
     expect(alpha.locator('.item[data-id="services/agent-run"] moxi-ui-row')).to_have_attribute(
         "where", "true · every hour · spends usage")
-    loose = panel.locator('section[data-part="group"][data-group="his"]')
+    loose = panel.locator('section[data-part="group"][data-group="yours"]')
     expect(loose.locator('.item[data-id="services/backup"] moxi-ui-row')).to_have_attribute(
         "where", "true · every 5 minutes")
     expect(loose.locator('.item[data-id="services/spare"] moxi-ui-row')).to_have_attribute("fact", "off")
@@ -421,7 +421,7 @@ def test_a_project_address_shows_its_rows_alone_until_show_all(seeded, ui_shell,
     assert sorted(ids(panel.locator(".item"))) == sorted(mine)
     # The failed row of alpha still rises; Moxi's rows and the other groups are not shown.
     expect(panel.locator('section[data-part="first"] .item[data-id="services/queue-worker"]')).to_have_count(1)
-    expect(panel.locator('section[data-group="moxi"], section[data-group="his"]')).to_have_count(0)
+    expect(panel.locator('section[data-group="moxi"], section[data-group="yours"]')).to_have_count(0)
     expect_path(ui_page, "/m/services/project/alpha")
 
     # The menu names the projects his rows carry.
@@ -677,7 +677,7 @@ def test_no_row_of_his_says_what_a_service_is(seeded, ui_shell, ui_page):
         "Nothing is down. You have added no services yet.")
     expect(first.locator('[data-line="counts"]')).to_have_count(0)
     expect(first.locator('[data-action="add"]')).to_have_count(0)
-    yours = panel.locator('section[data-part="group"][data-group="his"]')
+    yours = panel.locator('section[data-part="group"][data-group="yours"]')
     expect(yours.locator('[data-line="group"]')).to_have_text("Yours")
     expect(yours.locator('[data-line="what"]')).to_have_text(
         "A service is a command this computer keeps running, such as a dev server, or runs on a "

@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- The page's `Reading…` line, while its first read is out, shows once that read has
+  been out 400 ms in every browser. In Firefox it could stay blank until the page's
+  next redraw, up to a minute later, since the page checked the wait against
+  `Date.now()`, which Firefox coarsens. It now takes the wait from moxi-ui's
+  `WaitClock`, so the `ui` extra asks for moxi-ui 0.2.6 or later.
 - With `moxi-sessions` installed, `Live sessions` leaves the browser UI shell's band of
   pages: the Sessions page shows the running sessions with turns' live state. `/m/turns/`
   still opens the panel. It needs ui 0.2.5 or later, which reads `band_unless`; an older

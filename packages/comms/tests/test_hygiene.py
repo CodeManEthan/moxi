@@ -7,7 +7,7 @@ import tokenize
 from collections import Counter
 from pathlib import Path
 
-from conftest import wait_for_queue
+from conftest import wait_for_queue, wait_until
 
 from moxi_comms.context import CONTEXT_BLOCK
 
@@ -20,10 +20,14 @@ def test_logs_carry_ids_never_bodies_or_urls(rig, caplog):
                       scope="proj-a")
     assert code == 0
     wait_for_queue(reviewer, 1)
+    message_id = reviewer.queue[0]["message_id"]
+    # The daemon logs a delivery on its own thread after it hands the message to the shim,
+    # so the shim can hold it before that line is written.
+    wait_until(lambda: any(message_id in r.getMessage() for r in list(caplog.records)))
     text = "\n".join(r.getMessage() for r in caplog.records)
     assert secret_body not in text, "comms logs never carry message bodies"
     assert "discord.invalid" not in text and "/api/webhooks/" not in text
-    assert reviewer.queue[0]["message_id"] in text, "...but ids are logged"
+    assert message_id in text, "...but ids are logged"
 
 
 def test_context_block_stays_short_and_discord_free():

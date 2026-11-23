@@ -166,11 +166,92 @@ def test_a_turns_change_reaches_comms_but_not_cache(repo):
     assert picked(repo) == ["turns", "comms"]
 
 
-@pytest.mark.parametrize("path", ["uv.lock", "README.md", ".github/workflows/ci.yml",
-                                  "packages/NOTES", "packages/gone/x.py"])
+@pytest.mark.parametrize("path", ["uv.lock", "tools/x.py", "LICENSE", "packages/NOTES",
+                                  "packages/gone/x.py"])
 def test_a_path_outside_a_package_picks_every_package(repo, path):
     commit_file(repo, path)
     assert picked(repo) == list(LAYOUT)
+
+
+def test_the_root_pyproject_picks_every_package(repo):
+    commit_file(repo, "pyproject.toml", (repo / "pyproject.toml").read_text() + "# x\n")
+    assert picked(repo) == list(LAYOUT)
+
+
+@pytest.mark.parametrize("path", ["README.md", "CONTRIBUTING.md",
+                                  ".github/workflows/ci.yml", "docs/queue.md"])
+def test_the_workflows_and_the_root_docs_pick_nothing(repo, path):
+    commit_file(repo, path)
+    assert picked(repo) == []
+    commit_file(repo, "packages/turns/x.py")
+    assert picked(repo) == ["turns", "comms"]
+
+
+def test_a_check_change_picks_every_package(repo):
+    commit_file(repo, "packages/moxi-dev/src/moxi_dev/x.py")
+    assert picked(repo) == list(LAYOUT)
+
+
+# The real workspace's dev groups: every package lists moxi-dev, which requires moxi and
+# publishing; connector's dev group takes ui, whose pages its browser tests drive.
+DEV_LAYOUT = {
+    "moxi": ("moxi", [], {}, {"dev": ["pytest", "moxi-dev"]}),
+    "publishing": ("moxi-publishing", ["moxi>=0.1,<0.2"], {}, {"dev": ["moxi-dev"]}),
+    "turns": ("moxi-turns", ["moxi>=0.1,<0.2"], {}, {"dev": ["moxi-dev"]}),
+    "comms": ("moxi-comms", ["moxi-turns>=0.1,<0.2"], {}, {"dev": ["moxi-dev"]}),
+    "sessions": ("moxi-sessions", ["moxi>=0.1,<0.2"], {}, {"dev": ["moxi-dev"]}),
+    "ui": ("moxi-ui", ["moxi>=0.1,<0.2"], {"testing": ["pytest"]}, {"dev": ["moxi-dev"]}),
+    "connector": ("moxi-connector", ["moxi>=0.1,<0.2"], {},
+                  {"dev": ["moxi-dev", "moxi-ui[testing]"]}),
+    "moxi-dev": ("moxi-dev", ["moxi", "moxi-publishing", "pytest"], {}, {}),
+}
+
+
+@pytest.fixture
+def dev_repo(tmp_path):
+    root = tmp_path / "d"
+    root.mkdir()
+    git(root, "init", "-q", "-b", "main")
+    write_workspace(root, DEV_LAYOUT)
+    git(root, "add", "-A")
+    git(root, "commit", "-q", "-m", "start")
+    git(root, "switch", "-q", "-c", "work")
+    return root
+
+
+def test_picking_ignores_the_edges_to_the_check(dev_repo):
+    commit_file(dev_repo, "packages/turns/src/moxi_turns/x.py")
+    assert picked(dev_repo) == ["turns", "comms"]
+
+
+def test_a_change_the_check_requires_picks_the_check_not_everything(dev_repo):
+    commit_file(dev_repo, "packages/publishing/x.py")
+    assert picked(dev_repo) == ["publishing", "moxi-dev"]
+
+
+def test_another_dev_group_edge_still_picks(dev_repo):
+    commit_file(dev_repo, "packages/ui/x.py")
+    assert picked(dev_repo) == ["ui", "connector"]
+
+
+def test_with_every_dev_group_naming_the_check_its_change_picks_every_package(dev_repo):
+    commit_file(dev_repo, "packages/moxi-dev/x.py")
+    assert picked(dev_repo) == list(DEV_LAYOUT)
+    git(dev_repo, "reset", "-q", "--hard", "main")
+    commit_file(dev_repo, "packages/moxi/x.py")
+    assert picked(dev_repo) == list(DEV_LAYOUT)
+
+
+@pytest.mark.parametrize("path", [".github/workflows/publishing.yml",
+                                  ".github/workflows/release.yml"])
+def test_a_workflow_publishings_tests_read_picks_publishing(dev_repo, path):
+    commit_file(dev_repo, path)
+    assert picked(dev_repo) == ["publishing", "moxi-dev"]
+
+
+def test_the_rename_table_picks_the_check_alone(dev_repo):
+    commit_file(dev_repo, "packages/moxi-dev/renames.tsv", "a\tb\n")
+    assert picked(dev_repo) == ["moxi-dev"]
 
 
 def test_no_change_picks_nothing(repo):
@@ -183,8 +264,8 @@ def test_working_tree_changes_count_staged_unstaged_and_untracked(repo):
     assert picked(repo) == ["cache", "comms"]
     (repo / "packages/turns/tests/test_it.py").write_text("# edited\n")   # unstaged
     assert picked(repo) == ["turns", "cache", "comms"]
-    (repo / "packages/moxi-dev/new.py").write_text("untracked\n")        # untracked
-    assert picked(repo) == ["turns", "cache", "comms", "moxi-dev"]
+    (repo / "packages/sessions/new.py").write_text("untracked\n")        # untracked
+    assert picked(repo) == ["sessions", "turns", "cache", "comms"]
 
 
 def test_ignored_files_do_not_count(repo):
@@ -255,12 +336,23 @@ def test_the_real_workspace_picks_by_the_same_rule():
         return [p.dir for p in check.pick(packages, [path])]
 
     assert {"moxi", "sessions", "turns", "cache", "comms", "moxi-dev"} <= set(dirs)
+    # A root path a package's tests read picks that package; the rest of .github none.
+    assert "memory" in of("README.md") and "publishing" not in of("README.md")
+    assert "publishing" in of(".github/workflows/release.yml")
+    assert of(".github/workflows/ci.yml") == []
     # cache depends on sessions, comms on cache through an extra, the launcher on comms,
     # and usage and memory on sessions directly.
     assert set(of("packages/sessions/src/moxi_sessions/__init__.py")) == {
-        "sessions", "cache", "comms", "launcher", "usage", "memory"}
+        "sessions", "cache", "comms", "launcher", "usage", "memory", "rounds"}
     assert of("packages/moxi/src/moxi/__init__.py") == dirs
+    assert of("packages/moxi-dev/src/moxi_dev/check.py") == dirs
     assert of("uv.lock") == dirs
+    assert of(".github/workflows/ci.yml") == []
+    # Every package lists moxi-dev in its dev group, so only the edges to it would have
+    # carried these to every package.
+    assert len(of("packages/turns/src/moxi_turns/__init__.py")) < len(dirs)
+    assert len(of("packages/publishing/src/moxi_publishing/__init__.py")) < len(dirs)
+    assert "connector" in of("packages/ui/src/moxi_ui/__init__.py")
 
 
 # --- the steps -------------------------------------------------------------------------
@@ -431,7 +523,7 @@ def test_a_stale_lock_stops_before_the_sync(repo):
     result = run_check(repo, runs)
     assert result.code == 1 and len(runs.calls) == 1
     assert ("lock fail | tags not run | refs not run | names not run | ruff not run | "
-            "renames not run | release not run | "
+            "renames not run | release not run | pronouns not run | "
             "stamps not run | web not run | sync not run | lint not run") in result.line()
 
 
@@ -447,7 +539,7 @@ def test_nothing_picked_checks_the_lock_and_passes(repo):
     assert result.code == 0
     assert [cmd for cmd, _, _ in runs.calls] == [["uv", "lock", "--check"]]
     assert ("packages: none | lock pass | tags pass | refs pass | names pass | ruff pass | "
-            "renames none | release pass "
+            "renames none | release pass | pronouns pass "
             "| stamps skipped | web skipped | sync skipped | lint not run | no suites run") \
         in result.line()
 
@@ -884,7 +976,7 @@ def test_static_runs_the_static_steps_and_nothing_else(repo, monkeypatch):
     monkeypatch.setattr(check.stamp, "check_stamps", lambda *a, **kw: pytest.fail("stamps"))
     scanned = []
     for module in (check.tags, check.refs, check.naming, check.ruff_check,
-                   check.release):
+                   check.release, check.pronouns):
         real = module.scan
         monkeypatch.setattr(module, "scan", lambda root, real=real, name=module.__name__:
                             scanned.append(name) or real(root))
@@ -892,11 +984,11 @@ def test_static_runs_the_static_steps_and_nothing_else(repo, monkeypatch):
     result = run_check(repo, runs, static=True)
     assert result.code == 0 and runs.calls == [], "no command runs: no lock, sync or suite"
     assert scanned == ["moxi_dev.tags", "moxi_dev.refs", "moxi_dev.naming",
-                       "moxi_dev.ruff_check", "moxi_dev.release"]
+                       "moxi_dev.ruff_check", "moxi_dev.release", "moxi_dev.pronouns"]
     line = result.line()
     assert LINE.match(line), line
     assert ("| packages: none | lock not run | tags pass | refs pass | names pass | "
-            "ruff pass | renames none | release pass " + STATIC_NOT_RUN) in line
+            "ruff pass | renames none | release pass | pronouns pass " + STATIC_NOT_RUN) in line
 
 
 def test_static_runs_the_renames_step_when_there_is_a_table(repo):
@@ -926,7 +1018,7 @@ def test_static_steps_all_run_after_one_fails(repo, monkeypatch, capsys):
         check.ruff_check.Hit("packages/sessions/x.py", 1, 1, "N802", "bad name")])
     result = run_check(repo, Runs(), static=True)
     assert result.code == 1 and result.tags == "fail" and result.ruff == "fail"
-    assert result.refs == result.names == result.release == "pass"
+    assert result.refs == result.names == result.release == result.pronouns == "pass"
     out = capsys.readouterr().out
     assert f"moxi-dev check: packages/sessions/x.py:1: tag {tag!r}" in out
     assert "moxi-dev check: packages/sessions/x.py:1: N802: ruff: bad name" in out
@@ -972,6 +1064,7 @@ LINE = re.compile(
     r"ruff (pass|fail|not run) \| "
     r"renames (pass|fail|none|not run) \| "
     r"release (pass|fail|not run) \| "
+    r"pronouns (pass|fail|not run) \| "
     r"stamps (pass|fail|none|skipped|not run) \| "
     r"web (pass|fail|none|skipped|not run) \| "
     r"sync (pass|fail|skipped|not run) \| "

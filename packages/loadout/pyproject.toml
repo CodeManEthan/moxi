@@ -27,7 +27,7 @@ projects = ["moxi-projects>=0.1,<0.2"]
 # its two git hook pieces with repo, reached only through moxi.modules.load("repo").
 repo = ["moxi-repo>=0.1,<0.2"]
 # The browser UI shell: with it, loadout's page shows there.
-ui = ["moxi-ui>=0.2.3,<0.3"]
+ui = ["moxi-ui>=0.2.6,<0.3"]
 
 [project.urls]
 Homepage = "https://github.com/CodeManEthan/moxi"
