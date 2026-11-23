@@ -52,7 +52,7 @@ the claim, as `directors` and `policy_directors`, and passes the second to the f
 as `policy=`. The connector can be named a policy director but can't be directed (it
 renders no standing); voice binds the operator's own name, whose messages are always
 directives; and the `moxi-comms-shim --inject-file` test seam takes `--director` or the
-stamp as given and merges nothing.
+stamps as given, the policy part keeping its guard, and merges nothing.
 
 ## What a harness is
 

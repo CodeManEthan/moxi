@@ -129,6 +129,27 @@ def test_the_frame_line_carries_the_guard():
     assert line.startswith("[comms] directive from fleet-lead")
 
 
+def test_the_hand_run_seam_reads_the_policy_stamp_and_keeps_the_guard():
+    from moxi_comms.adapters.claude_shim import seam_directors
+
+    env = {"MOXI_COMMS_DIRECTORS": "lead@proj-a,fleet-lead",
+           "MOXI_COMMS_POLICY_DIRECTORS": "fleet-lead,stray"}
+    full, policy = seam_directors([], env)
+    assert full == ("lead@proj-a", "fleet-lead")
+    assert policy == ("fleet-lead",)
+    line = frame_line(payload("fleet-lead", tier="chosen"), full, policy=policy)
+    assert line.startswith("[comms] from fleet-lead")
+
+
+def test_the_hand_run_seams_flag_takes_no_policy_part():
+    from moxi_comms.adapters.claude_shim import seam_directors
+
+    env = {"MOXI_COMMS_DIRECTORS": "fleet-lead", "MOXI_COMMS_POLICY_DIRECTORS": "fleet-lead"}
+    assert seam_directors(["fleet-lead"], env) == (("fleet-lead",), ())
+    with pytest.raises(directors.BadDirector):
+        seam_directors(["not a name"], env)
+
+
 @pytest.mark.parametrize("tier, branch", [("standing", owed.BRANCH_DIRECTOR),
                                           ("chosen", owed.BRANCH_PEER)])
 def test_the_owed_ledger_opens_a_director_debt_only_for_a_directive(tier, branch):

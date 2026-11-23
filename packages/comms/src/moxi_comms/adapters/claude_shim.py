@@ -1390,7 +1390,9 @@ def build_parser():
     ap.add_argument("--director", action="append", default=[],
                     help="an ALREADY-QUALIFIED director name (repeatable). moxi-comms-claude "
                          "qualifies at launch and passes them here; a hand-run shim must "
-                         f"write `name@scope` itself. Default: ${directors_mod.DIRECTORS_ENV}")
+                         "write `name@scope` itself. Default: "
+                         f"${directors_mod.DIRECTORS_ENV}, with "
+                         f"${directors_mod.POLICY_DIRECTORS_ENV} naming its policy part")
     ap.add_argument("--inject-file",
                     help="the injection seam: write each digest to this file")
     ap.add_argument("--boundary-file", help="touch-file poll: each change = a Stop hook")
@@ -1401,6 +1403,21 @@ def build_parser():
                          "as this shim's claim; without it, nothing sends as this shim's "
                          "name")
     return ap
+
+
+def seam_directors(flagged, env=None) -> tuple[tuple, tuple]:
+    """The hand-run seam's directors, `(full, policy)`, with nothing merged.
+
+    `--director` names (`flagged`) are taken as given, with no policy part. Without them
+    the seam reads the stamps: the full list, and the part of it only the box's setting
+    gave, kept to names in the full list. The policy part gets the provisioning guard at
+    every render, as in a launched session. Raises `BadDirector` for a malformed name.
+    """
+    if flagged:
+        return directors_mod.validated(flagged), ()
+    full = directors_mod.validated(directors_mod.from_env(env))
+    policy = tuple(name for name in directors_mod.policy_from_env(env) if name in full)
+    return full, policy
 
 
 def main(argv=None) -> int:  # pragma: no cover - exercised by the smoke runs
@@ -1416,14 +1433,14 @@ def main(argv=None) -> int:  # pragma: no cover - exercised by the smoke runs
               "a live session is the turns module's; comms carries none.", file=sys.stderr)
         return 2
     try:
-        declared = directors_mod.validated(args.director or directors_mod.from_env())
+        declared, policy = seam_directors(args.director)
     except directors_mod.BadDirector as exc:
         print(f"moxi-comms-shim: {exc}", file=sys.stderr)
         return 2
     if declared:
-        log.info("directors declared for this session: %s", ", ".join(declared))
+        log.info("directors for this session: %s", directors_mod.describe(declared, policy))
     common = dict(name=args.name, scope=args.scope, global_=args.global_,
-                  autoreconnect=True, directors=declared)
+                  autoreconnect=True, directors=declared, policy_directors=policy)
     if args.project:
         common["project"] = args.project
     return _serve_inject_file(args, common)
@@ -1482,7 +1499,7 @@ __all__ = ["ClaudeShim", "frame_line", "frame_marks", "render_digest", "digest_h
            "digest_senders", "DELIVERY_BY",
            "held_mark", "humanize_age", "is_catch_up", "parse_timestamp",
            "replay_is_unverified",
-           "backlog_frames",
+           "backlog_frames", "seam_directors",
            "OFFLINE_MESSAGE", "DEFAULT_ROOM", "REPLAY_ATTRIBUTION_NOTE", "SILENT_TIERS",
            "REFUSED_PREFIX",
            "EXIT_REFUSED", "EXIT_OFFLINE",
