@@ -304,6 +304,69 @@ def test_codex_layer_one_has_no_director_sentence_for_a_policy_director_only():
     assert DIRECTOR_LINE not in layer_one_fixed(directors=adapter._directors())
 
 
+_CODEX_START = r"""
+import json, sys
+from moxi_comms.adapters import codex_wrapper, word
+
+def bound(launch, env, harness_pid, handle, w):
+    word.teller(w)(word.BOUND)
+    return 0
+
+codex_wrapper._adapter_process = bound
+launch = codex_wrapper.plan(
+    codex_wrapper.build_parser().parse_args(["--name", "coder", "--no-window",
+                                             *sys.argv[2:]]),
+    cwd=sys.argv[1], endpoint=lambda: (None, "comms' daemon isn't running"))
+written = []
+
+def exec_(binary, argv, env):
+    written.append(launch.instructions.read_text())
+    return 0
+
+code = codex_wrapper.start(launch, "/bin/true", ready_wait=10, exec_=exec_, roster={})
+print(json.dumps({"code": code, "text": written[0] if written else None,
+                  "policy": launch.agent.policy_directors}))
+"""
+
+
+@pytest.mark.parametrize("argv, present", [((), False), (("--director", "lead"), True)])
+def test_the_layer_one_codexs_start_writes_keys_on_launch_declared_only(
+        tmp_path, argv, present):
+    import json
+    import os
+    import subprocess
+    import sys
+
+    from moxi_comms.context import CONTEXT_BLOCK, DIRECTOR_LINE
+
+    # `start` forks, so it runs in a child process, never in the test's own.
+    proc = subprocess.run([sys.executable, "-c", _CODEX_START, str(tmp_path), *argv],
+                          env=dict(os.environ), capture_output=True, text=True, timeout=60)
+    assert proc.returncode == 0, proc.stderr
+    out = json.loads(proc.stdout.strip().splitlines()[-1])
+    assert out["code"] == 0, proc.stderr
+    assert out["policy"] == ["fleet-lead"]
+    assert out["text"].startswith(CONTEXT_BLOCK)
+    assert (DIRECTOR_LINE in out["text"]) is present
+
+
+@pytest.mark.parametrize("held, policy, present", [
+    (["fleet-lead"], ["fleet-lead"], False),
+    (["lead", "fleet-lead"], ["fleet-lead"], True)])
+def test_opencodes_layer_one_keys_on_launch_declared_only(tmp_path, held, policy, present):
+    from types import SimpleNamespace
+
+    from moxi_comms.adapters.opencode import OpenCodeAdapter
+    from moxi_comms.context import DIRECTOR_LINE
+
+    path = tmp_path / "layer-one.md"
+    stand_in = SimpleNamespace(agent=SimpleNamespace(directors=held, policy_directors=policy),
+                               layer_one_path=lambda: path,
+                               socket_path=tmp_path / "no-daemon.sock", comms_path="comms")
+    OpenCodeAdapter.write_layer_one(stand_in)
+    assert (DIRECTOR_LINE in path.read_text()) is present
+
+
 def roster_rows_for(table, body):
     write_config(None, textwrap.dedent(body).replace("[agents.", f"[{table}.agents."))
 
