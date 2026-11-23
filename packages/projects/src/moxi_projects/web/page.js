@@ -180,7 +180,7 @@ var gt=globalThis,xt=gt.ShadowRoot&&(gt.ShadyCSS===void 0||gt.ShadyCSS.nativeSha
   .one button { flex: none; color: var(--moxi-text-dim); }
   .first { color: var(--moxi-text-dim); line-height: 1.6; text-align: center; padding-top: 24px; }
   .first p { max-width: 520px; margin: 0 auto; }
-  .first .x { margin-top: 12px; padding: 0; border: 0; background: none; color: var(--moxi-text); }
+  .first .x { margin: 12px 0; padding: 0; border: 0; background: none; color: var(--moxi-text); }
   p.said { margin: 16px 0 0; padding: 0 2px; overflow-wrap: anywhere; }
   /* A removed project's one line, in its place: dim, with its act in the text colour. */
   .gone { padding: 9px 0; color: var(--moxi-text-dim); overflow-wrap: anywhere; }
@@ -255,8 +255,9 @@ ${s.join(`
         data-line=${s.state==="loading"?"reading":"failed"} role="status">${s.line}</p>`:p}
       ${o!==null&&s.acts?c`<p class="said" data-line="said" role="status">${o}</p>`:p}
       ${i===null?p:i.projects.length===0?s.acts?c`${this.#u!==null?this.#V(this.#u):p}<div class="first" data-part="empty">
-          <p data-line="empty">${qn}</p><p data-line="sentence">${Hn(r)}</p>
-          <button type="button" class="x" data-action="add" @click=${()=>this.#z()}>${ws}</button></div>
+          <p data-line="empty">${qn}</p>
+          <button type="button" class="x" data-action="add" @click=${()=>this.#z()}>${ws}</button>
+          <p data-line="sentence">${Hn(r)}</p></div>
           ${h!==null?c`<div class="grps">${this.#B(h,!0)}</div>`:p}`:p:this.#at(i,En(i.projects,{home:i.home,reports:r,open:f,now:d},{find:this.#b,kind:this.#v,held:a,previous:u}),h,s.acts)}
       ${this.#s!==null&&s.acts?c`<p class="foot" data-line="unknown">${dn(this.#s)}</p>`:p}
     </section>`}#at(e,s,o,i){this.#y=s.order;let r=new Map(e.projects.map(d=>[d.key,d])),l=d=>this.#ct(r.get(d.key),d,i),a=i?this.#u:null,u=[...s.rows];a!==null&&u.splice(Un(s.rows.map(d=>d.key),a.after),0,a);let f=d=>"project"in d?this.#V(d):l(d);return c`${s.long?this.#ut(s):p}

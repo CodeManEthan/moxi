@@ -20,8 +20,9 @@
 //   and the name filled. Five, then how many more, with `Show`.
 // - The list's states: nothing for 400 ms, then `Reading…`; while projects' page server
 //   isn't answering, a first row saying so over the last list, dim and with no acts; a
-//   store that refuses, its reason and fix and nothing else; no project, the empty
-//   sentence.
+//   store that refuses, its reason and fix and nothing else; no project, `No projects
+//   yet.`, `Add a project` under it and the empty sentence under that, so the sentence
+//   growing as the facts report never moves the button.
 // - The facts: every present module that declares a `project-facts` component has it
 //   placed, once, into one hidden host, with the `projects` attribute (every project the
 //   page holds) and `open` (the opened one's key). Each report replaces that module's
@@ -180,7 +181,7 @@ const STYLES = [BASE, css`
   .one button { flex: none; color: var(--moxi-text-dim); }
   .first { color: var(--moxi-text-dim); line-height: 1.6; text-align: center; padding-top: 24px; }
   .first p { max-width: 520px; margin: 0 auto; }
-  .first .x { margin-top: 12px; padding: 0; border: 0; background: none; color: var(--moxi-text); }
+  .first .x { margin: 12px 0; padding: 0; border: 0; background: none; color: var(--moxi-text); }
   p.said { margin: 16px 0 0; padding: 0 2px; overflow-wrap: anywhere; }
   /* A removed project's one line, in its place: dim, with its act in the text colour. */
   .gone { padding: 9px 0; color: var(--moxi-text-dim); overflow-wrap: anywhere; }
@@ -737,8 +738,9 @@ export class ProjectsPage extends LitElement {
       ${told !== null && state.acts ? html`<p class="said" data-line="said" role="status">${told}</p>` : nothing}
       ${listing === null ? nothing : listing.projects.length === 0 ? state.acts ? html`${
           this.#removed !== null ? this.#removedPart(this.#removed) : nothing}<div class="first" data-part="empty">
-          <p data-line="empty">${NO_PROJECTS}</p><p data-line="sentence">${emptySentence(reports)}</p>
-          <button type="button" class="x" data-action="add" @click=${() => this.#add()}>${ADD_A_PROJECT}</button></div>
+          <p data-line="empty">${NO_PROJECTS}</p>
+          <button type="button" class="x" data-action="add" @click=${() => this.#add()}>${ADD_A_PROJECT}</button>
+          <p data-line="sentence">${emptySentence(reports)}</p></div>
           ${folders !== null ? html`<div class="grps">${this.#foldersPart(folders, true)}</div>` : nothing}` : nothing
         : this.#rows(listing, listView(listing.projects, { home: listing.home, reports, open, now },
                                        { find: this.#typed, kind: this.#kind, held, previous }), folders,

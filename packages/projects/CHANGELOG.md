@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- With no project, `Add a project` sits under `No projects yet.` and the empty
+  sentence under it. The sentence grows as other modules' facts report, and it used to
+  push the button down a line, under a click that was already on its way.
 - The page's `Reading…` line, while its first read is out, shows once that read has
   been out 400 ms in every browser. In Firefox it could stay blank until something
   else redrew the page, since the page checked the wait against `Date.now()`, which
