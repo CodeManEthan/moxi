@@ -19,6 +19,10 @@ be, with the right mode and size. These look at what rounds needs and keeps:
   `gh auth status` does not exit 0 (only its exit code is read), naming `moxi rounds
   check --full` as the way through; else `ok`. A repo whose `ci.local` is `"none"` is
   named as meeting the check gate on CI alone.
+- queues: for each queue project (`land = "queue"`), `warn` while its queue is paused,
+  with the reason and `moxi rounds queue --repo KEY --resume`, and while a member waits
+  with no lander running, read from the pid in the lander's lock file without taking
+  the lock, with `moxi rounds queue --repo KEY`, which starts one; else `ok`.
 - finish locks: `warn` for each finish lock older than an hour, in the repo of any
   project, with its holder's line and the one git command that clears it, for the lead
   to run after asking the holder; else one `ok` row. Only a lock in the format `finish`
@@ -76,8 +80,36 @@ def rows() -> Iterator[Row]:
     yield from _logs(homes)
     yield _index(homes)
     yield from _ci()
+    yield from _queues()
     yield from _locks()
     yield from _leftovers()
+
+
+# -- queues ------------------------------------------------------------------------------
+
+def _queues() -> Iterator[Row]:
+    from . import lander, queue_file
+
+    try:
+        repos = lander.queue_repos()
+    except config.ConfigError:
+        return
+    for repo in repos:
+        queue = queue_file.read(repo)
+        waiting = queue.queued()
+        name = f"queue {repo}"
+        if queue.paused is not None:
+            yield Row(MODULE, name, "warn", f"the queue is paused: {queue.paused}",
+                      f"moxi rounds queue --repo {repo} --resume, once that is dealt "
+                      "with")
+        elif waiting and not lander.seen_running(repo):
+            yield Row(MODULE, name, "warn",
+                      f"{len(waiting)} member(s) wait and no lander runs",
+                      f"moxi rounds queue --repo {repo}, which starts one")
+        else:
+            yield Row(MODULE, name, "ok",
+                      f"{len(waiting)} member(s) wait" + (", a lander runs" if waiting
+                                                         else ""))
 
 
 # -- ci ----------------------------------------------------------------------------------

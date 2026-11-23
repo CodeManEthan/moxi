@@ -6,7 +6,8 @@ index, or from its log where the index is behind, and read in its repo with ever
 landing on record for that repo and target, in any round. Two qualifiers follow the
 state: `idle`, for a `building` build whose head was committed more than its round's
 `idle_days` ago, and `shares`, each other open build of the same repo and target whose
-range has a commit in common with this one's. Its data says who may drop it
+range has a commit in common with this one's, with this build's relation to it
+(`builds.relation`). Its data says who may drop it
 (`builds.drop_by`): the operator for one that could not be read.
 
 A build that can't be read (its repo is not in the projects list, git can't read the
@@ -38,15 +39,15 @@ _STATUS = ("state", "by", "why", "head", "target_head", "target_before", "merge_
 @dataclass(frozen=True)
 class OpenBuild:
     """One open build: `round`, the name of the round that holds it, the `build` as its
-    records give it, and either its `status` as read now with `idle` and `shares` (the
-    `(round, stage)` of each build it shares with, sorted), or the `problem` that kept
+    records give it, and either its `status` as read now with `idle` and `shares` (a
+    `builds.Share` for each build it shares with, sorted), or the `problem` that kept
     it from being read."""
 
     round: str
     build: builds.Build
     status: builds.Status | None = None
     idle: bool = False
-    shares: tuple[tuple[str, str], ...] = ()
+    shares: tuple[builds.Share, ...] = ()
     problem: RoundsError | None = None
 
     def data(self) -> dict:
@@ -59,7 +60,8 @@ class OpenBuild:
             "idle": self.idle,
             "drop_by": builds.OPERATOR if self.status is None
             else builds.drop_by(self.status, self.shares),
-            "shares": [{"round": name, "stage": stage} for name, stage in self.shares],
+            "shares": [{"round": one.round, "stage": one.stage, "relation": one.relation}
+                       for one in self.shares],
             "problem": None if self.problem is None
             else {"reason": self.problem.reason, "fix": self.problem.fix}})
         return found
@@ -162,7 +164,10 @@ def _group(members: list[tuple[index.Summary, builds.Build]],
                 for name, found in done.items()}
     return {name: found if found.problem is not None
             else OpenBuild(found.round, found.build, status=found.status,
-                           idle=found.idle, shares=shared[name])
+                           idle=found.idle, shares=tuple(
+                               builds.Share(other[0], other[1], how,
+                                            merged=read_ok[other].state == builds.MERGED)
+                               for other, how in shared[name]))
             for name, found in done.items()}
 
 

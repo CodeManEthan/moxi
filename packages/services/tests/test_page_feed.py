@@ -1,6 +1,7 @@
 """services' stream and the poller that feeds it, in process: the first event, a change,
 the supervisor and health cadences, a tick that finds the last gather still running, a
-gather that fails, and the idle exit the poller never holds.
+gather that fails, the idle exit the poller never holds, and a read while an act holds the
+core lock past the wait.
 
 The tick tests set the period to an hour, so the poller's own loop ticks once at its start
 and the test calls `tick()` itself. The supervisor is the `fake` fixture's.
@@ -9,11 +10,14 @@ and the test calls `tick()` itself. The supervisor is the `fake` fixture's.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import logging
 import sys
 import threading
 import time
 
+import moxi.files
+import moxi.paths
 import pytest
 
 from moxi_dev.testing import PROC_WAIT_S
@@ -31,6 +35,8 @@ def fresh_feed(monkeypatch, site, fake):
     no module rows but a test's own, and a fake supervisor."""
     monkeypatch.setattr(pagehandlers, "_current", None)
     monkeypatch.setattr(pagehandlers, "_known", {})
+    monkeypatch.setattr(pagehandlers, "_streaks", {})
+    monkeypatch.setattr(pagehandlers, "_gathered", {})
     monkeypatch.setattr(pagehandlers, "_logged", set())
     yield fake
     feed = pagehandlers._current
@@ -53,7 +59,8 @@ class Gathers:
         self.gate.set()
         self.inside = threading.Event()
         self.raises: Exception | None = None
-        self.value = {"state": "up", "detail": None, "rows": [], "problems": []}
+        self.value = {"state": "up", "detail": None, "at": None, "rows": [],
+                      "problems": []}
 
     def __call__(self, *, check_health: bool = False):
         self.calls.append(check_health)
@@ -61,7 +68,7 @@ class Gathers:
         assert self.gate.wait(30)
         if self.raises is not None:
             raise self.raises
-        return dict(self.value)
+        return {**self.value, "at": f"read {len(self.calls)}"}
 
 
 @pytest.fixture
@@ -103,11 +110,17 @@ def test_the_first_event_is_every_row_and_a_change_comes_at_the_next_tick(monkey
             assert stream.status == 200 and name == "rows"
             assert data["state"] == "up"
             assert [(r["id"], r["state"], r["verdict"]["cause"]) for r in data["rows"]] \
-                == [("services/web", "active", None)]
+                == [("services/web", "active", "running")]
             await asyncio.to_thread(acts.stop, "web")
-            _, data = await stream.next(PROC_WAIT_S)
-            assert [(r["id"], r["state"], r["verdict"]["cause"]) for r in data["rows"]] \
-                == [("services/web", "inactive", "stopped")]
+            # Every event up to the one that reads the stop; none may judge the row
+            # failed on the way, between the stop's record and its unit's stop.
+            deadline = time.monotonic() + PROC_WAIT_S
+            while True:
+                _, data = await stream.next(max(deadline - time.monotonic(), 0.01))
+                seen = [(r["id"], r["state"], r["verdict"]["cause"]) for r in data["rows"]]
+                assert all(cause != "not-running" for _, _, cause in seen), seen
+                if seen == [("services/web", "inactive", "stopped")]:
+                    break
         finally:
             await stream.close()
 
@@ -172,6 +185,49 @@ def test_the_poller_reads_every_five_seconds_and_checks_health_every_thirty():
     assert (pagehandlers.PERIOD, pagehandlers.HEALTH_PERIOD) == (5.0, 30.0)
 
 
+def test_the_topic_carries_when_the_supervisor_was_read(monkeypatch):
+    monkeypatch.setattr(pagehandlers, "PERIOD", HOUR)
+    a_daemon(enable=True)
+
+    async def go():
+        stream = Stream(served())
+        try:
+            _, data = await stream.next(5)
+            assert data["at"] is not None and data["at"].endswith("Z")
+        finally:
+            await stream.close()
+
+    asyncio.run(go())
+
+
+def test_a_read_that_changed_only_its_time_is_published_once_a_minute(monkeypatch,
+                                                                       gathers):
+    assert pagehandlers.REPUBLISH_S == 60.0
+    monkeypatch.setattr(pagehandlers, "PERIOD", HOUR)
+    monkeypatch.setattr(pagehandlers, "REPUBLISH_S", 0.3)
+    sent = []
+
+    async def go():
+        feed = pagehandlers._feed()
+        monkeypatch.setattr(type(feed.topics), "publish",
+                            lambda self, topic, value: sent.append(value["at"]))
+        await until_async(lambda: settled(feed))
+        assert sent == ["read 1"]
+        assert feed.tick()
+        await until_async(lambda: settled(feed))
+        assert sent == ["read 1"]
+        await asyncio.sleep(0.35)
+        assert feed.tick()
+        await until_async(lambda: settled(feed))
+        assert sent == ["read 1", "read 3"]
+        gathers.value = {**gathers.value, "detail": "the store moved"}
+        assert feed.tick()
+        await until_async(lambda: settled(feed))
+        assert sent == ["read 1", "read 3", "read 4"]
+
+    asyncio.run(go())
+
+
 def test_a_tick_that_finds_the_last_gather_running_is_skipped(monkeypatch, gathers):
     monkeypatch.setattr(pagehandlers, "PERIOD", HOUR)
     gathers.gate.clear()
@@ -215,12 +271,17 @@ def test_a_health_pass_due_while_a_gather_runs_is_run_at_the_next_tick_that_gath
 def test_the_health_pass_runs_each_check_under_services_own_limit_a_few_at_a_time(
         monkeypatch):
     seen = {}
-    real = pagehandlers.verdict.views
+    real_read, real_views = pagehandlers.verdict.read, pagehandlers.verdict.views
+
+    def read(found, **kwargs):
+        seen.update(kwargs)
+        return real_read(found, **kwargs)
 
     def views(found, **kwargs):
-        seen.update(kwargs)
-        return real(found, **kwargs)
+        seen.update({k: v for k, v in kwargs.items() if k != "reading"})
+        return real_views(found, **kwargs)
 
+    monkeypatch.setattr(pagehandlers.verdict, "read", read)
     monkeypatch.setattr(pagehandlers.verdict, "views", views)
     pagehandlers.gather(check_health=True)
     assert seen == {"check_health": True, "status_seconds": pagehandlers.STATUS_SECONDS,
@@ -309,3 +370,63 @@ def test_a_gather_runs_on_a_thread_of_its_own_never_the_bases(monkeypatch, gathe
     asyncio.run(go())
     assert names == ["services rows gather"]
     assert all(t.daemon for t in threading.enumerate() if t.name == "services rows gather")
+
+
+# --- a read while an act holds the core lock ------------------------------------------------
+
+@contextlib.contextmanager
+def an_act_holding_the_core_lock():
+    """The core lock held, as an act's job thread holds it, until the block ends."""
+    held, let_go = threading.Event(), threading.Event()
+
+    def hold():
+        with moxi.files.lock(moxi.paths.core_lock(), nested=True):
+            held.set()
+            let_go.wait(30)
+
+    thread = threading.Thread(target=hold, name="an act", daemon=True)
+    thread.start()
+    assert held.wait(5)
+    try:
+        yield
+    finally:
+        let_go.set()
+        thread.join(5)
+
+
+def test_a_gather_while_an_act_holds_the_core_lock_past_the_wait_shows_the_last_read(
+        monkeypatch, fake):
+    monkeypatch.setattr(pagehandlers, "ROWS_WAIT_S", 0.2)
+    a_daemon(enable=True)
+    last = pagehandlers.gather()
+    assert [(r["id"], r["state"]) for r in last["rows"]] == [("services/web", "active")]
+    with an_act_holding_the_core_lock():
+        # What the act did shows only once it lets the lock go.
+        fake.written["web"].active = False
+        began = time.monotonic()
+        assert pagehandlers.gather() == last
+        assert time.monotonic() - began >= 0.2
+    after = pagehandlers.gather()
+    assert [(r["id"], r["state"]) for r in after["rows"]] == [("services/web", "inactive")]
+
+
+def test_a_first_gather_while_an_act_holds_the_core_lock_says_the_rows_werent_read(monkeypatch):
+    monkeypatch.setattr(pagehandlers, "ROWS_WAIT_S", 0.2)
+    a_daemon(enable=True)
+    with an_act_holding_the_core_lock():
+        value = pagehandlers.gather()
+    assert (value["state"], value["rows"], value["at"]) == ("error", [], None)
+    assert value["detail"].startswith("the rows weren't read: the core lock stayed held by pid ")
+    assert value["detail"].endswith("; fix: try again in a moment")
+    assert str(moxi.paths.core_lock()) not in value["detail"]
+
+
+def test_one_rows_read_while_an_act_holds_the_core_lock_past_the_wait_answers_409(monkeypatch):
+    monkeypatch.setattr(pagehandlers, "ROWS_WAIT_S", 0.2)
+    a_daemon(enable=True)
+    with an_act_holding_the_core_lock():
+        status, body = asyncio.run(send(served(), "GET", "/api/row", query="id=web"))
+    assert status == 409, body
+    assert str(moxi.paths.core_lock()) not in str(body)
+    status, body = asyncio.run(send(served(), "GET", "/api/row", query="id=web"))
+    assert status == 200 and body["row"]["id"] == "services/web"

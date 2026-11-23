@@ -35,7 +35,7 @@ reads only the messages above the newest one the page holds.
 
 `/api/mail-state` decides whether an ask was answered by `replies`, the rule the
 daemon's `awaiting` uses, applied over the record: with the operator as the answerer for
-the asks to him (`owed`), and with each awaited agent for the asks between agents.
+the asks to the operator (`owed`), and with each awaited agent for the asks between agents.
 
 Like `page`, this module is imported only by the page server and loopback's export.
 """
@@ -388,7 +388,7 @@ def earlier(store: Store, start: str) -> dict[str, Any] | None:
 class Authored:
     """What the reply rule needs of a message's author: its qualified name, whether its
     attribution is `verified`, and whether it is the operator (tier `operator`, whatever
-    name the directory gives him)."""
+    name the directory gives the operator)."""
 
     qualified: str
     verified: bool
@@ -452,7 +452,7 @@ def mail_state(call: Any) -> dict[str, Any]:
 
 
 def _him(conn: sqlite3.Connection) -> frozenset[str]:
-    # The names that are the operator: `operator` and each name the directory gives him.
+    # The operator's names: `operator` and each name the directory gives the operator.
     return frozenset({OPERATOR_NAME,
                       *(str(row[0]) for row in conn.execute("SELECT name FROM operators"))})
 
@@ -483,7 +483,8 @@ def _queued(store: Store, rows, known: dict[str, Authored],
 
 
 def _owed(items, now: float) -> list[dict[str, Any]]:
-    # The asks to him, oldest first, that no message of his answers by the shared rule.
+    # The asks to the operator, oldest first, that no message from the operator answers by
+    # the shared rule.
     his = [e for _, who, e in items if who.is_operator]
     out = []
     for r, who, ask in items:
@@ -577,8 +578,8 @@ class _Pair:
     A message's author is read from its `author_id` with its `author_kind`, with no
     directory query: an agent's or a module's `author_id` is its qualified name, and
     the operator's kinds are the operator. An address is the operator when it is
-    `operator` or a name the directory gives him (read once per read); a tag naming
-    `operator` names him. Any other kind (a webhook's) is attributed once per author.
+    `operator` or a name the directory gives the operator (read once per read); a tag
+    naming `operator` names the operator. Any other kind (a webhook's) is attributed once per author.
     """
 
     def __init__(self, conn: sqlite3.Connection, a: str, b: str | None) -> None:

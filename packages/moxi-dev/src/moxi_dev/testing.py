@@ -17,7 +17,8 @@ The fence, around every test (the autouse fixture `fence`):
   every harness home a package reads is pointed into the test's tmp: `HOME` and the XDG
   homes under `tmp_path / "home"`, `CLAUDE_CONFIG_DIR` and `CODEX_HOME` inside it, and
   `XDG_RUNTIME_DIR` and each installed module's `MOXI_<MODULE>_HOME` in a short
-  per-test directory (see `short_dir`), so a socket under them keeps a short path.
+  per-test directory (see `short_dir`), so a socket under them keeps a short path (on
+  Windows the module homes are in the test's profile instead; see below).
   `TMPDIR`, and `tempfile`'s own default with it, point into that short directory too,
   so a temp file the test or a child makes lands in the test's tmp and goes with it.
   OpenCode reads its homes through `XDG_*`; its content variables (`OPENCODE_*`) are
@@ -28,7 +29,12 @@ The fence, around every test (the autouse fixture `fence`):
   are that home split at its drive, `LOCALAPPDATA` and `APPDATA` are under it, and so
   is each per-user folder platformdirs reads through a `WIN_PD_OVERRIDE_*` variable
   (without one it asks Windows for the real folder, whatever `APPDATA` says); see
-  `WINDOWS_HOMES`. `TEMP` and `TMP` point where `TMPDIR` does. The system's own
+  `WINDOWS_HOMES`. Each module's `MOXI_<MODULE>_HOME` is `moxi\\<module>` under the
+  test's `LOCALAPPDATA`, so whatever a module keeps only inside the user's profile (comms'
+  token store) is inside the test's own. Every directory the fence gives is spelled in
+  its long form, its real path: the runner's `TEMP` may be spelled with an 8.3 short name
+  (`C:\\Users\\RUNNER~1\\...`), and a test compares the fence's directories with paths
+  Windows hands back resolved. `TEMP` and `TMP` point where `TMPDIR` does. The system's own
   variables a process needs (`SYSTEMROOT`, `PATHEXT`, `COMSPEC` and the rest of
   `WINDOWS_KEPT_ENV`) are kept. Off Windows none of these is set or kept.
   `MOXI_ANCHOR_HOME` stands in for the account's own folder, which the core reads from
@@ -238,7 +244,7 @@ import time
 from collections.abc import Callable, Generator, Iterable, Iterator, Mapping, Sequence
 from enum import Enum
 from pathlib import Path, PurePath
-from typing import Any
+from typing import Any, TypeVar
 from urllib.parse import parse_qs, urlsplit
 
 import pytest
@@ -368,6 +374,9 @@ WINDOWS_HOMES = {
 WINDOWS_KEPT_ENV = ("SYSTEMROOT", "SYSTEMDRIVE", "WINDIR", "COMSPEC", "PATHEXT", "OS",
                     "PROCESSOR_ARCHITECTURE", "NUMBER_OF_PROCESSORS", "USERNAME")
 
+#: A path of either flavour, kept as the caller's.
+_P = TypeVar("_P", bound=PurePath)
+
 #: What `uv_env` adds to the fenced environment, besides uv's two directories.
 _UV_NO_DOWNLOADS = {"UV_PYTHON_DOWNLOADS": "never"}
 
@@ -402,7 +411,15 @@ class Fence:
 
     def module_home(self, module: str) -> Path:
         """Where `MOXI_<MODULE>_HOME` points for `module`."""
-        return self.short / module
+        return _module_home(self.home, self.short, module)
+
+    def profile_dir(self, name: str) -> Path:
+        """A new directory `name` inside the test's own profile, its home (`USERPROFILE`
+        on Windows), for a file a module keeps only inside the user's profile there, such
+        as comms' token store. The test owns it; it goes with the test's tmp."""
+        path = self.home / name
+        path.mkdir(parents=True)
+        return path
 
 
 # --- the audit hook --------------------------------------------------------------------
@@ -682,8 +699,23 @@ def _modules() -> list[str]:
     return sorted(name for name in found if _MODULE_NAME.fullmatch(name))
 
 
+def _spelled_long(path: _P) -> _P:
+    """On Windows, `path` in its long form: its real path, each part spelled in full
+    (`C:\\Users\\RUNNER~1` reads `C:\\Users\\runneradmin`). Elsewhere `path` as it is."""
+    return type(path)(ntpath.realpath(path)) if WINDOWS else path
+
+
+def _module_home(home: _P, short: _P, module: str) -> _P:
+    """Where the fence points `MOXI_<MODULE>_HOME` for `module`: in the short directory,
+    or on Windows under the test's `LOCALAPPDATA`, inside its profile."""
+    if WINDOWS:
+        return home / WINDOWS_HOMES["LOCALAPPDATA"] / "moxi" / module
+    return short / module
+
+
 def _fenced_env(source: Mapping[str, str], home: Path, runtime: Path, short: Path,
                 modules: Iterable[str]) -> dict[str, str]:
+    home, runtime, short = (_spelled_long(path) for path in (home, runtime, short))
     env = {key: value for key, value in source.items()
            if key in KEPT_ENV or key.startswith(_KEPT_PREFIXES)
            or (WINDOWS and key.upper() in WINDOWS_KEPT_ENV)}
@@ -691,7 +723,7 @@ def _fenced_env(source: Mapping[str, str], home: Path, runtime: Path, short: Pat
         env[key] = str(home if rel == "." else home / rel)
     env["XDG_RUNTIME_DIR"] = str(runtime)
     for module in modules:
-        env[f"MOXI_{module.upper()}_HOME"] = str(short / module)
+        env[f"MOXI_{module.upper()}_HOME"] = str(_module_home(home, short, module))
     if WINDOWS:
         for key, rel in WINDOWS_HOMES.items():
             env[key] = str(home if rel == "." else home / rel)
@@ -1485,10 +1517,11 @@ def fence(request: pytest.FixtureRequest, tmp_path: Path,
     # one back when it ends; the outermost leaves the hook idle.
     outer = _GUARD.save()
     basetemp = tmp_path_factory.getbasetemp()
-    short = Path(tempfile.mkdtemp(prefix="mx-", dir=_short_root()))
+    short = _spelled_long(Path(tempfile.mkdtemp(prefix="mx-", dir=_short_root())))
     home = tmp_path / "home"
     runtime = short / "run"
     home.mkdir()
+    home = _spelled_long(home)
     runtime.mkdir(mode=0o700)
     env = _fenced_env(os.environ, home, runtime, short,
                       _SESSION.get("modules") or _modules())

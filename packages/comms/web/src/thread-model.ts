@@ -140,7 +140,7 @@ export function withEarlier(held: ThreadHeld, answer: ThreadAnswer): ThreadHeld 
            messages: [...answer.messages.filter((message) => !ids.has(message.message_id)), ...held.messages].sort(byId) };
 }
 
-/** Whether a tag names an address: the address itself, or `operator` for one of his. */
+/** Whether a tag names an address: the address itself, or `operator` for one of the operator's. */
 const names = (tag: string, side: string, him: ReadonlySet<string>): boolean =>
   tag === side || (tag === "operator" && him.has(side));
 /** Whether a message is by an address. */
@@ -158,7 +158,7 @@ export interface ThreadFacts {
   a: string;
   b: string | null;
   roster: readonly RosterRow[];
-  /** The `owed` messages to him: their authors. */
+  /** The `owed` messages to the operator: their authors. */
   owedBy: readonly string[];
   /** The addresses that are the operator. */
   him: ReadonlySet<string>;
@@ -182,7 +182,7 @@ export interface ThreadView {
   /** `31 messages, back to <time>` after `Show earlier`, and the id it reads below. */
   earlier: { text: string; before: string } | null;
   messages: ThreadMessage[];
-  /** `Message <address>`, for each side that is not him. */
+  /** `Message <address>`, for each side that is not the operator. */
   write: string[];
   /** The newest message's id, for `Copy the last message's id`. */
   lastId: string | null;
@@ -199,7 +199,7 @@ export function threadView(held: ThreadHeld, facts: ThreadFacts): ThreadView {
   const owes = b === null ? null : owesWords(a, b, facts);
   if (owes !== null) parts.push(owes);
   const bound = (qualified: string): boolean => facts.roster.some((row) => row.qualified === qualified && row.live);
-  // His own copy has no read state on his page: he is reading it.
+  // The operator reads this page, so the operator's own copy shows no read state.
   const shown = (row: Delivery): boolean => !him.has(row.qualified)
     && (b === null || row.qualified === a || row.qualified === b);
   const messages = held.messages.map((message): ThreadMessage => {
@@ -223,8 +223,8 @@ export function threadView(held: ThreadHeld, facts: ThreadFacts): ThreadView {
   };
 }
 
-/** Who owes one reply between `a` and `b`: a side the other's `awaiting` names, or him when
- * an `owed` message is the other side's. */
+/** Who owes one reply between `a` and `b`: a side the other's `awaiting` names, or the
+ * operator when an `owed` message is the other side's. */
 function owesWords(a: string, b: string, facts: ThreadFacts): string | null {
   const awaits = (asker: string, awaited: string): boolean =>
     facts.roster.some((row) => row.qualified === asker && row.awaiting.includes(awaited));

@@ -172,11 +172,11 @@ def test_a_state_root_it_cannot_write_or_read_is_a_row(no_device, mode):
 # --------------------------------------------------------------------------- send-only tokens
 
 def test_a_programs_name_whose_token_this_process_cant_read_says_renew_where_it_sends(
-        tmp_path):
+        profile):
     from moxi_comms import reserved, secrets
     from moxi_comms.tokens import TokenStore
 
-    store = TokenStore(tmp_path / "tokens")
+    store = TokenStore(profile / "tokens")
     reserved.register("ticker", chain=secrets.build(["store"], store=store))
     assert reserved.token_rows(chain=secrets.build(["store"], store=store)) == []
     (row,) = reserved.token_rows(chain=secrets.build(["env"], env={}))
@@ -185,7 +185,7 @@ def test_a_programs_name_whose_token_this_process_cant_read_says_renew_where_it_
     assert row.fix.startswith("moxi comms send-only renew ticker, run where ticker sends")
 
 
-def test_a_stale_copy_of_a_programs_token_is_named_by_the_step_that_holds_it(tmp_path):
+def test_a_stale_copy_of_a_programs_token_is_named_by_the_step_that_holds_it(profile):
     """Renewing from the shell the doctor runs in would take the token from the program;
     removing the stale copy is the cure."""
     from test_secrets import FakeKeychain
@@ -193,7 +193,7 @@ def test_a_stale_copy_of_a_programs_token_is_named_by_the_step_that_holds_it(tmp
     from moxi_comms import reserved, secrets
     from moxi_comms.tokens import TokenStore
 
-    store, keychain = TokenStore(tmp_path / "tokens"), FakeKeychain()
+    store, keychain = TokenStore(profile / "tokens"), FakeKeychain()
     reserved.register("ticker", chain=secrets.build(["store"], store=store))
     keychain.set_password(secrets.KEYCHAIN_SERVICE, "send-only:comms/send-only/ticker",
                           "an-old-token")

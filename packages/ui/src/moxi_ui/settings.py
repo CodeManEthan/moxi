@@ -393,17 +393,31 @@ def _json_text(value: Any) -> str:
         return "null"
 
 
+#: The platform's path functions, which a `path` key's value and default are compared by.
+_paths = os.path
+
+
 def _path_default(default: Any, env: Mapping[str, str] | None) -> Any:
     """A `path` key's default as its value reads: none when empty, a leading `~` expanded
-    to the home folder `env` places."""
+    to the home folder `env` places, joined with the platform's separator."""
     if not isinstance(default, str) or default == "":
         return None
     if default == "~" or default.startswith("~/"):
         try:
-            return str(home(env)) + default[1:]
+            root = str(home(env))
         except LookupError:
             return default
+        return _paths.join(root, *default[2:].split("/")) if default != "~" else root
     return default
+
+
+def _same_path(value: Any, default: Any) -> bool:
+    """Whether a `path` key's `value` is its `default`: compared as paths, normalised and,
+    on a platform whose paths ignore case, case-folded; anything but two non-empty
+    strings by equality."""
+    if not (isinstance(value, str) and isinstance(default, str) and value and default):
+        return value == default
+    return _paths.normcase(_paths.normpath(value)) == _paths.normcase(_paths.normpath(default))
 
 
 def is_changed(item: Mapping[str, Any], *, env: Mapping[str, str] | None = None) -> bool:
@@ -416,7 +430,7 @@ def is_changed(item: Mapping[str, Any], *, env: Mapping[str, str] | None = None)
             isinstance(entry, Mapping) and entry.get("value") is True for entry in entries)
     default = item.get("default")
     if item.get("type") == "path":
-        default = _path_default(default, env)
+        return not _same_path(item.get("value"), _path_default(default, env))
     return item.get("value") != default
 
 

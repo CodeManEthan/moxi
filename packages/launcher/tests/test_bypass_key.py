@@ -155,6 +155,7 @@ def test_a_relative_settings_file_is_read_from_the_launch_cwd(tmp_path):
 # -- launched -----------------------------------------------------------------------------------
 
 
+@pytest.mark.slot_target
 def test_a_bypass_slot_launch_writes_its_run_file_with_the_key(work, harness, rig):
     got = launch(work, **BYPASS)
     assert got.state == "started"
@@ -164,6 +165,7 @@ def test_a_bypass_slot_launch_writes_its_run_file_with_the_key(work, harness, ri
     assert run_file().stat().st_mode & 0o777 == 0o600
 
 
+@pytest.mark.slot_target
 def test_a_users_settings_file_is_read_and_never_changed(work, harness, rig, tmp_path):
     own = tmp_path / "own-settings.json"
     own.write_text('{"env": {"A": "1"}, "model": "opus"}\n')
@@ -176,6 +178,7 @@ def test_a_users_settings_file_is_read_and_never_changed(work, harness, rig, tmp
                                                   KEY: True}
 
 
+@pytest.mark.slot_target
 def test_a_users_settings_string_is_merged(work, harness, rig):
     launch(work, extra=["--settings", '{"model": "opus"}'], **BYPASS)
     [start] = rig.calls("start")
@@ -183,6 +186,7 @@ def test_a_users_settings_string_is_merged(work, harness, rig):
     assert json.loads(run_file().read_text()) == {"model": "opus", KEY: True}
 
 
+@pytest.mark.slot_target
 def test_a_slot_launch_in_another_mode_writes_no_run_file(work, harness, rig):
     launch(work, permission_mode="acceptEdits")
     [start] = rig.calls("start")
@@ -190,6 +194,7 @@ def test_a_slot_launch_in_another_mode_writes_no_run_file(work, harness, rig):
     assert not run_file().exists()
 
 
+@pytest.mark.slot_target
 def test_the_sweep_removes_the_settings_run_file(work, harness, rig):
     launch(work, **BYPASS)
     old = time.time() - 40 * 86400

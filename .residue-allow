@@ -42,6 +42,7 @@ packages/rounds/src/moxi_rounds/report_block.py	L1	data: the example report bloc
 packages/rounds/tests/test_report_block.py	L1	data: a finding id in the report blocks the reader's tests feed it
 packages/rounds/tests/test_report_block.py	L2	data: a finding id in the report blocks the reader's tests feed it
 packages/rounds/tests/test_board.py	L2	data: a finding id in the events the board's tests read, as a finding's event names it
+packages/rounds/tests/test_queue_batch.py	L1	data: a finding id in the report block a test records, so a queued member gains a finding
 packages/rounds/tests/test_report_block.py	L9	data: a finding id in the report blocks the reader's tests feed it
 packages/rounds/tests/test_state.py	L1	data: the finding id of a made-up finding the state test records
 packages/rounds/tests/test_verdict.py	L1	data: a finding id in the made-up reports the verdict tests record

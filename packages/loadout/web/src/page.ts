@@ -2,9 +2,9 @@
 // bottom, each group with its label in the left column:
 //
 // - `This page`, only while the harness homes' note is set: the page's acts are off, and
-//   each act shows as the command he would type, with `Copy`.
+//   each act shows as the command the user would type, with `Copy`.
 // - `Placed`: the verdict, then each problem in three lines (what, where, the fix and its
-//   act), then the counts per harness; with nothing needing him, the counts sit at the
+//   act), then the counts per harness; with nothing needing the user, the counts sit at the
 //   verdict's right.
 // - `Folder`: the loadout folder, its files git hasn't committed, and `Settings › loadout`.
 // - `Your items`, a group per module whose skills it took over, then each project
@@ -46,7 +46,7 @@
 
 import { css, html, LitElement, nothing } from "lit";
 import { repeat } from "lit/directives/repeat.js";
-import { api, navigate } from "/m/ui/client.js";
+import { api, navigate, WaitClock } from "/m/ui/client.js";
 
 import { CHANGED, Feed, parseJob, parseProjects, parseReplacePreview, parseSourceDir, parseView } from "./feed.ts";
 import type { Job, Projects, ReplacePreview, SourceDir, View, ViewRow } from "./feed.ts";
@@ -123,7 +123,7 @@ interface Sent {
 
 /** The foot line for an address whose thing is gone, and the address the page wrote in its
  * place. The shell may place the page again for that address, as a new element; the line
- * stays on it until he opens something or an act ends. */
+ * stays on it until the user opens something or an act ends. */
 let goneHeld: { at: Address; line: string } | null = null;
 
 /** A fresh job id for one press. */
@@ -288,7 +288,8 @@ export class LoadoutPage extends LitElement {
 
   #view: Feed<View> | null = null;
   #dir: Feed<SourceDir> | null = null;
-  #openedAt = 0;
+  /** The first read's wait, for its `Reading…`. */
+  #waited = new WaitClock(READING_AFTER_MS);
 
   /** What is open, and the dim foot line for an address whose item is gone. */
   #at: Address = NOTHING_OPEN;
@@ -334,7 +335,6 @@ export class LoadoutPage extends LitElement {
   /** Which copy act reads `Copied`. */
   #copied: string | null = null;
   #copyTimer: ReturnType<typeof setTimeout> | undefined;
-  #waitTimer: ReturnType<typeof setTimeout> | undefined;
   #refreshTimer: ReturnType<typeof setInterval> | undefined;
 
   #shown = (): void => {
@@ -353,14 +353,13 @@ export class LoadoutPage extends LitElement {
 
   connectedCallback(): void {
     super.connectedCallback();
-    this.#openedAt = Date.now();
+    this.#waited.start(() => this.requestUpdate());
     const changed = (): void => this.requestUpdate();
     this.#view = new Feed<View>(() => api("loadout", "api/view"), parseView, changed);
     this.#dir = new Feed<SourceDir>(() => api("loadout", "api/folder"), parseSourceDir, changed);
     this.#readAll();
     document.addEventListener("visibilitychange", this.#shown);
     document.addEventListener("click", this.#outside);
-    this.#waitTimer = setTimeout(() => this.requestUpdate(), READING_AFTER_MS);
     this.#refreshTimer = setInterval(() => {
       if (document.visibilityState === "visible") this.#readAll();
     }, REFRESH_MS);
@@ -381,7 +380,7 @@ export class LoadoutPage extends LitElement {
     this.#job = null;
     clearTimeout(this.#jobTimer);
     clearTimeout(this.#copyTimer);
-    clearTimeout(this.#waitTimer);
+    this.#waited.stop();
     clearInterval(this.#refreshTimer);
     document.removeEventListener("visibilitychange", this.#shown);
     document.removeEventListener("click", this.#outside);
@@ -615,7 +614,7 @@ export class LoadoutPage extends LitElement {
       @click=${() => void this.#copy(what, text)}>${this.#copied === what ? COPIED : COPY}</button>`;
   }
 
-  /** An act as he would type it, with `Copy`, while the note is set. */
+  /** An act as the user would type it, with `Copy`, while the note is set. */
   #typed(argv: readonly string[], key: string) {
     const command = commandOf(argv);
     return html`<div class="cmd"><code data-line="command">${command}</code>${this.#copyButton(key, command)}</div>`;
@@ -626,13 +625,13 @@ export class LoadoutPage extends LitElement {
   render() {
     const feed = this.#view;
     if (feed === null) return nothing;
-    let state = pageState(feed, Date.now() - this.#openedAt);
+    let state = pageState(feed, this.#waited.waitedMs());
     // A filtered view waits for projects to say which there are, as the page waits for
     // its view.
     const projects = this.#projects;
     if ((state === "up" || state === "empty" || state === "problem") && this.#filter !== null && projects !== null
         && projects.value === null && projects.failure === null) {
-      state = Date.now() - this.#openedAt >= READING_AFTER_MS ? "reading" : "waiting";
+      state = this.#waited.waitedMs() >= READING_AFTER_MS ? "reading" : "waiting";
     }
     if (state === "gone") return html`<p class="waiting" data-line="gone" role="status">${GONE}</p>`;
     if (state === "waiting") return nothing;

@@ -2,7 +2,9 @@
 second process to hold a lock, and a git repo of the test's own.
 
 The test kit points `MOXI_ROUNDS_HOME` and `MOXI_PROJECTS_HOME` into each test's tmp, so
-the config file and the projects every call reads and writes are the test's own.
+the config file and the projects every call reads and writes are the test's own. Every
+test asks for the kit's fence by name, and the config fixtures refuse a path outside the
+test's tmp, so a run the kit does not fence fails instead of writing to the real homes.
 """
 
 from __future__ import annotations
@@ -20,16 +22,38 @@ import pytest
 from moxi_rounds import paths
 
 
+@pytest.fixture(autouse=True)
+def fenced(fence):
+    """Every test asks for the fence by name, so a run without the test kit's plugin (a
+    copy of these tests outside the package, whose root conftest.py loads it) fails each
+    test at setup instead of writing to the real homes."""
+    return fence
+
+
+def own_path(path: Path, tmp_path: Path, fence) -> Path:
+    """`path`, when it is inside the test's own tmp (`tmp_path` or the fence's short
+    directory); else the test fails, naming it."""
+    real = Path(os.path.realpath(path))
+    for root in (tmp_path, fence.short):
+        if real.is_relative_to(os.path.realpath(root)):
+            return path
+    pytest.fail(f"the config file {path} is outside the test's own tmp "
+                f"({tmp_path}, {fence.short}): the test fence is not in force",
+                pytrace=False)
+
+
 @pytest.fixture
-def config_file() -> Path:
-    """The test's own config file (not yet created)."""
-    return paths.LAYOUT.config_file()
+def config_file(tmp_path, fence) -> Path:
+    """The test's own config file (not yet created). A path outside the test's tmp fails
+    the test."""
+    return own_path(paths.LAYOUT.config_file(), tmp_path, fence)
 
 
 @pytest.fixture
 def write_config(config_file):
     """`write_config(text)`: write `text`, dedented, as rounds' config file; returns the
-    file's path."""
+    file's path. A path outside the test's tmp fails the test before anything is
+    written (through `config_file`)."""
 
     def write(text: str) -> Path:
         config_file.parent.mkdir(parents=True, exist_ok=True)

@@ -131,7 +131,7 @@ DELIVERY = lb.Out("table", items={
 #: One message as every message read sends it. `message_id` and `reply_to` are strings
 #: of digits, which the browser never does arithmetic on; `at` is the record's time,
 #: epoch seconds. `author` is the attribution's qualified name and `author_tier` its tier
-#: (`operator` is the operator, whatever name the directory gives him). `to` is the
+#: (`operator` is the operator, whatever name the directory gives the operator). `to` is the
 #: recipient tags as line zero writes them; `text` the body with line zero removed.
 #: `withdrawn` says the record marks it withdrawn; `rows` are its rows in the books, by
 #: qualified name.
@@ -174,12 +174,12 @@ MESSAGES = {
 #: `queued`: each address with a row in the books, by qualified name: how many rows wait,
 #: how many are in its session (`handed` or `in_digest`), and the authors of the waiting
 #: ones, oldest message first, each once, `is_operator` true for the operator (`operator`
-#: or a name the directory gives him). `owed`: the verified `[reply-once]` asks to the
-#: operator that no later message of his answers, oldest first. `asks`: each open ask
+#: or a name the directory gives the operator). `owed`: the verified `[reply-once]` asks
+#: to the operator that no later message from the operator answers, oldest first. `asks`: each open ask
 #: between two agents, the newest per pair; `read` is false while the books hold the
 #: awaited name's row for it, else null. `last`: each address's newest message, by it or
 #: to it. `operator_names`: the names that are the operator, `operator` and each name the
-#: directory gives him, in name order; the page makes no agent row of them. `state` and
+#: directory gives the operator, in name order; the page makes no agent row of them. `state` and
 #: `detail` are as `MESSAGES`'; an error answers empty lists and `operator_names` as
 #: `["operator"]`.
 MAIL_STATE = {

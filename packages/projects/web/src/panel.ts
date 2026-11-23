@@ -7,8 +7,8 @@
 // and says under the field whether the folder exists and is a git repository, or that
 // nothing is there yet, with the box that makes it (hidden for a kind whose mint is
 // `refuse`), and how the path stands to a project that holds it. Only the answer for what
-// the field holds now is drawn. `Name` fills from the folder's last part until he types
-// in it, and says when a project already has the name. `More` folds `Kind`, `Lead` and,
+// the field holds now is drawn. `Name` fills from the folder's last part until the user
+// types in it, and says when a project already has the name. `More` folds `Kind`, `Lead` and,
 // while notes is installed, `Notes folder`, with their values on its line. `Add project`
 // sends `/api/add` with the paths as typed, `~` included; until the folder has been read,
 // a name it would fill is not sent. What the answer came to shows under the button: the
@@ -24,8 +24,9 @@
 // off, then `/api/set` with the fields, then the names added. It stops at the first
 // refusal and says what was saved before it; a save that stopped sends only the rest next
 // time. With no answer, it says the project may have been saved. When the project changes
-// elsewhere, a form he hasn't changed starts again from it; one he has keeps his values
-// and says so. The where note and a broken kind or contribution show as in Add.
+// elsewhere, a form the user hasn't changed starts again from it; one the user has
+// changed keeps those values and says so. The where note and a broken kind or contribution
+// show as in Add.
 //
 // After an act that was done or may have been, it sends `CHANGED` on the document, so the
 // page and every projects component read again.

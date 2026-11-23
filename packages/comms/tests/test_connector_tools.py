@@ -167,6 +167,38 @@ def test_send_refusal_is_an_error_result(rig, tools):
     assert got.is_error and got.refusal
 
 
+HELD_UNTIL_REACHABLE = ("NOTE: reviewer@proj-a's session can't be reached right now, so "
+                        "the message is held until it is reachable.")
+
+
+def test_a_send_to_a_session_with_no_endpoint_says_it_is_held_and_names_no_command(rig,
+                                                                                  tools):
+    shim = rig.shim(name="reviewer", scope="proj-a", start=False)
+    shim.endpoint = False
+    shim.start()
+    assert wait_until(lambda: getattr(rig.daemon.bindings.get("reviewer@proj-a"),
+                                      "endpoint", None) is False)
+    got, _ = call(tools, "send", {"to": "reviewer@proj-a", "text": "x", "posture": "none"})
+    assert not got.is_error, got.text
+    assert got.structured["recipients"] == [{"name": "reviewer@proj-a",
+                                             "delivery": "waiting"}]
+    assert got.structured["notes"] == [HELD_UNTIL_REACHABLE]
+    assert got.text.split("\n")[1:] == [HELD_UNTIL_REACHABLE]
+    waited = wait_call(tools, {"to": "reviewer@proj-a", "text": "ok?", "wait_s": 5})
+    assert waited.structured["outcome"] == "not-delivered"
+    assert waited.structured["notes"] == [HELD_UNTIL_REACHABLE]
+    for text in (got.text, waited.text):
+        assert "moxi" not in text and "doctor" not in text, text
+        assert_connector_words(text)
+
+    # The verb's own note keeps how long it has waited and where to look.
+    code, out = rig.cli(["send", "--posture", "none", "reviewer@proj-a", "x"],
+                        name="planner", scope="proj-a")
+    assert code == 0, out
+    assert "is bound, but its session has had no turns endpoint" in out, out
+    assert "`moxi comms doctor` lists the sessions waiting" in out, out
+
+
 # --------------------------------------------------------------------------- open asks
 
 ANSWER_ONE = "Answer one with send and reply_to set to its id."

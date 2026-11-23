@@ -15,11 +15,13 @@ since nothing says which it belongs in.
 
 **What waits on the operator** (`waiting`): across every project, or in one, each open
 question, each parked question with what it waits for, each open waiting item of an
-open round, each major decision of one not yet ruled, each project's rulings not yet
-shown to him, and each open build of its rounds that is idle, gone, empty or unclear,
-that shares commits with another, or that git could not read. The question rows are the ones a project's questions export holds,
-from the same function, so the two never differ. A waiting item is no question, and is
-in no export.
+open round, each major decision of one not yet ruled (labelled the operator's to rule
+only where it is put to the operator, `decisions.not_put`) and each minor one that is
+the operator's, each project's rulings not yet shown to the operator, and each open
+build of its rounds that is idle, gone, empty or unclear, that shares commits with
+another, or that git could not read. The question rows are the ones a project's
+questions export holds, from the same function, so the two never differ. A waiting
+item is no question, and is in no export.
 
 **The numbers** (`numbers`): the numbers of every closed round, or of one project's,
 summed key by key, read from what each round's closing event holds as the index keeps
@@ -314,7 +316,9 @@ def _decision_lines(entries: Sequence, now: str) -> list[str]:
         lines += [f"  {entry.holder} {entry.id}: {entry.text}",
                   f"    from: {entry.origin}   {weight}   by: {entry.by}   at: "
                   f"{entry.at}   age: {age(entry.at, now)}",
-                  f"    his to rule: {decisions.rule_line(entry.holder, entry.id)}"]
+                  "    " + decisions.open_line(entry.holder, entry.id,
+                                                 weight=entry.weight, why=entry.not_put,
+                                                 ended=False)]
     return lines
 
 
@@ -353,7 +357,7 @@ def _lists_data(lists: Sequence) -> list:
 def _list_lines(lists: Sequence, now: str) -> list[str]:
     lines = []
     for back in lists:
-        lines.append(f"  {back.project}, {back.heading}; once he has read them: moxi "
+        lines.append(f"  {back.project}, {back.heading}; once the operator has read them: moxi "
                      f"rounds rule {back.project} {shown.READBACK}{back.through} "
                      "--record PTR")
         for row in back.rows:
@@ -415,8 +419,9 @@ def _build_lines(listed: Sequence, now: str) -> list[str]:
             what = [said["state"]] + (["idle"] if one.idle else [])
             what = ", ".join(what)
             if one.shares:
-                what += ", shares with " + ", ".join(f"{name} {stage}"
-                                                     for name, stage in one.shares)
+                what += ", " + builds.share_words(
+                    ((other.round, other.stage, other.relation) for other in one.shares),
+                    merged=one.status.state == builds.MERGED)
             what += f"; the {said['drop_by']}'s to drop"
         lines.append(f"  {one.round} {one.build.stage}: {one.build.repo} on "
                      f"{one.build.branch}; {what}")
@@ -438,12 +443,12 @@ def _to_look_at(one) -> bool:
 WAITING: tuple[Kind, ...] = (
     Kind("open", "open questions", _questions_in(questions.OPEN), _entries_data,
          _question_lines),
-    Kind("parked", "parked questions, not put to him", _questions_in(questions.PARKED),
+    Kind("parked", "parked questions, not put to the operator", _questions_in(questions.PARKED),
          _entries_data, _question_lines),
     Kind("waits", "open waiting items", _waits, _builds_data, _wait_lines),
-    Kind("decisions", "major decisions not yet ruled", _decisions, _entries_data,
+    Kind("decisions", "decisions not yet ruled", _decisions, _entries_data,
          _decision_lines),
-    Kind("not_shown", "rulings not yet shown to him", _lists, _lists_data, _list_lines),
+    Kind("not_shown", "rulings not yet shown to the operator", _lists, _lists_data, _list_lines),
     Kind("builds", "builds idle, gone, empty, unclear, sharing or not read",
          _builds_to_look_at, _builds_data, _build_lines))
 
@@ -541,9 +546,11 @@ def _time(text: str) -> datetime:
 class Numbers:
     """The numbers of the closed rounds summed: `project` is the one the listing was
     kept to, or None; `rounds` the closed rounds summed, by name; `uncounted` the
-    closed rounds whose closing holds no numbers; `unreadable` a line for each log
-    that can't be read, and `unplaced` one for each project whose rounds folder
-    can't be worked out, whose rounds are therefore not summed."""
+    closed rounds whose closing holds no numbers; `timed` the rounds of `rounds`
+    whose closing holds the round's time open, the ones `round_time_s` sums;
+    `unreadable` a line for each log that can't be read, and `unplaced` one for each
+    project whose rounds folder can't be worked out, whose rounds are therefore not
+    summed."""
 
     computed: str
     project: str | None
@@ -552,11 +559,12 @@ class Numbers:
     uncounted: tuple[str, ...] = ()
     unreadable: tuple[str, ...] = ()
     unplaced: tuple[str, ...] = ()
+    timed: tuple[str, ...] = ()
 
     def data(self) -> dict:
         return {"computed": self.computed, "project": self.project,
                 "rounds": list(self.rounds), "numbers": dict(self.numbers),
-                "uncounted": list(self.uncounted), "unreadable": list(self.unreadable),
+                "timed": list(self.timed), "uncounted": list(self.uncounted), "unreadable": list(self.unreadable),
                 "no_folder": list(self.unplaced)}
 
 
@@ -581,6 +589,8 @@ def numbers(project: str | None = None, *, settings=None, now: str | None = None
     return Numbers(computed=now, project=None if project is None else homes[0].project,
                    rounds=tuple(name for name, _held in summed),
                    numbers=counted.summed(held for _name, held in summed),
+                   timed=tuple(name for name, held in summed
+                               if isinstance(held.get("round_time_s"), int)),
                    uncounted=tuple(uncounted), unreadable=tuple(unreadable),
                    unplaced=unplaced)
 
@@ -592,6 +602,9 @@ def numbers_as_text(listing: Numbers) -> str:
         count = len(listing.rounds)
         lines = [f"numbers of {count} closed round{'' if count == 1 else 's'}{where}",
                  *(f"  {line}" for line in counted.lines(listing.numbers))]
+        if len(listing.timed) < count:
+            lines.append(f"  time open sums {len(listing.timed)} of the {count} rounds: "
+                         "the others closed before their closing held it")
     else:
         lines = [f"no round{where} has closed with its numbers"]
     if listing.uncounted:

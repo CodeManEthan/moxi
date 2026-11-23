@@ -355,6 +355,13 @@ def test_on_the_small_install_every_message_is_read_live(page_shell, rig, ui_con
     expect(root.locator('[data-part="box"] [data-line="deliver"]')).to_have_count(0)
 
 
+def settled(opened) -> None:
+    """Wait until the drawn opened row's `Session` line, where one comes, has its words: it
+    reads `Reading…` while the reads that fill it are out, and a click before they answer
+    races their redraw."""
+    expect(opened.locator('[data-line="session"]').filter(has_text="Reading…")).to_have_count(0)
+
+
 @needs_turns
 def test_the_dry_run_says_a_recipient_is_working_while_its_turn_is_open(page_shell, rig, ui_contexts):
     planner = rig.shim(**PLANNER)
@@ -370,6 +377,7 @@ def test_the_dry_run_says_a_recipient_is_working_while_its_turn_is_open(page_she
     expect(dry).to_contain_text("Delivered. planner is working; it reads this when its turn ends.")
     # Its turn ends: the next check reads turns again and the line says so.
     turns.open[planner.session_id] = False
+    settled(root.locator('[data-part="opened"][data-to="planner"]'))
     root.locator('[data-part="box"] [data-action="posture"]').click()
     root.locator('[data-part="box"] [data-choice="once"]').click()
     expect(dry).to_contain_text("Delivered. planner reads it at its next turn boundary.")
@@ -493,6 +501,7 @@ def test_who_owes_a_reply_to_him_and_between_agents(page_shell, rig, ui_contexts
     planner.locator('[data-action="message"]').click()
     waits = root.locator('[data-part="opened"][data-to="planner"] [data-line="waits:reviewer"]')
     expect(waits).to_contain_text(re.compile(rf"Waits onreviewer · for one reply to its {T} message"))
+    settled(root.locator('[data-part="opened"][data-to="planner"]'))
     waits.locator('[data-action="thread"]').click()
     header = root.locator('[data-part="thread"] [data-line="thread-header"]')
     expect(header).to_have_text("planner and reviewer · 1 message today · reviewer owes one reply")
