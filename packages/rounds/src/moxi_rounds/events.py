@@ -141,17 +141,20 @@ TYPES = _types(
     # with the target, the argv, and how it went: its exit code (None for a run ended at
     # its time limit), its duration and the file its output went to. A check by CI's
     # local part that pushed the tip to CI's own ref names the remote and that ref
-    # (`pushed`).
+    # (`pushed`). A queue member's run of `check.local` at its candidate, which the
+    # lander writes, names the candidate commit and the batch.
     EventType("check.ran",
               ("stage", "step", "commit", "merge_base", "argv", "exit_code", "duration_s",
-               "output", "pushed")),
+               "output", "pushed", "candidate", "batch")),
     # CI was read for a build: the commit, its merge-base with the target, the argvs
     # that ran, each workflow by path with the id it read as, its reading and its
     # run's url, and for one read by its jobs each job's reading and url, the whole
-    # reading, and the remote and CI's own ref the tip was pushed to (`pushed`).
+    # reading, and the remote and CI's own ref the tip was pushed to (`pushed`). A
+    # queue member's read, which the lander writes, also names the candidate commit, the
+    # batch, the run ids and the failures excused as the target's own.
     EventType("ci.read",
               ("stage", "commit", "merge_base", "status_argv", "ids_argv", "jobs_argvs",
-               "workflows", "reading", "pushed")),
+               "workflows", "reading", "pushed", "candidate", "batch", "run", "excused")),
     # A finding or a waiting item moved to a new state.
     EventType("finding.marked", ("id", "state", "commits", "record")),
     EventType("wait.marked", ("id", "state", "commits", "record")),
@@ -171,6 +174,32 @@ TYPES = _types(
               ("stage", "tip", "id", "kind", "state", "landing", "target_before")),
     # A build's finish completed at this tip.
     EventType("finish.done", ("stage", "tip")),
+    # A build of a queue project joined its repo's queue at its tip `tip`, the target's
+    # head being `main`; `urgent` puts it ahead of every member that is not.
+    EventType("queue.join", ("stage", "tip", "main", "urgent", "by"),
+              required=("stage", "tip")),
+    # A member left the queue: by hand, because its branch moved, or a gate it failed.
+    EventType("queue.left", ("stage", "tip", "reason", "by", "batch"),
+              required=("stage", "reason")),
+    # A member was taken into a batch: the batch's id, the target's head it was built on
+    # and its candidate commit.
+    EventType("queue.batch", ("stage", "tip", "batch", "main", "candidate"),
+              required=("stage", "batch")),
+    # A member landed in its batch, at its landing commit, with the failures its
+    # candidate's run had that were the target's own (`excused`); `left_late` when it
+    # left, or joined again, after the candidate reached the target.
+    EventType("queue.landed", ("stage", "tip", "batch", "landing", "excused",
+                               "left_late"),
+              required=("stage", "batch")),
+    # A member was sent back: a conflict with an earlier member (`blocker`), a commit
+    # hook's or the publishing scan's refusal, or a new failure in its batch's CI run.
+    EventType("queue.ejected", ("stage", "tip", "batch", "reason", "blocker", "run",
+                                "failures", "output"), required=("stage", "reason")),
+    # A member's batch ended without landing or ejecting it (`why`: paused, absent,
+    # split, the target moved, rebuilt without another member), so it waits again in
+    # its place.
+    EventType("queue.requeued", ("stage", "tip", "batch", "why"),
+              required=("stage", "batch")),
     # A dead holder's finish lock was cleared.
     EventType("lock.cleared", ("ref", "holder")),
     # A build or the whole round was withdrawn: by whom, the pointer, each open build's
