@@ -55,8 +55,9 @@ reads the store, writes at most one row, and returns; it never waits on the sess
 recycle itself, at its next pause point and only when it is mid-work (`RELAUNCH_LINE`),
 once per session id: a crossing that fires again in the same session id, after a
 compaction, gets no line, and a clear or a resume that names a new id is told afresh. It
-never tells a scratch launch, which can't recycle itself (`SCRATCH_RECYCLE`). usage
-appends the line to its notice on the same call, so the agent reads one line;
+tells only a launch whose session can recycle itself (`selfrecycle.missing_of_row`, the
+test the self arm reads), so never a scratch launch (`SCRATCH_RECYCLE`). usage appends
+the line to its notice on the same call, so the agent reads one line;
 `compact` writes a compact run and spawns its job, which waits for the session to be idle
 (`job.CompactJob`). A compact crossing that meets an open run leaves a pending compact,
 which the run's end takes up (`store.end_run`): it is never dropped silently.
@@ -77,7 +78,7 @@ from moxi import exit as codes
 from moxi import modules, paths, proc
 from moxi.paths import Layout
 
-from . import catalog, quiet, slots, store, target
+from . import catalog, quiet, selfrecycle, slots, store, target
 
 log = logging.getLogger("moxi.launcher.recycle")
 
@@ -120,8 +121,9 @@ COMPACT_LINE = ("This launch compacts at its limit: the launcher compacts this s
 #: has no notes directory to keep a handoff in. A launch that works in one and is given
 #: `recycle_at_limit = relaunch` by a flag, the page or its preset is refused wherever its
 #: values are checked (`catalog.refuse_scratch_recycle`); one that has it from
-#: `[defaults]` holds `off` with a warning (`presets.resolve`). An older such row is
-#: refused the self arm and gets no line at its mark, and a replay of one recycles `off`.
+#: `[defaults]` holds `off` with a warning (`presets.resolve`), and from the shipped
+#: default holds `off` quietly. An older such row is refused the self arm and gets no line
+#: at its mark, and a replay of one recycles `off`.
 #: `compact` stays open to a scratch.
 SCRATCH_RECYCLE = catalog.SCRATCH_RECYCLE
 
@@ -515,7 +517,7 @@ def crossing_line(conn: sqlite3.Connection, crossing: Any, *, pid: int,
     key = store.crossing_key(session_id, getattr(crossing, "mark", None),
                              getattr(crossing, "at", None))
     if value == "relaunch":
-        if is_scratch_relaunch(row.values):
+        if selfrecycle.missing_of_row(row) is not None:
             return None
         if not _told(conn, row.request_id, session_id):
             try:

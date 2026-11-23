@@ -41,7 +41,7 @@ from typing import Any
 from moxi import exit as codes
 from moxi import modules
 
-from . import keepwarm, relaunch, slots, store, target
+from . import keepwarm, relaunch, selfrecycle, slots, store, target
 from .recycle import LOOK, cache_read
 
 #: The outcomes, beside `blocked`, after which a launch needs a look.
@@ -291,6 +291,8 @@ def _recycle(conn: sqlite3.Connection, row: store.LaunchRow, own: Sequence[store
     told = [e.at for e in events if e.kind == "recycle-told"]
     dropped = [e.at for e in events if e.kind == "pending-compact-dropped"]
     at_limit = str(values.get("recycle_at_limit") or "off")
+    if at_limit == "off" and selfrecycle.holds_by_default(row):
+        at_limit = BY_DEFAULT
     return RecycleState(
         on_expiry=str(values.get("recycle_on_expiry") or "off"), at_limit=at_limit,
         limit_at=_limit_mark(row, at_limit=at_limit), last=last,
@@ -298,15 +300,22 @@ def _recycle(conn: sqlite3.Connection, row: store.LaunchRow, own: Sequence[store
         pending_dropped_at=dropped[-1] if dropped else None)
 
 
+#: The `at limit` of a launch that recycles itself on the `off` it never chose: one made
+#: before `relaunch` was the default (`selfrecycle.opted_in`).
+BY_DEFAULT = "relaunch (default)"
+
+
 def _limit_mark(row: store.LaunchRow, *, at_limit: str) -> str | None:
-    """The mark a launch recycles at: its `limit_at` when set; else, when it recycles at
-    its limit, the crossing mark stamped on it at launch (usage's `CROSSING_AT_ENV`, so
-    an unset `limit_at` shows the mark it followed); else None. None too when usage
-    can't be loaded here to name the stamp."""
+    """The mark a launch recycles at: for a compacting launch its `limit_at` when set;
+    else, when it recycles at its limit, the crossing mark stamped on it at launch
+    (usage's `CROSSING_AT_ENV`, so an unset `limit_at` shows the mark it followed, and a
+    relaunch launch the mark it is told at); else None. None too when usage can't be
+    loaded here to name the stamp, and for a launch that recycles itself by default,
+    which was stamped none."""
     limit_at = row.values.get("limit_at")
-    if limit_at:
+    if limit_at and at_limit == "compact":
         return str(limit_at)
-    if at_limit == "off":
+    if at_limit in ("off", BY_DEFAULT):
         return None
     found = modules.load("usage", interface=1)
     name = getattr(found.api, "CROSSING_AT_ENV", None) if found.ok else None

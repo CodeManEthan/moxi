@@ -9,10 +9,11 @@
 Relaunch is offered with turns and slots installed and slots running here; the session
 must be a slot launch, claimed, live, on a harness whose turns session offers `exit`.
 comms is optional: without it there is no director mode, no name to wait for and no
-notices. A self arm needs a launch made with `--recycle-at-limit relaunch`: a launch that
-recycles by compacting, or not at all, is refused `no-self-recycle`, a dry run too, and
-so is a scratch launch recorded with the option before a scratch was refused it. A
-director's call and a repair need no such launch.
+notices. A self arm needs a launch whose session can recycle itself
+(`selfrecycle.missing`): set to `relaunch` (the shipped default) or, made before that was
+the default, left at the shipped `off`; a Claude slot launch; not in a scratch folder;
+with a handoff folder; warned at a mark. Any other is refused `no-self-recycle`, a dry
+run too, with the item it fails. A director's call and a repair need no such launch.
 
 A launch that names no model comes back on the model its session last used (`pin`): the
 arm and the call read it and put it in their `--json` (`model`, `model_how`), and the job
@@ -98,7 +99,8 @@ from moxi import modules, paths
 from moxi import store as core_store
 from moxi.paths import Layout
 
-from . import catalog, first, handoffs, job, notices, pin, quiet, recycle, slots, store, target
+from . import (catalog, first, handoffs, job, notices, pin, quiet, recycle, selfrecycle, slots,
+               store, target)
 from .compose import common
 
 #: The job script every relaunch run runs as.
@@ -163,7 +165,7 @@ def arm_self(handoff: str, *, dry_run: bool = False,
         try:
             api = offered(found, slots_api)
             row, sid = found.row, found.session_id
-            may_recycle(row)
+            may_recycle(row, slots_here=lambda: True)    # `offered` asked slots already
             _no_open_run(c, row, api)
             path = check_handoff(handoff, c, row, sid)
             number = _no_live_agents(found.session)
@@ -198,35 +200,21 @@ def arm_self(handoff: str, *, dry_run: bool = False,
             found.close()
 
 
-#: The hint of a launch refused `no-self-recycle` for its `recycle_at_limit`.
-SELF_RECYCLE_HINT = ("finish the work and stop; a launch with --recycle-at-limit relaunch "
-                     "can recycle itself")
-#: The same hint for a scratch launch, which can't be made with that option.
-SCRATCH_HINT = ("finish the work and stop; a scratch launch recycles only by compacting, "
-                "and a launch in a directory with --recycle-at-limit relaunch can recycle "
-                "itself")
+#: What a launch refused `no-self-recycle` does now; the hint adds what would let a
+#: launch recycle itself.
+SELF_RECYCLE_HINT = "finish the work and stop"
 
 
-def may_recycle(row: store.LaunchRow) -> None:
-    """Refuse `no-self-recycle` unless the launch was made with `--recycle-at-limit
-    relaunch`, the option that lets its session recycle itself, and not in a scratch
-    folder (`recycle.SCRATCH_RECYCLE`: a row recorded before a scratch launch was refused
-    the option). A scratch row refused for its value gets `SCRATCH_HINT`, since a scratch
-    launch can't take the option."""
-    value = row.values.get("recycle_at_limit")
-    if recycle.is_scratch_relaunch(row.values):
-        problem, hint = recycle.SCRATCH_RECYCLE
-        raise Refused("no-self-recycle", f"launch {row.request_id} works in a scratch "
-                                         f"folder, and {problem}", hint)
-    if value == "relaunch":
-        return
-    hint = SCRATCH_HINT if row.values.get("scratch") else SELF_RECYCLE_HINT
-    if value == "compact":
-        raise Refused("no-self-recycle", f"launch {row.request_id} recycles at its limit by "
-                                         "compacting, so it can't relaunch itself", hint)
-    raise Refused("no-self-recycle", f"launch {row.request_id} was started without "
-                                     "--recycle-at-limit relaunch, so it can't recycle "
-                                     "itself", hint)
+def may_recycle(row: store.LaunchRow, *, slots_here: Callable[[], bool] | None = None) -> None:
+    """Refuse `no-self-recycle` unless the launch's session can recycle itself
+    (`selfrecycle.missing_of_row`, the test its crossing line is told by), naming the
+    item it fails: opted out, not a Claude slot launch, slots not running here, a scratch
+    folder, no handoff folder, or no warn-at mark. `slots_here` stands in for
+    `catalog.slots_here`."""
+    found = selfrecycle.missing_of_row(row, slots_here=slots_here)
+    if found is not None:
+        raise Refused("no-self-recycle", f"launch {row.request_id} {found.problem}",
+                      f"{SELF_RECYCLE_HINT}; {found.hint}")
 
 
 def check_handoff(handoff: str, conn: sqlite3.Connection, row: store.LaunchRow,
@@ -926,7 +914,7 @@ def _span(seconds: float) -> str:
     return f"{seconds:g} seconds"
 
 
-__all__ = ["ARMED", "HANDOFF_CAP", "JOB_SCRIPT", "LOOK", "REACHABLE", "SCRATCH_HINT",
+__all__ = ["ARMED", "HANDOFF_CAP", "JOB_SCRIPT", "LOOK", "REACHABLE",
            "SELF_RECYCLE_HINT", "UNREADABLE", "Refused", "Result", "arm_self", "call_director",
            "check_handoff", "follow_run", "from_record", "is_director", "job_argv",
            "may_recycle", "model_words", "not_warm", "offered",

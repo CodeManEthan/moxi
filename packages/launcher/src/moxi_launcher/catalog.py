@@ -47,8 +47,8 @@ the catalog's own:
              `refused` and `hint`, the words a launch or preset that breaks it is refused
              with
     offered_with
-             another launcher row: this row is offered only when that one is set off its
-             default
+             another launcher row: this row is offered only when that one is set to a
+             value other than its default and `off`
     fork     what a fork of a session (`moxi launcher fork`) does with the row, which
              every row names, so a row added later is classed before it ships: `copy`,
              the value as the parent ran it, for a row that shapes the request the
@@ -70,8 +70,9 @@ What this module gives the rest of the launcher:
 - `forked(harness, values)`: a fork's values from its parent's, by each row's `fork`
   class.
 - `refuse_values(harness, values, chosen=...)`: the rules between a launch's values that
-  `when` and `offered_with` state, each refused with its own words, and the one rule no
-  row states: a scratch launch can't recycle itself (`refuse_scratch_recycle`).
+  `when` and `offered_with` state, each refused with its own words, and the rules no row
+  states: a scratch launch can't recycle itself (`refuse_scratch_recycle`), and a launch
+  that relaunches itself does so at its `warn_at` mark (`refuse_relaunch_mark`).
 - `Row.check(value)` and `Row.tokens(mode, value, cwd=...)`: a value checked against its
   row, and the tokens one mode spells it as.
 - `fit(harness, mode, values, chosen)`: the modes rule. A composed command carries only
@@ -677,7 +678,10 @@ def row(harness: str, name: str) -> Row | None:
 def unset(row_: Row) -> object:
     """The value that leaves `row_` unset: false for a bool, or a string row whose
     default is false; [] for a list; "" for any other string or a path; the default for
-    the rest, an `enum` row's default being its value that sets nothing."""
+    the rest: an `enum` row's `off` when it takes one (`recycle_at_limit` ships
+    `relaunch`), else its default, which is then its value that sets nothing."""
+    if row_.type == "enum" and "off" in (row_.values or ()):
+        return "off"
     if row_.type == "list":
         return []
     if row_.type == "bool" or (row_.type == "string" and row_.default is False):
@@ -1062,12 +1066,13 @@ def refuse_values(harness: str, values: Mapping[str, object], *,
     - a value whose `when` needs are not met: a module absent, its condition not
       holding here, or the launch's `target` another;
     - a row chosen for this launch (`chosen`: typed or from the preset) whose
-      `offered_with` row is at its default, which leaves it nothing to do.
+      `offered_with` row is at its default or `off`, which leaves it nothing to do.
 
-    A row not in `values` is not offered here and is not looked at. First
-    comes `refuse_scratch_recycle`, which no other value can fix, so a launch, its
-    preview and `presets check` all refuse that pair in its own words."""
+    A row not in `values` is not offered here and is not looked at. First come
+    `refuse_scratch_recycle` and `refuse_relaunch_mark`, so a launch, its preview and
+    `presets check` all refuse those pairs in their own words."""
     refuse_scratch_recycle(values)
+    refuse_relaunch_mark(values)
     avail = _available(available)
     chosen = frozenset(chosen)
     for name, value in values.items():
@@ -1079,8 +1084,8 @@ def refuse_values(harness: str, values: Mapping[str, object], *,
             raise NeedsModule(row_, need.refused, need.hint)
         if row_.offered_with is not None and name in chosen:
             other = row(harness, row_.offered_with)
-            if other is None or values.get(other.name, other.default) in (None, "",
-                                                                            other.default):
+            if other is None or values.get(other.name, other.default) in (
+                    None, "", "off", other.default):
                 raise NeedsModule(row_, f"{name} needs {row_.offered_with}",
                                   f"set {row_.offered_with} too, or leave {name} out")
 
@@ -1104,6 +1109,36 @@ def refuse_scratch_recycle(values: Mapping[str, object]) -> None:
     `off` on a scratch launch, so what reaches here was typed or set by the preset."""
     if bool(values.get("scratch")) and values.get("recycle_at_limit") == "relaunch":
         raise ScratchRecycle("recycle_at_limit", *SCRATCH_RECYCLE)
+
+
+class RelaunchMark(Refused):
+    """A launch set to relaunch itself whose marks can't say when: `warn_at` off, or a
+    `limit_at`, which no longer moves the relaunch line."""
+
+    code = "relaunch-mark"
+
+
+#: The hint of a `limit_at` on a launch that relaunches itself.
+RELAUNCH_LIMIT_HINT = "the relaunch line comes at warn_at; set warn_at"
+
+
+def refuse_relaunch_mark(values: Mapping[str, object]) -> None:
+    """Refuse `RelaunchMark` when `values` set `recycle_at_limit = relaunch` with
+    `warn_at = off` (the relaunch line rides on usage's warning, so with none it never
+    comes) or with a `limit_at` (the relaunch line comes at `warn_at`, so a `limit_at`
+    would do nothing). `presets.resolve` has already set a shipped-default relaunch to
+    `off` where it can't act, set a `[defaults]` relaunch with `warn_at` off to `off`, and
+    left a `[defaults]` `limit_at` out of a relaunch launch, each but the first with a
+    warning, so what reaches here was chosen for the launch."""
+    if values.get("recycle_at_limit") != "relaunch":
+        return
+    if values.get("warn_at") == "off":
+        raise RelaunchMark("warn_at", "recycle_at_limit relaunch tells the session at its "
+                                      "warn_at mark, and warn_at is off",
+                           "set warn_at to 1x, 1.5x or 2x, or recycle_at_limit to off")
+    if is_set(values.get("limit_at")):
+        raise RelaunchMark("limit_at", "limit_at does nothing on a launch that relaunches "
+                                       "itself", RELAUNCH_LIMIT_HINT)
 
 
 def _met(need: When, values: Mapping[str, object], avail: Callable[[str], bool],

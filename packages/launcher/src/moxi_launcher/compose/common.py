@@ -688,16 +688,32 @@ def commands(values: Mapping[str, object]) -> tuple[str, ...]:
 
 def option_stamps(values: Mapping[str, object]) -> dict[str, str]:
     """The stamps a launch's option rows set: keep-warm on, recycle on expiry's value,
-    and the crossing mark (`limit_mark`) when it recycles at its limit. A row at `off`
-    stamps nothing."""
+    and the crossing mark (`limit_mark`) when it recycles at its limit: a `compact`
+    launch always, a `relaunch` launch only where its session can recycle itself
+    (`selfrecycle.missing`), so it is told exactly where its arm would be accepted. A row
+    at `off` stamps nothing."""
     env: dict[str, str] = {}
     if values.get("keep_warm") == "on":
         env[KEEP_WARM_ENV] = "on"
     if values.get("recycle_on_expiry") in ("clear", "compact"):
         env[RECYCLE_ON_EXPIRY_ENV] = str(values["recycle_on_expiry"])
-    if values.get("recycle_at_limit") in ("relaunch", "compact"):
+    at_limit = values.get("recycle_at_limit")
+    if at_limit == "compact" or (at_limit == "relaunch" and relaunch_holds(values)):
         _stamp(env, "usage", 1, "CROSSING_AT_ENV", limit_mark(values))
     return env
+
+
+def relaunch_holds(values: Mapping[str, object]) -> bool:
+    """Whether a launch of `values` (its `harness`, `target`, `cwd` and the rest, as the
+    composer has them) can recycle itself, by `selfrecycle.missing`; a launch not yet
+    placed in a slot counts as in one when its target is a slot."""
+    from .. import selfrecycle
+
+    target = values.get("target")
+    return selfrecycle.missing(
+        harness=str(values.get("harness") or "claude"), target=str(target or ""),
+        in_slot=target == "slot", cwd=str(values.get("cwd") or "") or None,
+        values=values, source=None) is None
 
 
 #: The mark a limit crossing falls back to when no other mark applies.
@@ -706,11 +722,15 @@ LIMIT_FALLBACK = "1x"
 
 def limit_mark(values: Mapping[str, object]) -> str:
     """The mark a launch that recycles at its limit is stamped to cross at, read when the
-    launch is composed: `limit_at` when it is a mark; else `warn_at` when it is one; else,
-    when `warn_at` is unset, usage's config `marks.default` when usage loads and that is a
-    mark, since usage warns an unstamped launch at it; else `LIMIT_FALLBACK` (`warn_at` is
-    `off`, or usage warns at none). So the recycle line comes with usage's warning."""
+    launch is composed. A `relaunch` launch crosses at its `warn_at`, the mark usage warns
+    it at, so the relaunch line rides on that warning; `relaunch_holds` has made sure it
+    is a mark. A `compact` launch crosses at `limit_at` when it is a mark; else `warn_at`
+    when it is one; else, when `warn_at` is unset, usage's config `marks.default` when
+    usage loads and that is a mark, since usage warns an unstamped launch at it; else
+    `LIMIT_FALLBACK` (`warn_at` is `off`, or usage warns at none)."""
     marks = catalog.launcher()["limit_at"].values
+    if values.get("recycle_at_limit") == "relaunch" and values.get("warn_at") in marks:
+        return str(values["warn_at"])
     for name in ("limit_at", "warn_at"):
         if values.get(name) in marks:
             return str(values[name])
@@ -920,7 +940,7 @@ __all__ = ["BASE_NAMES", "BASE_PREFIXES", "CODEX_KEEP", "COMMANDS", "CREDENTIAL"
            "Unreadable", "agent_role", "base_env", "check_sizes", "commands",
            "director_words", "encode",
            "env_class", "child_env", "first_turn", "headless_words", "identity_block",
-           "LIMIT_FALLBACK", "limit_mark", "locator", "no_credentials", "option_stamps",
+           "LIMIT_FALLBACK", "limit_mark", "locator", "no_credentials", "option_stamps", "relaunch_holds",
            "prompt_path", "read_settings", "usage_default_mark",
            "replay_env", "scratch_dir", "scratch_name", "scratch_root",
            "scratch_root_problem", "scrub", "seat_text", "settings_file", "settings_path",
