@@ -30,6 +30,7 @@ import pytest
 
 import moxi.store
 from moxi import modules
+from moxi_dev.testing import PROC_WAIT_S
 from moxi_sessions import api as sessions
 from moxi_usage import index, limits, models, page, pagehandlers, readings, reports, store
 from moxi_usage.readings import Reading
@@ -234,7 +235,7 @@ class Stream:
             await self.task
 
 
-async def until(check, timeout: float = 5.0) -> None:
+async def until(check, timeout: float = PROC_WAIT_S) -> None:
     async with asyncio.timeout(timeout):
         while not check():
             await asyncio.sleep(0.01)
@@ -1284,7 +1285,7 @@ def test_the_limits_route_makes_no_pull_and_the_poller_does(pulls, monkeypatch):
     async def go():
         stream = Stream(served(), "limits")
         try:
-            return (await stream.next(5))[1]
+            return (await stream.next(PROC_WAIT_S))[1]
         finally:
             await stream.close()
             pagehandlers._current.poller.cancel()
@@ -1999,12 +2000,12 @@ def test_the_poller_publishes_limits_only_when_they_change(monkeypatch):
     async def go():
         stream = Stream(served(), "limits")
         try:
-            name, first = await stream.next(5)
+            name, first = await stream.next(PROC_WAIT_S)
             assert name == "limits" and stream.status == 200
             assert set(first) == {"today", "rows", "pull", "notes"}
             assert await stream.none_within(0.6)
             put_readings(codex_reading(55.0, observed=time.time() - 5))
-            _, later = await stream.next(5)
+            _, later = await stream.next(PROC_WAIT_S)
             five = [r for r in later["rows"] if (r["harness"], r["label"]) == ("codex", "5h")]
             assert five[0]["used_percent"] == 55.0
             assert await stream.none_within(0.6)
@@ -2030,7 +2031,7 @@ def test_the_poller_starts_with_the_first_stream_and_runs_for_the_servers_life(m
         await ask(app, "/api/pass", method="POST")        # a pass alone starts no poller
         assert pagehandlers._current.poller is None and gathered == []
         one, two = Stream(app, "limits"), Stream(app, "index")
-        await one.next(5)
+        await one.next(PROC_WAIT_S)
         feed = pagehandlers._current
         poller = feed.poller
         assert poller is not None and not poller.done()
@@ -2043,7 +2044,7 @@ def test_the_poller_starts_with_the_first_stream_and_runs_for_the_servers_life(m
         assert feed.poller is poller and not poller.done()
         assert len(gathered) > count
         again = Stream(app, "limits")
-        assert (await again.next(5))[0] == "limits"
+        assert (await again.next(PROC_WAIT_S))[0] == "limits"
         assert feed.poller is poller
         await again.close()
         poller.cancel()
@@ -2067,7 +2068,7 @@ def test_the_poller_outlives_a_gather_that_raises(monkeypatch, caplog):
     async def go():
         stream = Stream(served(), "limits")
         try:
-            assert (await stream.next(5))[0] == "limits"
+            assert (await stream.next(PROC_WAIT_S))[0] == "limits"
         finally:
             await stream.close()
 
@@ -2121,16 +2122,17 @@ def test_the_pass_runs_once_at_a_time_holds_busy_and_publishes_index_at_start_an
             assert await stream.none_within(0.2)
             assert await ask(app, "/api/pass", method="POST") == (
                 200, {"started": True, "running": True})
-            assert await stream.next(5) == ("index", {"running": True, "last_pass": LAST_PASS,
-                                                      "note": None})
+            assert await stream.next(PROC_WAIT_S) == ("index", {"running": True,
+                                                                "last_pass": LAST_PASS,
+                                                                "note": None})
             assert await ask(app, "/api/pass", method="POST") == (
                 200, {"started": False, "running": True})
             _, health = await ask(app, "/api/health")
             assert health["open"]["busy"] == ["pass"]
             release.set()
-            assert await stream.next(5) == ("index", {"running": False,
-                                                      "last_pass": LAST_PASS + 60,
-                                                      "note": None})
+            assert await stream.next(PROC_WAIT_S) == ("index", {"running": False,
+                                                                "last_pass": LAST_PASS + 60,
+                                                                "note": None})
             await until(lambda: not pagehandlers._current.running())
             _, health = await ask(app, "/api/health")
             assert health["open"]["busy"] == []
@@ -2158,8 +2160,8 @@ def test_a_pass_that_fails_ends_with_its_reason_on_the_index_topic(seeded, monke
         stream = Stream(app, "index")
         try:
             assert (await ask(app, "/api/pass", method="POST"))[0] == 200
-            assert (await stream.next(5))[1]["running"]
-            _, end = await stream.next(5)
+            assert (await stream.next(PROC_WAIT_S))[1]["running"]
+            _, end = await stream.next(PROC_WAIT_S)
             assert end == {"running": False, "last_pass": LAST_PASS,
                            "note": "the pass failed (OSError); the page server's log has "
                                    "the details"}
@@ -2200,7 +2202,7 @@ def test_a_catch_up_pass_over_many_new_sources_reads_them_on_the_pool(monkeypatc
         try:
             assert await ask(app, "/api/pass", method="POST") == (
                 200, {"started": True, "running": True})
-            assert (await stream.next(5))[1]["last_pass"] == first.finished_at
+            assert (await stream.next(PROC_WAIT_S))[1]["last_pass"] == first.finished_at
             _, end = await stream.next(120)
             await pagehandlers._current.pass_task
             return end

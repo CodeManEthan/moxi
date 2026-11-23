@@ -21,6 +21,7 @@ from types import SimpleNamespace
 import pytest
 from moxi import exit as exits
 from moxi import modules, proc
+from moxi_dev.testing import PROC_WAIT_S
 
 import launcher_fake_slots as fake
 import launcher_fake_turns as fake_turns
@@ -493,7 +494,7 @@ def test_ending_the_wrapper_sends_sigterm_and_leaves_a_process_already_gone(
     child = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(60)"])
     try:
         targets._end_process(child.pid)
-        assert child.wait(10) == -signal.SIGTERM
+        assert child.wait(PROC_WAIT_S) == -signal.SIGTERM
     finally:
         if child.poll() is None:
             child.kill()

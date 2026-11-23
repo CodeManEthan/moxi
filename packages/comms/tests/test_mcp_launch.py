@@ -19,7 +19,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
-from moxi_dev.testing import timed_slack
+from moxi_dev.testing import PROC_WAIT_S, timed_slack
 from conftest import wait_until, write_config
 
 import moxi_turns
@@ -509,7 +509,7 @@ def test_a_codex_launch_stamps_the_pair_for_the_host_and_names_the_tools(
     assert proc.returncode == 0, err
     assert token not in out and token not in err
     assert f"  tools      {serving.mcp_url}" in out
-    assert wait_until(lambda: "coder" not in serving.bindings, 15)
+    assert wait_until(lambda: "coder" not in serving.bindings, PROC_WAIT_S)
 
 
 # ------------------------------------------------------------------- import cost

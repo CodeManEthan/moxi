@@ -20,7 +20,7 @@ import re
 import sys
 
 import pytest
-from moxi_dev.testing import wait_for
+from moxi_dev.testing import PROC_WAIT_S, wait_for
 from playwright.sync_api import expect
 
 import launcher_page_kit as kit
@@ -99,7 +99,8 @@ def entry(menu, name: str):
 
 def started(fake, count: int) -> dict:
     """The fake's start once it has had `count` of them."""
-    wait_for(lambda: len(fake.starts()) >= count, 10, what=f"start {count} in the fake slots")
+    wait_for(lambda: len(fake.starts()) >= count,
+             PROC_WAIT_S, what=f"start {count} in the fake slots")
     return fake.starts()[count - 1]
 
 
@@ -304,7 +305,8 @@ def launch(page, piece, shell, brief: str) -> tuple[dict, object]:
     with page.expect_request(lambda request: request.url.endswith(PREVIEW)) as sent:
         piece.locator(".go").click()
     expect(piece.locator('.said [data-line="started"]')).to_have_text(re.compile(r"^Started "))
-    wait_for(lambda: kit.newest_launch(shell).brief == brief, 10, what=f"the launch row of {brief!r}")
+    wait_for(lambda: kit.newest_launch(shell).brief == brief,
+             PROC_WAIT_S, what=f"the launch row of {brief!r}")
     return json.loads(sent.value.post_data), kit.newest_launch(shell)
 
 

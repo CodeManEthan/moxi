@@ -16,6 +16,7 @@ from pathlib import Path
 
 import pytest
 
+from moxi_dev.testing import PROC_WAIT_S
 import moxi_turns
 from conftest import end_endpoint, write_config
 from moxi_turns import codex_hooks, listeners
@@ -123,7 +124,7 @@ def ping(monkeypatch, harness, event, data, *extra):
     return json.loads(text) if text.strip() else None
 
 
-def timed_count(harness, event: str, expected: int, timeout: float = 5.0) -> int:
+def timed_count(harness, event: str, expected: int, timeout: float = PROC_WAIT_S) -> int:
     """How many `event` waits the hook server has recorded, once it has `expected` of them
     or `timeout` passes. The server records a hook's wait after it sends the answer, so
     the last one can land a moment after the ping returns."""

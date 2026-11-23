@@ -13,6 +13,7 @@ from types import SimpleNamespace
 import pytest
 from moxi import modules, proc
 from moxi.paths import Layout
+from moxi_dev.testing import PROC_WAIT_S
 
 from moxi_launcher import job as job_module
 from moxi_launcher import relaunch, store, target
@@ -1250,7 +1251,7 @@ def child():
     yield process
     if process.poll() is None:
         process.kill()
-    process.wait(5)
+    process.wait(PROC_WAIT_S)
 
 
 def open_relaunch(conn, *, kind="relaunch", mode="self", job="slots:relaunch-x"):
@@ -1266,7 +1267,7 @@ def test_a_stop_sends_the_runs_job_sigterm_and_says_what_it_does(conn, child):
     assert result.lines == (f"stop sent to run {run.run_id}: it ends stopped before the "
                             "exit; from the exit on, it ends after the relaunch is tried",)
     assert result.data == {"run_id": run.run_id, "outcome": "stop-sent", "pid": child.pid}
-    assert child.wait(5) == -relaunch.STOP_SIGNAL
+    assert child.wait(PROC_WAIT_S) == -relaunch.STOP_SIGNAL
 
 
 def test_a_repair_run_is_stopped_too(conn, child):
@@ -1316,7 +1317,7 @@ def test_a_stop_whose_job_is_gone_is_refused_and_sends_nothing(conn, api, monkey
 
 def test_a_stop_whose_pid_has_ended_is_refused(conn, child):
     child.kill()
-    child.wait(5)
+    child.wait(PROC_WAIT_S)
     run = open_relaunch(conn)
     with pytest.raises(relaunch.Refused) as caught:
         relaunch.stop_run(run.run_id, conn=conn, slots_api=JobSlots(running_job(child.pid)))

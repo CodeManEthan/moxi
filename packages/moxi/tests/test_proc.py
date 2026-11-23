@@ -18,6 +18,7 @@ from pathlib import Path
 import pytest
 
 from moxi import _mark, _watch, proc
+from moxi_dev.testing import PROC_WAIT_S
 
 POSIX = pytest.mark.skipif(sys.platform == "win32", reason="POSIX sessions and groups")
 PY = sys.executable
@@ -29,7 +30,7 @@ def script(tmp_path: Path, name: str, text: str) -> str:
     return str(path)
 
 
-def wait_for(check, timeout: float = 10.0, step: float = 0.05):
+def wait_for(check, timeout: float = PROC_WAIT_S, step: float = 0.05):
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
         value = check()
@@ -39,7 +40,7 @@ def wait_for(check, timeout: float = 10.0, step: float = 0.05):
     return check()
 
 
-def gone(ident: proc.ProcId, timeout: float = 10.0) -> bool:
+def gone(ident: proc.ProcId, timeout: float = PROC_WAIT_S) -> bool:
     return wait_for(lambda: not proc.alive(ident), timeout)
 
 
@@ -129,7 +130,7 @@ def test_a_timed_out_run_with_output_kills_the_tree_and_keeps_the_file(tmp_path)
     word, pid = out.read_text().split()
     assert word == "ready"
     assert wait_for(lambda: proc.identity(int(pid)) is None
-                    or not proc.alive(proc.identity(int(pid))), 10)
+                    or not proc.alive(proc.identity(int(pid))), PROC_WAIT_S)
 
 
 def test_run_refuses_a_single_string():
@@ -161,7 +162,7 @@ def test_a_timed_out_run_kills_the_whole_tree_and_keeps_its_output(tmp_path):
     assert word == b"ready"
     assert caught.value.timeout == 3
     assert wait_for(lambda: proc.identity(int(pid)) is None
-                    or not proc.alive(proc.identity(int(pid))), 10)
+                    or not proc.alive(proc.identity(int(pid))), PROC_WAIT_S)
 
 
 @POSIX
@@ -220,7 +221,7 @@ def test_a_grandchild_that_ignores_sigterm_and_holds_no_pipe_is_killed(
     try:
         assert caught.value.output == (b"ready\n" if capture else None)
         ident = proc.identity(grandchild)
-        assert ident is None or gone(ident, 3), "the grandchild outlived the run"
+        assert ident is None or gone(ident, PROC_WAIT_S), "the grandchild outlived the run"
         assert took >= 2.4                  # it had the grace before SIGKILL
     finally:
         try:
@@ -481,7 +482,7 @@ def test_the_child_ends_when_its_parent_is_killed(tmp_path, kind):
         assert proc.alive(child)
         middle.kill()
         middle.wait(timeout=30)
-        assert gone(child, 15)
+        assert gone(child, PROC_WAIT_S)
     finally:
         middle.stdout.close()
         if middle.poll() is None:
@@ -933,7 +934,7 @@ def test_status_of_a_process_not_started_detached_raises_lookup_error(tables):
             proc.status(child.pid)
     finally:
         child.stdin.close()
-        child.wait(timeout=10)
+        child.wait(timeout=PROC_WAIT_S)
 
 
 @POSIX
@@ -1101,7 +1102,7 @@ def _child_with(env: dict[str, str], argv0: str = PY) -> subprocess.Popen:
 
 def _end(child: subprocess.Popen) -> None:
     child.stdin.close()
-    child.wait(timeout=10)
+    child.wait(timeout=PROC_WAIT_S)
     child.stdout.close()
 
 
@@ -1138,7 +1139,7 @@ def test_env_of_a_zombie_is_none():
     # This kernel may refuse the read or return nothing; either way the answer is None.
     child = subprocess.Popen([PY, "-c", "pass"])
     try:
-        deadline = time.monotonic() + 10
+        deadline = time.monotonic() + PROC_WAIT_S
         while _state(child.pid) != "Z" and time.monotonic() < deadline:
             time.sleep(0.01)
         assert _state(child.pid) == "Z"
@@ -1330,7 +1331,7 @@ def test_run_and_spawn_add_the_mark_to_an_env_they_are_given(tmp_path, start):
         child = proc.spawn([PY, "-c", code], env=env, stdout=subprocess.PIPE)
         out = child.stdout.read().decode()
         child.lifeline.close()
-        child.wait(timeout=10)
+        child.wait(timeout=PROC_WAIT_S)
         child.stdout.close()
     else:
         log = tmp_path / "out.log"
@@ -1489,7 +1490,7 @@ def test_parent_of_a_child_is_this_process():
         assert proc.parent(child.pid) == os.getpid()
     finally:
         child.stdin.close()
-        child.wait(timeout=10)
+        child.wait(timeout=PROC_WAIT_S)
 
 
 @pytest.mark.parametrize("pid", [0, -1, True, 2.0, "1"])
@@ -1558,7 +1559,7 @@ def test_parent_on_macos_matches_ps():
         assert proc.parent(child.pid) == os.getpid()
     finally:
         child.stdin.close()
-        child.wait(timeout=10)
+        child.wait(timeout=PROC_WAIT_S)
 
 
 @MACOS

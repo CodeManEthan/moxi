@@ -17,6 +17,18 @@ before the turn ends, and a registered module can add context at a session's sta
 a prompt. A prompt says whether the person typed it, which delivery it is when turns
 handed it in, and whether it opens a turn or joins one already running.
 
+A caller can also fork a Claude Code session's main loop: `fork` starts an agent that
+holds the conversation so far and runs a task beside the main loop's turns, and
+`fork_continue` gives that agent its next round once it has answered. Each round is a
+delivery whose end carries the round's answer; Claude Code tells the main loop of each
+answer itself, and turns adds nothing to that. The caller sets how long each round may
+run before it reads lost (`round_timeout_s`), 120 s when it sets none. The fork's tool
+calls are judged by the guards like any agent's, and get no after-tool ask. A delivery or
+fork asked with `keep` has its end kept in turns' state folder until the caller acks its
+`ref`: a later wait reads the same end, even after the session's endpoint has ended, and
+turns removes none by age. Each kept delivery needs a `ref` of its own: turns refuses a
+`keep` under a `ref` whose kept end is not acked yet.
+
 Each session turns can reach has an endpoint with a Unix socket and a ledger of the
 session's turns (a small process of its own for a Claude Code session, and part of the
 host turns runs for a Codex or OpenCode session), so whether a session is idle and whether
@@ -32,7 +44,7 @@ experimental: no real run has confirmed it yet.
 
 turns is a library with no command of its own; `moxi doctor turns` checks it. Its API is
 the `moxi_turns` package, and the wire under it is described in
-[contracts/socket-protocol.md](https://github.com/CodeManEthan/moxi/blob/moxi-turns-v0.2.6/packages/turns/contracts/socket-protocol.md).
+[contracts/socket-protocol.md](https://github.com/CodeManEthan/moxi/blob/moxi-turns-v0.2.7/packages/turns/contracts/socket-protocol.md).
 
 ## Install
 
@@ -82,6 +94,16 @@ its switch, for example `moxi config set turns guards.removal true`:
   gets a one-line reminder of this. Until the session's endpoint has sent its guards,
   Claude Code's runner can't tell whether question mode is on, so it refuses every
   `AskUserQuestion` call and tells the agent to ask in prose.
+
+Which calls a guard judges on Claude Code: every agent's, a fork's that turns started
+among them. Only the runner's own calls skip the guards, and a call counts as the runner's
+only when it comes from turns' plugin and carries no agent id. The runner holds a fork's
+agent id from the fork's start until the fork's own turn ends for its open round; a
+`/clear`, a compaction or a resume lets go of nothing. A round that runs past its bound
+reads lost at once, but the fork may still be running, so its id stays held until that
+turn ends, and a `fork_continue` for it is refused meanwhile. While the runner holds the
+id, that fork's calls get no after-tool ask. A call from an agent id the runner does not
+hold is judged and asked after as any agent's.
 
 Other modules ship guards too (sessions' `sessions.transcript-read`, usage's
 `usage.ceiling`), and a guard can also be a file of your own. `guards.run` lists the
@@ -220,4 +242,4 @@ the panel.
 
 ## License
 
-MIT. See [LICENSE](https://github.com/CodeManEthan/moxi/blob/moxi-turns-v0.2.6/packages/turns/LICENSE).
+MIT. See [LICENSE](https://github.com/CodeManEthan/moxi/blob/moxi-turns-v0.2.7/packages/turns/LICENSE).

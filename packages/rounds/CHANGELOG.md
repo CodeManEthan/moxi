@@ -23,6 +23,16 @@
   no longer excused because the target's job fails some test; and a failed test is the
   target's own only when the target's run fails that same test, so a job of the
   target's that failed with no test named no longer excuses a candidate's new test.
+- A project's `private_files` lists files its repo neither tracks nor shows, such as an
+  `AGENTS.md` that `.git/info/exclude` hides. `commission` copies each into the new
+  worktree, never linking it, records each copy's source and `sha256` in
+  `build.commissioned` as `brought`, and names each in the commission block. It refuses
+  an entry that is missing, not a file, tracked at the commit the worktree checks out,
+  or not ignored. The removal rule lets an unchanged copy go with the worktree and keeps
+  the worktree for an edited one. A new finish gate, 11, refuses while any commit
+  finishing would bring into the target holds a private file, a path under one, or a
+  file where its folder would be; `check` reads it before it runs and `finish` again
+  under its lock. `moxi rounds doctor` gains a private files row.
 
 ## 0.1.3 (2026-11-23)
 

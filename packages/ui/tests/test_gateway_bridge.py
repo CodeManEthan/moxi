@@ -14,6 +14,7 @@ import time
 
 import pytest
 
+from moxi_dev.testing import PROC_WAIT_S
 from moxi_ui.testing import phone as phone_module
 from moxi_ui.testing.phone import HOST, PhoneBridge, gateway_shell, hold_port
 from moxi_ui.testing.shell import shell_env
@@ -255,14 +256,14 @@ def test_cut_and_stop_leave_a_connections_sockets_to_the_thread_that_serves_it(
 
             getattr(bridge, end)()
             # Both connections' pumps stop, and each serving thread comes to close.
-            deadline = time.monotonic() + 10
+            deadline = time.monotonic() + PROC_WAIT_S
             while len(waiting) < 2 and time.monotonic() < deadline:
                 time.sleep(0.01)
             assert len(waiting) >= 2
             assert [sock for sock in live if sock.fileno() == -1] == []
 
             release.set()
-            deadline = time.monotonic() + 10
+            deadline = time.monotonic() + PROC_WAIT_S
             while any(sock.fileno() != -1 for sock in live) and time.monotonic() < deadline:
                 time.sleep(0.01)
             assert [sock for sock in live if sock.fileno() != -1] == []

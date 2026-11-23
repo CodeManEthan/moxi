@@ -10,6 +10,7 @@ import time
 
 import pytest
 
+from moxi_dev.testing import PROC_WAIT_S
 from moxi_turns import codex_protocol as proto
 from moxi_turns.client import Session
 from moxi_turns.results import Agent, Refused
@@ -39,7 +40,7 @@ def session(endpoint):
     return Session(endpoint.address, endpoint.session(), endpoint_dir=endpoint.dir)
 
 
-def wait_for(pred, timeout=3.0):
+def wait_for(pred, timeout=PROC_WAIT_S):
     deadline = time.monotonic() + timeout
     while not pred() and time.monotonic() < deadline:
         time.sleep(0.02)

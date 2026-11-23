@@ -29,6 +29,7 @@ from moxi_comms.client import DaemonError, DaemonOffline
 from moxi_comms.config import ConfigError
 from moxi_comms.mcp import tokens
 from moxi_comms.mcp.additions import SHELL_REACH_ENV, SHELL_REACH_OFF, TOKEN_ENV, URL_ENV
+from moxi_dev.testing import PROC_WAIT_S
 
 PLANNER = "planner@proj-a"
 REVIEWER = "reviewer@proj-a"
@@ -250,7 +251,7 @@ def test_a_shim_started_while_the_daemon_is_down_registers_at_its_first_bind(rig
     daemon = Daemon(rig.record, clock=rig.clock, start_trim_thread=False)
     rig.daemon = daemon
     daemon.start()
-    assert wait_until(lambda: not s.offline, 10)
+    assert wait_until(lambda: not s.offline, PROC_WAIT_S)
     row = wait_until(lambda: row_of(rig))
     assert row.identity == REVIEWER and row.bound
 
@@ -352,7 +353,7 @@ def test_a_rebind_after_a_daemon_restart_registers_and_reloads(rig, launch):
                     serve_tools=True, mcp_port=0)
     rig.daemon = daemon
     daemon.start()
-    assert wait_until(lambda: not adapter.offline, 10)
+    assert wait_until(lambda: not adapter.offline, PROC_WAIT_S)
     assert wait_until(lambda: row_of(rig) is not None and row_of(rig).bound)
     assert wait_until(lambda: len(adapter.fake.reload_calls) == 2)
 

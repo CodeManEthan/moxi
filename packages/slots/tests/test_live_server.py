@@ -13,6 +13,7 @@ import time
 import pytest
 
 from moxi import units
+from moxi_dev.testing import PROC_WAIT_S
 from moxi_slots import doctor, health, places, tmux
 from moxi_slots import server as wrapper
 
@@ -63,7 +64,7 @@ def test_health_is_ok_against_the_recorded_pid(server, monkeypatch):
 
 def test_a_second_wrapper_leaves_the_running_server_alone(server):
     second = start_server()
-    assert second.wait(timeout=10) == 1
+    assert second.wait(timeout=PROC_WAIT_S) == 1
     assert "already answers" in second.stderr.read().decode()
     assert tmux.ping() == server.pid
 
@@ -84,7 +85,7 @@ def test_a_stale_socket_file_does_not_stop_a_start(tmux_path):
     proc = start_server()
     wait_answer()
     kill(tmux_path, places.socket(), None)
-    proc.wait(timeout=10)
+    proc.wait(timeout=PROC_WAIT_S)
     socket = places.socket()
     assert tmux.ping(timeout=1) is None
     if not os.path.exists(socket):

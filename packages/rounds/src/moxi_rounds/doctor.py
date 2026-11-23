@@ -29,6 +29,10 @@ be, with the right mode and size. These look at what rounds needs and keeps:
   writes has a holder and a time to read; whatever else a repo's `lock_ref` points at
   is another tool's, and not judged here. A project whose root git can't read has no
   locks to look at.
+- private files: for each project whose `private_files` lists any, `warn` naming each
+  entry that is missing at the project's root, is not a file, is tracked at the root's
+  `HEAD`, or that git at the root does not read as ignored, each with its fix, as
+  `commission` would refuse it; else `ok`. One `ok` row when no project lists any.
 - leftovers: the sweep's dry run (`sweeping.account`). `ok` when no folder of an ended
   build and no trash entry is left on this machine; else `warn` with each folder,
   whether it would go or the check that keeps it, and the command that removes what
@@ -82,6 +86,7 @@ def rows() -> Iterator[Row]:
     yield from _ci()
     yield from _queues()
     yield from _locks()
+    yield from _private_files()
     yield from _leftovers()
 
 
@@ -195,6 +200,45 @@ def _locks() -> Iterator[Row]:
         yield Row(MODULE, "finish locks", "ok",
                   f"no finish lock older than an hour in the {read} "
                   f"repo{'' if read == 1 else 's'} read")
+
+
+# -- private files -------------------------------------------------------------------------
+
+def _private_files() -> Iterator[Row]:
+    from . import private_files
+    from . import settings as own
+    from .gitreads import Git, GitError
+
+    try:
+        settings = own.load()
+    except config.ConfigError:
+        return
+    listing = 0
+    for key, root in folders.roots():
+        entries = private_files.listed(settings, key)
+        if not entries:
+            continue
+        listing += 1
+        name = f"private files {key}"
+        if not root.is_dir():
+            yield Row(MODULE, name, "warn", f"the project's root {root} is not there, so "
+                      "its private files can't be read", "moxi projects list")
+            continue
+        try:
+            found = private_files.doctor_warnings(Git(root), entries)
+        except GitError as exc:
+            yield Row(MODULE, name, "warn", f"git can't read {root}: {exc.reason}",
+                      exc.fix)
+            continue
+        if found:
+            yield Row(MODULE, name, "warn", "; ".join(found),
+                      "commission refuses until each is fixed")
+        else:
+            yield Row(MODULE, name, "ok",
+                      f"{len(entries)} private file{'' if len(entries) == 1 else 's'}, "
+                      "each a file the root ignores and does not track")
+    if not listing:
+        yield Row(MODULE, "private files", "ok", "no project lists a private file")
 
 
 # -- leftovers -------------------------------------------------------------------------------
