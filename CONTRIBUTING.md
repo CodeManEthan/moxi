@@ -17,6 +17,12 @@
    speaks to the reader, never he, his, him or himself. `moxi-dev check`'s pronoun step
    refuses them in a package's string literals, docstrings, web comments, README, docs and
    bundled skills; a genuine use (a quotation) carries `noqa: MX5 -- <why>` on its line.
+6. Text names no one's machine: no home folder but an example one (`/home/you`,
+   `~/...`), no private name from your list (secrets' `private_names`), and no
+   package-manager command except on a line written for its platform, marked
+   `noqa: MX6 -- <why>`. `moxi-dev check`'s machine-text step refuses them in shipped
+   code, docs and tests (a test's made-up home folder passes; a private name takes no
+   mark, and what is public on purpose goes in secrets' `private_names.allowed`).
 
 ### Names anyone can see: config keys, flags, verbs, scripts, parameters, tools and output
 
@@ -90,7 +96,8 @@
 A line a check refuses on purpose carries `# noqa: <code> -- <why>`. In a
 `settings.toml` the mark goes on the key's `[table]` line. The codes are ruff's (`N`,
 `A`, `FBT`) and the naming check's own: `MX1` units, `MX2` environment constants, `MX3`
-one word per concept, `MX4` verbs and switch keys; and the pronoun step's `MX5`, which a
-Markdown or TypeScript line writes in its own comment syntax. The check refuses a bare `# noqa`,
+one word per concept, `MX4` verbs and switch keys; the pronoun step's `MX5`; and the
+machine-text step's `MX6`. A Markdown or TypeScript line writes `MX5` or `MX6` in its own
+comment syntax. The check refuses a bare `# noqa`,
 and a mark for one of these codes without its `-- <why>`. A console script's name is
 held by contract check 7, which takes no mark.

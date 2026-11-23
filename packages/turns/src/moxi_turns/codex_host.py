@@ -18,7 +18,7 @@ The flags build the thread parameters each `thread/start`, `thread/resume` and
 `thread/fork` sends: top-level `sandbox` or `permissions` (one or the other) and `model`,
 and a nested `config` of Codex config overrides. `--option KEY=VALUE` sets one entry of `config`:
 `KEY` is a TOML dotted key, each dot outside quotes a nesting level, so a quoted part
-keeps its dots and loses its quotes (`projects."/home/x/my.dir".trust_level`); `VALUE`
+keeps its dots and loses its quotes (`projects."/home/you/my.dir".trust_level`); `VALUE`
 is read as TOML, as `codex -c` reads it (text that is not TOML is a string). `--options-file` holds those parameters whole
 as one JSON object; flags beside it replace its keys, and `--sandbox` or
 `--permissions` replaces the file's choice of either. The sandbox has one spelling,
