@@ -100,8 +100,39 @@ hit prints as `path:line: word` with the fix. A genuine use carries `noqa: MX5 -
 on the same line, in the file's comment syntax (`#`, `//` or `<!-- -->`); the step
 refuses a mark with no reason and a mark on a line it would not refuse.
 
+The machine-text step refuses text that holds on one machine only. It reads every file
+git lists (tracked, or untracked and not ignored) that is UTF-8 text, every line of it,
+comments included, but `.github/`, the core's vendored code, each package's built page
+folder, `uv.lock` and `package-lock.json`, the rename table, the allow and path lists
+(`.residue-allow`, `.refs-allow`, `.secrets-allow`, `.public-paths`) and LICENSE files.
+A file under a package is a test when a directory below the package is named `tests` or
+`test`, or its name is `conftest.py`, starts with `test_` or holds `.test.`. It refuses:
+
+- a path into one user's home folder (`/home/<user>`, `/var/home/<user>`,
+  `/Users/<user>`, `<drive>:\Users\<user>`) in shipped text. A placeholder, an example
+  user (`you`, `me`, `user`, `username` or `name`, in any case, with or without digits)
+  and a folder every machine has (`Public`, `Default`, `Shared`, `All Users`) pass, and
+  so does a path from the reader's own home (`~/...`). Tests pass this rule: a test's
+  made-up home is data no machine resolves.
+- a name from your own private-names list, the one secrets keeps in its config, in any
+  file. The line never prints the name. An empty list finds nothing; a list secrets
+  can't read stops the check with exit 2 (`moxi config secrets check` says why).
+- a package-manager command in any file: apt-get, apt, aptitude, dnf, yum, zypper,
+  pacman, apk, brew, port, snap, flatpak, choco, winget or scoop, followed by a verb
+  such as install, remove or update (flags and `sudo` allowed), pacman with its
+  operation flag, or the same as an argv list. A sentence that only names a manager
+  passes, and service managers (systemctl, launchctl and the like) are not in the rule.
+
+Each hit prints as `path:line: machine text: ...` with the fix. A genuine use, a line
+written for one platform or naming a place every machine of a kind has, carries
+`noqa: MX6 -- <why>` on the same line, in the file's comment syntax or in a docstring's
+text; a JSON line takes none. The mark lets the line's home folder and command stand,
+never a private name: text that is public on purpose goes in secrets'
+`private_names.allowed`, which publishing's commit check reads too. The step refuses a
+mark with no reason and a mark on a line with nothing for it to let stand.
+
 `moxi-dev check --static` runs the tag, comment-reference, naming, Ruff, renames,
-release and pronoun steps alone, over the whole repository, with the lines, summary line and exit
+release, pronoun and machine-text steps alone, over the whole repository, with the lines, summary line and exit
 codes they give in a full check, and nothing else: no lock check, no package picking, no
 stamps, web compare, sync, lint or tests, and nothing that needs the network. It takes
 about 80 to 140 s on this repository, the renames step about 60 s of it, so it suits a
@@ -109,8 +140,8 @@ gate run before a push.
 
 Run one step without the lock, release, package, lint or test steps with
 `moxi-dev check --only refs [PATH...]`, `moxi-dev check --only names [PATH...]`,
-`moxi-dev check --only ruff [PATH...]`, `moxi-dev check --only renames [PATH...]` or
-`moxi-dev check --only pronouns [PATH...]`.
+`moxi-dev check --only ruff [PATH...]`, `moxi-dev check --only renames [PATH...]`,
+`moxi-dev check --only pronouns [PATH...]` or `moxi-dev check --only machine [PATH...]`.
 Each step still reads the whole tree, but paths limit the findings it prints.
 
 `moxi-dev rename [--table PATH] [--dry-run] [--main REF] [ROOT]` reads tab-separated

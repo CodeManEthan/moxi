@@ -13,7 +13,7 @@ from pathlib import Path
 
 import pytest
 
-from moxi_dev import machine_text
+from moxi_dev import check, machine_text
 from moxi_dev.machine_text import (CODE, Hit, SetUnavailable, check_text, home_paths, is_test,
                                    manager_commands, read, scan)
 
@@ -142,15 +142,12 @@ def test_the_list_is_the_contributor_s_own_secrets_config():
 
 
 def test_a_list_secrets_can_t_read_stops_the_scan(repo, monkeypatch):
-    def unreadable(text, path):
-        raise SetUnavailable("private_names.words: not a list")
-
     write(repo, "README.md", "hello\n")
-    monkeypatch.setattr(machine_text, "private_lines", unreadable)
+    unreadable_list(monkeypatch)
     with pytest.raises(SetUnavailable):
         scan(repo)
-    assert machine_text.unreadable(SetUnavailable("bad")) == (
-        "the machine-text step could not read your private-names list (bad); "
+    assert machine_text.unreadable(SetUnavailable("no list")) == (
+        "the machine-text step could not read your private-names list (no list); "
         "run moxi config secrets check")
 
 
@@ -347,3 +344,70 @@ def test_scan_reads_the_tree_and_leaves_the_skipped_files(repo, names):
         Hit("packages/a/web/src/page.ts", 1, "home", "/home/bob"),
         Hit("tools/x.mjs", 1, "manager", cmd("brew| install")),
     ]
+
+
+# --- in the check -------------------------------------------------------------------------
+
+def steps(root: Path) -> tuple[check.Result, check._Steps]:
+    result = check.Result()
+    return result, check._Steps(root, [], (), {}, lambda *a: 0, lambda *a: [], result)
+
+
+def test_the_static_steps_run_the_machine_step_after_a_failed_pronoun_step(
+        repo, names, monkeypatch, capsys):
+    write(repo, "packages/a/README.md", "Ask " + "him.\n/home/bob/x\n")
+    for name in ("tags", "references", "names", "ruff", "renames", "release"):
+        monkeypatch.setattr(check._Steps, name, lambda self: True)
+    result, static = steps(repo)
+    assert static.static() is False
+    assert result.pronouns == "fail" and result.machine == "fail"
+    assert "| pronouns fail | machine fail | stamps not run |" in result.line()
+    out = capsys.readouterr().out.splitlines()
+    assert len(out) == 2 and "machine text" not in out[0]
+    assert out[1] == f"moxi-dev check: {Hit('packages/a/README.md', 2, 'home', '/home/bob')}"
+
+
+def test_the_machine_step_passes_a_clean_tree(repo, names):
+    write(repo, "packages/a/README.md", "See ~/code/app.\n")
+    result, static = steps(repo)
+    assert static.machine() is True and result.machine == "pass"
+
+
+def test_only_machine_runs_the_step_alone_and_filters_by_path(repo, names, capsys):
+    write(repo, "packages/a/README.md", "/home/bob\n")
+    write(repo, "packages/b/README.md", "ask ann\n")
+    assert check.only(repo, "machine", ["packages/b"]) == 1
+    out = capsys.readouterr().out
+    assert out == f"{Hit('packages/b/README.md', 1, 'name')}\n"
+    assert check.only(repo, "machine", ["packages/c"]) == 0
+
+
+def unreadable_list(monkeypatch):
+    def unreadable(text, path):
+        raise SetUnavailable("private_names.words: not a list")
+
+    monkeypatch.setattr(machine_text, "private_lines", unreadable)
+
+
+def test_a_list_secrets_can_t_read_exits_2_from_the_check(repo, monkeypatch, capsys):
+    write(repo, "pyproject.toml", "[tool.uv.workspace]\nmembers = []\n")
+    git(repo, "add", "-A")
+    git(repo, "-c", "user.name=t", "-c", "user.email=t@example.com", "commit", "-q",
+        "-m", "start")
+    for name in ("tags", "references", "names", "ruff", "renames", "release"):
+        monkeypatch.setattr(check._Steps, name, lambda self: True)
+    unreadable_list(monkeypatch)
+    result = check.check(repo, static=True)
+    assert result.code == 2 and result.machine == "not run"
+    assert capsys.readouterr().err == (
+        "moxi-dev check: the machine-text step could not read your private-names list "
+        "(private_names.words: not a list); run moxi config secrets check\n")
+
+
+def test_a_list_secrets_can_t_read_exits_2_from_only_machine(repo, monkeypatch, capsys):
+    write(repo, "README.md", "hello\n")
+    unreadable_list(monkeypatch)
+    assert check.only(repo, "machine") == 2
+    assert capsys.readouterr().err == (
+        "moxi-dev check: the machine-text step could not read your private-names list "
+        "(private_names.words: not a list); run moxi config secrets check\n")
