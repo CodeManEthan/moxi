@@ -765,6 +765,7 @@ def test_a_terminal_resume_keeps_the_id_and_later_acts_find_the_new_launch(work,
     assert found.row.request_id == "r2" and found.live
 
 
+@pytest.mark.slot_target
 def test_a_slot_resume_goes_back_to_its_slot(work, harness, rig):
     rig.plan(slots={"3": {"state": "free", "launchable": True}})
     first_launch(work, target="slot", slot="3")
@@ -777,6 +778,7 @@ def test_a_slot_resume_goes_back_to_its_slot(work, harness, rig):
     assert got.exit_code == 0 and got.data["slot"] == "3"
 
 
+@pytest.mark.slot_target
 def test_a_slot_resume_takes_the_lowest_when_its_slot_is_occupied(work, harness, rig):
     rig.plan(slots={"3": {"state": "free", "launchable": True}})
     first_launch(work, target="slot", slot="3")
@@ -787,6 +789,7 @@ def test_a_slot_resume_takes_the_lowest_when_its_slot_is_occupied(work, harness,
     assert got.data["slot"] == "1"
 
 
+@pytest.mark.slot_target
 def test_a_slot_resume_makes_its_missing_slot_first(work, harness, rig):
     rig.plan(slots={"3": {"state": "free", "launchable": True}})
     first_launch(work, target="slot", slot="3")
@@ -796,6 +799,7 @@ def test_a_slot_resume_makes_its_missing_slot_first(work, harness, rig):
     assert rig.calls("start")[-1]["slot"] == 3
 
 
+@pytest.mark.slot_target
 def test_a_restored_slot_launch_records_the_process_that_runs_claude(work, harness, rig):
     # Restore resumes a parked session through the slot target, so the new launch's row
     # names its own `claude` by pid and start time, the process its endpoints are
@@ -903,6 +907,7 @@ def test_the_session_a_go_launch_was_relaunched_into_resumes_showing_go(
     assert "start posture: go" in block and shown not in block, block
 
 
+@pytest.mark.slot_target
 def test_a_resume_that_failed_before_its_claim_is_skipped(work, harness, rig):
     rig.plan(slots={"3": {"state": "free", "launchable": True}})
     first_launch(work, target="slot", slot="3")

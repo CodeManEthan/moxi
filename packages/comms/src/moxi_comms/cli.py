@@ -95,15 +95,15 @@ Send boundary, enforced here:
     `[last reply]` on the replies that leave one and that close it. A read that fails
     or may be cut short lets the reply through with a NOTE.
   * the exempt sender: the operator (any lane whose sender is `operator`). No posture
-    refusal applies to him: a new send of his with no `--posture` is open, with no
-    `[open]`, and what he passes is written as passed. The `--cap` refusals still apply.
+    refusal applies: the operator's new send with no `--posture` is open, with no
+    `[open]`, and a posture passed is written as passed. The `--cap` refusals still apply.
   * the single-reply refusal: a plain `moxi comms send` whose
     recipients include someone holding a verified, unexpired `[reply-once]` ask to this
     sender, still unanswered in the record, posts nothing and names the cure --
     `moxi comms reply <id>`, or `--new` for a message on another subject. The daemon only
     nominates candidate asks; the verb decides on its own read of the record, and every
     read that fails lets the send through with a NOTE. This refusal never applies to the
-    exempt sender; the cold-cache hold below holds his message like anyone's.
+    exempt sender; the cold-cache hold below holds the operator's message like anyone's.
 Resolution is tier/route resolution, never a liveness check: nothing about delivery
 timing is inferred from it.
 

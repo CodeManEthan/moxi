@@ -83,7 +83,7 @@
 // nothing. The values that launch gave fill the rows the form leaves at their shipped
 // defaults, the harness first, and `From last launch` on the line above the box names them,
 // with `Clear` for each in its list and under its row in the panel. A filled value is not a
-// change; one the user edits becomes his, and leaves the item. A filled value that can do
+// change; one the user edits becomes one, and leaves the item. A filled value that can do
 // harm asks nothing and stays after a launch. A filled comms identity comms refuses a
 // launch under (held, reserved, retired) shows comms' refusal beside it, in the list and
 // under its row, and so does the note when a live session holds the same name in a project
@@ -121,7 +121,7 @@
 // with a handoff set there lets go of it, so the form's own shows again; a copied command
 // and a preset leave it set, as they leave a brief file. `Continue the last session` is
 // offered when the menu's read of `/api/sessions`, made each time it opens, holds a session
-// of the line's place that he made and can resume now; its dim line says whether it resumes
+// of the line's place the user made and can resume now; its dim line says whether it resumes
 // in a slot or copies the resume command. A click resumes it at once through `/api/resume`,
 // with the lines under the box a launch has, in a resume's words. The box's text goes as the
 // resume's brief, or the brief file in its place while one is set, and a resume that starts
@@ -943,7 +943,7 @@ export class LauncherPrompt extends LitElement {
     void this.updateComplete.then(() => this.#box()?.focus());
   }
 
-  /** A filled row the user edits is his change from now on, no longer filled. */
+  /** A filled row the user edits is the user's change from now on, no longer filled. */
   #edited(...names: string[]): void {
     if (names.some((name) => Object.hasOwn(this.filled, name))) this.filled = withoutFill(this.filled, ...names);
   }
@@ -985,7 +985,7 @@ export class LauncherPrompt extends LitElement {
     this.#home = where.home;
     this.#actor = where.actor;
     this.places = where.places;
-    // A place he picked while the read was under way stands; the one opened on counts as
+    // A place the user picked while the read was under way stands; the one opened on counts as
     // picked, so a project's own preset is applied.
     if (this.pick !== null) return;
     this.pick = where.pick;

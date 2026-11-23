@@ -248,6 +248,7 @@ def request(work, rid="r9", **typed):
                          session_id="7b2e5c3a-9b65-4ea0-9a2c-3f4d5e6f7a81", actor="ann")
 
 
+@pytest.mark.slot_target
 def test_a_named_launch_into_a_crashed_slot_is_refused_held_with_restore_or_unpark(
         conn, rig, work, harness):
     launch_row(conn)
@@ -261,6 +262,7 @@ def test_a_named_launch_into_a_crashed_slot_is_refused_held_with_restore_or_unpa
     assert rig.calls("start") == []
 
 
+@pytest.mark.slot_target
 def test_a_launch_naming_no_slot_reserves_crashed_slots_before_it_starts(conn, rig, work,
                                                                         harness):
     launch_row(conn)
@@ -272,6 +274,7 @@ def test_a_launch_naming_no_slot_reserves_crashed_slots_before_it_starts(conn, r
     assert names.index("hold") < names.index("start")
 
 
+@pytest.mark.slot_target
 @pytest.mark.parametrize(("harness_name", "trusted"), [("codex", False), ("claude", True)])
 def test_a_fresh_launch_tells_slots_whether_the_status_is_trusted(
         conn, rig, work, harness, harness_name, trusted):
@@ -282,6 +285,7 @@ def test_a_fresh_launch_tells_slots_whether_the_status_is_trusted(
     assert fresh["status_trusted"] is trusted
 
 
+@pytest.mark.slot_target
 def test_a_resume_goes_through_the_same_placement(conn, rig, work, harness):
     launch_row(conn, "r5", cwd=str(work),
                values={"harness": "claude", "cwd": str(work), "target": "slot", "slot": "3"})
@@ -340,6 +344,7 @@ def holder():
         proc.wait()
 
 
+@pytest.mark.slot_target
 def test_a_launch_while_park_runs_proceeds_without_discovery(conn, rig, work, harness,
                                                              holder):
     launch_row(conn)

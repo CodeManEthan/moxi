@@ -11,6 +11,7 @@ from pathlib import Path
 import pytest
 from moxi.store import transaction
 
+from conftest import CHECKS_MODE_BITS
 from moxi_comms import bindings, directory, module, paths, provision, store
 from moxi_comms.local_record import LocalRecord
 from moxi_comms.store import schema
@@ -80,7 +81,8 @@ def test_a_new_store_has_every_table_at_the_current_version():
     finally:
         conn.close()
     assert store.path() == paths.state_dir() / "comms.db"
-    assert oct(os.stat(store.path()).st_mode & 0o777) == "0o600"
+    if CHECKS_MODE_BITS:
+        assert oct(os.stat(store.path()).st_mode & 0o777) == "0o600"
 
 
 def test_a_version_one_store_renames_the_operators_kind_at_its_next_open():

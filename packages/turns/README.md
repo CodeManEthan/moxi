@@ -150,6 +150,9 @@ With the `ui` extra (`moxi-ui`), turns has a panel in the browser UI shell at `/
 the live list of every running session turns can reach. It only reads: nothing on it puts
 input into a session or acts on one. Its page server finds sessions by rescanning turns'
 runtime directory every 2 s and holds one watch per session; turns adds no daemon for it.
+With `moxi-sessions` installed, the Sessions page shows each running session's state from
+this list, and `Live sessions` leaves the shell's band of pages; `/m/turns/` still opens
+the panel.
 
 - **Groups and order.** A session is in the first group that holds: `problem` (its link to
   Moxi has trouble, or Moxi can't read its live state), `idle` (read, no turn open) or

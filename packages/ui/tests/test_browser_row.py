@@ -461,7 +461,8 @@ def test_a_click_that_ends_a_selection_of_text_does_not_toggle(ui_page):
         return ui_page.evaluate("() => String(getSelection())")
 
     # A drag over the name selects it, and the click that ends the drag is not a toggle.
-    assert drag(".name") in "a-session-name-to-copy" and len(drag(".name")) > 5
+    selected = drag(".name")
+    assert selected in "a-session-name-to-copy" and len(selected) > 5
     assert _toggles(ui_page) == []
     assert len(drag(".rest")) > 5
     assert _toggles(ui_page) == []

@@ -2,19 +2,29 @@
 
     GET  /api/rows      every row, each with its verdict, its state and the last health
                         result, and the modules whose run-time declarations failed
-    GET  /api/row       one row, by `id`, with a timer's newest runs and the log hint
+    GET  /api/row       one row, by `id`, with a timer's newest runs and today's count,
+                        the units the supervisor knows it by, and the log hint
+    GET  /api/unit      what the supervisor says of a unit not yet adopted, by `ref`
+                        and the `kind` it is read as; desk only
     GET  /api/projects  every project, by key, for the add form's picker
     GET  /api/status    what the act `job` came to: running, done, failed, refused, or
                         unknown for a job this server holds no record of
     GET  /api/events    the stream; its one topic, `rows`, is what `/api/rows` answers
     POST /api/start     `moxi services start ID`, a daemon; confirmed (202)
-    POST /api/stop      `moxi services stop ID`; confirmed (202)
-    POST /api/restart   `moxi services restart ID`, a daemon; confirmed (202)
+    GET  /api/ends      what a stop or restart of slots' server would end now: the
+                        sessions, open slots and jobs in its slots
+    POST /api/stop      `moxi services stop ID`; confirmed (202); slots' server's only
+                        when `ends` covers what runs in its slots, or `ends_unread`
+                        confirms they couldn't be read
+    POST /api/restart   `moxi services restart ID`, a daemon; confirmed (202); slots'
+                        server's as stop
     POST /api/run       a timer's run now (`start`), or with `restart` its run ended and
                         run once; confirmed (202)
-    POST /api/enable    `moxi services enable ID`; confirmed (202)
-    POST /api/disable   `moxi services disable ID`; confirmed (202)
-    POST /api/remove    `moxi services remove ID`; confirmed (202)
+    POST /api/enable    `moxi services enable ID`; confirmed (202); a Moxi row's refused
+    POST /api/disable   `moxi services disable ID`; confirmed (202); a Moxi row's refused
+    POST /api/act       the desk's one plain act: start, stop, restart, run, enable,
+                        disable or remove, by `act`, queued as the page's `job`; no
+                        confirm (202 with the same status link)
     POST /api/add       `moxi services add`, a command to write or a unit to adopt; one
                         step, no confirm (202 with the same status link)
 
@@ -24,9 +34,10 @@ server gives no first byte inside 30 seconds. So every act's handler checks the 
 the row, records a job as `running`, hands the act to services' one job thread and
 answers 202 with `/api/status?job=<id>` at once (`moxi_services.pagehandlers`).
 
-**The phone reaches the reads, the stream, the status route and the six confirmed acts on
-a row that exists** (start, stop, restart, run, enable and disable), and never add, remove
-or the project list: from the phone a service is acted on, never added, edited or
+**The phone reaches the reads, the stream, the status route, the read of what a stop of
+slots' server ends, and the six confirmed acts on a row that exists** (start, stop,
+restart, run, enable and disable), and never add, remove, the unit read or the project
+list: from the phone a service is acted on, never added, edited or
 removed, since a command sent from there would run on the desktop at every login and the
 phone could not add back what it removed. The gateway acts on these only while the shell
 mounts its acts; elsewhere the phone's sheet points to the desk.
@@ -43,7 +54,8 @@ loopback stops it when it has been idle. Only that server and loopback's export 
 import this module, each in a process of its own: nothing in services' announcement, CLI,
 doctor or projects link does. services' distribution doesn't require ui, which comes with
 the `ui` extra, so this module reaches loopback, ui's page-server base, only through
-`moxi.modules.load("ui", ...)` and raises `ImportError` when that fails.
+`moxi.modules.load("ui", ...)` and raises `ImportError` when that fails. slots, which
+says what its server's stop ends, is read the same way, and only for that.
 """
 
 from __future__ import annotations
@@ -87,8 +99,8 @@ _MAYBE_SAYS = lb.Out("string", mark="redact", nullable=True)
 _COMMAND = lb.Out("list", items=_SAYS, mark="redact", nullable=True)
 
 #: A row's verdict: `state` is `ok`, `warn`, `fail` or `off`; `unknown` is True when it
-#: is `warn` because a value could not be read; `cause` one word of `verdict.CAUSES` for
-#: the cases a reader tells apart (`not-running`, `stopped`, `last-run`), else null.
+#: is `warn` because a value could not be read; `cause` the word of `verdict.CAUSES` for
+#: the case that gave it.
 VERDICT = lb.Out("table", items={
     "state": _TEXT,
     "reason": _SAYS,
@@ -97,18 +109,41 @@ VERDICT = lb.Out("table", items={
     "cause": _MAYBE,
 })
 
-#: A timer's last run: `failed`, a few words (`ok`, `exit 1`, ...), and when.
+#: A timer's last run: `failed`, a few words (`ok`, `exit 1`, ...), when, and the exit
+#: code its gate line gives (null when the supervisor gave the result).
 LAST_RUN = lb.Out("table", nullable=True, items={
     "failed": _FLAG,
     "text": _SAYS,
     "at": _MAYBE,
+    "exit": _MAYBE_INT,
 })
 
 #: A running daemon's last health check: `state` `ok` or `fail` (a module daemon's own
-#: check may also give `warn` or `off`), and the check's first line.
+#: check may also give `warn` or `off`), the check's first line, and `at`, when the
+#: health pass that ran it began (UTC, ISO 8601 with `Z`; null when not known).
 CHECKED = lb.Out("table", nullable=True, items={
     "state": _TEXT,
     "line": _SAYS,
+    "at": _MAYBE,
+})
+
+_MAYBE_WORDS = lb.Out("list", items=_TEXT, nullable=True)
+
+#: A timer whose last run failed: how many of its newest runs failed in a row (counting
+#: back through at most 50 run lines), when the oldest of them ran, and whether they all
+#: exited with one code.
+STREAK = lb.Out("table", nullable=True, items={
+    "count": lb.Out("int"),
+    "since": _MAYBE,
+    "same_exit": _FLAG,
+})
+
+#: A timer's schedule as declared: `every` (`5m`, `1h`), or `at` (`HH:MM` times) limited
+#: to `days` (`mon` ... `sun`); each null when not declared.
+TIMING = lb.Out("table", nullable=True, items={
+    "every": _MAYBE,
+    "at": _MAYBE_WORDS,
+    "days": _MAYBE_WORDS,
 })
 
 #: One row as the page shows it.
@@ -123,12 +158,21 @@ CHECKED = lb.Out("table", nullable=True, items={
 #:   is armed, `pid`, `since` (UTC, ISO 8601 with `Z`) and `detail` as the supervisor
 #:   gives them, null when it was not read.
 #: - `last_run` a timer's last run, `checked` a running daemon's last health result.
+#: - `streak` a timer's run of failed runs, on a timer whose verdict is its last run
+#:   failed; else null.
+#: - `timing` a written or module timer's schedule as declared; null for a daemon and
+#:   for an adopted timer, whose schedule is the supervisor's and not read.
+#: - `ends_slots` True on slots' server only: its stop and restart end what runs in the
+#:   slots.
+#: - `has_settings` True for a module row whose module has settings.
 #: - A user row's `argv` (written), `cwd`, `unit` (adopted), `schedule` (`every 5m`, `at
-#:   09:00 on mon,fri`), `health` (its health command), `project`, `stopped` (a daemon
-#:   stopped by hand, UTC), `removing` and `platform` (the system it was added on); null
-#:   or False for a module row.
+#:   09:00 on mon,fri`), `health` (its health command), `project`, `removing` and
+#:   `platform` (the system it was added on); null or False for a module row.
+#: - `stopped`: a daemon's recorded stop by hand, UTC, a user's or a module's; else null.
 #: - `launches_session` True for a row whose runs launch an agent session, so its runs
 #:   spend usage.
+#: - `wrapped` True for an adopted Linux timer, which has services' small file (its
+#:   drop-in) beside its service; Remove takes that file away.
 ROW = lb.Out("table", items={
     "id": _TEXT,
     "module": _TEXT,
@@ -149,6 +193,10 @@ ROW = lb.Out("table", items={
     "detail": _MAYBE_SAYS,
     "last_run": LAST_RUN,
     "checked": CHECKED,
+    "streak": STREAK,
+    "timing": TIMING,
+    "ends_slots": _FLAG,
+    "has_settings": _FLAG,
     "argv": _COMMAND,
     "cwd": _MAYBE_PATH,
     "unit": _MAYBE,
@@ -157,18 +205,22 @@ ROW = lb.Out("table", items={
     "stopped": _MAYBE,
     "removing": _FLAG,
     "platform": _MAYBE,
+    "wrapped": _FLAG,
 })
 
 #: A module whose run-time declarations failed: its static daemons and timers are listed.
 PROBLEM = lb.Out("table", items={"module": _TEXT, "reason": _SAYS})
 
 #: Every row and how the list stands: `state` is `up` or `error`, `detail` null when up
-#: and the reason (with its fix) when the store can't be read. `rows` is the user's rows,
+#: and the reason (with its fix) when the store can't be read. `at` is when this read
+#: asked the supervisor (UTC, ISO 8601 with `Z`), null on an error. The stream publishes
+#: when anything but `at` changed, and at least once a minute. `rows` is the user's rows,
 #: then every installed module's daemons and timers; `problems` the modules whose
 #: run-time declarations failed. `/api/rows` answers it, and each `rows` event carries it.
 ROWS = {
     "state": _TEXT,
     "detail": _MAYBE_SAYS,
+    "at": _MAYBE,
     "rows": lb.Out("list", items=ROW),
     "problems": lb.Out("list", items=PROBLEM),
 }
@@ -182,9 +234,54 @@ RUN = lb.Out("table", items={
     "seconds": lb.Out("float", nullable=True),
 })
 
-#: One row with what only its own read gives: a timer's newest runs, oldest first, and
-#: the hint for reading its output (a `journalctl` command or a log file).
-ONE = {"row": ROW, "runs": lb.Out("list", items=RUN), "log": _MAYBE_SAYS}
+#: A timer's runs on the page server's local day, of the newest 500 run lines read:
+#: how many, how many failed, and `more` when all 500 are today's, so there may be more.
+TODAY = lb.Out("table", nullable=True, items={
+    "runs": lb.Out("int"),
+    "failed": lb.Out("int"),
+    "more": _FLAG,
+})
+
+#: One row with what only its own read gives: a timer's newest runs, oldest first, the
+#: hint for reading its output (a `journalctl` command or a log file), `unit` the one
+#: unit that runs it (a daemon's service, a timer's own unit, an adopted row's unit;
+#: null with no supervisor), `units` every id the supervisor knows it by, and `today`,
+#: a timer's runs today (null for a daemon and for a timer whose runs no run line
+#: records).
+ONE = {"row": ROW, "runs": lb.Out("list", items=RUN), "log": _MAYBE_SAYS,
+       "unit": _MAYBE, "units": lb.Out("list", items=_TEXT), "today": TODAY}
+
+#: One session a stop of slots' server ends: its slot's number and the label slots gives
+#: its launch while the run pane is there.
+SESSION = lb.Out("table", items={"slot": lb.Out("int"), "label": _MAYBE_SAYS})
+
+#: What a stop or restart of slots' server would end now: the sessions in its slots,
+#: how many other slots are open, and how many jobs run. `read` is False, with `why`,
+#: when slots couldn't be read; the counts are then null, never 0: a count Moxi couldn't
+#: read is not a number, and the stop may end sessions in them.
+ENDS = {
+    "read": _FLAG,
+    "why": _MAYBE_SAYS,
+    "sessions": lb.Out("list", items=SESSION, nullable=True),
+    "open": _MAYBE_INT,
+    "jobs": _MAYBE_INT,
+}
+
+#: What the supervisor says of a unit not yet adopted. `found` is False for a missing
+#: unit and null when the supervisor did not answer or was not read; `kind` the kind it
+#: was read as; `asks_kind` True where the supervisor can't tell a unit's kind, so the
+#: person says; `enabled` and `active` as the supervisor gives them, null when unread;
+#: `wraps` True for a systemd timer, which adopting wraps behind a switch; `refused` why
+#: it can't be adopted, or null.
+UNIT = {
+    "found": _MAYBE_FLAG,
+    "kind": _MAYBE,
+    "asks_kind": _FLAG,
+    "enabled": _MAYBE_FLAG,
+    "active": _MAYBE_FLAG,
+    "wraps": _FLAG,
+    "refused": _MAYBE_SAYS,
+}
 
 #: A project for the add form's picker. `reason` says why there is no list: projects not
 #: installed, busy or unreadable.
@@ -210,10 +307,34 @@ _ID = lb.Field("string", max=NAME_MAX)
 _MAYBE_TEXT = lb.Field("string", required=False, max=NAME_MAX)
 _MAYBE_BOOL = lb.Field("bool", required=False)
 
+#: The largest `ends` a request takes.
+ENDS_MAX = 9999
+
 #: An act on one row: its id, `<module>/<name>` or a user row's bare name.
 ROW_BODY = {"id": _ID}
+#: A stop or restart. `ends` is what the warning on slots' server showed in use;
+#: `ends_unread` true when the warning said the slots couldn't be read. A press sends at
+#: most one of them, and neither for a plain press.
+STOP_BODY = {"id": _ID, "ends": lb.Field("int", required=False, max=ENDS_MAX),
+             "ends_unread": _MAYBE_BOOL}
 #: A timer's run now; with `restart` a run in progress is ended first.
 RUN_BODY = {"id": _ID, "restart": _MAYBE_BOOL}
+#: The acts `/api/act` takes.
+ACTS = ("start", "stop", "restart", "run", "enable", "disable", "remove")
+#: A job id's length on `/api/act`: 32 hex characters the page mints per press.
+ACT_JOB_LENGTH = 32
+
+#: The desk's plain act: `act` on the row `id`, queued as `job`. `restart` is a run's
+#: (its run in progress ended first); `ends` and `ends_unread` a stop's or restart's, as
+#: `STOP_BODY`'s.
+ACT_BODY = {
+    "act": lb.Field("enum", values=ACTS),
+    "id": _ID,
+    "job": lb.Field("string", max=ACT_JOB_LENGTH),
+    "restart": _MAYBE_BOOL,
+    "ends": lb.Field("int", required=False, max=ENDS_MAX),
+    "ends_unread": _MAYBE_BOOL,
+}
 #: An add. `command` is the command line of a written row, split as this system's shell
 #: splits it, its first word a full path; `unit` the unit an adopted row takes on, with
 #: `enable` saying whether it is on now. `every`, or `at` with `days`, is a written
@@ -264,6 +385,12 @@ PAGE = lb.Page(
         lb.Route("/api/rows", "read", _target("listing"), returns=ROWS, gateway=True),
         lb.Route("/api/row", "read", _target("row"), query={"id": _ID}, returns=ONE,
                  gateway=True),
+        lb.Route("/api/unit", "read", _target("unit"),
+                 query={"ref": _ID, "kind": lb.Field("enum", values=KINDS,
+                                                     required=False)},
+                 returns=UNIT),
+        lb.Route("/api/ends", "read", _target("ends"), query={"id": _ID}, returns=ENDS,
+                 gateway=True),
         lb.Route("/api/projects", "read", _target("projects"), returns=PROJECTS),
         lb.Route(STATUS_ROUTE, "read", _target("status"),
                  query={"job": lb.Field("string", max=JOB_MAX)}, returns=STATUS,
@@ -271,16 +398,17 @@ PAGE = lb.Page(
         lb.Route("/api/events", "read", _target("events"), stream=True,
                  topics={TOPIC: lb.Out("table", items=ROWS)}, gateway=True),
         _confirmed("/api/start", "start", ROW_BODY, gateway=True),
-        _confirmed("/api/stop", "stop", ROW_BODY, gateway=True),
-        _confirmed("/api/restart", "restart", ROW_BODY, gateway=True),
+        _confirmed("/api/stop", "stop", STOP_BODY, gateway=True),
+        _confirmed("/api/restart", "restart", STOP_BODY, gateway=True),
         _confirmed("/api/run", "run", RUN_BODY, gateway=True),
         _confirmed("/api/enable", "enable", ROW_BODY, gateway=True),
         _confirmed("/api/disable", "disable", ROW_BODY, gateway=True),
-        _confirmed("/api/remove", "remove", ROW_BODY, gateway=False),
+        lb.Route("/api/act", "act", _target("act"), body=ACT_BODY, returns={}),
         lb.Route("/api/add", "act", _target("add"), body=ADD_BODY, returns={}),
     ),
 )
 
-__all__ = ["ADD_BODY", "BUDGET", "CHECKED", "DAYS", "KINDS", "LAST_RUN", "ONE", "PAGE",
-           "PROBLEM", "PROJECT", "PROJECTS", "ROW", "ROWS", "ROW_BODY", "RUN", "RUN_BODY",
-           "STATUS", "STATUS_ROUTE", "TOPIC", "VERDICT"]
+__all__ = ["ACTS", "ACT_BODY", "ACT_JOB_LENGTH", "ADD_BODY", "BUDGET", "CHECKED", "DAYS", "ENDS", "ENDS_MAX", "KINDS",
+           "LAST_RUN", "ONE", "PAGE", "PROBLEM", "PROJECT", "PROJECTS", "ROW", "ROWS",
+           "ROW_BODY", "RUN", "RUN_BODY", "SESSION", "STATUS", "STATUS_ROUTE",
+           "STOP_BODY", "STREAK", "TIMING", "TODAY", "TOPIC", "UNIT", "VERDICT"]

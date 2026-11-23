@@ -1,5 +1,5 @@
 // The acts the page sends: each its route relative to loadout's page, its body, and the
-// verb's words as he would type them, which the page shows in place of the act while the
+// verb's words as the user would type them, which the page shows in place of the act while the
 // harness homes' note is set. No DOM, so the Node tests read it.
 
 import type { ActScope, ProblemAct } from "./placed-model.ts";
@@ -84,7 +84,7 @@ export function shellWord(word: string): string {
   return `'${word.replaceAll("'", "'\\''")}'`;
 }
 
-/** The command an act runs, as he would type it: `moxi loadout <argv>`. */
+/** The command an act runs, as the user would type it: `moxi loadout <argv>`. */
 export function commandOf(argv: readonly string[]): string {
   return ["moxi", "loadout", ...argv.map(shellWord)].join(" ");
 }

@@ -12,7 +12,7 @@ from pathlib import Path
 
 import pytest
 
-from moxi_rounds import (checking, ci, commissioning, finish_gates, log, next_step,
+from moxi_rounds import (builds, checking, ci, commissioning, finish_gates, log, next_step,
                          opening, steps, verdicts)
 from moxi_rounds import settings as own
 from moxi_rounds import state as states
@@ -213,7 +213,8 @@ def test_the_check_gate_is_unmet_alone_by_a_pass_of_a_command_no_longer_declared
      "or merged finishes, under any skip"),
     ("state", "unclear", finish_gates.WORK, "it reads unclear"),
     ("state", "gone", finish_gates.WORK, "it reads gone"),
-    ("shares", (("proj-a/b-round", "B2"),), finish_gates.SHARING,
+    ("shares", (builds.Share("proj-a/b-round", "B2", builds.OVERLAPS),),
+     finish_gates.SHARING,
      "B1 shares commits with proj-a/b-round B2"),
     ("tree", finish_gates.ELSEWHERE, finish_gates.WORKTREE,
      "the worktree of B1 was made on another machine"),
@@ -227,6 +228,55 @@ def test_the_gates_no_skip_meets_are_read_from_what_git_says(ready, field, value
 
     assert numbers(found) == [number]
     assert said in found[0].unmet.reason
+
+
+OTHER = "proj-a/b-round"
+
+
+@pytest.mark.parametrize("state, relation, other_merged, said", [
+    ("building", builds.INSIDE, False, None),
+    ("merged", builds.CONTAINS, False, None),
+    ("merged", builds.CONTAINS, True, None),
+    ("building", builds.CONTAINS, False,
+     f"B1 is held until {OTHER} B2's work is on the target, which its finish does"),
+    ("building", builds.CONTAINS, True,
+     f"B1 is held until {OTHER} B2's work is on the target, which its finish does"),
+    ("merged", builds.INSIDE, True,
+     f"B1 is held until {OTHER} B2's finish records the landing that brought B1's work "
+     "onto the target"),
+    ("building", builds.OVERLAPS, False,
+     f"B1 shares commits with {OTHER} B2; a build finishes only with work of its own"),
+    ("merged", builds.OVERLAPS, True,
+     f"B1 shares commits with {OTHER} B2; a build finishes only with work of its own"),
+])
+def test_the_sharing_gate_holds_a_stacked_build_by_its_relation_and_refuses_an_overlap(
+        ready, state, relation, other_merged, said):
+    path, _tree = ready
+    seen = dataclasses.replace(
+        seen_now(path), state=state,
+        shares=(builds.Share(OTHER, "B2", relation, merged=other_merged),))
+
+    found = [one for one in gates(path, seen=seen) if one.number == finish_gates.SHARING]
+
+    if said is None:
+        assert found == []
+        return
+    (gate,) = found
+    assert gate.unmet.reason == said
+    if relation != builds.OVERLAPS:
+        assert gate.unmet.fix == f"finish that build first: moxi rounds next {OTHER} B2"
+
+
+def test_a_held_build_s_finish_step_waits_with_the_held_line(ready):
+    path, _tree = ready
+    seen = dataclasses.replace(
+        seen_now(path), shares=(builds.Share(OTHER, "B2", builds.CONTAINS),))
+
+    step = finish_step(path, seen={"B1": seen})
+
+    assert step.state == steps.WAITING
+    assert [one.reason for one in step.waits] == [
+        f"B1 is held until {OTHER} B2's work is on the target, which its finish does"]
 
 
 def test_a_build_with_no_work_is_refused_in_a_flow_with_no_check_and_no_verification(

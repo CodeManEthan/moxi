@@ -138,22 +138,39 @@ def test_a_stopping_daemon_starts_nothing(starts):
 
 # ------------------------------------------------------------------ the environment
 
+#: A stand-in for `claude` that says it is running, from its own interpreter, then waits.
+RUNNING = "import time; print('running', flush=True); time.sleep(30)"
+
+
+def run_under(env: dict) -> subprocess.Popen:
+    """A process started under `env`, given once it has exec'd. Its `/proc` entry reads
+    from the fork, but its environment is this process's own until the exec, so a read
+    any sooner sees the wrong one."""
+    proc = subprocess.Popen([sys.executable, "-c", RUNNING], env=env, stdout=subprocess.PIPE,
+                            text=True)
+    assert proc.stdout.readline() == "running\n", "the stand-in did not start"
+    return proc
+
+
+def end(proc: subprocess.Popen) -> None:
+    proc.kill()
+    proc.wait()
+    proc.stdout.close()
+
+
 @pytest.fixture
 def stand_in_claude():
     """A process started with an environment of its own: `(proc, env)`."""
     sock = str(paths.claim_socket(KEY))
     env = {"PATH": os.environ.get("PATH", ""), NAME_ENV: "planner",
            CLAIM_SOCKET_ENV: sock, "MOXI_COMMS_MCP_TOKEN": "secret-token-value"}
-    proc = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(30)"],
-                            env=env)
+    proc = run_under(env)
     yield proc, env
-    proc.kill()
-    proc.wait()
+    end(proc)
 
 
 def test_the_sessions_env_is_its_claudes_own(stand_in_claude):
     proc, env = stand_in_claude
-    assert wait_until(lambda: DEFAULT_PROC.start_time(proc.pid))
     got = respawn.session_env(record_for(proc.pid))
     assert {k: got.get(k) for k in env} == env
 
@@ -169,10 +186,8 @@ def test_an_env_without_the_sessions_stamps_is_refused(change, says, caplog):
            CLAIM_SOCKET_ENV: sock, "MOXI_COMMS_MCP_TOKEN": "secret-token-value"}
     env.update(change)
     env = {k: v for k, v in env.items() if v is not None}
-    proc = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(30)"],
-                            env=env)
+    proc = run_under(env)
     try:
-        assert wait_until(lambda: DEFAULT_PROC.start_time(proc.pid))
         with pytest.raises(respawn.CannotRespawn, match=says) as raised:
             respawn.session_env(record_for(proc.pid))
         assert "secret-token-value" not in str(raised.value)
@@ -183,8 +198,7 @@ def test_an_env_without_the_sessions_stamps_is_refused(change, says, caplog):
         assert says in caplog.text
         assert "secret-token-value" not in caplog.text and sock not in caplog.text
     finally:
-        proc.kill()
-        proc.wait()
+        end(proc)
 
 
 def test_an_env_whose_claude_has_ended_or_was_replaced_is_refused():

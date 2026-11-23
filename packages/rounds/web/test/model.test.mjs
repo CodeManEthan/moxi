@@ -217,6 +217,13 @@ test("the waiting line counts each kind, leaving out a kind with none", () => {
   assert.equal(phoneWaiting(board()), "Nothing waits on you.");
 });
 
+test("a decision not put to the operator is neither walked nor counted", () => {
+  const made = waitingBoard();
+  made.waiting.decisions.push({ holder: "kestrel/a", id: "B1.M2", text: "skipped", not_put: "ratify is off" });
+  assert.deepEqual(itemsOf(made).filter((one) => one.kind === "decision").map((one) => one.id), ["B1.M1"]);
+  assert.deepEqual(waitingCounts(made)[1], { n: "1", words: "decision" });
+});
+
 test("addresses both ways, each segment encoded", () => {
   const cases = [
     [{ kind: "round", round: "kestrel/billing-export" }, "round/kestrel/billing-export"],

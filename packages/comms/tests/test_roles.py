@@ -15,7 +15,7 @@ from __future__ import annotations
 import stat
 
 import pytest
-from conftest import write_config
+from conftest import POSIX_MODES, write_config
 
 from moxi_comms import config, secrets, tokens
 
@@ -30,19 +30,19 @@ def listed():
 # ------------------------------------------------------------------- unlisted: unknown
 
 @pytest.mark.parametrize("role", ADDED)
-def test_an_unlisted_role_is_unknown(role, tmp_path):
+def test_an_unlisted_role_is_unknown(role, profile):
     """What any unknown role gets: an owner with no parts, no holder string, no path."""
     assert config.load().credentials.roles == ()
     owner = tokens.owner_for_role(role)
     assert owner == tokens.TokenOwner((), role=role)
     assert not owner.refused
     assert tokens.owner_of_holder(f"comms/{role}") is None
-    store = tokens.TokenStore(root=tmp_path / "store")
+    store = tokens.TokenStore(root=profile / "store")
     with pytest.raises(tokens.TokenStoreError, match="no owner"):
         store.path_for(owner)
     with pytest.raises(tokens.TokenStoreError):
         store.write_secret(owner, f"{role}/key", "value")
-    assert not (tmp_path / "store").exists()
+    assert not (profile / "store").exists()
 
 
 def test_listing_one_role_leaves_the_others_unknown(tmp_path):
@@ -55,30 +55,31 @@ def test_listing_one_role_leaves_the_others_unknown(tmp_path):
 # --------------------------------------------------------------------- listed: a holder
 
 @pytest.mark.parametrize("role", ADDED)
-def test_a_listed_role_keys_under_its_own_name(listed, role, tmp_path):
+def test_a_listed_role_keys_under_its_own_name(listed, role, profile):
     owner = tokens.owner_for_role(role)
     assert owner == tokens.TokenOwner((role,), role=role)
     assert not owner.refused
     assert tokens.owner_of_holder(f"comms/{role}") == owner
     assert tokens.project_name(owner) == f"comms/{role}"
     assert tokens.holder_of_key(f"comms/{role}/bot-token") == f"comms/{role}"
-    assert tokens.TokenStore(root=tmp_path).path_for(owner) == tmp_path / role
+    assert tokens.TokenStore(root=profile).path_for(owner) == profile / role
 
 
-def test_role_holders_share_a_class_never_a_file(listed, tmp_path):
+def test_role_holders_share_a_class_never_a_file(listed, profile):
     """`reader` and `daemon` collapse to one file because they are one process; an added
     role is a different process holding different credentials, so it gets its own."""
-    store = tokens.TokenStore(root=tmp_path)
+    store = tokens.TokenStore(root=profile)
     paths = {store.path_for(tokens.owner_for_role(r))
              for r in ("daemon", "operator", *ADDED)}
     assert len(paths) == 4
-    assert store.path_for(tokens.owner_for_role("reader")) == tmp_path / "daemon"
+    assert store.path_for(tokens.owner_for_role("reader")) == profile / "daemon"
 
 
+@POSIX_MODES
 def test_a_listed_roles_keys_round_trip_0600_and_a_second_leaves_the_first(listed,
-                                                                          tmp_path):
+                                                                          profile):
     owner = tokens.owner_for_role("calendar")
-    store = tokens.TokenStore(root=tmp_path)
+    store = tokens.TokenStore(root=profile)
     path = store.write_secret(owner, "calendar/refresh-token", "refresh-1")
     assert store.read_secret(owner, "calendar/refresh-token") == "refresh-1"
     assert stat.S_IMODE(path.stat().st_mode) == 0o600
@@ -90,11 +91,11 @@ def test_a_listed_roles_keys_round_trip_0600_and_a_second_leaves_the_first(liste
     assert store.secret_ids(owner) == ["calendar/client-id", "calendar/refresh-token"]
 
 
-def test_the_chain_resolves_a_listed_roles_credential(listed, tmp_path):
+def test_the_chain_resolves_a_listed_roles_credential(listed, profile):
     """How a module reads its credential: the env step under its key, else the store
     keyed by the role's owner."""
     owner = tokens.owner_for_role("mailer")
-    store = tokens.TokenStore(root=tmp_path)
+    store = tokens.TokenStore(root=profile)
     store.write_secret(owner, "mailer/bot-token", "FROM-THE-STORE")
     chain = secrets.build(["env", "store"], env={}, store=store)
     assert chain.get("mailer/bot-token", owner=owner)["value"] == "FROM-THE-STORE"
@@ -144,13 +145,13 @@ def test_a_listed_role_must_be_a_token_store_name(bad):
     assert caught.value.key == "credentials.roles"
 
 
-def test_the_provisioner_stays_fenced_whatever_the_config_says(listed, tmp_path):
+def test_the_provisioner_stays_fenced_whatever_the_config_says(listed, profile):
     owner = tokens.owner_for_role("provisioner")
     assert owner.refused and owner.parts == ()
     with pytest.raises(tokens.TokenStoreError, match="crown-jewel"):
-        tokens.TokenStore(root=tmp_path / "store").write_secret(owner, "comms/x/y",
+        tokens.TokenStore(root=profile / "store").write_secret(owner, "comms/x/y",
                                                                 "MASTER-ISH")
-    assert not (tmp_path / "store").exists()
+    assert not (profile / "store").exists()
 
 
 def test_comms_names_only_its_own_four_roles_in_code():

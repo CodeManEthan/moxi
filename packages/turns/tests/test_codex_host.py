@@ -9,6 +9,7 @@ import threading
 import time
 
 import pytest
+from moxi_dev.testing import wait_for
 
 from moxi_turns import codex_hooks
 from moxi_turns import codex_protocol as proto
@@ -1086,7 +1087,9 @@ def test_an_unturned_threads_session_start_resume_reads_startup_once(
         assert delivery.wait_started(2).turn_id == "turn-1"   # turn/started came first
         assert _session_start(monkeypatch, harness, "resume") == "context at startup"
         assert asked == ["startup"]
-        assert not harness._unturned            # cleared once the answer was out
+        # Cleared once the answer was out, on the hook server's thread, after the reply
+        # this test's call returned on.
+        wait_for(lambda: not harness._unturned, what="the unturned mark to clear")
         # A later SessionStart of the same thread is what Codex says it is.
         assert _session_start(monkeypatch, harness, "resume") == "context at resume"
         assert asked == ["startup", "resume"]
