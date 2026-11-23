@@ -14,7 +14,8 @@ log can't be read is listed as unreadable, in either listing,
 since nothing says which it belongs in.
 
 **What waits on the operator** (`waiting`): across every project, or in one, each open
-question, each parked question with what it waits for, each open waiting item of an
+question with its options and whether it has a current prepared answer, each parked
+question with what it waits for, each open waiting item of an
 open round, each major decision of one not yet ruled (labelled the operator's to rule
 only where it is put to the operator, `decisions.not_put`) and each minor one that is
 the operator's, each project's rulings not yet shown to the operator, and each open
@@ -336,7 +337,8 @@ def _question_lines(entries: Sequence, now: str) -> list[str]:
             said.append(f"until: {entry.until or 'nothing named'}")
         else:
             keys = ", ".join(option.key for option in entry.options)
-            said += [f"age: {age(entry.at, now)}", f"options: {keys or 'none'}"]
+            said += [f"age: {age(entry.at, now)}", f"options: {keys or 'none'}",
+                     f"prepared: {_prepared(entry.prepared)}"]
         if entry.moved_from is not None:
             was = ("" if entry.held is None
                    else f", where it held up {questions.said(entry.held)}")
@@ -344,6 +346,13 @@ def _question_lines(entries: Sequence, now: str) -> list[str]:
         lines += [f"  {entry.holder} {entry.id}: {entry.text}",
                   f"    {'   '.join(said)}"]
     return lines
+
+
+def _prepared(data) -> str:
+    """Whether an open question has a current prepared answer, in a word or three."""
+    if not data:
+        return "none"
+    return "current" if data.get("current") else questions.OTHER_OPTIONS
 
 
 def _lists(project: Project) -> Sequence:
