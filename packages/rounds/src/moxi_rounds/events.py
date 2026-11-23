@@ -133,10 +133,12 @@ TYPES = _types(
     EventType("ruling.shown", ("ids", "record"), required=("ids", "record")),
     # A build began: its stage, repo, branch, the commit it was cut from, the branch it
     # is headed for, its worktree and scratch folder, its builder, the go pointer, the
-    # machine that made its folders (`host`) and the id their markers carry (`build`).
+    # machine that made its folders (`host`) and the id their markers carry (`build`),
+    # and each private file it copied into the worktree (`brought`: `path`, `from`,
+    # `sha256`), written only when it copied one.
     EventType("build.commissioned",
               ("stage", "repo", "branch", "base", "target", "worktree", "scratch",
-               "builder", "record", "host", "build")),
+               "builder", "record", "host", "build", "brought")),
     # A command ran for a build: the step it ran as, the commit, that commit's merge-base
     # with the target, the argv, and how it went: its exit code (None for a run ended at
     # its time limit), its duration and the file its output went to. A check by CI's
