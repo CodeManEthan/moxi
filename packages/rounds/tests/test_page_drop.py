@@ -47,7 +47,7 @@ def dropped_events(round_dir) -> list[dict]:
 
 # -- the confirm --------------------------------------------------------------------------
 
-def test_the_confirm_names_the_build_its_folders_and_what_stays(kit, git_repo):
+def test_the_confirm_names_the_build_its_worktree_and_scratch_and_what_stays(kit, git_repo):
     event = commissioned(kit)
     before = everything_logged(kit)
 
