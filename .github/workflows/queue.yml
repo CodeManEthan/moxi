@@ -7,11 +7,13 @@
 # No job here is named linux, so no run of this workflow meets the check main waits for
 # (ci.yml's linux job, which the publishing gate and the main branch's rules read).
 # The pick job reads M from the branch's name, prints the packages
-# `moxi-dev check --pick` picks on a line `picked: <JSON list>` of its log, which is
-# where a reader of the run finds them, and hands them on. The scoped job runs
-# `moxi-dev check --base M`. The web job runs as ci.yml runs it on a ci/ branch, on Linux
-# only. The browser jobs run, in Chromium and Firefox, the browser tests of the picked
-# packages that ci.yml's browser jobs run; with none picked the browser job is skipped.
+# `moxi-dev check --pick` picks on a line `picked: <JSON list>` of its log, and those
+# it hands the browser jobs on a line `picked for browser (*): <JSON list>` (the browser
+# jobs' name pattern), which is where a reader of the run finds them, and hands them on.
+# The scoped job runs `moxi-dev check --base M`. The web job runs as ci.yml runs it on a
+# ci/ branch, on Linux only. The browser jobs run, in Chromium and Firefox, the browser
+# tests of the picked packages that ci.yml's browser jobs run; with none picked the
+# browser job is skipped.
 # A newer push to the same branch cancels its run still going. Every job skips the push
 # that deletes a branch.
 # Actions are pinned to a release commit, with its version beside it.
@@ -76,6 +78,7 @@ jobs:
           echo "picked: $picked"
           browser="$(jq -nc --argjson picked "$picked" --arg list "$BROWSER" \
             '[$list | split(" ")[] | select(. as $p | $picked | any(.[]; . == $p))]')"
+          echo "picked for browser (*): $browser"
           echo "browser=$browser" >> "$GITHUB_OUTPUT"
 
   scoped:

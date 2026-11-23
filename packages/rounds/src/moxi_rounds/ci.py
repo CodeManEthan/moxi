@@ -27,7 +27,9 @@ that run's `databaseId`: a list of objects, each with `name`, `status` and
 `conclusion`, and `url` when there is one. From `PICK_LOG`, run with the `--repo` the
 setting's commands give (`gh_repo`) for the pick job of a completed run, `{job}` filled
 with the job's `databaseId`: the job's log, whose last line holding `picked: ` and then
-a JSON list of names gives the picked packages. Any command failing to start, exiting other
+a JSON list of names gives the picked packages, and whose last line holding
+`picked for <pattern>: ` and a JSON list gives what the pick picked for that `matrix`
+pattern (`picks_in`); a pattern with no such line takes the picked packages. Any command failing to start, exiting other
 than 0, running past its limit, or printing anything else (an object missing a field,
 two `ids` objects with one `path`, a run read by its jobs with no `databaseId`, a pick
 job's log with no `picked:` line) is a failed read (`ReadFailed`), and nothing is read from it.
@@ -44,7 +46,10 @@ pattern matches; a name no job has, or a pattern none matches, reads `pending` w
 run is not completed and `absent` once it is, and with no run at the tip each job it
 names reads `absent`, unasked. Where the entry names a `pick` job and it reads `green`,
 a job of a `matrix` pattern the pick did not run reads `skipped`: one concluded
-`skipped`, and a pattern no job matches once the run is completed. A job the entry names
+`skipped`, and, once the run is completed, a pattern no job matches that the pick
+picked nothing for (an empty list); a pattern no job matches that the pick picked
+something for reads `absent`, as does every unmatched pattern where the pick is not
+green. A job the entry names
 as itself never reads `skipped`: concluded `skipped`, it reads `red`, and missing, it
 reads `absent`. Such a workflow reads `green` only when every job it names reads `green`
 or `skipped`, else the first of `red`, `absent` and `pending` that one reads; so does the
@@ -113,8 +118,9 @@ RUN = "{run}"
 JOB = "{job}"
 #: The command that prints a job's log, read for the pick job's `picked:` line.
 PICK_LOG = ("gh", "run", "view", "--job", JOB, "--log")
-#: The line of a pick job's log that names the picked packages, as a JSON list.
-_PICKED = re.compile(r"picked: (\[.*\])\s*$")
+#: A line of a pick job's log that names what it picked, as a JSON list: `picked: ` the
+#: packages, or `picked for <pattern>: ` what it picked for a `matrix` pattern's jobs.
+_PICKED = re.compile(r"picked(?: for (.+?))?: (\[.*\])\s*$")
 
 
 @dataclass(frozen=True)
@@ -354,11 +360,12 @@ def matches(pattern: str, name: str) -> bool:
 
 
 def _job_words(flow: Workflow, run: Mapping, jobs: Sequence[Mapping],
-               picked_of: Callable[[Mapping], list[str]] | None = None,
+               picked_of: Callable[[Mapping], Mapping[str | None, list[str]]] | None = None,
                ) -> tuple[list[dict], list[str] | None]:
     """Each job `flow` names, and each its `matrix` patterns match, as `{"name",
     "reading", "url"}` (a pattern's also with `matrix`), read from the run's `jobs`; and
-    the packages its pick job picked, read by `picked_of`, None where none were read."""
+    the packages its pick job picked, read by `picked_of` (`picks_in`'s form), None
+    where none were read."""
     ended = run.get("status") == "completed"
     missing = ABSENT if ended else PENDING
     each: list[tuple[dict, Mapping | None]] = []
@@ -379,32 +386,34 @@ def _job_words(flow: Workflow, run: Mapping, jobs: Sequence[Mapping],
                  and "matrix" not in one and one["reading"] == GREEN), None)
     if pick is None:
         return [one for one, _job in each], None
+    picks = picked_of(pick) if ended and picked_of is not None else None
     for one, job in each:
         # A job the entry names as itself never reads skipped: a skip of one is a lost
         # check, not one the pick left out.
         if "matrix" not in one:
             continue
-        if job is None and one["reading"] == ABSENT:
+        if job is None:
+            # A pattern no job matches: skipped only where the pick picked nothing for it.
+            if (one["reading"] == ABSENT and picks is not None
+                    and not picks.get(one["matrix"], picks[None])):
+                one["reading"] = SKIPPED
+        elif job.get("status") == "completed" and job.get("conclusion") == "skipped":
             one["reading"] = SKIPPED
-        elif job is not None and job.get("status") == "completed" \
-                and job.get("conclusion") == "skipped":
-            one["reading"] = SKIPPED
-    picked = picked_of(pick) if ended and picked_of is not None else None
-    return [one for one, _job in each], picked
+    return [one for one, _job in each], None if picks is None else list(picks[None])
 
 
 def reading(workflows: Sequence[str | Workflow], ids: Mapping[str, object],
             runs: Sequence[Mapping], tip: str, *,
             jobs_of: Callable[[Mapping], Sequence[Mapping]] | None = None,
-            picked_of: Callable[[Mapping], list[str]] | None = None,
+            picked_of: Callable[[Mapping], Mapping[str | None, list[str]]] | None = None,
             ) -> tuple[tuple[dict, ...], str]:
     """Each workflow of `workflows` as `{"path", "id", "reading", "url"}`, read from the
     `ids` by path and the `runs` at `tip`, and the whole reading. A workflow read by its
     jobs also holds `jobs`, each as `{"name", "reading", "url"}`, read from what
     `jobs_of` gives for its run, or each `absent` where it has no run at `tip`; with
     `matrix` patterns or a `pick` job it names them too (`matrix`, `pick`), and the
-    packages its green pick job picked, which `picked_of` reads from that job, as
-    `picked`."""
+    packages its green pick job picked, which `picked_of` reads from that job in
+    `picks_in`'s form, as `picked`."""
     each = []
     for flow in workflows:
         flow = flow if isinstance(flow, Workflow) else Workflow(flow)
@@ -472,14 +481,14 @@ def read_runs(found: Declared, *, values: Mapping[str, str], cwd,
         jobs_argvs.append(argv)
         return jobs
 
-    def picked_of(job: Mapping) -> list[str]:
+    def picked_of(job: Mapping) -> dict[str | None, list[str]]:
         if job.get("databaseId") is None:
             raise ReadFailed(found.jobs, f"printed a pick job with no databaseId: "
                                          f"{dict(job)!r}")
         argv = (*(word.replace(JOB, str(job["databaseId"])) for word in PICK_LOG),
                 *gh_repo(found))
-        return picked_in(argv, _output(argv, cwd=cwd, timeout_s=found.status_timeout_s)
-                         .decode(errors="replace"))
+        return picks_in(argv, _output(argv, cwd=cwd, timeout_s=found.status_timeout_s)
+                        .decode(errors="replace"))
 
     flows = found.candidate_workflows if is_candidate else found.full_workflows
     each, whole = reading(flows, by_path, runs, values["tip"], jobs_of=jobs_of,
@@ -489,23 +498,27 @@ def read_runs(found: Declared, *, values: Mapping[str, str], cwd,
     return Reading(values["tip"], status, ids, each, whole, tuple(jobs_argvs)), read_by
 
 
-def picked_in(argv: Sequence[str], log: str) -> list[str]:
-    """The packages a pick job's `log` names: the JSON list after `picked: ` on its last
-    line that holds one. Raises `ReadFailed`, naming `argv`, when no line does."""
-    found = None
+def picks_in(argv: Sequence[str], log: str) -> dict[str | None, list[str]]:
+    """What a pick job's `log` names: under None the packages, the JSON list after
+    `picked: ` on its last line that holds one, and under each `matrix` pattern what it
+    picked for that pattern, the JSON list after `picked for <pattern>: ` on its last
+    line that holds one. Raises `ReadFailed`, naming `argv`, when no line names the
+    packages."""
+    found: dict[str | None, list[str]] = {}
     for line in log.splitlines():
         match = _PICKED.search(line)
         if match is None:
             continue
         try:
-            names = json.loads(match.group(1))
+            names = json.loads(match.group(2))
         except ValueError:
             continue
         if isinstance(names, list) and all(isinstance(one, str) for one in names):
-            found = names
-    if found is None:
+            found[match.group(1)] = names
+    if None not in found:
         raise ReadFailed(argv, "printed no line picked: <JSON list of names>")
     return found
+
 
 
 def gh_repo(found: Declared) -> tuple[str, ...]:
@@ -621,7 +634,7 @@ def met(state: states.State, stage: str, *, tip: str, now: Now) -> bool:
 
 __all__ = ["READ", "LOCAL", "NONE", "STATUS", "IDS", "JOBS", "BRANCH", "STATUS_TIMEOUT_S",
            "GREEN", "SKIPPED", "PENDING", "RED", "ABSENT", "Workflow", "Declared",
-           "declared", "matches", "JOB", "PICK_LOG", "picked_in", "gh_repo",
+           "declared", "matches", "JOB", "PICK_LOG", "picks_in", "gh_repo",
            "ref_problem", "overlap_problem", "prefix_of", "ref_for", "RUN", "Now", "now_of",
            "ReadFailed", "Reading", "reading", "read", "read_runs", "run_jobs", "newest",
            "why_not", "met",

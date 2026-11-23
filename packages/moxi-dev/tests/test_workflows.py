@@ -90,6 +90,9 @@ def test_the_pick_job_reads_the_base_from_the_branch_and_prints_the_pick():
     assert '"${GITHUB_REF_NAME#ci/queue-}"' in pick and "[0-9a-f]{12}" in pick
     assert "moxi-dev check --pick --base \"$BASE\"" in pick
     assert 'echo "picked: $picked"' in pick
+    # What the pick hands the browser jobs, under their name pattern, so a reader of the
+    # run tells a browser job the pick left out from one that never started.
+    assert 'echo "picked for browser (*): $browser"' in pick
     scoped = jobs("queue.yml")["scoped"]
     assert "needs: pick" in scoped
     assert 'moxi-dev check --base "$BASE"' in scoped

@@ -167,12 +167,12 @@ QUEUE = ci.Workflow(FLOW, ("pick", "scoped", "web (ubuntu-latest)"), ("browser (
                     "pick", reads_candidates=True)
 
 
-def scoped(jobs, picked=("ui",), flow=QUEUE, **fields):
+def scoped(jobs, picked=("ui",), flow=QUEUE, picked_for=None, **fields):
     asked = []
 
     def picked_of(one):
         asked.append(one["name"])
-        return list(picked)
+        return {None: list(picked), **(picked_for or {})}
 
     each, whole = ci.reading([flow], IDS, [run(**fields)], TIP, jobs_of=lambda one: jobs,
                              picked_of=picked_of)
@@ -213,6 +213,30 @@ def test_a_matrix_job_the_pick_did_not_run_reads_skipped_and_counts_green():
     assert readings(flow)[3] == ("browser (*)", ci.SKIPPED)
     flow, whole, _asked = scoped([*FIXED, job("browser (, )", conclusion="skipped")])
     assert (readings(flow)[3], whole) == (("browser (, )", ci.SKIPPED), ci.GREEN)
+
+
+@pytest.mark.parametrize("picked, picked_for, reading", [
+    ((), None, ci.SKIPPED),
+    (("ui",), None, ci.ABSENT),
+    (("repo",), {"browser (*)": []}, ci.SKIPPED),
+    ((), {"browser (*)": ["ui"]}, ci.ABSENT),
+])
+def test_an_unmatched_pattern_reads_skipped_only_where_the_pick_picked_nothing_for_it(
+        picked, picked_for, reading):
+    flow, whole, _asked = scoped(FIXED, picked=picked, picked_for=picked_for)
+
+    assert readings(flow)[3] == ("browser (*)", reading)
+    assert whole == (ci.GREEN if reading == ci.SKIPPED else ci.ABSENT)
+
+
+def test_a_pattern_with_no_match_in_a_failed_run_reads_absent():
+    # A matrix that failed to expand: GitHub names its one failed job `browser`.
+    jobs = [*FIXED, job("browser", conclusion="failure")]
+
+    flow, whole, _asked = scoped(jobs, conclusion="failure",
+                                 picked_for={"browser (*)": ["ui"]})
+
+    assert (readings(flow)[3], whole) == (("browser (*)", ci.ABSENT), ci.ABSENT)
 
 
 @pytest.mark.parametrize("name", ["scoped", "web (ubuntu-latest)"])
@@ -272,17 +296,23 @@ def test_a_pattern_s_star_stands_for_any_text_and_the_rest_for_itself(pattern, n
     assert ci.matches(pattern, name) is matched
 
 
-def test_the_picked_packages_are_the_last_picked_line_of_the_log():
+def test_the_picks_are_the_last_picked_lines_of_the_log():
     log = "\n".join([
         'pick\tthe packages\t2026-11-23T10:00:00Z echo "picked: $picked"',
+        'pick\tthe packages\t2026-11-23T10:00:00Z echo "picked for browser (*): $b"',
         'pick\tthe packages\t2026-11-23T10:00:01Z picked: ["moxi"]',
         'pick\tthe packages\t2026-11-23T10:00:02Z picked: ["moxi", "rounds"]',
+        'pick\tthe packages\t2026-11-23T10:00:02Z picked for browser (*): ["ui"]',
+        'pick\tthe packages\t2026-11-23T10:00:02Z picked for browser (*): ["rounds"]',
         "pick\tthe packages\t2026-11-23T10:00:03Z picked: [not json]"])
 
-    assert ci.picked_in(("gh",), log) == ["moxi", "rounds"]
+    assert ci.picks_in(("gh",), log) == {None: ["moxi", "rounds"],
+                                         "browser (*)": ["rounds"]}
     with pytest.raises(ci.ReadFailed) as caught:
-        ci.picked_in(("gh", "run"), "pick\tstep\tnothing here")
+        ci.picks_in(("gh", "run"), "pick\tstep\tnothing here")
     assert "printed no line picked:" in str(caught.value)
+    with pytest.raises(ci.ReadFailed):
+        ci.picks_in(("gh", "run"), 'pick\tstep\tpicked for browser (*): []')
 
 
 def printing(data) -> list[str]:
