@@ -225,7 +225,39 @@ def test_the_check_gate_accepts_a_candidate_read_green_with_its_local_run(
     state = states.fold(log.read_round(round_log_of(tmp_path, ROUND)))
     local = events(tmp_path, ROUND, checking.RAN)[-1]
     assert local["step"] == ci.LOCAL and local["candidate"] == repo.rev("main")
-    assert ci.candidate_why_not(state, "B1", tip=tip) is None
+    assert ci.candidate_why_not(state, "B1", tip=tip, has_local=True) is None
+    without = states.fold([one for one in log.read_round(round_log_of(tmp_path, ROUND))
+                           if one.get("step") != ci.LOCAL])
+    assert "no check.local ran" in ci.candidate_why_not(without, "B1", tip=tip,
+                                                        has_local=True)
+    assert ci.candidate_why_not(without, "B1", tip=tip, has_local=False) is None
+
+
+class Killed(Exception):
+    """The lander killed where the stand-in raises it."""
+
+
+def test_a_lander_killed_during_its_local_run_runs_it_before_landing(
+        repo, ready, fake, lander_pass, tmp_path, configure):
+    configure('ci = { workflows = ["ci.yml"], local = { command = "ci-local" } }')
+    tip = ready().rev()
+    local = fake.local
+
+    def killed(place, values):
+        raise Killed
+
+    fake.local = killed
+    with pytest.raises(Killed):
+        lander_pass()
+    fake.local = local
+    batch = queue().running()
+    assert [one["kind"] for one in batch.runs] == [batching.PUSHED]
+    lander_pass()
+    assert fake.locals == [batch.candidate]
+    assert queue().member(ROUND, "B1").state == queue_file.LANDED
+    ran = events(tmp_path, ROUND, checking.RAN)[-1]
+    assert (ran["step"], ran["commit"], ran["candidate"]) == (ci.LOCAL, tip,
+                                                              batch.candidate)
 
 
 def test_two_members_that_change_one_file_and_merge_cleanly_both_land_in_order(

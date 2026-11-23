@@ -25,8 +25,10 @@ a local branch of the same name. A push the publishing scan refuses ejects each 
 whose joined tip or changed path the refusal names, and the batch ends to be rebuilt
 without them. A refusal that names none (the scan's own, the network, a ruleset) is
 tried again at the next pass, and a second pauses the queue with it as the reason. Then
-`ci.local` runs at the candidate; a failure there counts as a red job `local`. A repo
-with no `ci` setting has no CI to read a candidate by: the queue pauses, saying so.
+`ci.local` runs at the candidate; a failure there counts as a red job `local`. A batch
+pushed with no local run recorded (a lander killed during it) has it run at the next
+pass, before its CI is read, so nothing lands without it. A repo with no `ci` setting
+has no CI to read a candidate by: the queue pauses, saying so.
 
 **Read** CI each pass until it reads `green`, `red`, `cancelled`, or `absent` for
 `ABSENT_S` after the push. A cancelled run is rerun once; an absent one ends the batch,
@@ -189,6 +191,7 @@ class _Pass:
             self.ci = queue_ci.QueueCi(
                 found, local_log=queue_file.queue_dir(repo, env) / "local.log")
         self.ref_template = None if found is None else found.ref
+        self.has_local = found is not None and found.local is not None
 
     # -- the pass ------------------------------------------------------------------------
 
@@ -406,6 +409,8 @@ class _Pass:
         if not any(one.get("kind") == PUSHED for one in batch.runs):
             self.check(batch)
             return
+        if self.has_local and _newest(batch.runs, LOCAL) is None:
+            self.run_local(batch, str(batch.candidate))
         try:
             read = self.ci.read(self.place, batch.candidate)
         except ci.ReadFailed as exc:

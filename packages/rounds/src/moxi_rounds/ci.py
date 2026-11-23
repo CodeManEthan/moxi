@@ -427,12 +427,14 @@ def why_not(state: states.State, stage: str, *, tip: str, now: Now) -> str | Non
     return None
 
 
-def candidate_why_not(state: states.State, stage: str, *, tip: str) -> str | None:
+def candidate_why_not(state: states.State, stage: str, *, tip: str,
+                      has_local: bool) -> str | None:
     """Why a queue member's check is not met at `tip` by its candidate, in words; None
     when it is: the newest `ci.read` at `tip` names a candidate and reads green, or red
     only on failures excused as the target's own (`excused`, each `{"job", "test"}`),
-    and the newest `check.local` at `tip`, where one names that candidate, passed or
-    its job `local` is excused."""
+    and the newest `check.local` at `tip` names that candidate and passed or has its job
+    `local` excused. With no `has_local` (the repo's `local` is `none`), a missing
+    `check.local` is no reason."""
     found = newest(state, stage, tip)
     if found is None or not found.get("candidate"):
         return f"no candidate of {stage}'s at {tip[:12]} was read"
@@ -441,9 +443,12 @@ def candidate_why_not(state: states.State, stage: str, *, tip: str) -> str | Non
         return (f"the candidate {str(found['candidate'])[:12]} reads "
                 f"{found.get('reading')}")
     local = checking.newest(state, stage, LOCAL)
-    if (local is not None and local.get("commit") == tip
-            and local.get("candidate") == found["candidate"]
-            and local.get("exit_code") != 0
+    if local is None or local.get("commit") != tip \
+            or local.get("candidate") != found["candidate"]:
+        if has_local:
+            return f"no {LOCAL} ran at the candidate {str(found['candidate'])[:12]}"
+        return None
+    if (local.get("exit_code") != 0
             and not any(one.get("job") == LOCAL_JOB for one in found.get("excused") or ())):
         return f"{LOCAL} exited {local.get('exit_code')} at the candidate"
     return None

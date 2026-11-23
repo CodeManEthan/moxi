@@ -449,7 +449,9 @@ def _check(state: states.State, about: Asked) -> Step:
         return Step(CHECK, DONE, stage=stage)
     # A queue member the lander landed is met by its candidate's records at the tip.
     if (seen.land == own.LAND_QUEUE and seen.head is not None
-            and ci_reads.candidate_why_not(state, stage, tip=seen.head) is None):
+            and ci_reads.candidate_why_not(
+                state, stage, tip=seen.head,
+                has_local=seen.ci is not None and seen.ci.local is not None) is None):
         return Step(CHECK, DONE, stage=stage)
     owes: tuple[str, ...] = ()
     if seen.ci is not None and seen.head is not None and seen.check is not None:
