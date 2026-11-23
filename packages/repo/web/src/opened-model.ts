@@ -74,7 +74,7 @@ export interface OpenedView {
   today: TodayLine[];
   autos: AutoView[];
   rules: RulesView | null;
-  /** `2.56.0 · hooks run from the repo's own git config · /home/jp/code/atlas-api`. */
+  /** `2.56.0 · hooks run from the repo's own git config · /home/you/code/atlas-api`. */
   git: string;
   /** A moved shim that is fine, said dim under `Git`; null for none. */
   moved: string | null;
