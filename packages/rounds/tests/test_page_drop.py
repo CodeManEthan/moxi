@@ -194,11 +194,12 @@ def test_the_drop_routes_use_the_servers_store(kit, comms, monkeypatch):
 
 def test_the_agents_are_the_names_comms_gives_as_bound(comms):
     assert pageacts.agents(comms) == {"agents": ["atlas-lead", "kestrel", "tax-lead"],
-                                      "reason": None}
+                                      "reason": None, "comms": True}
 
 
 def test_with_no_comms_the_agents_are_none_with_the_reason():
-    assert pageacts.agents(None) == {"agents": [], "reason": "comms is not installed"}
+    assert pageacts.agents(None) == {"agents": [], "reason": "comms is not installed",
+                                       "comms": False}
 
 
 def test_a_roster_that_cant_be_read_gives_comms_reason(comms):
@@ -207,4 +208,5 @@ def test_a_roster_that_cant_be_read_gives_comms_reason(comms):
 
     comms.roster = broken
 
-    assert pageacts.agents(comms) == {"agents": [], "reason": "the daemon is down"}
+    assert pageacts.agents(comms) == {"agents": [], "reason": "the daemon is down",
+                                     "comms": True}

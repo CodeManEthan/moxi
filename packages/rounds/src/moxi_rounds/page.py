@@ -11,7 +11,8 @@
     GET /api/events   the stream; its one topic, `rounds`, is the board without `now`, so
                       time passing alone publishes nothing
     GET /api/agents   the names comms gives as bound, for the To picker; none, with
-                      comms' reason, when comms is not installed or can't be read
+                      comms' reason, when comms is not installed or can't be read; and
+                      whether comms is installed
     GET /api/drop     `?round=&stage=`: what the drop's confirm says of one open build,
                       read now
     POST /api/answers     the tray's drafts sent: a receipt per draft and the messages
@@ -336,7 +337,7 @@ PAGE = lb.Page(
         lb.Route("/api/events", "read", "moxi_rounds.pagehandlers:events", stream=True,
                  topics={"rounds": lb.Out("table", items=BOARD)}),
         lb.Route("/api/agents", "read", "moxi_rounds.pagehandlers:agents",
-                 returns={"agents": WORDS, "reason": _s("scrub")}),
+                 returns={"agents": WORDS, "reason": _s("scrub"), "comms": BOOL}),
         lb.Route("/api/drop", "read", "moxi_rounds.pagehandlers:drop_confirm",
                  query={key: lb.Field("string", max=QUERY_MAX) for key in ("round", "stage")},
                  returns=DROP_FACTS),

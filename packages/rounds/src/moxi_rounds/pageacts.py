@@ -724,19 +724,20 @@ def comms_loaded() -> Any | None:
 
 
 def agents(comms: Any) -> dict:
-    """The names comms' roster gives as bound, for the To picker: `{"agents", "reason"}`,
-    an empty list with comms' reason when comms is not installed or its daemon can't be
-    read."""
+    """The names comms' roster gives as bound, for the To picker: `{"agents", "reason",
+    "comms"}`, an empty list with comms' reason when comms is not installed or its daemon
+    can't be read; `comms` says whether comms is installed, as the answers route finds it,
+    so the page words the tray as the route records it."""
     if comms is None:
-        return {"agents": [], "reason": "comms is not installed"}
+        return {"agents": [], "reason": "comms is not installed", "comms": False}
     try:
         roster = comms.roster()
     except UnfencedTest:
         raise
     except Exception as exc:  # noqa: BLE001 - the picker says why it is empty
-        return {"agents": [], "reason": str(exc) or type(exc).__name__}
+        return {"agents": [], "reason": str(exc) or type(exc).__name__, "comms": True}
     names = sorted({str(getattr(one, "qualified", "")) for one in roster.bound} - {""})
-    return {"agents": names, "reason": None}
+    return {"agents": names, "reason": None, "comms": True}
 
 
 __all__ = ["WAIT_S", "PAGE_NAME", "ACT_ID", "EACH", "PICK", "ACCEPT", "REJECT", "READ_BACK",

@@ -325,6 +325,7 @@ export function parseBoard(data: unknown): Board | null {
     columns: list<Column>(columns, (one) => typeof one.id === "string"),
     waiting: {
       questions: list<Entry>(waiting.questions, kept),
+      parked_questions: list<Entry>(waiting.parked_questions, kept),
       decisions: list<Entry>(waiting.decisions, kept),
       waits: list<Job>(waiting.waits, kept),
       not_shown: list<Waiting["not_shown"][number]>(waiting.not_shown, (one) => Array.isArray(one.rows)),

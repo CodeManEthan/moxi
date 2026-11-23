@@ -467,7 +467,7 @@ def test_the_agents_and_the_drop_reads_fit_their_shapes(kit, no_comms):
         ("/api/agents", None), ("/api/drop", {"round": BUSY, "stage": "B1"}))
 
     assert (status, dropped) == (200, 200)
-    assert agents == {"agents": [], "reason": "comms is not installed"}
+    assert agents == {"agents": [], "reason": "comms is not installed", "comms": False}
     assert conforms(facts, lb.Out("table", items=routes["/api/drop"].returns))
     assert facts["open"] and facts["branch"] == "branch-b1"
 

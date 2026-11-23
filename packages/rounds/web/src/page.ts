@@ -28,7 +28,8 @@
 // its tab is shown again. A record is read from `/api/record` when it opens, and again
 // when its round's `rev` changes while it is open. With turns installed it reads turns'
 // sessions, so a builder whose worktree is one live session's folder links to its row.
-// With comms installed the To picker reads `/api/agents` when it opens.
+// It reads `/api/agents` once, and again when the To picker opens: the agents comms
+// knows, and whether the page server sends through comms at all.
 
 import { css, html, LitElement, noChange, nothing } from "lit";
 import type { TemplateResult } from "lit";
@@ -312,6 +313,8 @@ export class RoundsPage extends LitElement {
   #tray: Tray = new Tray(null, "");
   #to = EACH;
   #agents: string[] | null = null;
+  /** Whether comms is installed, as the page server finds it; null until it is read. */
+  #comms: boolean | null = null;
   #agentsWhy: string | null = null;
   #sending = false;
   #sendNote: string | null = null;
@@ -335,6 +338,7 @@ export class RoundsPage extends LitElement {
     });
     if (installed("turns")) void this.#readSessions();
     window.addEventListener("storage", this.#onStorage);
+    void this.#readAgents();
     this.#timers.push(window.setTimeout(() => { this.#slow = true; this.requestUpdate(); }, READING_AFTER_MS),
                       window.setInterval(() => this.requestUpdate(), REDRAW_MS));
     document.addEventListener("visibilitychange", this.#onVisible);
@@ -1105,7 +1109,13 @@ export class RoundsPage extends LitElement {
   // --- acting ------------------------------------------------------------------------------
 
   #reach(value: Board): Reach {
-    return { comms: installed("comms"), to: this.#to, leadOf: leadOf(value) };
+    return { comms: this.#hasComms(), to: this.#to, leadOf: leadOf(value) };
+  }
+
+  /** Whether the page server sends through comms: what `/api/agents` said, else whether
+   * the shell lists comms. */
+  #hasComms(): boolean {
+    return this.#comms ?? installed("comms");
   }
 
   /** Whether the open popover is an item's with a form to answer it. */
@@ -1143,7 +1153,7 @@ export class RoundsPage extends LitElement {
     if (item.kind === "question" && record.item?.state === "parked") return draftOf(item.holder, item.id, "unpark", { about });
     if (form.choice) {
       return draftOf(item.holder, item.id, form.choice.kind, {
-        chose: form.choice.chose, about, text: form.choice.kind === "done" && installed("comms") ? text : null });
+        chose: form.choice.chose, about, text: form.choice.kind === "done" && this.#hasComms() ? text : null });
     }
     if (item.kind === "question" && text) return draftOf(item.holder, item.id, "words", { text, about });
     return null;
@@ -1194,13 +1204,13 @@ export class RoundsPage extends LitElement {
     const names = answer.data?.agents;
     this.#agents = answer.status === 200 && Array.isArray(names) ? names.filter((one) => typeof one === "string") : [];
     this.#agentsWhy = answer.status === 200 ? answer.data?.reason ?? null : failureWhy(answer.status);
+    if (answer.status === 200 && typeof answer.data?.comms === "boolean") this.#comms = answer.data.comms;
     this.requestUpdate();
   }
 
   /** The To picker: each round's lead, or one agent comms knows. */
   #picker(value: Board): TemplateResult | typeof nothing {
-    if (!installed("comms")) return nothing;
-    if (this.#agents === null) void this.#readAgents();
+    if (!this.#hasComms()) return nothing;
     const names = [...new Set([...(this.#agents ?? []), ...(this.#to === EACH ? [] : [this.#to])])];
     const notLed = this.#to === EACH ? [] : [...new Set(this.#tray.drafts.map((one) => one.holder))]
       .filter((holder) => leadOf(value)(holder) !== this.#to);
