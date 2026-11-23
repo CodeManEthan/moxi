@@ -24,13 +24,15 @@ machine only:
   empty one finds nothing.
 - a package-manager command: one of `MANAGERS`, called by its name or from a folder
   (`/usr/bin/apt-get`, `C:\\...\\choco.exe`), followed by one of `VERBS` (flags allowed
-  between), or pacman with its operation flag, where a command starts: at the line's
-  start (past a comment's opening, a shell prompt such as `$ `, `% ` or `PS C:\\> `, and
-  any `NAME=value` assignments), or after `sudo`, `&&`, `||`, `;`, `&`, `|` or a backtick that opens
-  inline code. The same as an argv list counts when the quoted manager comes first in
-  the list. Case-sensitive, since commands are lower case. A sentence that names a
-  manager, or a manager and a verb in the middle of prose or data ("each port update is
-  logged"), passes; service managers are not managers here.
+  between), or pacman with its operation flag, anywhere on a line: in a sentence, a
+  string or a comment. The same as an argv list of quoted words counts too.
+  Case-sensitive, since commands are lower case. A sentence that only names a manager
+  passes; service managers are not managers here. The managers whose name is also an
+  ordinary word (`WORD_MANAGERS`: port, snap, apk) count only where a command starts: at
+  the line's start (past a comment's opening, a shell prompt such as `$ `, `% ` or
+  `PS C:\\> `, and any `NAME=value` assignments), or after `sudo`, `&&`, `||`, `;`,
+  `&`, `|` or a backtick that opens inline code; as an argv list, when the quoted manager
+  comes first. So "each port update is logged" and `("host", "port", "update")` pass.
 
 The check reads every tracked and untracked-but-not-ignored file that reads as UTF-8,
 every line of it, comments included, lines numbered as git numbers them (a newline alone
@@ -104,36 +106,56 @@ SHARED_USERS = ("Public", "Default", "All Users", "Shared", "Guest", "linuxbrew"
 #: One platform's package managers.
 MANAGERS = ("apt-get", "aptitude", "apt", "dnf", "yum", "zypper", "pacman", "apk", "brew",
             "port", "snap", "flatpak", "choco", "winget", "scoop")
+#: The managers whose name is also an ordinary word: they and a verb make a command only
+#: where a command starts, since "each port update is logged" is prose.
+WORD_MANAGERS = ("apk", "port", "snap")
 #: The verbs that make a manager's name a command.
 VERBS = ("install", "reinstall", "remove", "uninstall", "erase", "purge", "autoremove",
          "upgrade", "update", "search", "info", "add", "del", "dist-upgrade", "full-upgrade",
          "groupinstall", "groupremove")
+#: No word, path or flag runs on into a manager's name.
+_ALONE = r"(?<![\w./-])"
 #: Where a command starts: the line's start, past a comment's opening (`#`, `//`, `/*`,
 #: `*`, `<!--`), a shell prompt (`$ `, `% `, `# `, `> `, `PS C:\> `) and any variable
-#: assignments (`NAME=value `); or after `&&`, `||`, `;`, `&`, `|` or a backtick that
-#: opens inline code.
+#: assignments (`NAME=value `); after `&&`, `||`, `;`, `&`, `|` or a backtick that opens
+#: inline code; or after `sudo` and its flags.
 _COMMENT = r"(?:(?://|/\*+|\*|<!--|#)\s*)?"
 _PROMPT = r"(?:(?:PS\s+)?[^\s$%#>]*[$%#>]\s+)?"
-_START = r"(?:^\s*" + _COMMENT + _PROMPT + r"(?:\w+=\S*\s+)*|(?<=[;&|`])\s*)"
-#: `sudo` and its flags.
-_SUDO = r"(?:sudo(?:\s+-[\w-]+)*\s+)?"
+_START = (r"(?:^\s*" + _COMMENT + _PROMPT + r"(?:\w+=\S*\s+)*|(?<=[;&|`])\s*|" + _ALONE
+          + r"sudo(?:\s+-[\w-]+)*\s+)")
 #: The folder a manager is called from: an absolute path (`/usr/bin/`), one from the home
 #: folder (`~/`) or from a drive (`C:\...\`).
 _CALLED_FROM = r"(?:(?:~|[A-Za-z]:)?(?:" + _SLASH + r"[\w.-]+)*" + _SLASH + ")?"
-_MANAGER = "(?P<manager>" + "|".join(map(re.escape, MANAGERS)) + r")(?:\.exe)?"
+_FLAGS = r"\s+(?:--?[\w-]+\s+)*"
 _VERB = "(?P<verb>" + "|".join(map(re.escape, VERBS)) + ")"
-#: A manager followed by a verb, flags allowed between; or pacman with its operation
-#: flag. Each starts a command, `sudo` allowed before it.
-COMMAND = re.compile(
-    _START + _SUDO + "(?:" + _CALLED_FROM + _MANAGER + r"\s+(?:--?[\w-]+\s+)*" + _VERB
-    + r"(?![\w-])|(?P<pacman>pacman)\s+(?P<flag>-[SRUQ]\w*))")
-#: The same as an argv list: a quoted manager first in the list (or after a quoted
-#: `sudo`), any quoted flags, then a quoted verb.
 _QUOTE = r"[\"']"
-ARGV = re.compile(
+_ARGV_FLAGS = r"\s*,\s*(?:" + _QUOTE + r"-[\w-]+" + _QUOTE + r"\s*,\s*)*"
+
+
+def _manager(names: tuple[str, ...]) -> str:
+    """A pattern for one of `names`, called by its name or with `.exe`."""
+    return "(?P<manager>" + "|".join(map(re.escape, names)) + r")(?:\.exe)?"
+
+
+_OTHER = _manager(tuple(name for name in MANAGERS if name not in WORD_MANAGERS))
+_WORD = _manager(WORD_MANAGERS)
+#: A manager whose name is no ordinary word, followed by a verb, flags allowed between,
+#: anywhere on the line; or pacman with its operation flag.
+COMMAND = re.compile(
+    _ALONE + "(?:" + _CALLED_FROM + _OTHER + _FLAGS + _VERB
+    + r"(?![\w-])|(?P<pacman>pacman)\s+(?P<flag>-[SRUQ]\w*))")
+#: A `WORD_MANAGERS` manager followed by a verb, flags allowed between, where a command
+#: starts.
+PLACED_COMMAND = re.compile(_START + _CALLED_FROM + _WORD + _FLAGS + _VERB + r"(?![\w-])")
+#: The same as an argv list: a quoted manager, any quoted flags, then a quoted verb,
+#: anywhere on the line.
+ARGV = re.compile(_QUOTE + _CALLED_FROM + _OTHER + _QUOTE + _ARGV_FLAGS
+                  + _QUOTE + _VERB + _QUOTE)
+#: A `WORD_MANAGERS` argv list counts when the quoted manager comes first in the list
+#: (or after a quoted `sudo`).
+PLACED_ARGV = re.compile(
     r"[\[(]\s*(?:" + _QUOTE + "sudo" + _QUOTE + r"\s*,\s*)?" + _QUOTE + _CALLED_FROM
-    + _MANAGER + _QUOTE + r"\s*,\s*(?:" + _QUOTE + r"-[\w-]+" + _QUOTE + r"\s*,\s*)*"
-    + _QUOTE + _VERB + _QUOTE)
+    + _WORD + _QUOTE + _ARGV_FLAGS + _QUOTE + _VERB + _QUOTE)
 
 #: The fix each rule's line names.
 HOME_FIX = ("write it from the home folder (~/...) or with an example user (/home/you), "
@@ -248,15 +270,16 @@ def user_dirs(line: str) -> list[str]:
 
 
 def manager_commands(line: str) -> list[str]:
-    """Each package-manager command `line` holds, as the manager and its verb."""
+    """Each package-manager command `line` holds, as the manager and its verb, in the
+    order they stand."""
+    matches = [match for pattern in (COMMAND, PLACED_COMMAND, ARGV, PLACED_ARGV)
+               for match in pattern.finditer(line)]
     found = []
-    for match in COMMAND.finditer(line):
-        if match.group("pacman"):
+    for match in sorted(matches, key=lambda match: match.start()):
+        if match.groupdict().get("pacman"):
             found.append(f"{match.group('pacman')} {match.group('flag')}")
         else:
             found.append(f"{match.group('manager')} {match.group('verb')}")
-    found += [f"{match.group('manager')} {match.group('verb')}"
-              for match in ARGV.finditer(line)]
     return found
 
 
@@ -332,6 +355,7 @@ def scan(root: Path | str) -> list[Hit]:
 
 
 __all__ = ["ARGV", "CODE", "COMMAND", "HIDDEN", "HOME_FIX", "HOME_ROOT", "Hit", "MANAGERS",
-           "MANAGER_FIX", "NAME_FIX", "SetUnavailable", "VERBS", "check_text",
+           "MANAGER_FIX", "NAME_FIX", "PLACED_ARGV", "PLACED_COMMAND", "SetUnavailable",
+           "VERBS", "WORD_MANAGERS", "check_text",
            "is_scanned", "is_test", "manager_commands", "private_lines", "private_spans",
            "scan", "shown_path", "unreadable", "user_dirs"]

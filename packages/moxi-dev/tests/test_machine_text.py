@@ -142,9 +142,49 @@ def test_each_user_dir_on_a_line_is_found():
     (cmd('["sudo", "apt-get"|, "install"]'), cmd("apt-get| install")),
     (cmd('["/usr/bin/apt-get"|, "install"]'), cmd("apt-get| install")),
     (cmd("( 'apk'|, 'add', 'x')"), cmd("apk| add")),
+    # A manager whose name is no ordinary word hits anywhere on a line.
+    (cmd("To get it, apt| install tmux first."), cmd("apt| install")),
+    (cmd("On a Mac, brew| install tmux and rerun."), cmd("brew| install")),
+    (cmd('hint = "apt| install tmux"'), cmd("apt| install")),
+    (cmd("say('brew| install tmux')"), cmd("brew| install")),
+    (cmd("install it with apt-get| install"), cmd("apt-get| install")),
+    (cmd("Run brew| install tmux."), cmd("brew| install")),
+    (cmd("CMD=apt-get| install"), cmd("apt-get| install")),
+    (cmd("- dnf| install x"), cmd("dnf| install")),
+    (cmd('"brew| install tmux (or port| install tmux)"'), cmd("brew| install")),
+    (cmd('("host", "apt-get"|, "install")'), cmd("apt-get| install")),
 ])
 def test_a_package_manager_command_hits(line, command):
     assert manager_commands(line) == [command]
+
+
+#: The managers whose name is also an ordinary word, each with a verb.
+WORD_COMMANDS = [cmd(text).split() for text in ("port| install", "snap| install", "apk| add")]
+
+
+@pytest.mark.parametrize("manager, verb", WORD_COMMANDS)
+@pytest.mark.parametrize("shape", [
+    "{m} {v} tmux", "sudo {m} {v} tmux", "sudo -E {m} {v} tmux", "x && {m} {v} tmux",
+    "run `{m} {v} tmux`", "then sudo {m} {v} tmux", "$ {m} {v} tmux", '["{m}", "{v}", "x"]',
+])
+def test_a_manager_that_is_a_word_hits_where_a_command_starts(manager, verb, shape):
+    line = shape.format(m=manager, v=verb)
+    assert manager_commands(line) == [f"{manager} {verb}"]
+
+
+@pytest.mark.parametrize("manager, verb", WORD_COMMANDS)
+@pytest.mark.parametrize("shape", [
+    "Run {m} {v} tmux.", '"or {m} {v} tmux"', "- {m} {v} tmux", "each {m} {v} is logged",
+    '("host", "{m}", "{v}")',
+])
+def test_a_manager_that_is_a_word_passes_elsewhere(manager, verb, shape):
+    assert manager_commands(shape.format(m=manager, v=verb)) == []
+
+
+def test_each_command_on_a_line_is_found_in_order():
+    line = cmd("brew| install tmux; port| install tmux && apt| install tmux")
+    assert manager_commands(line) == [cmd("brew| install"), cmd("port| install"),
+                                      cmd("apt| install")]
 
 
 @pytest.mark.parametrize("line", [
@@ -155,9 +195,8 @@ def test_a_package_manager_command_hits(line, command):
     "systemctl --user restart moxi", "launchctl load x", "pacman -s x",
     cmd("each port| update is logged"), cmd('("host", "port"|, "update")'),
     cmd("the port| search runs first"), cmd("a snap| info line"), cmd("the apk| add step"),
-    cmd("install it with apt-get| install"), cmd("Run brew| install tmux."),
-    cmd("bin/brew| install x"), cmd("x/usr/bin/apt-get| install"), cmd("CMD=apt-get| install"),
-    cmd('"brew| install tmux (or port| install tmux)"'), cmd("- dnf| install x"),
+    cmd("bin/brew| install x"), cmd("x/usr/bin/apt-get| install"),
+    cmd("Run port| install tmux."), cmd("(or port| install tmux)"), cmd("- snap| install x"),
     cmd("apt-get| dist-upgrader"), cmd("dnf| group install"),
 ])
 def test_a_near_miss_is_no_command(line):

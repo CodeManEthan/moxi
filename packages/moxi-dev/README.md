@@ -126,13 +126,15 @@ A file under a package is a test when a directory below the package is named `te
 - a package-manager command in any file: apt-get, apt, aptitude, dnf, yum, zypper,
   pacman, apk, brew, port, snap, flatpak, choco, winget or scoop, by its name or called
   from a folder (`/usr/bin/apt-get`), followed by a verb such as install, remove,
-  update or dist-upgrade (flags allowed), or pacman with its operation flag. It counts
-  only where a command starts: at the start of a line (past a comment's opening, a
-  shell prompt such as `$ ` or `PS C:\> `, and any `NAME=value` assignments), or after
-  `sudo`, `&&`, `||`, `;`, `&`, `|` or a backtick that opens inline code; as an argv
-  list, when the quoted manager comes first. A manager and a verb in the middle of a
-  sentence or a list of words ("each port update is logged") pass, and service managers
-  (systemctl, launchctl and the like) are not in the rule.
+  update or dist-upgrade (flags allowed), or pacman with its operation flag, or the same
+  as an argv list. It counts anywhere on a line, in a sentence or a string as much as in
+  a shell line. port, snap and apk are ordinary words too, so they count only where a
+  command starts: at the start of a line (past a comment's opening, a shell prompt such
+  as `$ ` or `PS C:\> `, and any `NAME=value` assignments), or after `sudo`, `&&`, `||`,
+  `;`, `&`, `|` or a backtick that opens inline code; as an argv list, when the quoted
+  manager comes first. "each port update is logged" passes. A sentence that only names
+  a manager passes, and service managers (systemctl, launchctl and the like) are not in
+  the rule.
 
 Each hit prints as `path:line: machine text: ...` with the fix. A genuine use, a line
 written for one platform or naming a place every machine of a kind has, carries
