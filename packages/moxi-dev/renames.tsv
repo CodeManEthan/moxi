@@ -17659,3 +17659,6 @@ sessions	packages/sessions/tests/test_writer.py	assert wrapped.injected is True 
 sessions	packages/sessions/tests/test_writer.py	chars = set(api.OPENING)	keep	set	set
 sessions	packages/sessions/tests/test_writer.py	out = set()	keep	set	set
 sessions	packages/sessions/tests/test_writer.py	synthetic.text("Called the Read tool", synthetic=True)	keep	synthetic	synthetic
+moxi-dev	packages/moxi-dev/src/moxi_dev/check.py	help="print the packages the change picks, as one JSON line, and "	keep	help	help
+moxi-dev	packages/moxi-dev/tests/test_workflows.py	assert set(found) == {"pick", "scoped", "web", "browser"}	keep	set	set
+rounds	packages/rounds/src/moxi_rounds/settings.py	if len(set(value)) != len(value):	keep	set	set
