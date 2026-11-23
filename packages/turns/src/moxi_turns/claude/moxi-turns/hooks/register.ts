@@ -283,7 +283,7 @@
 // answer; none in that time, or one whose reason is not `answer`, reports `fork.lost`
 // `gone: ...`. Then it sends the task with `$.session.send({to: {agentId}, text})`, and a
 // send that throws or is not delivered reports `fork.lost` `gone: ...`. The round's
-// turn.complete, within the line's `round_timeout_ms` (the asker's bound; 600 s when the
+// turn.complete, within the line's `round_timeout_ms` (the asker's bound; 120 s when the
 // line has none), reports `fork.done` with its answer; none in that time reports
 // `fork.lost` `gone: ...`. On a `fork.continue` line a fork that has answered gets
 // its next round: a fork the runner still holds (a round open) reports `fork.lost`
@@ -338,7 +338,7 @@ const FORK_DESCRIPTION = 'subconscious'
 /** How long the runner waits for a fork's warm-up to complete. */
 const WARM_UP_WAIT_MS = 30_000
 /** How long the runner waits for a fork's round to complete when its line sets no bound. */
-const ROUND_WAIT_MS = 600_000
+const ROUND_WAIT_MS = 120_000
 /** The longest round bound a line may set: the longest timer the runtime keeps. */
 const ROUND_WAIT_MAX_MS = 2 ** 31 - 1
 /** A guard's bound when its entry names none. */

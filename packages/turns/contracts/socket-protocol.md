@@ -308,7 +308,7 @@ adds `unanswered` for a command it wrote and got no answer to, and `not-exited` 
   Claude Code sends it. A refused spawn reads `lost` `denied`. A warm-up with no answer in
   30 s or one that ends other than with an answer, a task or round Claude Code does not
   deliver, and a round with no end within its bound (the asker's `round_timeout_ms`, or
-  600 s when it set none) read `lost` `gone`. `fork.continue` sends
+  120 s when it set none) read `lost` `gone`. `fork.continue` sends
   its text to the fork the same way. The runner holds the fork's agent id from the spawn
   (or the round's send) until that delivery has settled. While it holds it, the fork's
   tool calls are judged by the guards at the call and ask steps and get no after-tool
@@ -461,7 +461,7 @@ Params: `text`, the fork's task; `by`, the asking module's name (a non-empty str
 required); `ref`; `keep`, as `deliver`'s; `round_timeout_ms`, a number of milliseconds above
 0 and at most 2147483647 (about 24.8 days, the longest timer a runner keeps), or null: how
 long the harness's half waits for the fork's answer to its task before the fork reads
-`lost` `gone`. Absent or null, the harness's half waits its own default (600 s on Claude
+`lost` `gone`. Absent or null, the harness's half waits its own default (120 s on Claude
 Code). An endpoint of an older turns ignores it, as it ignores any param it does not know,
 and waits its default. Needs `fork`.
 

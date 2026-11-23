@@ -28,7 +28,7 @@ out of the harness. This package is turns' whole public API, the announcement's
     d = s.fork(text, *, by, ref=None, keep=False, round_timeout_s=None)
                              # a fork of the main loop (capability fork); Started
                              # carries its agent_id, Ended its answer; round_timeout_s
-                             # bounds the wait for its answer (None: 600 s on Claude Code)
+                             # bounds the wait for its answer (None: 120 s on Claude Code)
     d = s.fork_continue(delivery, text, *, ref=None, keep=False, round_timeout_s=None)
                              # the fork's next round
     d.id, d.ref              # id None until a hand-in whose answer never came is found

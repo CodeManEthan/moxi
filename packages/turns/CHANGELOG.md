@@ -14,7 +14,8 @@
   subagent; the runner leaves that notice as Claude Code sends it. The delivery's answer
   is that round's. A refused spawn reads `lost` `denied`; a warm-up that does not
   complete within 30 s or ends other than with an answer, a task Claude Code does not
-  deliver, and a round with no end within 600 s read `lost` `gone`.
+  deliver, and a round with no end within its bound (120 s when the asker sets none) read
+  `lost` `gone`.
 - The Claude runner tells a fork's tool calls from its own by the call's `agentId`. A
   call counts as the runner's own, judged by no guard, only when it carries no `agentId`;
   every call of a fork the runner started is judged by the guards at the call step and
@@ -30,7 +31,7 @@
   finished fork, which answers again in its own conversation.
 - `fork` and `fork.continue` take `round_timeout_ms` (the client's `round_timeout_s=`): how
   long the harness's half waits for the round's answer before the delivery reads `lost`
-  `gone`. With none, Claude Code's runner waits 600 s. An endpoint of an older turns
+  `gone`. With none, Claude Code's runner waits 120 s. An endpoint of an older turns
   ignores it and waits its default.
 - A new option, `keep` (with a `ref`), on `deliver`, `fork` and `fork.continue`, a new
   request, `ack {ref}`, and a new capability, `keep`, which every session of this version

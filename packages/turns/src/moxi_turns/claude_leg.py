@@ -108,7 +108,7 @@ Then, in any order:
         `gone: …`. Then it sends `text` with `$.session.send({to: {agentId}, text})`; a
         send that throws or is not delivered reports `fork.lost` `gone: …`. The round's
         `turn.complete`, within `round_timeout_ms` (the asker's bound, a positive number;
-        absent, `ROUND_WAIT_MS`, 600 s), reports `fork.done`; none in that time reports
+        absent, `ROUND_WAIT_MS`, 120 s), reports `fork.done`; none in that time reports
         `fork.lost` `gone: …`.
 
     {"op": "fork.continue", "delivery": id, "agent_id": "…", "text": "…",

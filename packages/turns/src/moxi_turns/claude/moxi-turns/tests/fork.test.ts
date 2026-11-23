@@ -175,16 +175,16 @@ describe('the fork', () => {
     }
   })
 
-  test('a task round with no end in 600 s is lost, gone', async () => {
+  test('a task round with no end in 120 s is lost, gone', async () => {
     const s = stand()
     const done = s.fork()
     await s.settle()
     await s.end('f1', 'READY')
-    await s.advance(599_999)
+    await s.advance(119_999)
     expect(s.kinds()).toEqual(['fork.started'])
     await s.advance(1)
     await done
-    expect(s.reports.at(-1)).toEqual({ kind: 'fork.lost', delivery: 'd1', reason: 'gone: the fork did not answer within 600 s' })
+    expect(s.reports.at(-1)).toEqual({ kind: 'fork.lost', delivery: 'd1', reason: 'gone: the fork did not answer within 120 s' })
   })
 
   test('a task round with the asker\'s bound is lost, gone, at that bound', async () => {
@@ -201,7 +201,7 @@ describe('the fork', () => {
     }
   })
 
-  test('a round past 600 s with a longer bound still answers', async () => {
+  test('a round past 120 s with a longer bound still answers', async () => {
     const s = stand()
     const done = s.fork('d1', 'recall', 3_600_000)
     await s.settle()
@@ -212,11 +212,11 @@ describe('the fork', () => {
     expect(s.reports.at(-1)).toMatchObject({ kind: 'fork.done', answer: 'slow but answered' })
   })
 
-  test('a line\'s bound is taken when it is a number above 0 within the runtime\'s timers, else 600 s', () => {
+  test('a line\'s bound is taken when it is a number above 0 within the runtime\'s timers, else 120 s', () => {
     expect(roundWaitMs(5_000)).toBe(5_000)
     expect(roundWaitMs(2 ** 31 - 1)).toBe(2 ** 31 - 1)
     for (const bad of [undefined, null, 0, -1, 2 ** 31, Number.NaN, Number.POSITIVE_INFINITY, '5000', true]) {
-      expect(roundWaitMs(bad)).toBe(600_000)
+      expect(roundWaitMs(bad)).toBe(120_000)
     }
   })
 
@@ -315,13 +315,13 @@ describe('a further round', () => {
     expect(heldFork(s.forks, 'f1')).toBe(false)
   })
 
-  test('a round with no end in 600 s is lost, gone', async () => {
+  test('a round with no end in 120 s is lost, gone', async () => {
     const s = await answered()
     const done = s.round('d2', 'f1', 'go on')
     await s.settle()
-    await s.advance(600_000)
+    await s.advance(120_000)
     await done
-    expect(s.reports.at(-1)).toEqual({ kind: 'fork.lost', delivery: 'd2', reason: 'gone: the fork did not answer within 600 s' })
+    expect(s.reports.at(-1)).toEqual({ kind: 'fork.lost', delivery: 'd2', reason: 'gone: the fork did not answer within 120 s' })
     expect(heldFork(s.forks, 'f1')).toBe(false)
   })
 })

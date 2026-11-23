@@ -519,7 +519,7 @@ class Session:
         reads `Ended` with the fork's answer, or `Lost` with a reason starting `denied`
         (the harness refused the fork) or `gone` (it went away with no answer). `keep` as
         `deliver`'s. `round_timeout_s`: how long the harness's half waits for the task's
-        answer before the fork reads `Lost` `gone`; None for its default (600 s on Claude
+        answer before the fork reads `Lost` `gone`; None for its default (120 s on Claude
         Code). An endpoint older than this option ignores it and keeps its default.
         Raises `TurnsError` with the `capability` code on a session that cannot fork."""
         _check_text(text)
