@@ -1175,7 +1175,8 @@ class Endpoint:
         makes where the delivery takes effect, so their refusal is the settled value.
         `by` (the module that asked) and `senders` (the names the text speaks for) ride
         on the `prompt` event the delivery raises. `keep` (with a `ref`): its end is kept
-        until the `ref` is acked (`ack`).
+        until the `ref` is acked (`ack`); raises `kept.RefKept`, recording nothing,
+        while a kept end of this session still holds the `ref`.
 
         Never waits on the harness: the delivery is recorded and its hand-off put on the
         worker under one hold of the lock (`early` holds a refusal decided here)."""
@@ -1420,13 +1421,26 @@ class Endpoint:
 
     def _new(self, kind: str, text: str, ref: str | None = None, *, keep: bool = False,
              **checks) -> Handed:
-        """Under the lock: record a new delivery. `keep` needs a `ref`."""
+        """Under the lock: record a new delivery. `keep` needs a `ref`, and one no kept
+        end of this session holds (`kept.RefKept`)."""
         if keep and ref is None:
             raise ValueError("keep needs a ref: an end is kept and acked by its ref")
+        if keep and self._ref_kept(ref):
+            raise turns_kept.RefKept(f"the ref {ref!r} still holds a kept end that is not acked: ack "
+                          "it first, or give this delivery a ref of its own")
         d = Handed(Delivery(f"{self.nonce}-{next(self._ids)}", text, kind, ref=ref,
                             **checks), _QUEUED, ref=ref, keep=keep)
         self._deliveries[d.id] = d
         return d
+
+    def _ref_kept(self, ref: str) -> bool:
+        """Under the lock: whether a kept end of this session still holds `ref`: a
+        delivery asked with `keep` in this endpoint's record, open or settled and not
+        acked, or a kept end in the state folder, an earlier endpoint's among them."""
+        if any(d.keep and d.ref == ref for d in self._deliveries.values()):
+            return True
+        return turns_kept.find(ref, session_ids=self.session_ids(), endpoint=self.name,
+                               env=self.env) is not None
 
     def _unable(self, capability: str) -> str | None:
         if self._gone is not None:

@@ -217,3 +217,58 @@ def test_the_doctor_lists_kept_ends_older_than_a_day(keeping):
     assert stale.state == "warn"
     assert "memory" in stale.detail and "s-9" in stale.detail and "48 h" in stale.detail
     assert "kept end fresh" not in rows
+
+
+def refused_keep(call):
+    """`call` is refused invalid params, naming the ref's unacked kept end."""
+    with pytest.raises(TurnsError) as caught:
+        call()
+    assert caught.value.code == -32602
+    assert "still holds a kept end" in str(caught.value)
+
+
+def test_a_second_keep_under_an_open_kept_ref_is_refused_and_the_first_end_survives(keeping):
+    ep, h, s = keeping()
+    first = s.fork("recall", by="memory", ref="r-twice", keep=True)
+    assert until(lambda: len(h.forked) == 1)
+    refused_keep(lambda: s.fork("again", by="memory", ref="r-twice", keep=True))
+    refused_keep(lambda: s.deliver("again", ref="r-twice", keep=True))
+    assert len(h.forked) == 1 and h.submitted == []        # nothing was handed in
+    ep.fork_started(h.forked[0].id, "agent-7")
+    ep.fork_ended(h.forked[0].id, "first answer")
+    assert first.wait_ended(5).answer == "first answer"
+    ep.stop()
+    assert until(lambda: ep.wait_closed(0))
+    # Past the endpoint's end the first end is still on disk, under its own ref.
+    assert first.wait_ended(5).answer == "first answer"
+    assert len(files()) == 1
+
+
+def test_a_settled_kept_ref_is_refused_until_its_ack_then_taken(keeping):
+    ep, h, s = keeping()
+    first = ran(s, h, "one", "r-again", keep=True)
+    refused_keep(lambda: s.deliver("two", ref="r-again", keep=True))
+    # Without keep the ref is free to use, as it always was.
+    plain = s.deliver("plain", ref="r-again")
+    assert isinstance(plain.wait_started(5), results.Started)
+    h.end_turn()
+    assert isinstance(plain.wait_ended(5), results.Ended)
+    assert s.ack("r-again") is True
+    second = ran(s, h, "two", "r-again", keep=True)
+    [path] = files()
+    assert json.loads(path.read_text())["delivery"] == second.id != first.id
+
+
+def test_an_earlier_endpoints_kept_end_holds_its_ref_for_the_same_session_only(keeping):
+    ep, h, s = keeping()
+    answered_fork(ep, h, s, "r-held")[0].wait_ended(5)
+    ep.stop()
+    ep2, h2, s2 = keeping()                      # the same session, launched again
+    refused_keep(lambda: s2.fork("recall", by="memory", ref="r-held", keep=True))
+    assert h2.forked == []
+    _, h3, other = keeping(session_id="s-2")     # another session's ref is its own
+    other.fork("recall", by="memory", ref="r-held", keep=True)
+    assert until(lambda: len(h3.forked) == 1)
+    assert s2.ack("r-held") is True
+    s2.fork("recall", by="memory", ref="r-held", keep=True)
+    assert until(lambda: len(h2.forked) == 1)

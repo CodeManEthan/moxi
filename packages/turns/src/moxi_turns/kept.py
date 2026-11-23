@@ -11,9 +11,10 @@ its doctor lists each one older than a day.
 
 Who may read a file: a lookup names the session it asks about, by its ids (the current
 one and the earlier ones of the same launch) or by the endpoint's name, and reads only the
-files of that session. Within one endpoint a later kept delivery with the same `ref`
-replaces the file; the newest file of a session carrying a `ref` is the one a lookup
-reads.
+files of that session. One `ref` holds one kept end per session: the endpoint refuses a
+`keep` under a `ref` that a kept end of its session still holds (`RefKept`), here or in
+its own record, so no kept end replaces another. Should two files of a session carry one
+`ref` all the same, the newest is the one a lookup reads.
 
 The endpoint reads and writes here under its own lock. A client reads and removes here
 only for a session whose endpoint is gone, so the two never act on one file at once.
@@ -42,6 +43,11 @@ log = logging.getLogger("moxi.turns.kept")
 KEPT_DIR = "kept"
 #: A kept end older than this, in seconds, is one the doctor lists.
 OLD_S = 24 * 3600.0
+
+
+class RefKept(ValueError):
+    """A `keep` under a `ref` that still holds a kept end of the session, not acked yet.
+    Nothing is recorded for it: each kept delivery needs a `ref` of its own."""
 
 
 def kept_dir(env: Mapping[str, str] | None = None) -> Path:
@@ -125,4 +131,4 @@ def remove(ref: str, *, session_ids: Iterable[str] = (), endpoint: str | None = 
     return removed
 
 
-__all__ = ["KEPT_DIR", "OLD_S", "kept_dir", "write", "entry", "records", "find", "remove"]
+__all__ = ["KEPT_DIR", "OLD_S", "RefKept", "kept_dir", "write", "entry", "records", "find", "remove"]

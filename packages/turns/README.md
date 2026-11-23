@@ -26,7 +26,8 @@ run before it reads lost (`round_timeout_s`), 600 s when it sets none. The fork'
 calls are judged by the guards like any agent's, and get no after-tool ask. A delivery or
 fork asked with `keep` has its end kept in turns' state folder until the caller acks its
 `ref`: a later wait reads the same end, even after the session's endpoint has ended, and
-turns removes none by age.
+turns removes none by age. Each kept delivery needs a `ref` of its own: turns refuses a
+`keep` under a `ref` whose kept end is not acked yet.
 
 Each session turns can reach has an endpoint with a Unix socket and a ledger of the
 session's turns (a small process of its own for a Claude Code session, and part of the

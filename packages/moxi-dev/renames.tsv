@@ -14275,6 +14275,7 @@ turns	packages/turns/src/moxi_turns/endpoint.py	while it waited. A skipped steer
 turns	packages/turns/src/moxi_turns/endpoint.py	while it waited. A skipped steer goes to the adapter's `expired`, so it lets go of	use	`expired`	`on_expired`
 turns	packages/turns/src/moxi_turns/endpoint.py	while len(self._settled) > SETTLED_KEPT:	keep	_settled	_settled
 turns	packages/turns/src/moxi_turns/endpoint.py	skip = d.state not in (_INFLIGHT, _STEERING, _FORKING) or d.expired	keep	expired	expired
+turns	packages/turns/src/moxi_turns/endpoint.py	if any(d.keep and d.ref == ref for d in self._deliveries.values()):	keep	any	any
 turns	packages/turns/src/moxi_turns/guards/__init__.py	#: `any`, `main` or `agents`.	keep	any	any
 turns	packages/turns/src/moxi_turns/guards/__init__.py	WHO = ("any", "main", "agents")	keep	any	any
 turns	packages/turns/src/moxi_turns/guards/__init__.py	elif entry not in known and not any(p.id == entry for p in problems):	keep	any	any
@@ -14339,7 +14340,7 @@ turns	packages/turns/src/moxi_turns/hooktimes.py	thread.join(timeout=2.0)	keep	t
 turns	packages/turns/src/moxi_turns/kept.py	"""Write one kept end (`record`, as `entry` makes it) in one step. Raises `OSError`."""	keep	record	record
 turns	packages/turns/src/moxi_turns/kept.py	"""True when `record` is a kept end of the session named by `session_ids` or by	keep	record	record
 turns	packages/turns/src/moxi_turns/kept.py	return any(s in ids for s in session_ids if s)	keep	any	any
-turns	packages/turns/src/moxi_turns/kept.py	__all__ = ["KEPT_DIR", "OLD_S", "kept_dir", "write", "entry", "records", "find", "remove"]	keep	find	find
+turns	packages/turns/src/moxi_turns/kept.py	__all__ = ["KEPT_DIR", "OLD_S", "RefKept", "kept_dir", "write", "entry", "records", "find", "remove"]	keep	find	find
 turns	packages/turns/src/moxi_turns/listeners.py	Floors	name	any	has_floor
 turns	packages/turns/src/moxi_turns/listeners.py	_text	kwonly	done	done
 turns	packages/turns/src/moxi_turns/listeners.py	listed = set(registry.start_order())	keep	set	set

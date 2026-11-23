@@ -43,7 +43,9 @@
   a day with its `ref` and asker. The client gains `keep=`, `Session.ack(ref)`, and
   `turns.wait_ref(ref, session_id=)` and `turns.ack(ref, session_id=)` for a caller that
   holds no `Delivery`. An endpoint of an older turns does not offer `keep`, and the client
-  refuses to send `keep` to it.
+  refuses to send `keep` to it. One `ref` holds one kept end: a `keep` under a `ref` whose
+  kept end in the session is not acked yet is answered invalid params, so no kept end
+  replaces another.
 
 ## 0.2.5 (2026-11-22)
 

@@ -129,7 +129,7 @@ conditional question: "no, a turn is open" is its answer, not a failure of the r
 | -32700 | parse error | a line that is not JSON |
 | -32600 | invalid request | not a JSON-RPC request, a batch, or a line over the cap |
 | -32601 | method not found | a method turns does not have |
-| -32602 | invalid params | params that break this contract: an empty or missing `text`; a `ref` that is not a string, or longer than 256 bytes as UTF-8; `if_turn_number`, `refuse_draft` or `refuse_agents` without `only_if_idle: true`, or of the wrong type; `by` that is not a non-empty string or null; `senders` that is not a list of non-empty strings; a bad `until` or `timeout_ms`; a `wait` with both or neither of `delivery` and `ref`; an unknown command name; `stop_shells` not a boolean, or given with `exit`; `environ`'s `names` not a list, longer than 64, or holding something that is not a variable name; `cached` not a boolean; `keep` not a boolean, or true without a `ref`; a `round_timeout_ms` that is not a number above 0 and at most 2147483647, or null; an `ack` without a `ref` |
+| -32602 | invalid params | params that break this contract: an empty or missing `text`; a `ref` that is not a string, or longer than 256 bytes as UTF-8; `if_turn_number`, `refuse_draft` or `refuse_agents` without `only_if_idle: true`, or of the wrong type; `by` that is not a non-empty string or null; `senders` that is not a list of non-empty strings; a bad `until` or `timeout_ms`; a `wait` with both or neither of `delivery` and `ref`; an unknown command name; `stop_shells` not a boolean, or given with `exit`; `environ`'s `names` not a list, longer than 64, or holding something that is not a variable name; `cached` not a boolean; `keep` not a boolean, or true without a `ref`, or true under a `ref` that a kept end of the session still holds (see `ack`; after its ack the same request is taken); a `round_timeout_ms` that is not a number above 0 and at most 2147483647, or null; an `ack` without a `ref` |
 | -32001 | hello refused | no version in both ranges; `data` names both |
 | -32002 | hello required | a first request other than `rpc.hello`; the connection closes |
 | 1001 | `gone` | the endpoint is ending or has ended |
@@ -541,6 +541,13 @@ a wait that finds nothing listening, or gets the `gone` error, returns the kept 
 by that `ref` from the state folder too. A `deliver` or `fork` answered with the `gone`
 error was never taken, so nothing is kept for it. turns removes no kept end by age;
 `moxi doctor` lists each one older than a day with its `ref` and asker.
+
+**One kept end per `ref`.** A `keep` under a `ref` that a kept end of this session still
+holds, one not acked yet, is answered invalid params, its message naming the `ref`, and
+nothing is recorded. The end holding it may be a kept delivery of this endpoint, open or
+settled, or a kept end in the state folder, an earlier endpoint's of the same session among
+them. So no kept end ever replaces another, and the asker gives each kept delivery a `ref`
+of its own. A `ref` asked without `keep` is never refused for this.
 
 `ack` removes the kept end of `ref`: from the endpoint's record (the delivery then counts
 among the settled ones it may drop) and from the state folder, this session's earlier

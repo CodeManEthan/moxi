@@ -484,7 +484,9 @@ class Session:
         them on the prompt the delivery raises (`delivery_by`, `delivery_senders`).
         `keep` (with a `ref`; the session must offer `keep`): turns keeps the delivery's
         end until `ack(ref)`, and its waits read that end even once the endpoint has
-        ended."""
+        ended. One `ref` holds one kept end: while a kept end of the session still holds
+        `ref`, a `keep` under it raises `TurnsError` (invalid params) and nothing is
+        handed in."""
         _check_text(text)
         ref = check_ref(ref)
         asker = _asker(by, senders)
