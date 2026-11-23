@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- An opened row of a bound agent draws its `Session` line as it opens, reading `Reading…`
+  until launcher's and sessions' reads answer, and then their words in the same place.
+  Before, the line arrived late above `Cache`, `Waits on` and the send box and pushed
+  them down a line, so a press of `Thread` or the box's `Reply wanted` just then could
+  miss. A session sessions doesn't list loses the line once that read answers.
 - The page's `Reading…` line, while its first read is out, shows once that read has
   been out 400 ms in every browser. In Firefox it could stay blank until something
   else redrew the page, since the page checked the wait against `Date.now()`, which

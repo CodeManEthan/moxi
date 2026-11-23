@@ -307,6 +307,9 @@ export class CommsPage extends LitElement {
   #runningAnswered = false;
   /** sessions' header of each session read, by `keyOf`, with sessions installed. */
   #sessionReads = new Map<string, SessionRead>();
+  /** The sessions whose header read has answered at least once, so a read asked again
+   * (`AGAIN_MS`) holds no line open for its answer. */
+  #sessionsAnswered = new Set<string>();
   /** The session of the row opened in the last drawing, the one last asked again for an
    * opened row (by `keyOf`), and the reads asked again that are out. */
   #drawnSession: SessionKey | null = null;
@@ -400,9 +403,12 @@ export class CommsPage extends LitElement {
         if (!this.isConnected) return;
         const header = result.status === 200 ? parseSessionHeader(result.data, key) : null;
         this.#sessionReads.set(held, { state: "read", header, at: Date.now() });
+        this.#sessionsAnswered.add(held);
         this.requestUpdate();
       }, () => {
         this.#sessionReads.set(held, { state: "read", header: null, at: Date.now() });
+        this.#sessionsAnswered.add(held);
+        this.requestUpdate();
       });
     }
   }
@@ -966,11 +972,14 @@ export class CommsPage extends LitElement {
       : { loading: true, gone: false, failure: null, value: null };
     const live = item.row.addresses.find((one) => one.qualified === to)?.row ?? null;
     this.#drawnSession = installed("sessions") && live !== null ? sessionOf(live) : null;
+    const drawn = this.#drawnSession;
+    const sessionOut = (installed("launcher") && !this.#runningAnswered)
+      || (drawn !== null && !this.#sessionsAnswered.has(keyOf(drawn)));
     const view = openedAgent({
       row: item.row, to, roster, asks: this.#mail?.value?.asks ?? [], queue, now,
       when: (at) => whenWords(at, this.#today), hasCache: installed("cache"), hasSessions: installed("sessions"),
       session: installed("sessions") ? sessionLine(headerOf(this.#sessionReads, live), this.#today) : null,
-      showsDetails: this.#details,
+      sessionOut, showsDetails: this.#details,
     });
     const sessionId = view.sessionId;
     return html`<div class="det" data-part="opened" data-to=${to}>
