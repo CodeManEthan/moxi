@@ -17674,3 +17674,22 @@ sessions	packages/sessions/tests/test_writer.py	assert wrapped.injected is True 
 sessions	packages/sessions/tests/test_writer.py	chars = set(api.OPENING)	keep	set	set
 sessions	packages/sessions/tests/test_writer.py	out = set()	keep	set	set
 sessions	packages/sessions/tests/test_writer.py	synthetic.text("Called the Read tool", synthetic=True)	keep	synthetic	synthetic
+rounds	packages/rounds/src/moxi_rounds/events.py	"builder", "record", "host", "build", "brought")),	keep	record	record
+rounds	packages/rounds/src/moxi_rounds/private_files.py	proc.wait(timeout=GIT_TIMEOUT_S)	keep	timeout	timeout
+rounds	packages/rounds/src/moxi_rounds/private_files.py	code, out = git._run("config", "--bool", "core.ignorecase", ok=(0, 1))	keep	ok	ok
+rounds	packages/rounds/src/moxi_rounds/private_files.py	out = git._run("rev-list", "--reverse", "--format=%T", tip, "--not", head)[1]	keep	refusing	refusing
+rounds	packages/rounds/src/moxi_rounds/private_files.py	code, _out = git._run("check-ignore", "-q", "--", path, ok=(0, 1))	keep	ok	ok
+rounds	packages/rounds/src/moxi_rounds/private_files.py	code, out = Git(worktree)._run("check-ignore", "-v", "-z", "--no-index", "--stdin",	keep	refusing	refusing
+rounds	packages/rounds/src/moxi_rounds/private_files.py	ok=(0, 1), stdin_data=path + "\0")	keep	ok	ok
+rounds	packages/rounds/src/moxi_rounds/private_files.py	place.parent.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
+rounds	packages/rounds/src/moxi_rounds/settings.py	seen = set()	keep	set	set
+rounds	packages/rounds/src/moxi_rounds/settings.py	if any(ord(char) < 32 or ord(char) == 127 for char in entry):	keep	any	any
+rounds	packages/rounds/src/moxi_rounds/settings.py	if any(char in entry for char in "*?["):	keep	any	any
+rounds	packages/rounds/src/moxi_rounds/settings.py	if any(part in ("", ".", "..") for part in parts):	keep	any	any
+rounds	packages/rounds/src/moxi_rounds/settings.py	if any(part.casefold() == ".git" for part in parts):	keep	any	any
+rounds	packages/rounds/tests/test_private_files.py	assert cli.main(["projects", "set", "proj-a", "--notes-root",	keep	set	set
+rounds	packages/rounds/tests/test_private_files.py	path.parent.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
+rounds	packages/rounds/tests/test_private_files.py	path.parent.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
+rounds	packages/rounds/tests/test_private_files.py	assert not any(one.startswith("brought in") for one in made.block.lines)	keep	any	any
+rounds	packages/rounds/tests/test_private_files.py	assert any(all(part in one for part in said) for one in reasons), reasons	keep	any	any
+rounds	packages/rounds/tests/test_private_files.py	tree.commit("notes/readme.md", "changed")	keep	changed	changed
