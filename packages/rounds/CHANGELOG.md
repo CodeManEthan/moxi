@@ -1,5 +1,33 @@
 # Changelog
 
+## 0.1.5 (unreleased)
+
+- The page acts, at a desk. An item's popover and the walk take the operator's answer:
+  an option picked, an answer in the operator's own words, a request to explain, a park,
+  an unpark, a ruling read back or corrected, a decision accepted or rejected, a job
+  done. Answers wait in a tray, `Your answers`, kept in the browser's storage, and
+  `Send` sends it, or `Send now` one row. The page records the picks, decisions,
+  read-backs, done jobs, parks and unparks itself through rounds' own calls, each with a
+  page pointer; own words and corrections go in the message to the agent chosen in the
+  To picker (each round's lead by default), who words and records them, and the row
+  reads recorded once the agent's ruling appears. With comms installed one message goes
+  to each recipient under rounds' send-only name; without it nothing is sent and the
+  row shows the command a lead would run. Each draft gets a receipt.
+- An act posted twice runs once: each act carries an act id, the page server answers a
+  repeat from the receipts it keeps, and after a restart an event whose pointer holds
+  the act id is that act's record, so it is not recorded again.
+- `Unpark` on a parked question takes back the parking that stands, a ruling of
+  `revoke:` that parking, whoever recorded it.
+- `Drop this build…` on a step of a stage with an open build opens a confirm that names
+  what the drop ends, removes and keeps, read fresh; the drop is recorded as the
+  operator's with the page as the pointer, and the round's lead is told.
+- The page reads each round's lead, a question's prepared answer (its recommended option
+  marked `recommended`), a question's record in every state with the ruling that put it
+  there, and the parked questions, which the foot's count opens.
+- New page routes, none open to the phone gateway: `GET /api/agents`, `GET /api/drop`,
+  `POST /api/answers` and `POST /api/drop/build`. Nothing acts at phone width.
+- `pointers.page_act` gives the act id a page pointer holds.
+
 ## 0.1.4 (unreleased)
 
 - A `ci.workflows` entry can read jobs by name pattern (`matrix = ["browser (*)"]`), name
