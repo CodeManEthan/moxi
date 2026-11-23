@@ -36,7 +36,8 @@ actions merge or push it and `finish` then removes what the build left. The oper
 reached the target, and the round closes itself with its numbers and, where its flow
 has one, a retrospective. Beside the rounds are a project's own list of questions, its
 register of standing rulings, the files generated from them, and the sweep of folders
-ended builds left. Its verbs are `open`, `fold`, `verdict`, `commission`, `check`,
+ended builds left. A question can be filled in ahead of the operator's answer, with
+options and with an answer an agent prepared for it. Its verbs are `open`, `fold`, `verdict`, `commission`, `check`,
 `finish`, `ask`, `rule`, `mark`, `next`, `show`, `list` and `drop`.
 
 A stage's `build` step is ready once it is commissioned and done once git reads its
@@ -52,8 +53,7 @@ what a re-check reads. The commands themselves come from `next`, the refusals an
 
 This version does not yet do:
 
-- answers prepared ahead for a question, and the suggestion of a sitting with the
-  operator;
+- the suggestion of a sitting with the operator;
 - parent and child rounds: a design may plan a stage that stands for a child round,
   and `next` prints that stage's steps as not built;
 - `list --dormant`, the rounds that have gone quiet;
@@ -74,13 +74,14 @@ lower-case letters, digits and `-`.
 | `moxi rounds next [ROUND] [--json]` | what is done next: the step the round is at, then the first step not done of each other stage and each other step of the round's own that is ready, each with who does it, what they read, the command that completes it and what it waits for; with no round, in a build's worktree, the round of the open build on the branch checked out there |
 | `moxi rounds queue [--repo KEY] [--resume]` | show each queue project's queue, its lander, a pause, the running batch and the members in the order they are taken; start a lander where a member waits and none runs; with `--resume`, lift a pause |
 | `moxi rounds land --repo KEY` | run a queue project's lander; `finish`, `next` and `queue` start it, and it exits at once when another holds the repo's lock |
-| `moxi rounds next --schema design\|build\|step\|majors\|retro` | the empty data block of a report of that kind, a comment on each key |
+| `moxi rounds next --schema design\|build\|step\|majors\|retro\|answer` | the empty data block of a report of that kind, or with `answer` of a prepared answer, a comment on each key |
 | `moxi rounds fold ROUND [--records-only --record PTR]` | freeze `design.md` as the next version and record what its data block declares |
 | `moxi rounds verdict ROUND REPORT.md` | record the verdict of a report on the design, on a build or on a build for a report step of your own, or a majors or retro report, run by whoever wrote the report |
 | `moxi rounds ask ROUND TEXT --from PTR [--blocks B<n>[,...]\|none] [--option K=TEXT ...]` | put a question to the operator in a round, as `Q<n>`; it holds up every stage unless `--blocks` names the ones it holds up, or `none` |
 | `moxi rounds ask ROUND TEXT --build B<n> [--blocks B<n>[,...]\|none]` | put a question that came up in the open build of a stage: a builder tells you, and you ask it; it comes from that build at its branch's tip, and is listed as asked by you for the builder |
 | `moxi rounds ask PROJECT TEXT --from PTR [--option K=TEXT ...]` | put a question on the project's list, as `P<n>`, where it holds up nothing |
 | `moxi rounds ask ROUND\|PROJECT ID [--option K=TEXT ...] [--retire K ...]` | add options to a question on record, or retire them |
+| `moxi rounds ask ROUND\|PROJECT ID --prepared FILE` | record an answer prepared for a question on record, from the `answer` block in FILE (see Questions); anyone may, and no gate reads it |
 | `moxi rounds ask ROUND --adopt P<n> [--record PTR]` | bring a question of the project's list into the round |
 | `moxi rounds ask PROJECT --move ROUND:Q<n> [--record PTR]` | put a round's question on the project's list |
 | `moxi rounds rule ROUND --text TEXT --record PTR [--reason TEXT] [--stages B<n>[,...]]` | record a ruling of the round, as `C<n>`; `--stages` names the stages it applies to, when not all |
@@ -689,6 +690,54 @@ A project's list holds questions that have no round yet, and they hold up nothin
 `--adopt` brings one into a round, where it holds up every stage. `--move` puts a
 round's question on the list, which ends what it holds up, so it needs the operator's
 pointer.
+
+### Answers prepared ahead
+
+An agent that has looked into a question can record what it recommends, for whoever
+puts the question to the operator. It prints the empty block with `moxi rounds next
+--schema answer`, fills it in a file, and records it:
+
+```sh
+moxi rounds ask alpha/search Q1 --prepared answer.md
+```
+
+```toml
+kind = "answer"
+question = "Q1"
+by = "scout"
+model = "a-model"
+recommend = "b"            # one option's key
+sure = "medium"            # low | medium | high
+why = "archived notes are read once a year"
+flips = "a reader who asks for an archived note by name"
+read = ["file:design.md#search", "comms:14"]
+
+[[option]]
+key = "a"
+costs = "a slower index"
+forecloses = "nothing"
+
+[[option]]
+key = "b"
+costs = "an archived note is never found"
+forecloses = "nothing"
+```
+
+The file's block opens with a line of three backticks and `toml rounds`, as a design's
+does. It has one `[[option]]` for each option the question offers and for no other; for
+a question with no options yet, each `[[option]]` also gives its line in `text`, two to
+four of them, and they become the question's options. `why`, `flips`, `costs` and
+`forecloses` are one line each, and `read` holds at least one pointer. A design's block
+may carry the same keys as `[question.prepared]` under a question, with
+`[[question.prepared.option]]` entries, and `fold` records it the same way; a records-only
+fold may add one.
+
+An answer is recorded only while its question is open or parked and its round has not
+ended. It changes nothing a gate reads: not the question's state, what it holds up, or
+any step. The newest one is shown, in `show`, `list --questions` and the read API, and
+is current while its options are the ones the question offers. Once an option is added
+or retired it reads `prepared for other options` and counts as none, until a new one
+is recorded. `list --waiting` says of each open question whether it has a current one.
 
 ## Rulings
 
