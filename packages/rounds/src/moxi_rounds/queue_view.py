@@ -1,9 +1,9 @@
 """What `moxi rounds queue` says of a repo's queue, as lines: whether a lander runs, a
 pause and its reason, a wait on something outside the queue, each running batch and its
 CI reading (two or more while a red batch is split) or the CI run it waits on to end,
-each member still in the queue in the order it is taken, the target's last full run, a
-full run still running at the newest head read, and the messages the lander could not
-send.
+each member still in the queue in the order it is taken, the target's last full run, the
+newest landing and its candidate's run, a full run still running at the newest head
+read, and the messages the lander could not send.
 
 Everything said is read from the queue file (`queue_file.read`); nothing is written.
 """
@@ -54,6 +54,9 @@ def lines(queue: queue_file.Queue, *, lander_runs: bool,
         last = queue.mains[-1]
         said.append(f"main's last full run: {last['event']} at "
                     f"{str(last.get('head'))[:12]}, run {last.get('run')}")
+    landing = landing_line(queue)
+    if landing is not None:
+        said.append(landing)
     head_read = next((one for one in reversed(queue.head_runs)
                       if one.get("kind") == "read"), None)
     if (head_read is not None and head_read.get("running")
@@ -64,10 +67,38 @@ def lines(queue: queue_file.Queue, *, lander_runs: bool,
     if spell is not None:
         said.append(spell)
     for one in queue.head_runs:
-        if one.get("kind") == "gave up":
+        if one.get("kind") == "gave up" and one.get("ref"):
             said.append(f"main's full run at {str(one.get('head'))[:12]} never started: "
                         f"{one.get('ref')} was pushed twice")
+        elif one.get("kind") == "gave up":
+            said.append(f"main's full run at {str(one.get('head'))[:12]} never showed, "
+                        "and the ci setting names no ref to push it to")
     return said + told_lines(queue)
+
+
+def landing_line(queue: queue_file.Queue) -> str | None:
+    """The newest landing and the candidate's run it landed on: its batch's newest
+    read that reads green, or, for a landing past the target's own failures, its newest
+    read; with that read's workflows and the job each of their jobs stands for. None
+    before any landing."""
+    landed = next((one for one in reversed(queue.events)
+                   if one.get("event") == queue_file.LANDED and one.get("batch")), None)
+    if landed is None:
+        return None
+    batch = queue.batch(str(landed["batch"]))
+    reads = [one for one in (batch.runs if batch is not None else [])
+             if one.get("kind") == queue_file.READ_KIND]
+    read = next((one for one in reversed(reads) if one.get("reading") == "green"),
+                reads[-1] if reads else {})
+    flows = read.get("workflows") or []
+    paths = ", ".join(str(one.get("path")) for one in flows)
+    stands = ", ".join(f"{job} stands for {stood}" for one in flows
+                       for job, stood in (one.get("stands_for") or {}).items())
+    named = "; ".join(part for part in (paths, stands) if part)
+    runs = ", ".join(map(str, read.get("runs") or [])) or "unknown"
+    return (f"last landing: {landed.get('round')} {landed.get('stage')} at "
+            f"{str(landed.get('landing') or '')[:12]}, on its candidate's run {runs}"
+            + (f" ({named})" if named else ""))
 
 
 def _running(read: dict) -> str:
@@ -120,4 +151,4 @@ def told_lines(queue: queue_file.Queue) -> list[str]:
     return said
 
 
-__all__ = ["UNDELIVERED_SHOWN", "lines", "spell_line", "told_lines"]
+__all__ = ["UNDELIVERED_SHOWN", "lines", "landing_line", "spell_line", "told_lines"]

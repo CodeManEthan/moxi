@@ -137,11 +137,13 @@ SPLIT_WHY = "split"
 #: The `run` events' kinds: the push, the local run, a read, a rerun, a push refused
 #: with no member named, a read that failed, a red candidate's failures, and the
 #: failures it lands with as the target's own.
-PUSHED, LOCAL, READ, RERUN = "pushed", "local", "read", "rerun"
+PUSHED, LOCAL, READ, RERUN = "pushed", "local", queue_file.READ_KIND, "rerun"
 PUSH_FAILED, READ_FAILED = "push failed", "read failed"
 FAILURES, EXCUSED = "failures", "excused"
 #: A target's head whose pushes showed no run, no longer waited for.
 GAVE_UP = "gave up"
+#: Why a head is given up with no push: the `ci` setting names no ref to push it to.
+NO_REF_WHY = "no ref"
 #: How many reads of a candidate's CI may fail in a row before the queue pauses.
 READ_FAILS_MAX = 5
 #: The identity state comms reads for a name a running session holds.
@@ -610,10 +612,13 @@ class _Pass:
     def read_head(self, head: str, *, push: bool = False) -> dict | None:
         """The target's full run at `head` as read: its `green` or `red` event, read once
         the run has ended and, when red, after one rerun of its failed jobs. None until
-        then. Only the full run's workflows are read (`read_full`), so a candidate's
-        scoped run at the same commit never stands in for it. With `push`, a head with no run is pushed to the target's `ci` ref, again
-        once when no run shows `ABSENT_S` after the push; then it is given up on
-        (`GAVE_UP`) and the director is told."""
+        then. Only the full run's workflows are read (`read_full`), and no run a
+        candidate was read by (`queue_file.Queue.candidate_runs`), so a candidate's run
+        at the same commit, scoped or full, never stands in for it. With `push`, a head
+        with no run is pushed to the target's `ci` ref, again once when no run shows
+        `ABSENT_S` after the push; then it is given up on (`GAVE_UP`) and the director
+        is told. With no `ref` to push to, it is given up once it has read absent for
+        `ABSENT_S`."""
         queue = queue_file.read(self.repo, self.env)
         known = queue.main_at(head)
         if known is not None:
@@ -621,13 +626,13 @@ class _Pass:
         runs = [one for one in queue.head_runs if one.get("head") == head]
         if _newest(runs, GAVE_UP) is not None:
             return None
-        read = self.ci.read_full(self.place, head)
+        read = self.ci.read_full(self.place, head, not_runs=sorted(queue.candidate_runs))
         last = _newest(runs, READ)
         if _read_differs(last, read):
             runs.append(queue_file.append(self.repo, {
                 "event": queue_file.RUN, "head": head, "kind": READ,
-                "reading": read.word, "runs": list(read.runs), **_running(read)},
-                self.env))
+                "reading": read.word, "runs": list(read.runs), "at_s": self.clock(),
+                **_running(read)}, self.env))
             self.say_running(f"{self.target_name() or 'the target'}'s full run at "
                              f"{head[:12]}", last, read)
         if read.word == ci.GREEN:
@@ -651,9 +656,13 @@ class _Pass:
 
     def push_head(self, head: str, runs: list[dict]) -> None:
         """Push `head` to the target's `ci` ref, forced, when it has no run: once, again
-        once `ABSENT_S` after the push, then give it up."""
+        once `ABSENT_S` after the push, then give it up. With no ref to push to, give it
+        up once it has read absent for `ABSENT_S`."""
         target = self.target_name()
-        if self.ref_template is None or target is None:
+        if target is None:
+            return
+        if self.ref_template is None:
+            self.give_up_unpushed(head, target, runs)
             return
         pushes = [one for one in runs if one.get("kind") == PUSHED]
         if pushes and self.clock() - float(pushes[-1].get("pushed_s") or 0) < ABSENT_S:
@@ -674,6 +683,23 @@ class _Pass:
                                       "code": pushed.code, "said": pushed.said}, self.env)
         self.say(f"lander of {self.repo}: pushed {head[:12]} to {ref}"
                  + ("" if pushed.code == 0 else f", refused: {pushed.said}"))
+
+    def give_up_unpushed(self, head: str, target: str, runs: list[dict]) -> None:
+        """Give up `head`, which the `ci` setting names no ref to push to, once its read
+        has said `absent` for `ABSENT_S`, and tell the director once."""
+        last = _newest(runs, READ)
+        if last is None or last.get("reading") != ci.ABSENT \
+                or self.clock() - float(last.get("at_s") or 0) < ABSENT_S:
+            return
+        queue_file.append(self.repo, {"event": queue_file.RUN, "head": head,
+                                      "kind": GAVE_UP, "why": NO_REF_WHY}, self.env)
+        self.tell_director(
+            "main run", f"gave up:{head}",
+            f"{target}'s full run at {head[:12]} never showed: no run of its full "
+            f"workflows was there {int(ABSENT_S)} s after it was first read, and "
+            f"{self.repo}'s ci setting names no ref the lander could push it to. The "
+            "lander stopped waiting for it. Run the full workflows at that commit by "
+            "hand to read it.")
 
     def target_name(self) -> str | None:
         """The target the queue lands on: the newest batch's."""
@@ -1304,5 +1330,5 @@ class QueueGit(finishing.MergeGit):
 
 
 __all__ = ["LANDER", "QUEUE_PLACE", "BRANCH_PREFIX", "ABSENT_S", "LOCAL_JOB", "NOT_REREAD",
-           "READ_FAILS_MAX", "GAVE_UP", "place_of", "take", "step", "owed_heads",
-           "main_owed", "QueueGit"]
+           "READ_FAILS_MAX", "GAVE_UP", "NO_REF_WHY", "place_of", "take", "step",
+           "owed_heads", "main_owed", "QueueGit"]

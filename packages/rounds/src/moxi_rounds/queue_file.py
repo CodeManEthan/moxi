@@ -28,9 +28,10 @@ The kinds:
 - `paused`, `resumed`: the queue stopped taking members that are not urgent, with its
   `reason`, and started again.
 - `red`, `green`: a full run on the target at `head` as the lander read it, with its
-  `run`, the landings it `covers` and, for red, its `failures` and its red spell: the
-  head the spell started at (`since`), main's `owner` and the build that makes it the
-  owner (`owning`), and `starts` on the run that starts the spell.
+  `run` (never a run a candidate was read by: an older event naming one is left out of
+  `Queue.mains`), the landings it `covers` and, for red, its `failures` and its red
+  spell: the head the spell started at (`since`), main's `owner` and the build that
+  makes it the owner (`owning`), and `starts` on the run that starts the spell.
 - `told`: a message the lander sent or could not send, with what comms reported.
 
 Several batches run at once only while a red batch is split (`running_batches`); a
@@ -90,6 +91,8 @@ IN_BATCH = "in batch"
 #: moved after the member joined.
 BY_HAND = "by hand"
 MOVED = "moved"
+#: The kind of a `run` event that records a read of CI.
+READ_KIND = "read"
 #: The start of a candidate's local branch name, `queue-<M12>-<n>`.
 BRANCH_PREFIX = "queue-"
 
@@ -167,8 +170,10 @@ class Queue:
     join of each), the `batches` in order, the pause's reason (`paused`, None when not
     paused), the target's full runs read (`mains`, each a `red` or `green` event), what
     the lander did to them (`head_runs`, the `run` events with a `head`), the `told`
-    events, the newest `waiting` event (None once a batch moved past it), and every
-    event in order (`events`)."""
+    events, the newest `waiting` event (None once a batch moved past it), every event
+    in order (`events`), and the ids of the runs a batch's `read` event recorded
+    (`candidate_runs`). A `red` or `green` event any of whose `run` ids is a
+    candidate's is not a full run of the target's, and `mains` leaves it out."""
 
     repo: str
     members: dict[tuple[str, str], Member] = field(default_factory=dict)
@@ -179,6 +184,7 @@ class Queue:
     told: list[dict] = field(default_factory=list)
     waiting_on: dict | None = None
     events: list[dict] = field(default_factory=list)
+    candidate_runs: set[str] = field(default_factory=set)
 
     def member(self, name: str, stage: str) -> Member | None:
         return self.members.get((name, stage))
@@ -311,16 +317,24 @@ def _apply(queue: Queue, event: dict, line: int) -> None:
         if batch is not None:
             batch.run = event
             batch.runs.append(event)
+        if event.get("kind") == READ_KIND:
+            queue.candidate_runs.update(str(one) for one in event.get("runs") or ())
+            queue.mains[:] = [one for one in queue.mains if not _candidates(queue, one)]
     elif kind == PAUSED:
         queue.paused = str(event.get("reason") or "paused")
     elif kind == RESUMED:
         queue.paused = None
     elif kind == WAITING:
         queue.waiting_on = event
-    elif kind in (RED, GREEN):
+    elif kind in (RED, GREEN) and not _candidates(queue, event):
         queue.mains.append(event)
     elif kind == TOLD:
         queue.told.append(event)
+
+
+def _candidates(queue: Queue, event: dict) -> bool:
+    """Whether the `red` or `green` event `event` names a run a candidate was read by."""
+    return any(str(one) in queue.candidate_runs for one in event.get("run") or ())
 
 
 def _landed_late(member: Member, event: dict) -> bool:
@@ -362,5 +376,6 @@ def append(repo: str, event: dict, env=None) -> dict:
 
 __all__ = ["QUEUE_DIR", "QUEUE_FILE", "KINDS", "JOIN", "LEFT", "BATCH", "RUN", "LANDED",
            "EJECTED", "WAITING", "PAUSED", "RESUMED", "RED", "GREEN", "TOLD", "BUILT",
-           "ENDED", "QUEUED", "IN_BATCH", "BY_HAND", "MOVED", "BRANCH_PREFIX", "queue_dir",
-           "queue_file", "Member", "Batch", "Queue", "read", "fold", "appending", "append"]
+           "ENDED", "QUEUED", "IN_BATCH", "BY_HAND", "MOVED", "READ_KIND",
+           "BRANCH_PREFIX", "queue_dir", "queue_file", "Member", "Batch", "Queue", "read",
+           "fold", "appending", "append"]
