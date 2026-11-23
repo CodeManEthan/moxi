@@ -87,15 +87,15 @@ def _writers():
     }
 
 
-def _moxi_folders(env) -> list[Path]:
+def _moxi_dirs(env) -> list[Path]:
     """The `moxi` folder that holds each of rounds' five roots as the platform's defaults
     place them under `env`'s home, which no Moxi variable moves: the folder itself on
     XDG systems, its parent where the root kind is a subfolder (Windows)."""
     plain = Layout(paths.MODULE)
     bare = {key: value for key, value in env.items() if key not in ROUNDS_LOCATORS}
     roots = [getattr(plain, f"{kind}_root")(bare) for kind in KINDS]
-    return sorted({next(folder for folder in (root, *root.parents)
-                        if folder.name == plain.namespace) for root in roots})
+    return sorted({next(ancestor for ancestor in (root, *root.parents)
+                        if ancestor.name == plain.namespace) for root in roots})
 
 
 @pytest.mark.parametrize("writer", sorted(_writers()))
@@ -106,7 +106,7 @@ def test_each_writer_is_refused_when_no_moxi_variable_places_rounds(writer, monk
         _writers()[writer]()
     assert not isinstance(refused.value, (RoundsError, OSError))
     assert "set MOXI_ROUNDS_HOME to a folder of the test's own" in str(refused.value)
-    assert [folder for folder in _moxi_folders(os.environ) if os.path.lexists(folder)] == []
+    assert [moxi_dir for moxi_dir in _moxi_dirs(os.environ) if os.path.lexists(moxi_dir)] == []
 
 
 @pytest.mark.parametrize("writer", sorted(_writers()))
@@ -115,7 +115,7 @@ def test_each_writer_lands_in_the_fences_home(writer, fence):
     found = _writers()[writer]()
     if isinstance(found, Path):
         assert os.path.realpath(found).startswith(home + os.sep)
-    assert [folder for folder in _moxi_folders(os.environ) if os.path.lexists(folder)] == []
+    assert [moxi_dir for moxi_dir in _moxi_dirs(os.environ) if os.path.lexists(moxi_dir)] == []
 
 
 def test_the_cli_prints_the_refusal_and_exits_1(monkeypatch, capsys):
