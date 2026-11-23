@@ -1,7 +1,11 @@
 # Changelog
 
-## Unreleased
+## 0.2.5 (2026-11-22)
 
+- A page may announce `band_unless`, a list of module names: while any of them is
+  installed, the page has no entry in the band of pages, and its address still opens it.
+  `/m/ui/api/modules` and `ComponentInfo` carry it on a page (`[]` when it names none) and
+  null on any other component. A value that is not a list of module names reads as none.
 - `<moxi-ui-rail>` sizes its small and vertical forms with custom element states, so it
   draws as designed from Chrome 125, Firefox 126 and Safari 17.4. Below that a mark no
   longer throws: an engine with no custom states, or one that takes only names starting
