@@ -189,7 +189,8 @@ def _questions(found: Shown) -> list:
                 "ruling": question.ruling, "record": question.record,
                 "moved_from": question.moved_from,
                 "held": None if question.held is None else questions.stored(question.held),
-                "moved_to": question.moved_to}
+                "moved_to": question.moved_to,
+                "prepared": questions.prepared_data(question)}
         data.update({key: value for key, value in more.items() if value})
         listed.append(data)
     return listed
@@ -226,6 +227,8 @@ def _question_lines(listed: list) -> list[str]:
                       for option in one.get("options", ())]
             if "retired" in one:
                 lines.append(f"    retired: {', '.join(one['retired'])}")
+            lines += [f"    {line}" for line in questions.prepared_lines(
+                one.get("prepared"))]
     return lines
 
 

@@ -8,8 +8,8 @@ import json
 import pytest
 from moxi import cli
 
-from moxi_rounds import (asking, dropping, export, index, listing, log, opening, paths,
-                         ruling, shown)
+from moxi_rounds import (asking, dropping, export, index, listing, log, opening, options,
+                         paths, preparing, ruling, shown)
 from moxi_rounds.cli import main
 
 A = "proj-a/a-round"
@@ -330,13 +330,13 @@ waiting on the operator, computed {NOW}
 open questions:
   proj-a P1: {THIRD}
     from: comms:11   blocks: none   state: open   by: critic   at: {T3}   \
-age: 2 days   options: none
+age: 2 days   options: none   prepared: none
   {A} Q1: {SAID}
     from: comms:11   blocks: all   state: open   by: scout   at: {T1}   \
-age: 3 days   options: a, b
+age: 3 days   options: a, b   prepared: none
   {C} Q1: {SAID}
     from: https://example.test/q   blocks: all   state: open   by: helper   \
-at: {T2}   age: 2 days   options: none
+at: {T2}   age: 2 days   options: none   prepared: none
 
 parked questions, not put to the operator:
   {A} Q2: {OTHER}
@@ -774,3 +774,30 @@ def test_the_rounds_as_lines_say_no_lead(rounds, capsys):
 
     assert main(["list"]) == 0
     assert "atlas-lead" not in capsys.readouterr().out
+
+
+def test_what_waits_says_whether_each_open_question_has_a_current_prepared_answer(
+        rounds, capsys, tmp_path):
+    ask(options=["a=prose yes, parsed rows no", "b=both follow the settings"])
+    ask(text=OTHER, at=T2, options=["a=prose yes, parsed rows no",
+                                    "b=both follow the settings"])
+    for question_id in ("Q1", "Q2"):
+        path = tmp_path / f"{question_id}.md"
+        path.write_text("```toml rounds\n" + "\n".join([
+            'kind = "answer"', f'question = "{question_id}"', 'by = "builder-1"',
+            'model = "a-model"', 'recommend = "a"', 'sure = "medium"',
+            'why = "prose is read"', 'flips = "a row read aloud"',
+            'read = ["comms:1234567"]',
+            '[[option]]', 'key = "a"', 'costs = "time"', 'forecloses = "nothing"',
+            '[[option]]', 'key = "b"', 'costs = "more"', 'forecloses = "nothing"',
+        ]) + "\n```\n", encoding="utf-8")
+        preparing.prepare(A, question_id, path, by="helper", at=T3)
+    options.fill(A, "Q2", by="helper", options=["c=neither does"])
+
+    out = printed(capsys, "--waiting")
+
+    assert "options: a, b   prepared: current\n" in out
+    assert "options: a, b, c   prepared: prepared for other options\n" in out
+    rows = json.loads(printed(capsys, "--waiting", "--json"))["open"]
+    found = {row["id"]: row["prepared"]["current"] for row in rows if "prepared" in row}
+    assert found == {"Q1": True, "Q2": False}

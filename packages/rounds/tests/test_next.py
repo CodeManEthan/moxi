@@ -11,8 +11,9 @@ from pathlib import Path
 
 import pytest
 
-from moxi_rounds import (asking, closing, dropping, freezing, log, next_step, opening,
-                         report_block, ruling, showing, steps, verdicts)
+from moxi_rounds import (answer_block, asking, closing, dropping, freezing, log,
+                         next_step, opening, report_block, ruling, showing, steps,
+                         verdicts)
 from moxi_rounds.cli import main
 
 ROUND = "proj-a/a-round"
@@ -788,18 +789,16 @@ def test_the_empty_block_of_each_kind_of_report_is_printed(kind, capsys):
     assert run(capsys, "next", "--schema", kind) == report_block.empty(kind)
 
 
-def test_the_block_of_a_prepared_answer_is_not_built(capsys):
-    assert main(["next", "--schema", "answer"]) == 2
-
-    err = capsys.readouterr().err
-    assert "the block of a prepared answer is not built in this version" in err
-    assert "name one of design, build, step, majors, retro" in err
+def test_the_empty_block_of_a_prepared_answer_is_printed(capsys):
+    assert run(capsys, "next", "--schema", "answer") == answer_block.empty()
 
 
 def test_a_word_that_is_no_kind_of_block_is_bad_arguments(capsys):
     assert main(["next", "--schema", "sketch"]) == 2
 
-    assert "'sketch' is no kind of report" in capsys.readouterr().err
+    err = capsys.readouterr().err
+    assert "'sketch' is no kind of block" in err
+    assert "name one of design, build, step, majors, retro, answer" in err
 
 
 # -- which round -------------------------------------------------------------------------
