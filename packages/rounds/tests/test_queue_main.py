@@ -13,7 +13,7 @@ from test_queue_batch import (  # noqa: F401 -- fixtures
 from test_queue_telling import (  # noqa: F401 -- fixtures
     comms, config_text, lander_pass, no_lander_process, told)
 
-from moxi_rounds import batching, ci, lander, leads, queue_file, queue_view
+from moxi_rounds import batching, ci, lander, leads, queue_file, queue_view, telling
 from moxi_rounds.cli import main
 
 ONE_FAILS = {"job": "linux", "test": "tests/test_a.py::test_one"}
@@ -197,6 +197,71 @@ def test_an_owner_with_no_running_session_is_still_told_and_the_director_gets_th
     assert queue_view.spell_line(queue()) == (
         f"main red since {head[:12]}; lead-a and dir-a have no running session; the "
         "notice waits")
+
+
+def test_an_owner_read_offline_is_read_again_at_each_try_and_the_director_told_once(
+        repo, ready, fake, lander_pass, with_ref, comms):
+    ready()
+    leads.mark(ROUND, "lead-a", by="planner")
+    comms.states.update({"lead-a": "offline", "dir-a": "offline"})
+    comms.outcome.update({"lead-a": "offline", "dir-a": "offline"})
+    fake.main_of = lambda: repo.rev("main")
+    fake.landed_word, fake.failed = ci.RED, [ONE_FAILS]
+    landed(lander_pass)
+    head = repo.rev("main")
+    lander_pass(batching.ABSENT_S)
+    assert told("director")[-1]["delivery"] == "offline"
+    assert "could not be reached" in told("director")[-1]["text"]
+
+    comms.states.update({"lead-a": "standing", "dir-a": "free"})
+    comms.outcome.clear()
+    comms.delivery.update({"lead-a": "unbound", "dir-a": "unbound"})
+    lander_pass(batching.ABSENT_S + 60)
+    lander_pass(batching.ABSENT_S + 120)
+    delivered = [one for one in told("director") if one["delivery"] == "unbound"]
+    assert len(delivered) == 1
+    assert (delivered[0]["owner_state"], delivered[0]["director_state"]) == (
+        "standing", "free")
+    assert told("red")[-1]["owner_state"] == "standing"
+    assert queue_view.spell_line(queue()) == (
+        f"main red since {head[:12]}; lead-a and dir-a have no running session; the "
+        "notice waits")
+
+
+def test_a_directors_notice_whose_owner_is_back_is_no_longer_owed(
+        repo, ready, fake, lander_pass, with_ref, comms):
+    ready()
+    leads.mark(ROUND, "lead-a", by="planner")
+    comms.states["lead-a"] = "offline"
+    comms.outcome.update({"lead-a": "offline", "dir-a": "offline"})
+    fake.main_of = lambda: repo.rev("main")
+    fake.landed_word, fake.failed = ci.RED, [ONE_FAILS]
+    landed(lander_pass)
+    lander_pass(batching.ABSENT_S)
+    comms.states["lead-a"] = "held"
+    comms.outcome.clear()
+    lander_pass(batching.ABSENT_S + 60)
+    assert told("director")[-1]["delivery"] == telling.UNSENT
+    assert "lead-a has a running session now" in told("director")[-1]["why"]
+    assert told("red")[-1]["delivery"] == "live"
+    assert not telling.trying(queue())
+
+
+def test_an_owner_held_at_the_read_and_gone_at_the_retry_gets_the_director_told(
+        repo, ready, fake, lander_pass, with_ref, comms):
+    ready()
+    leads.mark(ROUND, "lead-a", by="planner")
+    comms.outcome["lead-a"] = "offline"
+    fake.main_of = lambda: repo.rev("main")
+    fake.landed_word, fake.failed = ci.RED, [ONE_FAILS]
+    landed(lander_pass)
+    lander_pass(batching.ABSENT_S)
+    assert told("director") == []
+    comms.states["lead-a"] = "standing"
+    comms.outcome.clear()
+    lander_pass(batching.ABSENT_S + 60)
+    assert told("director")[-1]["owner_state"] == "standing"
+    assert told("director")[-1]["delivery"] == "live"
 
 
 def test_an_identity_read_that_raises_reads_as_no_session(

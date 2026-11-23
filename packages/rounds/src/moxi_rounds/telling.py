@@ -19,8 +19,10 @@ what became of it:
   `unbound` means no session holds the name and comms keeps the message for its next;
 - `offline`: comms' daemon could not be reached, or could not read the recipient's
   cache. Nothing was sent; the lander tries it again at each pass (`retry`) for
-  `UNSENT_S` after its first try, then records it `unsent` and stops trying. While one
-  is still tried the lander does not exit (`trying`);
+  `UNSENT_S` after its first try, then records it `unsent` and stops trying. A message
+  whose reason the lander reads again before each try (the owner's state, for a red
+  spell's notice) and finds gone is recorded `unsent` too. While one is still tried
+  the lander does not exit (`trying`);
 - `refused`: comms refused it (`why` holds its code and words, `never-bound` for a name
   comms has never seen bound); `error`: the send raised. Neither is tried again and
   both read as no delivery;
@@ -128,9 +130,12 @@ class Teller:
         why = f"{code}: {words}" if code and words != code else words
         return self.record(key, to, about, text, REFUSED, why=why, **fields)
 
-    def retry(self) -> None:
+    def retry(self, *, reread: Callable[[dict, dict], str | None] | None = None) -> None:
         """Try again each message comms could not take, until `UNSENT_S` after its first
-        try; past that it is recorded `unsent` and no longer tried."""
+        try; past that it is recorded `unsent` and no longer tried. `reread(record,
+        fields)`, before each try, reads again what the message depends on: it updates
+        the `fields` the try is recorded with, and gives why the message is no longer
+        owed (recorded `unsent`, not tried again), or None to try it."""
         if self.comms is None:
             return
         for one in trying(queue_file.read(self.repo, self.env)):
@@ -142,6 +147,11 @@ class Teller:
                 self.record(one["key"], one.get("to"), one.get("about"), one.get("text"),
                             UNSENT, why=f"comms could not take it for {int(UNSENT_S)} s: "
                             f"{one.get('why')}", **fields)
+                continue
+            gone = None if reread is None else reread(one, fields)
+            if gone is not None:
+                self.record(one["key"], one.get("to"), one.get("about"), one.get("text"),
+                            UNSENT, why=gone, **fields)
                 continue
             self.send(one["key"], one["to"], one.get("about"), one.get("text"),
                       first_s=first_s, **fields)

@@ -134,6 +134,8 @@ FAILURES, EXCUSED = "failures", "excused"
 GAVE_UP = "gave up"
 #: How many reads of a candidate's CI may fail in a row before the queue pauses.
 READ_FAILS_MAX = 5
+#: The identity state comms reads for a name a running session holds.
+HELD = "held"
 #: The finish gates the landing re-read does not read.
 NOT_REREAD = (finish_gates.CHECKED, finish_gates.DRIFT, finish_gates.TARGET)
 
@@ -196,7 +198,7 @@ class _Pass:
     # -- the pass ------------------------------------------------------------------------
 
     def run(self) -> None:
-        self.teller.retry()
+        self.teller.retry(reread=self.reread_owner)
         queue = queue_file.read(self.repo, self.env)
         if self.ci is None:
             if queue.queued() and queue.paused is None:
@@ -762,19 +764,52 @@ class _Pass:
 
     def reach_owner(self, red: dict, about: str, key: str, text: str) -> None:
         """Send `text` to the owner of the spell `red` names, and, when comms reads no
-        running session for the owner (or no owner is recorded), the director's notice.
-        comms offline: the owner's message is recorded and tried again, no notice."""
+        running session for the owner (`offline`, comms not reached, included) or no
+        owner is recorded, the director's notice. Both records name the spell (`spell`,
+        its red run's head, and `spell_key`), so each try of either reads the owner's
+        state again (`reread_owner`)."""
         owner = red.get("owner")
         state = self.identity(owner) if owner else "no owner"
         if owner:
-            self.teller.tell(owner, about, f"{key}:{owner}", text, owner_state=state)
-        if state in ("held", "offline") or self.teller.comms is None:
+            self.teller.tell(owner, about, f"{key}:{owner}", text, owner_state=state,
+                             spell=red.get("head"), spell_key=key)
+        self.tell_no_session(red, key, text, owner, state)
+
+    def tell_no_session(self, red: dict, key: str, text: str, owner: str | None,
+                        state: str) -> None:
+        """The director's notice of the spell `red` names, once, when `state`, the
+        owner's as comms reads it, is no running session."""
+        if state == HELD or self.teller.comms is None:
             return
         director = self.director()
         self.teller.tell(director, "director", f"{key}:director:{director}",
                          self.director_notice(red, text, owner, state),
                          why_nobody="no director set", owner=owner, owner_state=state,
-                         director_state=self.identity(director) if director else None)
+                         director_state=self.identity(director) if director else None,
+                         spell=red.get("head"), spell_key=key)
+
+    def reread_owner(self, record: dict, fields: dict) -> str | None:
+        """Before a red spell's notice is tried again, read its owner's state again: an
+        owner with no running session now gets the director told, once; a director's
+        notice whose owner has one now is no longer owed, and that is why."""
+        head = fields.get("spell")
+        if head is None:
+            return None
+        to_director = record.get("about") == "director"
+        owner = fields.get("owner") if to_director else record.get("to")
+        if not owner:
+            return None
+        state = self.identity(str(owner))
+        fields["owner_state"] = state
+        if to_director:
+            director = record.get("to")
+            fields["director_state"] = self.identity(str(director)) if director else None
+            return f"{owner} has a running session now" if state == HELD else None
+        red = queue_file.read(self.repo, self.env).main_at(str(head))
+        if red is not None:
+            self.tell_no_session(red, str(fields.get("spell_key")), str(record.get("text")),
+                                 str(owner), state)
+        return None
 
     def identity(self, name: str) -> str:
         """What comms reads of `name`: one of its identity states, or `error` when the
@@ -796,7 +831,10 @@ class _Pass:
         else:
             lines.append("The run covers no landing of the queue: only commits made by "
                          "hand.")
-        if owner:
+        if owner and state == telling.OFFLINE:
+            lines.append(f"{owner} owns the fix, and comms could not be reached to read "
+                         "whether that name has a running session.")
+        elif owner:
             lines.append(f"{owner} owns the fix, and comms reads no running session for "
                          f"that name ({state}).")
             lines.append(f"Bring {owner} back (moxi launcher sessions lists its launches; "
