@@ -13006,6 +13006,7 @@ sessions	packages/sessions/tests/test_browser_list.py	expect(button).not_to_have
 sessions	packages/sessions/tests/test_browser_list.py	expect(button).to_have_class("set")	keep	set	set
 sessions	packages/sessions/tests/test_browser_list.py	for key in ("folder", "harness", "when"):	keep	folder	folder
 sessions	packages/sessions/tests/test_browser_list.py	if key == "folder":	keep	folder	folder
+sessions	packages/sessions/tests/test_browser_live.py	"turn_started_at": now - 300 if turn_open else None, "agents": 0, "draft": False, "stale": False,	keep	stale	stale
 sessions	packages/sessions/tests/test_browser_opened.py	db.session(title="a title the harness made", directory="/work/proj-c", at=noon(5).timestamp())	use	directory=	work_dir=
 sessions	packages/sessions/tests/test_browser_page.py	check = ui_component_check(ui_page, "sessions", "page", keep=True)	keep	sessions	sessions
 sessions	packages/sessions/tests/test_browser_page.py	expect(panel.locator('section[data-part="subagents"]')).to_have_attribute("data-state", "refused")	keep	refused	refused
@@ -16315,6 +16316,7 @@ ui	packages/ui/tests/test_snapshot.py	assert set(value["modules"][0]) == set(MOD
 ui	packages/ui/tests/test_snapshot.py	assert status == 200 and listed["sntwo"]["mounted"] and listed["ui"]["page"]	keep	mounted	mounted
 ui	packages/ui/tests/test_snapshot.py	assert usage["mounted"] and usage["budget"] == {"rss": "120M", "fds": 64}	keep	mounted	mounted
 ui	packages/ui/tests/test_snapshot.py	assert {"home_as", "group", "order"} <= set(_COMPONENT.items)	keep	set	set
+ui	packages/ui/tests/test_snapshot.py	assert {"home_as", "group", "order", "band_unless"} <= set(_COMPONENT.items)	keep	set	set
 ui	packages/ui/tests/test_snapshot.py	session_id, key = shell.sessions.store.mint()	keep	sessions	sessions
 ui	packages/ui/tests/test_starter.py	-	name	test_every_child_runs_as_python_P_m_from_the_shells_runtime_dir	test_every_child_runs_as_python_p_m_from_the_shells_runtime_dir
 ui	packages/ui/tests/test_starter.py	_module	name	page	has_page
