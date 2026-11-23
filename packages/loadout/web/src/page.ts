@@ -46,7 +46,7 @@
 
 import { css, html, LitElement, nothing } from "lit";
 import { repeat } from "lit/directives/repeat.js";
-import { api, navigate } from "/m/ui/client.js";
+import { api, navigate, WaitClock } from "/m/ui/client.js";
 
 import { CHANGED, Feed, parseJob, parseProjects, parseReplacePreview, parseSourceDir, parseView } from "./feed.ts";
 import type { Job, Projects, ReplacePreview, SourceDir, View, ViewRow } from "./feed.ts";
@@ -288,7 +288,8 @@ export class LoadoutPage extends LitElement {
 
   #view: Feed<View> | null = null;
   #dir: Feed<SourceDir> | null = null;
-  #openedAt = 0;
+  /** The first read's wait, for its `Reading…`. */
+  #waited = new WaitClock(READING_AFTER_MS);
 
   /** What is open, and the dim foot line for an address whose item is gone. */
   #at: Address = NOTHING_OPEN;
@@ -334,7 +335,6 @@ export class LoadoutPage extends LitElement {
   /** Which copy act reads `Copied`. */
   #copied: string | null = null;
   #copyTimer: ReturnType<typeof setTimeout> | undefined;
-  #waitTimer: ReturnType<typeof setTimeout> | undefined;
   #refreshTimer: ReturnType<typeof setInterval> | undefined;
 
   #shown = (): void => {
@@ -353,14 +353,13 @@ export class LoadoutPage extends LitElement {
 
   connectedCallback(): void {
     super.connectedCallback();
-    this.#openedAt = Date.now();
+    this.#waited.start(() => this.requestUpdate());
     const changed = (): void => this.requestUpdate();
     this.#view = new Feed<View>(() => api("loadout", "api/view"), parseView, changed);
     this.#dir = new Feed<SourceDir>(() => api("loadout", "api/folder"), parseSourceDir, changed);
     this.#readAll();
     document.addEventListener("visibilitychange", this.#shown);
     document.addEventListener("click", this.#outside);
-    this.#waitTimer = setTimeout(() => this.requestUpdate(), READING_AFTER_MS);
     this.#refreshTimer = setInterval(() => {
       if (document.visibilityState === "visible") this.#readAll();
     }, REFRESH_MS);
@@ -381,7 +380,7 @@ export class LoadoutPage extends LitElement {
     this.#job = null;
     clearTimeout(this.#jobTimer);
     clearTimeout(this.#copyTimer);
-    clearTimeout(this.#waitTimer);
+    this.#waited.stop();
     clearInterval(this.#refreshTimer);
     document.removeEventListener("visibilitychange", this.#shown);
     document.removeEventListener("click", this.#outside);
@@ -626,13 +625,13 @@ export class LoadoutPage extends LitElement {
   render() {
     const feed = this.#view;
     if (feed === null) return nothing;
-    let state = pageState(feed, Date.now() - this.#openedAt);
+    let state = pageState(feed, this.#waited.waitedMs());
     // A filtered view waits for projects to say which there are, as the page waits for
     // its view.
     const projects = this.#projects;
     if ((state === "up" || state === "empty" || state === "problem") && this.#filter !== null && projects !== null
         && projects.value === null && projects.failure === null) {
-      state = Date.now() - this.#openedAt >= READING_AFTER_MS ? "reading" : "waiting";
+      state = this.#waited.waitedMs() >= READING_AFTER_MS ? "reading" : "waiting";
     }
     if (state === "gone") return html`<p class="waiting" data-line="gone" role="status">${GONE}</p>`;
     if (state === "waiting") return nothing;

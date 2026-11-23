@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.2.6 (2026-11-22)
+
+- `client.js` gains `WaitClock`, the wait a page shows a line after (`Reading…` once its
+  first read has been out 400 ms). It measures on the monotonic clock, and once its
+  timer has fired it reads as due, so the render that timer asks for draws the line in
+  every browser. A page that compared `Date.now()` with its start could miss it in
+  Firefox, which coarsens that clock and can fire the timer a millisecond early by it.
+
 ## 0.2.5 (2026-11-22)
 
 - A page may announce `band_unless`, a list of module names: while any of them is

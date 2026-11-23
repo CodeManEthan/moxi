@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- The page's `Reading…` line, while its first read is out, shows once that read has
+  been out 400 ms in every browser. In Firefox it could stay blank until something
+  else redrew the page, since the page checked the wait against `Date.now()`, which
+  Firefox coarsens. It now takes the wait from moxi-ui's `WaitClock`, so the `ui` extra
+  asks for moxi-ui 0.2.6 or later.
 - The page is rebuilt around what needs you: the rows that need you rise into a first
   group, worst first, the rest are grouped by project and Moxi's by module, each row
   says in words what it is doing, and an opened row shows its lines and the acts of its

@@ -28,7 +28,7 @@ projects = ["moxi-projects>=0.1,<0.2"]
 # services reaches slots only through moxi.modules.load("slots").
 slots = ["moxi-slots>=0.1,<0.2"]
 # The browser UI shell: with it, services' page shows there.
-ui = ["moxi-ui>=0.2,<0.3"]
+ui = ["moxi-ui>=0.2.6,<0.3"]
 
 [project.urls]
 Homepage = "https://github.com/CodeManEthan/moxi"
