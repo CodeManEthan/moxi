@@ -420,7 +420,12 @@ class CodexAdapter(HarnessAdapter):
             self.claims.on_end = lambda: self.end_headless(headless_mod.EXIT_SESSION)
 
     def _directors(self) -> tuple:
-        return tuple(getattr(self.agent, "directors", None) or ())
+        """The agent's launch-declared directors, the ones layer one's director sentence
+        keys on: its policy directors left out."""
+        from ..directors import launch_declared
+
+        return launch_declared(getattr(self.agent, "directors", None) or (),
+                               getattr(self.agent, "policy_directors", None) or ())
 
     def find_session(self):
         """turns' session of the host, once it is ready. Looks in steps of `find_step`

@@ -12,6 +12,7 @@ here; a `register` on the daemon socket never causes a spawn.
     [opencode.agents."coder@proj-a"]
     cwd       = "/home/me/src/proj-a"  # best at a git root (see below)
     directors = ["main"]               # THIS agent's declared directors (authority)
+    # takes_policy_directors = false   # none of the box's [policy] directors
     # model   = "opencode/minimax-m3.1-flash-free"   # the launch default; a list names
     #                                                # the fallbacks after it, in order
     # binary  = "/home/me/.opencode/bin/opencode"
@@ -67,11 +68,13 @@ DEFAULT_MODEL = DEFAULT_MODELS[0]
 BINARY = "opencode"
 INSTALL_DIR = Path("~/.opencode/bin")
 
-_ENTRY_KEYS = {"cwd", "directors", "model", "binary", "session_file"}
+_ENTRY_KEYS = {"cwd", "directors", "model", "binary", "session_file",
+               "takes_policy_directors"}
 #: Keys that name one identity's own things, so `[opencode.defaults]` may not hold them.
 _OWN_KEYS = {"session_file"}
 #: What `[opencode.defaults]` may hold: the launch model alone. Every other key is set
-#: on each row, `directors` above all, since it is one recipient's authority grant.
+#: on each row, `directors` and `takes_policy_directors` above all, since each is one
+#: recipient's authority grant.
 _DEFAULT_KEYS = {"model"}
 
 
@@ -87,6 +90,10 @@ class OpenCodeAgent:
     models: list = field(default_factory=lambda: list(DEFAULT_MODELS))
     binary: str | None = None
     directors: list = field(default_factory=list)   # qualified at load, one spelling
+    #: The part of `directors` only the box's `[policy] directors` gave (`load`).
+    policy_directors: list = field(default_factory=list)
+    #: The row's `takes_policy_directors`: false opts it out of the policy directors.
+    takes_policy_directors: bool = True
 
     def env(self, base=None) -> dict:
         """Identity stamped into the server's environment AT SPAWN, scrubbed first.
@@ -129,10 +136,12 @@ def session_path(qualified: str) -> Path:
 
 def load(env=None, path=None) -> Roster:
     """The roster from comms' config file (`config.load(env).opencode`), or from the comms
-    config file `path` when a launch names one (`--config`). A file with no `[opencode]`
-    table is an empty roster; a bad row is refused, loudly."""
+    config file `path` when a launch names one (`--config`), each row with the box's
+    policy directors merged after its own (`roster_rows.take_policy`). A file with no
+    `[opencode]` table is an empty roster; a bad row is refused, loudly."""
     cfg = roster_rows.read_config(env, path)
-    return from_table(cfg.opencode, cfg.source)
+    return roster_rows.take_policy(from_table(cfg.opencode, cfg.source), cfg, env=env,
+                                   path=path)
 
 
 def from_table(table: dict, source: str = "defaults", *, check: bool = False) -> Roster:
@@ -187,7 +196,8 @@ def _entry(path, qualified: str, section, *, check: bool = False) -> OpenCodeAge
         qualified=qualified, name=head.name, scope=head.scope,
         cwd=head.cwd, session_file=(Path(section["session_file"]) if section.get("session_file")
                       else None if check else session_path(qualified)),
-        models=list(models), binary=binary, directors=declared)
+        models=list(models), binary=binary, directors=declared,
+        takes_policy_directors=roster_rows.parse_takes_policy(where, section))
 
 
 __all__ = ["BINARY", "DEFAULT_MODEL", "DEFAULT_MODELS", "INSTALL_DIR", "OpenCodeAgent", "Roster",

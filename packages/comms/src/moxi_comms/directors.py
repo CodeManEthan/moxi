@@ -171,6 +171,27 @@ def validated(tags) -> tuple:
     return tuple(out)
 
 
+def describe(directors, policy=(), held=None, *, opted_out: bool = False) -> str | None:
+    """The launch prints' directors line, after `directors  `, or None when there is
+    nothing to say. Each policy name is marked `(policy)`, or `(policy, not provisioned)`
+    when `held` (the names holding a standing row now, `directory.provisioned`) is known
+    and lacks it. `opted_out` says the launch takes no policy directors."""
+    policy = set(policy or ())
+    names = []
+    for name in directors or ():
+        if name not in policy:
+            names.append(name)
+        elif held is not None and name not in held:
+            names.append(f"{name} (policy, not provisioned)")
+        else:
+            names.append(f"{name} (policy)")
+    if not names and not opted_out:
+        return None
+    text = (", ".join(names) + "; verified messages from these render as directives"
+            if names else "none")
+    return f"{text}; policy directors: opted out" if opted_out else text
+
+
 # ----------------------------------------------------------------------- the rendering
 
 @dataclass(frozen=True)
@@ -218,5 +239,5 @@ def standing_of(author: dict, directors=(), *, policy=()) -> Standing:
 
 
 __all__ = ["DIRECTORS_ENV", "POLICY_DIRECTORS_ENV", "SEPARATOR", "DIRECTIVE", "INFORMATION",
-           "BadDirector", "Standing", "declare", "effective", "from_env", "launch_declared",
+           "BadDirector", "Standing", "declare", "describe", "effective", "from_env", "launch_declared",
            "policy_from_env", "qualify_director", "stamp", "standing_of", "validated"]

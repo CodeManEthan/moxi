@@ -86,14 +86,18 @@ def launch_stamp() -> str:
 def plan_head(agent, roster, say, *, record: str) -> None:
     """The head of a wrapper's plan: the identity, roster, cwd, `record` (the
     harness's own line for the thread or session it keeps), and the agent's directors
-    when it declares any."""
+    when it has any, each policy director marked (`session.directors_line`), or that it
+    opted out of them."""
+    from .session import directors_line
+
     say(f"identity   {agent.qualified}")
     say(f"  roster     {roster.source}")
     say(f"  cwd        {agent.cwd}")
     say(record)
-    if agent.directors:
-        say(f"  directors  {', '.join(agent.directors)} "
-            "(verified messages from these render as directives)")
+    said = directors_line(agent.directors, getattr(agent, "policy_directors", ()),
+                          opted_out=not getattr(agent, "takes_policy_directors", True))
+    if said:
+        say(f"  directors  {said}")
 
 
 def plan_comms(comms_path, say) -> None:

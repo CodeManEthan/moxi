@@ -8,9 +8,11 @@ only provisioning writes. A launch-declared director keeps its own rule.
 
 from __future__ import annotations
 
+import textwrap
 import time
 
 import pytest
+from conftest import write_config
 
 from moxi_comms import directors, owed
 from moxi_comms.adapters.claude_shim import frame_line
@@ -134,3 +136,229 @@ def test_the_owed_ledger_opens_a_director_debt_only_for_a_directive(tier, branch
     assert owed.owing_branch(p, ["fleet-lead"], policy=["fleet-lead"]) == branch
     debt = owed.Ledger().open(p, ["fleet-lead"], "s1", time.time(), policy=["fleet-lead"])
     assert debt is not None and debt.branch == branch
+
+
+# --------------------------------------------------------------- the wrappers, at launch
+
+SID = "5e55a1d0-0000-4000-8000-00000000f1a1"
+
+
+def claude_dry_run(capsys, *argv) -> str:
+    from moxi_comms.adapters import session
+
+    assert session.main(["--name", "worker", "--scope", "proj-a", "--session-id", SID,
+                         *argv, "--dry-run"]) == 0
+    return capsys.readouterr().out
+
+
+def provision_standing(name, scope="global"):
+    from moxi_comms import directory
+    from moxi_comms.mock_record import MockRecord
+    from moxi_comms.paths import comms_db
+    from moxi_comms.provision import provision
+
+    provision(MockRecord(), comms_db(), standing=[(name, scope)])
+    assert directory.provisioned([name]) == {name}
+
+
+def test_a_claude_launch_with_no_director_takes_the_policy_names(capsys):
+    out = claude_dry_run(capsys)
+    assert "  directors  fleet-lead (policy, not provisioned); verified" in out
+    provision_standing("fleet-lead")
+    out = claude_dry_run(capsys)
+    assert "  directors  fleet-lead (policy); verified" in out
+
+
+def test_the_claude_session_stamps_both_lists():
+    from moxi_comms.adapters import session
+
+    s = session.Session("d1", name="worker", scope="proj-a", project="proj-a",
+                        directors=["lead", "fleet-lead"], policy_directors=["fleet-lead"])
+    env = s.env(base={"MOXI_COMMS_POLICY_DIRECTORS": "someone-else"})
+    assert env["MOXI_COMMS_DIRECTORS"] == "lead,fleet-lead"
+    assert env["MOXI_COMMS_POLICY_DIRECTORS"] == "fleet-lead"
+    none = session.Session("d2", name="worker", directors=["lead"])
+    assert "MOXI_COMMS_POLICY_DIRECTORS" not in none.env(
+        base={"MOXI_COMMS_POLICY_DIRECTORS": "someone-else"})
+
+
+def test_a_claude_launch_opted_out_takes_none_and_keeps_its_own(capsys):
+    out = claude_dry_run(capsys, "--no-policy-directors")
+    assert "  directors  none; policy directors: opted out" in out
+    out = claude_dry_run(capsys, "--director", "fleet-lead", "--no-policy-directors")
+    assert "  directors  fleet-lead; verified messages from these render as directives; " \
+           "policy directors: opted out" in out
+
+
+def test_an_empty_setting_says_nothing(capsys):
+    write_config(None, "[policy]\ndirectors = []\n")
+    assert "  directors  " not in claude_dry_run(capsys)
+
+
+def test_the_claude_launch_stamps_the_merge(monkeypatch, tmp_path):
+    from moxi_comms.adapters import session
+
+    binary = tmp_path / "claude"
+    binary.write_text("#!/bin/sh\n")
+    binary.chmod(0o755)
+    seen = {}
+    monkeypatch.setattr(session, "launch",
+                        lambda s, found, cmd, env, **_: seen.update(s=s, env=env) or 0)
+    assert session.main(["--name", "worker", "--director", "lead", "--session-id", SID,
+                         "--claude", str(binary)]) == 0
+    assert seen["env"]["MOXI_COMMS_DIRECTORS"] == "lead,fleet-lead"
+    assert seen["env"]["MOXI_COMMS_POLICY_DIRECTORS"] == "fleet-lead"
+    assert seen["s"].policy_directors == ["fleet-lead"]
+
+
+def test_the_fleet_leads_own_launch_takes_no_policy_self(capsys):
+    from moxi_comms.adapters import session
+
+    assert session.main(["--name", "fleet-lead", "--session-id", SID, "--dry-run"]) == 0
+    assert "  directors  " not in capsys.readouterr().out
+
+
+def test_the_layer_one_director_sentence_keys_on_launch_declared_only():
+    from moxi_comms.adapters.shim_roster import render_snapshot
+    from moxi_comms.context import DIRECTOR_LINE
+
+    policy_only = directors.stamp(["fleet-lead"], ["fleet-lead"])
+    text, _ = render_snapshot(None, env=policy_only)
+    assert DIRECTOR_LINE not in text
+    declared = directors.stamp(["lead", "fleet-lead"], ["fleet-lead"])
+    text, _ = render_snapshot(None, env=declared)
+    assert DIRECTOR_LINE in text
+
+
+# ------------------------------------------------------------------- codex, opencode
+
+def codex_args(*argv):
+    from moxi_comms.adapters.codex_wrapper import build_parser
+
+    return build_parser().parse_args(list(argv))
+
+
+def test_a_codex_named_launch_takes_the_policy_names(tmp_path):
+    from moxi_comms.adapters.codex_wrapper import plan
+
+    launch = plan(codex_args("--name", "coder"), cwd=str(tmp_path))
+    assert (launch.agent.directors, launch.agent.policy_directors) == (["fleet-lead"],
+                                                                     ["fleet-lead"])
+    env = launch.agent.env({})
+    assert env["MOXI_COMMS_DIRECTORS"] == env["MOXI_COMMS_POLICY_DIRECTORS"] == "fleet-lead"
+    opted = plan(codex_args("--name", "coder", "--director", "fleet-lead",
+                            "--no-policy-directors"), cwd=str(tmp_path))
+    assert (opted.agent.directors, opted.agent.policy_directors) == (["fleet-lead"], [])
+    assert "MOXI_COMMS_POLICY_DIRECTORS" not in opted.agent.env({})
+
+
+def test_the_codex_plan_marks_the_policy_names(tmp_path):
+    import io
+
+    from moxi_comms.adapters import codex_wrapper
+
+    def said(*argv):
+        launch = codex_wrapper.plan(codex_args("--name", "coder", *argv), cwd=str(tmp_path))
+        out = io.StringIO()
+        codex_wrapper.print_plan(launch, launch.host_argv("host"), out=out)
+        return [ln for ln in out.getvalue().splitlines() if ln.startswith("  directors  ")]
+
+    assert said("--director", "lead") == [
+        "  directors  lead, fleet-lead (policy, not provisioned); verified messages "
+        "from these render as directives"]
+    assert said("--no-policy-directors") == [
+        "  directors  none; policy directors: opted out"]
+
+
+def test_codex_layer_one_has_no_director_sentence_for_a_policy_director_only():
+    from moxi_comms.adapters.codex import CodexAdapter
+    from moxi_comms.adapters.codex_roster import CodexAgent
+    from moxi_comms.context import DIRECTOR_LINE, layer_one_fixed
+
+    agent = CodexAgent(qualified="c", name="c", scope="global", cwd="/w", thread_file=None,
+                       directors=["fleet-lead"], policy_directors=["fleet-lead"])
+    adapter = CodexAdapter.__new__(CodexAdapter)
+    adapter.agent = agent
+    assert adapter._directors() == ()
+    assert DIRECTOR_LINE not in layer_one_fixed(directors=adapter._directors())
+
+
+def roster_rows_for(table, body):
+    write_config(None, textwrap.dedent(body).replace("[agents.", f"[{table}.agents."))
+
+
+@pytest.mark.parametrize("table", ["codex", "opencode"])
+def test_a_roster_row_takes_the_policy_names_after_its_own(table):
+    from moxi_comms.adapters import codex_roster, opencode_roster
+
+    roster = {"codex": codex_roster, "opencode": opencode_roster}[table]
+    roster_rows_for(table, """
+        [policy]
+        directors = ["fleet-lead", "ops"]
+
+        [agents."a@p"]
+        cwd = "/w"
+        directors = ["lead"]
+
+        [agents."b@p"]
+        cwd = "/w"
+        directors = ["fleet-lead"]
+        takes_policy_directors = false
+    """)
+    loaded = roster.load()
+    a, b = loaded.require("a@p"), loaded.require("b@p")
+    assert (a.directors, a.policy_directors) == (["lead", "fleet-lead", "ops"],
+                                                 ["fleet-lead", "ops"])
+    assert (b.directors, b.policy_directors) == (["fleet-lead"], [])
+    assert b.takes_policy_directors is False
+    assert a.env({})["MOXI_COMMS_POLICY_DIRECTORS"] == "fleet-lead,ops"
+
+
+@pytest.mark.parametrize("table", ["codex", "opencode"])
+def test_the_text_check_does_not_merge(table):
+    from moxi_comms.adapters import codex_roster, opencode_roster
+
+    roster = {"codex": codex_roster, "opencode": opencode_roster}[table]
+    checked = roster.from_table({"agents": {"a@p": {"cwd": "/w"}}}, "t", check=True)
+    assert checked.require("a@p").directors == []
+
+
+@pytest.mark.parametrize("table", ["codex", "opencode"])
+def test_a_config_path_roster_takes_the_boxs_setting(tmp_path, table):
+    from moxi_comms.adapters import codex_roster, opencode_roster
+
+    roster = {"codex": codex_roster, "opencode": opencode_roster}[table]
+    write_config(None, '[policy]\ndirectors = ["box-lead"]\n')
+    other = tmp_path / "other.toml"
+    other.write_text(f'[policy]\ndirectors = ["file-lead"]\n\n'
+                     f'[{table}.agents."a@p"]\ncwd = "/w"\n')
+    agent = roster.load(path=str(other)).require("a@p")
+    assert (agent.directors, agent.policy_directors) == (["box-lead"], ["box-lead"])
+
+
+@pytest.mark.parametrize("table", ["codex", "opencode"])
+def test_the_roster_defaults_refuse_the_opt_out(table):
+    from moxi_comms import config
+
+    with pytest.raises(config.ConfigError) as caught:
+        config.check_text(f"[{table}.defaults]\ntakes_policy_directors = false\n")
+    assert "takes_policy_directors" in str(caught.value)
+
+
+@pytest.mark.parametrize("table", ["codex", "opencode"])
+def test_a_roster_row_refuses_a_non_bool_opt_out(table):
+    from moxi_comms import config
+
+    with pytest.raises(config.ConfigError) as caught:
+        config.check_text(f'[{table}.agents."a@p"]\ncwd = "/w"\n'
+                          'takes_policy_directors = "no"\n')
+    assert "takes_policy_directors must be true or false" in str(caught.value)
+
+
+def test_a_codex_roster_launch_refuses_the_opt_out_flag():
+    from moxi_comms.adapters.codex_wrapper import Refused, plan
+
+    roster_rows_for("codex", '[agents."a@p"]\ncwd = "/w"\n')
+    with pytest.raises(Refused) as caught:
+        plan(codex_args("a@p", "--no-policy-directors"))
+    assert "--no-policy-directors" in str(caught.value)
