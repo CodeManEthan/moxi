@@ -23,7 +23,7 @@ def test_each_word_is_refused_in_any_case(word):
 
 @pytest.mark.parametrize("text", [
     "the shell", "hehe", "heh", "this", "whim", "hims", "here", "hello", "Thesis",
-    "chimself", "his_count", "him2", "him-and-her", "she-he",
+    "chimself", "his_count", "him2", "him-and-her", "she-he", "shape.his", "`ListShape.his`",
 ])
 def test_a_word_that_only_holds_one_is_not_refused(text):
     assert doc_words(text) == []

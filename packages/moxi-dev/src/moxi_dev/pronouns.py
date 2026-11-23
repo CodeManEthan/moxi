@@ -12,7 +12,8 @@ the text a package shows or ships:
 - its shipped docs: `README.md`, each `docs/*.md`, and each bundled skill's `SKILL.md`
   under `src/`, every line.
 
-Tests, CHANGELOGs (release history) and the core's vendored libraries are not read.
+A word joined by a dot to the name before it, as a field is to its object, is a name and
+passes. Tests, CHANGELOGs (release history) and the core's vendored libraries are not read.
 
 A genuine use (a quotation, a generic replier in a protocol's prose) is let stand by a
 mark on the same line, in the house form of an exception mark: `noqa:`, the code `CODE`
@@ -40,8 +41,9 @@ from .contract import VENDORED as _CORE_VENDORED
 
 #: The code an exception mark names to let a pronoun stand.
 CODE = "MX5"
-#: The refused words, whole words in any case. Spelled in parts so no word stands here.
-WORD = re.compile(r"(?<![\w-])h(?:e|is|im|imself)(?![\w-])", re.I)
+#: The refused words, whole words in any case. Spelled in parts so no word stands here. A
+#: word joined by a dot to the name before it is a name, not prose.
+WORD = re.compile(r"(?<![\w.-])h(?:e|is|im|imself)(?![\w-])", re.I)
 #: A mark that names `CODE` among its codes, then ` -- ` and a reason.
 MARK = re.compile(r"\bnoqa:\s*[A-Z0-9, ]*?\b" + CODE + r"\b[A-Z0-9, ]*?\s+--\s+\S")
 #: Any mark that names `CODE`, with or without a reason.
