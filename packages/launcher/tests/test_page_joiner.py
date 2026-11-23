@@ -16,6 +16,7 @@ import pytest
 from test_page import _send, served
 from test_page_state import quick
 
+from moxi_dev.testing import PROC_WAIT_S
 from moxi_launcher import first, joiner, pagehandlers, slots
 
 #: The launch log of this test's own environment, as the kit's seeds take a shell.
@@ -367,7 +368,7 @@ def test_a_read_that_raises_gives_nothing_and_the_next_read_still_runs(monkeypat
 
 # --- the feed: one pass at a time, the first wait, publishing ----------------------------------
 
-async def until(check, timeout_s: float = 5.0) -> None:
+async def until(check, timeout_s: float = PROC_WAIT_S) -> None:
     async with asyncio.timeout(timeout_s):
         while not check():
             await asyncio.sleep(0.02)

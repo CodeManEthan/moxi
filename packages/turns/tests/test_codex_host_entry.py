@@ -16,6 +16,7 @@ from pathlib import Path
 import pytest
 
 from moxi import proc as moxi_proc
+from moxi_dev.testing import PROC_WAIT_S
 from moxi_turns import client as turns_client
 from moxi_turns import codex as codex_module
 from moxi_turns import codex_host
@@ -586,7 +587,7 @@ def test_the_app_server_ends_when_its_host_is_killed(rig):
     host.kill()
     host.wait()
     # No SIGTERM from the host, no parent-death signal: the watchdog ends it.
-    assert _until(lambda: _gone(server["pid"]), 15.0)
+    assert _until(lambda: _gone(server["pid"]), PROC_WAIT_S)
 
 
 @LINUX
@@ -597,7 +598,7 @@ def test_a_launch_that_fails_exits_1_with_the_reason_on_stderr(rig):
     assert "moxi-turns-codex-host: the Codex launch failed: " in err
     assert "not trusted" in err
     server = rig.app_server()
-    assert _until(lambda: _gone(server["pid"]), 15.0)
+    assert _until(lambda: _gone(server["pid"]), PROC_WAIT_S)
 
 
 @LINUX
@@ -612,7 +613,7 @@ def test_a_codex_without_inject_exits_1_with_the_line_and_sends_no_turn(rig):
     assert [c["method"] for c in made].count("thread/start") == 1   # no retry
     assert not [c for c in made if c["method"] == "turn/start"]
     server = rig.app_server()
-    assert _until(lambda: _gone(server["pid"]), 15.0)
+    assert _until(lambda: _gone(server["pid"]), PROC_WAIT_S)
 
 
 @LINUX
@@ -652,7 +653,7 @@ def test_a_stop_once_the_first_load_is_accepted_ends_the_session_with_0(
     assert "the session ended: the Codex host was stopped (SIGTERM)" in caplog.text
     assert "the Codex launch failed" not in caplog.text
     server = rig.app_server()
-    assert _until(lambda: _gone(server["pid"]), 15.0)
+    assert _until(lambda: _gone(server["pid"]), PROC_WAIT_S)
 
 
 @LINUX
@@ -697,7 +698,7 @@ def test_the_window_shares_the_hosts_terminal_and_its_close_ends_the_host(rig):
         session.close()
         (rig.records / "quit").touch()
         assert _exit(host) == 0
-        assert _until(lambda: _gone(server["pid"]), 15.0)
+        assert _until(lambda: _gone(server["pid"]), PROC_WAIT_S)
         assert turns_client.find(pid=host.pid) is None
     finally:
         os.close(master)

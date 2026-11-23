@@ -16,6 +16,7 @@ import time
 
 import pytest
 
+from moxi_dev.testing import PROC_WAIT_S
 import moxi_turns as turns
 from claude_runner import post
 from conftest import write_config
@@ -36,7 +37,7 @@ def _alive(pid: int) -> bool:
         return False
 
 
-def _until(predicate, timeout=5.0):
+def _until(predicate, timeout=PROC_WAIT_S):
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
         if predicate():
@@ -59,7 +60,7 @@ def spawn(turns_env):
     for p in procs:
         if p.poll() is None:
             p.kill()
-        p.wait(timeout=5)
+        p.wait(timeout=PROC_WAIT_S)
 
 
 def _first(p) -> dict:
@@ -96,7 +97,7 @@ def test_sigterm_ends_it_with_lost_and_removes_its_dir(spawn):
     t.start()
     time.sleep(0.2)
     p.send_signal(signal.SIGTERM)
-    assert p.wait(timeout=5) == 0
+    assert p.wait(timeout=PROC_WAIT_S) == 0
     t.join(5)
     assert isinstance(result[0], turns.Lost) and not result[0].untied
     assert not os.path.exists(os.path.dirname(sock))
@@ -122,7 +123,7 @@ def test_epipe_on_its_stdout_ends_it(spawn):
     # connection before it answers.
     with contextlib.suppress(turns.TurnsError):
         turns.find(session_id="s-e").facts()
-    assert p.wait(timeout=5) == 0
+    assert p.wait(timeout=PROC_WAIT_S) == 0
     assert not os.path.exists(os.path.dirname(first["mod_sock"]))
 
 
@@ -140,7 +141,7 @@ def test_a_change_of_parent_ends_it(spawn):
     assert first["pid"] == endpoint_pid
     parent.kill()
     parent.wait()
-    assert _until(lambda: not _alive(endpoint_pid), timeout=5)
+    assert _until(lambda: not _alive(endpoint_pid), timeout=PROC_WAIT_S)
     assert not os.path.exists(os.path.dirname(first["mod_sock"]))
 
 
@@ -149,4 +150,4 @@ def test_a_broken_config_sends_one_failed_line(spawn, turns_env):
     p = spawn()
     first = _first(p)
     assert first["op"] == "failed" and first["leg"] == leg.LEG and first["error"]
-    assert p.wait(timeout=5) == 2
+    assert p.wait(timeout=PROC_WAIT_S) == 2

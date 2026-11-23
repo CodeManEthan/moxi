@@ -26,7 +26,7 @@ from pathlib import Path
 import pytest
 from moxi import proc
 from moxi.paths import Layout
-from moxi_dev.testing import short_dir, wait_for
+from moxi_dev.testing import PROC_WAIT_S, short_dir, wait_for
 
 from moxi_ui.loopback import serve
 from moxi_ui.loopback.check import proof
@@ -170,7 +170,7 @@ class Runner:
                                stdout=subprocess.PIPE, stderr=self._err)
         self.server_id = None
 
-    def ready(self, timeout=10.0):
+    def ready(self, timeout=PROC_WAIT_S):
         """The server_id of the ready line, or None if stdout closed without one."""
         line = []
         reader = threading.Thread(target=lambda: line.append(self.proc.stdout.readline()),
@@ -209,7 +209,7 @@ class Runner:
     def end(self):
         if self.proc.poll() is None:
             self.proc.kill()
-            self.proc.wait(10)
+            self.proc.wait(PROC_WAIT_S)
         self.proc.stdout.close()
         self._err.close()
 
@@ -328,7 +328,8 @@ def wait_refused(info, timeout=0.08):
 
 
 def wait_open_requests(info, count):
-    wait_for(lambda: call(info, "GET", "/api/health")[1]["open"]["requests"] >= count, 3,
+    wait_for(lambda: call(info, "GET", "/api/health")[1]["open"]["requests"] >= count,
+             PROC_WAIT_S,
              interval=0.02, what="the request in the app")
 
 
@@ -454,7 +455,7 @@ def test_a_second_instance_exits_75(served, spawn):
 def test_a_killed_servers_files_are_recovered_by_the_next_start(served, spawn):
     runner, info = served
     runner.proc.kill()
-    runner.proc.wait(5)
+    runner.proc.wait(PROC_WAIT_S)
     assert runtime_path(MODULE).exists() and os.path.exists(info.address)
     second = spawn()
     assert second.ready()

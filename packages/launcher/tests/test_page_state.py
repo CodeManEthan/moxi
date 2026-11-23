@@ -15,6 +15,7 @@ import uuid
 
 import pytest
 from moxi import proc
+from moxi_dev.testing import PROC_WAIT_S
 from test_page import PORT, TOKEN, get, served
 
 from moxi_launcher import first, page, pagehandlers, slots, store
@@ -342,7 +343,7 @@ def test_each_topic_sends_its_value_first_then_each_change_a_store_write_makes(c
     async def go():
         stream = Stream(served())
         try:
-            seen = dict([await stream.next(3), await stream.next(3)])
+            seen = dict([await stream.next(PROC_WAIT_S), await stream.next(PROC_WAIT_S)])
             assert stream.status == 200
             assert set(seen) == {"sessions", "launches"}
             assert seen["sessions"]["state"] == "up" and seen["sessions"]["detail"] is None
@@ -352,11 +353,13 @@ def test_each_topic_sends_its_value_first_then_each_change_a_store_write_makes(c
             assert requests(seen["launches"], "launches") == ["r1"]
             # A new launch, written by another connection, moves the data version.
             launched(conn, "r2", pid=1, started=1.0)
-            data = await stream.until("launches", lambda d: len(d["launches"]) == 2, 3)
+            data = await stream.until("launches", lambda d: len(d["launches"]) == 2,
+                                      PROC_WAIT_S)
             assert requests(data, "launches") == ["r2", "r1"]
             # A run on the live launch ending red changes its state.
             ran(conn, "r1", "first-turn-not-sent")
-            data = await stream.until("sessions", lambda d: d["sessions"][0]["red"], 3)
+            data = await stream.until("sessions", lambda d: d["sessions"][0]["red"],
+                                      PROC_WAIT_S)
             assert data["sessions"][0]["word"] == "failed"
         finally:
             await stream.close()
@@ -371,8 +374,8 @@ def test_a_write_that_changes_neither_topic_sends_nothing(conn, monkeypatch):
     async def go():
         stream = Stream(served())
         try:
-            await stream.next(3)
-            await stream.next(3)
+            await stream.next(PROC_WAIT_S)
+            await stream.next(PROC_WAIT_S)
             store.add_event(conn, "note", {"said": "nothing the page shows"}, request_id="r9")
             assert await stream.none_within(0.5)
         finally:
@@ -387,14 +390,14 @@ def test_a_launch_log_made_after_the_stream_opened_is_seen(monkeypatch):
     async def go():
         stream = Stream(served())
         try:
-            seen = dict([await stream.next(3), await stream.next(3)])
+            seen = dict([await stream.next(PROC_WAIT_S), await stream.next(PROC_WAIT_S)])
             assert seen["sessions"]["sessions"] == [] and seen["launches"]["launches"] == []
             conn = store.connect()
             try:
                 living(conn, "r1")
             finally:
                 conn.close()
-            data = await stream.until("launches", lambda d: d["launches"], 3)
+            data = await stream.until("launches", lambda d: d["launches"], PROC_WAIT_S)
             assert requests(data, "launches") == ["r1"]
         finally:
             await stream.close()
@@ -410,7 +413,7 @@ def test_a_session_whose_process_ends_leaves_the_topic_with_no_store_write(conn,
     child = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(60)"])
     try:
         ident = None
-        deadline = time.monotonic() + 5
+        deadline = time.monotonic() + PROC_WAIT_S
         while ident is None and time.monotonic() < deadline:
             ident = proc.identity(child.pid)
         launched(conn, "r1", pid=child.pid, started=ident.started)
@@ -418,11 +421,12 @@ def test_a_session_whose_process_ends_leaves_the_topic_with_no_store_write(conn,
         async def go():
             stream = Stream(served(), b"topics=sessions")
             try:
-                _, data = await stream.next(3)
+                _, data = await stream.next(PROC_WAIT_S)
                 assert requests(data, "sessions") == ["r1"]
                 child.kill()
-                child.wait(5)
-                data = await stream.until("sessions", lambda d: not d["sessions"], 3)
+                child.wait(PROC_WAIT_S)
+                data = await stream.until("sessions", lambda d: not d["sessions"],
+                                          PROC_WAIT_S)
                 assert data == {"state": "up", "detail": None, "sessions": []}
             finally:
                 await stream.close()
@@ -430,7 +434,7 @@ def test_a_session_whose_process_ends_leaves_the_topic_with_no_store_write(conn,
         asyncio.run(go())
     finally:
         child.kill()
-        child.wait(5)
+        child.wait(PROC_WAIT_S)
 
 
 def test_a_topic_publishes_its_error_and_then_up_once_its_read_recovers(conn, monkeypatch):
@@ -449,11 +453,11 @@ def test_a_topic_publishes_its_error_and_then_up_once_its_read_recovers(conn, mo
     async def go():
         stream = Stream(served(), b"topics=sessions")
         try:
-            _, data = await stream.next(3)
+            _, data = await stream.next(PROC_WAIT_S)
             assert data == {"state": "error", "detail": UNEXPECTED.format("PermissionError"),
                             "sessions": []}
             raising.clear()
-            data = await stream.until("sessions", lambda d: d["state"] == "up", 3)
+            data = await stream.until("sessions", lambda d: d["state"] == "up", PROC_WAIT_S)
             assert requests(data, "sessions") == ["r1"]
         finally:
             await stream.close()
@@ -470,7 +474,7 @@ def test_one_launchs_failed_state_read_leaves_the_rest_of_the_topic(conn, monkey
     async def go():
         stream = Stream(served(), b"topics=sessions")
         try:
-            _, data = await stream.next(3)
+            _, data = await stream.next(PROC_WAIT_S)
             assert data["state"] == "up" and data["detail"] is None
             assert requests(data, "sessions") == ["new", "old"]
             assert [s["unreadable"] for s in data["sessions"]] == [
@@ -506,8 +510,8 @@ def test_the_poller_outlives_a_gather_and_a_version_read_that_raise(conn, monkey
     async def go():
         stream = Stream(served(), b"topics=sessions")
         try:
-            assert await stream.next(3) == ("sessions", {"state": "up", "detail": None,
-                                                         "sessions": []})
+            assert await stream.next(PROC_WAIT_S) == ("sessions", {
+                "state": "up", "detail": None, "sessions": []})
         finally:
             await stream.close()
 
@@ -523,7 +527,7 @@ def test_the_poller_starts_with_the_first_stream_and_keeps_running_after_it(monk
     async def go():
         assert pagehandlers._current is None
         stream = Stream(served())
-        await stream.next(3)
+        await stream.next(PROC_WAIT_S)
         feed = pagehandlers._current
         await stream.close()
         await asyncio.sleep(0.3)
@@ -542,8 +546,8 @@ def test_a_second_stream_gets_each_current_value_first(conn, monkeypatch):
         app = served()
         first_stream = Stream(app)
         try:
-            await first_stream.next(3)
-            await first_stream.next(3)
+            await first_stream.next(PROC_WAIT_S)
+            await first_stream.next(PROC_WAIT_S)
             second = Stream(app)
             try:
                 seen = dict([await second.next(1), await second.next(1)])

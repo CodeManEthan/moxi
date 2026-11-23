@@ -24,6 +24,7 @@ import roster_kit
 import shim_drive
 from moxi_comms import claimfile
 from moxi_comms.daemon import Daemon
+from moxi_dev.testing import PROC_WAIT_S
 from roster_kit import STANDING, holding, put_clock, wait_for
 from test_reply_enforcement import PLANNER, REVIEWER, P, R, indexed, send
 
@@ -82,7 +83,7 @@ def shell(ui_shell, monkeypatch):
 
 def bound(rig, *names):
     wait_for(lambda: all(n in rig.daemon.bindings and rig.daemon.bindings[n].session_id
-                         for n in names), 5, what=f"{names} to bind")
+                         for n in names), PROC_WAIT_S, what=f"{names} to bind")
 
 
 def awaits(data: dict, qualified: str) -> list[str]:

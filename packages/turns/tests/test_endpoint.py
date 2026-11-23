@@ -12,6 +12,7 @@ import time
 
 import pytest
 
+from moxi_dev.testing import PROC_WAIT_S
 import moxi_turns as turns
 from conftest import bare, write_config
 from fake_harness import FakeHarness
@@ -492,7 +493,7 @@ def test_a_command_the_harness_never_settles_expires_and_frees_the_slot(
     assert not first.reason.startswith("expired")
     assert s.command("exit", timeout_s=0.1) == turns.Refused("in-flight")
     pending = ep._commands[fake.commands[0].id]
-    deadline = time.monotonic() + 3
+    deadline = time.monotonic() + PROC_WAIT_S
     while pending.result is None and time.monotonic() < deadline:
         time.sleep(0.02)                             # past the bound: the slot frees
     assert pending.result.reason.startswith("expired")

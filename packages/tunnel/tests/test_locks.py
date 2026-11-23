@@ -10,6 +10,7 @@ import threading
 import pytest
 
 from moxi import files, paths
+from moxi_dev.testing import PROC_WAIT_S
 from moxi_tunnel import locks
 
 #: A child that takes the locks named in argv (core, tunnel) in the one order, prints
@@ -39,7 +40,7 @@ def child(*which: str) -> subprocess.Popen:
 def release(proc: subprocess.Popen) -> None:
     proc.stdin.write("\n")
     proc.stdin.flush()
-    assert proc.wait(timeout=10) == 0
+    assert proc.wait(timeout=PROC_WAIT_S) == 0
 
 
 def test_held_takes_the_core_lock_before_tunnel_lock():

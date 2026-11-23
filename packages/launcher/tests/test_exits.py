@@ -11,6 +11,7 @@ from types import SimpleNamespace
 
 import pytest
 from moxi import proc
+from moxi_dev.testing import PROC_WAIT_S
 
 from moxi_launcher import exits, first, job, store, target
 
@@ -441,7 +442,7 @@ def test_a_quiet_codex_session_exits_by_its_host_stopping(tmp_path):
             SID, conn=conn, turns=FakeTurns(session), slots_api=slots_api,
             settings=SETTINGS, caller_env=dict(os.environ))
         assert result.exit_code == 0 and result.data["outcome"] == "exited"
-        assert child.wait(5) is not None and session.commands == []
+        assert child.wait(PROC_WAIT_S) is not None and session.commands == []
         assert slots_api.calls == []                  # no dialog: the pane ends with it
         [row] = logged(conn)
         assert row.verdict == "exited" and "Codex host was stopped" in row.detail
