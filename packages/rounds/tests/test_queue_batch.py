@@ -28,7 +28,9 @@ SCOPED = shlex.join([sys.executable, "-c", "import sys; print(sys.argv)", "--bas
 class FakeCi:
     """The candidate's CI: what it reads (`word` for a commit pushed as a candidate,
     `main_word` for any other, `words` by commit, and `landed_word`, when set, for the
-    target's head as `main_of()` gives it), what a push says
+    target's head as `main_of()` gives it; `read_full`, the target's full run, reads
+    `full_word` where it is set and else the same, and records the commit in
+    `full_reads`), what a push says
     (`refusal`, None for a push that goes), the local run's exit code (`local_code`, or
     `local_codes` by commit), and a red run's failures (`failed`, or `failed_at` by
     commit)."""
@@ -48,6 +50,8 @@ class FakeCi:
         self.removed: list[str] = []
         self.reruns: list[tuple[tuple[str, ...], bool]] = []
         self.locals: list[str] = []
+        self.full_reads: list[str] = []
+        self.full_word: str | None = None
 
     def push(self, place, commit, ref):
         self.pushes.append((commit, ref))
@@ -73,6 +77,12 @@ class FakeCi:
             return queue_ci.Read(self.words[commit], ("101",))
         candidate = any(pushed == commit and "queue-" in ref for pushed, ref in self.pushes)
         return queue_ci.Read(self.word if candidate else self.main_word, ("101",))
+
+    def read_full(self, place, commit):
+        self.full_reads.append(commit)
+        if self.full_word is not None:
+            return queue_ci.Read(self.full_word, ("303",))
+        return self.read(place, commit)
 
     def failures(self, place, commit, read):
         return [dict(one) for one in self.failed_at.get(commit, self.failed)]
@@ -703,6 +713,51 @@ def test_a_failure_mains_run_at_m_has_blames_no_member_and_lands_excused(
     read = events(tmp_path, ROUND, ci.READ)[-1]
     assert (read["reading"], read["excused"]) == (ci.RED, [IN_SCOPED])
     assert events(tmp_path, ROUND, finishing.DONE)
+
+
+#: A whole-tree failure (no test named) in the candidate's scoped job, which stands for
+#: main's linux job.
+SCOPED_WHOLE = {"job": "scoped", "test": None, "stands_for": "linux"}
+
+
+@pytest.mark.parametrize("mains, lands", [
+    ([{"job": "linux", "test": None}], True),
+    ([IN_LINUX], False),
+    ([{"job": "scoped", "test": None}], False),
+], ids=["linux-no-test", "linux-test-only", "own-name-only"])
+def test_a_whole_tree_failure_in_scoped_is_excused_only_by_a_no_test_failure_in_linux(
+        repo, ready, fake, lander_pass, tmp_path, mains, lands):
+    main_head = repo.rev("main")
+    ready()
+    fake.word, fake.failed = ci.RED, [SCOPED_WHOLE]
+    fake.words[main_head], fake.failed_at[main_head] = ci.RED, mains
+    lander_pass(0.0)
+    lander_pass(0.0)
+    lander_pass(0.0)
+    lander_pass(batching.ABSENT_S)
+    member = queue().member(ROUND, "B1")
+    if lands:
+        assert member.state == queue_file.LANDED
+        assert events(tmp_path, ROUND, "queue.landed")[-1]["excused"] == [SCOPED_WHOLE]
+    else:
+        assert member.state == queue_file.EJECTED
+        assert events(tmp_path, ROUND, "queue.ejected")[-1]["failures"] == [SCOPED_WHOLE]
+
+
+def test_main_red_on_a_whole_tree_step_in_linux_ejects_a_new_test_in_scoped(
+        repo, ready, fake, lander_pass, tmp_path):
+    main_head = repo.rev("main")
+    new_test = {**IN_SCOPED, "stands_for": "linux"}
+    ready()
+    fake.word, fake.failed = ci.RED, [new_test]
+    fake.words[main_head], fake.failed_at[main_head] = ci.RED, [{"job": "linux",
+                                                                 "test": None}]
+    lander_pass(0.0)
+    lander_pass(0.0)
+    lander_pass(0.0)
+    lander_pass(batching.ABSENT_S)
+    assert queue().member(ROUND, "B1").state == queue_file.EJECTED
+    assert events(tmp_path, ROUND, "queue.ejected")[-1]["failures"] == [new_test]
 
 
 def test_a_new_failure_with_one_member_ejects_it_with_the_failures(

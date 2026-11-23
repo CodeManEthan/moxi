@@ -979,7 +979,7 @@ def _findings(part_: Part, column: str, stage: str | None) -> dict | None:
     return {"open": open_, "rest": len(listed) - len(open_)}
 
 
-_CI_ORDER = (ci.RED, ci.ABSENT, ci.PENDING, ci.GREEN)
+_CI_ORDER = (ci.RED, ci.ABSENT, ci.PENDING, ci.GREEN, ci.SKIPPED)
 
 
 def _ci(part_: Part, column: str, stage: str | None) -> dict | None:

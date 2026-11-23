@@ -2,7 +2,9 @@
 
 Run from the repository's root as
 `uv run --locked moxi-dev check [--full] [--base REV] [--finding L<n>]`, or as
-`uv run --locked moxi-dev check --static` for step 2 alone (see the end).
+`uv run --locked moxi-dev check --static` for step 2 alone, or as
+`uv run --locked moxi-dev check --pick [--base REV]` to print what step 3 picks (see
+the end).
 It first reads the workspace, the worker count and the changed paths; a bad workspace,
 worker count or base stops it there, before any step runs. Then, in order:
 
@@ -40,7 +42,8 @@ worker count or base stops it there, before any step runs. Then, in order:
    and one under `packages/moxi-dev/`, the check itself, picks every package; its
    rename table, which the renames step above reads whatever the pick, picks only
    `moxi-dev`. A root path a package's tests read picks that package (`READ_BY`):
-   `README.md` picks `memory`, and publishing's two workflow files pick `publishing`.
+   `README.md` picks `memory`, publishing's two workflow files pick `publishing`, and
+   `ci.yml` and `queue.yml` pick `moxi-dev` alone, whose tests read them.
    The other workflows (`.github/`), `docs/` and `CONTRIBUTING.md` pick nothing; any
    other path (the lock, the root `pyproject.toml`, the other root files) picks every
    package. Then every package that depends on a picked one, by its declared
@@ -117,13 +120,20 @@ line is printed in every case.
 `--static` reads the workspace and runs step 2 alone, over the whole repository: the
 tag, comment-reference, naming, Ruff, renames, release, pronoun and machine-text steps,
 with the same printed lines, the same summary line (every other step `not run`,
-`packages: none`) and the same exit codes. It reads no changed paths and no worker count, and runs no lock
-check, so no step needs the network.
+`packages: none`) and the same exit codes. It reads no changed paths and no worker
+count, and runs no lock check, so no step needs the network.
+
+`--pick` reads the workspace and the changed paths as step 3 does, prints one line,
+the JSON object `{"packages": [...]}` with the picked packages' folders under
+`packages/` in the workspace's order, and runs no step: a workflow reads it to run
+only the picked packages' jobs. It exits 0, or 2 with the reason on stderr and nothing
+on stdout when the workspace or the base can't be read.
 """
 
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import re
 import shutil
@@ -277,10 +287,13 @@ PICKS_NOTHING = frozenset({".github", "docs", "CONTRIBUTING.md", "README.md"})
 
 # Root paths a package's tests read, each with that package's folder in `packages/`: a
 # change to one picks the package. memory's contract test reads the package table in the
-# root README; publishing's tests hold its workflow files equal to its templates.
+# root README; publishing's tests hold its workflow files equal to its templates; the
+# check's own tests hold the full check's workflow and the merge queue's.
 READ_BY = {"README.md": "memory",
            ".github/workflows/publishing.yml": "publishing",
-           ".github/workflows/release.yml": "publishing"}
+           ".github/workflows/release.yml": "publishing",
+           ".github/workflows/ci.yml": "moxi-dev",
+           ".github/workflows/queue.yml": "moxi-dev"}
 
 
 def pick(packages: Sequence[Package], paths: Sequence[str]) -> list[Package]:
@@ -906,12 +919,26 @@ def _parser() -> argparse.ArgumentParser:
                         help="run only the tag, comment-reference, naming, Ruff, renames, "
                              "release, pronoun and machine-text steps, over the whole "
                              "repository")
+    parser.add_argument("--pick", action="store_true",
+                        help="print the packages the change picks, as one JSON line, and "
+                             "run nothing")
     parser.add_argument("--only", choices=("refs", "names", "ruff", "renames", "pronouns",
                                            "machine"),
                         help="run only this whole-tree code check")
     parser.add_argument("paths", nargs="*", metavar="PATH",
                         help="with --only, print findings only under these paths")
     return parser
+
+
+def print_pick(root: Path, base: str) -> int:
+    """Print the packages the changes since HEAD left `base` pick, as `--pick` does."""
+    try:
+        chosen = pick(load_workspace(root), changed_paths(root, base))
+    except CheckError as exc:
+        print(f"moxi-dev check: {exc}", file=sys.stderr, flush=True)
+        return 2
+    print(json.dumps({"packages": [package.dir for package in chosen]}), flush=True)
+    return 0
 
 
 def _shown(path: str, selected: Sequence[str]) -> bool:
@@ -951,6 +978,9 @@ def main(argv: list[str]) -> int:
     if args.static and (args.only or args.full or args.base or args.finding):
         _parser().error("--static cannot be combined with --only, --full, --base or "
                         "--finding")
+    if args.pick and (args.only or args.full or args.finding or args.static):
+        _parser().error("--pick cannot be combined with --only, --full, --finding or "
+                        "--static")
     try:
         root = Path(_git(Path.cwd(), "rev-parse", "--show-toplevel").strip())
     except CheckError as exc:
@@ -960,6 +990,8 @@ def main(argv: list[str]) -> int:
         return result.code
     if args.only:
         return only(root, args.only, args.paths)
+    if args.pick:
+        return print_pick(root, args.base or "main")
     result = check(root, full=args.full, base=args.base, finding=args.finding,
                    static=args.static)
     print(result.line(), flush=True)

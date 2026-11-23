@@ -1,5 +1,7 @@
 # The same check a contributor runs before asking for a merge: `moxi-dev check`.
-# Linux runs on every push to any branch; Windows and macOS run on pushes to main,
+# A merge queue's candidate, pushed to a ci/queue- branch, is checked by queue.yml
+# instead, and this workflow ignores those branches; it runs on every other one.
+# Linux runs on every push to any of them; Windows and macOS run on pushes to main,
 # after the merge, and to a ci-full/ branch, and gate nothing while the packages are
 # Linux-only. secrets' tests also run in a Windows job of their own, on the same terms:
 # on pushes to main and to a ci-full/ branch, gating nothing, with only secrets and what
@@ -25,7 +27,7 @@ name: check
 
 on:
   push:
-    branches: ["**"]
+    branches-ignore: ["ci/queue-*"]
 
 concurrency:
   group: ${{ (startsWith(github.ref, 'refs/heads/ci/') || startsWith(github.ref, 'refs/heads/ci-full/')) && github.ref || github.run_id }}

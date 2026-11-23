@@ -11,17 +11,23 @@ takes any object with the same methods, so a test gives it a stand-in.
   at `place`, placeholders filled from `values`, for at most its `timeout_s`; None when
   `local` is `none`. Its output goes to `local_log`. The command holds its own locks, as
   a check's does (moxi's runs under `gate.lock` and `check.lock`).
-- `read(place, commit)` reads CI at `commit` as `check` reads it (`ci.read_runs`), as one
-  `Read`: the whole reading, or `cancelled` when a run it read was cancelled.
+- `read(place, commit)` reads a candidate's CI at `commit` as `check` reads it
+  (`ci.read_runs`), by the workflows the setting gives candidates
+  (`ci.Declared.candidate_workflows`), as one `Read`: the whole reading, or `cancelled`
+  when a run it read was cancelled. `read_full(place, commit)` reads the target's full
+  run there the same way, by the full run's workflows (`ci.Declared.full_workflows`),
+  so a candidate's scoped run at the same commit never stands in for it.
 - `rerun(place, runs, failed=...)` reruns each run, or only its failed jobs.
 - `failures(place, commit, read)` lists the failures of a red read's runs at `commit`
   (`failures.of_run`): each run's failed jobs by the setting's `jobs` command, of the
   jobs the setting names where every workflow is read by its jobs, and the tests their
-  logs name (`LOG_FAILED`). Raises `ci.ReadFailed` when either command fails.
+  logs name (`LOG_FAILED`), each failure of a job the read's workflows give a
+  `stands_for` holding the job it stands for. Raises `ci.ReadFailed` when either
+  command fails.
 
 The two `gh` commands the setting does not give, the rerun and `LOG_FAILED`, take the
-repository the setting's own commands name (`gh_repo`: the first `--repo` or `-R` of
-`status`, `ids` or `jobs`), so they read the runs those commands read.
+repository the setting's own commands name (`ci.gh_repo`: the first `--repo` or `-R`
+of `status`, `ids` or `jobs`), so they read the runs those commands read.
 - `remove(place, ref)` deletes `ref` on the remote; what git said is not read, since the
   sweep removes a ref left behind.
 """
@@ -83,16 +89,8 @@ class Read:
     jobs_argvs: tuple[tuple[str, ...], ...] = ()
 
 
-def gh_repo(found: ci.Declared) -> tuple[str, ...]:
-    """The `--repo` argument the setting's `status`, `ids` or `jobs` command gives gh,
-    the first found, as `("--repo", NAME)`; empty when none gives one."""
-    for argv in (found.status, found.ids, found.jobs):
-        for index, word in enumerate(argv):
-            if word in ("--repo", "-R") and index + 1 < len(argv):
-                return ("--repo", argv[index + 1])
-            if word.startswith("--repo="):
-                return ("--repo", word.removeprefix("--repo="))
-    return ()
+#: The `--repo` argument the setting's own commands give gh.
+gh_repo = ci.gh_repo
 
 
 def _said(argv: Sequence[str], *, cwd, timeout_s: float | None) -> Said:
@@ -140,7 +138,14 @@ class QueueCi:
         return Local(argv, code, round(time.monotonic() - began, 1), str(self.local_log))
 
     def read(self, place: Path, commit: str) -> Read:
-        reading, runs = ci.read_runs(self.found, values={"tip": commit}, cwd=place)
+        return self._read(place, commit, is_candidate=True)
+
+    def read_full(self, place: Path, commit: str) -> Read:
+        return self._read(place, commit, is_candidate=False)
+
+    def _read(self, place: Path, commit: str, *, is_candidate: bool) -> Read:
+        reading, runs = ci.read_runs(self.found, values={"tip": commit}, cwd=place,
+                                     is_candidate=is_candidate)
         word = reading.whole
         if any(run.get("conclusion") == CANCELLED for run in runs):
             word = CANCELLED
@@ -153,6 +158,8 @@ class QueueCi:
         names = None
         if read.workflows and all("jobs" in one for one in read.workflows):
             names = [str(job.get("name")) for one in read.workflows for job in one["jobs"]]
+        stands_for = {str(job): str(stood) for one in read.workflows
+                      for job, stood in (one.get("stands_for") or {}).items()}
         found: list[dict] = []
         for run in read.runs:
             _argv, jobs = ci.run_jobs(self.found, run, values={"tip": commit}, cwd=place)
@@ -164,7 +171,8 @@ class QueueCi:
             log = _said(argv, cwd=place, timeout_s=PUSH_TIMEOUT_S)
             if log.code != 0:
                 raise ci.ReadFailed(argv, f"exited {log.code}")
-            found.extend(failing.of_run(failed, failing.tests_of_log(log.said)))
+            found.extend(failing.of_run(failed, failing.tests_of_log(log.said),
+                                        stands_for))
         return found
 
     def rerun(self, place: Path, runs: Sequence[str], *, failed: bool) -> Said:
