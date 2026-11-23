@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- After a topic value the page reads its past sessions again through moxi-ui's
+  `readLater`, so the page root's `data-reading` mark counts that read from the moment it
+  is scheduled until its answer is drawn, and a test's press waits for the list it
+  draws. A user sees no change. The `ui` extra asks for moxi-ui 0.2.8 or later.
+- A `launches` value from the stream that leaves out a launch the page shows is read
+  again from `/api/launches` instead of drawn. The stream can hand over a list older than
+  the page's own read, which took a launch away from `Launches` for a moment and moved
+  everything under it, the past sessions' buttons included.
 - `moxi launcher fork SESSION_ID [--target slot|terminal] [--slot N] [--json]` starts a
   new session from a copy of a launched session's conversation, live or not, and prints
   its id. Claude Code forks with `--resume PARENT --fork-session`; Codex needs turns'

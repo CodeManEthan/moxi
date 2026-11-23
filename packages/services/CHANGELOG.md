@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+- The add panel reads the typed unit through moxi-ui's `readLater`, so the page root's
+  `data-reading` mark counts that read from the keystroke until what it fills in is
+  drawn, and a test's press waits for it. A user sees no change. The `ui` extra asks for
+  moxi-ui 0.2.8 or later.
+- An opened row draws its foot (its acts) and its module's links only once the row's own
+  reads (`/api/row`, and `/api/ends` for slots' server) have answered, so a line those
+  answers add, such as `Unit` or `Needs it`, no longer moves `Stop` under a press.
+- `moxi_services.jobs.Jobs.close` now waits for the jobs thread to end, after the jobs
+  queued before it have run, and raises `TimeoutError` when a job still runs after
+  `wait_s` (`CLOSE_WAIT_S`, 10 s, by default). A test that closes the table in its
+  teardown no longer lets a job it started run on into the next test. The page server
+  never closes its table, so the page doesn't change.
 - The page's `Reading…` line, while its first read is out, shows once that read has
   been out 400 ms in every browser. In Firefox it could stay blank until something
   else redrew the page, since the page checked the wait against `Date.now()`, which

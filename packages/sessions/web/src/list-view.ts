@@ -50,7 +50,7 @@ import { css, html, LitElement, nothing } from "lit";
 import { ifDefined } from "lit/directives/if-defined.js";
 import { live } from "lit/directives/live.js";
 import { repeat } from "lit/directives/repeat.js";
-import { api, components, gateway, installed, navigate, subscribe } from "/m/ui/client.js";
+import { api, components, gateway, installed, navigate, readLater, subscribe } from "/m/ui/client.js";
 
 import { addressLine, LIST_PATH, memoryOf, readAddress, withMemory } from "./address.ts";
 import { Feed } from "./feed.ts";
@@ -229,7 +229,8 @@ export class SessionsList extends LitElement {
   #copied: string | null = null;
   #copyTimer: ReturnType<typeof setTimeout> | null = null;
   #timer: ReturnType<typeof setInterval> | null = null;
-  #findTimer: ReturnType<typeof setTimeout> | null = null;
+  /** Cancels the find's list read waiting to be sent. */
+  #cancelFind = (): void => {};
   #scrollTimer: ReturnType<typeof setTimeout> | null = null;
   /** Launcher's running launches as last read, one read at a time; and the topic's stop. */
   #running: RunningRead | null = null;
@@ -322,9 +323,9 @@ export class SessionsList extends LitElement {
     removeEventListener("scroll", this.#onScroll);
     removeEventListener("pagehide", this.#onPageHide);
     if (this.#timer !== null) clearInterval(this.#timer);
-    if (this.#findTimer !== null) clearTimeout(this.#findTimer);
+    this.#cancelFind();
     if (this.#scrollTimer !== null) clearTimeout(this.#scrollTimer);
-    this.#timer = this.#findTimer = this.#scrollTimer = null;
+    this.#timer = this.#scrollTimer = null;
     this.#stopRunning?.();
     this.#stopRunning = null;
     this.#stopTurns?.();
@@ -590,17 +591,16 @@ export class SessionsList extends LitElement {
 
   #type(text: string): void {
     this.#typed = text;
-    if (this.#findTimer !== null) clearTimeout(this.#findTimer);
-    this.#findTimer = setTimeout(() => {
-      this.#findTimer = null;
-      this.#setFilters({ ...this.#filters(), find: this.#typed });
-    }, FIND_WAIT_MS);
+    // The page root counts the list read as out from the keystroke, so a press waits for
+    // the list the find draws.
+    this.#cancelFind();
+    this.#cancelFind = readLater(() => this.#setFilters({ ...this.#filters(), find: this.#typed }),
+                                 FIND_WAIT_MS);
     this.requestUpdate();
   }
 
   #clearFind(): void {
-    if (this.#findTimer !== null) clearTimeout(this.#findTimer);
-    this.#findTimer = null;
+    this.#cancelFind();
     this.#typed = "";
     this.#setFilters({ ...this.#filters(), find: "" });
   }

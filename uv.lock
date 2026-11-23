@@ -1614,7 +1614,7 @@ dev = [
 
 [[package]]
 name = "moxi-ui"
-version = "0.2.7"
+version = "0.2.8"
 source = { editable = "packages/ui" }
 dependencies = [
     { name = "h11" },

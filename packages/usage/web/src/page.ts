@@ -72,7 +72,7 @@ import { Directive, directive, PartType } from "lit/directive.js";
 import type { ElementPart, PartInfo } from "lit/directive.js";
 import { keyed } from "lit/directives/keyed.js";
 import { repeat } from "lit/directives/repeat.js";
-import { api, installed, navigate, subscribe } from "/m/ui/client.js";
+import { api, installed, navigate, readLater, subscribe } from "/m/ui/client.js";
 
 import {
   addressPath, addressWrite, addsHistoryEntry, limitAddress, NOTHING_OPEN, parseAddress, sameAddress, sessionAddress,
@@ -555,7 +555,8 @@ export class UsagePage extends LitElement {
   /** `Find a model`'s search, and the text it was asked with. */
   #search: Feed<Prices> | null = null;
   #searched = "";
-  #searchTimer: ReturnType<typeof setTimeout> | undefined;
+  /** Cancels the search waiting to be sent. */
+  #cancelSearch = (): void => {};
   /** What is open: the piece the address names. */
   #at: Address = NOTHING_OPEN;
   /** The opened limit row's read, with the window it reads and the reading it was last
@@ -1890,7 +1891,7 @@ export class UsagePage extends LitElement {
 
   /** Closes what is open under the price table, and its search. */
   #closePart(): void {
-    clearTimeout(this.#searchTimer);
+    this.#cancelSearch();
     this.#search?.close();
     this.#search = null;
     this.#searched = "";
@@ -1903,18 +1904,22 @@ export class UsagePage extends LitElement {
     const type = (event: Event) => {
       const text = (event.target as HTMLInputElement).value.trim();
       this.searchText = text;
-      clearTimeout(this.#searchTimer);
-      this.#searchTimer = setTimeout(() => {
+      // The page root counts the search as out from the keystroke, so a press waits for its
+      // matches.
+      this.#cancelSearch();
+      this.#cancelSearch = readLater(() => {
         if (text === this.#searched) return;
         this.#searched = text;
         this.#search?.close();
         this.#search = null;
+        let read: Promise<void> | undefined;
         if (text.length >= SEARCH_MIN) {
           const path = searchPath(text);
           this.#search = new Feed<Prices>(() => api("usage", path), parsePrices, () => this.requestUpdate());
-          void this.#search.refresh();
+          read = this.#search.refresh();
         }
         this.requestUpdate();
+        return read;
       }, SEARCH_MS);
     };
     const feed = this.#search;

@@ -295,6 +295,16 @@ export declare function confirm(module: string, path: string, body: object, shee
  */
 export declare function subscribe(module: string, topic: string, fn: (data: any) => void): () => void;
 /**
+ * Runs `read` after `ms` milliseconds: a read the page has decided on but waits to send,
+ * such as a list read again a while after a topic value, or a field's value read once
+ * typing stops. The page root's mark counts it from now until a turn after what `read`
+ * gives (its promise) has settled, so a press waits through the wait as well as the read.
+ * Gives the function that cancels it: before `read` has run, `read` never runs and the
+ * mark lets it go; after, it does nothing. Call it where the page would `clearTimeout`,
+ * and in `disconnectedCallback`.
+ */
+export declare function readLater(read: () => unknown, ms: number): () => void;
+/**
  * Places `module`'s component `name` at the end of `host`, with `attrs` as its HTML
  * attributes, once its script has defined it. Gives the element, or null when the
  * module is not installed, does not declare the component, asks for a contract this

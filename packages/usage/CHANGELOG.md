@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- `Find a model` sends its search through moxi-ui's `readLater`, so the page root's
+  `data-reading` mark counts the search from the keystroke until its matches are drawn,
+  and a test's press waits for them. A user sees no change. The `ui` extra asks for
+  moxi-ui 0.2.8 or later.
 - On Windows usage depends on `tzdata`, so a zone named by its IANA name (`Europe/Paris`)
   resolves there: Windows has no IANA time zone database of its own for `zoneinfo` to
   read.

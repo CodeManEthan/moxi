@@ -1948,6 +1948,7 @@ comms	packages/comms/tests/test_codex_wrapper.py	assert not any(codex_wrapper.se
 comms	packages/comms/tests/test_codex_wrapper.py	assert not codex_wrapper.sessions_dir().exists() or not any(	keep	any	any
 comms	packages/comms/tests/test_codex_wrapper.py	assert wait_until(lambda: not any(codex_wrapper.sessions_dir().glob("codex-*")),	keep	any	any
 comms	packages/comms/tests/test_codex_wrapper.py	proc.communicate(timeout=20)	keep	timeout	timeout
+comms	packages/comms/tests/test_codex_wrapper.py	proc.wait(timeout=20)	keep	timeout	timeout
 comms	packages/comms/tests/test_codex_wrapper.py	run_wrapper	name	environ	env
 comms	packages/comms/tests/test_codex_wrapper.py	return host.out.exists() and any(ln == word or ln.startswith(word + " ")	keep	any	any
 comms	packages/comms/tests/test_cold_every_sender.py	"unhandled": unhandled_d}, timeout=5.0)	keep	timeout	timeout
@@ -12516,6 +12517,7 @@ services	packages/services/tests/test_jobs.py	found = ended(table, "bad")	keep	b
 services	packages/services/tests/test_jobs.py	gate.set()	keep	set	set
 services	packages/services/tests/test_jobs.py	second.set()	keep	set	set
 services	packages/services/tests/test_jobs.py	table.submit("bad", "stop", "services/web", broken)	keep	bad	bad
+services	packages/services/tests/test_jobs.py	threading.Timer(0.2, gate.set).start()	keep	set	set
 services	packages/services/tests/test_lifecycle.py	assert set(found.stores) == {"registry"}	keep	set	set
 services	packages/services/tests/test_lifecycle.py	store_path.parent.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
 services	packages/services/tests/test_live.py	assert box.show(box.adopt)["state"] != "active"	keep	show	show
@@ -14902,9 +14904,11 @@ turns	packages/turns/tests/test_claude_setup.py	assert set(written) == {runner /
 turns	packages/turns/tests/test_client.py	-	name	test_a_v2_endpoint_beside_a_v1_directory_is_found	test_a_v2_endpoint_beside_a_v1_dir_is_found
 turns	packages/turns/tests/test_client.py	_hello	name	directory	endpoint_dir
 turns	packages/turns/tests/test_client.py	assert s._short._client is not s._reads._client	keep	_client	_client
+turns	packages/turns/tests/test_client.py	else set()	keep	set	set
 turns	packages/turns/tests/test_client.py	endpoint_dir.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
 turns	packages/turns/tests/test_client.py	gate.set()	keep	set	set
 turns	packages/turns/tests/test_client.py	h = s.handle_stops(lambda facts: asked.set() or "go on")	keep	set	set
+turns	packages/turns/tests/test_client.py	if any(n in addresses or n.startswith(places) for n in _names_of(fd)))	keep	any	any
 turns	packages/turns/tests/test_client.py	listens and never accepts, found by `sessions()` through a `hello.json` of its own,	keep	sessions	sessions
 turns	packages/turns/tests/test_client.py	release.set()	keep	set	set
 turns	packages/turns/tests/test_client.py	s._short._client.close()                          # the first connection closes too	keep	_client	_client
@@ -15880,6 +15884,7 @@ ui	packages/ui/src/moxi_ui/testing/browser.py	check_component	name	err	exc
 ui	packages/ui/src/moxi_ui/testing/browser.py	held: set[str] = set()	keep	set	set
 ui	packages/ui/src/moxi_ui/testing/browser.py	if any(parts.path.startswith(f"/m/{module}/") for module in modules):	keep	any	any
 ui	packages/ui/src/moxi_ui/testing/browser.py	if not held_read and any(urlsplit(url).path == PUSH_PATH for url in strays):	keep	any	any
+ui	packages/ui/src/moxi_ui/testing/browser.py	locator.wait_for(state="visible", timeout=wait_ms)	keep	timeout	timeout
 ui	packages/ui/src/moxi_ui/testing/browser.py	page.wait_for_function(_JS_RENDERED, arg=mark, timeout=RENDER_MS)	keep	timeout	timeout
 ui	packages/ui/src/moxi_ui/testing/browser.py	return set(), False	keep	set	set
 ui	packages/ui/src/moxi_ui/testing/phone.py	PhoneBridge	name	_guarded	_on_guarded

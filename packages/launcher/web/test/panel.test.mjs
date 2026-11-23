@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
-  choiceKey, choiceOf, chosenPreset, commandLine, emptyGroups, fieldsFor, filledFields, followedOf, formPath,
+  choiceKey, choiceOf, chosenPreset, commandLine, dropsShown, emptyGroups, fieldsFor, filledFields, followedOf, formPath,
   HARNESS, keepLabel, launchBody, launchesView, leaveOutChoice, NO_PRESET, olderPath, outcomeOf, parseCatalog,
   parseForm, parsePasts, parsePresets, parsePreview, pastItem, pastView, presetLines, presetProblems, presetsOf,
   quote, refusalLine, requestOf, resumeBody, shownValue, sourceNote, statusOf,
@@ -483,4 +483,14 @@ test("a resume's body carries the brief or brief file typed beside it, and nothi
   assert.deepEqual(resumeBody("s1", "Carry on.\n", ""), { session: "s1", brief: "Carry on.\n" });
   assert.deepEqual(resumeBody("s1", "", " /w/brief.md "), { session: "s1", brief_file: "/w/brief.md" });
   assert.deepEqual(resumeBody("s1", "Go.", "/w/brief.md"), { session: "s1", brief: "Go.", brief_file: "/w/brief.md" });
+});
+
+test("a launches topic value that leaves out a shown launch is read again, not drawn", () => {
+  const up = (...ids) => ({ state: "up", detail: null, launches: ids.map((id) => ({ ...ROW, request_id: id })) });
+  assert.equal(dropsShown(up("q1", "q2"), up("q1")), true);
+  assert.equal(dropsShown(up("q1"), up("q2", "q1")), false, "a new launch is drawn");
+  assert.equal(dropsShown(up("q1"), up("q1")), false);
+  assert.equal(dropsShown(null, up()), false, "nothing shown yet");
+  assert.equal(dropsShown(up("q1"), { state: "error", detail: "x", launches: [] }), false);
+  assert.equal(dropsShown(up("q1"), null), false);
 });
