@@ -122,6 +122,31 @@ def test_a_private_name_hits_any_read_file_and_prints_no_name(names):
     assert "ann" not in str(Hit("a.md", 1, "name"))
 
 
+@pytest.mark.parametrize("line, root", [
+    ("cd /home/ann/src", "/home/"),
+    ("/var/home/ann/.config", "/var/home/"),
+    ("C:\\Users\\ann\\AppData", "C:\\Users\\"),
+])
+def test_a_home_path_whose_user_is_a_private_name_prints_no_name(names, line, root):
+    hits = check_text("a.md", line + "\n")
+    assert hits == [Hit("a.md", 1, "home", root), Hit("a.md", 1, "name")]
+    for hit in hits:
+        assert "ann" not in str(hit)
+
+
+def test_a_home_path_on_a_line_with_a_private_name_prints_the_root_alone(names):
+    hits = check_text("a.md", "ask ann about /home/bob/x\n")
+    assert hits == [Hit("a.md", 1, "home", "/home/"), Hit("a.md", 1, "name")]
+    for hit in hits:
+        assert "ann" not in str(hit)
+        assert "bob" not in str(hit)
+
+
+def test_a_home_path_on_a_line_with_no_private_name_prints_root_and_user(names):
+    assert check_text("a.md", "ask ann\ncd /home/bob/x\n") == [
+        Hit("a.md", 1, "name"), Hit("a.md", 2, "home", "/home/bob")]
+
+
 def test_an_empty_list_finds_nothing(no_names):
     assert check_text("a.md", "ask ann\n") == []
 
@@ -275,7 +300,7 @@ def test_a_json_line_takes_no_mark(no_names):
 def test_a_line_with_two_rules_gives_one_line_each(names):
     source = cmd("ann: /home/bob /home/cy, brew| install x, dnf| install y\n")
     assert check_text("a.md", source) == [
-        Hit("a.md", 1, "home", "/home/bob"), Hit("a.md", 1, "manager", cmd("brew| install")),
+        Hit("a.md", 1, "home", "/home/"), Hit("a.md", 1, "manager", cmd("brew| install")),
         Hit("a.md", 1, "name")]
 
 

@@ -14,9 +14,10 @@ machine only:
   own home (`~/...`) is not this rule's. Tests pass this rule: a test's made-up home is
   data no machine resolves.
 - a private name: a name from the running contributor's own private-names list, the one
-  `moxi_secrets` keeps in its config, outside every repository. The line never prints the
-  name. A list secrets can't read raises `moxi_secrets.SetUnavailable`; an empty one finds
-  nothing.
+  `moxi_secrets` keeps in its config, outside every repository. No line the check prints
+  names it: the private-name line names no text, and on a line that holds one, the
+  home-folder line names the root alone. A list secrets can't read raises
+  `moxi_secrets.SetUnavailable`; an empty one finds nothing.
 - a package-manager command: one of `MANAGERS` followed by one of `VERBS` (with `sudo`
   and flags allowed between), pacman with its operation flag, or the same as an argv
   list of quoted words. Case-sensitive, since commands are lower case. A sentence that
@@ -134,7 +135,8 @@ class Hit:
     #: "home", "manager" or "name" for a refused text; "reason" for a mark with no
     #: reason; "unused" for a mark on a line with nothing to let stand.
     rule: str
-    #: The text the line names: the home folder's root and user, or the manager and its
+    #: The text the line names: the home folder's root and user (the root alone on a line
+    #: holding a private name, since the user may be the name), or the manager and its
     #: verb. Empty for a private name, which is never printed, and for a mark's fault.
     text: str = ""
 
@@ -228,6 +230,7 @@ def check_text(path: str, text: str) -> list[Hit]:
     and each unused mark."""
     shipped = not is_test(path)
     takes_marks = not path.endswith(".json")
+    named = private_lines(text, path)
     hits, used = [], set()
     marked, bare = set(), set()
     for number, line in enumerate(text.split("\n"), 1):
@@ -237,15 +240,17 @@ def check_text(path: str, text: str) -> list[Hit]:
                 marked.add(number)
             elif ANY_MARK.search(unquoted):
                 bare.add(number)
-        found = [Hit(path, number, "home", home)
-                 for home in (home_paths(line) if shipped else [])][:1]
+        homes = home_paths(line) if shipped else []
+        if number in named:
+            homes = [HOME_ROOT.match(home).group(0) for home in homes]
+        found = [Hit(path, number, "home", home) for home in homes][:1]
         found += [Hit(path, number, "manager", command)
                   for command in manager_commands(line)][:1]
         if found and number in marked:
             used.add(number)
         else:
             hits += found
-    hits += [Hit(path, number, "name") for number in private_lines(text, path)]
+    hits += [Hit(path, number, "name") for number in named]
     hits += [Hit(path, number, "reason") for number in bare]
     hits += [Hit(path, number, "unused") for number in marked - used]
     return sorted(hits)

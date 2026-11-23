@@ -115,8 +115,10 @@ A file under a package is a test when a directory below the package is named `te
   so does a path from the reader's own home (`~/...`). Tests pass this rule: a test's
   made-up home is data no machine resolves.
 - a name from your own private-names list, the one secrets keeps in its config, in any
-  file. The line never prints the name. An empty list finds nothing; a list secrets
-  can't read stops the check with exit 2 (`moxi config secrets check` says why).
+  file. No line the step prints names it: on a line that holds one, the home-folder
+  line prints the root alone (`home folder /home/`). An empty list finds nothing; a
+  list secrets can't read stops the check with exit 2 (`moxi config secrets check`
+  says why).
 - a package-manager command in any file: apt-get, apt, aptitude, dnf, yum, zypper,
   pacman, apk, brew, port, snap, flatpak, choco, winget or scoop, followed by a verb
   such as install, remove or update (flags and `sudo` allowed), pacman with its
