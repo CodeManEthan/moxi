@@ -6,7 +6,7 @@
 import { describe, expect, test } from 'claude-code/testing'
 import { ROOT_ARGV, SOCK, commandRow, world } from './world'
 import type { World } from './world'
-import { noteStands, skipsHold, unsent } from '../hooks/register'
+import { noteReached, noteStands, skipsHold, unsent } from '../hooks/register'
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type E = any
@@ -1204,7 +1204,7 @@ describe('a held steer\'s submit', () => {
   const answer = (text: string) => ({ role: 'assistant', content: [{ type: 'text', text }] })
   const ask = (text: string) => ({ role: 'user', content: [{ type: 'text', text }] })
   const POINTER = 'a note came with this prompt'
-  const heldLine = (delivery: string, text: string) => ({ ...submitLine(delivery, POINTER), note: text })
+  const heldLine = (delivery: string, text: string, nonce = N1) => ({ ...submitLine(delivery, POINTER, nonce), note: text })
 
   test('a note still held: the pointer is submitted, and the note comes beside it', async ($: E, on) => {
     const w = world(on)
@@ -1260,6 +1260,79 @@ describe('a held steer\'s submit', () => {
     await w.line(submitLine('d1', 'plain'))
     expect(w.messageReads).toBe(0)
   })
+
+  /** The pointer submitted for `d1`, with its note still held, then its turn `t2` started. */
+  async function pointedTurn($: E, w: World, text: string): Promise<void> {
+    await attached($, w)
+    w.messages = [ask('write an essay'), answer('the essay'), note(text)]
+    await w.line(heldLine('d1', text))
+    expect(w.submits).toEqual([`moxi-turns-window: ${N1}\n${POINTER}`])
+    await turnStart($, 't2')
+  }
+  const heldAgain = (w: World) => w.reports().filter(r => r.kind === 'append.held').map(r => r.delivery)
+
+  test('the pointer\'s turn whose request carried the note: nothing more', async ($: E, on) => {
+    const w = world(on)
+    await pointedTurn($, w, 'the word is KIWI')
+    w.messages = [ask('write an essay'), answer('the essay'), note('the word is KIWI'), ask(POINTER), answer('KIWI')]
+    await turnEnd($, 't2')
+    expect(heldAgain(w)).toEqual([])
+    expect(w.kinds().slice(-1)).toEqual(['turn.complete'])
+  })
+
+  test('the pointer\'s turn whose requests never carried the note: held again, ahead of its end', async ($: E, on) => {
+    const w = world(on)
+    await pointedTurn($, w, 'the word is PLUM')
+    // A compaction inside the turn's first request dropped the note.
+    w.messages = [ask('a summary of the conversation so far'), ask(POINTER), answer('which note?')]
+    await turnEnd($, 't2')
+    expect(heldAgain(w)).toEqual(['d1'])
+    expect(w.kinds().slice(-2)).toEqual(['append.held', 'turn.complete'])
+    expect(w.logs).toContain('moxi-turns: held steer d1\'s note reached no request of turn t2; it is held again')
+    // The endpoint hands it back: the note is gone, so its text is the prompt, and the
+    // end of that turn reads nothing more.
+    await w.line(heldLine('d1', 'the word is PLUM', N2))
+    expect(w.submits.slice(-1)).toEqual([`moxi-turns-window: ${N2}\nthe word is PLUM`])
+    await turnStart($, 't3')
+    w.messages = [ask('a summary of the conversation so far'), ask('the word is PLUM'), answer('PLUM')]
+    const reads = w.messageReads
+    await turnEnd($, 't3')
+    expect(w.messageReads).toBe(reads)
+    expect(heldAgain(w)).toEqual(['d1'])
+  })
+
+  test('only the turn that started after the pointer is read', async ($: E, on) => {
+    const w = world(on)
+    await pointedTurn($, w, 'the word is SLOE')
+    w.messages = [ask('a summary')]
+    await turnEnd($, 't2')
+    await turnStart($, 't3')
+    await turnEnd($, 't3')
+    expect(heldAgain(w)).toEqual(['d1'])
+  })
+
+  test('a pointer the gate dropped reads no turn\'s end', async ($: E, on) => {
+    const w = world(on)
+    await attached($, w)
+    w.messages = [ask('write an essay'), answer('the essay'), note('the word is DATE')]
+    w.settle = async () => ({ drop: 'moxi-turns-gate: not admitted (gone)' })
+    await w.line(heldLine('d1', 'the word is DATE'))
+    expect(closes(w)).toMatchObject([{ delivery: 'd1', end: 'drop' }])
+    await turnStart($, 't2')
+    w.messages = [ask('a summary')]
+    await turnEnd($, 't2')
+    expect(heldAgain(w)).toEqual([])
+  })
+
+  test('messages that cannot be read at the pointer\'s turn end: nothing more', async ($: E, on) => {
+    const w = world(on)
+    await pointedTurn($, w, 'the word is LIME')
+    w.messages = null
+    await turnEnd($, 't2')
+    expect(heldAgain(w)).toEqual([])
+    expect(w.kinds().slice(-1)).toEqual(['turn.complete'])
+    expect(w.logs.some(l => l.startsWith('moxi-turns: the messages were not read at the end of held steer d1\'s turn'))).toBe(true)
+  })
 })
 
 describe('noteStands', () => {
@@ -1278,6 +1351,14 @@ describe('noteStands', () => {
     expect(noteStands([user('a'), bot], 'NOTE', false)).toBe('gone')
     expect(noteStands([], 'NOTE', true)).toBe('gone')
     expect(noteStands({ deny: 'no' }, 'NOTE', false)).toBe('gone')
+  })
+
+  test('noteReached: only a user message before the last answer counts', () => {
+    expect(noteReached([user('x NOTE y'), bot], 'NOTE')).toBe(true)
+    expect(noteReached([user('NOTE'), bot, user('NOTE')], 'NOTE')).toBe(true)
+    expect(noteReached([bot, user('NOTE')], 'NOTE')).toBe(false)
+    expect(noteReached([user('a'), bot], 'NOTE')).toBe(false)
+    expect(noteReached(null, 'NOTE')).toBe(false)
   })
 })
 

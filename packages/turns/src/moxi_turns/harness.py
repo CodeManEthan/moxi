@@ -79,7 +79,8 @@ happened comes back through the endpoint's adapter-side calls:
                                           request carried it, and the harness holds the
                                           text for the next request: the steer opens a
                                           turn of its own, handed to `submit` with
-                                          `kind` "steer"
+                                          `kind` "steer"; said of the turn a held
+                                          steer opened, it opens one more, once
     endpoint.on_steer_carried(delivery_id) -> bool
                                           a held steer handed to `submit` needs no turn
                                           of its own: another turn's request carried
@@ -176,7 +177,8 @@ takes effect, after `entering` passes. A steer is taken into the running turn or
 the turn ended. `submit` then gets it with `kind` "steer", and its prompt is the adapter's
 to choose, since the harness carries the held text with the next request itself. Where
 another turn's request carried the held text first, the adapter submits nothing and says
-so (`on_steer_carried`).
+so (`on_steer_carried`). Where no request of the turn the held steer opened carried the
+text either, the adapter reports it held again, and the steer opens one more turn, once.
 """
 
 from __future__ import annotations

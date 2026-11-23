@@ -709,6 +709,63 @@ def test_a_steer_held_at_its_turns_end_opens_a_turn_of_its_own(claude):
     assert _ids(got[4]) == [(d.id, "opened")]
 
 
+def _held_turn(runner, d, text, turn_id):
+    """`d`, the held steer of `text`, opens `turn_id`."""
+    line = runner.next_line()
+    assert line["delivery"] == d.id and line["note"] == text
+    assert runner.enter(line["nonce"])["verdict"] == "pass"
+    runner.turn_start(turn_id)
+    runner.close(d.id, leg.END_RESOLVE)
+    assert bare(d.wait_started(2)) == turns.Started(turn_id)
+
+
+def test_a_held_steer_its_own_turn_missed_opens_one_more_turn_once(claude):
+    ep, runner = claude()
+    s = turns.find(session_id="s-1")
+    events = watcher(s)
+    runner.turn_start("T1")
+    d = s.steer("the word is PLUM")
+    runner.next_line()
+    runner.report(leg.R_APPEND_DONE, delivery=d.id)
+    runner.report(leg.R_APPEND_HELD, delivery=d.id)
+    runner.turn_complete("T1", answer="the essay")
+    _held_turn(runner, d, "the word is PLUM", "T2")
+    # A compaction inside T2's first request dropped the note: held again, ahead of T2's end.
+    runner.report(leg.R_APPEND_HELD, delivery=d.id)
+    runner.turn_complete("T2", answer="which note?")
+    with pytest.raises(TimeoutError):
+        d.wait_ended(0.1)                        # T2's end does not settle it
+    _held_turn(runner, d, "the word is PLUM", "T3")
+    # Missed again: nothing more opens, and the steer ends with T3.
+    runner.report(leg.R_APPEND_HELD, delivery=d.id)
+    runner.turn_complete("T3", answer="PLUM")
+    assert bare(d.wait_ended(2)) == turns.Ended("T3", "answer", answer="PLUM")
+    assert runner.no_line()
+    got = [e for e in drain(events) if type(e).__name__ != "Ready"]
+    assert [(type(e).__name__, e.turn_id) for e in got] == [
+        ("TurnStarted", "T1"), ("TurnSteered", "T1"), ("TurnEnded", "T1"),
+        ("TurnStarted", "T2"), ("TurnEnded", "T2"), ("TurnStarted", "T3"),
+        ("TurnEnded", "T3")]
+    assert _ids(got[3]) == [(d.id, "opened")] and got[3].turn_id == "T2"
+    assert _ids(got[4]) == []                    # T2 ends without naming the steer
+    assert _ids(got[5]) == _ids(got[6]) == _ids(got[3])     # T3 opens and ends with it
+
+
+def test_a_held_steer_its_own_turn_carried_ends_with_that_turn(claude):
+    ep, runner = claude()
+    s = turns.find(session_id="s-1")
+    runner.turn_start("T1")
+    d = s.steer("the word is KIWI")
+    runner.next_line()
+    runner.report(leg.R_APPEND_DONE, delivery=d.id)
+    runner.report(leg.R_APPEND_HELD, delivery=d.id)
+    runner.turn_complete("T1", answer="the essay")
+    _held_turn(runner, d, "the word is KIWI", "T2")
+    runner.turn_complete("T2", answer="KIWI")    # no word from the runner: carried
+    assert bare(d.wait_ended(2)) == turns.Ended("T2", "answer", answer="KIWI")
+    assert runner.no_line()
+
+
 def test_the_prompt_listeners_read_a_held_steers_text_as_its_turns_prompt(claude):
     from moxi_turns.claude_endpoint import HELD_PROMPT
 

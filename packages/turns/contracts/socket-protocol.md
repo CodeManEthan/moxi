@@ -261,7 +261,11 @@ A shell left over does not make the command a failure: the command ran.
   turn still open the steer joins it, as a `turn.steered` of it, and ends with it; else it
   ends with that turn, whose `turn.ended` went out without naming it. When Claude Code no
   longer holds the text by then (a `/clear` or a compaction dropped it), the steer's own
-  text is that turn's prompt.
+  text is that turn's prompt. When the steer's own turn ended with no request of it
+  carrying the held text (a compaction inside its first request dropped it), that turn's
+  `turn.ended` does not name the steer, though its `turn.started` did, and the steer
+  opens one more turn, whose prompt is its own text where Claude Code no longer holds it.
+  It does so once: the end of that further turn is the steer's end.
 - `source` is one of `startup`, `resume`, `clear`, `compact`, or null when the harness did
   not say.
 

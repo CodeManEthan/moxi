@@ -160,6 +160,9 @@ class Handed:
     #: Asked with `keep`: its end is written to the kept ends when it settles, and it
     #: stays out of the settled deliveries the endpoint drops, until its `ref` is acked.
     keep: bool = False
+    #: A held steer whose own turn ended before any request carried its text
+    #: (`on_steer_held`): it has opened its one further turn.
+    missed: bool = False
 
     @property
     def agent(self) -> str | None:
@@ -981,8 +984,14 @@ class Endpoint:
         name it, and waits to open a turn of its own, ahead of every queued delivery: it
         goes to the adapter's `submit` once no turn runs and none is in flight, and the
         turn it opens names it, its end settling the steer; where another turn's request
-        carried the text first, the adapter says so instead (`on_steer_carried`). A word
-        on a steer that has settled, or on a delivery that is no steer, changes nothing."""
+        carried the text first, the adapter says so instead (`on_steer_carried`).
+
+        The word may come for the turn the steer opened: that turn ended too before any
+        request carried the text (a compaction inside its first request dropped what the
+        harness held). The steer leaves it the same way, that turn's `turn.ended` not
+        naming it, and opens one more turn, once: a second such word changes nothing, and
+        the steer ends with its turn. A word on a steer that has settled, or on a delivery
+        that is no steer, changes nothing."""
         with self._lock:
             d = self._deliveries.get(delivery_id)
             if (self._gone is not None or d is None or d.spec.kind != "steer"
@@ -991,7 +1000,16 @@ class Endpoint:
                          delivery_id)
                 return
             turn = d.turn
-            if turn is not None and d.id in turn.steered:
+            if turn is not None and turn.delivery_id == d.id:
+                if d.missed:
+                    log.warning("steer %s was missed again by turn %s, which it opened; "
+                                "it ends with that turn", d.id, turn.turn_id)
+                    return
+                d.missed = True
+                turn.delivery_id = None
+                log.warning("steer %s was missed by turn %s, which it opened; it opens "
+                            "one more turn", d.id, turn.turn_id)
+            elif turn is not None and d.id in turn.steered:
                 turn.steered.remove(d.id)
             log.info("steer %s was held at the end of turn %s; it opens a turn of its own",
                      d.id, turn.turn_id if turn is not None else None)

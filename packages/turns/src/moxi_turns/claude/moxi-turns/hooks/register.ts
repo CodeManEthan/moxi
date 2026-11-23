@@ -341,6 +341,14 @@
 // cannot be read: the runner submits the note's text itself as the prompt, so the message
 // still reaches the model. Otherwise the note is still held, and the runner submits the
 // line's `text`, the prompt that points at it, so the model reads the note once.
+//
+// A compaction inside that turn's first request may still drop the note, after the runner
+// read it held. So the runner keeps the steer it pointed at until the turn.complete of the
+// main turn that starts next, and reads the messages there once more: a note in no user
+// message before the last assistant message reached no request of the turn, and the
+// runner reports `append.held` for the steer again, ahead of the turn.complete. The
+// endpoint then hands it back once more, on a `submit` line read as above, and never a
+// third time. A read that fails there reports nothing, as at any turn's end.
 
 import type { EngineInterface, Register } from 'claude-code'
 
@@ -470,6 +478,9 @@ let helloP = new Promise<void>(resolve => { helloSeen = resolve })
 let turnOpen: string | null = null
 /** The steers appended into the open main turn, in order, each until its turn.complete. */
 let steers: Steer[] = []
+/** The held steer whose pointing prompt the runner submitted last, with its note, until the
+ *  turn.complete of the main turn that started next (`turnId`, set at its turn.start). */
+let pointed: { delivery: string; note: string; turnId: string | null } | null = null
 let win: Win | null = null
 let seq = 0
 let queue: Report[] = []
@@ -660,6 +671,8 @@ function settle($: Dollar, w: Win, end: 'resolve' | 'drop' | 'fail', reason: str
   w.closed = true
   stopTimer(w)
   if (win === w) win = null
+  // A submit that did not go in opens no turn whose end could read the note.
+  if (end !== 'resolve' && pointed?.delivery === w.delivery && pointed.turnId === null) pointed = null
   void report($, 'submit.close', { delivery: w.delivery, end, reason })
 }
 
@@ -683,7 +696,9 @@ async function writeSock($: Dollar): Promise<void> {
   await $.state.set(ENDPOINT, { sock: hello.sock })
 }
 
-async function openWindow($: Dollar, delivery: string, text: string, nonce: string): Promise<void> {
+/** Open the window of `delivery` and submit `text` in it. `note`: the held note `text`
+ *  points at, which the end of the turn the submit opens reads again (`pointed`). */
+async function openWindow($: Dollar, delivery: string, text: string, nonce: string, note?: string): Promise<void> {
   // A new submit means the endpoint closed the last window. If that submit is still
   // pending it reports its settle when it comes; its bound no longer counts.
   if (win !== null) {
@@ -702,6 +717,7 @@ async function openWindow($: Dollar, delivery: string, text: string, nonce: stri
   }
   const w: Win = { delivery, closed: false, bounded: false, timer: null }
   win = w
+  if (note !== undefined) pointed = { delivery, note, turnId: null }
   arm($, w, IDLE_FAIL_MS)
   let submitted: ReturnType<Dollar['prompt']['submit']>
   // Counted in flight until the call settles, whatever the window does: a bound or the
@@ -822,10 +838,25 @@ export function unsent(messages: unknown, of: readonly Steer[]): string[] {
  *  message holds it, or when it is anywhere while a main turn is open (that turn's
  *  requests carry it); else `held`. */
 export function noteStands(messages: unknown, note: string, turnIsOpen: boolean): NoteStands {
-  if (!Array.isArray(messages)) return 'gone'
-  const last = messages.findLastIndex(m => (m as { role?: unknown } | null)?.role === 'assistant')
+  const { carried, trailing } = noteRows(messages, note)
+  if (!carried && !trailing) return 'gone'
+  if (turnIsOpen) return 'carried'
+  return carried && !trailing ? 'carried' : 'held'
+}
+
+/** Whether a request carried `note`: a user message of `messages` before the last
+ *  assistant message holds it. */
+export function noteReached(messages: unknown, note: string): boolean {
+  return noteRows(messages, note).carried
+}
+
+/** Where user messages of `messages` hold `note`: `carried`, one before the last assistant
+ *  message; `trailing`, one after it. Neither when `messages` is no list. */
+function noteRows(messages: unknown, note: string): { carried: boolean; trailing: boolean } {
   let carried = false
   let trailing = false
+  if (!Array.isArray(messages)) return { carried, trailing }
+  const last = messages.findLastIndex(m => (m as { role?: unknown } | null)?.role === 'assistant')
   messages.forEach((m, i) => {
     const { role, content } = (m ?? {}) as { role?: unknown; content?: unknown }
     if (role !== 'user' || !Array.isArray(content)) return
@@ -836,9 +867,18 @@ export function noteStands(messages: unknown, note: string, turnIsOpen: boolean)
       else carried = true
     }
   })
-  if (!carried && !trailing) return 'gone'
-  if (turnIsOpen) return 'carried'
-  return carried && !trailing ? 'carried' : 'held'
+  return { carried, trailing }
+}
+
+/** Whether the note `p` points at reached no request of the turn that just completed; false
+ *  when the messages cannot be read, as at any turn's end. */
+async function noteMissed($: Dollar, p: { delivery: string; note: string }): Promise<boolean> {
+  try {
+    return !noteReached(await $.session.messages({ as: 'api' }), p.note)
+  } catch (err) {
+    log($, `the messages were not read at the end of held steer ${p.delivery}'s turn, so its note reads carried: ${String(err)}`)
+    return false
+  }
 }
 
 /** Where the note of the held steer `delivery` stands as its submit comes; `gone` when the
@@ -1205,7 +1245,7 @@ async function onLine($: Dollar, line: string): Promise<void> {
         log($, `held steer ${delivery}'s note is gone from the messages; its text is the prompt`)
         await openWindow($, delivery, note ?? '', nonce)
       } else {
-        await openWindow($, delivery, str(m.text) ?? '', nonce)
+        await openWindow($, delivery, str(m.text) ?? '', nonce, note)
       }
     }
   } else if (op === 'append' && delivery !== undefined) {
@@ -1797,6 +1837,7 @@ export const register: Register = on => {
       if (e.agentId !== undefined || headless === true || ended) return behind(hook, performance.now(), await next(e))
       turnOpen = e.turnId
       steers = []
+      if (pointed !== null && pointed.turnId === null) pointed.turnId = e.turnId
       stopTimer(win)
       await reportAndWait($, 'turn.start', { turn_id: e.turnId })
       return behind(hook, performance.now(), await next(e))
@@ -1817,6 +1858,14 @@ export const register: Register = on => {
       for (const delivery of await heldSteers($, mine)) {
         log($, `steer ${delivery} was carried by no request of turn ${e.turnId}; it is held`)
         void report($, 'append.held', { delivery })
+      }
+      if (pointed !== null && pointed.turnId === e.turnId) {
+        const p = pointed
+        pointed = null
+        if (await noteMissed($, p)) {
+          log($, `held steer ${p.delivery}'s note reached no request of turn ${e.turnId}; it is held again`)
+          void report($, 'append.held', { delivery: p.delivery })
+        }
       }
       await reportAndWait($, 'turn.complete', { turn_id: e.turnId, reason: e.reason, is_aborted: e.isAborted, answer: e.answer })
       if (win !== null) arm($, win, IDLE_FAIL_MS)

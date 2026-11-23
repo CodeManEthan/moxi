@@ -78,7 +78,12 @@ Then, in any order:
         runner submits nothing and reports `submit.close` with `end` `carried`. When no
         user message holds the note (a /clear or a compaction dropped it), or the
         messages cannot be read, it submits `note` in place of `text`, so the steer's
-        text still reaches the model.
+        text still reaches the model. When it submitted `text`, it reads the messages
+        again at the `turn.complete` of the main-loop turn that started next, and
+        reports `append.held` for the delivery, ahead of that `turn.complete`, when the
+        note sits in no user message before the last assistant message: no request of
+        that turn carried it (a compaction inside the turn's first request dropped it).
+        A read that fails there reports nothing.
     {"op": "append", "delivery": id, "text": "…"}
         `$.session.append` a user-role row into the running turn (a steer). The runner
         reports `append.done` when the call resolves without a deny while a main-loop
@@ -180,7 +185,9 @@ own count from 1 for this load, and `kind`:
     append.failed  {delivery, reason}               a steer the runner could not append
     append.held    {delivery}                       a steer appended, which its turn
                                                     ended without sending: Claude Code
-                                                    holds it for the next request
+                                                    holds it for the next request; or a
+                                                    held steer whose own turn ended
+                                                    without sending its note
     fork.started   {delivery, agent_id}             the fork's spawn resolved with its
                                                     agent id, or a further round's task
                                                     was delivered
