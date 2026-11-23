@@ -65,7 +65,7 @@ export class ServicesProjectFacts extends HTMLElement {
     if (feed === null) return;
     void feed.refresh().then(() => {
       if (this.#feed === feed && this.#stop === null && document.visibilityState === "visible") {
-        this.#stop = subscribe("services", "rows", (data) => feed.topic(data));
+        this.#stop = subscribe("services", "rows", feed.listener());
       }
     });
     if (this.#timer === null) this.#timer = setInterval(() => this.#report(), REWORD_MS);

@@ -60,7 +60,7 @@ export class ServicesSummary extends LitElement {
     const feed = new Feed<Rows>(() => api("services", "api/rows"), parseRows, () => this.requestUpdate());
     this.#feed = feed;
     void feed.refresh().then(() => {
-      if (this.#feed === feed) this.#stop = subscribe("services", "rows", (data) => feed.topic(data));
+      if (this.#feed === feed) this.#stop = subscribe("services", "rows", feed.listener());
     });
     document.addEventListener("visibilitychange", this.#shown);
   }

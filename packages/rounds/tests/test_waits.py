@@ -184,12 +184,12 @@ def test_the_lead_may_not_drop_a_round_whose_waiting_item_is_open(built):
     round_dir, tree = built
     verify(round_dir, tree.rev(), ("W1", PAGE))
 
-    held = dropping.his_acts(folded(round_dir), state.fold([]), ROUND)
+    held = dropping.operator_acts(folded(round_dir), state.fold([]), ROUND)
 
     assert "the open waiting item B1.W1" in held
     done()
     assert not any("waiting item" in line for line in
-                   dropping.his_acts(folded(round_dir), state.fold([]), ROUND))
+                   dropping.operator_acts(folded(round_dir), state.fold([]), ROUND))
 
 
 # -- listed -------------------------------------------------------------------------------

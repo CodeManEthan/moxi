@@ -2,14 +2,14 @@
 operator.
 
 `check` and `send` run the send verb's own path (`api.check`, `api.send`) as the
-operator's lane, `api.Sender.operator(<his user id>)`, with the posture always given and
+operator's lane, `api.Sender.operator(<the operator's user id>)`, with the posture always given and
 `new_name` set (the page offers only names the roster or the record holds); `take_back`
 runs `api.delete` (`moxi comms remove`) the same way. Each gives every daemon call
-`ACT_TIMEOUT_S`. The verb reads his credential from its chain in this process for the one
+`ACT_TIMEOUT_S`. The verb reads the operator's credential from its chain in this process for the one
 call and keeps nothing; no answer carries it. The verb closes the record it opened before
 it returns, so the page server holds no writing connection past an act's answer.
 
-**His user id**: this process's `MOXI_COMMS_OPERATOR` when it is set and not blank, as
+**The operator's user id**: this process's `MOXI_COMMS_OPERATOR` when it is set and not blank, as
 the terminal's send takes it; else the directory's one operator row, read on a
 read-only connection that is closed before the act goes on. With neither (no row, two or
 more, or no `comms.db`), the act refuses with the code `operator-unknown` and posts

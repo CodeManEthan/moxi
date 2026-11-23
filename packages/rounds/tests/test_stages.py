@@ -351,7 +351,7 @@ def test_stages_that_shared_a_repo_before_a_step_down_are_declared_again(opened)
 # -- leaving the plan --------------------------------------------------------------------
 
 @pytest.mark.parametrize("flow", FLOWS)
-def test_his_ruling_takes_a_stage_with_no_build_out_of_the_plan(opened, flow):
+def test_the_operators_ruling_takes_a_stage_with_no_build_out_of_the_plan(opened, flow):
     round_dir = opened(flow)
     planned(round_dir, "B1", "B2")
     count = len(events(round_dir))
@@ -451,7 +451,7 @@ def test_a_stage_the_plan_does_not_hold_is_not_taken_out(opened, item, said):
     assert raw(round_dir) == before
 
 
-def test_a_ruling_that_takes_a_stage_out_needs_his_pointer(opened, capsys):
+def test_a_ruling_that_takes_a_stage_out_needs_the_operators_pointer(opened, capsys):
     round_dir = opened("fix")
     planned(round_dir, "B1")
     before = raw(round_dir)
@@ -916,7 +916,7 @@ def test_a_wait_stopped_after_its_append_is_whole(opened, monkeypatch):
 
 
 @pytest.mark.parametrize("flow", FLOWS)
-def test_his_ruling_takes_one_wait_off_a_stage(opened, flow, capsys):
+def test_the_operators_ruling_takes_one_wait_off_a_stage(opened, flow, capsys):
     round_dir = opened(flow)
     planned(round_dir, "B1", "B2")
     declare(round_dir, "B3", after=["B1", "B2"])

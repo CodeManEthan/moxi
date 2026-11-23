@@ -37,9 +37,10 @@ def test_an_empty_config_gives_a_build_a_local_merge_and_no_check():
     read = settings.load()
     assert {key: settings.build_setting(read, "proj-a", key)
             for key in settings.BUILD_KEYS} == {
-        "into": None, "check": None, "ci": None, "finish": [{"do": "merge", "id": "merge"}],
+        "into": None, "land": "finish", "check": None, "ci": None,
+        "finish": [{"do": "merge", "id": "merge"}],
         "check_on": "merged", "shared_paths": [], "keep_branch": False,
-        "lock_ref": None, "brief": [],
+        "lock_ref": None, "brief": [], "director": "",
         "disposable": [".venv", "__pycache__", "*.pyc", ".pytest_cache", ".ruff_cache",
                        ".mypy_cache", "node_modules", "*.egg-info"]}
 
@@ -146,7 +147,7 @@ def test_two_tables_that_name_one_project_in_two_cases_are_refused():
 
 def test_the_keys_for_a_round_and_for_a_build_share_none():
     assert not set(settings.ROUND_KEYS) & set(settings.BUILD_KEYS)
-    assert set(settings.ROUND_KEYS) | {"check_on", "disposable"} >= {
+    assert set(settings.ROUND_KEYS) | {"check_on", "disposable", "director"} >= {
         key.name.removeprefix("defaults.") for key in settings.schema().live()
         if key.name.startswith("defaults.")}
 

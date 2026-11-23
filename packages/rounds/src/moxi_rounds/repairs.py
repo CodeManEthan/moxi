@@ -22,6 +22,18 @@ never supplies a value, and records no step's completion.
   block is read as `verdict` reads one, so a publishable report gains no open blocker
   or major.
 
+- `restamp(round, record=..., actor=...)` reads the frozen copy of the design's current
+  version and records its SHA-256 as that version's re-stamped digest, for a design
+  whose copy and `design.md` were both edited alike after the freeze (a rewrite of the
+  notes), so neither holds the digest recorded then. It is refused for a round with no
+  frozen version, a copy that can't be read, and a `design.md` that differs from the
+  copy, which is a change of the design and wants a fold. A `design.md` that holds the
+  version's digest already writes nothing, and says so. It is the one repair that takes
+  a pointer, `record`, to where the lead named what edited the two: nothing it reads
+  says why the bytes moved. It is also the one repair an ended round takes, as it
+  corrects a record and adds no work; the others refuse one. A re-stamp changes no
+  version's standing (`versions`).
+
 Each writes one `repair` event, the whole of the repair: what was derived again, the
 old and new value of each field, and what was read. A ruling, a skip and a verdict
 word are the operator's or a report's, and each repair refuses to name one as what it
@@ -36,16 +48,17 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
-from . import (builds, ending, findings, folders, places, questions, report_block,
-               verdicts, write)
+from . import (builds, ending, findings, folders, places, pointers, questions,
+               report_block, verdicts, versions, write)
 from . import settings as own
 from . import state as states
 from .errors import BadArgument, BadBlock, NoLog, NoRound, Refused, RoundsError, Unmet
 from .gitreads import Git
 
-#: The two repairs, as the `what` of their event.
+#: The three repairs, as the `what` of their event.
 BASE = states.BASE
 REPORT = states.REPORT
+DIGEST = states.DIGEST
 #: The event a repair writes.
 REPAIRED = "repair"
 
@@ -283,6 +296,81 @@ def reread(target: str, report: Path | str, *, by: str, settings=None,
                     failed=written.failed)
 
 
+def restamp(target: str, *, record: str | None, by: str, settings=None,
+            wait_s: float = write.WAIT_S, at: str | None = None) -> Repaired:
+    """Re-stamp the current version of the design of the round `target`: record the
+    SHA-256 of its frozen copy as its digest, beside the one recorded at its freeze.
+    `record` is the pointer to where the lead named what edited the design and its
+    copy.
+
+    Raises `UnknownProject`, `NoFolder` or `NoRound` for a round that can't be found,
+    and `Refused` when the pointer is missing or has no known shape, the design was
+    never frozen, the frozen copy can't be read, or `design.md` holds other bytes than
+    the copy. An ended round is re-stamped too. A refusal leaves the log as it was."""
+    project, slug = folders.split(target)
+    settings = own.load() if settings is None else settings
+    home = folders.home(project, settings)
+    name = f"{home.project}/{slug}"
+    round_dir = home.round_dir(slug)
+    again = f"moxi rounds mark {name} --restamp --record PTR"
+    went: dict[str, str] = {}
+
+    def has_a_pointer(view):
+        if record is None:
+            return Unmet("a re-stamp says where the lead named what edited the design; "
+                         f"PTR below is one token: {pointers.SHAPES}", again)
+        return pointers.unmet(record, again,
+                              names="where the lead named what edited the design")
+
+    def frozen(view):
+        if versions.current(view.state) is None:
+            return Unmet(f"the design of {name} was never frozen, so there is no "
+                         "version to re-stamp", f"moxi rounds fold {name}")
+        return None
+
+    def repaired(view, result):
+        version = versions.current(view.state)
+        copy_path = versions.file(round_dir, version.n)
+        fold = f"moxi rounds fold {name}"
+        try:
+            text = (round_dir / versions.DESIGN_FILE).read_bytes()
+        except OSError:
+            text = None
+        if text is not None and hashlib.sha256(text).hexdigest() == versions.held(version):
+            went["said"] = (f"{versions.DESIGN_FILE} holds the digest of v{version.n}: "
+                            "nothing to re-stamp, and nothing was written")
+            return None
+        try:
+            copy = copy_path.read_bytes()
+        except OSError as exc:
+            raise Refused([Unmet(f"the frozen copy {copy_path} can't be read "
+                                 f"({exc.strerror or exc}), so there is nothing to "
+                                 "re-stamp from",
+                                 f"bring the copy back, or fold the design: {fold}")]
+                          ) from None
+        if text != copy:
+            raise Refused([Unmet(f"{versions.DESIGN_FILE} differs from the frozen copy "
+                                 f"of v{version.n}: that is a change of the design, "
+                                 "not an edit of both alike", fold)])
+        was, now = versions.held(version), hashlib.sha256(copy).hexdigest()
+        went["said"] = (f"digest of v{version.n}: {str(was)[:12]} to {now[:12]}, read "
+                        f"from {copy_path}")
+        return write.Entry(REPAIRED, {
+            "what": DIGEST, "version": version.n, "record": record,
+            "fields": {"digest": {"was": was, "now": now}},
+            "read": str(copy_path)})
+
+    try:
+        written = write.record(write.Where(home.project, home.rounds_dir, slug), by=by,
+                               gates=[has_a_pointer, frozen], event=repaired,
+                               wait_s=wait_s, at=at)
+    except NoLog:
+        raise NoRound(name) from None
+    return Repaired(name=name, what=DIGEST, said=went["said"],
+                    event=written.events[0] if written.events else None,
+                    failed=written.failed)
+
+
 # The fields of a verdict's event a reread reads again beside its lists, each with the
 # block's value of it, for the kinds that carry it.
 _FIELDS: dict[str, Callable[[report_block.ReportBlock], object]] = {
@@ -386,4 +474,5 @@ def _key(event: dict, one: dict) -> str:
     return f"{stage}.{one.get('id')}" if isinstance(stage, str) else str(one.get("id"))
 
 
-__all__ = ["BASE", "REPORT", "REPAIRED", "Repaired", "not_repaired", "resync", "reread"]
+__all__ = ["BASE", "REPORT", "DIGEST", "REPAIRED", "Repaired", "not_repaired", "resync",
+           "reread", "restamp"]

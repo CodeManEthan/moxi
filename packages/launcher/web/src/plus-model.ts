@@ -63,8 +63,8 @@ export function ofPlace(past: Past, pick: Pick, home: string): boolean {
  * The session `Continue the last session` resumes: the newest of `pasts` (newest first, as
  * `/api/sessions` lists them) that can be resumed now, is of the place the line names, and
  * was made by `actor`, the user the page server launches as. Another actor's session in the
- * same place, an agent's worker among them, is never his last. Null when none is, so the
- * entry is not shown.
+ * same place, an agent's worker among them, is never the user's last. Null when none is,
+ * so the entry is not shown.
  */
 export function lastSession(pasts: readonly Past[], pick: Pick | null, actor: string, home: string): Past | null {
   if (pick === null || actor === "") return null;

@@ -18,8 +18,8 @@
 // `Unread`, each message cut at four lines with `Show all`), `Waits on` with `Thread`,
 // `Directs`, `Directed by`, the send box (`box-model.ts`), and `Details` folded at its foot.
 // The box checks how a message would go as it opens and when its posture or `Deliver`
-// changes, sends once, and offers `Take back` on each of his messages the books can still
-// take back; after either act the mail state and the queue are read again. A box set to
+// changes, sends once, and offers `Take back` on each of the operator's messages the books
+// can still take back; after either act the mail state and the queue are read again. A box set to
 // answer a message quotes it, and the row's `Message` act clears that.
 //
 // Under the agents, the messages (`today-model.ts`): `Today`, newest first, each with `Open`
@@ -69,7 +69,7 @@
 import { css, html, LitElement, nothing } from "lit";
 import { ifDefined } from "lit/directives/if-defined.js";
 import { repeat } from "lit/directives/repeat.js";
-import { api, installed, navigate, subscribe } from "/m/ui/client.js";
+import { api, installed, navigate, subscribe, WaitClock } from "/m/ui/client.js";
 
 import { addressWrite, NOTHING_OPEN, parseAddress, sameAddress, threadAddress } from "./address-model.ts";
 import type { Address } from "./address-model.ts";
@@ -287,7 +287,8 @@ export class CommsPage extends LitElement {
   #today: string | null = null;
   #at: Address = NOTHING_OPEN;
   #placed: Placed | null = null;
-  #openedAt = 0;
+  /** The first read's wait, for its `Reading…`. */
+  #waited = new WaitClock(READING_AFTER_MS);
   /** The opened row's send box, the message the frame set it to answer, and which of its
    * menus is open. */
   #box: SendBox | null = null;
@@ -306,6 +307,9 @@ export class CommsPage extends LitElement {
   #runningAnswered = false;
   /** sessions' header of each session read, by `keyOf`, with sessions installed. */
   #sessionReads = new Map<string, SessionRead>();
+  /** The sessions whose header read has answered at least once, so a read asked again
+   * (`AGAIN_MS`) holds no line open for its answer. */
+  #sessionsAnswered = new Set<string>();
   /** The session of the row opened in the last drawing, the one last asked again for an
    * opened row (by `keyOf`), and the reads asked again that are out. */
   #drawnSession: SessionKey | null = null;
@@ -333,7 +337,6 @@ export class CommsPage extends LitElement {
   #tickTimer: ReturnType<typeof setInterval> | undefined;
   #mailTimer: ReturnType<typeof setInterval> | undefined;
   #copyTimer: ReturnType<typeof setTimeout> | undefined;
-  #readingTimer: ReturnType<typeof setTimeout> | undefined;
 
   #shown = (): void => {
     if (document.visibilityState !== "visible") return;
@@ -400,9 +403,12 @@ export class CommsPage extends LitElement {
         if (!this.isConnected) return;
         const header = result.status === 200 ? parseSessionHeader(result.data, key) : null;
         this.#sessionReads.set(held, { state: "read", header, at: Date.now() });
+        this.#sessionsAnswered.add(held);
         this.requestUpdate();
       }, () => {
         this.#sessionReads.set(held, { state: "read", header: null, at: Date.now() });
+        this.#sessionsAnswered.add(held);
+        this.requestUpdate();
       });
     }
   }
@@ -522,7 +528,7 @@ export class CommsPage extends LitElement {
 
   connectedCallback(): void {
     super.connectedCallback();
-    this.#openedAt = Date.now();
+    this.#waited.start(() => this.requestUpdate());
     const feed = new Feed<PageRoster>(() => api("comms", "api/roster"), (data) => parsePageRoster(data, parseRoster),
                                       () => this.#rosterRead());
     this.#feed = feed;
@@ -546,7 +552,6 @@ export class CommsPage extends LitElement {
     void this.#readRunning();
     document.addEventListener("visibilitychange", this.#shown);
     this.#tickTimer = setInterval(() => { this.tick += 1; }, TICK_MS);
-    this.#readingTimer = setTimeout(() => this.requestUpdate(), READING_AFTER_MS);
     this.#mailTimer = setInterval(() => {
       if (document.visibilityState !== "visible") return;
       this.#readMail();
@@ -577,7 +582,7 @@ export class CommsPage extends LitElement {
     clearInterval(this.#tickTimer);
     clearInterval(this.#mailTimer);
     clearTimeout(this.#copyTimer);
-    clearTimeout(this.#readingTimer);
+    this.#waited.stop();
     for (const wait of this.#pressWaits.values()) clearTimeout(wait);
     this.#pressWaits.clear();
     this.#presses = NO_PRESSES;
@@ -684,7 +689,7 @@ export class CommsPage extends LitElement {
     if (feed === null || mail === null) return null;
     const frame = frameModel({
       roster: feed, kept: this.#kept, mail, now: feed.now(), today: this.#today, hasCache: installed("cache"),
-      hasLauncher: installed("launcher"), waitedMs: Date.now() - this.#openedAt, at: this.#at, placed: this.#placed,
+      hasLauncher: installed("launcher"), waitedMs: this.#waited.waitedMs(), at: this.#at, placed: this.#placed,
       launched: installed("launcher") ? joinRunning(this.#running, this.#kept?.value.rows ?? [], this.#when) : null,
       presses: this.#presses, runningLine: installed("launcher") ? this.#runningLine : null,
       // The box that sent keeps its row, and so its answer, until the next act in it.
@@ -743,8 +748,8 @@ export class CommsPage extends LitElement {
 
   /** `Today`, `Earlier today`, the days added and `Before today`; dim with no acts while the
    * roster isn't up. */
-  /** The addresses that are the operator: the server's mark, and the authors of his
-   * messages the page holds. */
+  /** The addresses that are the operator: the server's mark, and the authors of the
+   * operator's messages the page holds. */
   #him(): Set<string> {
     return new Set(["operator", ...operatorAddresses(this.#mail?.value ?? null),
                     ...[this.#todayRead, ...this.#days].flatMap((read) =>
@@ -967,11 +972,14 @@ export class CommsPage extends LitElement {
       : { loading: true, gone: false, failure: null, value: null };
     const live = item.row.addresses.find((one) => one.qualified === to)?.row ?? null;
     this.#drawnSession = installed("sessions") && live !== null ? sessionOf(live) : null;
+    const drawn = this.#drawnSession;
+    const sessionOut = (installed("launcher") && !this.#runningAnswered)
+      || (drawn !== null && !this.#sessionsAnswered.has(keyOf(drawn)));
     const view = openedAgent({
       row: item.row, to, roster, asks: this.#mail?.value?.asks ?? [], queue, now,
       when: (at) => whenWords(at, this.#today), hasCache: installed("cache"), hasSessions: installed("sessions"),
       session: installed("sessions") ? sessionLine(headerOf(this.#sessionReads, live), this.#today) : null,
-      showsDetails: this.#details,
+      sessionOut, showsDetails: this.#details,
     });
     const sessionId = view.sessionId;
     return html`<div class="det" data-part="opened" data-to=${to}>
@@ -1005,8 +1013,8 @@ export class CommsPage extends LitElement {
     </div>`;
   }
 
-  /** The act at the right of one queued message: `Take back` on his own while the books can
-   * still take it back. */
+  /** The act at the right of one queued message: `Take back` on the operator's own while the
+   * books can still take it back. */
   protected queueAct(item: { message_id: string; takeable: boolean }, to: string): unknown {
     const box = this.#box;
     if (!item.takeable || box === null || box.to !== to) return html`<span></span>`;

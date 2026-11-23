@@ -61,10 +61,11 @@ def _comms_rig():
 
 
 RIG = _comms_rig()
-# comms' fixtures, for this module: its roots under tmp, its reserve step scoped, its
-# socket unit read as unknown, every thread a test starts ended at its teardown, the rig.
-env, installs, unit_read, threads_end, rig = (RIG.env, RIG.installs, RIG.unit_read,
-                                              RIG.threads_end, RIG.rig)
+# comms' fixtures, for this module: the test's profile directory and its roots there, its
+# reserve step scoped, its socket unit read as unknown, every thread a test starts ended at
+# its teardown, the rig.
+profile, env, installs, unit_read, threads_end, rig = (
+    RIG.profile, RIG.env, RIG.installs, RIG.unit_read, RIG.threads_end, RIG.rig)
 
 
 @pytest.fixture

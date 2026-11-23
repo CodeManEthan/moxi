@@ -122,7 +122,7 @@ def test_an_origin_of_each_shape_is_recorded_as_given(rounds, pointer):
     assert event["from"] == pointer and "record" not in event
 
 
-def test_the_operators_own_question_has_his_pointer_as_its_origin(rounds, capsys):
+def test_the_operators_own_question_has_the_operators_pointer_as_its_origin(rounds, capsys):
     assert run("proj-a/a-round", "--record", "comms:77", origin=None) == 0
 
     [event] = asked(round_log(rounds))
@@ -153,7 +153,7 @@ def test_no_origin_is_refused_wherever_the_command_is_run(rounds, tmp_path, monk
         asking.ask("proj-a/a-round", SAID, by="scout")
 
 
-@pytest.mark.parametrize("pointer", ["he asked in chat", "comms:twelve", "comms:",
+@pytest.mark.parametrize("pointer", ["the operator asked in chat", "comms:twelve", "comms:",
                                      "http://example.com/x", "file:design.md",
                                      "file:../other/design.md#q", ""])
 @pytest.mark.parametrize("flag", ["--from", "--record"])

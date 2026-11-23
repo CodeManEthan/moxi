@@ -924,7 +924,41 @@ def test_module_row_acts_go_to_its_module(fake, notes, store_path):
     assert fake.acts() == [("stop", "notes", ("sync",), False),
                            ("start", "notes", ("sync",), False),
                            ("restart", "notes", ("snapshot",), False)]
-    assert not store_path.exists()  # a module daemon's stop is not stored
+
+
+def test_a_module_daemons_stop_is_recorded_and_start_clears_it(fake, notes):
+    assert acts.stop("notes/sync").code == 0
+    assert list(store.read_module_stops()) == ["notes/sync"]
+    assert acts.start("notes/sync").code == 0
+    assert store.read_module_stops() == {}
+
+
+def test_a_module_daemons_restart_clears_its_stop(fake, notes):
+    assert acts.stop("notes/sync").code == 0
+    assert acts.restart("notes/sync").code == 0
+    assert store.read_module_stops() == {}
+
+
+def test_a_module_timers_stop_is_not_recorded(fake, notes, store_path):
+    assert acts.stop("notes/snapshot").code == 0
+    assert acts.start("notes/sync").code == 0  # nothing recorded: nothing to clear
+    assert not store_path.exists()
+
+
+def test_enable_clears_the_stops_of_every_daemon_its_switch_covers(site, fake, monkeypatch):
+    site.module("tools", '''
+SUMMARY = "tools"
+DAEMONS = {"a": {"command": "moxi-tools-a", "switch": "run.enabled"},
+           "b": {"command": "moxi-tools-b", "switch": "run.enabled"},
+           "c": {"command": "moxi-tools-c"}}
+''')
+    for name in "abc":
+        fake.modules[("tools", name)] = Unit("daemon", enabled=True, active=True)
+    monkeypatch.setattr(moxi.config, "set_value", lambda *a, **k: [])
+    for name in "abc":
+        assert acts.stop(f"tools/{name}").code == 0
+    assert acts.enable("tools/a").code == 0
+    assert list(store.read_module_stops()) == ["tools/c"]
 
 
 def test_module_row_enable_flips_its_switch(fake, notes):

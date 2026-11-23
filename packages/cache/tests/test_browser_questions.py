@@ -283,16 +283,19 @@ def named_by_rule(panel, names: dict[str, tuple[str, str | None]]) -> None:
 
 
 @pytest.fixture
-def on_both(installs, ui_contexts, moment):
+def on_both(installs, ui_contexts, moment, ui_days):
     """`on_both(walk, *, still=True, **context_args)` runs `walk(page, shell)` on the
     small install and on the full one, each in a context of its own. Unless `still` is
     false, the context's browser clock stands still at `moment` (its timers still run),
     so the page's clock reads `moment` at every step and each time it shows, a countdown
-    among them, is the same on both installs however long a step takes. A walk returns
+    among them, is the same on both installs however long a step takes. The page words a
+    day against its server's date, which the `clocks` topic brings and no route stub can
+    pin, so the two walks start clear of midnight and run on one date. A walk returns
     what the page showed at each of its steps; the two must be the same, hold no element
     that is not cache's page or the row, no session's id and no word of a cost or of
     keeping a session warm. Returns what was shown."""
     def run(walk, *, still: bool = True, **context_args) -> list:
+        ui_days.wait_out_midnight()
         seen = {}
         for name, shell in installs.items():
             context = ui_contexts(shell, **context_args)

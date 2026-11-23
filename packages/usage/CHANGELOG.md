@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- On Windows usage depends on `tzdata`, so a zone named by its IANA name (`Europe/Paris`)
+  resolves there: Windows has no IANA time zone database of its own for `zoneinfo` to
+  read.
 - `GET /api/window` carries `model_family`, the family of models a scoped limit counts
   where the reading's kind names one (`opus` for Claude's `seven_day_opus`, `sonnet` for
   `seven_day_sonnet`), else null. Such a limit's `used` lists this machine's sessions of

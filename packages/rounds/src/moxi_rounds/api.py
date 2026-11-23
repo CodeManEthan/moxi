@@ -101,7 +101,7 @@ def waiting() -> dict:
     gives it; `waits` each open waiting item of an open round, with its round;
     `decisions` each major decision of an open round not yet ruled, as its entry;
     `not_shown` holds, for each project that has any, its rulings not yet shown to
-    him; `builds` each open build to look at. `unreadable` names each log that can't
+    the operator; `builds` each open build to look at. `unreadable` names each log that can't
     be read, whose rows are not here."""
     return listing.waiting(refresh=False).data()
 
@@ -144,8 +144,10 @@ def builds(repo: str | None = None) -> dict:
     is true for a `building` build whose head is older than its round's `idle_days`.
     `drop_by` says who may drop it: `lead` for one with no work a drop could lose, else
     `operator`, as for one that can't be read.
-    `shares` holds `{"round", "stage"}` for each open build of the same repo and
-    target that shares commits with it. A build that can't be read has its
+    `shares` holds `{"round", "stage", "relation"}` for each open build of the same
+    repo and target that shares commits with it, `relation` being this build's to it:
+    `inside` (its range is a strict part of the other's), `contains` (the other's is a
+    strict part of its own) or `overlaps` (neither, equal ranges among them). A build that can't be read has its
     `{"reason", "fix"}` in `problem`, and None for each field of its state.
     `unreadable` names each round whose log can't be read, whose builds are not here,
     and `no_folder` each project whose rounds folder can't be worked out.

@@ -176,7 +176,7 @@ FINDING = Table("finding", "one for each finding; none when the pass found nothi
 
 WAIT = Table("wait", "one for each piece of work that needs the operator; often none", (
     ident("id", WAIT_ID, "W<n>", "W<n>: an id no earlier report of the stage used"),
-    line("text", "what waits for him, in one line"),
+    line("text", "what waits for the operator, in one line"),
 ))
 
 _DECISION = (
@@ -184,9 +184,10 @@ _DECISION = (
                                       "the stage used"),
     ident("stage", questions.STAGE, "B<n>", "the build it was made in"),
     word("weight", WEIGHTS, "major when the operator would rule on it"),
-    flag("forecloses", "true when it rules out something he could have had; then it "
-                       "is major"),
-    line("text", "what was built, and what he ruled or the design said, in one line"),
+    flag("forecloses", "true when it rules out something the operator could have "
+                       "had; then it is major"),
+    line("text", "what was built, and what the operator ruled or the design said, in "
+                 "one line"),
 )
 
 DECISION = Table(

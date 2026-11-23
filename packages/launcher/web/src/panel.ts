@@ -472,7 +472,7 @@ function emptied(field: FieldDescriptor): FieldDescriptor {
  * When the user has set one row of a group (its value differs from what its field shows,
  * and is a value), every other row of the group that still shows its filled value is
  * emptied, and a withheld sibling's keep box is unticked, so the form shows what will
- * launch. A row the user changed himself stays as he left it. `fields` comes back as the
+ * launch. A row the user changed stays as the user left it. `fields` comes back as the
  * same array when nothing changed.
  */
 export function emptyGroups(fields: FieldDescriptor[], now: Record<string, FormValue>,

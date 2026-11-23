@@ -43,6 +43,10 @@ export interface Waits {
   count: number;
 }
 
+/** The kinds of turns' agents that launcher counts in a `subagents` wait, as its keep-warm's
+ * `SIGNAL_KINDS` names them; a test holds them equal. A shell is never one. */
+export const WAITED_KINDS: readonly string[] = ["subagent", "teammate"];
+
 /** The latest message in a running launch's session. */
 export interface Activity {
   at: string;
@@ -247,6 +251,13 @@ export function factOf(entry: RunningEntry, clock: (at: number) => string): { te
 /** What leads line two in the uncovered case, heavy: `waiting on <n> agents`; null otherwise. */
 export function leadOf(entry: RunningEntry): string | null {
   return caseOf(entry) === "uncovered" ? `waiting on ${waited(entry.waits as Waits)}` : null;
+}
+
+/** The kinds of turns' agents the heavy lead already counts: `WAITED_KINDS` after `waiting
+ * on <n> subagents`; none after `waiting on <n> agents`, whose agents are comms names, nor
+ * without a lead. */
+export function countedKinds(entry: RunningEntry): readonly string[] {
+  return leadOf(entry) !== null && entry.waits?.kind === "subagents" ? WAITED_KINDS : [];
 }
 
 /** Where a session runs, as Home's running rows say it: `slot N`, `terminal` or

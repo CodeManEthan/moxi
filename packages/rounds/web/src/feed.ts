@@ -39,7 +39,7 @@ export interface Option {
   text: string;
 }
 
-/** A question or a decision, as what waits on him gives it. */
+/** A question or a decision, as what waits on the operator gives it. */
 export interface Entry {
   /** The round (`<project>/<slug>`) or the project that holds it. */
   holder: string;
@@ -57,9 +57,11 @@ export interface Entry {
   weight?: string | null;
   forecloses?: boolean | null;
   alone?: boolean | null;
+  /** For a decision not put to the operator, why not. */
+  not_put?: string | null;
 }
 
-/** A job for him. */
+/** A job for the operator. */
 export interface Job {
   round: string;
   id: string;
@@ -70,7 +72,7 @@ export interface Job {
   at: string | null;
 }
 
-/** A ruling not yet shown to him. */
+/** A ruling not yet shown to the operator. */
 export interface Shown {
   holder: string;
   id: string;

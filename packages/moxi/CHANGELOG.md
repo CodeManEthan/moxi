@@ -12,7 +12,7 @@
 - The doctor's `setup version` row names `moxi install <module> --setup-only` as its
   fix, in place of `moxi install <module>`, which refuses a module not on PyPI. A module
   that declares no `SETUP` no longer gets the row: it has no setup to run again.
-
+- The terminal walk's docstring names the person neutrally, never "his".
 - A `moxi.ipc` Unix server closed within a second of an accept failing at the
   file-descriptor limit no longer logs errors after close: `close()` cancels the accept
   retries asyncio still holds for its listener, each of which logged
