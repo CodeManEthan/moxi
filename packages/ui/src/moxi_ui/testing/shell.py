@@ -397,8 +397,8 @@ class TestShell:
         Every call reuses one sign-in. It reads `SESSION_CHECK` with it first, and signs in
         again only when the shell no longer honours it (a test that opened more browsers
         than the shell keeps sessions for pushed it out). The shell keeps a limited number
-        of sessions and drops the oldest-made first, so a sign-in per call would push out a
-        test's browser instead, and end its push stream."""
+        of sessions and drops the least recently used one first, so a sign-in per call would
+        push out a test's idle browser instead."""
         if self.port is None:
             raise ShellError("the test shell is not running")
         with self._signing_in:
