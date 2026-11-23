@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.1.3 (2026-11-23)
 
 - Under a test, rounds refuses its own directories when no Moxi variable places them
   (`MOXI_ROUNDS_<KIND>_HOME`, `MOXI_ROUNDS_HOME` or `MOXI_HOME`), and a project's folders
@@ -67,9 +67,6 @@
   `--existing`.
 - Tests: the rounds tests fail at setup when the test fence is not loaded, and a config
   path outside the test's own tmp fails the test.
-
-## 0.1.3 (2026-11-23)
-
 - Answers prepared ahead: `next --schema answer` prints the block of a prepared
   answer, and `ask ROUND|PROJECT ID --prepared FILE` records one on a question that is
   open or parked: the key it recommends, how sure it is (`low`, `medium` or `high`) and
