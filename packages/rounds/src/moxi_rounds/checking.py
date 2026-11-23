@@ -62,10 +62,15 @@ builds of parallel rounds don't run whole test suites side by side: each run, th
 local part of a check by CI and a command step's included, holds an exclusive lock on
 `check.lock` in rounds' folder of lock files (`lock_file`) from just before its command
 starts until it ends, however it ends. The lock is the process's, so the system frees
-it when the verb dies, and the command does not inherit it. A run that finds it held
-says once who holds it and waits, then says how long it waited; with `wait=False`
-(`--no-wait`) it is refused at once instead, naming the holder, with nothing run or
-recorded. A wait that a tip moved during is caught by step 3.
+it when the verb dies, and the command does not inherit it. Runs take it in the order
+they asked for it: each takes a ticket in the lock's line and tries the lock only once
+no live ticket is ahead of it (`check_line`), and the run that holds it keeps a holder
+record naming its round, stage, step, repo and output file, which the doctor's check
+lock row reads. A run that must wait says once who holds the lock and how many are
+ahead of it, then says how long it waited; with `wait=False` (`--no-wait`) it takes the
+lock only when it is free and no ticket waits, and is refused at once otherwise, naming
+the holder and the number waiting, with nothing run or recorded. A wait that a tip
+moved during is caught by step 3.
 """
 
 from __future__ import annotations
@@ -76,14 +81,14 @@ import shlex
 import subprocess
 import time
 from collections.abc import Iterator, Mapping, Sequence
-from contextlib import contextmanager
+from contextlib import ExitStack, contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 
 from moxi import files, proc
 
-from . import (builds, findings, flows, folders, gitreads, open_builds, paths, places,
-               write)
+from . import (builds, check_line, findings, flows, folders, gitreads, open_builds,
+               paths, places, write)
 from . import settings as own
 from . import state as states
 from .errors import BadArgument, Refused, RoundsError, Unmet
@@ -536,7 +541,7 @@ def check(name: str, stage: str, *, by: str, step: str | None = None,
                                      by_ci=step is None and not full, full=full)
         return looked[id(view)]
 
-    held = _Held(wait=wait, say=say, again=again, env=env)
+    held = _Held(wait=wait, say=say, again=again, env=env, name=name, step=run_as)
 
     def act(view):
         found = look(view)
@@ -586,36 +591,85 @@ def check(name: str, stage: str, *, by: str, step: str | None = None,
 @dataclass(frozen=True)
 class _Held:
     """How a run takes the machine's check lock: whether it `wait`s, the `say` that
-    gets the waiting lines, the command that runs the check `again`, and the `env`
-    the lock file's place is read from."""
+    gets the waiting lines, the command that runs the check `again`, the `env` the lock
+    file's place is read from, and the round (`name`) and `step` its ticket and holder
+    record name."""
 
     wait: bool = True
     say: object = None
     again: str = ""
     env: object = None
+    name: str = ""
+    step: str = ""
 
 
 @contextmanager
-def _check_lock(held: _Held) -> Iterator[None]:
-    """Hold the machine's check lock for the block, waiting while another run holds
-    it, or refused at once where `held.wait` is false."""
+def _check_lock(held: _Held, found: _Look) -> Iterator[Path]:
+    """Hold the machine's check lock for the block, taken in the order the runs asked
+    for it (`check_line`), or refused at once where `held.wait` is false and the lock
+    is held or a run waits for it. The block gets the lock file's path, to name its
+    output in the holder record (`check_line.update_holder`)."""
     path = lock_file(held.env)
+    path.parent.mkdir(parents=True, exist_ok=True)
     say = held.say or (lambda _line: None)
-    try:
-        with files.lock(path, timeout_s=0):
-            yield
-        return
-    except files.LockTimeout as exc:
-        who = f"pid {exc.holder}" if exc.holder else "another process"
-    if not held.wait:
-        raise Refused([Unmet(f"another check holds the machine's check lock {path}: "
-                             f"{who}", f"run it again once {who} is done: {held.again}, "
-                             "or leave --no-wait out to wait for it")])
-    say(f"waiting for the machine's check lock {path}, held by {who}")
+    build = found.build
+    fields = {**check_line.me(), "round": held.name,
+              "stage": None if build is None else build.stage, "step": held.step,
+              "repo": None if build is None else build.repo}
+    with ExitStack() as stack:
+        if not held.wait:
+            waiting = check_line.remove_dead(path)
+            taken = False
+            if not waiting:
+                try:
+                    stack.enter_context(files.lock(path, timeout_s=0))
+                    taken = True
+                except files.LockTimeout:
+                    pass
+            if not taken:
+                who = check_line.held_by(check_line.holder(path),
+                                         check_line.lock_pid(path))
+                raise Refused([Unmet(
+                    f"another check holds or waits for the machine's check lock {path}: "
+                    f"held by {who}; {len(waiting)} waiting",
+                    f"run it again once those are done: {held.again}, or leave "
+                    "--no-wait out to wait in line")])
+        else:
+            _wait_in_line(stack, path, fields, say)
+        check_line.write_holder(path, fields)
+        try:
+            yield path
+        finally:
+            check_line.remove_holder(path)
+
+
+def _wait_in_line(stack: ExitStack, path: Path, fields: Mapping, say) -> None:
+    """Take a ticket in the check lock's line and wait until it is first and the lock
+    is free, then take the lock into `stack`. The ticket is removed however the wait
+    ends; one a killed waiter leaves is removed by the next poll of another."""
+    ticket = check_line.take(path, fields)
     started = time.monotonic()
-    with files.lock(path):
+    said = False
+    try:
+        while True:
+            ahead = check_line.remove_dead(path, own=ticket)
+            if not ahead:
+                try:
+                    stack.enter_context(files.lock(path, timeout_s=0))
+                    break
+                except files.LockTimeout:
+                    pass
+            if not said:
+                who = check_line.held_by(check_line.holder(path),
+                                         check_line.lock_pid(path))
+                say(f"waiting for the machine's check lock, held by {who}; "
+                    f"{len(ahead)} ahead of you")
+                said = True
+            time.sleep(check_line.LINE_POLL_S)
+    finally:
+        check_line.remove(ticket)
+    if said:
         say(f"got the check lock after {time.monotonic() - started:.1f} s")
-        yield
 
 
 def _run(found: _Look, argv: Sequence[str], timeout_s: float | None,
@@ -623,8 +677,9 @@ def _run(found: _Look, argv: Sequence[str], timeout_s: float | None,
     """Run `argv` in the build's worktree, holding the machine's check lock, its
     output to a new file in the scratch folder: its exit code (None when ended at
     `timeout_s`), duration and output file. The duration counts the run only."""
-    with _check_lock(held):
+    with _check_lock(held, found) as lock_path:
         output = _output_file(found.scratch)
+        check_line.update_holder(lock_path, output=str(output))
         started = time.monotonic()
         try:
             done = proc.run(list(argv), timeout_s=timeout_s, env=gitreads.git_env(),
