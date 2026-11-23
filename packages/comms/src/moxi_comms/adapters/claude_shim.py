@@ -17,11 +17,12 @@ mid-turn means the call never comes; the binding's end puts the rows back to wai
 and the whole digest replays at the next bind. Replay is the safe direction. The idle
 tick is not a turn and sends no `kind`.
 
-Authority: the frame line is where a recipient's
-launch-declared directors become visible. The declaration arrives as `--director`
-(qualified by `moxi-comms-claude`) or the `MOXI_COMMS_DIRECTORS` stamp; nothing about it touches
-the daemon, the payload or the record. `frame_line` / `render_digest` are the shared
-seam -- `adapters/codex` renders through the same two functions.
+Authority: the frame line is where a recipient's directors become visible: the
+launch-declared ones and the box's policy ones, a policy one only once provisioned. They
+arrive as `--director` (qualified by `moxi-comms-claude`) or the `MOXI_COMMS_DIRECTORS`
+stamp, with `MOXI_COMMS_POLICY_DIRECTORS` naming the policy part; nothing about them
+touches the daemon, the payload or the record. `frame_line` / `render_digest` are the
+shared seam -- `adapters/codex` renders through the same two functions.
 
 Injection seam: `injector(text)` is the ONE place the harness is touched. In a session
 `moxi comms claude` launches, the session's adapter process (`claude_adapter`) sets

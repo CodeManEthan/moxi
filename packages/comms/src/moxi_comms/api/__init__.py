@@ -430,16 +430,17 @@ def effective(declared, config=None, *, own: str, use_policy: bool) -> tuple[lis
     `use_policy`, without `own`, the launching session's qualified identity.
 
     `config` is left out by a caller outside comms: the box's comms config is then
-    loaded when `use_policy`, as comms' own wrappers load it. A comms caller holding one already passes it.
-    Raises `moxi.config.ConfigError` when that config can't be read, and `ValueError`
-    for a declared name that is not a name."""
+    loaded when `use_policy`, as comms' own wrappers load it. A comms caller holding one
+    already passes it. Raises `moxi.config.ConfigError` when that config can't be read,
+    and `ValueError` for a declared name that is not a name."""
     if config is None and use_policy:
         config = _config.load()
     return _directors.effective(declared, config, own=own, use_policy=use_policy)
 
 
 def roster(*, timeout_s: float = READ_DEADLINE) -> Roster:
-    """The bound agents with their declared directors, the standing names (the
+    """The bound agents with their directors (the launch-declared ones and the policy
+    ones, `policy_directors` saying which), the standing names (the
     directory's standing rows and the reserved send-only names) and the mail waiting per
     name, as the daemon's `agents` answer lists them. Raises `DaemonOffline` or
     `DaemonError`."""
@@ -498,8 +499,8 @@ def _reserved(qualified: str) -> tuple[bool, str | None, str | None]:
 
 
 def owner(session_id: str, *, timeout_s: float = READ_DEADLINE) -> Owner:
-    """Which identity owns `session_id` now, with its declared directors and whom it
-    awaits. Raises `DaemonOffline`, or `DaemonError` (an empty id among them)."""
+    """Which identity owns `session_id` now, with its directors (launch-declared and
+    policy, `policy_directors` saying which) and whom it awaits. Raises `DaemonOffline`, or `DaemonError` (an empty id among them)."""
     client = _daemon(timeout_s)
     try:
         answer = client.call("owner", {"session_id": str(session_id)})
