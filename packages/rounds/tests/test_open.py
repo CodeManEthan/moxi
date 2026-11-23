@@ -220,7 +220,7 @@ def test_a_go_pointer_of_any_known_shape_is_kept(rounds, pointer):
     assert log.read(log.round_log(rounds / "a-round"))[0]["record"] == pointer
 
 
-@pytest.mark.parametrize("pointer", ["he said go", "comms:twelve",
+@pytest.mark.parametrize("pointer", ["the operator said go", "comms:twelve",
                                      "http://example.com/pages/7"])
 def test_a_go_pointer_of_no_known_shape_is_refused_and_no_dir_is_made(
         rounds, capsys, pointer):

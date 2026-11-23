@@ -8,7 +8,7 @@ A question lives in one log. Two calls carry one to the other log of the same pr
   project's list, as a new `P<n>`.
 
 **What is carried.** The sentence, where it came from, who asked it and when, the
-operator's pointer when the question is his own, the options it offers and the keys
+operator's pointer when the question is the operator's own, the options it offers and the keys
 retired from it, and its state as it reads now: open, or parked. A parked question that
 waits for another round still waits for it; a wait for a stage of the round it leaves
 is not carried, since the stage is not one of the log it arrives in. A ruled or
@@ -18,11 +18,11 @@ withdrawn question is not moved.
 `held`, what it held up in the round it left. In a round, every stage unless the
 adoption names a list. A question that was asked on the project's list never held a
 stage and takes any list. One that came from a round arrives holding up every stage, so
-a list for it narrows what it holds, and narrowing is the operator's: it needs his
-pointer.
+a list for it narrows what it holds, and narrowing is the operator's: it needs the
+operator's pointer.
 
 **Whose act.** Anyone adopts. A move out of a round ends what the question holds up
-there, so it is the operator's and carries his pointer, with one exception: anyone may
+there, so it is the operator's and carries the operator's pointer, with one exception: anyone may
 move a question whose move ends nothing, now or later. That is a parked question that
 holds up a list of stages, each of them finished or out of the plan.
 
@@ -148,7 +148,7 @@ def adopt(target: str, question_id: str, *, by: str, blocks: str | None = None,
         return Unmet(f"{', '.join(missing)} is not a stage of {name}: "
                      f"{questions.stages_said(view.state)}", f"{again} [--blocks LIST]")
 
-    def a_list_that_narrows_is_his(view):
+    def a_list_that_narrows_is_the_operators(view):
         with_pointer = f"{again} --blocks {questions.said(wanted)} --record PTR"
         if record is not None:
             return pointers.unmet(record, with_pointer)
@@ -158,7 +158,8 @@ def adopt(target: str, question_id: str, *, by: str, blocks: str | None = None,
         return Unmet(
             f"{question_id} came from {question.moved_from}, so it arrives holding up "
             "every stage; a list for it narrows that, which only the operator does. "
-            f"Leave --blocks out, or give his pointer; PTR below is one token: "
+            f"Leave --blocks out, or give the operator's pointer; PTR below is one "
+            f"token: "
             f"{pointers.SHAPES}", with_pointer)
 
     def finishes_with_the_list_it_began_with(view):
@@ -177,7 +178,7 @@ def adopt(target: str, question_id: str, *, by: str, blocks: str | None = None,
         home, slug, question_id, into_round=True, record=record, by=by,
         gates=[ending.takes_new_work(name, "a question"), exists,
                _still_asked(found, question_id, listing),
-               names_stages_of_the_round, a_list_that_narrows_is_his,
+               names_stages_of_the_round, a_list_that_narrows_is_the_operators,
                finishes_with_the_list_it_began_with],
         blocks=wanted, settings=settings, wait_s=wait_s, at=at)
 
@@ -233,7 +234,7 @@ def move(target: str, source: str, *, by: str, record: str | None = None,
     def on_closed(other):
         return questions.is_closed(other, settings)
 
-    def is_his_or_ends_nothing(view):
+    def is_the_operators_or_ends_nothing(view):
         if record is not None:
             return pointers.unmet(record, again)
         question = found(view)
@@ -244,7 +245,8 @@ def move(target: str, source: str, *, by: str, record: str | None = None,
             return None
         return Unmet(
             f"a move of {question_id} out of {name} would end what it holds up there, "
-            "which only the operator does. Without his pointer a question is moved "
+            "which only the operator does. Without the operator's pointer a question "
+            "is moved "
             "only when it is parked and holds up a list of stages that are each "
             f"finished or out of the plan, and {'; '.join(short)}. PTR below is one "
             f"token: {pointers.SHAPES}", again)
@@ -252,7 +254,7 @@ def move(target: str, source: str, *, by: str, record: str | None = None,
     return _carry(
         home, slug, question_id, into_round=False, record=record, by=by,
         gates=[ending.takes_new_work(name, "a move of one of its questions"), exists,
-               _still_asked(found, question_id, show), is_his_or_ends_nothing],
+               _still_asked(found, question_id, show), is_the_operators_or_ends_nothing],
         blocks=questions.NONE, settings=settings, wait_s=wait_s, at=at)
 
 

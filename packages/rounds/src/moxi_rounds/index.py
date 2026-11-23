@@ -111,7 +111,7 @@ STEPS = ("""
 
 #: Counts the changes to what a row is made from. A row made under another count is
 #: stale, so it is not trusted after an upgrade that derives more from a log.
-DERIVED = 26
+DERIVED = 27
 
 #: What a log holds open, by kind: each function is given the log's `State` and lists
 #: `(id, body)` pairs, the body a JSON-ready mapping. A question is here while it is
@@ -137,7 +137,9 @@ STEP = "step"
 #: And each build that is open, under its stage: its commission, readings and finish
 #: tips, which with the round's landings make the build again (`builds.from_item`).
 BUILD = "build"
-#: And each waiting item that is still open, and each decision not yet ruled.
+#: And each waiting item that is still open, and each decision not yet ruled: `open`,
+#: or `settled` by the lead, which no export draws. Each decision's body holds why the
+#: round's flow puts no decision to the operator (`not_ratified`), None when it does.
 WAIT = "wait"
 DECISION = "decision"
 
