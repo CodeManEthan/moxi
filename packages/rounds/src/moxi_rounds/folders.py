@@ -19,6 +19,9 @@ The rounds of a project are the folders of its rounds folder that hold a `round.
 Nothing else lists them: a folder copied in, or one that arrived by git, is a round as
 soon as it is there. A round's name is `<project>/<slug>`, the slug its folder's name.
 
+Under a test, no place is taken from a projects registry that no Moxi variable places,
+which is the real one: the read raises `UnfencedTest` first (`_projects`).
+
 Nothing here makes a folder or writes a file.
 """
 
@@ -26,6 +29,7 @@ from __future__ import annotations
 
 import os
 import re
+import sys
 from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
@@ -187,9 +191,32 @@ def _settings(settings):
 
 
 def _projects():
-    """The projects module's read API."""
+    """The projects module's read API: the one way rounds reads the projects registry.
+
+    Under a test whose projects registry no Moxi variable places (the projects module's
+    data root, by `MOXI_PROJECTS_DATA_HOME`, `MOXI_PROJECTS_HOME` or `MOXI_HOME`), it
+    raises `UnfencedTest` before the registry is read: a real registry means a real
+    project, and every place taken from its records (a project's notes folder and rounds
+    folder, its root) would be the real one. Only the process that shows a test is
+    running is refused, and the processes it starts; another process writing the same
+    notes folder never is."""
     from moxi import modules
 
+    from . import paths
+
+    env = os.environ
+    signal = paths.running_under_pytest(env, sys.modules)
+    if paths.refused_root(paths.PROJECTS_LAYOUT, "data", env, signal) is not None:
+        try:
+            registry = f" in {paths.PROJECTS_LAYOUT.data_dir(env)}"
+        except (LookupError, OSError):
+            registry = ""
+        raise UnfencedTest(
+            "rounds refused to take a project's notes folder from the projects registry"
+            f"{registry}: a test is running ({signal}) and no Moxi variable places the "
+            "registry, so it is the real one and so are its projects' notes folders. Run "
+            "the test inside moxi-dev's fence (rounds' tests folder, run from "
+            "packages/rounds), or set MOXI_PROJECTS_HOME to a folder of the test's own.")
     found = modules.load("projects", interface=1)
     if not found.ok or found.api is None:
         raise RoundsError(f"the projects module can't be used: {found.reason}",

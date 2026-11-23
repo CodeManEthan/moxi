@@ -15,8 +15,8 @@ from pathlib import Path
 import pytest
 from moxi.paths import Layout
 
-from moxi_rounds import (index, paths, places, queue_file, removal, settings, sweeping,
-                         write)
+from moxi_rounds import (folders, index, opening, paths, places, queue_file, removal,
+                         settings, sweeping, write)
 from moxi_rounds.cli import main
 from moxi_rounds.errors import RoundsError, UnfencedTest
 
@@ -140,6 +140,56 @@ def test_a_run_that_is_not_a_test_writes_to_the_default_roots(fence, tmp_path):
     for made in (plain.config_file(env), plain.data_dir(env) / paths.INDEX_FILE):
         assert made.is_file()
         assert os.path.realpath(made).startswith(os.path.realpath(fence.home) + os.sep)
+
+
+# -- a project's folders from the registry ----------------------------------------------
+
+def _without_signal(env) -> dict[str, str]:
+    return {key: value for key, value in env.items()
+            if key not in ("PYTEST_CURRENT_TEST", "PYTEST_VERSION")}
+
+
+@pytest.fixture
+def real_registry(monkeypatch, tmp_path, add_project):
+    """The project `proj-a` in a registry no Moxi variable places, at the platform's
+    default under the test's home; rounds' own homes stay the fence's. Returns the
+    project's notes folder."""
+    monkeypatch.delenv("MOXI_PROJECTS_HOME")
+    notes = tmp_path / "notes"
+    add_project("proj-a", notes_root=notes)
+    registry = Layout("projects").data_dir(os.environ)
+    assert os.path.realpath(registry).startswith(os.path.realpath(tmp_path) + os.sep)
+    return notes
+
+
+@pytest.mark.parametrize("read", [
+    lambda: opening.open_round("proj-a/a-round", description="a round", by="planner"),
+    lambda: folders.home("proj-a"),
+    lambda: folders.notes_dir("proj-a"),
+    lambda: folders.root("proj-a"),
+    lambda: folders.roots(),
+])
+def test_a_projects_places_are_refused_when_the_registry_is_the_real_one(read,
+                                                                         real_registry):
+    with pytest.raises(UnfencedTest, match="from the projects registry") as refused:
+        read()
+    assert "set MOXI_PROJECTS_HOME to a folder of the test's own" in str(refused.value)
+    assert sorted(real_registry.rglob("*")) == []
+
+
+def test_another_process_without_the_signal_writes_the_same_notes(
+        real_registry, tmp_path):
+    with pytest.raises(UnfencedTest):
+        opening.open_round("proj-a/a-round", description="a round", by="planner")
+    assert not (real_registry / "rounds" / "a-round").exists()
+    env = {**_without_signal(os.environ), "PYTHONDONTWRITEBYTECODE": "1"}
+    code = ("import sys\n"
+            "from moxi_rounds.cli import main\n"
+            "sys.exit(main(['open', 'proj-a/a-round', '--description', 'a round']))\n")
+    done = subprocess.run([sys.executable, "-c", code], env=env, cwd=tmp_path,
+                          capture_output=True, text=True, timeout=120, check=False)
+    assert done.returncode == 0, done.stderr
+    assert (real_registry / "rounds" / "a-round" / "round.jsonl").is_file()
 
 
 # -- the scan of rounds' source ---------------------------------------------------------
