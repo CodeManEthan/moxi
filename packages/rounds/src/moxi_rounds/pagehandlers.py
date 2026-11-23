@@ -685,6 +685,36 @@ async def answers(call: Any) -> dict:
                                                    comms=comms))
 
 
+async def agents(call: Any) -> dict:
+    """`GET /api/agents`: the names comms' roster gives as bound, for the To picker; an
+    empty list with comms' reason when comms is not installed or can't be read."""
+    comms = comms_api()
+    return await aio.offload(lambda: pageacts.agents(comms))
+
+
+async def drop_confirm(call: Any) -> dict:
+    """`GET /api/drop`: what the drop's confirm says of the open build of `stage` of
+    `round`, read now; writes nothing."""
+    name, stage = call.query.get("round"), call.query.get("stage")
+    if not name:
+        raise lb.BadRequest("round", "missing")
+    if not stage:
+        raise lb.BadRequest("stage", "missing")
+    return await aio.offload(lambda: pageacts.drop_facts(name, stage))
+
+
+async def drop(call: Any) -> dict:
+    """`POST /api/drop/build`: the operator's drop of the open build of `stage` of
+    `round`, with the page pointer of `act`, then the round's lead told."""
+    body = call.body
+    act = body.get("act") or ""
+    if not pageacts.ACT_ID.fullmatch(act):
+        raise lb.BadRequest("act", "not an act id")
+    comms = comms_api()
+    return await aio.offload(lambda: pageacts.drop(body["round"], body["stage"], act,
+                                                   receipts=RECEIPTS, comms=comms))
+
+
 async def events(call: Any) -> Any:
     """`GET /api/events`: the stream over the `rounds` topic. The first call starts the
     poller."""

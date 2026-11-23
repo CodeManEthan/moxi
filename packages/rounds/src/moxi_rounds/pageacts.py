@@ -593,11 +593,17 @@ def drop_facts(name: str, stage: str, *, settings=None) -> dict:
     and CI's own refs the drop removes. `open` is False, with `reason`, when the stage
     has no open build."""
     settings = own.load() if settings is None else settings
-    held = _read(name, settings)
-    build = builds.current(held.state, stage)
     made: dict[str, Any] = {"round": name, "stage": stage, "open": False, "reason": None,
                             "branch": None, "builder": None, "at": None, "tip": None,
                             "folders": [], "refs": []}
+    try:
+        held = _read(name, settings)
+        build = builds.current(held.state, stage)
+    except UnfencedTest:
+        raise
+    except RoundsError as exc:
+        made["reason"] = exc.reason
+        return made
     if build is None or build.ended is not None:
         made["reason"] = (f"{stage} has no open build" if build is None else
                           f"{stage} has no open build: its last was {build.ended}")
