@@ -15,17 +15,18 @@ Without comms (`print` adds `-p` after `claude`):
 
 With comms and an identity, comms' wrapper runs claude, with the claude argv after `--`:
 
-    moxi comms claude --name N [--scope S] [--director D ...] --session-id <U>
-      [--native-name L] -- [<opening prompt>] --append-system-prompt-file <F> ...
+    moxi comms claude --name N [--scope S] [--director D ...] [--no-policy-directors]
+      --session-id <U> [--native-name L] -- [<opening prompt>]
+      --append-system-prompt-file <F> ...
 
 The claude argv then carries neither `-n` (the native name goes to `--native-name`) nor
 turns' launch additions, which the wrapper asks for itself. A headless launch (`print`)
 gives the wrapper its headless flags and carries its opening prompt on `--brief`, not in
 the claude argv, which then holds no `-p` either:
 
-    moxi comms claude --name N [--scope S] [--director D ...] --session-id <U>
-      [--native-name L] --headless [--exit W ...] --brief <opening prompt>
-      -- --append-system-prompt-file <F> ...
+    moxi comms claude --name N [--scope S] [--director D ...] [--no-policy-directors]
+      --session-id <U> [--native-name L] --headless [--exit W ...]
+      --brief <opening prompt> -- --append-system-prompt-file <F> ...
 
 **The display name** (`-n`, or the wrapper's `--native-name`) is the `native_name` row
 when `[defaults]`, a preset or a flag set it, else the launch's own `name`. The launch
@@ -175,8 +176,7 @@ def compose(values: Mapping[str, object], ctx: Context) -> Composition:
         argv = [ctx.moxi, "comms", HARNESS, "--name", identity]
         if scope:
             argv += ["--scope", scope]
-        for director in values.get("director") or ():
-            argv += ["--director", str(director)]
+        argv += common.director_words(values, ctx)
         argv += ["--session-id", ctx.session_id]
         if shown_as:
             argv += ["--native-name", shown_as]

@@ -420,7 +420,12 @@ class CodexAdapter(HarnessAdapter):
             self.claims.on_end = lambda: self.end_headless(headless_mod.EXIT_SESSION)
 
     def _directors(self) -> tuple:
-        return tuple(getattr(self.agent, "directors", None) or ())
+        """The agent's launch-declared directors, the ones layer one's director sentence
+        keys on: its policy directors left out."""
+        from ..directors import launch_declared
+
+        return launch_declared(getattr(self.agent, "directors", None) or (),
+                               getattr(self.agent, "policy_directors", None) or ())
 
     def find_session(self):
         """turns' session of the host, once it is ready. Looks in steps of `find_step`
@@ -993,7 +998,7 @@ class CodexAdapter(HarnessAdapter):
         high = max(int(mid) for mid in ids)
         try:
             text = render_digest(batch, None, self.agent.directors, clock=self.clock,
-                                 steered=True)
+                                 steered=True, policy=self._policy_directors())
             self.marks[str(high)] = self.claims.hold_mark()
             receipt = self._hand_in(text, high, ids, steer=True,
                                     senders=digest_senders(batch))
@@ -1006,7 +1011,8 @@ class CodexAdapter(HarnessAdapter):
             directors = tuple(getattr(self.agent, "directors", None) or ())
             session_id = self.mirror_session()
             for p in batch:
-                self.reply_ledger.open(p, directors, session_id, now)
+                self.reply_ledger.open(p, directors, session_id, now,
+                                       policy=self._policy_directors())
         self.on_delivered(text, high, identity, len(batch), receipt)
         return text
 

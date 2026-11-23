@@ -46,7 +46,14 @@ the same way. The daemon reads the group when it starts and refuses a register o
 kind; a declaration that does not hold is left out and logged
 (`moxi_comms/kinds.py`). An adapter built outside comms uses `moxi_comms.adapter`: the
 daemon client, the backoff, the digest and frame line, the attribution tiers
-and the machine line's parse.
+and the machine line's parse. It gets the box's policy directors (`[policy] directors`)
+only if its launch calls `moxi_comms.api.effective`, which reads the box's comms config
+itself, and its holder writes both lists into
+the claim, as `directors` and `policy_directors`, and passes the second to the frame line
+as `policy=`. The connector can be named a policy director but can't be directed (it
+renders no standing); voice binds the operator's own name, whose messages are always
+directives; and the `moxi-comms-shim --inject-file` test seam takes `--director` or the
+stamps as given, the policy part keeping its guard, and merges nothing.
 
 ## What a harness is
 
@@ -99,8 +106,8 @@ a harness.
    message that opens a thread with limits). An open message with no posture token shows
    none. Layer one, the block a session is shown at start, is `context.layer_one_block`
    for every harness: the context block, with the director sentence after it only for
-   an agent with a declared director (`--director` for Claude, the roster's `directors`
-   for Codex and OpenCode). After the block comes one line, the same on every harness,
+   an agent whose launch declared a director (`--director` for Claude, the roster's
+   `directors` for Codex and OpenCode); a policy director alone adds no sentence. After the block comes one line, the same on every harness,
    naming which comms to run by absolute path: the launching install's own `moxi`
    script, since the agent's shell may find another install's `moxi` first. The Codex
    and OpenCode wrappers write it into layer one themselves; the Claude wrapper stamps
@@ -325,6 +332,7 @@ runs `codex app-server` and its hooks and keeps the session's endpoint. Install 
 
 ```text
 moxi comms codex --name NAME [--scope SCOPE | --global] [--director NAME]...
+                 [--no-policy-directors]
                  [--model M] [--sandbox MODE | --permissions PROFILE]
                  [--option KEY=VALUE]... [--options-file F]
                  [--no-window] [--dry-run]

@@ -178,9 +178,11 @@ def render_snapshot(info: dict | None, *, env=None) -> tuple[str, bool]:
     or anything `usable` cannot render -- is the offline branch). The block leads both
     branches: how to send and reply does not depend on liveness."""
     env = env if env is not None else os.environ
-    # The session's declared directors, as its `moxi-comms-claude` stamped them: a session
-    # with one gets the director sentence after the block.
-    directors = directors_mod.from_env(env)
+    # The session's launch-declared directors, as its `moxi-comms-claude` stamped them
+    # (the full stamp less the policy stamp): a session with one gets the director
+    # sentence after the block. A policy director changes standing, not reporting.
+    directors = directors_mod.launch_declared(directors_mod.from_env(env),
+                                              directors_mod.policy_from_env(env))
     comms = comms_command(env)
     # A launch carrying comms' tools gets layer one's tools form.
     form = layer_one_form(env)

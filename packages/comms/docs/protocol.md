@@ -232,14 +232,20 @@ and for how long:
 `sent` is the time alone on the day it was sent; the wait is minutes under an hour,
 hours under two days, then days.
 
-Directors are granted by the recipient at launch (`moxi comms claude --director`, the
-`directors` key in the Codex and OpenCode rosters), never claimed by the sender. A
-declared director's verified message renders as a directive. The operator's messages
-always do.
+Directors are granted by the recipient's side, never claimed by the sender: at launch
+(`moxi comms claude --director`, the `directors` key in the Codex and OpenCode rosters),
+and through the box's own comms config, `[policy] directors`, whose names every session
+takes after its launch's own unless its launch opts out (`--no-policy-directors`, a
+roster row's `takes_policy_directors = false`). A launch-declared director's verified
+message renders as a directive. A policy director's does only while its name holds a
+standing row, which only provisioning writes (the author's tier reads `standing`); until
+then its messages are information, and the frame line says `policy director, not
+provisioned`. The operator's messages always do.
 
 The first thing a Claude session is shown at start is the agent context block
-(`context.CONTEXT_BLOCK`, with `context.DIRECTOR_LINE` after it for a session that
-declared a director) and the current roster. Everything else an agent meets only
+(`context.CONTEXT_BLOCK`, with `context.DIRECTOR_LINE` after it for a session whose
+launch declared a director; a policy director changes standing, not who the agent
+reports to) and the current roster. Everything else an agent meets only
 sometimes is explained on demand by `moxi comms help <term>`.
 
 ## Delivery rules
