@@ -11,7 +11,10 @@
 // their own: the shell's top line names the page.
 //
 // It reads only the shell's own routes and topics, through client.js. The shell places a
-// new element for each navigation, so `route` is read once.
+// new element for each navigation, so `route` is read once. The modules view's
+// `data-reading` mark on the page root is the sum of its own reads and its blocks':
+// each block's placing and every read a block sends go through client.js, which counts
+// them all.
 
 import { css, html, LitElement, nothing } from "lit";
 import type { PropertyValues } from "lit";

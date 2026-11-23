@@ -13,6 +13,13 @@
 // On the phone, through the gateway, `gateway` is true, and a component hides what the
 // phone can't reach.
 //
+// It marks the page root (the shell's `#moxi-panel`, else the document's root element)
+// with `data-reading="<n>"` while n reads that decide the page's layout are out, and takes
+// the mark away at none: each `api` read (not a post) until its answer has been drawn,
+// each `subscribe` until its first value (at most `FIRST_VALUE_MS`), and each `place`
+// until its element is placed. A test presses only once the mark is gone, so no late
+// answer moves a control under its press.
+//
 // It also defines `<moxi-ui-form>`, the one form renderer, `<moxi-ui-confirm>`, the
 // confirm sheet, `<moxi-ui-row>`, the two-line row of a list, and `<moxi-ui-rail>` with its
 // `<moxi-ui-mark>` cells, a line of step markers, so every page can use them.
@@ -26,6 +33,7 @@ import { fetchOpener, TabPush } from "./push.ts";
 import type { Opener } from "./push.ts";
 import { Gate } from "./hold-model.ts";
 import { waitedMs } from "./wait-model.ts";
+import { ReadingCount } from "./reading-model.ts";
 import { defineRow } from "./row.ts";
 import { defineRail } from "./rail.ts";
 import { apiTarget, checkAttributes, checkName, panelTarget, scriptUrl } from "./rules.ts";
@@ -373,6 +381,14 @@ function watched(open: Opener): Opener {
   });
 }
 
+/** The page root's mark while reads that decide its layout are out: their count. */
+const READING_MARK = "data-reading";
+const reading = new ReadingCount((count) => {
+  const root = document.getElementById("moxi-panel") ?? document.documentElement;
+  if (count > 0) root.setAttribute(READING_MARK, String(count));
+  else root.removeAttribute(READING_MARK);
+}, (fn, ms) => setTimeout(fn, ms));
+
 const push = new TabPush(here.gateway ? watched(fetchOpener(key)) : fetchOpener(key), markSignedOut);
 
 // --- the contract -----------------------------------------------------------------------
@@ -437,7 +453,12 @@ export async function api(module: string, path: string, body?: object): Promise<
     headers["Content-Type"] = "application/json";
     init.body = JSON.stringify(body);
   }
-  return await fetched(target, init);
+  const end = body === undefined ? reading.begin() : null;
+  try {
+    return await fetched(target, init);
+  } finally {
+    end?.();
+  }
 }
 
 async function fetched(target: string, init: RequestInit): Promise<ApiResult> {
@@ -546,7 +567,12 @@ export function subscribe(module: string, topic: string, fn: (data: any) => void
   checkName("module", module);
   checkName("topic", topic);
   if (typeof fn !== "function") throw new TypeError("subscribe takes a function");
-  return push.hub.add(`${module}.${topic}`, fn);
+  const first = reading.firstValue(fn);
+  const stop = push.hub.add(`${module}.${topic}`, first.listener);
+  return () => {
+    first.stopped();
+    stop();
+  };
 }
 
 /**
@@ -567,6 +593,18 @@ export async function place(host: Element, module: string, name: string,
   checkAttributes(info, attrs);
   const url = scriptUrl(info, module, location.origin);
   if (url === null) return null;
+  const end = reading.begin();
+  try {
+    return await placeElement(host, info, url, module, name, attrs);
+  } finally {
+    end();
+  }
+}
+
+/** Loads `url`, waits for it to define the component's element, and appends one to `host`;
+ * null when the script fails to load or to define it in time. */
+async function placeElement(host: Element, info: ComponentInfo, url: string, module: string, name: string,
+                            attrs: Record<string, string>): Promise<Element | null> {
   try {
     await import(url);
     let timer: ReturnType<typeof setTimeout> | undefined;
