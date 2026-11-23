@@ -1,6 +1,6 @@
 """A stand-in for one turns session, shaped as `moxi_turns.Session` is on turns' protocol
 version 2: `capabilities`, `facts`, `watch` (with `.facts`), `handle_stops`, `deliver`
-and `steer` with a `ref`, `agents` (its busy count), and the values turns hands back. The test drives the session's
+and `steer` with a `ref`, `by` and `senders`, `agents` (its busy count), and the values turns hands back. The test drives the session's
 turns by hand, as turns' Codex host would report them.
 
 It imports nothing of turns: comms reaches turns only through its public API, and the
@@ -139,12 +139,15 @@ class StopFacts:
 
 
 class Handed(NamedTuple):
-    """One hand-in, as the session recorded it. `steer` says it came by `steer`."""
+    """One hand-in, as the session recorded it. `steer` says it came by `steer`; `by`
+    and `senders` are the module that asked and the names the text speaks for."""
 
     id: str | None
     text: str
     steer: bool
     ref: str | None
+    by: str | None = None
+    senders: tuple = ()
 
 
 class FakeAgents:
@@ -295,24 +298,25 @@ class FakeSession:
             return FakeAgents(self.busy)
 
     def deliver(self, text, *, ref=None, only_if_idle=False, if_turn_number=None,
-                refuse_draft=False, refuse_agents=False):
-        return self._hand(text, ref, "deliver")
+                refuse_draft=False, refuse_agents=False, by=None, senders=()):
+        return self._hand(text, ref, "deliver", by, senders)
 
-    def steer(self, text, *, ref=None):
+    def steer(self, text, *, ref=None, by=None, senders=()):
         if "steer" not in self.capabilities:
             raise RuntimeError("the session does not offer steer (the capability error)")
-        return self._hand(text, ref, "steer")
+        return self._hand(text, ref, "steer", by, senders)
 
-    def _hand(self, text, ref, method):
+    def _hand(self, text, ref, method, by=None, senders=()):
+        asker = (by, tuple(senders))
         with self._lock:
             step = self.script.pop(0) if self.script else self.answer
             kind, reason = (step, None) if isinstance(step, str) else step
             if kind == "gone":
-                self.delivered.append(Handed(None, text, method != "deliver", ref))
+                self.delivered.append(Handed(None, text, method != "deliver", ref, *asker))
                 return FakeDelivery(None, ref, started=Refused("gone"),
                                     ended=Refused("gone"))
             did = f"d{next(self._ids)}"
-            self.delivered.append(Handed(did, text, method != "deliver", ref))
+            self.delivered.append(Handed(did, text, method != "deliver", ref, *asker))
             if kind == "refuse":
                 value = Refused(reason or "busy-turn", did, ref)
                 return FakeDelivery(did, ref, started=value, ended=value)

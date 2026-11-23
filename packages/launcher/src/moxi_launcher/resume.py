@@ -2,7 +2,8 @@
 again where it left off.
 
     sessions()                     # sessions: one entry per launch, newest first
-    resume(session_id)             # resume SESSION_ID [--slot N]: launch it again, resumed
+    resume(session_id)             # resume SESSION_ID [--slot N] [--brief TEXT | --brief-file
+                                   #   FILE | --plain]: launch it again, resumed
 
 **The list** is the launch log's, one entry per launch, newest first, each with the id the
 launch was last known by (after a clear or a compaction it is not the one it started
@@ -12,11 +13,19 @@ process (`moxi.proc.alive` on the pid and start time the row recorded). A read t
 marks only its own entry: its liveness is unread, and it is not offered for resume.
 
 **A resume** launches the row again from its stored values (`api.ReplayRequest`, no
-preset read), with the row's own environment rule, `resume_of` naming the launch it
-resumes, and the harness told to resume the session: Claude's `--resume <id>`, turns'
-Codex host's `--resume <thread id>`. It sends no first turn. It keeps the session id it
-resumes, and that id then belongs to the new launch, so every later act on the id finds
-the new launch. A Codex launch with a comms name resumes like any other: its replay runs
+preset read), with the row's own environment rule and the posture the launch was
+configured with (a relaunch's row shows its own in its `posture` column, which the resumed
+launch does not take), `resume_of` naming the launch it resumes, and the harness told to resume the session: Claude's `--resume <id>`, turns'
+Codex host's `--resume <thread id>`. It sends no first turn of the row's: the row's brief
+is not sent again. A brief given to the resume (`--brief` or `--brief-file`, one of them) is
+its first turn, sent as a launch sends its own (`first`). The start posture rules it as it
+rules a launch's (`presets.check_resume_brief`): a resume of a `go` launch needs one, since
+a resumed session does not wake itself either, and a resume under `with:<identity>` takes
+none. A caller that asks for a plain resume (`plain`: the command line's `--plain`, which
+takes no brief, and what Home's `Continue the last session` sends with an empty box)
+resumes a `go` launch with no brief too, and with no first turn. It keeps the session id it resumes,
+and that id then belongs to the new launch, so every later act on the id finds the new
+launch. A Codex launch with a comms name resumes like any other: its replay runs
 comms' Codex wrapper with the wrapper's own flags and then `--resume <thread id>`, and the
 wrapper binds the name to that thread and continues it. Only a resume passes `--resume`: a
 relaunch, a repair and a recycle start a new thread.
@@ -33,7 +42,11 @@ It is refused, with nothing written, when:
   moxi-comms lets it resume. Whether comms can is read once per list, not once per entry;
 - its session is live now (`live`): attach to it instead; liveness is read again at the
   call, whatever the list said;
-- its liveness can't be read (`liveness-unread`, exit 1).
+- its liveness can't be read (`liveness-unread`, exit 1);
+- the brief doesn't fit: both `--brief` and `--brief-file` given, a brief file's path not
+  absolute, no brief for a `go` launch (a `go` launch that relaunched itself too) unless
+  the resume is `plain`, or a brief under `with:<identity>` (`posture-brief`). A brief file that can't be read is refused as a launch's is, when
+  the resume composes.
 
 The check that the session is not live is made again as the new launch's row is written,
 in the same store transaction: while another launch of the session is still starting, or
@@ -43,10 +56,20 @@ session at once launch it once.
 **Where it goes is the original's target.** A launch in this terminal resumes in this
 terminal (on Linux and macOS the process becomes the harness, so `resume` does not
 return). A slot launch goes back to its slot when that slot is launchable, else to the
-lowest launchable one; a slot that went missing is made again first (`create`), and a
-slot slots won't make again falls back to the lowest too. `slot` names the slot to use
-in place of the original's: a missing one is made first, and any other is passed as it
-is, so a slot that is taken is refused by the launch's own check.
+lowest launchable one, with a line saying why; a slot that went missing is made again
+first (`create`), and a slot slots won't make again, or one another holder holds (a
+park's reservation for another session, say), falls back to the lowest too. `slot`
+names the slot to use in place of the original's: a missing one is made first, and any
+other is passed as it is, so a slot that is taken is refused by the launch's own check.
+
+A slot launch's resume runs crash discovery first (`parks.discover_before_launch`), so a
+session whose slot crashed gets its park entry before the resume looks for one.
+
+**A parked session** (one with an open park entry) is resumed as `restore` resumes it
+(`restore.resume_parked`): under the park lock, into its reserved slot with the
+reservation as the launch's own hold, or elsewhere with the reservation released and the
+entry closed. A resume made under the park lock already (restore's own) is not sent
+there again.
 """
 
 from __future__ import annotations
@@ -63,7 +86,7 @@ from typing import Any
 from moxi import exit as codes
 from moxi import proc
 
-from . import catalog, first, presets, relaunch, slots, store, target
+from . import catalog, first, parks, presets, relaunch, slots, store, target
 
 LOOK = relaunch.LOOK
 Refused = relaunch.Refused
@@ -83,7 +106,8 @@ class Past:
     take it now, `why` the reason when it would not, and `hint` what to do instead.
     `held_by` names a later launch that holds the same session id (a resume of it), which
     is the one a resume of that id acts on. `project_key` is the project the launch ran
-    in, None for a launch in a folder alone, and `actor` who made it."""
+    in, None for a launch in a folder alone, and `actor` who made it. `parked` is the
+    slot an open park entry keeps for the session, None when none does."""
 
     request_id: str
     created_at: str
@@ -104,6 +128,7 @@ class Past:
     held_by: str | None = None
     resume_of: str | None = None
     relaunch_of: str | None = None
+    parked: int | None = None
 
     def as_json(self) -> dict[str, Any]:
         return asdict(self)
@@ -145,6 +170,8 @@ def entry(conn: sqlite3.Connection, row: store.LaunchRow, turns: Any | None, *,
                           f"resume it as that launch's: moxi launcher resume {newest}")
     if refused is None:
         refused = live_refusal(row, newest, live=live, unread=unread)
+    parked = store.entries_of(conn, [row.request_id],
+                              [newest] if newest and not held_by else [])
     return Past(
         request_id=row.request_id, created_at=row.created_at, harness=row.harness,
         target=row.target, slot=row.slot, cwd=row.cwd, project_key=row.project_key,
@@ -152,7 +179,8 @@ def entry(conn: sqlite3.Connection, row: store.LaunchRow, turns: Any | None, *,
         live=live, resumable=refused is None,
         why=None if refused is None else refused.problem,
         hint=None if refused is None else refused.hint, unread=unread, held_by=held_by,
-        resume_of=row.resume_of, relaunch_of=row.relaunch_of)
+        resume_of=row.resume_of, relaunch_of=row.relaunch_of,
+        parked=parked[0].slot if parked else None)
 
 
 def session_line(past: Past) -> str:
@@ -161,6 +189,8 @@ def session_line(past: Past) -> str:
     said = (f"{past.created_at} {past.harness} in {where}, launch {past.request_id}, "
             f"session {past.session_id or '(none)'}")
     said += {True: ", live", False: ", ended", None: ", liveness unread"}[past.live]
+    if past.parked is not None:
+        said += f", parked in slot {past.parked}"
     said += ": resumable" if past.resumable else f": not resumable, {past.why}"
     return said
 
@@ -237,43 +267,70 @@ def live_refusal(row: store.LaunchRow, session_id: str | None, *, live: bool | N
 
 
 def resume(session_id: str, *, slot: int | str | None = None,
+           brief: str | None = None, brief_file: str | None = None,
+           plain: bool = False,
            request_id: str | None = None, caller_env: Mapping[str, str] | None = None,
            turns: Any = LOOK, slots_api: Any = LOOK,
            launch: Callable[..., Any] | None = None,
            warn: Callable[[str], None] | None = None,
-           conn: sqlite3.Connection | None = None) -> Result:
+           conn: sqlite3.Connection | None = None, hold: str | None = None) -> Result:
     """Launch the session `session_id` again, resumed. Raises a refusal with nothing
     written (`store.RunOpen` while a run on the launch is open and its job runs); returns the new launch's outcome. A launch in this terminal does not return
     on Linux and macOS.
 
-    `slot` is the slot to use in place of the original's; `request_id` the new launch's
-    (minted when None), its idempotency key. `turns`, `slots_api` and `launch` stand in
-    for turns' and slots' APIs (None: not installed) and `api.launch`."""
+    `slot` is the slot to use in place of the original's; `brief` or `brief_file` the
+    brief sent as the resumed session's first turn (`checked_brief` checks them, with
+    `plain`, which lets a `go` launch resume with neither); `request_id` the new launch's
+    (minted when None), its idempotency key. `hold` is the slot hold the resume has, which
+    lets it into the slot it holds and ends with the start. `turns`, `slots_api` and
+    `launch` stand in for turns' and slots' APIs (None: not installed) and `api.launch`."""
     env = dict(os.environ if caller_env is None else caller_env)
     with relaunch._store(conn) as c:
         row = store.resolve(c, session_id)
         if row is None:
             raise target.NotLaunched()
         newest = row.newest_session_id or row.session_id
+        if row.target == "slot" and hold is None and parks.held_here() is None:
+            # Crashed slots become park entries first, this session's own among them, so
+            # a crashed session is resumed by its entry and the slot it wanted is seen
+            # reserved.
+            parks.discover_before_launch(by=first.actor(env), turns=_turns(turns),
+                                         api=_slots(slots_api), conn=c)
+        if hold is None and parks.held_here() is None and store.entries_of(
+                c, request_ids=[row.request_id], session_ids=[newest] if newest else []):
+            from . import restore
+
+            # Crash discovery above has run already, under the park lock it takes around
+            # itself, and may have reserved crashed slots. The brief is checked here,
+            # before `restore.resume_parked` takes the whole-run park lock and before the
+            # entry's slot is touched.
+            checked_brief(row, brief, brief_file, plain=plain)
+            return restore.resume_parked(
+                session_id, slot=slot, request_id=request_id, caller_env=caller_env,
+                turns=turns, slots_api=slots_api, launch=launch, warn=warn, conn=conn,
+                brief=brief, brief_file=brief_file, plain=plain)
         refused = static_refusal(row, newest)
         if refused is None:
             live, unread = liveness(row, newest, _turns(turns))
             refused = live_refusal(row, newest, live=live, unread=unread)
         if refused is not None:
             raise refused
+        brief, brief_file = checked_brief(row, brief, brief_file, plain=plain)
         # A relaunch, exit or recycle under way owns the session: between its exit and
         # its respawn the session reads not live, and a resume then would run a second.
         slots_found = _slots(slots_api)
         relaunch._no_open_run(c, row, slots_found)
     # The store is closed before the launch: in this terminal the launch never returns.
     chosen = slot
+    elsewhere: list[str] = []
     if row.target == "slot":
-        chosen = choose_slot(slots_found, row, slot)
+        chosen = choose_slot(slots_found, row, slot, hold=hold, say=elsewhere.append)
     from . import api
 
     request = api.ReplayRequest(row, resume_of=row.request_id,
                                 request_id=request_id or str(uuid.uuid4()),
-                                session_id=newest, actor=first.actor(env), slot=chosen)
+                                session_id=newest, actor=first.actor(env), slot=chosen,
+                                hold=hold, brief=brief, brief_file=brief_file)
     try:
         if launch is None:
             result = api.launch(request, env=caller_env, warn=warn)
@@ -281,7 +338,7 @@ def resume(session_id: str, *, slot: int | str | None = None,
             result = launch(request, env=caller_env, warn=warn)
     except store.SessionLive as exc:
         raise met_refusal(exc) from None
-    lines = (result.line,)
+    lines = (*elsewhere, result.line)
     if result.outcome is not None and result.outcome.line() != result.line:
         lines += (result.outcome.line(),)
     return Result(result.exit_code, lines, data={
@@ -289,6 +346,24 @@ def resume(session_id: str, *, slot: int | str | None = None,
         "state": result.state, "reason": result.reason, "request_id": result.request_id,
         "session_id": result.session_id, "resume_of": row.request_id,
         "target": result.target, "slot": result.slot, "duplicate": result.duplicate})
+
+
+def checked_brief(row: store.LaunchRow, brief: str | None, brief_file: str | None, *,
+                  plain: bool = False) -> tuple[str | None, str | None]:
+    """The brief and brief file a resume of `row` sends, checked: a brief file's path as a
+    launch's is (absolute, `~` expanded), and the start posture's rule for the brief
+    (`presets.check_resume_brief`, which `plain` lets a `go` launch pass with neither). The posture is the one the launch was configured with,
+    which its values keep: a relaunch's row shows its own in the `posture` column
+    (`relaunched (handoff: ...)`, `with:<director>`), and a `go` launch that relaunched
+    itself still needs a brief to resume. Raises the refusal they meet; each one not given
+    is None."""
+    brief = brief or None
+    if catalog.is_set(brief_file):
+        brief_file = catalog.row(row.harness, "brief_file").check(brief_file)
+    brief_file = brief_file or None
+    presets.check_resume_brief(str(row.values.get("posture") or ""), brief=brief or "",
+                               brief_file=brief_file or "", plain=plain)
+    return brief, brief_file
 
 
 def met_refusal(met: store.SessionLive) -> Refused:
@@ -305,25 +380,40 @@ def met_refusal(met: store.SessionLive) -> Refused:
                            f"{holder.request_id}", hint)
 
 
-def choose_slot(api: Any | None, row: store.LaunchRow,
-                asked: int | str | None) -> int | str | None:
+def choose_slot(api: Any | None, row: store.LaunchRow, asked: int | str | None, *,
+                hold: str | None = None,
+                say: Callable[[str], None] | None = None) -> int | str | None:
     """The slot a resume of the slot launch `row` asks for: `asked` when given (a
-    missing one made first), else the row's own when launchable (a missing one made
-    first), else "" (the lowest launchable). With slots not installed or not running
-    here, `asked` or the row's own, which the launch then refuses with its words.
-    Raises a refusal when slots can't be asked."""
+    missing one made first unless another holder holds it), else the row's own when it
+    takes the resume (a missing one made first), else "" (the lowest launchable). The row's
+    own takes it when launchable, or when it is free, ended or missing with no hold or
+    with `hold`, the resume's own. When the row's own is passed over, `say` is told why.
+    With slots not installed or not running here, `asked` or the row's own, which the
+    launch then refuses with its words. Raises a refusal when slots can't be asked."""
     if api is None or not _running(api):
         return asked if asked is not None else row.slot
     wanted = asked if asked is not None else row.slot
     if wanted is None or not str(wanted).strip():
         return ""
+
+    def lowest(why: str) -> str:
+        if say is not None:
+            say(f"slot {wanted} {why}; resuming into the lowest slot that takes it")
+        return ""
+
     try:
         found = api.show(wanted)
+        held = found.hold if found is not None else None
+        if held is not None and held.holder != hold and (
+                found.created is None or found.state == "missing"):
+            # Held by another, a park's reservation for its own session among them: the
+            # slot is not made again for this one.
+            return asked if asked is not None else lowest(f"is held by {held.holder}")
         if found is None or found.created is None or found.state == "missing":
             number = _number(found, wanted)
             if number is not None and _create(api, number):
                 return wanted
-            return wanted if asked is not None else ""
+            return wanted if asked is not None else lowest("could not be made again")
     except api.TryAgain as exc:
         raise Refused("slots-busy", f"slots did not answer about slot {wanted}: {exc}",
                       "try again in a moment", codes.TEMPFAIL) from None
@@ -332,9 +422,12 @@ def choose_slot(api: Any | None, row: store.LaunchRow,
             return asked
         raise Refused("slots-failed", f"slots could not show slot {wanted}: {exc}",
                       "moxi slots list shows the slots", codes.ERROR) from None
-    if asked is not None or found.launchable:
+    ours = held is not None and held.holder == hold and found.state in ("free", "ended")
+    if asked is not None or found.launchable or ours:
         return wanted
-    return ""
+    if held is not None and found.state in ("free", "ended"):
+        return lowest(f"is held by {held.holder}")
+    return lowest(f"is {found.state}")
 
 
 def _create(api: Any, number: int) -> bool:
@@ -382,6 +475,6 @@ def _close(session: Any) -> None:
         pass
 
 
-__all__ = ["ATTACH_SLOT", "ATTACH_TERMINAL", "Past", "Refused", "Result", "choose_slot",
-           "entry", "live_refusal", "liveness", "met_refusal", "resume", "session_line",
-           "sessions", "static_refusal"]
+__all__ = ["ATTACH_SLOT", "ATTACH_TERMINAL", "Past", "Refused", "Result", "checked_brief",
+           "choose_slot", "entry", "live_refusal", "liveness", "met_refusal", "resume",
+           "session_line", "sessions", "static_refusal"]

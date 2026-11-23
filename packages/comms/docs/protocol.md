@@ -19,8 +19,9 @@ live. Numbers named here are in `src/moxi_comms/constants.py`.
 - **Delivery adapters** connect to the daemon, bind a name, and put mail in front of a
   model at a turn boundary: `claude-shim` (a Claude Code session), `codex` (a Codex
   app-server) and `opencode` (an OpenCode server). The kind `connector` is comms'
-  provider in the connector, which serves the Claude apps; it is a person kind, so its
-  mail is never held.
+  provider in the connector, which serves the Claude apps, and `speech` is a person
+  speaking through voice, which binds the operator's name as it. Both are person kinds,
+  so their mail is never held and their cache is never read.
   A send-only name is one a module or a registered program sends under and nobody binds
   or mails ([adapters.md](adapters.md#send-only-names)).
 - **The CLI**, `moxi comms`, sends and reads through the daemon. With the daemon down
@@ -120,9 +121,8 @@ file and send a pointer to it.
 
 Every new `moxi comms send` (no `--reply-to`) states what it wants back with `--posture none`,
 `optional`, `once` or `open`; without it the verb refuses, exit 2 (usage), posting nothing. The operator
-(any lane whose sender is `operator`) is exempt from every posture refusal: a new send of
-his with no `--posture` is open with no cap, and what he passes is written
-as passed.
+(any lane whose sender is `operator`) is exempt from every posture refusal: the operator's new
+send with no `--posture` is open with no cap, and a posture passed is written as passed.
 
 A reply (`moxi comms reply <id>`, or `moxi comms send --reply-to <id>`) needs no `--posture`; it
 takes its posture from the message it answers, read top to bottom:
@@ -147,7 +147,7 @@ whose `re:` names the root or a member; the verified ones count. It is closed wh
    `[threads] reply_cap` in comms' config file (default 8);
 2. its newest message has been readable by the replier for an hour. The daemon's
    `readable` read says when it handed each message over, and which it still
-   has in its queue for him; mail not yet handed over starts no clock;
+   has in its queue for the replier; mail not yet handed over starts no clock;
 3. a verified member carries `[no reply]`.
 
 A reply in a closed thread is refused with a text that names a new send as the cure,

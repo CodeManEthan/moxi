@@ -56,21 +56,42 @@ with the worst.
 Every row reads `ok`, `warn`, `fail` or `off`, with a reason and the command that fixes
 it, the same in `list`, `show`, `watch` and `moxi doctor`. A timer is judged by whether
 its schedule is armed and how its last run went, never by whether a process is running.
-A daemon that is on and not running is `fail`, unless you stopped it by hand (`warn`). A
+A daemon that is on and not running is `fail`, unless you stopped it by hand (`warn`):
+services records each stop it makes, of your daemons and of Moxi's own, until the daemon is
+started, restarted or turned on again, or the machine boots. A
 value the supervisor can't give is `warn`, "unknown", with the reason. A health check you
 give with `--health` runs when asked (`show`, `watch`, `list --health`, the doctor),
 only for a running daemon, for five seconds at most: exit 0 is healthy.
 
 A verdict's `cause`, in `--json` and on the page's reads, is one word that tells a reader
-which case gave it without reading the reason:
+which case gave it without reading the reason. Each case has its own:
 
+- `elsewhere`: a row added on another system (`off`);
+- `no-supervisor`: this system has no supervisor (`off`);
+- `removing`: a remove that did not finish (`warn`);
+- `switched-off`: one of Moxi's rows whose module switch is off (`off`);
+- `unknown`: a value the supervisor can't give (`warn`, "unknown");
+- `not-here`: a unit that is not for this system (`off`);
+- `missing`: a unit that is missing (`fail` while on, `warn` while off);
+- `not-wrapped`: an adopted Linux timer whose drop-in is gone (`warn`);
+- `listening`: a daemon idle under its listening socket (`ok`);
+- `stopped`: a daemon you stopped by hand, since the last boot (`warn`);
 - `not-running`: a daemon that is on and not running, with no stop by hand that holds
   (`fail`);
-- `stopped`: a daemon you stopped by hand, since the last boot (`warn`);
-- `last-run`: a timer whose last run failed (`warn`).
+- `no-login`: a running daemon that won't start at login (`warn`);
+- `running`: a daemon that is on and running (`ok`);
+- `running-off`: a daemon that is off but running until the next login (`warn`);
+- `login-off`: a daemon that is off but starts at login (`warn`);
+- `off`: a daemon or timer that is off (`off`);
+- `armed-off`: a timer that is off whose schedule is armed (`warn`);
+- `not-armed`: a timer that is on whose schedule is not armed (`fail`);
+- `schedule-failed`: a timer whose schedule failed (`fail`);
+- `last-run`: a timer whose last run failed (`warn`);
+- `armed`: a timer that is on and armed, its last run fine or none yet (`ok`);
+- `health`: a running daemon whose health check failed (`fail`) or warned (`warn`).
 
-Every other verdict's cause is null. The set may grow, so a reader treats a word it does
-not know as it treats null.
+The set may grow, so a reader names the words it knows and treats every other word, and
+null, as its fallback.
 
 ## Adopted timers on Linux
 
@@ -99,48 +120,86 @@ KEY` files a row under a project, and a project isn't removed while a service na
 ## The page
 
 With the `ui` extra (`moxi-ui`, the browser UI shell), services has a page in the shell,
-at `/m/services/`, and a block on the shell's home that counts the rows that are `ok`,
-`warn`, `fail` and `off`, each verdict as `moxi services list` gives it, and links to the
-page. Each act on the page runs the same code as the `moxi services` command you would
-run in a terminal, and refuses where that command refuses.
+at `/m/services/`, and a block on the shell's modules view that counts the rows that are
+`ok`, `warn`, `fail` and `off`, each verdict as `moxi services list` gives it, and links
+to the page. Each act on the page runs the same code as the `moxi services` command you
+would run in a terminal, and refuses where that command refuses.
 
 With projects' page in the shell too, each project's row there shows the services filed
-under it that failed (`docs failed at 18:00`), one you stopped by hand (`docs is
-stopped`) and a timer whose last run failed, each as its verdict gives it; an opened
-project lists every service filed under it in a `Services` row, first while one fails.
+under it that is down or failed (`docs down`, `web failed`), one you stopped by hand
+(`docs stopped by hand at 18:00`) and a timer whose last run failed, each as its verdict
+gives it; an opened project lists every service filed under it in a `Services` row,
+first while one fails, and its `Services` link opens this page filtered to the project.
 
-- **The list.** Every row, grouped by project, with its verdict and reason, its health
-  check's last result, its switch or on/off, and since when it runs or how its last run
-  went. Open a row to see its command, unit, directory, schedule and the supervisor's own
-  words. The page, the home's block and the Projects page's project facts follow the
-  rows as they change: while any of them is open, services' page server reads the
-  supervisor every 5 seconds and runs the health checks every 30, at most eight at a
-  time, and it keeps doing so for a while after the last one closes, until the server
-  stops when idle.
-- **Acts.** Start, stop and restart for a daemon, run now and run again for a timer,
-  enable and disable, and remove for a row you added. Each opens the shell's confirm
-  sheet, and nothing is sent until you confirm. A run of a row whose runs launch an agent
-  session says on its sheet that it spends usage.
+- **The list.** The first group holds the rows that need you, worst first; when none
+  does it says `Nothing is down.`, counts the rest by state (running, ready, on
+  schedule, stopped by hand, off) and says when the supervisor was read. Then the rows
+  you added or adopted, by project and then those with no project, and Moxi's own rows
+  by module. Each row says in plain words what it is doing: since when it runs, when a
+  timer last ran, that its runs spend usage. Open a row to see its state,
+  command, unit, folder, schedule, health check, last runs and the supervisor's own
+  words. With no row of your own the page says what a service is and offers `Add a
+  service`. The page, the modules view's block and the Projects page's project facts
+  follow the rows as they change: while any of them is open, services' page server
+  reads the supervisor every 5 seconds and runs the health checks every 30, at most
+  eight at a time, and it keeps doing so for a while after the last one closes, until
+  the server stops when idle.
+- **Addresses.** `/m/services/row/<id>` opens a row (`<id>` as the command line takes
+  it: a bare name for yours, `<module>/<name>` for Moxi's), `project/<key>` shows one
+  project's rows until `Show all`, `project/<key>/row/<id>` does both, and `add` and
+  `adopt` open the panel on that way. The page writes its address as you open and close
+  things. An address naming a row it doesn't have opens the page and says so; a project
+  key no row names keeps the filter and says `No service belongs to <key>.`
+- **Acts.** A closed row offers the one act that fits its state (`Start` on a stopped
+  daemon, `Restart` on one failing its health check, `Run now` on a timer whose last run
+  failed), and an opened row's foot the rest: start, stop and restart for a daemon, run
+  now for a timer with `Run again` and `Stop run` tucked under it, turn on and turn off,
+  and remove for a row you added or adopted. A press acts at once and the row follows it
+  to its end. Three ask first, in place: a run whose runs launch an agent session says
+  it spends usage, `Remove` says what goes and, for a row you added, the command that
+  adds it back, and stopping or restarting slots' server says what it ends. Stopping
+  ui's shell would close the page, so the page gives its command instead; restarting it
+  reloads the page. The page doesn't turn one of Moxi's own rows on or off: that is the
+  module's setting, under `Settings › <module>`, and `moxi services enable` and
+  `disable` still do it in a terminal.
+- **Stopping slots' server.** With `moxi-slots` installed (the `slots` extra), stopping
+  or restarting slots' server ends every session, open slot and job in its slots. Before
+  either, the page server reads through slots' API what is in use there. With nothing in
+  use the act goes ahead; with something in use, the page asks in the warning colour,
+  naming what ends, and the act goes ahead only when you were shown at least that much:
+  when more is in use by then, it is refused and the page asks again with the new count.
+  When the slots can't be read, no count is given: the act may end sessions in them, so
+  it goes ahead only after you confirm that. The row is known by its id,
+  `slots/server`: no other module says what stopping its daemon ends, so no other row is
+  guarded this way.
 - **One at a time.** The page server runs its acts one at a time, each as a job, and
   answers at once with the job's status. The page follows that status until the job ends,
   shows what the command printed, and keeps every act's control off while one runs. If
   the answer is lost, the page says the act may have been done and reads the rows again.
   The server keeps its jobs only while it runs: after it restarts, a status it holds no
   record of says so, and the row's state shows the outcome.
-- **Add.** The form `moxi services add` takes: a command line to run, or a unit already on
-  the system to adopt, with its schedule, directory, health command, project and doc. A
-  command line's first word must be a full path (`/usr/bin/python3`, not `python3`), and
-  the page refuses one that isn't. The page server runs under your service manager,
-  whose `PATH` isn't your shell's, so it doesn't search one; `command -v python3` in your
-  shell prints the full path. Give a health command's first word in full too, since the
-  checks run with that same `PATH`. As in a terminal, a command you add starts off: tick "Turn
-  it on now" to start it now and at every login. Adopting a unit asks you to say whether
-  it is on or off.
-- **On the phone.** Through the shell's gateway the phone shows the list and the home's
-  block, and can start, stop, restart, run, enable and disable a row, each confirmed on
-  the phone. It can't add or remove a row, and doesn't see the projects list: those stay
-  at the desk. When the gateway lets the phone read but not act, each sheet says to do the
-  act at the desk. Every text that carries the supervisor's or a command's words is
+- **Add.** `Add a service` opens a panel at the window's right edge with the two ways
+  `moxi services add` takes: a command to run, or a unit already on this computer to
+  adopt, with its schedule, folder, health check, project and description. Once you type
+  a unit, the panel reads what your system says of it: found, and whether it is a timer or
+  a service and on or off, or missing, or why it can't be adopted. Where your system
+  can't tell a unit's kind (launchd, Task Scheduler), the panel asks whether it keeps
+  running or runs on a schedule, and reads it again as that. A command line's first word
+  must be a full path (`/usr/bin/python3`, not `python3`), and the page refuses one that
+  isn't. The page server runs under your service manager, whose `PATH` isn't your
+  shell's, so it doesn't search one; `command -v python3` in your shell prints the full
+  path. Give a health command's first word in full too, since the checks run with that
+  same `PATH`. As in a terminal, a command you add starts off: turn on "Turn it on now"
+  to start it now and at every login. Adopting a unit asks you to say whether it is on
+  or off. A done add leaves the panel open and empty, and the row in the list.
+- **On the phone.** Through the shell's gateway the phone shows the list and the modules
+  view's block. When the gateway lets the phone act, each row carries `Open` and its
+  closed-row act, and an opened row's foot every act the desk offers but `Remove`; each
+  goes through the shell's confirm sheet, which says what the desk's confirm says, and
+  stopping or restarting slots' server reads what it ends first and shows the count.
+  When the gateway lets the phone read but not act, the phone shows no act, and the shell
+  says so. Adding and removing a row stay at the desk, and the phone doesn't see the
+  projects list. Every text that carries the supervisor's or a command's words is
   redacted on the way out, and a store that can't be read is named on the phone without
   its path.
 
@@ -164,7 +223,7 @@ moxi install services
 
 The first line installs `moxi`, Moxi's core, which provides the `moxi` command; the
 second adds services beside it and offers its optional extras: `projects` (project keys
-on rows) and `ui` (the page). The repository's README, at
+on rows), `slots` (what stopping slots' server ends) and `ui` (the page). The repository's README, at
 [CodeManEthan/moxi](https://github.com/CodeManEthan/moxi), covers the `moxi` command and
 lists the other modules.
 
@@ -172,7 +231,8 @@ lists the other modules.
 
 `moxi`, Moxi's core, and `psutil`, which reads a running daemon's uptime, memory and
 CPU time, and when the machine booted. The `projects` extra (`moxi-projects`) files rows
-under projects, and the `ui` extra (`moxi-ui`, the browser UI shell) adds the page.
+under projects, the `slots` extra (`moxi-slots`) says what stopping slots' server ends,
+and the `ui` extra (`moxi-ui`, the browser UI shell) adds the page.
 
 ## License
 

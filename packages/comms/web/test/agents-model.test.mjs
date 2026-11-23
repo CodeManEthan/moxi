@@ -103,9 +103,19 @@ test("a scoped address with neither mail nor a session goes to Other names, the 
   assert.deepEqual(rows[0].addresses.map((a) => a.qualified), ["planner"]);
   assert.deepEqual(rows[0].note.lines, []);
   assert.deepEqual(others, [
-    { qualified: "ops-watch", sentBy: null, writable: true },
-    { qualified: "ops-watch@x", sentBy: null, writable: true },
-    { qualified: "planner@kestrel-web", sentBy: null, writable: true },
+    { qualified: "ops-watch", sentBy: null, writable: true, speaksFor: "ops-watch" },
+    { qualified: "ops-watch@x", sentBy: null, writable: true, speaksFor: null },
+    { qualified: "planner@kestrel-web", sentBy: null, writable: true, speaksFor: null },
+  ]);
+});
+
+test("an idle name speaks through its first entry in Other names, its bare address when it has one", () => {
+  const r = roster([row("main@proj-b"), row("main@proj-a"), row("herald"), row("herald@x"), bound("planner"),
+                    row("planner@kestrel-web"), row("console", { kind: "send-only", module: "launcher" })]);
+  const { others } = agents(r);
+  assert.deepEqual(others.map((other) => [other.qualified, other.speaksFor]), [
+    ["console", null], ["herald", "herald"], ["herald@x", null], ["main@proj-a", "main"], ["main@proj-b", null],
+    ["planner@kestrel-web", null],
   ]);
 });
 
@@ -113,14 +123,14 @@ test("a send-only name is in Other names with its module and no Message", () => 
   const r = roster([row("console", { kind: "send-only", module: "ui" }), row("relay", { kind: "send-only" })]);
   const { rows, others } = agents(r);
   assert.deepEqual(rows, []);
-  assert.deepEqual(others, [{ qualified: "console", sentBy: "ui", writable: false },
-                            { qualified: "relay", sentBy: null, writable: false }]);
+  assert.deepEqual(others, [{ qualified: "console", sentBy: "ui", writable: false, speaksFor: null },
+                            { qualified: "relay", sentBy: null, writable: false, speaksFor: null }]);
 });
 
 test("a send-only name a program registered is sent by a program", () => {
   const r = roster([row("ticker", { kind: "send-only", module: null, holder: "program" })]);
   const { others } = agents(r);
-  assert.deepEqual(others, [{ qualified: "ticker", sentBy: "a program", writable: false }]);
+  assert.deepEqual(others, [{ qualified: "ticker", sentBy: "a program", writable: false, speaksFor: null }]);
 });
 
 test("an owed author with no other fact is a row of its own, with Reply", () => {

@@ -22,6 +22,12 @@ empty transcript. The load is accepted, and raises Ready ``startup``, once Codex
 the item. A Codex without ``thread/inject_items`` is refused for good, with no retry and
 no turn sent in its place.
 
+A forked thread. A launch given ``fork`` makes its first load a ``thread/fork`` of that
+thread: Codex copies the thread's history into a new thread, live parent or not, and the
+new thread is the session. It is loaded as a resumed thread is, its turn list read and no
+item injected, since the copied history is its rollout. Its id names the session from
+the fork's answer on, so a later load resumes it.
+
 Unturned threads. A thread is unturned until its first turn has run. The mark is set
 when the inject is accepted, or on a resumed load whose turn list is empty. It is
 cleared when the hook server has answered the thread's first ``SessionStart`` since the
@@ -252,11 +258,16 @@ class CodexHarness(Harness):
                  binary: str = BINARY, ping=None, client_factory=None,
                  app_server_factory=None, window_factory=None,
                  verify_wait: float = VERIFY_WAIT, backoff_factory=None,
-                 resume: str | None = None, guards: GuardRunner | None = None):
+                 resume: str | None = None, guards: GuardRunner | None = None,
+                 fork: str | None = None):
         if options is not None and not isinstance(options, Mapping):
             raise TypeError("options must be a mapping")
         if resume is not None and (not isinstance(resume, str) or not resume.strip()):
             raise ValueError("resume names a Codex thread id")
+        if fork is not None and (not isinstance(fork, str) or not fork.strip()):
+            raise ValueError("fork names a Codex thread id")
+        if resume is not None and fork is not None:
+            raise ValueError("a launch resumes a thread or forks one, not both")
         conflicts = OWNED_OPTIONS.intersection(options or ())
         if conflicts:
             names = ", ".join(sorted(conflicts))
@@ -302,6 +313,10 @@ class CodexHarness(Harness):
         #: The thread: None until a fresh thread is started; a resume names it from
         #: the start, so the first load is a `thread/resume`.
         self.session_id: str | None = resume
+        #: The thread a fork launch copies: the first load forks it with `thread/fork`,
+        #: and the new thread's id then names the session, so every later load resumes
+        #: it. None once forked, and for any other launch.
+        self._fork: str | None = fork
         self.active_turn_id: str | None = None
         self.thread_active = False
         self.ws = None
@@ -322,6 +337,16 @@ class CodexHarness(Harness):
         self._reported_turns: set[str] = set()
         self._settled_turns: set[str] = set()
         self._steering: set[str] = set()
+        #: The main thread's last completed agent message, `(turn id, text)`.
+        self._last_message: tuple[str | None, str | None] = (None, None)
+        #: The last main turn a UserPromptSubmit named: a later prompt naming it joined it.
+        self._prompted_turn: str | None = None
+        #: The last main turn reported and the delivery whose ``turn/start`` opened it,
+        #: `(turn id, delivery id)`, set under the same hold that frees the waiting slot;
+        #: None when no delivery opened it.
+        self._opened: tuple[str, str] | None = None
+        #: The hand-ins a UserPromptSubmit has already been placed on: each is placed once.
+        self._placed: set[str] = set()
         self._ending: str | None = None    # the turn whose Stop was answered unblocked
         self._steers_out = 0               # turn/steer requests sent and not yet answered
         self._steers_idle = threading.Condition(self._lock)
@@ -370,7 +395,7 @@ class CodexHarness(Harness):
             p for e in self.guards.entries for p in e.calls)
         flags, self.hook_keys = codex_hooks.session_flags(
             list(ping), hook_socket, hold_wait_s=endpoint.stop_wait_s,
-            listen_wait_s=endpoint.listen_wait_s,
+            listen_wait_s=endpoint.listen_wait_s, prompt_wait_s=endpoint.prompt_wait_s,
             pre_matcher=pre_matcher, guard_wait_s=self._guard_wait_ms / 1000,
             refuse=codex_hooks.refuse_table(self.guards.entries),
             after_tool=bool(endpoint.floors.rows), after_wait_s=endpoint.after_tool_wait_s,
@@ -404,7 +429,7 @@ class CodexHarness(Harness):
         self.guards.reload()
         return self.guards.take_notes()
 
-    def prompt_seen(self, turn_id, text: str | None) -> None:
+    def prompt_seen(self, turn_id, text: str | None, origin: str | None = None) -> None:
         """A main-loop prompt: the current main turn's prompts, for guards that want
         them. A prompt in another turn starts the list again."""
         if not isinstance(text, str):
@@ -414,7 +439,41 @@ class CodexHarness(Harness):
             held, prompts = self._prompts
             if turn_id is None or turn_id != held:
                 prompts = ()
-            self._prompts = (turn_id, (*prompts, Prompt(None, text)))
+            self._prompts = (turn_id, (*prompts, Prompt(origin, text)))
+
+    def place_prompt(self, turn_id, text: str | None) -> tuple[str | None, str | None,
+                                                                 bool]:
+        """`(origin, delivery, opens)` for a main-loop UserPromptSubmit, and marks the
+        hand-in it places the prompt on.
+
+        The host's hand-ins still out are the delivery whose `turn/start` it has out, the
+        delivery that opened the turn the prompt names, and each steer it is handing in;
+        each stays out until a prompt is placed on it. A prompt whose text equals one's
+        is that delivery's and carries no origin. One that equals none is typed in the
+        window (`composer`) only when no hand-in is out: while one is, the prompt could be
+        it with its text changed, so it carries no origin and no delivery, and is never
+        `composer`. `opens` is whether the prompt opens its turn (false: it joins a turn
+        an earlier prompt named; a hook with no turn id opens)."""
+        turn_id = turn_id if isinstance(turn_id, str) and turn_id else None
+        with self._lock:
+            opens = turn_id is None or turn_id != self._prompted_turn
+            if turn_id is not None:
+                self._prompted_turn = turn_id
+            opened = self._opened
+            live = [self._pending_delivery, opened[1] if opened else None,
+                    *sorted(self._steering)]
+            self._placed &= set(live)
+            if opened is not None and turn_id is not None and opened[0] != turn_id:
+                live[1] = None    # it opened another turn: this prompt is not its text
+            out = [i for i in dict.fromkeys(live) if i is not None and i not in self._placed]
+        if not out:
+            return codex_hooks.PROMPT_ORIGIN, None, opens
+        endpoint = self.endpoint
+        placed = next((i for i in out if endpoint.delivery_text(i) == text), None)
+        if placed is not None:
+            with self._lock:
+                self._placed.add(placed)
+        return None, placed, opens
 
     def context_tokens(self) -> int | None:
         """The main thread's context, in tokens, from its last token reading; None
@@ -636,7 +695,20 @@ class CodexHarness(Harness):
                     raise codex_hooks.HooksUntrusted(problem)
 
                 starting = self.session_id is None
-                if starting:
+                if starting and self._fork is not None:
+                    # A fork's thread has the copied history, so it is loaded as a
+                    # resumed one. Its id names the session at once: a load that fails
+                    # after this resumes it, and the parent is never forked twice.
+                    result = ws.call("thread/fork", proto.fork_params(
+                        self._fork, self.cwd, self.instructions, self.options,
+                    ))
+                    thread_id = (result.get("thread") or {}).get("id")
+                    if not thread_id:
+                        raise AppServerOffline("thread/fork returned no thread id")
+                    with self._lock:
+                        self.session_id, self._fork = thread_id, None
+                    starting = False
+                elif starting:
                     result = ws.call("thread/start", proto.start_thread_params(
                         self.cwd, self.instructions, self.options,
                     ))
@@ -866,6 +938,21 @@ class CodexHarness(Harness):
         collab.update(carried)
         self._unconfirmed = {agent_id for agent_id, entry in carried.items()
                              if entry[1] is not True}
+
+    def _note_message(self, params: dict) -> None:
+        """A completed agent message of the session's own thread: the latest is its
+        turn's answer so far, which a delivery the turn took ends with."""
+        item = params.get("item")
+        if not isinstance(item, dict) or item.get("type") != proto.AGENT_MESSAGE_ITEM:
+            return
+        text, turn_id = item.get("text"), params.get("turnId")
+        if not isinstance(text, str) or not isinstance(turn_id, str):
+            return
+        with self._lock:
+            thread = params.get("threadId")
+            if isinstance(thread, str) and thread != self.session_id:
+                return
+            self._last_message = (turn_id, text)
 
     def _track_collab(self, params: dict) -> None:
         """An item's start or end: a collab tool call's notices update the record. Items
@@ -1271,6 +1358,9 @@ class CodexHarness(Harness):
                 delivery_id = None   # settled meanwhile: the turn counts as the person's
             if delivery_id is not None:
                 self._pending_delivery = None
+            # The tie is the host's own, made before the lock is let go: a prompt that
+            # lands before the endpoint opens the turn still finds the delivery out.
+            self._opened = (turn_id, delivery_id) if delivery_id is not None else None
             command = None
             compaction = self._compacting
             if (delivery_id is None and compaction is not None
@@ -1313,6 +1403,8 @@ class CodexHarness(Harness):
             self._on_completed(params)
         elif method in ("item/started", "item/completed"):
             self._track_collab(params)
+            if method == "item/completed":
+                self._note_message(params)
         elif method == "thread/tokenUsage/updated":
             self._token_usage(params)
         elif method == LIMITS_UPDATED:
@@ -1500,7 +1592,10 @@ class CodexHarness(Harness):
             if self._ending == actual:
                 self._ending = None
             self.thread_active = False
-        self.endpoint.turn_ended(actual, outcome)
+            said, text = self._last_message
+            # An empty agent message is no answer (None), as on Claude Code.
+            answer = text if said == actual and text else None
+        self.endpoint.turn_ended(actual, outcome, answer=answer)
 
     def stop_facts(self, frame: dict) -> StopFacts:
         task_types = frame.get("task_types")
@@ -1651,7 +1746,7 @@ _HOSTS_LOCK = threading.Lock()
 
 def launch(cwd, *, instructions: str | None = None, env=None,
            window: bool = True, options=None, verify=None, additions=None,
-           resume: str | None = None):
+           resume: str | None = None, fork: str | None = None):
     """Launch a hosted Codex thread and return its live turns ``Session``.
 
     ``options`` are the thread parameters each load sends: top-level ``sandbox`` or
@@ -1659,7 +1754,9 @@ def launch(cwd, *, instructions: str | None = None, env=None,
     ``additions`` is the launch's ``LaunchAdditions`` for ``codex``; without it the host
     asks ``launch_additions`` once itself, and with it asks nothing. Its variables go
     over ``env`` and its options under ``options``. A key turns owns in either is refused
-    with ``ValueError``. ``resume`` names a thread to resume instead of starting one.
+    with ``ValueError``. ``resume`` names a thread to resume instead of starting one;
+    ``fork`` names a thread to fork with ``thread/fork`` instead, and the session is the
+    new thread, which every later load resumes. A launch names one or neither.
 
     ``verify(answer) -> str | None`` checks each load's answer; a reason fails a resume
     (the app-server is stopped and the load retried) and is logged for a new thread.
@@ -1671,11 +1768,11 @@ def launch(cwd, *, instructions: str | None = None, env=None,
     """
     return _launch(cwd, instructions=instructions, env=env, window=window,
                    options=options, verify=verify, additions=additions,
-                   resume=resume)[0]
+                   resume=resume, fork=fork)[0]
 
 
 def _launch(cwd, *, instructions=None, env=None, window=True, options=None, verify=None,
-            additions=None, resume=None, opened: list | None = None):
+            additions=None, resume=None, fork=None, opened: list | None = None):
     """`launch`, returning the endpoint beside the session, for the host entry.
 
     With `opened`, the endpoint is appended to it as soon as it is open. A stop asked
@@ -1690,7 +1787,7 @@ def _launch(cwd, *, instructions=None, env=None, window=True, options=None, veri
         raise FileNotFoundError(f"Codex working directory does not exist: {path}")
     env, options = for_host("codex", additions, cwd=path, env=env, options=options)
     harness = CodexHarness(path, instructions=instructions, env=env, window=window,
-                           options=options, verify=verify, resume=resume)
+                           options=options, verify=verify, resume=resume, fork=fork)
     endpoint = Endpoint(harness, env=harness.env).open()
     if opened is not None:
         opened.append(endpoint)
@@ -1713,7 +1810,7 @@ def _launch(cwd, *, instructions=None, env=None, window=True, options=None, veri
 
 def launch_args(argv) -> dict:
     """The keywords of `launch` (``cwd``, ``options``, ``instructions``, ``resume``,
-    ``window``) from the flags of ``moxi-turns-codex-host``. A bad flag raises
+    ``fork``, ``window``) from the flags of ``moxi-turns-codex-host``. A bad flag raises
     ``moxi_turns.codex_host.UsageError``, a ``ValueError``."""
     from .codex_host import launch_args as parse
 

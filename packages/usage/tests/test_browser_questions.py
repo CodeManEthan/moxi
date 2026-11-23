@@ -1,4 +1,4 @@
-"""The eight questions usage's page is there to answer, each answered from the page the
+"""The nine questions usage's page is there to answer, each answered from the page the
 way a person would, in a browser, through a real shell that starts usage's real page
 server:
 
@@ -6,11 +6,12 @@ server:
 2. And Codex? (with why its opened row has no fill time)
 3. What did today and this week cost?
 4. Where did the last 30 days go? (a row filtering Sessions; the Harness and Model filters)
-5. Which sessions cost most? (names, `Show`, `Earlier`, a session opened, its subagents
+5. Which sessions cost most? (the table and its names, a session opened, its subagents
    shown and one opened)
 6. Is caching paying off?
 7. What is eating the 5-hour window? (a new reading read again)
 8. How fresh is this?
+9. Does a session on Opus count against the plan's 5-hour window?
 
 Each walk starts at the page's own address and reads only what the page shows. Each runs
 twice: on a small install, whose shell leaves out every module but ui, usage and
@@ -58,6 +59,7 @@ SMALL = ("sessions", "ui", "usage")
 
 SONNET = "claude-sonnet-4-5"
 HAIKU = "claude-haiku-4-5"
+OPUS = "claude-opus-4-5"
 CODEX_MODEL = "gpt-5-codex"
 PROJECTS = ("proj-a", "proj-b")
 WORK_DIRS = ("proj-a", "proj-b", "scratch")
@@ -97,6 +99,10 @@ SESSIONS = WEEK + [CODEX] + EARLIER
 #: today's, so it adds to today's cost.
 LATE = {"harness": "claude", "session": session_id(30), "requests": 2, "folder": "proj-a", "ago": 10 * 60,
         "today": True, "model": SONNET, "title": None, "agents": []}
+#: A session on Opus twenty minutes before the moment, for the walk over the plan's
+#: window and the weekly Opus limit: today's, in the first project.
+ON_OPUS = {"harness": "claude", "session": session_id(31), "requests": 2, "folder": "proj-a",
+           "ago": 20 * 60, "today": True, "model": OPUS, "title": None, "agents": []}
 #: The oldest of today's sessions, in seconds before the moment.
 TODAY_S = max(spec["ago"] for spec in SESSIONS + [LATE] if spec["today"])
 
@@ -178,17 +184,34 @@ finally:
     conn.close()
 """
 
+#: One reading of Claude's weekly Opus window, a minute before the moment argv[1], from
+#: the session argv[2]: 20% used, resetting in four days.
+OPUS_READING = """
+import sys
+from moxi_usage import readings
+from moxi_usage.readings import Reading
+moment, session = float(sys.argv[1]), sys.argv[2]
+conn = readings.open_store()
+try:
+    readings.store(conn, [Reading("claude", "opus", 10080, "seven_day_opus", 20.0, moment + 4 * 86400,
+                                  moment - 60, "session-usage", session)], now=moment, days=7)
+finally:
+    conn.close()
+"""
+
 TIME = r"\d{1,2}:\d\d(?: [AP]M)?"
 #: A time with the day it may carry: `21:34`, `today 21:34`, `Wed 23:58`, `Nov 3 08:52`.
 WHEN = rf"(?:\w+ (?:\d+ )?)?{TIME}"
 MONEY = r"(?:at least )?\$\d[\d,]*\.\d\d"
 NAMED = rf"(?:today|yesterday|\w+|\w+ \d+) {TIME}"
 FIVE, WEEKLY = "claude/plan/300", "claude/plan/10080"
+WEEKLY_OPUS = "claude/opus/10080"
 CODEX_FIVE, CODEX_WEEKLY = "codex/codex/300", "codex/codex/10080"
 
 #: What a part of the page shows, top to bottom: each run of text, each control, each
 #: element with a name of its own, and each row with the facts it was given but its key,
-#: and its `where`, which differs between the installs by design and is checked apart.
+#: and its `where`, which differs between the installs by design and is checked apart; so
+#: does the Sessions table's first column, a project on one and a folder on the other.
 SHOWN = """el => {
   const out = [];
   const walk = (node) => {
@@ -208,6 +231,7 @@ SHOWN = """el => {
       for (const child of node.childNodes) walk(child);
       return;
     }
+    if ((tag === "td" || tag === "th") && node.cellIndex === 0 && node.closest("table[data-table=sessions]")) return;
     if (tag.includes("-")) out.push(`<${tag}>`);
     if (tag === "button" || tag === "a" || tag === "input") out.push(`[${tag}]`);
     for (const child of (node.shadowRoot ?? node).childNodes) walk(child);
@@ -339,12 +363,13 @@ def section(panel, key: str):
     return panel.locator(f"[data-part=below] section[data-group={key}]")
 
 
-def rows_of(sessions, which: str = "first"):
-    return sessions.locator(f"[data-list={which}] moxi-ui-row")
+def rows_of(sessions):
+    """The Sessions table's rows."""
+    return sessions.locator("table[data-table=sessions] tbody tr[data-row]")
 
 
-def keys(rows) -> list[str]:
-    return rows.evaluate_all("all => all.map((one) => one.dataset.key)")
+def row_keys(rows) -> list[str]:
+    return rows.evaluate_all("all => all.map((one) => one.dataset.row)")
 
 
 def key(spec: dict) -> str:
@@ -540,30 +565,28 @@ def test_the_last_30_days_go_by_place_and_model_and_a_row_filters_sessions_to_it
             expect(names).to_have_text(["~/work/proj-a", "~/work/proj-b", "~/work/scratch"])
             expect(places.get_by_text("no project")).to_have_count(0)
             target = places.locator("[data-part=rows] .tr2", has_text="~/work/proj-b")
-            set_to = "~/work/proj-b▾"
+            set_to = "1 folder▾"
         else:
             expect(names).to_have_text(["proj-a", "proj-b", "no project"])
             expect(places.locator("[data-part=sentence]")).to_contain_text('"no project" is ~/work/scratch.')
             target = places.locator('a[data-row="project:proj-b"]')
-            set_to = "proj-b▾"
+            set_to = "1 project▾"
         target.click()
         expect(page).to_have_url(re.compile(r"/m/usage/sessions$"))
         expect(filter_of(panel, "place").locator("button.pick")).to_have_text(set_to)
         sessions = section(panel, "sessions")
-        in_b = [key(spec) for spec in WEEK + [CODEX] if spec["folder"] == "proj-b"]
+        in_b = [key(spec) for spec in WEEK + [CODEX] + EARLIER if spec["folder"] == "proj-b"]
         expect(rows_of(sessions)).to_have_count(len(in_b))
-        assert sorted(keys(rows_of(sessions))) == sorted(in_b)
-        expect(sessions.locator("[data-more=earlier]")).to_have_text(
-            re.compile(rf"^Earlier · 1 session, \w+ \d+ to \w+ \d+, {MONEY}\s*Show$"))
+        assert sorted(row_keys(rows_of(sessions))) == sorted(in_b)
         steps.append(shown(sessions))
-        settle(panel, "place", "all")
+        settle(panel, "place", "All folders" if shell.small else "All projects")
 
         # Which model: the Model filter narrows everything below to it.
         expect(filter_of(panel, "model").locator(".k")).to_have_text("Model")
         pick(panel, "model", HAIKU)
         expect(filter_of(panel, "model").locator("button.pick")).to_have_text(f"{HAIKU}▾")
         expect(rows_of(sessions)).to_have_count(1)
-        expect(rows_of(sessions).first).to_have_attribute("data-key", key(WEEK[12]))
+        expect(rows_of(sessions).first).to_have_attribute("data-row", key(WEEK[12]))
         expect(models.locator("[data-part=closed]")).to_have_text(re.compile(rf"^{HAIKU} {MONEY}$"))
         steps.append(shown(panel.locator("[data-group=chart], [data-group=sessions], [data-group=models]")))
         settle(panel, "model", "all")
@@ -574,7 +597,7 @@ def test_the_last_30_days_go_by_place_and_model_and_a_row_filters_sessions_to_it
         pick(panel, "harness", "Codex")
         expect(filter_of(panel, "harness").locator("button.pick")).to_have_text("Codex▾")
         expect(rows_of(sessions)).to_have_count(1)
-        expect(rows_of(sessions).first).to_have_attribute("data-key", key(CODEX))
+        expect(rows_of(sessions).first).to_have_attribute("data-row", key(CODEX))
         expect(filter_of(panel, "model")).to_have_count(0)
         expect(models.locator("[data-part=closed]")).to_have_text(re.compile(rf"^{CODEX_MODEL} {MONEY}$"))
         steps.append(shown(panel.locator("[data-group=chart], [data-group=sessions], [data-group=models]")))
@@ -591,7 +614,7 @@ def test_the_last_30_days_go_by_place_and_model_and_a_row_filters_sessions_to_it
 
 # --- 5. Which sessions cost most? ----------------------------------------------------------
 
-def test_the_dearest_sessions_are_named_shown_further_and_one_opens_with_its_subagents(installs, on_both):
+def test_the_dearest_sessions_are_named_in_the_table_and_one_opens_with_its_subagents(installs, on_both):
     def walk(page, shell) -> list:
         steps = []
         panel = open_page(page)
@@ -599,45 +622,32 @@ def test_the_dearest_sessions_are_named_shown_further_and_one_opens_with_its_sub
         expect(sessions.locator("[data-part=closed]")).to_have_text(re.compile(rf"^most to {TYPED}, {MONEY}$"))
         sessions.get_by_role("link", name=f"{len(SESSIONS)} sessions").click()
         expect(page).to_have_url(re.compile(r"/m/usage/sessions$"))
-        expect(sessions.locator("[data-part=heading]")).to_have_text("This week, dearest first")
+        # Opened, the table of every session in the range, dearest first.
         rows = rows_of(sessions)
-        expect(rows).to_have_count(10)
-        # The dearest is named as typed; an unnamed one by its folder and start. Beside a
-        # typed name stands its project, or on the small install its folder; beside an
-        # unnamed one its project, or nothing, since its folder is in its name.
-        typed, unnamed = rows.nth(0), sessions.locator(f'moxi-ui-row[data-key="{key(WEEK[1])}"]')
-        expect(typed).to_have_attribute("data-key", key(WEEK[0]))
+        expect(rows).to_have_count(len(WEEK) + 1 + len(EARLIER))
+        assert sorted(row_keys(rows)) == sorted(key(spec) for spec in WEEK + [CODEX] + EARLIER)
+        expect(sessions.locator("table[data-table=sessions] th[aria-sort=descending]")).to_have_text("Est. cost ↓")
+        # The dearest is named as typed; an unnamed one by its folder and start. A Codex
+        # thread has no typed name either, and a badge that says how it is priced.
+        expect(rows.first).to_have_attribute("data-row", key(WEEK[0]))
+        expect(rows.first.get_by_role("link")).to_have_text(TYPED)
+        unnamed = sessions.locator(f'tr[data-row="{key(WEEK[1])}"]')
+        expect(unnamed.get_by_role("link")).to_have_text(re.compile(rf"^proj-b · started {NAMED}$"))
+        thread = sessions.locator(f'tr[data-row="{key(CODEX)}"]')
+        expect(thread.get_by_role("link")).to_have_text(re.compile(rf"^proj-b · started {NAMED}$"))
+        expect(thread.locator("[data-part=badge]")).to_have_text("codex")
+        steps.append(shown(sessions))
+
+        # A session opened from its row: first in the section, what it cost and where it
+        # went. Beside a typed name stands its project, or on the small install its folder.
+        rows.first.get_by_role("link").click()
+        expect(page).to_have_url(re.compile(rf"/m/usage/sessions/claude/{WEEK[0]['session']}$"))
+        typed = sessions.locator(f'[data-list=placed] moxi-ui-row[data-key="{key(WEEK[0])}"]')
         expect(typed).to_have_attribute("name", TYPED)
         expect(typed).to_have_attribute("where", "proj-a")
         expect(typed).to_have_attribute("lead", re.compile(r"^\d+ requests$"))
         expect(typed).to_have_attribute("rest", SONNET)
         expect(typed).to_have_attribute("tail", re.compile(r"^context (under 1|\d+)% full$"))
-        expect(unnamed).to_have_attribute("name", re.compile(rf"^proj-b · started {NAMED}$"))
-        expect(unnamed).to_have_attribute("where", "" if shell.small else "proj-b")
-        steps.append(shown(sessions))
-
-        # `Show` brings the rest of the week below; `Earlier` the days before it.
-        more = sessions.locator("[data-more=first]")
-        expect(more).to_have_text(re.compile(rf"^4 more this week, {MONEY} between them\s*Show$"))
-        first = keys(rows)
-        more.get_by_role("button", name="Show").click()
-        expect(rows).to_have_count(14)
-        assert keys(rows)[:10] == first
-        assert sorted(keys(rows)) == sorted(key(spec) for spec in WEEK + [CODEX])
-        # A Codex thread has no typed name: its folder and start, and its model.
-        thread = sessions.locator(f'moxi-ui-row[data-key="{key(CODEX)}"]')
-        expect(thread).to_have_attribute("name", re.compile(rf"^proj-b · started {NAMED}$"))
-        expect(thread).to_have_attribute("rest", CODEX_MODEL)
-        earlier = sessions.locator("[data-more=earlier]")
-        expect(earlier).to_have_text(re.compile(rf"^Earlier · 2 sessions, \w+ \d+ to \w+ \d+, {MONEY}\s*Show$"))
-        earlier.get_by_role("button", name="Show").click()
-        expect(rows_of(sessions, "earlier")).to_have_count(2)
-        assert keys(rows_of(sessions, "earlier")) == [key(spec) for spec in EARLIER]
-        steps.append(shown(sessions))
-
-        # A session opened in its row: what it cost and where it went.
-        typed.get_by_role("link", name="Open").click()
-        expect(page).to_have_url(re.compile(rf"/m/usage/sessions/claude/{WEEK[0]['session']}$"))
         body = typed.locator("[data-part=session]")
         expect(body.locator("[data-line=requests]")).to_have_text(re.compile(r"^\s*Requests\s*16 requests by the main agent "))
         expect(body.locator("[data-line=context]")).to_have_text(re.compile(r"tokens on the last request"))
@@ -685,12 +695,12 @@ def test_token_kinds_say_how_much_input_came_from_cache_and_what_caching_saved(i
         expect(rows).to_have_count(4)
         assert sorted(rows.locator(".nm").evaluate_all(
             "all => all.map((one) => one.textContent.split('·')[0].trim())")) == [
-            "Cache reads", "Cache writes", "Fresh input", "Output"]
+            "Cache create", "Cache reads", "Input", "Output"]
         # Every request read six thousand tokens from cache at a tenth of the input price.
         expect(kinds.locator("[data-part=saving]")).to_have_text(re.compile(
             r"^[\d.]+[kM]? of [\d.]+[kM]? input tokens were read from cache\. With no cache, at the same prices, "
-            r"those reads would have cost \$[\d.,]+ as fresh input; they cost \$[\d.,]+, and cache writes cost "
-            r"\$[\d.,]+ more than fresh input, so caching saved about \$[\d.,]+\. An estimate\.$"))
+            r"those reads would have cost \$[\d.,]+ as input; they cost \$[\d.,]+, and cache writes cost "
+            r"\$[\d.,]+ more than input, so caching saved about \$[\d.,]+\. An estimate\.$"))
         return [closed, shown(kinds)]
 
     on_both(installs, walk)
@@ -763,5 +773,35 @@ def test_each_part_says_when_it_was_read_and_read_new_sessions_brings_a_new_one_
         expect(foot.get_by_role("button", name="Read new sessions")).to_be_visible()
         steps.append(shown(panel.locator("[data-group=limits] .gk, [data-group=cost], [data-part=foot]")))
         return steps
+
+    on_both(made, walk)
+
+
+# --- 9. Does a session on Opus count against the plan's 5-hour window? --------------------
+
+def test_an_opus_session_counts_against_the_plan_and_the_opus_limit_lists_no_one(ui_shells, on_both):
+    made = two_installs(ui_shells)
+    for shell in made.values():
+        write(shell, [ON_OPUS], shell.moment)
+        run(shell, sys.executable, "-m", "moxi", "usage", "index")
+        run(shell, sys.executable, "-c", OPUS_READING, repr(shell.moment), ON_OPUS["session"])
+
+    def walk(page, shell) -> list:
+        panel = open_page(page)
+        opus = limit(panel, WEEKLY_OPUS)
+        expect(opus.locator("span").first).to_have_text("Weekly Opus")
+        expect(opus.locator(".u")).to_have_text("20% used")
+        opus.click()
+        expect(page).to_have_url(re.compile(r"/m/usage/limit/claude/opus/10080$"))
+        # A limit that is not the plan's own says when it opened and lists no one.
+        lines = opened(panel)
+        expect(lines.locator("[data-opened=window] .f")).to_have_text(re.compile(r"20% used$"))
+        expect(lines.locator("[data-opened=used]")).to_have_count(0)
+        # The plan's own 5-hour window, opened, counts every model, the Opus session too.
+        limit(panel, FIVE).click()
+        expect(page).to_have_url(re.compile(r"/m/usage/limit/claude/plan/300$"))
+        expect(opened(panel).locator("[data-opened=used] [data-part=used-total]")).to_have_text(
+            re.compile(rf"^\s*3 sessions, \d+ requests since {WHEN}\s*{MONEY}$"))
+        return [shown(group(panel, "claude"))]
 
     on_both(made, walk)

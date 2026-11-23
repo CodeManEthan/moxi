@@ -90,6 +90,18 @@ def test_a_page_keeps_its_group_and_order_and_a_wrong_one_reads_as_the_default()
         assert page(group="daily", order=order)["order"] == 500
 
 
+def test_a_page_keeps_the_modules_that_take_it_out_of_the_band_and_a_wrong_value_reads_as_none():
+    def page(**extra):
+        return _one(_ok(script="page.js", place="page", **extra), name="page")
+
+    assert page(band_unless=["sessions"])["band_unless"] == ["sessions"]
+    assert page(band_unless=("sessions", "memory", "sessions"))["band_unless"] == ["sessions", "memory"]
+    assert page()["band_unless"] == []
+    for wrong in ("sessions", ["Sessions"], ["sessions", 3], [""], {"sessions": True}, True, None):
+        assert page(band_unless=wrong)["band_unless"] == []
+    assert _one(_ok(home=True, band_unless=["sessions"]))["band_unless"] is None
+
+
 @pytest.mark.parametrize("home_as", ["main", "row"])
 def test_a_home_block_keeps_its_home_as_and_order(home_as):
     kept = _one(_ok(home=True, home_as=home_as, order=10))
@@ -117,12 +129,12 @@ def test_a_home_as_that_does_not_fit_refuses_the_component(decl, reason):
     assert placed == [] and reason in refused[0]["reason"]
 
 
-def test_the_modules_shape_sends_the_three_fields():
+def test_the_modules_shape_sends_the_four_fields():
     from moxi_ui.page import _COMPONENT
 
     row = _one(_ok(home=True, home_as="row", order=900))
     assert set(row) == set(_COMPONENT.items)
-    assert {"home_as", "group", "order"} <= set(_COMPONENT.items)
+    assert {"home_as", "group", "order", "band_unless"} <= set(_COMPONENT.items)
 
 
 def _fake_run(listing, exports, calls):

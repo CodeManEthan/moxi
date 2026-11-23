@@ -55,7 +55,7 @@ def test_rules_ok_counts_the_pinned_sets():
     row = doctor.rules_row()
     assert row.state == "ok"
     assert row.detail == ("credentials 231 rules (221 from gitleaks v8.30.1, 10 local), "
-                          "broad 3, 0 dropped")
+                          "broad 4, 0 dropped")
     assert row.fix is None
 
 
@@ -111,7 +111,7 @@ def test_rules_warn_when_a_rule_is_dropped(rules_copy):
     row = doctor.rules_row()
     assert row.state == "warn"
     assert row.detail.startswith("credentials 231 rules (221 from gitleaks v8.30.1, 10 "
-                                 "local), broad 2, 1 dropped: ")
+                                 "local), broad 3, 1 dropped: ")
     assert f"broad/{gone['id']}" in row.detail
 
 

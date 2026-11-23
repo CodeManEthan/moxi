@@ -95,15 +95,15 @@ Send boundary, enforced here:
     `[last reply]` on the replies that leave one and that close it. A read that fails
     or may be cut short lets the reply through with a NOTE.
   * the exempt sender: the operator (any lane whose sender is `operator`). No posture
-    refusal applies to him: a new send of his with no `--posture` is open, with no
-    `[open]`, and what he passes is written as passed. The `--cap` refusals still apply.
+    refusal applies: the operator's new send with no `--posture` is open, with no
+    `[open]`, and a posture passed is written as passed. The `--cap` refusals still apply.
   * the single-reply refusal: a plain `moxi comms send` whose
     recipients include someone holding a verified, unexpired `[reply-once]` ask to this
     sender, still unanswered in the record, posts nothing and names the cure --
     `moxi comms reply <id>`, or `--new` for a message on another subject. The daemon only
     nominates candidate asks; the verb decides on its own read of the record, and every
     read that fails lets the send through with a NOTE. This refusal never applies to the
-    exempt sender; the cold-cache hold below holds his message like anyone's.
+    exempt sender; the cold-cache hold below holds the operator's message like anyone's.
 Resolution is tier/route resolution, never a liveness check: nothing about delivery
 timing is inferred from it.
 
@@ -153,7 +153,7 @@ import time
 
 from moxi import exit as moxi_exit
 
-from . import (api, attribution, cache, cards, claimfile, claimhold, config,
+from . import (api, archive, attribution, cache, cards, claimfile, claimhold, config,
                directory, glossary, machine_line, policy, sending)
 from .client import DaemonClient, DaemonError, DaemonOffline, DaemonTimeout, VersionMismatch
 from .constants import BACKEND_ENV
@@ -333,7 +333,8 @@ def cmd_history(args, ctx: Context) -> int:
             return moxi_exit.OK
     with ctx.db() as db:
         room = directory.room_by_name(db, NAMES)
-        msgs = ctx.record.history(room["room_id"], limit=args.limit)
+        # An older comms' record (`[archive] record`) reads as the start of this one.
+        msgs, from_archive = archive.timeline(ctx.record, room["room_id"], args.limit)
         rows = []
         # The effective audience of every message IN THIS PAGE, oldest first (the seam's
         # `history` is ascending), so a hand-typed reply can show the audience it
@@ -353,7 +354,8 @@ def cmd_history(args, ctx: Context) -> int:
             if author.qualified != identity and not addressed:
                 continue
             rows.append((m, ml, author, "from" if author.qualified == identity else "to"))
-        dropped = _history_dropped(db, [m.id for m, *_ in rows])
+        # The store's drop rows are comms.db's; an archive message has none.
+        dropped = _history_dropped(db, [m.id for m, *_ in rows if not from_archive(m)])
     if not rows:
         ctx.say(f"no {NAMES} history for {identity}.")
     for m, ml, author, direction in rows:
@@ -368,7 +370,8 @@ def cmd_history(args, ctx: Context) -> int:
                 + (f" re:{ml.reply_to}" if ml.reply_to else "")
                 + _history_audience(ml, effective)
                 + _history_marks(ml)
-                + _history_gone(m, dropped.get(str(m.id), {})))
+                + _history_gone(m, {} if from_archive(m)
+                                else dropped.get(str(m.id), {})))
         for line in ml.text.splitlines():
             ctx.say(f"      {line}")
     if window is not None:
@@ -500,7 +503,12 @@ def cmd_explain(args, ctx: Context) -> int:
             "comms' store and survives, so here is that much.", 76)))
         ctx.say("")
         qualified = identity_of(identity)
-        if args.message_id is not None:
+        older = None if args.message_id is None else archive.explained(
+            books.read_archive_skipped(), args.message_id, qualified)
+        if older is not None:
+            for line in _older_explain(qualified, args.message_id, older):
+                ctx.say(line)
+        elif args.message_id is not None:
             dropped = books.read_dropped(qualified, args.message_id)
             if dropped is not None:
                 from .daemon import CASE_REASONS
@@ -792,6 +800,12 @@ def cmd_doctor(args, ctx: Context) -> int:
             row("waiting", line)
     for line in _store_rows(ctx.env):
         row("store", line)
+    # A session whose adapter is gone while it runs: its mail has stopped.
+    from .checks import adapter_rows
+
+    for gone in adapter_rows(env=ctx.env):
+        row("adapter", f"{gone.name.removeprefix('adapter: ')}: {gone.detail}; "
+                       f"{gone.fix}")
     # turns' own rows (its config, the listeners registered with it, the live endpoints,
     # its Claude plugins) are turns' to declare; `moxi doctor` runs them. comms keeps the
     # bound sessions that have no endpoint, above.
@@ -972,6 +986,10 @@ def _render_explain(info: dict) -> str:
 
     d = info["delivery"]
     about = "" if d is None else f"   message {d['message_id']}"
+    if info.get("archive") is not None:
+        return "\n".join(_older_explain(info["identity"], d["message_id"],
+                                        info["archive"])
+                         + _render_facts(info))
     lines = [f"{info['identity']}   "
              f"{info['case'] or 'no delivery to classify'}{about}", ""]
     if info["case"]:
@@ -983,7 +1001,55 @@ def _render_explain(info: dict) -> str:
         lines += _wrap(f"comms could not classify this message: "
                        f"{info['case_error']}. The cursor's own reason, below, is what "
                        "there is to go on.", 74, "  ") + [""]
+    return "\n".join(lines + _render_facts(info))
 
+
+def _older_explain(identity: str, message_id, older: dict) -> list[str]:
+    """The head of `explain` for a message from an older comms' record
+    (`archive.explained`): what that record's queue and the name's cursor file there say
+    of it for `identity`, and that the rest of its delivery is not read."""
+    queued, cursor = older.get("queued"), older.get("cursor")
+    if queued is None:
+        held = "That record can't be read now, so nothing of its delivery is known."
+    elif queued:
+        held = (f"That comms still held it in {identity}'s queue when it stopped, so "
+                "it had not reached that name then, and comms.db does not deliver it.")
+    else:
+        held = f"That comms was not holding it in {identity}'s queue when it stopped."
+    text = ("This message is from the older comms' record, read in place. " + held
+            + _older_cursor(identity, cursor)
+            + " The rest of its delivery (the hand-over, the injection) was that "
+            "daemon's memory, which is gone. The facts below are comms.db's, about this "
+            "name, not about this message.")
+    return ([f"{identity}   from the older comms' record   message {message_id}", ""]
+            + _wrap(text, 74, "  ") + [""])
+
+
+def _older_cursor(identity: str, cursor: dict | None) -> str:
+    """The older cursor file's sentence for `_older_explain`, led by a space."""
+    if cursor is None:
+        return ""
+    reason, at = cursor["reason"], cursor.get("updated_at")
+    when = f", written {at}" if at else ""
+    if reason == archive.ALREADY_PAST:
+        return (f" Its cursor file for {identity} stands at {cursor['position']}{when}: "
+                "at or past this message, so a turn of that name completed with it.")
+    if reason == archive.BEHIND:
+        return (f" Its cursor file for {identity} stands at {cursor['position']}{when}: "
+                "short of this message, so no turn of that name completed with it.")
+    if reason == archive.NO_CURSOR:
+        return f" It kept no cursor file for {identity}."
+    if reason == archive.NOT_AN_ID:
+        return (f" Its cursor file for {identity} holds {cursor['position']!r}, which is "
+                "not a message id, so nothing can be compared with it.")
+    return f" Its cursor file for {identity} can't be read as a cursor."
+
+
+def _render_facts(info: dict) -> list[str]:
+    """`explain`'s facts under the verdict: the binding, the delivery, the injection,
+    the activity, the queue and the cursor, then the text the identity was shown."""
+    d = info["delivery"]
+    lines = []
     b = info["binding"]
     if b is None:
         lines += _field("binding", "none. nothing holds this name right now",
@@ -992,7 +1058,7 @@ def _render_explain(info: dict) -> str:
         lines += _field("binding", f"{b['tier']}, adapter {b['adapter']}, "
                                    f"bound {_ago(b['bound_for'])}")
 
-    if d is None:
+    if d is None or info.get("archive") is not None:
         lines += _field("delivered", "nothing this daemon still knows about",
                         "a binding drops what it was handed when it ends, and the",
                         "daily trim drops a hand-over older than an hour")
@@ -1025,7 +1091,7 @@ def _render_explain(info: dict) -> str:
     if info["digest"]:
         lines += ["", "  the text this identity was shown, verbatim:"]
         lines += _digest_lines(info["digest"])
-    return "\n".join(lines)
+    return lines
 
 
 def _digest_lines(digest: str, max_lines: int = 14, max_chars: int = 900) -> list[str]:
@@ -1080,9 +1146,9 @@ def build_parser(prog: str = PROG) -> argparse.ArgumentParser:
                          "MOXI_COMMS_BACKEND, then the config file, then local)")
     sub = ap.add_subparsers(dest="verb", required=True)
 
-    # `claude` and `codex` are the wrappers (`adapters/session.py`,
-    # `adapters/codex_wrapper.py`), each with a parser of its own; `main` hands it every
-    # argument after the verb. Listed here so `--help` names them.
+    # `claude`, `codex` and `opencode` are the wrappers (`adapters/session.py`,
+    # `adapters/codex_wrapper.py`, `adapters/opencode.py`), each with a parser of its own;
+    # `main` hands it every argument after the verb. Listed here so `--help` names them.
     sub.add_parser("claude", add_help=False,
                    help="start a Claude Code session with a comms identity "
                         "(`claude --help` for its options). The options of "
@@ -1091,6 +1157,11 @@ def build_parser(prog: str = PROG) -> argparse.ArgumentParser:
                    help="start a Codex session with a comms identity, through turns' "
                         "Codex host (`codex --help` for its options). The options of "
                         "`moxi comms` itself, such as --backend, do not apply to it")
+    sub.add_parser("opencode", add_help=False,
+                   help="start an OpenCode session for an identity in the config file's "
+                        "[opencode] roster, in this terminal (`opencode --help` for its "
+                        "options; experimental). The options of `moxi comms` itself, such "
+                        "as --backend, do not apply to it")
 
     s = sub.add_parser("send", help="message an identity by name")
     s.add_argument("to", help="name, or a comma-separated list (one post, one thread)")
@@ -1358,6 +1429,9 @@ def main(argv=None, ctx: Context | None = None, *, prog: str = PROG) -> int:
     if argv[:1] == ["codex"]:
         from .adapters import codex_wrapper
         return codex_wrapper.main(argv[1:], prog=f"{prog} codex")
+    if argv[:1] == ["opencode"]:
+        from .adapters import opencode
+        return opencode.main(argv[1:], prog=f"{prog} opencode")
     args = build_parser(prog).parse_args(argv)
     ctx = ctx or Context(backend=getattr(args, "backend", None))
     try:

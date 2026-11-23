@@ -15,6 +15,7 @@ newest place.
 from __future__ import annotations
 
 import json
+import os
 import re
 import sys
 from pathlib import Path
@@ -214,7 +215,27 @@ def test_a_project_picked_from_all_projects_is_the_line_and_the_launch_names_it(
     expect(menu.locator('.places .row[data-current="true"] .name')).to_have_text("proj-b")
 
 
-def test_scratch_picked_on_the_line_is_the_launchs_one_place_and_a_dir_turns_it_off(page, shell):
+@pytest.fixture(scope="module")
+def scratch_made():
+    """The scratch dirs this module's launches made in the real `/tmp/scratch-<uid>` (the
+    page server's shell has no stand-in for it): each one a test adds that lies in that
+    parent is removed when the module ends, and the parent too when it wasn't there
+    before. Only empty dirs go, so nothing a session wrote is lost. Module scope, since
+    the test fence refuses a test's own write outside its tmp."""
+    parent = Path(f"/tmp/scratch-{os.getuid()}")
+    had_parent = parent.exists()
+    made: list[Path] = []
+    yield made
+    gone = [each for each in made if each.parent == parent]
+    for each in [*gone, *([] if had_parent else [parent])]:
+        try:
+            each.rmdir()
+        except FileNotFoundError:
+            pass
+
+
+def test_scratch_picked_on_the_line_is_the_launchs_one_place_and_a_dir_turns_it_off(
+        page, shell, scratch_made):
     piece = kit.open_home(page)
     menu = open_where(piece)
     scratch = menu.locator('.others .row[data-place="scratch"]')
@@ -238,7 +259,11 @@ def test_scratch_picked_on_the_line_is_the_launchs_one_place_and_a_dir_turns_it_
     assert "cwd" in body["leave_out"] and "project" in body["leave_out"], body
     expect(piece.locator('[data-line="started"]')).to_be_visible()
     row = kit.newest_launch(shell)
+    scratch_made.append(Path(row.cwd))
     assert row.values.get("scratch") is True and row.project_key is None, row
+    # The folder is named by the session name under this user's own parent in /tmp,
+    # whatever the shell's TMPDIR says.
+    assert row.cwd == f"/tmp/scratch-{os.getuid()}/{row.values['name']}", row
     # The tick is on Scratch; a folder picked again sends the folder alone.
     menu = open_where(piece)
     expect(menu.locator('.row[data-current="true"]')).to_have_attribute("data-place", "scratch")

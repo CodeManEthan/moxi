@@ -4,6 +4,7 @@ import os
 
 import pytest
 from moxi.doctor import Row
+from moxi_secrets import REDACT_VERSION
 from moxi_sessions import api
 
 from moxi_memory import additions, doctor, ingest, links, module, state, table
@@ -80,7 +81,7 @@ def test_after_an_ingest_the_index_and_ingest_rows_say_what_is_there():
     rows = by_name()
     index_row = rows["index"]
     assert index_row.state == "ok"
-    assert "generation 1" in index_row.detail and "schema 1" in index_row.detail
+    assert "generation 1" in index_row.detail and "schema 2" in index_row.detail
     assert "2 messages and calls" in index_row.detail
     assert "still filling" not in index_row.detail
     assert "claude: last walk " in rows["ingest"].detail
@@ -119,6 +120,29 @@ def test_a_killed_rebuild_is_a_warn_on_the_index_row_until_a_rebuild_finishes():
     ingest.run("rebuild", launcher=links.Link(links.NONE), then=lambda args: None)
     row = by_name()["index"]
     assert row.state == "ok" and "did not finish" not in row.detail
+
+
+def test_the_index_row_shows_the_redact_version_and_warns_while_it_is_below_secrets():
+    from moxi_memory import index
+
+    ingest_one()
+    row = by_name()["index"]
+    assert row.state == "ok" and f"redact version {REDACT_VERSION}" in row.detail
+    with index.writer() as w:
+        conn = w.connect()
+        try:
+            conn.execute("DELETE FROM meta WHERE key = ?", (index.REDACT_VERSION_KEY,))
+        finally:
+            conn.close()
+    row = by_name()["index"]
+    assert row.state == "warn" and "redact version 1" in row.detail
+    assert f"secrets' redact version {REDACT_VERSION} catches" in row.detail
+    assert row.fix == "moxi memory reindex"
+    ingest.run("rebuild", launcher=links.Link(links.NONE), then=lambda args: None)
+    row = by_name()["index"]
+    assert row.state == "ok" and f"redact version {REDACT_VERSION}" in row.detail
+    assert "redacted again the rows stored under redact version 1" in row.detail
+    assert "dropped no session" in row.detail
 
 
 def ask(kind, asked):
@@ -223,7 +247,7 @@ def test_the_announcement_names_every_part():
     assert module.SETUP == "moxi_memory.setup:setup"
     assert module.TEARDOWN == "moxi_memory.setup:teardown"
     assert module.DOCTOR == "moxi_memory.doctor:rows"
-    assert set(module.OPTIONAL) == {"comms", "launcher"}
+    assert set(module.OPTIONAL) == {"comms", "launcher", "connector", "secrets"}
     assert module.TIMERS["ingest"] == {
         "command": "moxi-memory-ingest", "args": ["--walk"], "every": "1h",
         "switch": "ingest.timer.enabled",

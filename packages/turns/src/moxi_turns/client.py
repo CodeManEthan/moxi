@@ -463,19 +463,23 @@ class Session:
 
     def deliver(self, text: str, *, only_if_idle: bool = False,
                 if_turn_number: int | None = None, refuse_draft: bool = False,
-                refuse_agents: bool = False, ref: str | None = None) -> Delivery:
+                refuse_agents: bool = False, ref: str | None = None,
+                by: str | None = None, senders: Iterable[str] = ()) -> Delivery:
         """Hand `text` to the session as the next input. With `only_if_idle` it starts a
         turn only when none is open, and `if_turn_number`, `refuse_draft` and
         `refuse_agents` add their checks; without it those are a `ValueError`. `ref` is
         the caller's own name for the delivery (at most 256 bytes as UTF-8), echoed on
-        its values and the turn notifications."""
+        its values and the turn notifications. `by` is the asking module's name and
+        `senders` the names the text speaks for; the session's `prompt` listeners read
+        them on the prompt the delivery raises (`delivery_by`, `delivery_senders`)."""
         _check_text(text)
         ref = check_ref(ref)
+        asker = _asker(by, senders)
         if not only_if_idle and (if_turn_number is not None or refuse_draft
                                  or refuse_agents):
             raise ValueError("if_turn_number, refuse_draft and refuse_agents are valid "
                              "only with only_if_idle=True")
-        params: dict[str, Any] = {"text": text}
+        params: dict[str, Any] = {"text": text, **asker}
         if ref is not None:
             params["ref"] = ref
         if only_if_idle:
@@ -483,12 +487,13 @@ class Session:
                           refuse_draft=refuse_draft, refuse_agents=refuse_agents)
         return self._hand("deliver", params, ref)
 
-    def steer(self, text: str, *, ref: str | None = None) -> Delivery:
+    def steer(self, text: str, *, ref: str | None = None, by: str | None = None,
+              senders: Iterable[str] = ()) -> Delivery:
         """Hand `text` into the turn now running. A session with no turn running refuses
-        it `idle`."""
+        it `idle`. `by` and `senders` are as `deliver`'s."""
         _check_text(text)
         ref = check_ref(ref)
-        params: dict[str, Any] = {"text": text}
+        params: dict[str, Any] = {"text": text, **_asker(by, senders)}
         if ref is not None:
             params["ref"] = ref
         return self._hand("steer", params, ref)
@@ -629,6 +634,24 @@ class Session:
 def _check_text(text: Any) -> None:
     if not isinstance(text, str) or not text:
         raise ValueError("text is a non-empty string")
+
+
+def _asker(by: str | None, senders: Iterable[str]) -> dict[str, Any]:
+    """A delivery's `by` and `senders` params, each left out when not given. Raises
+    `ValueError` on an empty or non-string name."""
+    params: dict[str, Any] = {}
+    if by is not None:
+        if not isinstance(by, str) or not by:
+            raise ValueError("by is a non-empty string")
+        params["by"] = by
+    if isinstance(senders, str):
+        raise ValueError("senders is a list of names, not one string")
+    names = list(senders)
+    if not all(isinstance(n, str) and n for n in names):
+        raise ValueError("senders are non-empty strings")
+    if names:
+        params["senders"] = names
+    return params
 
 
 def _exited(proc_id: Any, bound: float) -> bool:

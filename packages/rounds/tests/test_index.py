@@ -127,7 +127,7 @@ def test_a_write_leaves_the_rounds_dir_status_and_flow_and_its_logs_digest(home)
     assert found["logs"] == [("proj-a", "a-round", str(at.round_log), len(data),
                               hashlib.sha256(data).hexdigest(), 1, index.DERIVED, None)]
     assert found["rounds"] == [("proj-a", "a-round", str(home.rounds_dir / "a-round"), "open",
-                                "small", None)]
+                                "small", None, None)]
     assert found["items"] == []
 
 
@@ -598,3 +598,77 @@ def test_a_landing_row_the_log_does_not_give_is_a_disagreement(home):
     conn.close()
     assert [one.problem for one in index.disagreements([home])] == [
         "has rows in the index that its log does not give"]
+
+
+# -- the round's own lead ----------------------------------------------------------------
+
+def test_a_rounds_row_keeps_its_own_lead(home):
+    open_round(home)
+    write.record(where(home, "a-round"), by="planner",
+                 event=lambda view, result: write.Entry(
+                     "lead.changed", {"lead": "atlas-lead", "was": None}))
+
+    assert rows()["rounds"][0][-1] == "atlas-lead"
+    assert index.read("proj-a", home.rounds_dir, "a-round").lead == "atlas-lead"
+    assert index.rounds("proj-a", home.rounds_dir)[0].lead == "atlas-lead"
+
+
+def test_a_row_made_before_the_lead_was_kept_reads_the_lead_from_the_log(home):
+    at = open_round(home)
+    write.record(at, by="planner",
+                 event=lambda view, result: write.Entry(
+                     "lead.changed", {"lead": "atlas-lead", "was": None}))
+    # As the version before left the row: no lead, made under the count before.
+    conn = sqlite3.connect(paths.index_file())
+    with conn:
+        conn.execute("UPDATE rounds SET lead = NULL")
+        conn.execute("UPDATE logs SET derived = ?", (index.DERIVED - 1,))
+    conn.close()
+
+    assert index.read("proj-a", home.rounds_dir, "a-round").lead == "atlas-lead"
+    assert [one.problem for one in index.disagreements([home])] == [
+        "has a log that changed since the index last read it"]
+
+
+# -- a question's prepared answer --------------------------------------------------------
+
+PREPARED = {"by": "builder-1", "model": "a-model", "recommend": "a", "sure": "low",
+            "why": "a guess", "flips": "a reading", "read": ["comms:1234567"],
+            "option": [{"key": "a", "costs": "time", "forecloses": "nothing"},
+                       {"key": "b", "costs": "more time", "forecloses": "nothing"}]}
+
+
+def ask_prepared(at: write.Where) -> None:
+    write.record(at, by="planner", at=AT, event=lambda view, result: write.Entry(
+        "question.asked", {"id": "Q1", "text": "Is it so?", "from": "comms:1",
+                           "blocks": "all", "state": "open", "asked_by": "planner",
+                           "asked_at": AT, "options": {"a": "yes", "b": "no"}}))
+    write.record(at, by="helper", at=AT, event=lambda view, result: write.Entry(
+        "question.changed", {"id": "Q1", "prepared": PREPARED}))
+
+
+def test_a_questions_row_keeps_its_newest_prepared_answer(home):
+    ask_prepared(open_round(home))
+
+    [item] = index.read("proj-a", home.rounds_dir, "a-round").items
+    prepared = item.body["prepared"]
+    assert (prepared["recommend"], prepared["actor"], prepared["at"]) == (
+        "a", "helper", AT)
+    assert prepared["current"] is True
+    assert [one["key"] for one in prepared["options"]] == ["a", "b"]
+
+
+def test_a_row_made_before_prepared_answers_were_kept_reads_them_from_the_log(home):
+    ask_prepared(open_round(home))
+    index.read("proj-a", home.rounds_dir, "a-round")
+    # As the version before left the row: no answer, made under the count before.
+    conn = sqlite3.connect(paths.index_file())
+    with conn:
+        body = json.loads(conn.execute("SELECT body FROM items").fetchone()[0])
+        body.pop("prepared", None)
+        conn.execute("UPDATE items SET body = ?", (json.dumps(body),))
+        conn.execute("UPDATE logs SET derived = ?", (index.DERIVED - 1,))
+    conn.close()
+
+    [item] = index.read("proj-a", home.rounds_dir, "a-round").items
+    assert item.body["prepared"]["recommend"] == "a"

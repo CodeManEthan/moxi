@@ -27,13 +27,18 @@ def test_the_announcement_names_the_command_the_settings_and_their_check():
     assert found.summary and "\n" not in found.summary
 
 
-def test_notes_and_turns_are_the_optional_modules():
+def test_ui_notes_turns_and_comms_are_the_optional_modules():
     found = modules.load("rounds")
-    assert dict(found.optional) == {
-        "notes": "Gives the default notes folder of a project that names none, for a "
-                 "relative rounds folder.",
-        "turns": "Runs the leftover sweep at a session's start, when sweep.at_start is "
-                 "on."}
+    assert sorted(dict(found.optional)) == ["comms", "notes", "turns", "ui"]
+    assert dict(found.optional)["ui"] == (
+        "The rounds page in the browser UI shell: every open round as a line of its "
+        "steps.")
+    assert dict(found.optional)["notes"] == (
+        "Gives the default notes folder of a project that names none, for a relative "
+        "rounds folder.")
+    assert dict(found.optional)["turns"] == (
+        "Runs the leftover sweep at a session's start, when sweep.at_start is on.")
+    assert "send-only name rounds" in dict(found.optional)["comms"]
     assert dict(found.gated) == {}
 
 
@@ -88,3 +93,10 @@ def test_the_command_refuses_what_it_does_not_know(capsys, argv):
     assert main(argv, prog="rounds") == 2
     out, err = capsys.readouterr()
     assert out == "" and err.startswith("usage: rounds")
+
+
+def test_the_page_is_announced_in_the_daily_group_between_comms_and_cache():
+    assert module.PAGE == "moxi_rounds.page:PAGE"
+    page = module.COMPONENTS["page"]
+    assert (page["script"], page["place"], page["group"], page["order"]) == (
+        "page.js", "page", "daily", 45)

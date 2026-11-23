@@ -13,6 +13,8 @@ What is held here:
 - plain mail goes one digest at a time, at turn boundaries only, named by its digest id
   as its `ref`, and settles from the turn that names that ref: `answer` handled;
   `aborted`, `error`, `refusal` unhandled;
+- every hand-in carries `by="comms"` and the digest's senders, each once, the
+  fallback `deliver` of a refused steer included;
 - interrupt mail goes into a running turn by `steer`, marked `[interrupt]`; a steer
   refused `idle` falls back to one `deliver` with the same ref; a session without
   `steer` takes it at the boundary;
@@ -45,6 +47,7 @@ pytestmark = pytest.mark.skipif(sys.platform == "win32",
 
 PLANNER = dict(name="planner", scope="proj-a")
 REVIEWER = "reviewer@proj-a"
+BUILDER = dict(name="builder", scope="proj-a")
 SESSION = "5e55a1d0-0000-4000-8000-000000000001"
 
 
@@ -267,6 +270,26 @@ def test_one_digest_at_a_time(rig, adapter, endpoints):
     ep.end_turn("answer")
     assert wait_until(lambda: len(ep.texts) == 2)
     assert "second" in ep.texts[1] and "third" in ep.texts[1], "one digest, coalesced"
+
+
+def test_a_digest_goes_in_by_comms_with_every_messages_sender(rig, adapter, endpoints):
+    """turns gets `by="comms"` and the digest's senders, each once, in id order, which a
+    session's `prompt` listeners read as `delivery_by` and `delivery_senders`."""
+    ep = endpoints()
+    a = adapter()
+    assert found(a, ep)
+    ep.start_turn()                       # the person's turn: the mail waits as one digest
+    assert wait_until(lambda: a.turn_open)
+    send(rig, "from the planner")
+    assert rig.send(REVIEWER, "from the builder", sender=BUILDER)[0] == 0
+    send(rig, "the planner again")
+    assert wait_until(lambda: len(a.shim.queue) == 3)
+    ep.end_turn("answer")
+    assert wait_until(lambda: len(ep.calls) == 1)
+    (method, did, _, text) = ep.calls[0]
+    assert method == "deliver" and "from the builder" in text
+    d = ep.deliveries[did]
+    assert (d["by"], d["senders"]) == ("comms", ["planner@proj-a", "builder@proj-a"])
 
 
 @pytest.mark.parametrize("step", [refuse("unsupported"), refuse_later("dropped"),
@@ -605,6 +628,8 @@ def test_interrupt_mail_is_steered_into_the_running_turn_and_acked_at_its_end(
     assert method == "steer" and "stop and look" in text
     assert "plain, mid turn" not in text, "only the interrupt mail is steered"
     assert "[interrupt]" in text, "the frame line says why it came mid-turn"
+    assert (ep.deliveries[did]["by"], ep.deliveries[did]["senders"]) == (
+        "comms", ["planner@proj-a"]), "a steer names comms and its senders too"
     assert ep.turn["deliveries"] == [(did, "steered")], "the turn took it"
     assert wait_until(lambda: started_at(ref) is not None), "turn.steered marks it started"
     assert a.shim.queue and not turn_frames(frames, "handled_ids")
@@ -660,6 +685,8 @@ def test_a_steer_refused_idle_falls_back_to_one_deliver_with_the_same_ref(
     (steer, deliver) = ep.calls
     assert (steer[0], deliver[0]) == ("steer", "deliver")
     assert steer[2] == deliver[2] and steer[3] == deliver[3], "same text, same ref"
+    assert ep.deliveries[deliver[1]]["by"] == "comms"
+    assert ep.deliveries[deliver[1]]["senders"] == ["planner@proj-a"], "same senders"
     assert not turn_frames(frames, "unhandled_ids"), "the digest stays open"
     ep.end_turn("answer")                 # the delivery opens the next turn
     assert wait_until(lambda: ep.turn is not None and ep.turn["opening"] == deliver[1])

@@ -18,7 +18,9 @@ answer.
    none: a re-check is that step's pass.
 6. **The target.** `P` is an ancestor of `T`, when the repo's `check_on` is `merged` and
    whenever gate 3 is met only by CI's form. With `check_on = "tip"` and gate 3 met by
-   the full check, a skip or no check at all, this gate is off.
+   the full check, a skip or no check at all, this gate is off. In a queue project
+   (`land = "queue"`) it is off too: the build joins the queue rather than landing, and
+   the lander's candidate holds the target by construction.
 7. **The worktree and the branch.** The worktree, while it exists, holds no change to a
    tracked file and no untracked path, read as the removal rule reads git, so no
    setting of the user's hides one; ignored paths are left to the removal. One made on
@@ -26,7 +28,11 @@ answer.
    is at `T`.
 8. **Steps of the user's own.** Each is done at `T`, or skipped for the stage.
 9. **Work.** The build reads `building` or `merged`.
-10. **Sharing.** The build shares commits with no other build.
+10. **Sharing.** The build overlaps no other build, and is held by none
+    (`builds.order`): of two builds one strictly inside the other, the inner one is
+    held while the outer reads merged, until the outer's finish records the landing;
+    the outer one is held, unless it reads merged, until the inner's work is on the
+    target.
 
 Gates 9 and 10 are not steps, so no skip meets them, and nothing here reads a skip of
 `finish`: the operator can't skip it.
@@ -38,6 +44,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 
 from . import builds, checking, findings, flows, report_block, skips
+from .settings import LAND_QUEUE
 from . import state as states
 from .errors import Unmet
 
@@ -155,7 +162,8 @@ def unmet(state: states.State, stage: str, *, seen, tip: str | None = None,
                and seen.check is not None and seen.head is not None
                and not checking.passes(state, stage, checking.CHECK, tip=seen.head,
                                        argv=seen.check))
-    if (seen.check_on == MERGED or only_ci) and seen.holds_target is not True:
+    if (seen.land != LAND_QUEUE and (seen.check_on == MERGED or only_ci)
+            and seen.holds_target is not True):
         why = ("the check is met only by CI, which ran on the tip and not on the "
                "target merged with it" if only_ci else
                "the repo's check_on is merged: the check must have run on the tip "
@@ -200,11 +208,26 @@ def unmet(state: states.State, stage: str, *, seen, tip: str | None = None,
         add(WORK, f"{stage} has no work to finish: it reads {seen.state}, and only a "
             "build that reads building or merged finishes, under any skip", fix)
 
-    if seen.shares:
-        said = ", ".join(f"{other} {other_stage}" for other, other_stage in seen.shares)
+    merged = seen.state == builds.MERGED
+    overlapping = [one for one in seen.shares
+                   if builds.order(one, merged=merged) == builds.REFUSED]
+    if overlapping:
+        said = ", ".join(f"{one.round} {one.stage}" for one in overlapping)
         add(SHARING, f"{stage} shares commits with {said}; a build finishes only with "
             "work of its own", f"keep each build's work on its own branch, or end the "
-            f"other build first: moxi rounds show {seen.shares[0][0]}")
+            f"other build first: moxi rounds show {overlapping[0].round}")
+    for one in seen.shares:
+        held = builds.order(one, merged=merged)
+        other = f"{one.round} {one.stage}"
+        if held == builds.HELD_FOR_LANDING:
+            said = (f"{stage} is held until {other}'s finish records the landing that "
+                    f"brought {stage}'s work onto the target")
+        elif held == builds.HELD_FOR_WORK:
+            said = (f"{stage} is held until {other}'s work is on the target, which its "
+                    "finish does")
+        else:
+            continue
+        add(SHARING, said, f"finish that build first: moxi rounds next {other}")
     return tuple(found)
 
 

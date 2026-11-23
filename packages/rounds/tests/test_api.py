@@ -12,7 +12,8 @@ from pathlib import Path
 import pytest
 from moxi import modules
 
-from moxi_rounds import api, asking, dropping, errors, log, opening, paths, ruling
+from moxi_rounds import (api, asking, dropping, errors, log, opening, paths, preparing,
+                         ruling)
 from moxi_rounds.cli import main
 
 A = "proj-a/a-round"
@@ -145,7 +146,7 @@ def test_the_calls_hold_what_the_rounds_hold(rounds):
     assert [one["name"] for one in listing["rounds"]] == [A, B, C]
     assert listing["rounds"][0] == {
         "name": A, "project": "proj-a", "folder": str(rounds / "a-round"),
-        "status": "open", "flow": "fix",
+        "status": "open", "flow": "fix", "lead": None,
         "step": {"step": "commission", "stage": "B1", "state": "waiting"},
         "counts": {"open": 1, "parked": 1, "not_shown": 3}, "standing": None,
         "ended": None}
@@ -166,6 +167,22 @@ def test_the_calls_hold_what_the_rounds_hold(rounds):
 
     assert [entry["id"] for entry in api.questions(A)["entries"]] == ["Q1", "Q2"]
     assert api.questions("proj-a")["entries"] == [*waits["open"][:2], *waits["parked"]]
+
+
+def test_the_rounds_and_one_round_carry_its_lead(rounds):
+    from moxi import cli
+
+    from moxi_rounds import leads
+
+    leads.mark(A, "atlas-lead", by="planner")
+    assert cli.main(["projects", "set", "proj-a", "--lead", "kestrel"]) == 0
+
+    assert {one["name"]: one["lead"] for one in api.rounds()["rounds"]} == {
+        A: {"name": "atlas-lead", "from": "round"},
+        B: {"name": "kestrel", "from": "project"}, C: None}
+    assert api.round_data(A)["lead"] == {"name": "atlas-lead", "from": "round"}
+    assert api.round_data(B)["lead"] == {"name": "kestrel", "from": "project"}
+    assert api.round_data(D)["lead"] is None
 
 
 def test_the_calls_say_what_step_a_round_is_at(rounds):
@@ -347,7 +364,7 @@ def _name(requirement: str) -> str:
     return requirement.split(";")[0].split("<")[0].split(">")[0].split("=")[0].strip()
 
 
-def test_the_package_requires_none_of_repo_turns_or_comms_and_turns_only_as_its_extra():
+def test_the_package_requires_none_of_repo_turns_or_comms_and_each_only_as_its_extra():
     declared = tomllib.loads((PACKAGE / "pyproject.toml").read_text(encoding="utf-8"))
     project = declared["project"]
     extras = project.get("optional-dependencies", {})
@@ -356,22 +373,46 @@ def test_the_package_requires_none_of_repo_turns_or_comms_and_turns_only_as_its_
     assert not required & {"moxi-repo", "moxi-turns", "moxi-comms"}
     for extra, named in extras.items():
         names = {_name(one) for one in named}
-        assert not names & {"moxi-repo", "moxi-comms"}
+        assert "moxi-repo" not in names
         assert ("moxi-turns" in names) == (extra == "turns")
-    assert "turns" in extras
+        assert ("moxi-comms" in names) == (extra == "comms")
+    assert "turns" in extras and "comms" in extras
 
     installed = metadata.distribution("moxi-rounds").requires or []
     for requirement in installed:
         name = _name(requirement)
-        assert name not in {"moxi-repo", "moxi-comms"}
-        if name == "moxi-turns":
-            assert "extra == 'turns'" in requirement.replace('"', "'")
+        assert name != "moxi-repo"
+        for module in ("turns", "comms"):
+            if name == f"moxi-{module}":
+                assert f"extra == '{module}'" in requirement.replace('"', "'")
 
 
-def test_the_package_registers_its_module_and_its_turns_listener_and_no_git_hook():
+def test_the_package_registers_its_module_its_listener_its_refusal_and_no_git_hook():
     declared = tomllib.loads((PACKAGE / "pyproject.toml").read_text(encoding="utf-8"))
-    assert set(declared["project"]["entry-points"]) == {"moxi.modules", "moxi.turns.listeners"}
+    expected = {"moxi.modules", "moxi.turns.listeners", "moxi.projects"}
+    assert set(declared["project"]["entry-points"]) == expected
 
     groups = {point.group for point in metadata.distribution("moxi-rounds").entry_points}
-    assert groups == {"moxi.modules", "moxi.turns.listeners"}
+    assert groups == expected
     assert "moxi.repo.git_hooks" not in groups
+
+
+def test_a_questions_entry_carries_its_prepared_answer(tmp_path, add_project, capsys):
+    add_project("proj-a", notes_root=tmp_path / "notes")
+    opening.open_round(A, description="a placeholder round", by="planner", flow="fix")
+    asking.ask(A, "Is it so?", origin="comms:11", by="scout",
+               options=["a=yes", "b=no"])
+    path = tmp_path / "answer.md"
+    path.write_text("```toml rounds\n" + "\n".join([
+        'kind = "answer"', 'question = "Q1"', 'by = "builder-1"', 'model = "a-model"',
+        'recommend = "b"', 'sure = "low"', 'why = "a guess"', 'flips = "a reading"',
+        'read = ["comms:1234567"]',
+        '[[option]]', 'key = "a"', 'costs = "time"', 'forecloses = "nothing"',
+        '[[option]]', 'key = "b"', 'costs = "more"', 'forecloses = "nothing"',
+    ]) + "\n```\n", encoding="utf-8")
+    preparing.prepare(A, "Q1", path, by="helper")
+
+    [entry] = api.questions(A)["entries"]
+    assert entry["prepared"]["recommend"] == "b" and entry["prepared"]["current"]
+    [question] = api.round_data(A)["questions"]
+    assert question["prepared"] == entry["prepared"]

@@ -272,6 +272,7 @@ def seed_events() -> list:
         conn.close()
 
 
+@pytest.mark.slot_target
 def test_a_slot_launch_with_the_setting_on_seeds_before_slots_starts(tmp_path, harness, rig,
                                                                      launch_config,
                                                                      monkeypatch):
@@ -294,6 +295,7 @@ def test_a_slot_launch_with_the_setting_on_seeds_before_slots_starts(tmp_path, h
                             "outcome": seed.SEEDED}
 
 
+@pytest.mark.slot_target
 def test_a_trust_screen_after_a_seed_is_answered_and_says_the_seed_missed(
         tmp_path, harness, rig, launch_config):
     repo = git_repo(tmp_path / "repo")
@@ -311,6 +313,7 @@ def test_a_trust_screen_after_a_seed_is_answered_and_says_the_seed_missed(
                                                                 str(launch_config))
 
 
+@pytest.mark.slot_target
 def test_with_the_setting_off_nothing_is_written(tmp_path, harness, rig, launch_config):
     repo = git_repo(tmp_path / "repo")
     trust_setting(on=False)
@@ -329,6 +332,7 @@ def test_with_the_setting_off_nothing_is_written(tmp_path, harness, rig, launch_
                                                                 str(launch_config))
 
 
+@pytest.mark.slot_target
 def test_a_trusted_root_with_the_setting_off_shows_no_screen_and_goes_on(
         tmp_path, harness, rig):
     repo = git_repo(tmp_path / "repo")
@@ -373,7 +377,8 @@ def digest(path: Path) -> tuple[bytes, int]:
 
 
 @pytest.mark.parametrize("harness_name", ["claude", "codex"])
-@pytest.mark.parametrize("target", ["terminal", "headless", "slot"])
+@pytest.mark.parametrize("target", ["terminal", "headless",
+                                    pytest.param("slot", marks=pytest.mark.slot_target)])
 def test_a_launch_changes_only_the_trust_key_and_only_in_a_claude_slot_launch(
         tmp_path, harness, rig, launch_config, monkeypatch, target, harness_name):
     monkeypatch.setattr(targets, "_execve", lambda *a: None)

@@ -111,7 +111,7 @@ export function nameTaken(name: string, projects: readonly Listed[]): boolean {
   return wanted !== "" && projects.some((project) => project.key.toLowerCase() === wanted);
 }
 
-/** What the Add panel holds, as typed. `named` is true once he has typed in the name;
+/** What the Add panel holds, as typed. `named` is true once the user has typed in the name;
  * until then it fills from the folder. */
 export interface AddPanel {
   folder: string;
@@ -129,12 +129,13 @@ export function addPanel({ folder = "", name = "" }: { folder?: string; name?: s
 }
 
 /** The form once an answer for the field as it stands has come: the name it fills, until
- * he has typed one. */
+ * the user has typed one. */
 export function filled(form: AddPanel, answer: AtPath): AddPanel {
   return form.named ? form : { ...form, name: answer.key ?? "" };
 }
 
-/** The form once he has typed `name`: his from then on, unless he empties it. */
+/** The form once the user has typed `name`: as typed from then on, unless the user empties
+ * it. */
 export function named(form: AddPanel, name: string): AddPanel {
   return { ...form, name, named: name !== "" };
 }
@@ -190,7 +191,8 @@ export function addedSaid(acted: Acted<Added>, home: string | null): PanelSaid {
 
 /** The line under the name, which Edit shows as plain text. */
 export const NAME_STAYS = "The name stays as it is: everything filed under this project is filed by its name.";
-/** The line an open Edit panel shows once its project has changed under values he typed. */
+/** The line an open Edit panel shows once its project has changed under values the user
+ * typed. */
 export const CHANGED_SINCE = "This project has changed since you opened it.";
 /** The line a save whose answer was lost says. */
 export const MAY_BE_SAVED = "It may have been saved.";
@@ -198,7 +200,8 @@ export const MAY_BE_SAVED = "It may have been saved.";
 /** What the Edit panel holds, as typed, over `base`, the project as last stored by this
  * panel's own saves, or as it stood when the panel opened. The folders start in `~` form;
  * `off` holds the names taken off, `added` the names added, `agent` what is typed in `Add
- * an agent by name`. `stale`: the project has changed elsewhere under values he typed. */
+ * an agent by name`. `stale`: the project has changed elsewhere under values the user typed.
+ */
 export interface EditPanel {
   base: Project;
   folder: string;
@@ -307,7 +310,7 @@ export function saveSteps(form: EditPanel, { home, notesInstalled }: { home: str
   return steps;
 }
 
-/** Whether he has changed anything in the form from the project it stands over. */
+/** Whether the user has changed anything in the form from the project it stands over. */
 export function editTouched(form: EditPanel, { home, notesInstalled }: { home: string | null; notesInstalled: boolean }): boolean {
   return saveSteps(form, { home, notesInstalled }).length > 0;
 }
@@ -317,9 +320,9 @@ function sameProject(a: Project, b: Project): boolean {
     && a.associated.join("\n") === b.associated.join("\n");
 }
 
-/** The form once its project has been read again as `project`: one he hasn't changed starts
- * again from it; any other keeps his values over the project it stood over, and is stale
- * while `project` differs from that one. */
+/** The form once its project has been read again as `project`: one the user hasn't changed
+ * starts again from it; any other keeps the user's values over the project it stood over,
+ * and is stale while `project` differs from that one. */
 export function editReread(form: EditPanel, project: Project, { home, notesInstalled }: { home: string | null; notesInstalled: boolean }):
     EditPanel {
   if (!editTouched(form, { home, notesInstalled })) return editPanel(project, home);

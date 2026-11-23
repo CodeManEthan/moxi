@@ -303,6 +303,11 @@ class Endpoint:
         self.pending_ttl_s = PENDING_TTL_S
         self.registry = registry if registry is not None \
             else turns_listeners.load(env=self.env)
+        #: The session's prompt bound: `listen.wait_ms`, or a longer bound a `prompt` row
+        #: asks for this session (its `wait_ms` option). Decided once, from the
+        #: session's environment, so the harness's hook waits it too.
+        self.prompt_wait_s = turns_listeners.prompt_wait_ms(
+            self.registry, self.env, int(self.listen_wait_s * 1000)) / 1000
         rows = turns_listeners.after_rows(self.registry)
         #: Each after-tool row's floor, by row id.
         self.floors = turns_listeners.Floors(rows, self.after_tool_wait_s,
@@ -624,12 +629,40 @@ class Endpoint:
             refresh.join(self.after_tool_wait_s + 1.0)
         return context
 
-    def prompt(self, text: str | None = None, origin: str | None = None) -> str | None:
+    def prompt(self, text: str | None = None, origin: str | None = None, *,
+               delivery_id: str | None = None, opens: bool | None = None) -> str | None:
         """A prompt entered (UserPromptSubmit), with its text and its origin's kind where
-        the harness gives them. Returns the listeners' added context."""
+        the harness gives them. Returns the listeners' added context.
+
+        The event's `own` is true when the origin is on `prompt.own_origins`, read now.
+        `delivery_id` is the delivery the adapter handed in as this prompt, whose `by` and
+        `senders` the event carries as `delivery_by` and `delivery_senders` (None for a
+        prompt turns did not hand in). `opens` is true when the prompt opens a turn, false
+        when it joins one already running; the adapter says where it knows, else it is
+        true when no main-loop turn is open now."""
         if self._gone is not None:
             return None
-        return self._ask(self._event("prompt", text=text, origin=origin))
+        with self._lock:
+            d = self._deliveries.get(delivery_id) if delivery_id is not None else None
+            if opens is None:
+                opens = self.ledger.open is None
+        by, senders = (None, None) if d is None else (d.spec.by, d.spec.senders)
+        event = self._event("prompt", text=text, origin=origin, own=self._own(origin),
+                            delivery_by=by, delivery_senders=senders, opens=opens)
+        return turns_listeners.ask(self.registry, event, self.prompt_wait_s,
+                                   after=self.floors.after_call)
+
+    def _own(self, origin: str | None) -> bool:
+        """Whether a prompt of `origin` is the person's own: the origin is on
+        `prompt.own_origins`. A prompt with no origin never is."""
+        if origin is None:
+            return False
+        try:
+            listed = self._config.use(turns_config.OWN_ORIGINS)
+        except Exception as exc:  # noqa: BLE001 - a config that reads nothing counts none
+            log.warning("prompt.own_origins does not read (%s); the prompt is not own", exc)
+            return False
+        return origin in {o for o in listed or () if isinstance(o, str)}
 
     def after_tool(self, tool: str, *, tool_use_id: str | None = None,
                    agent_id: str | None = None, is_error: bool | None = None,
@@ -649,6 +682,14 @@ class Endpoint:
                             tool=tool, tool_use_id=tool_use_id, is_error=is_error,
                             point=point, record_path=record_path)
         return self._after_tool.ask(event, rows)
+
+    def load(self) -> None:
+        """The adapter learned the session's id for the first time in this process: the
+        `load` rows are told, with that id, and not waited for. The adapter raises it
+        once per endpoint process."""
+        if self._gone is not None:
+            return
+        self._ask(self._event("load"))
 
     def usage(self, reading: dict[str, Any]) -> None:
         """A usage reading from the harness, as given: the `usage` rows are told, with the
@@ -726,8 +767,11 @@ class Endpoint:
             self._emit(self._turn_started(turn))
             self._cond.notify_all()
 
-    def turn_ended(self, turn_id: str | None, outcome: str) -> None:
-        """The open main-loop turn ended with `outcome` (one of `results.OUTCOMES`)."""
+    def turn_ended(self, turn_id: str | None, outcome: str, *,
+                   answer: str | None = None) -> None:
+        """The open main-loop turn ended with `outcome` (one of `results.OUTCOMES`).
+        `answer` is the turn's final text where the harness gives it; every delivery the
+        turn took ends with it."""
         if outcome not in OUTCOMES:
             log.warning("turn %s ended with outcome %r, not one of %s; it counts as "
                         "error", turn_id, outcome, ", ".join(OUTCOMES))
@@ -739,6 +783,7 @@ class Endpoint:
             if turn is None:
                 log.warning("turn %s ended while no turn was open; ignored", turn_id)
                 return
+            turn.answer = answer
             if turn_id is not None and turn.turn_id is not None and turn_id != turn.turn_id:
                 log.warning("turn %s ended while the ledger held turn %s open; the open "
                             "one ends", turn_id, turn.turn_id)
@@ -818,6 +863,12 @@ class Endpoint:
             d = self._deliveries.get(delivery_id)
             return d is not None and d.state in (_QUEUED, _INFLIGHT) and not d.expired
 
+    def delivery_text(self, delivery_id: str) -> str | None:
+        """The text of a delivery the endpoint still keeps, or None."""
+        with self._lock:
+            d = self._deliveries.get(delivery_id)
+            return None if d is None else d.spec.text
+
     def learn_session(self, session_id: str | None) -> bool:
         """The adapter learned the session's id (on Claude Code the runner sends it on
         every load). True when it changed; `hello.json` follows it."""
@@ -889,7 +940,8 @@ class Endpoint:
                 # text went into a turn whose `turn.ended` has gone out without it.
                 log.warning("steer %s confirmed after its turn %s ended; it ends with "
                             "that turn", d.id, turn.turn_id)
-                self._settle(d, ended=Ended(turn.turn_id, turn.outcome or "error"))
+                self._settle(d, ended=Ended(turn.turn_id, turn.outcome or "error",
+                                            answer=turn.answer))
             self._cond.notify_all()
 
     def on_stop(self, facts: StopFacts) -> str | None:
@@ -1088,7 +1140,8 @@ class Endpoint:
 
     def deliver(self, text: str, *, ref: str | None = None, only_if_idle: bool = False,
                 if_turn_number: int | None = None, refuse_draft: bool = False,
-                refuse_agents: bool = False) -> Handed:
+                refuse_agents: bool = False, by: str | None = None,
+                senders: tuple[str, ...] = ()) -> Handed:
         """A new turn now if the session is idle, else when the running turn ends; held at
         a load gate until a load is accepted.
 
@@ -1098,12 +1151,15 @@ class Endpoint:
         when `if_turn_number` differs from the ledger's, `loading` with no accepted load.
         `refuse_draft` and `refuse_agents` need the harness's live read, which the adapter
         makes where the delivery takes effect, so their refusal is the settled value.
+        `by` (the module that asked) and `senders` (the names the text speaks for) ride
+        on the `prompt` event the delivery raises.
 
         Never waits on the harness: the delivery is recorded and its hand-off put on the
         worker under one hold of the lock (`early` holds a refusal decided here)."""
         with self._lock:
             d = self._new("deliver", text, ref, only_if_idle=only_if_idle,
-                          refuse_draft=refuse_draft, refuse_agents=refuse_agents)
+                          refuse_draft=refuse_draft, refuse_agents=refuse_agents, by=by,
+                          senders=tuple(senders))
             if not only_if_idle:
                 self._admit(d)
                 return d
@@ -1118,15 +1174,17 @@ class Endpoint:
             self._hand_submit(d)
             return d
 
-    def steer(self, text: str, *, ref: str | None = None) -> Handed:
+    def steer(self, text: str, *, ref: str | None = None, by: str | None = None,
+              senders: tuple[str, ...] = ()) -> Handed:
         """The text into the running turn: `idle` when none runs (or the open one is
         ending), `loading` with no accepted load. Never waits on the harness: the steer is
         recorded against the open turn and its `append` put on the worker under one hold
         of the lock. It reads `Started`, and watchers get `turn.steered`, once the adapter
         confirms the harness took it (`steered`); the harness's refusal settles it
-        `refused` `idle`. It never becomes a turn of its own."""
+        `refused` `idle`. It never becomes a turn of its own. `by` and `senders` are as
+        `deliver`'s."""
         with self._lock:
-            d = self._new("steer", text, ref)
+            d = self._new("steer", text, ref, by=by, senders=tuple(senders))
             reason = self._unable("steer")
             turn = self.ledger.open
             if reason is None and (turn is None or turn.ending):
@@ -1545,7 +1603,7 @@ class Endpoint:
             turn.ended_held = True   # its TurnEnded waits with its TurnStarted
             return
         outcome = turn.outcome or "error"
-        ended = Ended(turn.turn_id, outcome)
+        ended = Ended(turn.turn_id, outcome, answer=turn.answer)
         for delivery_id in [turn.delivery_id, *turn.steered]:
             d = self._deliveries.get(delivery_id) if delivery_id else None
             if d is not None and d.state != _DONE:

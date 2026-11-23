@@ -13,6 +13,11 @@
 // "Earlier" to page back, and the session's subagents. Selecting a subagent, or the
 // parent session, navigates to its route, so the browser's back returns here.
 //
+// A transcript opened from the list carries the list's query (its filters, find and
+// depth) in its own address. It reads nothing from it: it hands it on to the subagent and
+// parent routes it opens, and its link back goes to the list with it, so the link gives
+// the list as it was left. A transcript opened with no query links to the plain list.
+//
 // Over the turns the page draws its own header, from the header's model
 // (`transcript.ts`): the link back to the list, the session's name as the list names it
 // and `Refresh` on one line; under it the harness, the model and from when to when, with
@@ -138,11 +143,11 @@ export class SessionsPage extends SessionView {
   }
 
   protected pick(entry: EntryView): void {
-    navigate("sessions", entry.route);
+    navigate("sessions", entry.route + location.search);
   }
 
   protected openParent(parent: Target): void {
-    navigate("sessions", routeOf(parent));
+    navigate("sessions", routeOf(parent) + location.search);
   }
 
   render() {
@@ -167,10 +172,10 @@ export class SessionsPage extends SessionView {
     const back = (event: MouseEvent): void => {
       if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
       event.preventDefault();
-      navigate("sessions", head.back.route);
+      navigate("sessions", head.back.route + location.search);
     };
     return html`<div data-part="head">
-        <div class="crumb" data-line="crumb"><span class="c"><a href=${`/m/sessions/${head.back.route}`} data-action="back"
+        <div class="crumb" data-line="crumb"><span class="c"><a href=${`/m/sessions/${head.back.route}${location.search}`} data-action="back"
           @click=${back}>${head.back.text}</a>${head.name !== null ? html`<span class="sep" aria-hidden="true">›</span><span
           class="nm" data-line="name">${head.name}</span>${head.where !== null
             ? html`<span class="wh" data-line="where">${head.where}</span>` : nothing}`

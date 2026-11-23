@@ -75,6 +75,7 @@ def test_the_first_line_and_no_hello_before_the_session_id(claude):
     first = runner.first
     assert first["op"] == "hello" and first["leg"] == leg.LEG
     assert first["stop_wait_ms"] == 2000 and first["listen_wait_ms"] == 2000
+    assert first["prompt_wait_ms"] == 2000
     assert first["stop_after_clear"] is leg.STOP_AFTER_CLEAR
     assert first["mod_sock"] == str(ep.dir / protocol.MOD_SOCK)
     assert turns.sessions() == []                # no socket until the id comes
@@ -105,11 +106,38 @@ def test_an_idle_start_is_tied_at_the_resolve_and_its_events_wait(claude):
         d.wait_started(0.1)
     runner.close(d.id, leg.END_RESOLVE)
     assert bare(d.wait_started(2)) == turns.Started("T1")
-    runner.turn_complete("T1")
-    assert bare(d.wait_ended(2)) == turns.Ended("T1", "answer")
+    runner.turn_complete("T1", answer="hi back")
+    assert bare(d.wait_ended(2)) == turns.Ended("T1", "answer", answer="hi back")
     got = drain(events)
     assert [type(e).__name__ for e in got] == ["TurnStarted", "TurnEnded"]
     assert opener(got[0]) == d.id and opener(got[1]) == d.id
+
+
+def test_a_prompt_with_no_origin_in_an_admitted_window_is_that_windows_delivery(claude):
+    events = []
+
+    def answer(event):
+        events.append(event)
+
+    ep, runner = claude(registry=Registry((Listener("sample", frozenset({"prompt"}),
+                                                    "sample.module:answer", _fn=answer),)))
+    s = turns.find(session_id="s-1")
+    d = s.deliver("digest", by="comms", senders=["ann"])
+    line = runner.next_line()
+
+    def ask(text, origin, *, opens=True):
+        runner.post(leg.PATH_CONTEXT, {"event": "prompt", "session_id": "s-1",
+                                       "text": text, "origin": origin, "opens": opens})
+
+    ask("digest", None)                          # the window is not admitted yet
+    assert runner.enter(line["nonce"], draft=False, agents=0)["verdict"] == "pass"
+    ask("digest", None)
+    ask("typed meanwhile", "composer")
+    runner.turn_start("T1")
+    ask("joined", "composer", opens=False)
+    assert [(e.text, e.delivery_by, e.delivery_senders, e.opens) for e in events] == [
+        ("digest", None, None, True), ("digest", "comms", ("ann",), True),
+        ("typed meanwhile", None, None, True), ("joined", None, None, False)]
 
 
 def test_a_turn_that_ends_before_the_close_raises_both_events_at_the_close(claude):
@@ -125,6 +153,17 @@ def test_a_turn_that_ends_before_the_close_raises_both_events_at_the_close(claud
     assert bare(d.wait_ended(2)) == turns.Ended("T1", "aborted")
     assert [(type(e).__name__, opener(e)) for e in drain(events)] == [
         ("TurnStarted", d.id), ("TurnEnded", d.id)]
+
+
+def test_a_turn_with_no_final_text_ends_its_delivery_with_no_answer(claude):
+    ep, runner = claude()
+    s = turns.find(session_id="s-1")
+    d = s.deliver("quiet")
+    runner.next_line()
+    runner.turn_start("T1")
+    runner.turn_complete("T1", answer="")
+    runner.close(d.id, leg.END_RESOLVE)
+    assert d.wait_ended(2).answer is None
 
 
 def test_a_person_turn_in_the_window_is_released_by_the_later_turn_start(claude):
@@ -388,6 +427,65 @@ def test_context_asks_reach_the_listeners_and_a_clear_follows_the_id(claude):
     assert turns.find(session_id="s-2").dir == ep.dir
     assert [(type(e).__name__, e.source) for e in drain(events)] == [
         ("Ready", "startup"), ("Ready", "clear")]
+
+
+#: The `load` and `ready` rows' calls: (event, session id, harness, env, cwd).
+SEEN: queue.Queue = queue.Queue()
+
+
+def _seen(event):
+    SEEN.put((event.event, event.session_id, event.harness, event.env, event.cwd))
+
+
+def _seen_calls(count, timeout=2.0):
+    """The first `count` calls, then any more that come within a short wait."""
+    out = [SEEN.get(timeout=timeout) for _ in range(count)]
+    return out + drain(SEEN, timeout=0.3)
+
+
+@pytest.fixture
+def seen():
+    drain(SEEN, timeout=0)
+    yield SEEN
+    drain(SEEN, timeout=0)
+
+
+def test_load_is_raised_once_at_the_first_session_line_with_the_id(claude, seen):
+    registry = Registry((Listener("launcher", frozenset({"load"}), f"{__name__}:_seen"),))
+    ep, runner = claude(registry=registry)
+    [(event, session_id, harness, env, cwd)] = _seen_calls(1)
+    assert (event, session_id, harness, cwd) == ("load", "s-1", "claude", ep.harness.cwd)
+    assert env == ep.env
+    # The runner sends its line again on a reload; a later id comes with a ready.
+    runner.session("s-1")
+    runner.session("s-2")
+    runner.post(leg.PATH_CONTEXT, {"event": "ready", "source": "clear",
+                                   "session_id": "s-3"})
+    assert drain(seen) == []
+
+
+def test_a_session_line_with_no_id_raises_no_load_and_the_ready_raises_it_first(
+        claude, seen, monkeypatch):
+    registry = Registry((Listener("launcher", frozenset({"load", "ready"}),
+                                  f"{__name__}:_seen"),))
+    raised = []
+    launch = listeners._launch
+
+    def record(chosen, event, after=None):
+        raised.append(event.event)
+        return launch(chosen, event, after)
+
+    monkeypatch.setattr(listeners, "_launch", record)
+    ep, runner = claude(registry=registry, session=None)
+    runner.report(leg.R_SESSION, session_id=None, mod_version="0.1.0")
+    assert drain(seen) == [] and raised == []
+    runner.post(leg.PATH_CONTEXT, {"event": "ready", "source": "startup",
+                                   "session_id": "s-1"})
+    assert raised == ["load", "ready"]
+    calls = _seen_calls(2)
+    assert sorted((c[0], c[1]) for c in calls) == [("load", "s-1"), ("ready", "s-1")]
+    runner.session("s-1")
+    assert drain(seen) == [] and raised == ["load", "ready"]
 
 
 def _command(s, name, out):

@@ -21,7 +21,9 @@ and no event stream is ever held open. `subscriptions/listen` is not served. Bot
 work: a client that sends `server/discover` first and one that sends `initialize` first
 both reach the tools. `tools/list` answers every tool of every started provider
 (`moxi_connector.providers.Registry.tools`); `prompts/list` and `resources/list` answer
-empty lists. A request body is at most `MAX_BODY` bytes. The SDK's DNS-rebinding check is
+empty lists. Every tool answer, a refusal included, is scrubbed of control and format
+characters before it goes out (`moxi_connector.scrub`). A request body is at most
+`MAX_BODY` bytes. The SDK's DNS-rebinding check is
 set from O too: O's host as the one allowed host and O as the one allowed `Origin`.
 
 `Front` is the app uvicorn serves for the process's whole life. For each HTTP request it:
@@ -78,6 +80,7 @@ from .probe import HEADER as PROBE_HEADER
 from .probe import Probes
 from .provider import TOOL_FAILED, Ctx, Result, Tool
 from .providers import Registry
+from .scrub import scrub_text, scrub_value
 from .signin import GRANT, Closed, Grant, Mount, SignIn
 
 log = logging.getLogger("moxi.connector.app")
@@ -216,12 +219,16 @@ def _listed(tool: Tool) -> types.Tool:
 
 
 def to_mcp(result: Result) -> types.CallToolResult:
-    """A provider's `Result` as the SDK's answer."""
+    """A provider's `Result` as the SDK's answer, its text and every string of its
+    structured value scrubbed (`moxi_connector.scrub`)."""
     structured = dict(result.structured) if result.structured is not None else None
     if result.is_error and result.refusal and (structured is None
                                                or "refusal" not in structured):
         structured = {**(structured or {}), "refusal": result.refusal}
-    return types.CallToolResult(content=[types.TextContent(type="text", text=result.text)],
+    text = scrub_text(result.text)
+    if structured is not None:
+        structured = scrub_value(structured)
+    return types.CallToolResult(content=[types.TextContent(type="text", text=text)],
                                 structured_content=structured, is_error=result.is_error)
 
 

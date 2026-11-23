@@ -20,6 +20,7 @@ once a Codex launch is held.
 
 from __future__ import annotations
 
+import contextlib
 import logging
 from pathlib import Path
 
@@ -62,10 +63,14 @@ def answer(event) -> str | None:
 
     values = row.values
     key = handoffs.key_of_row(row)
+    handoff_dir = None
+    if key:
+        with contextlib.suppress(handoffs.NoNotesDir):
+            handoff_dir = handoffs.handoff_dir_of_row(row)
     block = identity_block(
         session_id=getattr(event, "session_id", None) or row.session_id, cwd=row.cwd,
         posture=row.posture, project_key=row.project_key, identity=row.identity,
-        scope=row.scope, handoff_dir=handoffs.handoff_dir_of_row(row) if key else None)
+        scope=row.scope, handoff_dir=handoff_dir)
     return seat_text(block, instructions(values))
 
 

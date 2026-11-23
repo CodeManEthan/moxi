@@ -160,9 +160,9 @@ test("agent/<address> of Other names opens it there; an address the page doesn't
 });
 
 test("Other names: the line's names, and a send-only name sent by its module", () => {
-  const others = [{ qualified: "ops-watch", sentBy: null, writable: true },
-                  { qualified: "planner@proj-b", sentBy: null, writable: true },
-                  { qualified: "usage", sentBy: "usage", writable: false }];
+  const others = [{ qualified: "ops-watch", sentBy: null, writable: true, speaksFor: "ops-watch" },
+                  { qualified: "planner@proj-b", sentBy: null, writable: true, speaksFor: null },
+                  { qualified: "usage", sentBy: "usage", writable: false, speaksFor: null }];
   assert.equal(otherNamesWords(others), "ops-watch, planner@proj-b and usage");
   assert.deepEqual(others.map(otherWhere), [null, null, "sent by usage"]);
   assert.equal(frame({ at: { piece: "agent", qualified: "ops-watch" } }).opened.kind, "other");

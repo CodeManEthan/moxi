@@ -3,8 +3,9 @@ for other seats in the same folder.
 
 A `start` row that answers when a session starts or resumes (source `startup` or
 `resume`), not at a clear or compaction. It answers nothing on a relaunch
-(`MOXI_LAUNCHER_RELAUNCH`, whose first turn carries the handoff) and nothing in a headless
-launch.
+(`MOXI_LAUNCHER_RELAUNCH`, whose first turn carries the handoff), nothing in a headless
+launch, and nothing in a fork (`moxi launcher fork`), a short reader that marks no
+handoff picked.
 
 - **A launch this endpoint holds** (`listeners.claim`): the key comes from the row. The
   pointer names the newest handoff of the key still waiting, and records it as picked
@@ -20,7 +21,8 @@ launch.
 After the pointer come other seats' waiting handoffs in the same folder, one line each,
 newest first, at most `handoffs.OTHERS_SHOWN`, then how many more (`handoffs.others`). They
 mark nothing picked: each waits for its own seat. A session with no key gets no pointer and
-these lines for every waiting handoff in its folder.
+these lines for every waiting handoff in its folder. A session with no handoff folder (notes
+installed and no notes directory for it) gets nothing.
 """
 
 from __future__ import annotations
@@ -54,10 +56,13 @@ def answer(event) -> str | None:
 
 def _launched(event, conn) -> list[str]:
     row = listeners.claim(event, conn)
-    if row is None or row.target == "headless":
+    if row is None or row.target == "headless" or row.fork_of:
         return []
     key = handoffs.key_of_row(row)
-    where = handoffs.handoff_dir_of_row(row, create=key is not None)
+    try:
+        where = handoffs.handoff_dir_of_row(row, create=key is not None)
+    except handoffs.NoNotesDir:
+        return []
     lines = []
     found = handoffs.waiting(conn, where, key) if key is not None else None
     if found is not None:
@@ -70,7 +75,10 @@ def _launched(event, conn) -> list[str]:
 
 def _by_hand(event, env, conn) -> list[str]:
     key = handoffs.key_of_env(env)
-    where = handoffs.handoff_dir(_cwd(event, env), create=key is not None)
+    try:
+        where = handoffs.handoff_dir(_cwd(event, env), create=key is not None)
+    except handoffs.NoNotesDir:
+        return []
     lines = []
     found = handoffs.waiting(conn, where, key) if key is not None else None
     if found is not None:

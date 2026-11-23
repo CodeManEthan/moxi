@@ -40,7 +40,7 @@ def printed(ruling_id, said, holder="proj-a/a-round", *, question=None):
     answers, and how whoever recorded it says the operator was shown it."""
     answers = "" if question is None else f"in answer to {question[0]}: {question[1]}\n"
     return (f"Recorded as {ruling_id}: {said}\n{answers}"
-            'show him this under "Recorded as" in your next message, then:\n'
+            'show the operator this under "Recorded as" in your next message, then:\n'
             f"  moxi rounds mark {holder} {ruling_id} --shown --record "
             "<pointer to that message>\n")
 
@@ -110,11 +110,11 @@ def test_the_sentence_is_printed_as_recorded_byte_for_byte(rounds, capsys):
 
 
 def test_a_reason_is_kept_and_left_out_when_none_is_given(rounds):
-    assert run("proj-a/a-round", "--reason", "he reads it there") == 0
+    assert run("proj-a/a-round", "--reason", "the operator reads it there") == 0
     assert run("proj-a/a-round") == 0
 
     first, second = rulings(round_log(rounds))
-    assert first["reason"] == "he reads it there" and "reason" not in second
+    assert first["reason"] == "the operator reads it there" and "reason" not in second
 
 
 def test_a_ruling_on_a_round_is_recorded_under_the_projects_stored_key(rounds, capsys):
@@ -237,7 +237,8 @@ def test_an_id_is_one_past_the_highest_the_log_holds(rounds):
 
 @pytest.mark.parametrize("pointer", [
     "comms:1234567", "0a1b2c3d@2026-01-02T03:04Z",
-    "https://example.com/pages/7#answers", "file:design.md#rulings"])
+    "https://example.com/pages/7#answers", "file:design.md#rulings",
+    "page:rounds/k3J9xQ2aZf1T@2026-11-21T04:18:05Z"])
 def test_a_pointer_of_each_shape_is_recorded_as_given(rounds, pointer):
     assert run("proj-a/a-round", record=pointer) == 0
     assert run("proj-a", record=pointer) == 0
@@ -246,7 +247,20 @@ def test_a_pointer_of_each_shape_is_recorded_as_given(rounds, pointer):
     assert rulings(log.project_log(rounds))[0]["record"] == pointer
 
 
-@pytest.mark.parametrize("pointer", ["he said so in chat", "comms:twelve",
+def test_an_answer_picked_on_a_page_is_recorded_with_the_pages_pointer(rounds, capsys):
+    asking.ask("proj-a/a-round", "Do agent-read times follow the settings?",
+               by="scout", origin="comms:11",
+               options=["a=prose yes, parsed rows no", "b=both follow the settings"])
+    pointer = "page:rounds/k3J9xQ2aZf1T@2026-11-21T04:18:05Z"
+
+    assert main(["rule", "proj-a/a-round", "Q1", "--chose", "b", "--record",
+                 pointer]) == 0
+
+    [made] = rulings(round_log(rounds))
+    assert (made["rules"], made["chose"], made["record"]) == ("Q1", "b", pointer)
+
+
+@pytest.mark.parametrize("pointer", ["the operator said so in chat", "comms:twelve",
                                      "0a1b2c3d@yesterday", "http://example.com/pages/7",
                                      "file:design.md", "file:../b-round/design.md#x"])
 @pytest.mark.parametrize("target", [["proj-a/a-round"], ["proj-a/a-round", "--standing"],
@@ -274,7 +288,7 @@ def test_a_ruling_with_no_pointer_is_refused_and_the_logs_are_untouched(
     assert run(*target, record=None) == 3
 
     out, err = capsys.readouterr()
-    assert out == "" and "needs a pointer to where he said it" in err
+    assert out == "" and "needs a pointer to where the operator said it" in err
     assert "--record PTR" in err
     assert logs(rounds) == before
     with pytest.raises(Refused):
@@ -374,7 +388,7 @@ def test_an_answer_is_a_ruling_of_substance_on_the_stages_the_question_held_up(
     assert capsys.readouterr().out == printed("C1", ANSWER, question=("Q1", ASKED))
 
 
-def test_an_answer_needs_its_sentence_and_his_pointer(staged, capsys):
+def test_an_answer_needs_its_sentence_and_the_operators_pointer(staged, capsys):
     ask()
     before = logs(staged)
 
@@ -383,7 +397,7 @@ def test_an_answer_needs_its_sentence_and_his_pointer(staged, capsys):
     assert run("proj-a/a-round", "Q1", text=ANSWER, record=None) == 3
     assert ("run: moxi rounds rule proj-a/a-round Q1 --text TEXT --record PTR"
             in capsys.readouterr().err)
-    assert run("proj-a/a-round", "Q1", text=ANSWER, record="he said so") == 3
+    assert run("proj-a/a-round", "Q1", text=ANSWER, record="the operator said so") == 3
     assert logs(staged) == before
 
 
@@ -604,8 +618,8 @@ def test_a_withdrawal_is_an_act_on_the_process(staged, capsys):
 
 
 @pytest.mark.parametrize("item", ["park:Q1", "narrow:Q1=none", "withdraw:Q1"])
-@pytest.mark.parametrize("record", [None, "he said so"])
-def test_an_act_on_a_question_is_the_operators_and_needs_his_pointer(
+@pytest.mark.parametrize("record", [None, "the operator said so"])
+def test_an_act_on_a_question_is_the_operators_and_needs_the_operators_pointer(
         staged, capsys, item, record):
     ask()
     before = logs(staged)
@@ -870,7 +884,7 @@ def offer(target="proj-a/a-round", given=OPTIONS):
     return asking.ask(target, ASKED, origin="comms:11", by="scout", options=given).id
 
 
-def test_an_answer_names_the_key_he_chose(staged, capsys):
+def test_an_answer_names_the_key_the_operator_chose(staged, capsys):
     offer()
 
     assert run("proj-a/a-round", "Q1", "--chose", "b", "--as", "planner",
@@ -908,7 +922,7 @@ def test_an_answer_with_no_key_leaves_none_chosen(staged):
     assert question(round_log(staged)).chose is None
 
 
-def test_an_answer_to_a_projects_question_names_the_key_he_chose(staged):
+def test_an_answer_to_a_projects_question_names_the_key_the_operator_chose(staged):
     offer("proj-a")
 
     assert run("proj-a", "P1", "--chose", "c", text=None) == 0
@@ -968,7 +982,7 @@ def test_only_an_answer_names_a_key(staged, capsys, argv):
 
     assert run("proj-a/a-round", *argv, "--chose", "a") == 2
 
-    assert "--chose names the option he chose in answer to a question" in \
+    assert "--chose names the option the operator chose in answer to a question" in \
         capsys.readouterr().err
     assert logs(staged) == before
 
@@ -981,7 +995,7 @@ def test_an_answer_with_a_key_and_an_empty_sentence_is_a_usage_error(staged, cap
     assert "--text says nothing" in capsys.readouterr().err
 
 
-def test_an_answer_with_a_key_still_needs_his_pointer(staged, capsys):
+def test_an_answer_with_a_key_still_needs_the_operators_pointer(staged, capsys):
     offer()
     before = logs(staged)
 

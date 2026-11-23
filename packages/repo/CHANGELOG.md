@@ -2,6 +2,20 @@
 
 ## Unreleased
 
+- The page's `Reading…` line, while its first read is out, shows once that read has
+  been out 400 ms in every browser. In Firefox it could stay blank until something
+  else redrew the page, since the page checked the wait against `Date.now()`, which
+  Firefox coarsens. It now takes the wait from moxi-ui's `WaitClock`, so the `ui` extra
+  asks for moxi-ui 0.2.6 or later.
+- `repo/commit-rules` takes a `tag-check-trailers` setting, `true` or `false`. When true,
+  the repo's tag patterns are matched against every line of the trailer block too,
+  continuation lines included; off, as before, the trailers are not read for tags. The
+  push piece's check of commit-rules at push and `moxi repo rules` read it the same way;
+  `rules` prints `- no text matching, trailers included:` for each pattern where it is on.
+- `repo/commit-proof` drops the `Commit-Check` lines it read from a message it passes,
+  with the lines continuing them, so the line is not in the commit. On a clean merge only
+  the lines holding the merge's own value go. A refused message, and a commit repo's
+  committer makes, keep theirs.
 - The git hooks page is redrawn on ui's row element. `Hooks` gathers what needs you
   (problems, failing auto-commits, open records) under one verdict line; `Repos` has a
   row per repo that opens in place with its events, today's records, auto-commit, rules,

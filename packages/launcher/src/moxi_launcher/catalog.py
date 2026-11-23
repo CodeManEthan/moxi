@@ -49,6 +49,12 @@ the catalog's own:
     offered_with
              another launcher row: this row is offered only when that one is set off its
              default
+    fork     what a fork of a session (`moxi launcher fork`) does with the row, which
+             every row names, so a row added later is classed before it ships: `copy`,
+             the value as the parent ran it, for a row that shapes the request the
+             harness sends; `drop`, the row unset, for a row about who the session is,
+             what its first turn says, or how it lives and ends; `own`, the row composed
+             again for the fork, for a row the launcher composes for each launch itself
 
 The modes are Claude's `interactive` (`claude`) and `print` (`claude -p`), and Codex's
 `interactive` (`codex`), `exec` (`codex exec`) and `host` (turns' Codex host, and comms'
@@ -61,8 +67,11 @@ What this module gives the rest of the launcher:
 
 - `load(harness)` and `launcher()`: the parsed catalogs, checked when read; `offered(...)`
   the rows a user may set on this install, for a harness when one is named.
+- `forked(harness, values)`: a fork's values from its parent's, by each row's `fork`
+  class.
 - `refuse_values(harness, values, chosen=...)`: the rules between a launch's values that
-  `when` and `offered_with` state, each refused with its own words.
+  `when` and `offered_with` state, each refused with its own words, and the one rule no
+  row states: a scratch launch can't recycle itself (`refuse_scratch_recycle`).
 - `Row.check(value)` and `Row.tokens(mode, value, cwd=...)`: a value checked against its
   row, and the tokens one mode spells it as.
 - `fit(harness, mode, values, chosen)`: the modes rule. A composed command carries only
@@ -127,12 +136,14 @@ POSTURE_FLAGS = {
 }
 #: Flags of turns' Codex host that a launch never passes on, though the host takes them,
 #: each with what to do instead. A thread is resumed only through the launcher's own
-#: resume, which adds `--resume` itself; a launch always
+#: resume, which adds `--resume` itself, and forked only through its fork, which adds
+#: `--fork`; a launch always
 #: runs the Codex window; an options file can set the sandbox where the posture check
 #: can't see it; and the launcher gives the seat's instructions itself.
 HELD_FLAGS = {
     "codex": {
         "--resume": "resume a past session with moxi launcher resume",
+        "--fork": "fork a session with moxi launcher fork",
         "--no-window": "a launch always runs the Codex window; leave --no-window out",
         "--options-file": "an options file can set the sandbox where the posture check "
                           "can't see it; give each setting with its own option, or with "
@@ -170,7 +181,7 @@ TYPES = ("bool", "int", "float", "string", "enum", "path", "list")
 KEY_FIELDS = ("type", "default", "doc", "values", "env", "retired")
 OWN_FIELDS = ("flag", "aliases", "repeatable", "optional_value", "variadic", "modes",
               "items", "owned", "posture", "since", "hidden", "requires", "condition",
-              "when", "offered_with")
+              "when", "offered_with", "fork")
 #: What the browser's launch options read of a row: where it is drawn, what it is called,
 #: which of its values can hurt, and what it needs to be drawn or typed.
 PANEL_FIELDS = ("group", "sub", "label", "danger", "carry", "shown_with", "typed_with")
@@ -178,6 +189,8 @@ FIELDS = KEY_FIELDS + OWN_FIELDS + PANEL_FIELDS
 #: The groups a row is drawn in, in the order they are drawn. A `model` row is drawn with
 #: the harness and the model, not among the options.
 GROUPS = ("model", "access", "tools", "seat", "runs-in", "lifecycle", "config")
+#: What a fork does with a row (the `fork` field): copy it, drop it, or compose it again.
+FORK_CLASSES = ("copy", "drop", "own")
 #: The fields of one value's table under `when`.
 WHEN_FIELDS = ("requires", "condition", "target", "refused", "hint")
 #: The harnesses whose sessions cache's timer asks about: it keeps clock records for
@@ -451,6 +464,7 @@ class Row:
     carry: bool = True
     shown_with: tuple[str, ...] = ()
     typed_with: str | None = None
+    fork: str = "own"
 
     @property
     def required(self) -> tuple[str, ...]:
@@ -658,6 +672,34 @@ def row(harness: str, name: str) -> Row | None:
     return load(harness).rows.get(name)
 
 
+def unset(row_: Row) -> object:
+    """The value that leaves `row_` unset: false for a bool, or a string row whose
+    default is false; [] for a list; "" for any other string or a path; the default for
+    the rest, an `enum` row's default being its value that sets nothing."""
+    if row_.type == "list":
+        return []
+    if row_.type == "bool" or (row_.type == "string" and row_.default is False):
+        return False
+    if row_.type in ("string", "path"):
+        return ""
+    return row_.default
+
+
+def forked(harness: str, values: Mapping[str, object]) -> dict[str, object]:
+    """A fork's values from its parent's recorded `values`, by each row's `fork` class:
+    a `copy` row as the parent ran it, a `drop` row unset (`unset`), an `own` row left
+    out for the fork's launch to compose again. A value that names no row of the
+    launcher or of `harness` is kept as it is."""
+    out: dict[str, object] = {}
+    for name, value in values.items():
+        found = row(harness, name)
+        if found is None or found.fork == "copy":
+            out[name] = value
+        elif found.fork == "drop":
+            out[name] = unset(found)
+    return out
+
+
 def _read(name: str) -> Catalog:
     from importlib.resources import files
 
@@ -823,14 +865,15 @@ def _row(name, spec, harness, source) -> Row:
             raise bad("is offered_with itself")
     if flags["owned"] and flags["posture"]:
         raise bad("is both owned and a posture row")
+    fork = spec.get("fork")
     panel = _panel(spec, kind, values, bad)
 
     built = Row(name=name, harness=None if harness == LAUNCHER else harness, type=kind,
                 default=default, doc=doc, values=values, env=env, retired=retired,
                 flag=flag, aliases=tuple(aliases), modes=modes, items=items,
                 since=since, requires=requires, condition=condition,
-                when=MappingProxyType(when), offered_with=offered_with, **panel,
-                **flags)
+                when=MappingProxyType(when), offered_with=offered_with, fork=fork,
+                **panel, **flags)
     if retired is None:
         try:
             checked = (built.check(default) if not (kind == "path" and default == "")
@@ -839,6 +882,9 @@ def _row(name, spec, harness, source) -> Row:
             raise bad(f"has a default that does not fit: {exc.problem}") from None
         if kind == "enum" and default != "" and checked not in values:
             raise bad("has a default outside its values")
+    if fork not in FORK_CLASSES:
+        raise bad(f"has no fork class; class it {', '.join(FORK_CLASSES)}" if fork is None
+                  else f"has fork {fork!r}; class it {', '.join(FORK_CLASSES)}")
     return built
 
 
@@ -1016,7 +1062,10 @@ def refuse_values(harness: str, values: Mapping[str, object], *,
     - a row chosen for this launch (`chosen`: typed or from the preset) whose
       `offered_with` row is at its default, which leaves it nothing to do.
 
-    A row not in `values` is not offered here and is not looked at."""
+    A row not in `values` is not offered here and is not looked at. First
+    comes `refuse_scratch_recycle`, which no other value can fix, so a launch, its
+    preview and `presets check` all refuse that pair in its own words."""
+    refuse_scratch_recycle(values)
     avail = _available(available)
     chosen = frozenset(chosen)
     for name, value in values.items():
@@ -1032,6 +1081,27 @@ def refuse_values(harness: str, values: Mapping[str, object], *,
                                                                             other.default):
                 raise NeedsModule(row_, f"{name} needs {row_.offered_with}",
                                   f"set {row_.offered_with} too, or leave {name} out")
+
+
+#: Why a scratch launch may not recycle itself, and what to do instead: a scratch folder
+#: has no notes directory to keep a handoff in. `compact` stays open to a scratch.
+SCRATCH_RECYCLE = ("a scratch launch can't recycle itself",
+                   "recycle with compact, or launch in a directory")
+
+
+class ScratchRecycle(Refused):
+    """A scratch launch set to recycle itself (`recycle_at_limit = relaunch`): a scratch
+    folder has no notes directory to keep its handoff in."""
+
+    code = "scratch-recycle"
+
+
+def refuse_scratch_recycle(values: Mapping[str, object]) -> None:
+    """Refuse `ScratchRecycle` when `values` set `scratch` and `recycle_at_limit =
+    relaunch` together. `presets.resolve` has already set a `[defaults]` relaunch to
+    `off` on a scratch launch, so what reaches here was typed or set by the preset."""
+    if bool(values.get("scratch")) and values.get("recycle_at_limit") == "relaunch":
+        raise ScratchRecycle("recycle_at_limit", *SCRATCH_RECYCLE)
 
 
 def _met(need: When, values: Mapping[str, object], avail: Callable[[str], bool],
@@ -1180,13 +1250,14 @@ def _add_option(parser: argparse.ArgumentParser, row_: Row) -> None:
 @dataclass(frozen=True)
 class Parsed:
     """A launch's typed flags. `values` holds the rows typed, checked, by name;
-    `unknown` the flags the parser did not know, in order, and `extra` those with the
-    words after `--`, which go last on the harness's argv."""
+    `unknown` the flags the parser did not know, in order, `tail` the words after `--`,
+    and `extra` the unknown flags then the tail, which go last on the harness's argv."""
 
     harness: str
     values: Mapping[str, object]
     unknown: tuple[str, ...]
     extra: tuple[str, ...]
+    tail: tuple[str, ...] = ()
 
     @property
     def warning(self) -> str | None:
@@ -1221,7 +1292,8 @@ def parse(argv: Sequence[str], harness: str, *,
         values[name] = found.check(value) if found is not None else value
     extra = [*unknown, *tail]
     refuse_passthrough(harness, extra)
-    return Parsed(harness, MappingProxyType(values), tuple(unknown), tuple(extra))
+    return Parsed(harness, MappingProxyType(values), tuple(unknown), tuple(extra),
+                  tuple(tail))
 
 
 def typed_harness(argv: Sequence[str]) -> str | None:

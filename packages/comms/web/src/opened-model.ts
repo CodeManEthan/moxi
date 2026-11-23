@@ -49,7 +49,7 @@ export interface QueueItem {
   /** `you`, or the author's name. */
   author: string;
   text: string;
-  /** His own, and the books say it can still be taken back. */
+  /** The operator's own, and the books say it can still be taken back. */
   takeable: boolean;
 }
 
@@ -100,6 +100,10 @@ export interface OpenedFacts {
   /** sessions' `Session` line for the address's session (`session-model.ts`), drawn where
    * launcher gives none; null or absent where sessions gives nothing. */
   session?: { value: string; route: string } | null;
+  /** A read that can bring the `Session` line is still out (launcher's running read, or
+   * sessions' read of the session): the line is drawn reading `Reading…` till it answers,
+   * so its value arriving moves nothing under it. */
+  sessionOut?: boolean;
   showsDetails: boolean;
 }
 
@@ -122,6 +126,8 @@ export function openedAgent(facts: OpenedFacts): OpenedAgent {
   } else if (bound && facts.session) {
     before.push({ key: "session", label: SESSION_LABEL, value: facts.session.value, tail: null,
                   link: facts.hasSessions ? { kind: "sessions", route: facts.session.route } : null });
+  } else if (bound && facts.sessionOut) {
+    before.push({ key: "session", label: SESSION_LABEL, value: READING, tail: null, link: null });
   }
   const cacheLink: Link | null = facts.hasCache ? { kind: "cache" } : null;
   const cache = rosterRow?.cache ?? null;

@@ -22,6 +22,7 @@ with what it adds: its posture, a resume, the relaunch's header and stamps.
 
 from __future__ import annotations
 
+import contextlib
 import os
 import uuid
 from collections.abc import Iterable, Mapping
@@ -97,7 +98,7 @@ def context(values: Mapping[str, object], *, request_id: str,
     `environ` is the caller's environment; `child_environ` the one the child's is built
     from, which turns' launch additions are asked with (default `environ`; a replay's
     differs). `replay` holds the `Context` fields a replay sets (`posture`, `resume`,
-    `relaunched`, `extra_stamps`)."""
+    `fork_of`, `relaunched`, `extra_stamps`)."""
     env = dict(os.environ if env is None else env)
     child = env if child_env is None else dict(child_env)
     links = installed() if modules is None else frozenset(modules)
@@ -128,10 +129,10 @@ def context(values: Mapping[str, object], *, request_id: str,
         preset_name=preset_name, project_key=project_key))
     handoff_dir = None
     if key and values.get("cwd"):
-        handoff_dir = str(handoffs.handoff_dir(str(values["cwd"]),
-                                          notes_dir=values.get("notes_dir") or None,
-                                          env=env, create=create,
-                                          create_own=False))
+        with contextlib.suppress(handoffs.NoNotesDir):
+            handoff_dir = str(handoffs.handoff_dir(str(values["cwd"]),
+                                                   notes_dir=values.get("notes_dir") or None,
+                                                   env=env, create=create, create_own=False))
 
     role_found = None
     if values.get("agent"):
@@ -199,7 +200,9 @@ def build(request, resolved, *, env: Mapping[str, str] | None = None,
 
     `request` gives `request_id`, `session_id` and `actor`, each read as None when it is
     missing (an id is then minted, the actor read from the environment). A scratch launch
-    works in `common.scratch_dir(request_id)`, which the launch makes; this only names it.
+    works in `common.scratch_dir(name)`, named by the launch's session name (folded to
+    lowercase letters, digits and dashes), which the launch makes; this only names it.
+    It raises `presets.ScratchNotes` when notes would give that folder a notes home.
     `preview` and the launch both come here, so the same request, its ids given, composes
     the same argv.
 
@@ -207,7 +210,8 @@ def build(request, resolved, *, env: Mapping[str, str] | None = None,
     too, where a resumed session's transcript is found; its session id is the one it
     resumes when `request.resume_of` is set. It gives the identity block its `posture`,
     and a relaunch with a handoff (`relaunch_of` and `handoff` set) the relaunch's header
-    and, with `run`, the `RELAUNCH_ENV` stamp.
+    and, with `run`, the `RELAUNCH_ENV` stamp. A fork (`fork_of` set) names the session
+    it forks to its composer, and carries its `stamps` with the launch's own.
     """
     values = dict(resolved.values)
     request_id = getattr(request, "request_id", None) or str(uuid.uuid4())
@@ -217,7 +221,15 @@ def build(request, resolved, *, env: Mapping[str, str] | None = None,
         session_id = str(uuid.uuid4())
     if replay is None and (getattr(resolved, "scratch", False)
                            or (values.get("scratch") and not values.get("cwd"))):
-        values["cwd"] = str(common.scratch_dir(request_id))
+        values["cwd"] = str(common.scratch_dir(str(values.get("name") or "")))
+        home = handoffs.notes_home(values["cwd"])
+        if home is not None:
+            root = common.scratch_root()
+            raise presets.ScratchNotes(
+                "scratch", f"the scratch folder {values['cwd']} resolves to a notes home "
+                           f"({home}), and a scratch launch keeps nothing",
+                f"keep notes out of {root} (moxi config set notes exclude --add {root}), "
+                "or launch in a folder of your own")
     if hasattr(resolved, "off_posture"):
         values["off_posture"] = bool(resolved.off_posture)
     ctx = context(values, request_id=request_id, session_id=session_id,
@@ -239,10 +251,12 @@ def _replay(request) -> dict[str, object] | None:
     handoff = getattr(request, "handoff", None)
     relaunched = bool(getattr(request, "relaunch_of", None) and handoff)
     run = getattr(request, "run", None)
+    stamped = {common.RELAUNCH_ENV: str(run)} if relaunched and run else {}
+    stamped.update({str(k): str(v) for k, v in (getattr(request, "stamps", None) or {}).items()})
     return {"posture": getattr(request, "posture", None),
             "resume": bool(getattr(request, "resume_of", None)),
-            "relaunched": relaunched,
-            "extra_stamps": {common.RELAUNCH_ENV: str(run)} if relaunched and run else {}}
+            "fork_of": getattr(request, "fork_of", None) or None,
+            "relaunched": relaunched, "extra_stamps": stamped}
 
 
 def _read(row: str, name: object) -> str | None:

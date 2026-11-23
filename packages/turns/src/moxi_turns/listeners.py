@@ -20,6 +20,11 @@ named options. The events:
 - `ready` is the same moment, observe only: every row naming it is called, on the list or
   not, and its answer is ignored. A module that only wants to know a session started
   needs no place on the list.
+- `load`: a Claude Code endpoint learned its session's id for the first time, once per
+  endpoint process. That is normally the runner's `session` line at the endpoint's own
+  start, so a module hears of an endpoint that replaced another before the session's
+  next start, resume, clear or compaction. When that line carries no id, `load` comes
+  just before the first `ready`. Observe only, like `ready`.
 - `prompt` adds context at each prompt: the texts, joined in module-name order.
 - `turn` (a main-loop turn ended) and `gone` (the endpoint is ending); answers ignored.
 - `after-tool`: a tool call ran; the text answer is added to what the model reads after
@@ -30,9 +35,17 @@ named options. The events:
 The name `tool` is kept for a later turns: a registration naming it is refused whole, so
 no module ships one early.
 
-The one option is `floor`, `{"floor": "package.module:function"}`: a function called with
-a `SessionEvent` that returns a token count, below which the main loop's events skip the
-row. An option this turns doesn't know is ignored and named in the doctor. A row grows
+The options, each naming a function `"package.module:function"`:
+
+- `floor`: called with a `SessionEvent`, it returns a token count below which the main
+  loop's events skip the row (an `after-tool` row's).
+- `wait_ms`: called once at the session's start with the session's environment, it
+  returns the row's own bound on `prompt` for that session, in milliseconds, or None for
+  none. The session's prompt bound is the longest of `listen.wait_ms` and these
+  (`prompt_wait_ms`); a function that raises or returns something other than a whole
+  number of at least 0 adds nothing, logged.
+
+An option this turns doesn't know is ignored and named in the doctor. A row grows
 only by optional trailing items; this turns reads a longer row as its first three items
 and says so in the doctor.
 
@@ -63,7 +76,8 @@ and its shares as a session of a harness would get them, running nothing: no lis
 no run entry.
 
 Asking: every function that names the event runs in its own thread; all start together
-and are bounded together by one `listen.wait_ms`. An exception or a late answer is logged
+and are bounded together by one `listen.wait_ms`, or for `prompt` by the session's prompt
+bound. An exception or a late answer is logged
 once and counts as None, so a broken listener costs its own context and never the
 session's turn. A function is imported in its thread at its first ask, so a slow import
 costs that ask and not the endpoint's start.
@@ -114,11 +128,12 @@ log = logging.getLogger("moxi.turns.listeners")
 #: The entry-point group.
 GROUP = "moxi.turns.listeners"
 #: The events a listener may name.
-EVENTS = ("ready", "start", "prompt", "turn", "gone", "after-tool", "usage", "codex_limits")
+EVENTS = ("ready", "start", "prompt", "turn", "gone", "after-tool", "usage", "codex_limits",
+          "load")
 #: Event names kept for a later turns; a registration naming one is refused.
 RESERVED = ("tool",)
 #: The options a row's third item may name.
-OPTIONS = ("floor",)
+OPTIONS = ("floor", "wait_ms")
 #: The events whose answers turns passes back.
 CONTEXT_EVENTS = ("start", "prompt")
 #: How listener texts are joined into one added context.
@@ -145,6 +160,8 @@ class Listener:
     target: str
     #: The row's floor function, `"package.module:function"`, or None for no floor.
     floor: str | None = None
+    #: The row's prompt-wait function, `"package.module:function"`, or None for none.
+    wait_ms: str | None = None
     _fn: Callable[[SessionEvent], object] | None = field(default=None, repr=False)
     _floor_fn: Callable[[SessionEvent], object] | None = field(default=None, repr=False)
     _lock: threading.Lock = field(default_factory=threading.Lock, repr=False)
@@ -260,8 +277,8 @@ def load(entries: Iterable | None = None, *, order: Iterable[str] | None = None,
             broken.append(Broken(name, f"its registration does not load: "
                                        f"{type(exc).__name__}: {exc}"))
             continue
-        listeners.extend(Listener(name, events, target, floor)
-                         for events, target, floor in rows)
+        listeners.extend(Listener(name, events, target, floor, wait_ms)
+                         for events, target, floor, wait_ms in rows)
         notices.extend(Notice(name, reason) for reason in said)
     for b in broken:
         log.warning("listeners of %s are off: %s", b.module, b.reason)
@@ -282,8 +299,9 @@ def _start_settings(env) -> tuple[tuple[str, ...] | None, int]:
     return tuple(settings["start.order"]), int(settings["start.limit_chars"])
 
 
-def _rows(module) -> tuple[list[tuple[frozenset[str], str, str | None]], list[str]]:
-    """The rows of a `LISTENERS` as `(events, target, floor)`, and what the doctor should
+def _rows(module) -> tuple[list[tuple[frozenset[str], str, str | None, str | None]],
+                          list[str]]:
+    """The rows of a `LISTENERS` as `(events, target, floor, wait_ms)`, and what the doctor should
     say of what was ignored: options this turns doesn't know, and rows longer than
     three items."""
     rows = getattr(module, "LISTENERS", None)
@@ -298,7 +316,7 @@ def _rows(module) -> tuple[list[tuple[frozenset[str], str, str | None]], list[st
         if len(row) > 3:
             longer += 1
         events, target = row[0], row[1]
-        floor, unknown_options = _options(row, row[2] if len(row) > 2 else None)
+        floor, wait_ms, unknown_options = _options(row, row[2] if len(row) > 2 else None)
         said.extend(f"this turns doesn't know option {k!r} (row {target!r}); it is "
                     "ignored" for k in unknown_options)
         if isinstance(events, str):
@@ -315,7 +333,7 @@ def _rows(module) -> tuple[list[tuple[frozenset[str], str, str | None]], list[st
         if not isinstance(target, str) or not _TARGET.fullmatch(target):
             raise ValueError(f"the row {row!r} has target {target!r}; use "
                              '"package.module:function"')
-        out.append((events, target, floor))
+        out.append((events, target, floor, wait_ms))
     if longer:
         said.append(f"{longer} of its rows carry more than (events, target, options); "
                     "this turns is older than the row and reads only its first three "
@@ -323,19 +341,51 @@ def _rows(module) -> tuple[list[tuple[frozenset[str], str, str | None]], list[st
     return out, said
 
 
-def _options(row, options) -> tuple[str | None, list[str]]:
-    """A row's floor from its options table, and the option names this turns doesn't
-    know. A table that isn't one, or a floor that isn't a target, refuses the row."""
+def _options(row, options) -> tuple[str | None, str | None, list[str]]:
+    """A row's floor and prompt-wait function from its options table, and the option names
+    this turns doesn't know. A table that isn't one, or an option that isn't a target,
+    refuses the row."""
     if options is None:
-        return None, []
+        return None, None, []
     if not isinstance(options, Mapping):
         raise ValueError(f"the row {row!r} has a third item that is not a table of "
                          "options; use {\"floor\": \"package.module:function\"}")
-    floor = options.get("floor")
-    if floor is not None and (not isinstance(floor, str) or not _TARGET.fullmatch(floor)):
-        raise ValueError(f"the row {row!r} has floor {floor!r}; use "
-                         '"package.module:function"')
-    return floor, sorted(str(k) for k in options if k not in OPTIONS)
+    named = []
+    for key in OPTIONS:
+        value = options.get(key)
+        if value is not None and (not isinstance(value, str)
+                                  or not _TARGET.fullmatch(value)):
+            raise ValueError(f"the row {row!r} has {key} {value!r}; use "
+                             '"package.module:function"')
+        named.append(value)
+    floor, wait_ms = named
+    return floor, wait_ms, sorted(str(k) for k in options if k not in OPTIONS)
+
+
+def prompt_wait_ms(registry: Registry, env: Mapping[str, str], listen_wait_ms: int) -> int:
+    """The session's prompt bound, in milliseconds: the longest of `listen_wait_ms` and
+    each `prompt` row's own (its `wait_ms` function called with `env`). Decided once, at
+    the session's start. A function that does not import, raises, or answers something
+    other than an int of at least 0 adds nothing, logged; None adds nothing. Never
+    raises."""
+    longest = listen_wait_ms
+    for ls in registry.naming("prompt"):
+        if ls.wait_ms is None:
+            continue
+        try:
+            value = _import(ls.wait_ms)(env)
+        except Exception as exc:  # noqa: BLE001 - one row's fault costs its own wait
+            log.warning("the prompt wait %s of row %s failed: %s: %s; it adds nothing",
+                        ls.wait_ms, ls.target, type(exc).__name__, exc)
+            continue
+        if value is None:
+            continue
+        if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+            log.warning("the prompt wait %s of row %s answered %r, not a whole number of "
+                        "ms; it adds nothing", ls.wait_ms, ls.target, value)
+            continue
+        longest = max(longest, value)
+    return longest
 
 
 # -- the start list ----------------------------------------------------------------------
@@ -592,10 +642,10 @@ def ask(registry: Registry, event: SessionEvent, wait_s: float, *,
 
     A `ready` or `start` event is the start moment: every `ready` row is told, and the
     start list's entries are asked; the result is the start context, or None. For
-    `prompt`, the texts joined in module-name order, or None. For `turn` and `gone` the
-    answers are ignored and this returns None at once, the calls running on, unless
-    `wait` asks it to wait for them up to `wait_s` too (the endpoint's own end, so a
-    `gone` call is not cut off by the process exiting). `after`, when given, is called in
+    `prompt`, the texts joined in module-name order, or None. For `load`, `turn` and
+    `gone` the answers are ignored and this returns None at once, the calls running on,
+    unless `wait` asks it to wait for them up to `wait_s` too (the endpoint's own end, so
+    a `gone` call is not cut off by the process exiting). `after`, when given, is called in
     each listener's thread once its call returned (the endpoint reads floors there).
     """
     if event.event in ("ready", "start"):
@@ -1064,4 +1114,4 @@ __all__ = ["GROUP", "EVENTS", "RESERVED", "OPTIONS", "CONTEXT_EVENTS", "JOIN",
            "AFTER_WORKERS", "AFTER_TOOL", "START_CEILINGS", "DEFAULT_CEILING", "Listener",
            "Broken", "Notice", "Registry", "Entry", "Plan", "SessionEvent", "After",
            "default_order", "start_ceiling", "load", "plan", "is_file_entry", "cut",
-           "share_out", "ask", "after_rows", "AfterTool", "Floors"]
+           "share_out", "ask", "after_rows", "AfterTool", "Floors", "prompt_wait_ms"]

@@ -1,6 +1,6 @@
 """`moxi rounds list ROUND|PROJECT --questions`: the questions that wait on the operator,
 written out as markdown, as data and as two files, with the rulings not yet shown to
-him after them."""
+the operator after them."""
 
 from __future__ import annotations
 
@@ -10,7 +10,7 @@ import pytest
 from moxi import cli
 
 from moxi_rounds import (asking, dropping, export, folders, index, log, moving, opening,
-                         options, paths, questions, ruling, state)
+                         options, paths, preparing, questions, ruling, state)
 from moxi_rounds.cli import main
 from moxi_rounds.errors import BadArgument, NoRound, Refused, Unreadable
 
@@ -159,7 +159,7 @@ def test_the_export_says_what_it_is_of_and_when_it_was_computed(rounds):
         "of": "proj-a", "project": "proj-a", "round": None, "view": None,
         "computed": NOW}
     assert list(of_round) == ["of", "project", "round", "view", "computed", "entries",
-                              "ratify", "covers", "later", "ended", "left",
+                              "ratify", "covers", "later", "not_ratified", "ended", "left",
                               "unreadable", "read_back"]
     assert (of_project["ratify"], of_project["covers"], of_project["later"]) == (
         None, None, [])
@@ -307,6 +307,68 @@ def test_a_question_with_options_is_exported_with_them_in_the_order_added(
     assert ("- options:\n  - b: both follow the settings\n"
             "  - a: prose yes, parsed rows no\n  - c: neither does\n"
             ) in printed(capsys, A, "--questions")
+
+
+def prepare(tmp_path, *keys, target=A, question_id="Q1", recommend="a"):
+    """Record an answer prepared for the question, with an option under each key."""
+    lines = ['kind = "answer"', f'question = "{question_id}"', 'by = "builder-1"',
+             'model = "a-model"', f'recommend = "{recommend}"', 'sure = "medium"',
+             'why = "prose is what a person reads"', 'flips = "a parsed row read aloud"',
+             'read = ["comms:4611686018427394085"]']
+    for key in keys:
+        lines += ["[[option]]", f'key = "{key}"', f'costs = "the cost of {key}"',
+                  'forecloses = "nothing"']
+    path = tmp_path / f"answer-{len(list(tmp_path.glob('answer-*')))}.md"
+    path.write_text("```toml rounds\n" + "\n".join(lines) + "\n```\n", encoding="utf-8")
+    return preparing.prepare(target, question_id, path, by="helper", at=T5)
+
+
+def test_a_prepared_question_is_exported_with_its_newest_answer(rounds, tmp_path,
+                                                                capsys):
+    ask(options=["a=prose yes, parsed rows no", "b=both follow the settings"])
+    prepare(tmp_path, "a", "b", recommend="b")
+    prepare(tmp_path, "b", "a")
+
+    [entry] = entries()
+
+    assert set(entry) == BARE | {"options", "prepared"}
+    assert entry["prepared"] == {
+        "by": "builder-1", "model": "a-model", "recommend": "a", "sure": "medium",
+        "why": "prose is what a person reads", "flips": "a parsed row read aloud",
+        "read": ["comms:4611686018427394085"],
+        "options": [{"key": "b", "costs": "the cost of b", "forecloses": "nothing"},
+                    {"key": "a", "costs": "the cost of a", "forecloses": "nothing"}],
+        "actor": "helper", "at": T5, "current": True}
+    assert ("- prepared by builder-1 (a-model, sure: medium): recommends a. prose is "
+            "what a person reads. Flips if: a parsed row read aloud.\n"
+            "  - b: costs the cost of b; forecloses nothing\n"
+            "  - a: costs the cost of a; forecloses nothing\n"
+            ) in printed(capsys, A, "--questions")
+    data = json.loads(printed(capsys, A, "--questions", "--json"))
+    assert data["entries"][0]["prepared"] == entry["prepared"]
+
+
+def test_an_answer_prepared_for_other_options_is_exported_as_such(rounds, tmp_path,
+                                                                 capsys):
+    ask(options=["a=prose yes, parsed rows no", "b=both follow the settings"])
+    prepare(tmp_path, "a", "b")
+    options.fill(A, "Q1", by="helper", options=["c=neither does"])
+
+    [entry] = entries()
+
+    assert entry["prepared"]["current"] is False
+    text = printed(capsys, A, "--questions")
+    assert "recommends a." in text
+    assert "  - prepared for other options\n" in text
+    assert "costs the cost of a" not in text
+
+
+def test_a_projects_export_carries_the_answers_of_its_rounds(rounds, tmp_path):
+    ask(options=["a=prose yes, parsed rows no", "b=both follow the settings"])
+    prepare(tmp_path, "a", "b")
+
+    [entry] = [one for one in entries("proj-a") if one["id"] == "Q1"]
+    assert entry["prepared"]["recommend"] == "a"
 
 
 def test_a_retired_option_is_in_no_form_of_the_export(rounds, tmp_path, capsys):
@@ -502,7 +564,7 @@ def test_a_projects_export_holds_no_question_of_a_round_that_was_dropped(
     rule(B, item="Q2", text="It is.", at=T3)
     dropping.drop(B, by="operator", record="comms:30", run_by="planner", at=T4)
     # An answer taken back after the drop leaves its question unanswered in a round
-    # that takes no answer: it is not put to him from there.
+    # that takes no answer: it is not put to the operator from there.
     rule(B, item="revoke:C1", at=T5)
 
     found = export.questions_of("proj-a")
@@ -813,7 +875,7 @@ def test_a_decision_that_forecloses_is_an_entry_of_its_own_in_every_view(
     assert all(one["alone"] for one in of_project["entries"] if one.get("forecloses"))
 
 
-def test_off_puts_no_decision_to_him_and_names_what_it_covers(
+def test_off_puts_no_decision_to_the_operator_and_names_what_it_covers(
         rounds, write_config, capsys):
     ratify_setting(write_config, "off")
     built(rounds, "B1")
@@ -860,7 +922,7 @@ def test_the_ratification_s_json_and_markdown_are_one_reading(rounds, capsys, tm
         encoding="utf-8")) == data
 
 
-def test_a_round_that_has_ended_puts_no_decision_to_him(rounds):
+def test_a_round_that_has_ended_puts_no_decision_to_the_operator(rounds):
     built(rounds, "B1")
     decided(rounds, "B1", ("M1", "major", False))
     log.append(log.round_log(rounds / "a-round"), "round.dropped",

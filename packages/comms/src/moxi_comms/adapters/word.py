@@ -25,6 +25,9 @@ from moxi import exit as moxi_exit
 NOTICE_AFTER = 2.0
 
 BOUND, OFFLINE, REFUSED, TRY_AGAIN, FAILED = "B", "O", "R", "T", "E"
+#: A respawned adapter's word when another new adapter already serves its session
+#: (`respawn`): it ends at once, and the other one binds.
+STARTING = "S"
 #: The wrapper's exit code for each word but `BOUND`.
 EXIT_OF = {OFFLINE: moxi_exit.TEMPFAIL, REFUSED: moxi_exit.REFUSED,
            TRY_AGAIN: moxi_exit.TEMPFAIL, FAILED: moxi_exit.ERROR}
@@ -109,5 +112,6 @@ def await_word(fd: int, timeout: float, *, notice=None, notice_after=None):
     return (text[0], text[1:])
 
 
-__all__ = ["BOUND", "OFFLINE", "REFUSED", "TRY_AGAIN", "FAILED", "EXIT_OF", "NOTICE_AFTER",
+__all__ = ["BOUND", "OFFLINE", "REFUSED", "STARTING", "TRY_AGAIN", "FAILED", "EXIT_OF",
+           "NOTICE_AFTER",
            "await_word", "exit_of", "teller", "word_for"]

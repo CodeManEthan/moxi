@@ -49,6 +49,8 @@ class Turn:
     #: The turns command the harness ran this turn for (`compact`), or None.
     command: str | None = None
     outcome: str | None = None
+    #: The turn's final text as the harness gave it at its end, or None where it gave none.
+    answer: str | None = None
     #: The turn's events wait for a decision about which delivery, if any, it took:
     #: the ledger has it open or ended, `watch()` has not seen it yet.
     held: bool = False

@@ -61,10 +61,11 @@ def _comms_rig():
 
 
 RIG = _comms_rig()
-# comms' fixtures, for this module: its roots under tmp, its reserve step scoped, its
-# socket unit read as unknown, every thread a test starts ended at its teardown, the rig.
-env, installs, unit_read, threads_end, rig = (RIG.env, RIG.installs, RIG.unit_read,
-                                              RIG.threads_end, RIG.rig)
+# comms' fixtures, for this module: the test's profile directory and its roots there, its
+# reserve step scoped, its socket unit read as unknown, every thread a test starts ended at
+# its teardown, the rig.
+profile, env, installs, unit_read, threads_end, rig = (
+    RIG.profile, RIG.env, RIG.installs, RIG.unit_read, RIG.threads_end, RIG.rig)
 
 
 @pytest.fixture
@@ -94,7 +95,9 @@ def kinds(rows, kind):
 @pytest.fixture
 def registry(rig):
     """The providers this environment installs, loaded from `moxi.connector.providers` and
-    started on the test's roots, comms' among them; stopped at the end."""
+    started on the test's roots, comms' among them; stopped at the end. The read tools'
+    providers load beside comms in the workspace, so a check of the tools served reads
+    comms' own."""
     from moxi_connector.providers import Registry
 
     found = Registry.from_group()
@@ -226,7 +229,8 @@ def test_the_registry_loads_comms_with_its_gate_from_the_entry_point(registry):
     assert gates["comms"] is entry.provider.gate
     gate = comms("connector.gate")
     assert (gates["comms"].peer, gates["comms"].shell) == (gate.peer, gate.shell)
-    assert list(registry.tools()) == NAMES
+    assert [name for name, (module, _) in registry.tools().items()
+            if module == "comms"] == NAMES
 
 
 @pytest.mark.parametrize("where", ["inside", "unplaced"])
@@ -360,7 +364,8 @@ def test_the_full_sign_in_then_comms_tools_reach_the_daemon(running, walk, regis
         assert "tools" in mcp_over(d.port, access, initialize())["capabilities"]
 
         # tools/list: comms' four tools, each with its title and truthful annotations.
-        listed = mcp_over(d.port, access, rpc("tools/list", rid=2))["tools"]
+        listed = [t for t in mcp_over(d.port, access, rpc("tools/list", rid=2))["tools"]
+                  if t["name"] in NAMES]
         assert [t["name"] for t in listed] == NAMES
         hints = {t["name"]: t["annotations"] for t in listed}
         assert {n: h["readOnlyHint"] for n, h in hints.items()} == {
@@ -613,7 +618,8 @@ def test_the_doctor_names_comms_provider_its_gate_and_its_identity(
     bound(registry)
     with running:
         rows = {r.name: r for r in doctor.rows()}
-    assert (rows["providers"].state, rows["providers"].detail) == ("ok", "comms, 4 tools")
+    assert rows["providers"].state == "ok"
+    assert "comms, 4 tools" in rows["providers"].detail.split("; ")
     assert (rows["mint gate"].state, rows["mint gate"].detail) == ("ok", "from comms")
     identity = rows["comms identity"]
     assert identity.state == "ok" and ME in identity.detail

@@ -13,6 +13,9 @@ has a step, listed or not: three steps come with `build` and one with `verify-de
 `read(settings)` gives every flow by name as plain lists of tables, the built-in ones
 first; a flow the config names like a built-in one stands in its place. `check(settings)`
 refuses a flow the rest of rounds could not follow, and a tier that names no flow.
+
+`recorded(steps)` gives a flow's steps as a round's record holds them: each word of a
+command step's argv that is a path under the home folder in its `~` form.
 """
 
 from __future__ import annotations
@@ -21,6 +24,8 @@ import copy
 import re
 
 from moxi.config import ConfigError
+
+from . import places
 
 #: A step done once for the round.
 ROUND = "round"
@@ -116,6 +121,20 @@ def read(settings) -> dict[str, list[dict]]:
     for name, flow in settings["flows"].items():
         flows[name] = copy.deepcopy(flow["steps"])
     return flows
+
+
+def recorded(steps) -> list[dict]:
+    """A copy of the step entries `steps` as a round's record holds them: each word of a
+    command step's `argv` that is the home folder or a path under it in its `~` form,
+    every other word and key as it is. Two lists of steps that name the same commands
+    are equal once both are read through this."""
+    entries = copy.deepcopy(list(steps))
+    for entry in entries:
+        argv = entry.get("argv") if isinstance(entry, dict) else None
+        if isinstance(argv, list):
+            entry["argv"] = [places.contract_home(word) if isinstance(word, str) else word
+                             for word in argv]
+    return entries
 
 
 def check(settings) -> None:
@@ -277,5 +296,5 @@ def kind_of(value) -> str:
 
 __all__ = ["ROUND", "STAGE", "STEPS", "VERIFY_STEPS", "OPERATOR_STEPS", "UNLISTED_STEPS",
            "REPORT", "COMMAND", "DOES", "BEFORE", "BUILT_IN", "is_user_step", "names",
-           "has", "read",
+           "has", "read", "recorded",
            "check", "check_argv", "check_timeout", "kind_of"]

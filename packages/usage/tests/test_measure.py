@@ -258,6 +258,26 @@ def test_the_verb_measures_then_prints_rows_and_marks(monkeypatch, capsys):
     assert found["measured"] and found["rows"][0]["marks"]["2x"]["tokens"] > 0
 
 
+def test_days_sets_one_measures_window_and_the_config_stays(monkeypatch, capsys):
+    # `--days N` with `--measure` sets the window of this one measure; the config's stays.
+    monkeypatch.setattr(measure, "MIN_FILES", 2)
+    pin_clock(monkeypatch)
+    for n in range(2):
+        session(n)
+    session(2, start=NOW - 10 * DAY)
+    assert cli.main(["restart-point", "--measure", "--days", "5"]) == 0
+    assert "restart point measured over 2 files" in capsys.readouterr().out
+    assert json.loads(thresholds.params_path().read_text())["days"] == 5
+    assert cli.main(["restart-point", "--measure"]) == 0
+    assert "restart point measured over 3 files" in capsys.readouterr().out
+    assert json.loads(thresholds.params_path().read_text())["days"] == 21
+    for argv in (["--measure", "--days", "0"], ["--measure", "--days", "-3"],
+                 ["--days", "5"]):
+        assert cli.main(["restart-point", *argv]) == 2
+        assert "--days" in capsys.readouterr().err
+    assert json.loads(thresholds.params_path().read_text())["days"] == 21
+
+
 def test_the_verb_without_a_measure_says_so_and_exits_1(capsys):
     assert cli.main(["restart-point"]) == 1
     assert "has not been measured" in capsys.readouterr().out
@@ -372,3 +392,48 @@ def test_a_model_without_an_input_price_or_one_of_0_has_no_row_and_is_named():
     run = measure.Run(found, "here")
     assert ("2 models without a usable input price in the model table (unknown, missing "
             "or 0), so no row" in run.line())
+
+
+# --- a borrowed row in what the measure shows ----------------------------------------------
+
+def test_restart_point_lists_a_borrowed_row_and_the_verb_prints_it():
+    from test_thresholds import OPUS_MAIN, borrow_table, with_opus, write_params
+
+    params = with_opus()
+    params.update(days=21, sample={"files": 284, "requests": 9000},
+                  thin={"claude-fable-5-2": {"main": 10}})
+    write_params(params)
+    point = measure.restart_point(table=borrow_table())
+    assert [(m, p) for m, p, _, _ in point.rows] == [("claude-fable-5-2", "main"),
+                                                    ("claude-opus-5-5", "main")]
+    _, _, shown, marks = point.rows[0]
+    w = round(2.0 * 0.998 + 1.25 * 0.002, 3)
+    assert {key: shown[key] for key in ("n", "S", "P", "g")} == {
+        key: OPUS_MAIN[key] for key in ("n", "S", "P", "g")}
+    assert shown["w"] == w and shown["borrowed_from"] == "claude-opus-5-5"
+    assert {mark: found.tokens for mark, found in marks.items()} == {
+        "1x": 140_380, "1.5x": 276_480, "2x": 370_185}
+    assert all(found.borrowed_from == "claude-opus-5-5" for found in marks.values())
+    assert point.as_dict()["rows"][0]["borrowed_from"] == "claude-opus-5-5"
+    assert "borrowed_from" not in point.as_dict()["rows"][1]
+    # the measure's own file is as written: the borrow is worked out when it is read
+    assert "claude-fable-5-2" not in json.loads(thresholds.params_path().read_text())["models"]
+
+    lines = cli.restart_lines(point)
+    assert lines[1] == (f"  {'claude-fable-5-2':<24} {'main':<8} n 274, borrowed from "
+                        f"claude-opus-5-5: S 56,264, P 25,698, g 1,433, w {w}   "
+                        "1x 140,380   1.5x 276,480   2x 370,185")
+    assert lines[2].startswith(f"  {'claude-opus-5-5':<24} {'main':<8} n 274: ")
+    assert lines[3] == (f"  {'claude-fable-5-2':<24} {'main':<8} 10 files, under the 20 a "
+                        "row needs; borrows claude-opus-5-5's row")
+
+
+def test_with_no_lender_row_nothing_is_borrowed_and_the_thin_line_says_no_more():
+    from test_thresholds import borrow_table, write_params
+
+    write_params({"schema": 1, "measured_at": "2026-11-20T03:10:00+00:00", "days": 21,
+                  "models": {}, "thin": {"claude-fable-5-2": {"main": 10}}})
+    point = measure.restart_point(table=borrow_table())
+    assert point.rows == ()
+    assert cli.restart_lines(point)[-1] == (
+        f"  {'claude-fable-5-2':<24} {'main':<8} 10 files, under the 20 a row needs")

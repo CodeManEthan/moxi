@@ -9,6 +9,7 @@ import os
 import subprocess
 import sys
 import threading
+import time
 from dataclasses import dataclass, field
 from pathlib import Path
 from types import SimpleNamespace
@@ -29,6 +30,10 @@ PARENT = "1000@1.000000"
 NESTED = "2000@2.000000"
 #: This test process, named as an endpoint: one whose process is alive.
 LIVE = f"{os.getpid()}@{proc.identity(os.getpid()).started:.6f}"
+#: The launch's own `claude` in these tests: this test process, by pid and start time.
+SEAT = proc.identity(os.getpid())
+#: A replacing endpoint of the launched session.
+NEW = "3000@3.000000"
 
 
 @dataclass
@@ -80,13 +85,16 @@ def projects_never_read(monkeypatch):
 
 @pytest.fixture
 def endpoint(monkeypatch):
-    """Which endpoint process the next event comes from; the launched session's by
-    default."""
-    current = {"id": PARENT}
+    """Which endpoint process the next event comes from, and that endpoint's parent
+    process: the launched session's endpoint by default, its parent unknown. `use(name,
+    parent)` names another; a replacing endpoint of the launched session passes
+    `parent=SEAT`."""
+    current = {"id": PARENT, "parent": None}
     monkeypatch.setattr(listeners, "endpoint_id", lambda: current["id"])
+    monkeypatch.setattr(listeners, "endpoint_parent", lambda: current["parent"])
 
-    def use(name):
-        current["id"] = name
+    def use(name, parent=None):
+        current["id"], current["parent"] = name, parent
     return use
 
 
@@ -102,6 +110,40 @@ def dead() -> str:
         child.wait()
     assert ident is not None and not proc.alive(ident)
     return f"{ident.pid}@{ident.started:.6f}"
+
+
+@pytest.fixture(autouse=True)
+def overlap_drained():
+    """Each test starts with no wait for a held endpoint under way and no id remembered
+    from a `load`, and ends once the wait it started, if any, has handled or dropped its
+    queue."""
+    listen_ready._drainer = None
+    listen_ready._load_added = None
+    yield
+    if listen_ready._drainer is not None:
+        listen_ready._drainer.join(timeout=10)
+        assert not listen_ready._drainer.is_alive()
+    assert listen_ready._queue == []
+
+
+def drained():
+    """Wait for the overlap wait under way to finish."""
+    assert listen_ready._drainer is not None
+    listen_ready._drainer.join(timeout=10)
+
+
+@pytest.fixture
+def sibling():
+    """A live endpoint of the launched session that a replacing one is a sibling of: a
+    child of this test process, which plays the launch's `claude`. `.end()` ends it."""
+    child = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(60)"])
+    ident = proc.identity(child.pid)
+
+    def end():
+        child.kill()
+        child.wait()
+    yield SimpleNamespace(name=f"{ident.pid}@{ident.started:.6f}", end=end)
+    end()
 
 
 @pytest.fixture
@@ -133,6 +175,15 @@ def launch_codex(conn, request_id="c1", mode="host", values=None, **overrides):
     return store.insert(conn, **args).row
 
 
+def seated(conn, request_id="r1"):
+    """Record this test process as the launch's own process, its `claude`."""
+    store.set_facts(conn, request_id, pid=SEAT.pid, pid_started=SEAT.started)
+
+
+def load(harness, session_id, request_id, **env):
+    return Event("load", harness, session_id, stamp(request_id, **env))
+
+
 def ready(harness, session_id, request_id, source="startup", **env):
     return Event("ready", harness, session_id, stamp(request_id, **env), source=source)
 
@@ -146,7 +197,7 @@ def start(harness, session_id, request_id, source="startup", **env):
 
 def test_the_registration_names_three_rows_in_answer_order():
     assert listeners.LISTENERS == (
-        (("ready", "gone"), "moxi_launcher.listen_ready:observe"),
+        (("ready", "gone", "load"), "moxi_launcher.listen_ready:observe"),
         (("start",), "moxi_launcher.listen_codex:answer"),
         (("start",), "moxi_launcher.listen_handoff:answer"),
     )
@@ -176,6 +227,13 @@ def test_the_endpoint_is_named_once_by_its_pid_and_start_time():
     first = listeners.endpoint_id()
     assert first.startswith(f"{__import__('os').getpid()}@")
     assert listeners.endpoint_id() == first
+
+
+def test_the_endpoint_parent_is_read_once_by_its_pid_and_start_time(monkeypatch):
+    first = listeners.endpoint_parent()
+    assert first == proc.identity(os.getppid())
+    monkeypatch.setattr(proc, "identity", lambda pid: None)
+    assert listeners.endpoint_parent() == first
 
 
 # -- the claim and the ready recorder ------------------------------------------------------
@@ -238,39 +296,103 @@ def test_a_second_endpoint_with_the_minted_id_does_not_take_the_launch_while_the
     assert store.events(conn, "r1") == []
 
 
-def test_a_new_endpoint_reclaims_the_launch_once_the_one_holding_it_has_ended(
-        conn, endpoint, dead):
-    # Claude starts a new endpoint for the same session when its plugins reload.
+def test_a_replaced_endpoint_then_a_clear_moves_the_claim_by_parent(conn, endpoint, dead):
+    # Claude Code replaced the endpoint (its plugins reloaded), then the session was
+    # cleared: the clear's id is one the launch never knew.
     launch_claude(conn)
+    seated(conn)
     endpoint(dead)
     listen_ready.observe(ready("claude", CLAUDE_ID, "r1"))
-    endpoint(NESTED)
-    listen_ready.observe(ready("claude", CLAUDE_ID, "r1", source="startup"))
-    assert store.get(conn, "r1").endpoint == NESTED
-    [moved] = store.events(conn, "r1")
-    assert (moved.kind, moved.session_id) == (store.RECLAIMED, CLAUDE_ID)
-    assert moved.detail == {"endpoint": NESTED, "was": dead}
-    # From then on the new endpoint's events are the launch's.
+    endpoint(NEW, parent=SEAT)
     listen_ready.observe(ready("claude", CLEARED_ID, "r1", source="clear"))
-    assert store.session_ids(conn, "r1") == [(CLAUDE_ID, "minted"), (CLEARED_ID, "clear")]
-
-
-def test_a_reload_after_a_clear_reclaims_by_the_cleared_id(conn, endpoint, dead):
-    # The session was cleared, so its id is the cleared one, then its plugins reloaded.
-    launch_claude(conn)
-    endpoint(dead)
-    listen_ready.observe(ready("claude", CLAUDE_ID, "r1"))
-    listen_ready.observe(ready("claude", CLEARED_ID, "r1", source="clear"))
-    endpoint(NESTED)
-    listen_ready.observe(ready("claude", CLEARED_ID, "r1", source="startup"))
-    assert store.get(conn, "r1").endpoint == NESTED
+    assert store.get(conn, "r1").endpoint == NEW
     [moved] = store.events(conn, "r1")
     assert (moved.kind, moved.session_id) == (store.RECLAIMED, CLEARED_ID)
-    assert moved.detail == {"endpoint": NESTED, "was": dead}
-    # Its later ids are recorded again.
-    listen_ready.observe(ready("claude", "c0mpact-id", "r1", source="compact"))
-    assert store.session_ids(conn, "r1") == [
-        (CLAUDE_ID, "minted"), (CLEARED_ID, "clear"), ("c0mpact-id", "compact")]
+    assert moved.detail == {"endpoint": NEW, "was": dead, "by": "parent"}
+    assert store.session_ids(conn, "r1") == [(CLAUDE_ID, "minted"), (CLEARED_ID, "clear")]
+    found = store.resolve(conn, CLEARED_ID)
+    assert found.request_id == "r1" and found.newest_session_id == CLEARED_ID
+
+
+def test_a_replacing_endpoint_load_moves_the_claim_and_writes_no_state(conn, endpoint, dead):
+    launch_claude(conn)
+    seated(conn)
+    assert store.claim(conn, "r1", harness="claude", session_id=CLAUDE_ID,
+                       endpoint=dead) is not None
+    endpoint(NEW, parent=SEAT)
+    listen_ready.observe(load("claude", CLAUDE_ID, "r1"))
+    row = store.get(conn, "r1")
+    assert (row.endpoint, row.state) == (NEW, "spawning")
+    assert [(e.kind, e.detail) for e in store.events(conn, "r1")] == [
+        (store.RECLAIMED, {"endpoint": NEW, "was": dead, "by": "parent"})]
+    assert store.session_ids(conn, "r1") == [(CLAUDE_ID, "minted")]
+
+
+@pytest.mark.parametrize("session_id", [CLAUDE_ID, CLEARED_ID, NESTED_ID])
+def test_a_nested_endpoint_never_takes_a_held_launch_whatever_id_it_names(
+        conn, endpoint, dead, session_id):
+    # A session started from inside the launched one: its endpoint's parent is the nested
+    # `claude`, another process, even after the launch's own endpoint has ended.
+    launch_claude(conn)
+    seated(conn)
+    endpoint(dead)
+    listen_ready.observe(ready("claude", CLAUDE_ID, "r1"))
+    listen_ready.observe(ready("claude", CLEARED_ID, "r1", source="clear"))
+    endpoint(NESTED, parent=proc.identity(os.getppid()))
+    listen_ready.observe(load("claude", session_id, "r1"))
+    listen_ready.observe(ready("claude", session_id, "r1", source="resume"))
+    listen_ready.observe(ready("claude", NESTED_ID, "r1", source="clear"))
+    assert store.get(conn, "r1").endpoint == dead
+    assert store.events(conn, "r1") == []
+    assert store.session_ids(conn, "r1") == [(CLAUDE_ID, "minted"), (CLEARED_ID, "clear")]
+    assert store.resolve(conn, NESTED_ID) is None
+
+
+def test_an_endpoint_whose_parent_is_unknown_never_takes_a_held_launch(conn, endpoint, dead):
+    launch_claude(conn)
+    seated(conn)
+    endpoint(dead)
+    listen_ready.observe(ready("claude", CLAUDE_ID, "r1"))
+    endpoint(NEW)
+    listen_ready.observe(load("claude", CLAUDE_ID, "r1"))
+    assert store.get(conn, "r1").endpoint == dead
+
+
+def test_a_reused_pid_never_moves_the_claim(conn, endpoint, dead):
+    # The parent has the launch's pid but started at another time: another process.
+    launch_claude(conn)
+    seated(conn)
+    endpoint(dead)
+    listen_ready.observe(ready("claude", CLAUDE_ID, "r1"))
+    endpoint(NEW, parent=proc.ProcId(SEAT.pid, SEAT.started + 30))
+    listen_ready.observe(load("claude", CLAUDE_ID, "r1"))
+    listen_ready.observe(ready("claude", CLEARED_ID, "r1", source="clear"))
+    assert store.get(conn, "r1").endpoint == dead
+    assert store.events(conn, "r1") == []
+
+
+def test_a_row_with_no_pid_started_never_moves(conn, endpoint, dead):
+    launch_claude(conn)
+    store.set_facts(conn, "r1", pid=SEAT.pid)
+    endpoint(dead)
+    listen_ready.observe(ready("claude", CLAUDE_ID, "r1"))
+    endpoint(NEW, parent=SEAT)
+    listen_ready.observe(load("claude", CLAUDE_ID, "r1"))
+    listen_ready.observe(ready("claude", CLEARED_ID, "r1", source="clear"))
+    assert store.get(conn, "r1").endpoint == dead
+    assert store.events(conn, "r1") == []
+
+
+def test_the_launch_parent_is_compared_by_pid_and_start_time(conn):
+    row = launch_claude(conn)
+    assert not store.is_launch_parent(row, SEAT)                 # no pid recorded
+    seated(conn)
+    row = store.get(conn, "r1")
+    assert store.is_launch_parent(row, SEAT)
+    assert store.is_launch_parent(row, proc.ProcId(SEAT.pid, SEAT.started + 0.5))
+    assert not store.is_launch_parent(row, proc.ProcId(SEAT.pid, SEAT.started + 30))
+    assert not store.is_launch_parent(row, proc.identity(os.getppid()))
+    assert not store.is_launch_parent(row, None)
 
 
 def test_an_id_recorded_for_another_launch_does_not_reclaim(conn, endpoint, dead):
@@ -285,25 +407,205 @@ def test_an_id_recorded_for_another_launch_does_not_reclaim(conn, endpoint, dead
     assert store.events(conn, "r1") == []
 
 
-def test_a_new_endpoint_with_another_session_id_does_not_reclaim(conn, endpoint, dead):
-    launch_claude(conn)
-    endpoint(dead)
-    listen_ready.observe(ready("claude", CLAUDE_ID, "r1"))
-    endpoint(NESTED)
-    listen_ready.observe(ready("claude", NESTED_ID, "r1"))
-    assert store.get(conn, "r1").endpoint == dead
-    assert store.events(conn, "r1") == [] and store.resolve(conn, NESTED_ID) is None
-
-
 def test_a_codex_launch_is_reclaimed_only_by_its_thread_id(conn, endpoint, dead):
+    launch_codex(conn)
+    store.set_facts(conn, "c1", pid=SEAT.pid, pid_started=SEAT.started)
+    endpoint(dead)
+    listen_ready.observe(ready("codex", THREAD_ID, "c1"))
+    # Neither a parent nor an id it doesn't know moves a Codex claim.
+    endpoint(NESTED, parent=SEAT)
+    listen_ready.observe(ready("codex", "thr-other", "c1"))
+    assert store.get(conn, "c1").endpoint == dead
+    endpoint(NESTED)
+    listen_ready.observe(ready("codex", THREAD_ID, "c1", source="resume"))
+    assert store.get(conn, "c1").endpoint == NESTED
+    [moved] = store.events(conn, "c1")
+    assert moved.detail == {"endpoint": NESTED, "was": dead}
+
+
+def test_a_codex_launch_is_reclaimed_by_an_id_learned_after_a_clear(conn, endpoint, dead):
     launch_codex(conn)
     endpoint(dead)
     listen_ready.observe(ready("codex", THREAD_ID, "c1"))
+    listen_ready.observe(ready("codex", "thr-cleared", "c1", source="clear"))
     endpoint(NESTED)
-    listen_ready.observe(ready("codex", "thr-other", "c1"))
-    assert store.get(conn, "c1").endpoint == dead
-    listen_ready.observe(ready("codex", THREAD_ID, "c1", source="resume"))
+    listen_ready.observe(ready("codex", "thr-cleared", "c1", source="resume"))
     assert store.get(conn, "c1").endpoint == NESTED
+
+
+LOADED_ID = "77777777-2222-4333-8444-555566667777"
+COMPACTED_ID = "c0c0c0c0-3333-4444-8555-666677778888"
+
+
+def held_by(conn, name, request_id="r1", session_id=CLAUDE_ID):
+    launch_claude(conn, request_id, session_id=session_id)
+    seated(conn, request_id)
+    assert store.claim(conn, request_id, harness="claude", session_id=session_id,
+                       endpoint=name) is not None
+
+
+def test_a_load_while_the_old_endpoint_ends_moves_the_claim_within_the_wait(
+        conn, endpoint, sibling):
+    held_by(conn, sibling.name)
+    endpoint(NEW, parent=SEAT)
+    began = time.monotonic()
+    listen_ready.observe(load("claude", LOADED_ID, "r1"))
+    assert time.monotonic() - began < 1                  # returns to turns at once
+    assert store.get(conn, "r1").endpoint == sibling.name
+    threading.Timer(0.3, sibling.end).start()
+    drained()
+    assert time.monotonic() - began < listen_ready.OVERLAP_WAIT_S
+    row = store.get(conn, "r1")
+    assert (row.endpoint, row.state) == (NEW, "spawning")
+    [moved] = store.events(conn, "r1")
+    assert moved.detail == {"endpoint": NEW, "was": sibling.name, "by": "parent"}
+    # An id first learned at load (the session was cleared in the gap) says so.
+    assert store.session_ids(conn, "r1") == [(CLAUDE_ID, "minted"), (LOADED_ID, "load")]
+
+
+def test_an_old_endpoint_alive_past_the_wait_keeps_the_claim_until_the_next_ready(
+        conn, endpoint, sibling, monkeypatch):
+    monkeypatch.setattr(listen_ready, "OVERLAP_WAIT_S", 0.5)
+    held_by(conn, sibling.name)
+    endpoint(NEW, parent=SEAT)
+    listen_ready.observe(load("claude", LOADED_ID, "r1"))
+    drained()
+    assert store.get(conn, "r1").endpoint == sibling.name
+    assert store.session_ids(conn, "r1") == [(CLAUDE_ID, "minted")]
+    assert listen_ready._queue == []
+    sibling.end()
+    listen_ready.observe(ready("claude", CLEARED_ID, "r1", source="clear"))
+    row = store.get(conn, "r1")
+    assert (row.endpoint, row.state) == (NEW, "ready")
+    assert store.session_ids(conn, "r1") == [(CLAUDE_ID, "minted"), (CLEARED_ID, "clear")]
+
+
+def test_a_clear_inside_the_overlap_is_learned_in_arrival_order(
+        conn, endpoint, sibling, monkeypatch):
+    # A long step, so the old endpoint ends and a third event arrives before the wait
+    # looks again.
+    monkeypatch.setattr(listen_ready, "OVERLAP_STEP_S", 1.0)
+    held_by(conn, sibling.name)
+    endpoint(NEW, parent=SEAT)
+    listen_ready.observe(load("claude", CLAUDE_ID, "r1"))
+    listen_ready.observe(ready("claude", CLEARED_ID, "r1", source="clear"))
+    assert store.session_ids(conn, "r1") == [(CLAUDE_ID, "minted")]
+    sibling.end()
+    assert store.endpoint_gone(sibling.name)
+    listen_ready.observe(ready("claude", COMPACTED_ID, "r1", source="compact"))
+    assert len(listen_ready._queue) == 3
+    drained()
+    row = store.get(conn, "r1")
+    assert (row.endpoint, row.state) == (NEW, "ready")
+    assert store.session_ids(conn, "r1") == [
+        (CLAUDE_ID, "minted"), (CLEARED_ID, "clear"), (COMPACTED_ID, "compact")]
+    found = store.resolve(conn, CLEARED_ID)
+    assert found.request_id == "r1" and found.newest_session_id == COMPACTED_ID
+    assert [e.kind for e in store.events(conn, "r1")] == [store.RECLAIMED]
+
+
+def test_a_queued_clear_alone_is_the_newest_id(conn, endpoint, sibling):
+    held_by(conn, sibling.name)
+    endpoint(NEW, parent=SEAT)
+    listen_ready.observe(load("claude", CLAUDE_ID, "r1"))
+    listen_ready.observe(ready("claude", CLEARED_ID, "r1", source="clear"))
+    sibling.end()
+    drained()
+    found = store.resolve(conn, CLEARED_ID)
+    assert found.request_id == "r1" and found.newest_session_id == CLEARED_ID
+    assert store.get(conn, "r1").state == "ready"
+
+
+@pytest.mark.parametrize("overlapping", [False, True])
+def test_a_load_and_a_ready_of_one_endpoint_arriving_at_once(
+        conn, endpoint, dead, overlapping):
+    # turns calls each listener on its own thread, so the two may run at the same time.
+    for n in range(8):
+        request_id, minted, cleared = f"r{n}", f"minted-{n}", f"cleared-{n}"
+        if overlapping:
+            child = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(60)"])
+            ident = proc.identity(child.pid)
+            held_by(conn, f"{ident.pid}@{ident.started:.6f}", request_id, minted)
+        else:
+            held_by(conn, dead, request_id, minted)
+        endpoint(NEW, parent=SEAT)
+        barrier = threading.Barrier(2)
+
+        def arrive(event, barrier=barrier):
+            barrier.wait()
+            listen_ready.observe(event)
+
+        threads = [threading.Thread(target=arrive, args=(e,)) for e in (
+            load("claude", minted, request_id),
+            ready("claude", cleared, request_id, source="clear"))]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+        if overlapping:
+            child.kill()
+            child.wait()
+            drained()
+            listen_ready._drainer = None
+        row = store.get(conn, request_id)
+        assert (row.endpoint, row.state) == (NEW, "ready")
+        assert [e.kind for e in store.events(conn, request_id)] == [store.RECLAIMED]
+        assert store.session_ids(conn, request_id) == [(minted, "minted"), (cleared, "clear")]
+
+
+@pytest.mark.parametrize("load_first", [True, False])
+def test_a_ready_after_its_own_endpoints_load_of_the_same_id_names_its_source(
+        conn, endpoint, dead, load_first):
+    # The two arrive in either order; the `ready`'s source says how the id began.
+    held_by(conn, dead)
+    endpoint(NEW, parent=SEAT)
+    events = [load("claude", LOADED_ID, "r1"),
+              ready("claude", LOADED_ID, "r1", source="clear")]
+    for event in events if load_first else events[::-1]:
+        listen_ready.observe(event)
+    assert store.session_ids(conn, "r1") == [(CLAUDE_ID, "minted"), (LOADED_ID, "clear")]
+    found = store.resolve(conn, CLAUDE_ID)
+    assert found.request_id == "r1" and found.newest_session_id == LOADED_ID
+
+
+def test_a_ready_of_an_id_another_endpoint_loaded_leaves_its_source(conn, endpoint, dead):
+    held_by(conn, dead)
+    endpoint(NEW, parent=SEAT)
+    listen_ready.observe(load("claude", LOADED_ID, "r1"))
+    endpoint("3001@3.000000", parent=SEAT)
+    listen_ready.observe(ready("claude", LOADED_ID, "r1", source="resume"))
+    assert store.get(conn, "r1").endpoint == "3001@3.000000"
+    assert store.session_ids(conn, "r1") == [(CLAUDE_ID, "minted"), (LOADED_ID, "load")]
+
+
+def test_a_live_held_endpoint_that_is_not_a_sibling_waits_for_nothing(conn, endpoint):
+    # The held endpoint runs, but its parent is not the launch's claude.
+    held_by(conn, LIVE)
+    endpoint(NEW, parent=SEAT)
+    listen_ready.observe(load("claude", CLAUDE_ID, "r1"))
+    listen_ready.observe(ready("claude", CLEARED_ID, "r1", source="clear"))
+    assert listen_ready._drainer is None and listen_ready._queue == []
+    assert store.get(conn, "r1").endpoint == LIVE
+    assert store.session_ids(conn, "r1") == [(CLAUDE_ID, "minted")]
+
+
+def test_a_nested_endpoint_beside_a_live_sibling_neither_queues_nor_waits(
+        conn, endpoint, sibling):
+    held_by(conn, sibling.name)
+    endpoint(NESTED, parent=proc.identity(os.getppid()))
+    listen_ready.observe(load("claude", CLAUDE_ID, "r1"))
+    listen_ready.observe(ready("claude", NESTED_ID, "r1", source="clear"))
+    assert listen_ready._drainer is None and listen_ready._queue == []
+    sibling.end()
+    assert store.get(conn, "r1").endpoint == sibling.name
+    assert store.session_ids(conn, "r1") == [(CLAUDE_ID, "minted")]
+
+
+def test_a_start_never_queues(conn, endpoint, sibling):
+    held_by(conn, sibling.name)
+    endpoint(NEW, parent=SEAT)
+    assert listen_handoff.answer(start("claude", CLAUDE_ID, "r1")) is None
+    assert listen_ready._drainer is None and listen_ready._queue == []
 
 
 def test_the_held_endpoint_is_gone_only_when_its_process_has_ended(dead):
@@ -416,6 +718,7 @@ def test_of_two_endpoints_claiming_at_once_exactly_one_wins(conn):
 
 def test_of_two_endpoints_reclaiming_at_once_exactly_one_wins(conn, dead):
     launch_claude(conn)
+    seated(conn)
     assert store.claim(conn, "r1", harness="claude", session_id=CLAUDE_ID,
                        endpoint=dead) is not None
     barrier = threading.Barrier(2)
@@ -426,7 +729,7 @@ def test_of_two_endpoints_reclaiming_at_once_exactly_one_wins(conn, dead):
         try:
             barrier.wait()
             if store.claim(conn, "r1", harness="claude", session_id=CLAUDE_ID,
-                           endpoint=name) is not None:
+                           endpoint=name, parent=SEAT) is not None:
                 won.append(name)
         finally:
             conn.close()
@@ -507,6 +810,21 @@ def test_a_seat_is_pointed_to_its_newest_waiting_handoff_once(conn, endpoint):
     assert store.picked(conn, "lead") == [str(newest)]
     launch_claude(conn, "r2", session_id=CLEARED_ID)
     assert listen_handoff.answer(start("claude", CLEARED_ID, "r2")) is None
+
+
+def test_with_notes_and_no_notes_dir_a_seat_is_pointed_to_nothing(conn, endpoint, monkeypatch):
+    # A handoff is read only from the launch's notes directory; a handoff in the
+    # launcher's own folder is not offered while notes is installed.
+    launch_claude(conn)
+    handoff("lead")
+    homeless = SimpleNamespace(state=modules.PRESENT, ok=True, reason="", api=SimpleNamespace(
+        handoffs_dir=lambda path, *, create=False, override=None: None))
+    real_load = modules.load
+    monkeypatch.setattr(modules, "available", lambda name: name == "notes")
+    monkeypatch.setattr(modules, "load", lambda name, interface=None:
+                        homeless if name == "notes" else real_load(name, interface=interface))
+    assert listen_handoff.answer(start("claude", CLAUDE_ID, "r1")) is None
+    assert store.picked(conn, "lead") == []
 
 
 @pytest.mark.parametrize("source", ["clear", "compact"])
