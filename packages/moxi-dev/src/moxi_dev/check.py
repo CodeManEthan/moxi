@@ -37,7 +37,8 @@ worker count or base stops it there, before any step runs. Then, in order:
    and one under `packages/moxi-dev/`, the check itself, picks every package; its
    rename table, which the renames step above reads whatever the pick, picks only
    `moxi-dev`. A root path a package's tests read picks that package (`READ_BY`):
-   `README.md` picks `memory`, and publishing's two workflow files pick `publishing`.
+   `README.md` picks `memory`, publishing's two workflow files pick `publishing`, and
+   `ci.yml` and `queue.yml` pick `moxi-dev` alone, whose tests read them.
    The other workflows (`.github/`), `docs/` and `CONTRIBUTING.md` pick nothing; any
    other path (the lock, the root `pyproject.toml`, the other root files) picks every
    package. Then every package that depends on a picked one, by its declared
@@ -279,10 +280,13 @@ PICKS_NOTHING = frozenset({".github", "docs", "CONTRIBUTING.md", "README.md"})
 
 # Root paths a package's tests read, each with that package's folder in `packages/`: a
 # change to one picks the package. memory's contract test reads the package table in the
-# root README; publishing's tests hold its workflow files equal to its templates.
+# root README; publishing's tests hold its workflow files equal to its templates; the
+# check's own tests hold the full check's workflow and the merge queue's.
 READ_BY = {"README.md": "memory",
            ".github/workflows/publishing.yml": "publishing",
-           ".github/workflows/release.yml": "publishing"}
+           ".github/workflows/release.yml": "publishing",
+           ".github/workflows/ci.yml": "moxi-dev",
+           ".github/workflows/queue.yml": "moxi-dev"}
 
 
 def pick(packages: Sequence[Package], paths: Sequence[str]) -> list[Package]:

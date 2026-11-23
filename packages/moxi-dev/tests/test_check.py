@@ -179,7 +179,7 @@ def test_the_root_pyproject_picks_every_package(repo):
 
 
 @pytest.mark.parametrize("path", ["README.md", "CONTRIBUTING.md",
-                                  ".github/workflows/ci.yml", "docs/queue.md"])
+                                  ".github/workflows/lint.yml", "docs/queue.md"])
 def test_the_workflows_and_the_root_docs_pick_nothing(repo, path):
     commit_file(repo, path)
     assert picked(repo) == []
@@ -282,6 +282,19 @@ def test_a_workflow_publishings_tests_read_picks_publishing(dev_repo, path):
     assert picked(dev_repo) == ["publishing", "moxi-dev"]
 
 
+@pytest.mark.parametrize("path", [".github/workflows/ci.yml",
+                                  ".github/workflows/queue.yml"])
+def test_a_workflow_the_checks_tests_read_picks_the_check_alone(dev_repo, path):
+    commit_file(dev_repo, path)
+    assert picked(dev_repo) == ["moxi-dev"]
+
+
+def test_another_github_path_picks_nothing(dev_repo):
+    commit_file(dev_repo, ".github/workflows/other.yml")
+    commit_file(dev_repo, ".github/dependabot.yml")
+    assert picked(dev_repo) == []
+
+
 def test_the_rename_table_picks_the_check_alone(dev_repo):
     commit_file(dev_repo, "packages/moxi-dev/renames.tsv", "a\tb\n")
     assert picked(dev_repo) == ["moxi-dev"]
@@ -372,7 +385,9 @@ def test_the_real_workspace_picks_by_the_same_rule():
     # A root path a package's tests read picks that package; the rest of .github none.
     assert "memory" in of("README.md") and "publishing" not in of("README.md")
     assert "publishing" in of(".github/workflows/release.yml")
-    assert of(".github/workflows/ci.yml") == []
+    assert of(".github/workflows/ci.yml") == of(".github/workflows/queue.yml") == [
+        "moxi-dev"]
+    assert of(".github/workflows/other.yml") == []
     # cache depends on sessions, comms on cache through an extra, the launcher on comms,
     # and usage and memory on sessions directly.
     assert set(of("packages/sessions/src/moxi_sessions/__init__.py")) == {
@@ -380,7 +395,6 @@ def test_the_real_workspace_picks_by_the_same_rule():
     assert of("packages/moxi/src/moxi/__init__.py") == dirs
     assert of("packages/moxi-dev/src/moxi_dev/check.py") == dirs
     assert of("uv.lock") == dirs
-    assert of(".github/workflows/ci.yml") == []
     # Every package lists moxi-dev in its dev group, so only the edges to it would have
     # carried these to every package.
     assert len(of("packages/turns/src/moxi_turns/__init__.py")) < len(dirs)
