@@ -274,7 +274,8 @@ def commission(name: str, stage_id: str | None = None, *, builder: str, by: str,
     made = commission_block.block(
         after, written.view.project_state, name=name, stage=one["stage"],
         repo=one["repo"], branch=one["branch"], base=one["base"], target=one["target"],
-        worktree=worktree, scratch=scratch, settings=settings)
+        worktree=worktree, scratch=scratch, settings=settings,
+        brought=one.get("brought") or ())
     limit = own.round_setting(settings, home.project, sizing.LIMIT)
     declared = [event for event in written.events if event["type"] == "stage.declared"]
     return Commissioned(

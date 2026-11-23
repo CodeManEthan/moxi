@@ -161,6 +161,26 @@ def test_a_source_that_is_a_link_to_a_file_is_copied_as_a_file(repo, opened, tmp
     assert not copy.is_symlink() and copy.read_text(encoding="utf-8") == "linked\n"
 
 
+def test_the_block_names_each_copy_what_an_edit_does_and_how_to_let_it_go(repo, opened):
+    made = commission()
+
+    source = places.contract_home(repo.root / "AGENTS.md")
+    line = (f"brought in, not in the repo: AGENTS.md, a copy of {source}: an edit "
+            "stays here and keeps the worktree when the build ends; restore the file "
+            "from its source, or delete it, then end the build")
+    lines = list(made.block.lines)
+    assert lines[lines.index(line) - 1] == (
+        "         (logs and probes only: removed when the build ends)")
+
+
+def test_a_block_with_nothing_brought_has_no_such_line(repo, opened, write_config):
+    write_config("")
+
+    made = commission()
+
+    assert not any(one.startswith("brought in") for one in made.block.lines)
+
+
 # -- what refuses a commission before anything is made ---------------------------------------
 
 def nothing_made(path: Path) -> None:
