@@ -461,9 +461,11 @@ endpoint decides from its own record refused the steer: `idle` when no turn runs
 when a Codex host has no accepted load, or `unsupported`. The harness's take comes later:
 the delivery's `started` value and the `turn.steered` notification arrive when the harness
 confirms it took the text, and its `ended` is that turn's end. A steer is either taken into
-the turn that is running or settles `refused` `idle`; it never becomes a turn of its own.
-So a caller that falls back to `deliver` on `idle` runs the text once whichever way the race
-went. Steers reach the harness in the order the endpoint recorded them. A steer the harness
+the turn that is running or settles `refused` `idle`. It becomes a turn of its own only on
+Claude Code, when the turn it went into ended before any request carried the text (see
+`turn.ended`): its `ended` is then that later turn's end, or the end of the turn whose
+request carried the text first. Either way the text runs once, so a caller that falls back
+to `deliver` on `idle` runs the text once whichever way the race went. Steers reach the harness in the order the endpoint recorded them. A steer the harness
 neither confirms nor refuses within 300 s settles `lost`, with a reason starting `expired`.
 
 A caller that wants a steer where the session can take one, and a turn of its own where it
