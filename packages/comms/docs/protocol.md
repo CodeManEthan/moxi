@@ -121,9 +121,8 @@ file and send a pointer to it.
 
 Every new `moxi comms send` (no `--reply-to`) states what it wants back with `--posture none`,
 `optional`, `once` or `open`; without it the verb refuses, exit 2 (usage), posting nothing. The operator
-(any lane whose sender is `operator`) is exempt from every posture refusal: a new send of
-his with no `--posture` is open with no cap, and what he passes is written
-as passed.
+(any lane whose sender is `operator`) is exempt from every posture refusal: the operator's new
+send with no `--posture` is open with no cap, and a posture passed is written as passed.
 
 A reply (`moxi comms reply <id>`, or `moxi comms send --reply-to <id>`) needs no `--posture`; it
 takes its posture from the message it answers, read top to bottom:

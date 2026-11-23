@@ -191,9 +191,9 @@ SOURCES_UNREAD = ("startup", "clear", "compact")
 #: before the turn. 8 s, the last step, is eighty times that timer and leaves room for a
 #: loaded machine; a window costs at most this many reads.
 RELEASE_SETTLE_STEPS = (0.25, 0.5, 1.0, 2.0, 4.0, 8.0)
-# The operator's identity, `OPERATOR_NAME`. He has no session to hold mail for, so
-# `[held]` is read as absent for him: his mail is live when a session of his is bound and
-# waits as offline mail otherwise.
+# The operator's identity, `OPERATOR_NAME`. The operator has no session to hold mail for,
+# so `[held]` is read as absent for the operator, whose mail is live when an operator
+# session is bound and waits as offline mail otherwise.
 
 #: The doctor record a daemon that can't open comms.db leaves, and a start that opens it
 #: clears.
