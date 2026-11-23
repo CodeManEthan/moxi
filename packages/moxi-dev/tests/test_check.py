@@ -179,7 +179,7 @@ def test_the_root_pyproject_picks_every_package(repo):
 
 
 @pytest.mark.parametrize("path", ["README.md", "CONTRIBUTING.md",
-                                  ".github/workflows/ci.yml", "docs/queue.md"])
+                                  ".github/workflows/lint.yml", "docs/queue.md"])
 def test_the_workflows_and_the_root_docs_pick_nothing(repo, path):
     commit_file(repo, path)
     assert picked(repo) == []
@@ -190,6 +190,39 @@ def test_the_workflows_and_the_root_docs_pick_nothing(repo, path):
 def test_a_check_change_picks_every_package(repo):
     commit_file(repo, "packages/moxi-dev/src/moxi_dev/x.py")
     assert picked(repo) == list(LAYOUT)
+
+
+def test_pick_prints_the_picked_packages_as_one_json_line_and_runs_nothing(
+        repo, monkeypatch, capsys):
+    commit_file(repo, "packages/sessions/src/moxi_sessions/x.py")
+    base = git(repo, "rev-parse", "main").strip()
+    git(repo, "branch", "-f", "main", "HEAD")   # --base, not main, gives the changes
+    runs = Runs()
+    monkeypatch.setattr(check, "_run", runs)
+    monkeypatch.chdir(repo / "packages" / "turns")
+    assert check.main(["--pick", "--base", base]) == 0
+    out = capsys.readouterr().out
+    assert out.count("\n") == 1
+    assert json.loads(out) == {"packages": ["sessions", "cache", "comms"]}
+    assert runs.calls == []
+    assert check.main(["--pick"]) == 0
+    assert json.loads(capsys.readouterr().out) == {"packages": []}
+
+
+def test_pick_with_no_merge_base_exits_2_printing_nothing(repo, monkeypatch, capsys):
+    monkeypatch.chdir(repo)
+    assert check.main(["--pick", "--base", "no-such-rev"]) == 2
+    out, err = capsys.readouterr()
+    assert out == "" and "no merge base of no-such-rev" in err
+
+
+@pytest.mark.parametrize("args", [["--full"], ["--finding", "L1"], ["--static"],
+                                  ["--only", "refs"]])
+def test_pick_takes_no_other_mode(repo, monkeypatch, args):
+    monkeypatch.chdir(repo)
+    with pytest.raises(SystemExit) as stop:
+        check.main(["--pick", *args])
+    assert stop.value.code == 2
 
 
 # The real workspace's dev groups: every package lists moxi-dev, which requires moxi and
@@ -247,6 +280,19 @@ def test_with_every_dev_group_naming_the_check_its_change_picks_every_package(de
 def test_a_workflow_publishings_tests_read_picks_publishing(dev_repo, path):
     commit_file(dev_repo, path)
     assert picked(dev_repo) == ["publishing", "moxi-dev"]
+
+
+@pytest.mark.parametrize("path", [".github/workflows/ci.yml",
+                                  ".github/workflows/queue.yml"])
+def test_a_workflow_the_checks_tests_read_picks_the_check_alone(dev_repo, path):
+    commit_file(dev_repo, path)
+    assert picked(dev_repo) == ["moxi-dev"]
+
+
+def test_another_github_path_picks_nothing(dev_repo):
+    commit_file(dev_repo, ".github/workflows/other.yml")
+    commit_file(dev_repo, ".github/dependabot.yml")
+    assert picked(dev_repo) == []
 
 
 def test_the_rename_table_picks_the_check_alone(dev_repo):
@@ -339,7 +385,9 @@ def test_the_real_workspace_picks_by_the_same_rule():
     # A root path a package's tests read picks that package; the rest of .github none.
     assert "memory" in of("README.md") and "publishing" not in of("README.md")
     assert "publishing" in of(".github/workflows/release.yml")
-    assert of(".github/workflows/ci.yml") == []
+    assert of(".github/workflows/ci.yml") == of(".github/workflows/queue.yml") == [
+        "moxi-dev"]
+    assert of(".github/workflows/other.yml") == []
     # cache depends on sessions, comms on cache through an extra, the launcher on comms,
     # and usage and memory on sessions directly.
     assert set(of("packages/sessions/src/moxi_sessions/__init__.py")) == {
@@ -347,7 +395,6 @@ def test_the_real_workspace_picks_by_the_same_rule():
     assert of("packages/moxi/src/moxi/__init__.py") == dirs
     assert of("packages/moxi-dev/src/moxi_dev/check.py") == dirs
     assert of("uv.lock") == dirs
-    assert of(".github/workflows/ci.yml") == []
     # Every package lists moxi-dev in its dev group, so only the edges to it would have
     # carried these to every package.
     assert len(of("packages/turns/src/moxi_turns/__init__.py")) < len(dirs)

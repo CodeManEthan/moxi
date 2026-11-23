@@ -10,7 +10,8 @@ repository's `uv sync` installs it, and no Moxi module depends on it at run time
   `browser` or `build` tier runs when a path its `touches` mark names changed; `--full`
   runs every package and every tier but `live`; `--finding L<n>` runs only the tests
   marked with that finding (see "The tag check" below); `--static` runs only the
-  whole-tree static steps (see "The code checks" below). It runs no `timed` test, in any
+  whole-tree static steps (see "The code checks" below); `--pick` prints the packages
+  the change picks and runs nothing (see below). It runs no `timed` test, in any
   form: it holds each one back and its last line counts them as `timed held <n>`;
   `moxi-dev timed` runs them. A finding whose tests are all timed counts as found, with
   a line that says so. Its last line also gives the tests' seconds, the slowest 5 %'s
@@ -106,6 +107,14 @@ codes they give in a full check, and nothing else: no lock check, no package pic
 stamps, web compare, sync, lint or tests, and nothing that needs the network. It takes
 about 80 to 140 s on this repository, the renames step about 60 s of it, so it suits a
 gate run before a push.
+
+`moxi-dev check --pick [--base REV]` reads the workspace and the changed paths as the
+check does, picks the packages the same way, prints one line, the JSON object
+`{"packages": [...]}` with the picked packages' folders under `packages/` in the
+workspace's order, and runs no step. It exits 0, or 2 with the reason on stderr and
+nothing on stdout when the workspace or the base can't be read. The repository's
+`queue.yml` workflow reads it to check a merge queue's candidate: its browser jobs run
+only for the picked packages.
 
 Run one step without the lock, release, package, lint or test steps with
 `moxi-dev check --only refs [PATH...]`, `moxi-dev check --only names [PATH...]`,

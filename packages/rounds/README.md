@@ -963,7 +963,8 @@ the target's head on a branch `queue-<M12>-<n>` in its own worktree, `<worktree_
 <repo>/.queue`. A member that conflicts is ejected with the member before it that it
 conflicts with, one a commit hook refuses with the hook's output, and one whose branch
 moved or whose build ended leaves. It pushes the candidate to its own ref (the `ci.ref`
-template filled with that branch), runs `ci.local` at it, and reads its CI each minute.
+template filled with that branch), runs `ci.local` at it, and reads its CI each minute,
+by the `ci.workflows` marked `reads_candidates`, or by all of them where none is.
 A push refusal that names a member's tip or path ejects it; one that names none is tried
 again once, then pauses the queue. A cancelled run is rerun once and an absent one
 pushed again once under the next number; a second of either pauses the queue, as do
@@ -979,14 +980,41 @@ which meet the check gate, and finishes each one with its own merge found as its
 landing. A lander that dies after the fast-forward is finished by the next one from the
 queue file and git.
 
+**A scoped candidate.** A repo can check its candidates with a workflow of their own
+that runs only what the members change, while the full run still follows each landing.
+In moxi, `ci.yml` ignores the branches `ci/queue-*`, and `queue.yml` runs on them: its
+`pick` job reads the target's head from the 12 hex digits in the branch's name, prints
+the packages `moxi-dev check --pick` picks on a `picked:` line and those it hands the
+browser matrix on a `picked for browser (*):` line, and hands them on; the matrix runs
+only theirs and is skipped when there are none; `scoped` runs `moxi-dev check --base`
+that head; `web` runs as on any `ci/` branch. No job of it is named `linux`, so a
+candidate's run never meets the check `main` waits for. The project reads it with a
+second entry, whose `stands_for` says that the scoped job's failures are compared with
+the full run's `linux` job:
+
+```toml
+[projects.moxi.ci]
+workflows = [
+  { path = ".github/workflows/ci.yml", jobs = ["linux", "web (ubuntu-latest)"],
+    matrix = ["browser (*)"] },
+  { path = ".github/workflows/queue.yml", reads_candidates = true, pick = "pick",
+    jobs = ["pick", "scoped", "web (ubuntu-latest)"], matrix = ["browser (*)"],
+    stands_for = { scoped = "linux" } },
+]
+```
+
 **A red candidate.** A red run's failed jobs are rerun once (`gh run rerun --failed`),
 and a failed `ci.local` is run again; green then lands. Still red, the lander lists its
 failures: each test a failed job's log names in pytest's `FAILED` lines, or the job
 alone. It compares them with the target's own at the candidate's base: that commit's
 full run, read once it has ended and, when red, after one rerun of its failed jobs, and
-`ci.local` run there once when `local` failed. A test counts as the target's own when
-that run fails it in any job, or fails its job naming no test; a job named alone, when
-that run fails a job of that name. Until the target's run is known the batch waits; if
+`ci.local` run there once when `local` failed. Each failed job is compared with the job
+of that run it stands for, as its workflow's `stands_for` names it, else the job of its
+own name. A test counts as the target's own only when that run fails the same test, in
+any job; a job of that run failing with no test named excuses no test. A job named alone
+(a whole-tree step, a setup step, a timeout) counts only when that run fails that job
+naming no test either, so a red target never excuses a candidate's whole-tree failure
+for a test it fails, nor a candidate's new test for a whole-tree failure of its own. Until the target's run is known the batch waits; if
 the target moves meanwhile, the batch is rebuilt on it. With no failure the target
 lacks, the candidate lands, each member's `ci.read` and `queue.landed` naming the
 failures as `excused`. A new failure with one member ejects it with the failures. With
@@ -996,8 +1024,10 @@ half whose target moved is rebuilt on it. Members that join meanwhile wait until
 split is done.
 
 **Main afterwards.** The target's head always gets a full run, and the queue cancels
-none. Each pass the lander reads the full run at the head; a head whose candidate's run
-already covers it needs nothing more. A head with no run is pushed, forced, to the
+none. Each pass the lander reads the full run at the head, by the workflows not marked
+`reads_candidates` alone, so a candidate's scoped run at the same commit never counts
+for it; a head whose candidate's run was a full run (no workflow marked) needs nothing
+more. A head with no run is pushed, forced, to the
 target's own `ci` ref (`ci/main` for moxi), but not while a run pushed there earlier is
 still going: when that ends it is read, and then the newest head is pushed. A push that
 shows no run after ten minutes is made once more; after a second the head is given up,
@@ -1235,7 +1265,15 @@ ci = { workflows = [{ path = ".github/workflows/ci.yml", jobs = ["linux", "web"]
 
 `workflows` names each workflow by its file's path in the repo, read whole, or as a
 table of the `path` and the `jobs` of its run that are read, by the names the run gives
-them. `local` is required: the command, or `"none"` written out where CI does all of it.
+them. A table may name jobs by pattern too, in `matrix`, each `*` standing for any text
+(`"browser (*)"` reads every job of a matrix named `browser`), and then needs no `jobs`;
+it may name its run's `pick` job, one of its `jobs`, which picks the others that run;
+`reads_candidates = true` marks the workflow a merge queue's candidate is read by (see
+"The merge queue"); and `stands_for`, a table of job names, maps a job of its run to
+the job of the target's full run its failures are compared with
+(`stands_for = { scoped = "linux" }`; a job it leaves out is compared with the job of
+its own name). A build's check and the target's full run are read by the
+workflows not so marked, and at least one must not be. `local` is required: the command, or `"none"` written out where CI does all of it.
 `remote`, when set, is where `check` pushes the tip before it reads, as a plain push to
 the build's own branch name; where `git ls-remote` shows the branch already at the tip
 at every push URL of the remote (`git remote get-url --push --all`), it pushes nothing,
@@ -1298,9 +1336,23 @@ CI is read with `status`, `ids` and `jobs`, commands printing JSON, by default `
 list --commit {tip} --json ...`, `gh workflow list --all --json id,path` and `gh run
 view {run} --json jobs --jq .jobs` (`{run}` is the run's id), each bounded by
 `status_timeout_s` (60). A workflow reads `green`, `pending`, `red` or `absent` at the
-tip; one read by its jobs reads each job it names, and is `green` only when each is.
-A job the run lacks reads `pending` until the run completes and `absent` after, and
-with no run at the tip each job it names reads `absent`. The check step is done once
+tip; one read by its jobs reads each job it names, and each its `matrix` patterns
+match, and is `green` only when each is `green` or `skipped`. A job the run lacks, or a
+pattern no job matches, reads `pending` until the run completes and `absent` after, and
+with no run at the tip each job it names reads `absent`. Only a job of a `matrix`
+pattern can read `skipped`, which counts as green, and only where the workflow names a
+`pick` job and that job reads green: a matrix job the run reports skipped, and, once the
+run has completed, a pattern no job matches that the pick picked nothing for. A pattern
+no job matches that the pick picked something for reads `absent`. A job the workflow
+names as itself never reads `skipped`: one the run reports skipped reads `red`, since a
+skip there means the workflow lost that check, and one that is missing reads `absent`.
+With the pick job red or missing, a skipped matrix job reads `red` and an unmatched
+pattern `absent`. The pick job's log names the packages it picked on a line
+`picked: <JSON list>`, and what it picked for a pattern on a line
+`picked for <pattern>: <JSON list>` (a pattern with no such line takes the packages);
+both are read with `gh run view --job <id> --log`, with the `--repo` the setting's
+commands give. The packages are recorded with the workflow in `ci.read` as `picked`, and
+a green pick job whose log has no `picked:` line is a failed read. The check step is done once
 every workflow reads green there, the workflows and jobs named are the ones the setting
 names now, and the local run passed at the tip with the command it declares now. The
 full check, run with `check --full`, meets the step whatever CI reads. A `ci` in a
@@ -1499,4 +1551,4 @@ lists the other modules.
 
 ## License
 
-MIT. See [LICENSE](https://github.com/CodeManEthan/moxi/blob/moxi-rounds-v0.1.3/packages/rounds/LICENSE).
+MIT. See [LICENSE](https://github.com/CodeManEthan/moxi/blob/moxi-rounds-v0.1.4/packages/rounds/LICENSE).

@@ -9661,8 +9661,8 @@ rounds	packages/rounds/src/moxi_rounds/export.py	summary = index.read(home.proje
 rounds	packages/rounds/src/moxi_rounds/export.py	waiting	name	closed	on_closed
 rounds	packages/rounds/src/moxi_rounds/export.py	write	name	error	exc
 rounds	packages/rounds/src/moxi_rounds/export.py	write	name	folder	export_dir
-rounds	packages/rounds/src/moxi_rounds/failures.py	return any(one.get("job") == failure.get("job") for one in target)	keep	any	any
-rounds	packages/rounds/src/moxi_rounds/failures.py	return any(one.get("test") == test	keep	any	any
+rounds	packages/rounds/src/moxi_rounds/failures.py	return any(one.get("test") == test for one in target)	keep	any	any
+rounds	packages/rounds/src/moxi_rounds/failures.py	return any(one.get("test") is None and one.get("job") == job for one in target)	keep	any	any
 rounds	packages/rounds/src/moxi_rounds/findings.py	until = min(ends, default=None)	keep	default	default
 rounds	packages/rounds/src/moxi_rounds/findings.py	used = set()	keep	set	set
 rounds	packages/rounds/src/moxi_rounds/finish_gates.py	CHANGED = "changed"	keep	changed	changed
@@ -17715,6 +17715,9 @@ sessions	packages/sessions/tests/test_writer.py	assert wrapped.injected is True 
 sessions	packages/sessions/tests/test_writer.py	chars = set(api.OPENING)	keep	set	set
 sessions	packages/sessions/tests/test_writer.py	out = set()	keep	set	set
 sessions	packages/sessions/tests/test_writer.py	synthetic.text("Called the Read tool", synthetic=True)	keep	synthetic	synthetic
+moxi-dev	packages/moxi-dev/src/moxi_dev/check.py	help="print the packages the change picks, as one JSON line, and "	keep	help	help
+moxi-dev	packages/moxi-dev/tests/test_workflows.py	assert set(found) == {"pick", "scoped", "web", "browser"}	keep	set	set
+rounds	packages/rounds/src/moxi_rounds/settings.py	if len(set(value)) != len(value):	keep	set	set
 rounds	packages/rounds/src/moxi_rounds/events.py	"builder", "record", "host", "build", "brought")),	keep	record	record
 rounds	packages/rounds/src/moxi_rounds/private_files.py	proc.wait(timeout=GIT_TIMEOUT_S)	keep	timeout	timeout
 rounds	packages/rounds/src/moxi_rounds/private_files.py	code, out = git._run("config", "--bool", "core.ignorecase", ok=(0, 1))	keep	ok	ok

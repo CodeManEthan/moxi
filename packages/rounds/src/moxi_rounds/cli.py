@@ -1618,7 +1618,7 @@ def _ci_checked(ran, args, out) -> int:
             url = "" if one["url"] is None else f"   {one['url']}"
             print(f"  {one['path']}: {one['reading']}{url}", file=out)
             for job in one.get("jobs") or ():
-                if job["reading"] != ci.GREEN:
+                if job["reading"] not in (ci.GREEN, ci.SKIPPED):
                     url = "" if job["url"] is None else f"   {job['url']}"
                     print(f"    {job['name']}: {job['reading']}{url}", file=out)
         for line in _ci_way_on(ran.name, ran.stage, reading["reading"]):
