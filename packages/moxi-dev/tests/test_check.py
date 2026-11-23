@@ -192,6 +192,39 @@ def test_a_check_change_picks_every_package(repo):
     assert picked(repo) == list(LAYOUT)
 
 
+def test_pick_prints_the_picked_packages_as_one_json_line_and_runs_nothing(
+        repo, monkeypatch, capsys):
+    commit_file(repo, "packages/sessions/src/moxi_sessions/x.py")
+    base = git(repo, "rev-parse", "main").strip()
+    git(repo, "branch", "-f", "main", "HEAD")   # --base, not main, gives the changes
+    runs = Runs()
+    monkeypatch.setattr(check, "_run", runs)
+    monkeypatch.chdir(repo / "packages" / "turns")
+    assert check.main(["--pick", "--base", base]) == 0
+    out = capsys.readouterr().out
+    assert out.count("\n") == 1
+    assert json.loads(out) == {"packages": ["sessions", "cache", "comms"]}
+    assert runs.calls == []
+    assert check.main(["--pick"]) == 0
+    assert json.loads(capsys.readouterr().out) == {"packages": []}
+
+
+def test_pick_with_no_merge_base_exits_2_printing_nothing(repo, monkeypatch, capsys):
+    monkeypatch.chdir(repo)
+    assert check.main(["--pick", "--base", "no-such-rev"]) == 2
+    out, err = capsys.readouterr()
+    assert out == "" and "no merge base of no-such-rev" in err
+
+
+@pytest.mark.parametrize("args", [["--full"], ["--finding", "L1"], ["--static"],
+                                  ["--only", "refs"]])
+def test_pick_takes_no_other_mode(repo, monkeypatch, args):
+    monkeypatch.chdir(repo)
+    with pytest.raises(SystemExit) as stop:
+        check.main(["--pick", *args])
+    assert stop.value.code == 2
+
+
 # The real workspace's dev groups: every package lists moxi-dev, which requires moxi and
 # publishing; connector's dev group takes ui, whose pages its browser tests drive.
 DEV_LAYOUT = {

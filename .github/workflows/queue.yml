@@ -1,0 +1,171 @@
+# The check of a merge queue's candidate: a commit that merges the builds waiting to
+# land onto main's head M, pushed to a branch ci/queue-<M12>-<n>, where M12 is the first
+# 12 hex digits of M and n the batch's number. ci.yml ignores those branches and this
+# workflow runs on them alone. It checks what the candidate changes since M and every
+# package that depends on it, not the whole tree; the full check runs on main after the
+# candidate lands.
+# No job here is named linux, so no run of this workflow meets the check main waits for
+# (ci.yml's linux job, which the publishing gate and the main branch's rules read).
+# The pick job reads M from the branch's name, prints the packages
+# `moxi-dev check --pick` picks on a line `picked: <JSON list>` of its log, which is
+# where a reader of the run finds them, and hands them on. The scoped job runs
+# `moxi-dev check --base M`. The web job runs as ci.yml runs it on a ci/ branch, on Linux
+# only. The browser jobs run, in Chromium and Firefox, the browser tests of the picked
+# packages that ci.yml's browser jobs run; with none picked the browser job is skipped.
+# A newer push to the same branch cancels its run still going. Every job skips the push
+# that deletes a branch.
+# Actions are pinned to a release commit, with its version beside it.
+
+name: queue
+
+on:
+  push:
+    branches: ["ci/queue-*"]
+
+concurrency:
+  group: queue-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  # GitHub's runners are slower than the machine the timed tests' budgets were set on:
+  # every upper bound of a timed test is multiplied by this factor.
+  MOXI_TEST_TIMED_SLACK: "2"
+
+jobs:
+  pick:
+    if: ${{ !github.event.deleted }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    outputs:
+      base: ${{ steps.base.outputs.base }}
+      browser: ${{ steps.pick.outputs.browser }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          fetch-depth: 0
+      - uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9  # v9.0.0
+        with:
+          version: "0.12.19"
+          python-version: "3.12"
+      - name: main's head, from the 12 hex digits in the branch's name
+        id: base
+        run: |
+          short="${GITHUB_REF_NAME#ci/queue-}"
+          short="${short%%-*}"
+          if ! printf '%s' "$short" | grep -Eqx '[0-9a-f]{12}'; then
+            echo "the branch $GITHUB_REF_NAME names no base: ci/queue-<12 hex digits>-<n>"
+            exit 1
+          fi
+          if ! base="$(git rev-parse --verify --quiet "${short}^{commit}")"; then
+            echo "no commit $short is in the candidate's history"
+            exit 1
+          fi
+          echo "base=$base" >> "$GITHUB_OUTPUT"
+      - name: the packages the candidate picks
+        id: pick
+        env:
+          BASE: ${{ steps.base.outputs.base }}
+          # The packages ci.yml's browser jobs run, in its order.
+          BROWSER: ui cache comms launcher usage loadout projects sessions turns services connector rounds
+        run: |
+          set -o pipefail
+          picked="$(uv run --locked --package moxi-dev moxi-dev check --pick --base "$BASE" | jq -c .packages)"
+          echo "picked: $picked"
+          browser="$(jq -nc --argjson picked "$picked" --arg list "$BROWSER" \
+            '[$list | split(" ")[] | select(. as $p | $picked | any(.[]; . == $p))]')"
+          echo "browser=$browser" >> "$GITHUB_OUTPUT"
+
+  scoped:
+    needs: pick
+    if: ${{ !github.event.deleted }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          fetch-depth: 0
+      - uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9  # v9.0.0
+        with:
+          version: "0.12.19"
+          python-version: "3.12"
+      - run: uv sync --locked
+      - name: check the candidate against main's head
+        env:
+          BASE: ${{ needs.pick.outputs.base }}
+        run: uv run --locked moxi-dev check --base "$BASE"
+
+  web:
+    if: ${{ !github.event.deleted }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    steps:
+      # As ci.yml's web job: line-ending conversion on before the checkout.
+      - run: git config --global core.autocrlf true
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1  # v7.1.0
+        with:
+          node-version-file: .nvmrc
+      - run: npm ci
+      - name: type-check each page, build into a temp directory, compare with the tree
+        run: npm run check
+      - name: each page's own Node tests
+        run: npm test --workspaces --if-present
+      - uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9  # v9.0.0
+        with:
+          version: "0.12.19"
+          python-version: "3.12"
+      - name: the build stamps, recomputed without Node
+        env:
+          PYTHONPATH: packages/moxi-dev/src
+        run: uv run --no-project --python 3.12 python -m moxi_dev.stamp
+
+  browser:
+    # As ci.yml's browser jobs, for the picked packages only.
+    needs: pick
+    if: ${{ !github.event.deleted && needs.pick.outputs.browser != '[]' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        package: ${{ fromJSON(needs.pick.outputs.browser) }}
+        engine: [chromium, firefox]
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+      - uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9  # v9.0.0
+        with:
+          version: "0.12.19"
+          python-version: "3.12"
+      - run: uv sync --locked --all-packages --all-extras
+      - name: install the browser and the system libraries it needs
+        working-directory: packages/${{ matrix.package }}
+        run: uv run --locked --all-packages --all-extras playwright install --with-deps ${{ matrix.engine }}
+      - name: the fallback fonts
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y fontconfig fonts-dejavu-core
+      - name: the theme's first font is not installed
+        run: |
+          family="$(fc-match -f '%{family}' 'Adwaita Sans')"
+          echo "Adwaita Sans resolves to: ${family:-nothing}"
+          case "$family" in
+            "") echo "fc-match found no font for Adwaita Sans"; exit 1 ;;
+            *Adwaita*) echo "this runner has Adwaita, so the layouts would not meet a fallback face"; exit 1 ;;
+          esac
+      - name: the browser tests
+        working-directory: packages/${{ matrix.package }}
+        run: uv run --locked --all-packages --all-extras pytest -m browser --ui-browser ${{ matrix.engine }} -n auto --ui-traces ui-traces
+      - name: a failed test's Playwright traces
+        if: failure()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7.0.2
+        with:
+          name: ui-traces-${{ matrix.package }}-${{ matrix.engine }}
+          path: packages/${{ matrix.package }}/ui-traces
+          if-no-files-found: ignore
