@@ -2,9 +2,10 @@
 // page root (`data-reading="<n>"`, gone at none). DOM-free: when a read ends, and how to
 // wait, are given.
 //
-// The rule: a read counts from when it is sent until its answer has been drawn. An end
-// is taken off the count only on `later`, a turn after the answer, so the render the
-// answer's continuation makes (a Lit update is a microtask) lands before the mark goes.
+// The rule: a read counts from when it is sent until its answer has been drawn, and a read
+// a page defers behind a wait counts from when it is scheduled. An end is taken off the
+// count only on `later`, a turn after the answer, so the render the answer's continuation
+// makes (a Lit update is a microtask) lands before the mark goes.
 
 /** Runs `fn` after `ms` milliseconds; `setTimeout` in the browser. */
 export type Later = (fn: () => void, ms: number) => unknown;
@@ -39,6 +40,32 @@ export class ReadingCount {
         this.count -= 1;
         this.#onChange(this.count);
       }, 0);
+    };
+  }
+
+  /** `read` run after `ms`, counted as a read out from now until a turn after what it
+   * gives (its promise) has settled, so its answer is drawn first. Gives the function that
+   * cancels it: before `read` has run, `read` never runs and the count lets it go; after,
+   * it does nothing, and the read counts until it ends. */
+  deferred(read: () => unknown, ms: number): () => void {
+    const end = this.begin();
+    let due = true;
+    this.#later(() => {
+      if (!due) return;
+      due = false;
+      let ran: unknown;
+      try {
+        ran = read();
+      } catch (exc) {
+        end();
+        throw exc;
+      }
+      void Promise.resolve(ran).finally(end);
+    }, ms);
+    return () => {
+      if (!due) return;
+      due = false;
+      end();
     };
   }
 

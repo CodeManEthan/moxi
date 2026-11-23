@@ -13,6 +13,10 @@
   (`moxi_ui.testing.browser.press`), a click that waits for the mark to go first, and
   `settled(page)`: press through it and a late answer can't move a control under the
   click. A page that never settles fails the press with the mark's count.
+- `client.js` gains `readLater(read, ms)`, for a read a page decides on but sends after a
+  wait (a list read again after a topic value, a field read once typing stops): the
+  page root's `data-reading` mark counts it from the moment it is scheduled until its
+  answer has been drawn, and the function it gives cancels it. A user sees no change.
 
 ## 0.2.7 (2026-11-22)
 

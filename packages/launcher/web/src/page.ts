@@ -26,7 +26,7 @@
 import { css, html, LitElement, nothing } from "lit";
 import { keyed } from "lit/directives/keyed.js";
 import { repeat } from "lit/directives/repeat.js";
-import { api, place, subscribe } from "/m/ui/client.js";
+import { api, place, readLater, subscribe } from "/m/ui/client.js";
 import type { FieldDescriptor, FormElement, FormSubmit, FormValue } from "/m/ui/client.js";
 
 import { Feed, parseLaunches, parseStates } from "./feed.ts";
@@ -144,7 +144,8 @@ export class LauncherPage extends LitElement {
   #older: Past[] = [];
   #olderBusy = false;
   #stops: (() => void)[] = [];
-  #pastTimer: ReturnType<typeof setTimeout> | undefined;
+  /** Cancels the past sessions' read waiting to be sent. */
+  #pastCancel = (): void => {};
   #followTimer: ReturnType<typeof setInterval> | undefined;
 
   // The form: the preset chosen, the `/api/form` answer it is filled from, the harness it
@@ -234,7 +235,7 @@ export class LauncherPage extends LitElement {
     this.#states = null;
     for (const stop of this.#stops) stop();
     this.#stops = [];
-    clearTimeout(this.#pastTimer);
+    this.#pastCancel();
     clearInterval(this.#followTimer);
     this.#followTimer = undefined;
     document.removeEventListener("visibilitychange", this.#shown);
@@ -302,9 +303,11 @@ export class LauncherPage extends LitElement {
     this.requestUpdate();
   }
 
+  /** Reads the past sessions again once a burst of topic values has passed. The page root
+   * counts that read as out from now, so a press waits for the list it draws. */
   #pastsLater(): void {
-    clearTimeout(this.#pastTimer);
-    this.#pastTimer = setTimeout(() => { void this.#pasts?.refresh(); }, PAST_DELAY_MS);
+    this.#pastCancel();
+    this.#pastCancel = readLater(() => this.#pasts?.refresh(), PAST_DELAY_MS);
   }
 
   #form(): FormElement | null {

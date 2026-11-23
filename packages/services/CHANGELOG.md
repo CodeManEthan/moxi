@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- The add panel reads the typed unit through moxi-ui's `readLater`, so the page root's
+  `data-reading` mark counts that read from the keystroke until what it fills in is
+  drawn, and a test's press waits for it. A user sees no change. The `ui` extra asks for
+  moxi-ui 0.2.8 or later.
 - An opened row draws its foot (its acts) and its module's links only once the row's own
   reads (`/api/row`, and `/api/ends` for slots' server) have answered, so a line those
   answers add, such as `Unit` or `Needs it`, no longer moves `Stop` under a press.

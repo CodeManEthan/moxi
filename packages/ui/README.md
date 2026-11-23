@@ -231,6 +231,31 @@ class Page extends LitElement {
 time once the timer `start` armed has fired, so the render it asks for always draws the
 line.
 
+## A read sent after a wait
+
+A page that waits before it sends a read it has decided on (a list read again a while after
+a topic value, a field's value read once typing stops) schedules it with `readLater` from
+`/m/ui/client.js`, not `setTimeout`:
+
+```js
+import { readLater } from "/m/ui/client.js";
+
+class Page extends LitElement {
+  #cancel = () => {};
+  // A topic value came: read the list again once the burst it is part of has passed.
+  #later() {
+    this.#cancel();
+    this.#cancel = readLater(() => this.#list.refresh(), 300);
+  }
+  disconnectedCallback() { super.disconnectedCallback(); this.#cancel(); }
+}
+```
+
+The page root's `data-reading` mark (see "Testing a module's pages") counts the read from
+the moment it is scheduled until a turn after the promise `read` gives has settled, so a
+press waits through the wait too. `readLater` gives the function that cancels it: before
+the read has run, the read never runs and the mark lets it go; after, it does nothing.
+
 ## The gateway: the UI on your phone
 
 The gateway is a second listener of the shell, reached from a phone through the tunnel
@@ -333,7 +358,8 @@ docstring lists every fixture.
 A test presses a control through `ui_press(locator)`. While reads that decide a page's
 layout are out, `client.js` marks the page root (the shell's `#moxi-panel`) with
 `data-reading="<n>"`, their count: each `api` read until its answer has been drawn, each
-`subscribe` until its first value (at most 5 s), each `place` until its element is placed.
+`subscribe` until its first value (at most 5 s), each `place` until its element is placed,
+and each `readLater` read from when it is scheduled until its answer has been drawn.
 The press waits until the mark is gone, then clicks, so a late answer never moves a
 control under the click. A page that never settles fails the press with the mark's count.
 

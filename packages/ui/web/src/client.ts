@@ -16,9 +16,10 @@
 // It marks the page root (the shell's `#moxi-panel`, else the document's root element)
 // with `data-reading="<n>"` while n reads that decide the page's layout are out, and takes
 // the mark away at none: each `api` read (not a post) until its answer has been drawn,
-// each `subscribe` until its first value (at most `FIRST_VALUE_MS`), and each `place`
-// until its element is placed. A test presses only once the mark is gone, so no late
-// answer moves a control under its press.
+// each `subscribe` until its first value (at most `FIRST_VALUE_MS`), each `place` until
+// its element is placed, and each read a page defers through `readLater` from when it is
+// scheduled until its answer has been drawn. A test presses only once the mark is gone, so
+// no late answer moves a control under its press.
 //
 // It also defines `<moxi-ui-form>`, the one form renderer, `<moxi-ui-confirm>`, the
 // confirm sheet, `<moxi-ui-row>`, the two-line row of a list, and `<moxi-ui-rail>` with its
@@ -573,6 +574,19 @@ export function subscribe(module: string, topic: string, fn: (data: any) => void
     first.stopped();
     stop();
   };
+}
+
+/**
+ * Runs `read` after `ms` milliseconds: a read the page has decided on but waits to send,
+ * such as a list read again a while after a topic value, or a field's value read once
+ * typing stops. The page root's mark counts it from now until a turn after what `read`
+ * gives (its promise) has settled, so a press waits through the wait as well as the read.
+ * Gives the function that cancels it: before `read` has run, `read` never runs and the
+ * mark lets it go; after, it does nothing. Call it where the page would `clearTimeout`,
+ * and in `disconnectedCallback`.
+ */
+export function readLater(read: () => unknown, ms: number): () => void {
+  return reading.deferred(read, ms);
 }
 
 /**
