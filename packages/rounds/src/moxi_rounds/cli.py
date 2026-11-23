@@ -1218,6 +1218,9 @@ def _frozen(plan) -> list[str]:
         if change.get("retired"):
             parts.append(f"retires {', '.join(change['retired'])}")
         lines.append(f"options: {question} {' and '.join(parts)}")
+    lines += [f"prepared: {question} by {body.get('by')}, recommends "
+              f"{body.get('recommend')}"
+              for question, body in added.get("prepared", {}).items()]
     lines += [f"pending: {versions.said(one)}" for one in plan.pending]
     if plan.pending:
         lines.append("what is pending changes nothing until a verdict finds this "

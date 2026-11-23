@@ -7,7 +7,7 @@ import textwrap
 
 import pytest
 
-from moxi_rounds import design_block
+from moxi_rounds import answer_block, design_block, preparing
 from moxi_rounds.errors import BadBlock
 
 WHOLE = """
@@ -579,3 +579,21 @@ def test_the_empty_block_is_refused_as_it_stands_and_read_once_filled(design):
     assert read.stages[0].slices[0].minutes == 40
     assert read.traces[0].question == "Q1"
     assert read.commitments[0].where == "the index"
+
+
+def test_a_blocks_prepared_answer_is_stored_as_an_answer_files_is(design, tmp_path):
+    prepared = design_block.read(design(WHOLE)).questions[0].prepared
+    lines = ['kind = "answer"', 'question = "Q1"', 'by = "scout"', 'model = "a-model"',
+             'recommend = "b"', 'sure = "medium"',
+             'why = "archived notes are a tenth of the folder"',
+             'flips = "a reader who asks for an archived note by name"',
+             'read = ["file:design.md#search", "comms:1234567"]']
+    for one in prepared.options:
+        lines += ["[[option]]", f'key = "{one.key}"']
+        lines += [f'text = "{one.text}"'] if one.text else []
+        lines += [f'costs = "{one.costs}"', f'forecloses = "{one.forecloses}"']
+    path = tmp_path / "answer.md"
+    path.write_text("```toml rounds\n" + "\n".join(lines) + "\n```\n", encoding="utf-8")
+
+    assert preparing.stored(answer_block.read(path).prepared) == preparing.stored(
+        prepared)
