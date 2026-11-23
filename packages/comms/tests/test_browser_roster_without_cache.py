@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import sys
 
+from moxi_dev.testing import PROC_WAIT_S
 import pytest
 from playwright.sync_api import expect
 
@@ -35,7 +36,8 @@ def shell(ui_shell, monkeypatch):
 def test_with_cache_left_out_a_live_row_has_no_chip_and_nothing_asks_cache(
         shell, rig, ui_contexts, ui_component_check):
     reviewer = rig.shim(**REVIEWER)
-    wait_for(lambda: R in rig.daemon.bindings and rig.daemon.bindings[R].session_id, 5,
+    wait_for(lambda: R in rig.daemon.bindings and rig.daemon.bindings[R].session_id,
+             PROC_WAIT_S,
              what="reviewer to bind")
     put_clock(shell, reviewer.session_id, age=60)
     roster_kit.current(shell, holding([R]))

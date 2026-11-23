@@ -16,6 +16,7 @@ from moxi_comms.record import RateLimited
 from moxi_comms.mock_record import MockRecord
 from moxi_comms.paths import cursors_dir, daemon_socket
 from moxi_comms.sender import SendFailed, _bounded
+from moxi_dev.testing import PROC_WAIT_S
 
 
 # --------------------------------------------------------------------------- block
@@ -218,7 +219,7 @@ def test_shim_surfaces_comms_offline_and_reconnects(rig):
 
     fresh = daemon_mod.Daemon(rig.record, clock=rig.clock, start_trim_thread=False).start()
     rig.daemon = fresh
-    assert wait_until(lambda: b.offline is False, timeout=5.0)
+    assert wait_until(lambda: b.offline is False, timeout=PROC_WAIT_S)
     assert wait_until(lambda: any("comms online" in s for s in b.statuses))
     rig.post_as("agent-6", ["reviewer@proj-a"], "after the outage")
     assert wait_until(lambda: any(p["text"] == "after the outage" for p in b.queue))

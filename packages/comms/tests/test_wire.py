@@ -25,6 +25,7 @@ from moxi import ipc
 from moxi_comms import checks, directory, machine_line, wire
 from moxi_comms.daemon import WINDOW, Daemon
 from moxi_comms.paths import comms_db, daemon_socket, old_daemon_socket
+from moxi_dev.testing import PROC_WAIT_S
 
 pytestmark = pytest.mark.skipif(not hasattr(socket, "AF_UNIX"),
                                 reason="the daemon socket is a unix socket here; the "
@@ -94,7 +95,7 @@ class Line:
             return self.read(timeout)
         return message
 
-    def ends(self, timeout: float = 10.0) -> bool:
+    def ends(self, timeout: float = PROC_WAIT_S) -> bool:
         """Read until the daemon ends the connection: True when it did."""
         self.sock.settimeout(timeout)
         try:

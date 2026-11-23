@@ -30,6 +30,7 @@ from moxi_comms import wire
 from moxi_comms.client import DaemonClient
 from moxi_comms.daemon import Daemon
 from moxi_comms.paths import daemon_socket
+from moxi_dev.testing import PROC_WAIT_S
 
 import shim_drive
 
@@ -400,7 +401,7 @@ def test_a_digest_open_across_a_daemon_restart_is_handed_again_and_reads_undeliv
     reviewer.on_turn_boundary()          # injected, turn not yet complete: held_ids
     assert reviewer.held_ids
     daemon = reboot(rig)
-    assert wait_until(lambda: R in daemon.bindings, timeout=5)
+    assert wait_until(lambda: R in daemon.bindings, timeout=PROC_WAIT_S)
     assert wait_until(lambda: daemon.bindings[R].handed_max == sent.id)
     assert wait_until(lambda: [p["message_id"] for p in reviewer.queue] == [sent.id])
     assert query_owed(R)["undelivered"] is True

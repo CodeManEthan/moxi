@@ -11,6 +11,7 @@ import subprocess
 import time
 from pathlib import Path
 
+from moxi_dev.testing import PROC_WAIT_S
 import pytest
 
 SCRIPT = Path(__file__).resolve().parent.parent / "scripts" / "opencode-home-check.py"
@@ -74,7 +75,7 @@ def test_it_refuses_while_another_opencode_runs(check, tmp_path, capsys):
     shutil.copy("/bin/sh", fake)
     proc = subprocess.Popen([str(fake), "-c", "read _"], stdin=subprocess.PIPE)
     try:
-        time_limit = time.monotonic() + 5
+        time_limit = time.monotonic() + PROC_WAIT_S
         while time.monotonic() < time_limit and not any(
                 pid == proc.pid for pid, _ in check.other_opencode()):
             time.sleep(0.05)

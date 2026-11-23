@@ -12,6 +12,7 @@ import pytest
 from moxi import units
 from moxi.paths import Layout, python
 from moxi.units import Acted, UnitState
+from moxi_dev.testing import PROC_WAIT_S
 from moxi_ui import cli
 from moxi_ui.cli import Refused
 
@@ -495,7 +496,7 @@ def test_open_print_starts_a_shell_and_its_ticket_signs_in(monkeypatch, capsys):
         info = read_runtime("ui")
         if info is not None:
             os.kill(info.pid, signal.SIGTERM)
-            deadline = time.monotonic() + 10
+            deadline = time.monotonic() + PROC_WAIT_S
             while cli.lock_held() and time.monotonic() < deadline:
                 time.sleep(0.05)
     assert read_runtime("ui") is None

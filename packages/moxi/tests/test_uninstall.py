@@ -23,6 +23,7 @@ import moxi.uninstall as uninstall
 from conftest import WINDOWS, drop_modules, is_link, link_dir
 from moxi import _questions, _settle, files, paths, units
 from moxi.units import _backend, _state
+from moxi_dev.testing import PROC_WAIT_S
 from fake_backend import FakeBackend, FakeSupervisor
 from test_install import CATALOG, Fake, _requirement, moxi_install
 
@@ -433,7 +434,7 @@ def test_a_second_uninstall_waits_for_a_running_install(fake, capsys):
         assert said == "held"
         code, _, err = moxi_uninstall(capsys, "turns")
     finally:
-        holder.wait(10)
+        holder.wait(PROC_WAIT_S)
     assert code == 0, err
     assert f"waiting for the core lock, which pid {pid} holds (an install or uninstall, " \
            "or a module reading or changing its units)" in err

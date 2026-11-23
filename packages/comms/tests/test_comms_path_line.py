@@ -23,6 +23,7 @@ from moxi_comms import context, listener
 from moxi_comms.adapters import codex, codex_wrapper, session, shim_roster
 from moxi_comms.adapters import opencode as oc
 from moxi_comms.context import CONTEXT_BLOCK
+from moxi_dev.testing import PROC_WAIT_S
 
 COMMAND = "/x/bin/moxi comms"
 LINE = ("Run every comms verb with /x/bin/moxi comms (this agent's own comms install). "
@@ -158,7 +159,7 @@ def test_the_claude_wrapper_stamps_its_own_comms_command(rig, fake_claude):
     proc = subprocess.run([sys.executable, "-c", code], env=env, capture_output=True,
                           text=True, timeout=30)
     assert proc.returncode == 0, proc.stderr
-    assert wait_until(lambda: out.exists(), timeout=10)
+    assert wait_until(lambda: out.exists(), timeout=PROC_WAIT_S)
     expected = context.own_comms()
     assert expected and expected.endswith("/moxi comms")
     assert out.read_text().splitlines() == [f"command {expected}"]

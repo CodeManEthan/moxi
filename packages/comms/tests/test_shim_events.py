@@ -33,6 +33,7 @@ from moxi_comms.adapters import claude_shim
 from moxi_comms.adapters.claude_shim import ClaudeShim
 from moxi_comms.client import DaemonError, DaemonOffline
 from moxi_comms.paths import runtime_root
+from moxi_dev.testing import PROC_WAIT_S
 
 import shim_drive
 
@@ -612,7 +613,7 @@ def test_a_connection_that_dies_during_register_is_not_a_binding(rig, monkeypatc
     assert wait_until(lambda: "reviewer@proj-a" not in rig.daemon.bindings)
 
     shim.start(tolerate_offline=True)          # and nothing is stranded
-    assert wait_until(lambda: shim.offline is False, timeout=5.0)
+    assert wait_until(lambda: shim.offline is False, timeout=PROC_WAIT_S)
     assert shim._client is not None and shim._client.connected is True, \
         "online means a LIVE client, never one the reader thread already buried"
     assert shim.identity == "reviewer@proj-a"
@@ -707,7 +708,7 @@ def test_a_finite_reconnect_backoff_falls_back_to_the_default(rig, restart):
                     backoff=iter([0.01]))
     rig.daemon.stop()
     restart()
-    assert wait_until(lambda: not shim.offline, timeout=5.0)
+    assert wait_until(lambda: not shim.offline, timeout=PROC_WAIT_S)
     assert shim._supervisor.is_alive()
 
 

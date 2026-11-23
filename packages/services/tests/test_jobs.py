@@ -10,6 +10,7 @@ import time
 
 import pytest
 
+from moxi_dev.testing import PROC_WAIT_S
 from moxi_services import jobs
 from moxi_services.acts import Outcome
 
@@ -49,7 +50,7 @@ def done(ident: str = "services/web", act: str = "stop", code: int = 0, **extra)
     return Outcome(ident, act, code, **extra)
 
 
-def until(check, within: float = 10.0) -> None:
+def until(check, within: float = PROC_WAIT_S) -> None:
     deadline = time.monotonic() + within
     while not check():
         assert time.monotonic() < deadline, "timed out"

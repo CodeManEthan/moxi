@@ -1635,7 +1635,7 @@ comms	packages/comms/tests/fixtures/comms-0.2/make.py	tier="standing", adapter="
 comms	packages/comms/tests/pty_kit.py	alive	name	f	fh
 comms	packages/comms/tests/pty_kit.py	return self.proc.wait(timeout=timeout)	keep	timeout	timeout
 comms	packages/comms/tests/pty_kit.py	self._reader.join(timeout=2)	keep	timeout	timeout
-comms	packages/comms/tests/pty_kit.py	self.proc.wait(timeout=10)	keep	timeout	timeout
+comms	packages/comms/tests/pty_kit.py	self.proc.wait(timeout=PROC_WAIT_S)	keep	timeout	timeout
 comms	packages/comms/tests/roster_kit.py	clock_records_dir.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
 comms	packages/comms/tests/roster_kit.py	put_clock	name	directory	clock_records_dir
 comms	packages/comms/tests/roster_kit.py	return events.until(lambda name, data: name == "comms.roster" and check(data))[1]	keep	ok	ok
@@ -1874,7 +1874,7 @@ comms	packages/comms/tests/test_claude_launch.py	-	name	test_turns_endpoint_comm
 comms	packages/comms/tests/test_claude_launch.py	assert any(ln.startswith("waiting") and "none" in ln for ln in out.splitlines()), out	keep	any	any
 comms	packages/comms/tests/test_claude_launch.py	config.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
 comms	packages/comms/tests/test_claude_launch.py	path.parent.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
-comms	packages/comms/tests/test_claude_launch.py	proc.wait(timeout=15)	keep	timeout	timeout
+comms	packages/comms/tests/test_claude_launch.py	proc.wait(timeout=PROC_WAIT_S)	keep	timeout	timeout
 comms	packages/comms/tests/test_claude_launch.py	proc.wait(timeout=30)	keep	timeout	timeout
 comms	packages/comms/tests/test_claude_launch.py	seen.update(session=s, binary=found, cmd=cmd, env=env)	keep	env	env
 comms	packages/comms/tests/test_claude_launch.py	shim = rig.shim(name="reviewer", scope="proj-a", start=False)	keep	start	start
@@ -1946,7 +1946,7 @@ comms	packages/comms/tests/test_codex_wrapper.py	-	name	test_the_hosts_environme
 comms	packages/comms/tests/test_codex_wrapper.py	_, err = proc.communicate(timeout=30)	keep	timeout	timeout
 comms	packages/comms/tests/test_codex_wrapper.py	assert not any(codex_wrapper.sessions_dir().glob("codex-*"))	keep	any	any
 comms	packages/comms/tests/test_codex_wrapper.py	assert not codex_wrapper.sessions_dir().exists() or not any(	keep	any	any
-comms	packages/comms/tests/test_codex_wrapper.py	assert wait_until(lambda: not any(codex_wrapper.sessions_dir().glob("codex-*")), 10)	keep	any	any
+comms	packages/comms/tests/test_codex_wrapper.py	assert wait_until(lambda: not any(codex_wrapper.sessions_dir().glob("codex-*")),	keep	any	any
 comms	packages/comms/tests/test_codex_wrapper.py	proc.communicate(timeout=20)	keep	timeout	timeout
 comms	packages/comms/tests/test_codex_wrapper.py	run_wrapper	name	environ	env
 comms	packages/comms/tests/test_codex_wrapper.py	return host.out.exists() and any(ln == word or ln.startswith(word + " ")	keep	any	any
@@ -2354,7 +2354,7 @@ comms	packages/comms/tests/test_mcp_listen.py	test_systemds_variables_for_anothe
 comms	packages/comms/tests/test_mcp_listen.py	test_the_daemon_serves_an_inherited_socket_on_another_port_and_revokes_nothing	name	environ	env
 comms	packages/comms/tests/test_mcp_tokens.py	-	name	test_a_claim_key_names_a_file_in_the_claim_directory_only	test_a_claim_key_names_a_file_in_the_claim_dir_only
 comms	packages/comms/tests/test_mcp_tokens.py	assert not any(token in cell for cell in cells)	keep	any	any
-comms	packages/comms/tests/test_mcp_tokens.py	host.run_on_loop(asyncio.sleep(0), timeout=WAIT)	keep	timeout	timeout
+comms	packages/comms/tests/test_mcp_tokens.py	host.run_on_loop(asyncio.sleep(0), timeout=PROC_WAIT_S)	keep	timeout	timeout
 comms	packages/comms/tests/test_mcp_tokens.py	rig.daemon = Daemon(rig.record, clock=rig.clock, start_trim_thread=False)	keep	record	record
 comms	packages/comms/tests/test_mcp_tokens.py	self.broken: set = set()	keep	set	set
 comms	packages/comms/tests/test_mcp_tools.py	"REPLY_OWN_UNREADABLE_TOOL", "INTERRUPT_IGNORED_OPERATOR_TOOL"} <= set(texts)	keep	set	set
@@ -7082,7 +7082,7 @@ moxi	packages/moxi/tests/test_place.py	from conftest import FOLDER_LINK, WINDOWS
 moxi	packages/moxi/tests/test_place.py	from conftest import FOLDER_LINK, WINDOWS, is_link, link_folder, link_text	use	link_folder	link_dir
 moxi	packages/moxi/tests/test_place.py	given = {"HOME": str(tmp_path / "given"), "USERPROFILE": str(tmp_path / "given"),	keep	HOME	HOME
 moxi	packages/moxi/tests/test_place.py	given = {**os.environ, "HOME": str(tmp_path / "given"),	keep	HOME	HOME
-moxi	packages/moxi/tests/test_place.py	holder.wait(timeout=10)	keep	timeout	timeout
+moxi	packages/moxi/tests/test_place.py	holder.wait(timeout=PROC_WAIT_S)	keep	timeout	timeout
 moxi	packages/moxi/tests/test_place.py	if how == "git_seconds":	use	git_seconds	git_s
 moxi	packages/moxi/tests/test_place.py	lambda folder, *rest: calls.append(folder) or real(folder, *rest))	use	folder	repo_dir
 moxi	packages/moxi/tests/test_place.py	link_folder(alias, pkg)	use	link_folder	link_dir
@@ -7142,7 +7142,7 @@ moxi	packages/moxi/tests/test_proc.py	assert child.wait(timeout=30) == 1	keep	ti
 moxi	packages/moxi/tests/test_proc.py	assert child.wait(timeout=30) == 7	keep	timeout	timeout
 moxi	packages/moxi/tests/test_proc.py	assert child.watchdog.wait(timeout=30) == 0	keep	timeout	timeout
 moxi	packages/moxi/tests/test_proc.py	assert msvcrt.opened == opened	keep	opened	opened
-moxi	packages/moxi/tests/test_proc.py	child.wait(timeout=10)	keep	timeout	timeout
+moxi	packages/moxi/tests/test_proc.py	child.wait(timeout=PROC_WAIT_S)	keep	timeout	timeout
 moxi	packages/moxi/tests/test_proc.py	env["HOME"] = os.environ.get("HOME", "/")	keep	HOME	HOME
 moxi	packages/moxi/tests/test_proc.py	middle.wait(timeout=30)	keep	timeout	timeout
 moxi	packages/moxi/tests/test_proc.py	out, _ = child.communicate(timeout=30)	keep	timeout	timeout
@@ -7556,8 +7556,8 @@ moxi	packages/moxi/tests/test_watch.py	assert child.wait(timeout=30) == -signal.
 moxi	packages/moxi/tests/test_watch.py	assert child.wait(timeout=30) == -signal.SIGTERM	keep	timeout	timeout
 moxi	packages/moxi/tests/test_watch.py	assert child.wait(timeout=30) == 0	keep	timeout	timeout
 moxi	packages/moxi/tests/test_watch.py	assert child.watchdog.wait(timeout=30) == 0	keep	timeout	timeout
-moxi	packages/moxi/tests/test_watch.py	assert j.until(lambda: gone(child, grandchild), timeout=10)	keep	timeout	timeout
-moxi	packages/moxi/tests/test_watch.py	assert j.until(lambda: gone(j.parent["watchdog"]), timeout=10)	keep	timeout	timeout
+moxi	packages/moxi/tests/test_watch.py	assert j.until(lambda: gone(child, grandchild), timeout=PROC_WAIT_S)	keep	timeout	timeout
+moxi	packages/moxi/tests/test_watch.py	assert j.until(lambda: gone(j.parent["watchdog"]), timeout=PROC_WAIT_S)	keep	timeout	timeout
 moxi	packages/moxi/tests/test_watch.py	assert watchdog.wait(timeout=30) == 0	keep	timeout	timeout
 moxi	packages/moxi/tests/test_watch.py	assert watchdog.wait(timeout=30) == 0  # with the lifeline still open	keep	timeout	timeout
 moxi	packages/moxi/tests/test_watch.py	assert {middle, orphan} <= set(watch.watched)	keep	set	set
@@ -12207,7 +12207,7 @@ secrets	packages/secrets/tests/test_doctor.py	@pytest.mark.parametrize("git", ["
 secrets	packages/secrets/tests/test_doctor.py	if git == "directory":	keep	directory	directory
 secrets	packages/secrets/tests/test_engine.py	assert [(h.set, h.rule, h.start, h.end) for h in hits] == [	keep	set	set
 secrets	packages/secrets/tests/test_engine.py	assert proc.wait(timeout=20) == fallback.TIMER_EXIT	keep	timeout	timeout
-secrets	packages/secrets/tests/test_engine.py	proc.wait(timeout=10)	keep	timeout	timeout
+secrets	packages/secrets/tests/test_engine.py	proc.wait(timeout=PROC_WAIT_S)	keep	timeout	timeout
 secrets	packages/secrets/tests/test_generate.py	assert any(re.search(p, "packages/secrets/src/moxi_secrets/rules/sets.json")	keep	any	any
 secrets	packages/secrets/tests/test_generate.py	assert matched("(?i)" + negated) == set(UNIVERSE) - orbit	keep	set	set
 secrets	packages/secrets/tests/test_generate.py	assert matched(f"(?i)[^{go_escape(c)}]") == set(UNIVERSE) - orbit	keep	set	set
@@ -13814,6 +13814,7 @@ slots	packages/slots/tests/screen_program.py	out = [("─" * cols if r and set(r
 slots	packages/slots/tests/screen_program.py	wait = min((p[0] for p in pending), default=now + 0.5) - now	keep	default	default
 slots	packages/slots/tests/slots_kit.py	path.parent.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
 slots	packages/slots/tests/slots_kit.py	proc.wait(timeout=5)	keep	timeout	timeout
+slots	packages/slots/tests/slots_kit.py	proc.wait(timeout=PROC_WAIT_S)	keep	timeout	timeout
 slots	packages/slots/tests/test_answer.py	assert record["screen"] == "CLAUDE_TRUST_FOLDER" and record["width"] == 20	use	CLAUDE_TRUST_FOLDER	CLAUDE_TRUST_DIR
 slots	packages/slots/tests/test_claude_live.py	REAL = {k: os.environ[k] for k in ("HOME", "USER", "LOGNAME", "CLAUDE_CONFIG_DIR",	keep	HOME	HOME
 slots	packages/slots/tests/test_claude_live.py	assert any("sleep 600" in row for row in seen.rows), seen.rows	keep	any	any
@@ -13835,8 +13836,8 @@ slots	packages/slots/tests/test_live_screens.py	assert capsys.readouterr().out.s
 slots	packages/slots/tests/test_live_screens.py	assert out["screen"] == "CLAUDE_TRUST_FOLDER" and out["full"] is True	use	CLAUDE_TRUST_FOLDER	CLAUDE_TRUST_DIR
 slots	packages/slots/tests/test_live_screens.py	read_screen(1, ["CLAUDE_TRUST_FOLDER"])	use	CLAUDE_TRUST_FOLDER	CLAUDE_TRUST_DIR
 slots	packages/slots/tests/test_live_server.py	-	name	test_the_server_starts_with_a_clean_environment	test_the_server_starts_with_a_clean_env
-slots	packages/slots/tests/test_live_server.py	assert second.wait(timeout=10) == 1	keep	timeout	timeout
-slots	packages/slots/tests/test_live_server.py	proc.wait(timeout=10)	keep	timeout	timeout
+slots	packages/slots/tests/test_live_server.py	assert second.wait(timeout=PROC_WAIT_S) == 1	keep	timeout	timeout
+slots	packages/slots/tests/test_live_server.py	proc.wait(timeout=PROC_WAIT_S)	keep	timeout	timeout
 slots	packages/slots/tests/test_live_server.py	test_the_wrapper_removes_launch_files_left_from_before	name	directory	launch_dir
 slots	packages/slots/tests/test_live_slots.py	assert cli.main(["show", "1"]) == 0	keep	show	show
 slots	packages/slots/tests/test_live_slots.py	assert cli.main(["show", "9"]) == 3	keep	show	show
@@ -13849,7 +13850,7 @@ slots	packages/slots/tests/test_live_slots.py	assert caught.value.reason == "cha
 slots	packages/slots/tests/test_panes.py	assert panes.join(reg, [home()]).find(1).hold.holder == "h"	keep	find	find
 slots	packages/slots/tests/test_panes.py	found = panes.join(reg, [home(), run(dead=True, status=3)], NOW).find(1)	keep	find	find
 slots	packages/slots/tests/test_registry.py	assert data["version"] == 1 and set(data["slots"]) == {"3", "12"}	keep	set	set
-slots	packages/slots/tests/test_registry.py	holder.wait(timeout=5)	keep	timeout	timeout
+slots	packages/slots/tests/test_registry.py	holder.wait(timeout=PROC_WAIT_S)	keep	timeout	timeout
 slots	packages/slots/tests/test_registry.py	places.module_lock().parent.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
 slots	packages/slots/tests/test_registry.py	places.registry().parent.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
 slots	packages/slots/tests/test_registry.py	assert data["version"] == 2 and set(data["slots"]) == {"3", "12"}	keep	set	set
@@ -13863,7 +13864,7 @@ slots	packages/slots/tests/test_server.py	text = server.config_text(None, {"HOME
 slots	packages/slots/tests/test_settings.py	assert cli.main(["config", "slots", "show", "--json"]) == 0	keep	show	show
 slots	packages/slots/tests/test_tmux.py	-	name	test_the_client_environment_drops_the_tmux_variables	test_the_client_env_drops_the_tmux_variables
 slots	packages/slots/tests/test_trampoline.py	"TERM_PROGRAM": "tmux", "SERVER_SECRET": "from-the-server", "HOME": "/home/x"}	keep	HOME	HOME
-slots	packages/slots/tests/test_trampoline.py	_, err = proc.communicate(timeout=10)	keep	timeout	timeout
+slots	packages/slots/tests/test_trampoline.py	_, err = proc.communicate(timeout=PROC_WAIT_S)	keep	timeout	timeout
 slots	packages/slots/tests/test_trampoline.py	assert set(TERM_NAMES) == {"TERM", "COLORTERM", "TERM_PROGRAM", "TERM_PROGRAM_VERSION",	keep	set	set
 slots	packages/slots/tests/test_trampoline.py	test_a_launch_file_already_taken_runs_nothing	name	f	fh
 statusline	packages/statusline/src/moxi_statusline/cli.py	the config's `show`, held to the config's rules. It writes nothing.	keep	show	show
@@ -14188,7 +14189,7 @@ tunnel	packages/tunnel/tests/test_half_switch.py	assert any("old Tailscale entry
 tunnel	packages/tunnel/tests/test_half_switch.py	assert any(HAND in line for line in yes.asked[-1])	keep	any	any
 tunnel	packages/tunnel/tests/test_half_switch.py	assert any(HAND in note for note in got.notes)	keep	any	any
 tunnel	packages/tunnel/tests/test_half_switch.py	with pytest.raises(ApplyError, match="refused"):	keep	refused	refused
-tunnel	packages/tunnel/tests/test_locks.py	assert proc.wait(timeout=10) == 0	keep	timeout	timeout
+tunnel	packages/tunnel/tests/test_locks.py	assert proc.wait(timeout=PROC_WAIT_S) == 0	keep	timeout	timeout
 tunnel	packages/tunnel/tests/test_locks.py	done.set()	keep	set	set
 tunnel	packages/tunnel/tests/test_locks.py	stack.enter_context(files.lock(locks.lock_path(), timeout=10))	use	timeout=	timeout_s=
 tunnel	packages/tunnel/tests/test_locks.py	stack.enter_context(files.lock(paths.core_lock(), timeout=10))	use	timeout=	timeout_s=
@@ -14861,9 +14862,9 @@ turns	packages/turns/tests/test_claude_plugins.py	@pytest.mark.parametrize("fold
 turns	packages/turns/tests/test_claude_plugins.py	test_claude_plugin_validate_passes	name	folder	plugin_dir
 turns	packages/turns/tests/test_claude_process.py	-	name	test_sigterm_ends_it_with_lost_and_removes_its_directory	test_sigterm_ends_it_with_lost_and_removes_its_dir
 turns	packages/turns/tests/test_claude_process.py	_alive	name	f	fh
-turns	packages/turns/tests/test_claude_process.py	assert p.wait(timeout=5) == 0	keep	timeout	timeout
-turns	packages/turns/tests/test_claude_process.py	assert p.wait(timeout=5) == 2	keep	timeout	timeout
-turns	packages/turns/tests/test_claude_process.py	p.wait(timeout=5)	keep	timeout	timeout
+turns	packages/turns/tests/test_claude_process.py	assert p.wait(timeout=PROC_WAIT_S) == 0	keep	timeout	timeout
+turns	packages/turns/tests/test_claude_process.py	assert p.wait(timeout=PROC_WAIT_S) == 2	keep	timeout	timeout
+turns	packages/turns/tests/test_claude_process.py	p.wait(timeout=PROC_WAIT_S)	keep	timeout	timeout
 turns	packages/turns/tests/test_claude_setup.py	(cache / "hooks").mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
 turns	packages/turns/tests/test_claude_setup.py	-	name	test_a_launch_through_launch_additions_names_the_placed_folders	test_a_launch_through_launch_additions_names_the_placed_dirs
 turns	packages/turns/tests/test_claude_setup.py	-	name	test_a_read_only_runner_folder_is_a_setup_error	test_a_read_only_runner_dir_is_a_setup_error
@@ -17608,11 +17609,10 @@ rounds	packages/rounds/tests/test_ci_refs.py	hooks.mkdir(exist_ok=True)	keep	exi
 rounds	packages/rounds/tests/test_ci_refs.py	path.parent.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
 slots	packages/slots/src/moxi_slots/errors.py	"name-taken", "job-running", "unsupported", "changed")	keep	changed	changed
 slots	packages/slots/tests/test_live_runs.py	places.module_lock().parent.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
-slots	packages/slots/tests/test_live_runs.py	holder.wait(timeout=10)	keep	timeout	timeout
-slots	packages/slots/tests/test_live_runs.py	holder.wait(timeout=5)	keep	timeout	timeout
+slots	packages/slots/tests/test_live_runs.py	holder.wait(timeout=PROC_WAIT_S)	keep	timeout	timeout
 slots	packages/slots/tests/test_live_runs.py	assert cli.main(["show", "1"]) == 0	keep	show	show
 slots	packages/slots/tests/test_live_runs.py	assert cli.main(["show", "1", "--json"]) == 0	keep	show	show
-slots	packages/slots/tests/test_live_runs.py	old.wait(timeout=10)	keep	timeout	timeout
+slots	packages/slots/tests/test_live_runs.py	old.wait(timeout=PROC_WAIT_S)	keep	timeout	timeout
 slots	packages/slots/tests/test_live_runs.py	assert not any(s.crashed for s in slots.list_slots().slots)	keep	any	any
 slots	packages/slots/tests/test_live_runs.py	assert listing.ok and not any(s.crashed for s in listing.slots)	keep	any	any
 rounds	packages/rounds/tests/test_leads.py	"name": "kestrel", "from": "round"}	keep	round	round

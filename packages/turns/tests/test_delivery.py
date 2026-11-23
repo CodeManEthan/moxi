@@ -14,6 +14,7 @@ import pytest
 
 from fake_harness import FakeHarness
 from moxi import ipc
+from moxi_dev.testing import PROC_WAIT_S
 from moxi_turns import results as results
 from moxi_turns.harness import Live
 
@@ -36,7 +37,7 @@ def connect():
         client.close()
 
 
-def until(pred, timeout=5.0):
+def until(pred, timeout=PROC_WAIT_S):
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
         if pred():
