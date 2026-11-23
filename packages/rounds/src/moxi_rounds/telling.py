@@ -40,6 +40,7 @@ from collections.abc import Callable
 from typing import Any
 
 from . import queue_file
+from .errors import UnfencedTest
 
 #: The module the send-only name is reserved for, and the name.
 MODULE = "rounds"
@@ -112,6 +113,8 @@ class Teller:
         """One try of a message, recorded."""
         try:
             result = self.comms.send_as(MODULE, SENDER, [to], text)
+        except UnfencedTest:
+            raise
         except Exception as exc:  # noqa: BLE001  (a send that raises is recorded)
             return self.record(key, to, about, text, ERROR, why=str(exc) or type(exc).__name__,
                                **fields)

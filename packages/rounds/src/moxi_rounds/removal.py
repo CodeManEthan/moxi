@@ -75,7 +75,7 @@ from pathlib import Path
 
 from . import folders, paths, places
 from . import settings as own
-from .errors import RoundsError
+from .errors import RoundsError, UnfencedTest
 from .gitreads import Git, GitError
 
 #: The two folders of a build.
@@ -538,6 +538,8 @@ def _mount_table() -> list[str]:
         return []
     try:
         return [one.mountpoint for one in psutil.disk_partitions(all=True)]
+    except UnfencedTest:
+        raise
     except Exception:  # noqa: BLE001 -- a table that can't be read lists nothing; the device check stands
         return []
 

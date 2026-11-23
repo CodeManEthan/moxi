@@ -92,7 +92,7 @@ def test_the_flags_for_each_roster_row_give_the_options_comms_builds(tmp_path, r
     got = _args(tmp_path, *flags)
     assert got["options"] == options
     assert got == {"cwd": str(tmp_path), "options": options, "instructions": None,
-                   "resume": None, "window": True}
+                   "resume": None, "fork": None, "window": True}
 
 
 @pytest.mark.parametrize("row", sorted(ROSTER_ROWS))
@@ -155,7 +155,12 @@ def test_the_rest_of_the_flags(tmp_path):
     got = _args(tmp_path, "--instructions-file", str(path), "--resume", "thread-9",
                 "--no-window")
     assert got == {"cwd": str(tmp_path), "options": {}, "instructions": text,
-                   "resume": "thread-9", "window": False}
+                   "resume": "thread-9", "fork": None, "window": False}
+
+
+def test_fork_names_the_thread_a_launch_forks(tmp_path):
+    got = _args(tmp_path, "--fork", "thread-9")
+    assert (got["fork"], got["resume"]) == ("thread-9", None)
 
 
 @pytest.mark.parametrize(("flags", "words"), [
@@ -172,6 +177,8 @@ def test_the_rest_of_the_flags(tmp_path):
     (["--option", '"a\nb"=1'], "KEY=VALUE"),
     (["--option", "when=1979-05-27"], "date"),
     (["--resume", " "], "thread id"),
+    (["--fork", " "], "thread id"),
+    (["--fork", "thread-9", "--resume", "thread-8"], "not allowed with"),
     (["--surprise"], "unrecognized"),
 ])
 def test_a_refused_flag_exits_2_before_anything_starts(tmp_path, capsys, flags, words):
@@ -505,6 +512,39 @@ def test_a_host_spawned_with_a_stdin_lifeline_ends_when_its_stdin_closes(rig):
     assert _exit(host) == 0
     assert "the Codex host was stopped (its lifeline closed)" in host.out.read_text()
     assert _until(lambda: _gone(server["pid"]))
+
+
+@LINUX
+def test_a_host_forks_a_live_thread_into_a_new_one_a_later_host_resumes(rig):
+    parent = rig.spawn("--no-window", stdin=subprocess.DEVNULL)
+    session = turns_client.wait_ready(pid=parent.pid, timeout_s=WAIT)
+    thread = session.session_id
+    session.deliver("work", only_if_idle=True).wait_ended(WAIT)
+    session.close()
+
+    fork = rig.spawn("--no-window", "--fork", thread, stdin=subprocess.DEVNULL)
+    forked = turns_client.wait_ready(pid=fork.pid, timeout_s=WAIT)
+    new = forked.session_id
+    try:
+        assert new not in (None, thread)
+        assert forked.facts().ready.source == "resume"
+        forks = [c for c in calls(rig.records) if c["method"] == "thread/fork"]
+        assert [c["params"]["threadId"] for c in forks] == [thread]
+    finally:
+        forked.close()
+    fork.send_signal(signal.SIGTERM)
+    assert _exit(fork) == 0
+    assert parent.poll() is None            # the thread forked runs on
+
+    again = rig.spawn("--no-window", "--resume", new, stdin=subprocess.DEVNULL)
+    resumed = turns_client.wait_ready(pid=again.pid, timeout_s=WAIT)
+    try:
+        assert resumed.session_id == new
+    finally:
+        resumed.close()
+    for host in (again, parent):
+        host.send_signal(signal.SIGTERM)
+        assert _exit(host) == 0
 
 
 @LINUX
