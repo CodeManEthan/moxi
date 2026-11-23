@@ -1,7 +1,13 @@
 # Changelog
 
-## Unreleased
+## 0.2.6 (unreleased)
 
+- The Codex host takes `--fork THREAD_ID` (`codex.launch(fork=...)`), beside and never
+  with `--resume`: its first load forks that thread with `thread/fork`, live or not, into a
+  new thread that holds a copy of its conversation, and hosts the new one. The new thread
+  is loaded as a resumed one, with no item injected, and its id names the session from
+  the fork on, so a later load resumes it and the thread is never forked twice. Ready is
+  `resume`, or `startup` when the forked thread has had no turn.
 - The page's `Reading…` line, while its first read is out, shows once that read has
   been out 400 ms in every browser. In Firefox it could stay blank until the page's
   next redraw, up to a minute later, since the page checked the wait against

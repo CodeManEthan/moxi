@@ -3325,6 +3325,7 @@ launcher	packages/launcher/src/moxi_launcher/catalog.py	taken: set = set()	keep	
 launcher	packages/launcher/src/moxi_launcher/catalog.py	unknown = sorted(set(meta) - {"harness", "checked", "help"})	keep	set	set
 launcher	packages/launcher/src/moxi_launcher/catalog.py	unknown = sorted(set(spec) - set(FIELDS))	keep	set	set
 launcher	packages/launcher/src/moxi_launcher/catalog.py	values[name] = found.check(value) if found is not None else value	keep	ok	ok
+launcher	packages/launcher/src/moxi_launcher/catalog.py	raise bad(f"has no fork class; class it {', '.join(FORK_CLASSES)}" if fork is None	keep	bad	bad
 launcher	packages/launcher/src/moxi_launcher/cli.py	"exit-session", help="exit a launched session", allow_abbrev=False,	keep	help	help
 launcher	packages/launcher/src/moxi_launcher/cli.py	"keep-warm", help="open, release or list this session's holds", allow_abbrev=False,	keep	help	help
 launcher	packages/launcher/src/moxi_launcher/cli.py	"relaunch", help="relaunch a session in its slot", allow_abbrev=False,	keep	help	help
@@ -3414,6 +3415,12 @@ launcher	packages/launcher/src/moxi_launcher/cli.py	run = verbs.add_parser("run"
 launcher	packages/launcher/src/moxi_launcher/cli.py	shown = {"key": key, "folder": str(folder)}	keep	folder	folder
 launcher	packages/launcher/src/moxi_launcher/cli.py	shown = {"key": key, "folder": str(handoff_dir)}	keep	folder	folder
 launcher	packages/launcher/src/moxi_launcher/cli.py	state.add_argument("--json", action="store_true", help="print one JSON object")	keep	help	help
+launcher	packages/launcher/src/moxi_launcher/cli.py	"fork", help="start a new session from a copy of a session's conversation",	keep	help	help
+launcher	packages/launcher/src/moxi_launcher/cli.py	fork.add_argument("session_id", metavar="SESSION_ID", help="the session to fork")	keep	help	help
+launcher	packages/launcher/src/moxi_launcher/cli.py	fork.add_argument("--target", choices=("terminal", "slot"), default="terminal",	keep	default	default
+launcher	packages/launcher/src/moxi_launcher/cli.py	help="where the fork runs: this terminal (the default) or a slot")	keep	help	help
+launcher	packages/launcher/src/moxi_launcher/cli.py	help="with --target slot: the slot; the lowest free one when unset")	keep	help	help
+launcher	packages/launcher/src/moxi_launcher/cli.py	fork.add_argument("--json", action="store_true", help="print one JSON object")	keep	help	help
 launcher	packages/launcher/src/moxi_launcher/cli.py	return _said(park.park(wait_s=args.wait_s, dry_run=args.dry_run), args)	keep	dry_run	dry_run
 launcher	packages/launcher/src/moxi_launcher/cli.py	"park", help="exit the sessions in slots and reserve their slots",	keep	help	help
 launcher	packages/launcher/src/moxi_launcher/cli.py	park.add_argument("--wait-s", type=float, metavar="SECONDS",	keep	type	type
@@ -5138,6 +5145,9 @@ launcher	packages/launcher/tests/test_target.py	self.closed += 1	keep	closed	clo
 launcher	packages/launcher/tests/test_target.py	self.closed = 0	keep	closed	closed
 launcher	packages/launcher/tests/test_waits.py	assert coder.closed == 1	keep	closed	closed
 launcher	packages/launcher/tests/test_waits.py	monkeypatch.setattr(waits, "_logged", set())	keep	set	set
+launcher	packages/launcher/src/moxi_launcher/fork.py	result = (launch or api.launch)(request, env=caller_env, warn=warn)	keep	env	env
+launcher	packages/launcher/src/moxi_launcher/fork.py	return any(key == name or (key.endswith("_") and name.startswith(key))	keep	any	any
+launcher	packages/launcher/tests/test_fork.py	assert calls == [((SID,), {"dry_run": True, "caller_env": {"A": "1"}})]	keep	dry_run	dry_run
 loadout	packages/loadout/src/moxi_loadout/adoption.py	-	name	at_its_folder	at_harness_dir
 loadout	packages/loadout/src/moxi_loadout/adoption.py	at_its_folder	name	folder	harness_dir
 loadout	packages/loadout/src/moxi_loadout/adoption.py	folder = None if row is None else row.folder(placed.kind)	use	row.folder	row.harness_dir
@@ -10200,6 +10210,7 @@ rounds	packages/rounds/src/moxi_rounds/state.py	round=event.get("round"), after=
 rounds	packages/rounds/src/moxi_rounds/state.py	state.ended = Ended(how=DROPPED, by=event.get("by"), record=event.get("record"),	keep	record	record
 rounds	packages/rounds/src/moxi_rounds/state.py	taken = {key for key, _text in have} | set(retired)	keep	set	set
 rounds	packages/rounds/src/moxi_rounds/state.py	touched = set()	keep	set	set
+rounds	packages/rounds/src/moxi_rounds/state.py	if any(key == had for had, _text in question.options))),	keep	any	any
 rounds	packages/rounds/src/moxi_rounds/stepping.py	move, with `NAME` where the flow's name goes."""	keep	NAME	NAME
 rounds	packages/rounds/src/moxi_rounds/stepping.py	step_up	name	actor	by
 rounds	packages/rounds/src/moxi_rounds/stepping.py	write.Where(home.project, home.folder, slug), actor=actor,	use	actor=	by=
@@ -10904,6 +10915,7 @@ rounds	packages/rounds/tests/test_export.py	rounds	name	folder	rounds_dir
 rounds	packages/rounds/tests/test_export.py	test_a_round_whose_log_cant_be_read_is_not_exported_as_empty	name	file	fh
 rounds	packages/rounds/tests/test_export.py	{"by": "operator", "record": "comms:13"}, actor="planner")	use	actor=	by=
 rounds	packages/rounds/tests/test_export.py	{"stage": stage, "by": "operator", "record": "comms:40"},	keep	record	record
+rounds	packages/rounds/tests/test_export.py	assert set(entry) == BARE | {"options", "prepared"}	keep	set	set
 rounds	packages/rounds/tests/test_finish.py	-	name	test_the_cleanup_removes_both_folders_and_deletes_the_merged_branch	test_the_cleanup_removes_both_dirs_and_deletes_the_merged_branch
 rounds	packages/rounds/tests/test_finish.py	-	name	test_the_cleanup_writes_the_scratch_folders_trash_entry_to_the_sweeps_log	test_the_cleanup_writes_the_scratch_dirs_trash_entry_to_the_sweeps_log
 rounds	packages/rounds/tests/test_finish.py	-	name	test_with_keep_branch_the_cleanup_removes_the_folders_and_keeps_the_branch	test_with_keep_branch_the_cleanup_removes_the_dirs_and_keeps_the_branch
@@ -11080,6 +11092,9 @@ rounds	packages/rounds/tests/test_fold.py	waits	name	folder	round_dir
 rounds	packages/rounds/tests/test_fold.py	{"id": "B1", "repo": "proj-a", "branch": "branch-b1"}, actor="planner")	use	actor=	by=
 rounds	packages/rounds/tests/test_fold.py	{"id": "B2", "repo": "proj-a", "branch": "branch-b2"}, actor="planner")	use	actor=	by=
 rounds	packages/rounds/tests/test_fold.py	{"id": "R1", "as": "carried", "where": "1", "record": "", "stages": []}]	keep	record	record
+rounds	packages/rounds/tests/test_fold.py	assert set(frozen.plan.added) == {"prepared"}	keep	set	set
+rounds	packages/rounds/tests/test_fold.py	assert set(fold().plan.added) == {"prepared"}	keep	set	set
+rounds	packages/rounds/tests/test_fold.py	assert set(fold().plan.added) == {"options", "prepared"}	keep	set	set
 rounds	packages/rounds/tests/test_folders.py	(folder / "a-round" / "round.jsonl").mkdir(parents=True)	use	folder	rounds_dir
 rounds	packages/rounds/tests/test_folders.py	(folder / "no-log-here").mkdir()	use	folder	rounds_dir
 rounds	packages/rounds/tests/test_folders.py	(folder / "only-a-note" / "round-note.md").write_text("generated\n")	use	folder	rounds_dir
@@ -14388,6 +14403,7 @@ turns	packages/turns/src/moxi_turns/codex_host.py	parser.add_argument("--cwd", r
 turns	packages/turns/src/moxi_turns/codex_host.py	parser.add_argument("--model", help="the model the thread runs")	keep	help	help
 turns	packages/turns/src/moxi_turns/codex_host.py	parser.add_argument("--option", action="append", default=[], metavar="KEY=VALUE",	keep	default	default
 turns	packages/turns/src/moxi_turns/codex_host.py	state_dir.mkdir(mode=0o700, parents=True, exist_ok=True)	keep	exist_ok	exist_ok
+turns	packages/turns/src/moxi_turns/codex_host.py	help="fork this thread into a new one instead of starting one")	keep	help	help
 turns	packages/turns/src/moxi_turns/codex_mcp.py	McpSettle	name	notified	on_notified
 turns	packages/turns/src/moxi_turns/codex_mcp.py	`CodexError` for an error answer); `thread_id()` is the session's thread. `record` and	keep	record	record
 turns	packages/turns/src/moxi_turns/codex_mcp.py	run.done.set()	keep	set	set
@@ -14698,6 +14714,7 @@ turns	packages/turns/tests/fake_codex.py	install	name	folder	bin_dir
 turns	packages/turns/tests/fake_codex.py	signal.signal(signal.SIGTERM, lambda *_: stop.set())	keep	set	set
 turns	packages/turns/tests/fake_codex.py	thread["injected"] = thread.get("injected", 0) + len(params["items"])	keep	injected	injected
 turns	packages/turns/tests/fake_codex.py	ws.send(json.dumps(frame))	keep	fail	fail
+turns	packages/turns/tests/fake_codex.py	"injected": parent.get("injected", 0) or 1,	keep	injected	injected
 turns	packages/turns/tests/fake_harness.py	ep.command_ran(request.id, new_session_id=new_id, shells=self.stop_report)	keep	shells	shells
 turns	packages/turns/tests/fake_harness.py	ep.command_ran(request.id, shells=self.stop_report)	keep	shells	shells
 turns	packages/turns/tests/fake_harness.py	self.endpoint.refused(delivery.id, "idle")	use	refused	on_refused
@@ -14902,6 +14919,9 @@ turns	packages/turns/tests/test_codex_host_entry.py	host = rig.spawn("--no-windo
 turns	packages/turns/tests/test_codex_host_entry.py	monkeypatch.setattr(turns_client, "find", find)	keep	find	find
 turns	packages/turns/tests/test_codex_host_entry.py	proc.wait(timeout=WAIT)	keep	timeout	timeout
 turns	packages/turns/tests/test_codex_host_entry.py	return proc.wait(timeout=timeout)	keep	timeout	timeout
+turns	packages/turns/tests/test_codex_host_entry.py	parent = rig.spawn("--no-window", stdin=subprocess.DEVNULL)	keep	stdin	stdin
+turns	packages/turns/tests/test_codex_host_entry.py	fork = rig.spawn("--no-window", "--fork", thread, stdin=subprocess.DEVNULL)	keep	stdin	stdin
+turns	packages/turns/tests/test_codex_host_entry.py	again = rig.spawn("--no-window", "--resume", new, stdin=subprocess.DEVNULL)	keep	stdin	stdin
 turns	packages/turns/tests/test_codex_limits.py	assert set(fresh) == {"payload", "received_at"}	keep	set	set
 turns	packages/turns/tests/test_codex_limits.py	client.call("usage.codex_limits", {}, timeout=5)	use	timeout=	timeout_s=
 turns	packages/turns/tests/test_codex_mcp.py	app.note("comms", "failed")	keep	note	note
@@ -17551,6 +17571,8 @@ rounds	packages/rounds/src/moxi_rounds/cli.py	done = repairs.restamp(args.target
 rounds	packages/rounds/src/moxi_rounds/cli.py	help="the lead's settlement of a minor decision that is not the "	keep	help	help
 rounds	packages/rounds/src/moxi_rounds/cli.py	help="the lead's raise of a decision to major, as a later "	keep	help	help
 rounds	packages/rounds/src/moxi_rounds/cli.py	done = settling.make_major(args.target, args.id, record=args.record,	keep	record	record
+rounds	packages/rounds/src/moxi_rounds/cli.py	help="with an ID, record the answer prepared for it in FILE, "	keep	help	help
+rounds	packages/rounds/src/moxi_rounds/cli.py	help="print the empty data block of this kind of report, "	keep	help	help
 rounds	packages/rounds/src/moxi_rounds/decisions.py	record=event.get("record"), ruled=event["n"],	keep	record	record
 rounds	packages/rounds/src/moxi_rounds/decisions.py	chose, record = ((one.chose, one.record) if isinstance(one, Decision)	keep	record	record
 rounds	packages/rounds/src/moxi_rounds/decisions.py	else (one.get("chose"), one.get("record")))	keep	record	record
