@@ -8,6 +8,7 @@ only provisioning writes. A launch-declared director keeps its own rule.
 
 from __future__ import annotations
 
+import sys
 import textwrap
 import time
 
@@ -323,19 +324,19 @@ def exec_(binary, argv, env):
     written.append(launch.instructions.read_text())
     return 0
 
-code = codex_wrapper.start(launch, "/bin/true", ready_wait=10, exec_=exec_, roster={})
+code = codex_wrapper.start(launch, "codex-host", ready_wait=10, exec_=exec_, roster={})
 print(json.dumps({"code": code, "text": written[0] if written else None,
                   "policy": launch.agent.policy_directors}))
 """
 
 
+@pytest.mark.skipif(not sys.platform.startswith("linux"), reason="comms runs on Linux only")
 @pytest.mark.parametrize("argv, present", [((), False), (("--director", "lead"), True)])
 def test_the_layer_one_codexs_start_writes_keys_on_launch_declared_only(
         tmp_path, argv, present):
     import json
     import os
     import subprocess
-    import sys
 
     from moxi_comms.context import CONTEXT_BLOCK, DIRECTOR_LINE
 

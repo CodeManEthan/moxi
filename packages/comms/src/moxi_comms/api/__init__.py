@@ -44,8 +44,9 @@ outside comms.
   hold a standing row now, qualified (empty when comms' config or its directory can't be
   read), and `effective(declared, *, own, use_policy)`, the one merge of a launch's own
   directors with the box's policy directors, for an adapter kind built outside comms
-  (it loads the box's comms config; a comms caller may pass its own second): it returns the whole list and the part only the policy gave, which the
-  adapter's holder writes into its claim as `directors` and `policy_directors`.
+  (it loads the box's comms config; a comms caller may pass its own second): it returns
+  the whole list and the part only the policy gave, which the adapter's holder writes
+  into its claim as `directors` and `policy_directors`.
   `Agent`, `Owner` and `RosterRow` carry both lists, read from the claim files.
 * `CODEX_RESUME`: True when the Codex wrapper, `moxi comms codex --name N`, takes
   `--resume THREAD_ID`; a comms without it has no resume.
@@ -500,7 +501,8 @@ def _reserved(qualified: str) -> tuple[bool, str | None, str | None]:
 
 def owner(session_id: str, *, timeout_s: float = READ_DEADLINE) -> Owner:
     """Which identity owns `session_id` now, with its directors (launch-declared and
-    policy, `policy_directors` saying which) and whom it awaits. Raises `DaemonOffline`, or `DaemonError` (an empty id among them)."""
+    policy, `policy_directors` saying which) and whom it awaits. Raises `DaemonOffline`,
+    or `DaemonError` (an empty id among them)."""
     client = _daemon(timeout_s)
     try:
         answer = client.call("owner", {"session_id": str(session_id)})
