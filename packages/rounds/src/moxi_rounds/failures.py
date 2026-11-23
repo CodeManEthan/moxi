@@ -12,12 +12,13 @@ line `<job>\\t<step>\\t<line>`, colour codes left out.
 
 **The target's own** (`new` gives the rest). A candidate's failure is compared with the
 job of the target's run it stands for, its `stands_for`, else the job of its own name.
-A failed test is the target's own when the target's run has that test failing in any
-job, or has that job failing with no test named; tests are compared by id across jobs,
-so a candidate's scoped job is compared test by test with the target's full one. A
-failure whose log names no test (a whole-tree step, a setup step, a timeout) is the
-target's own only when the target's run has that job failing with no test named either,
-so a red target never excuses a candidate's whole-tree failure for a test it fails.
+A failed test is the target's own only when the target's run has that same test
+failing, in any job; tests are compared by id across jobs, so a candidate's scoped job
+is compared test by test with the target's full one, and a job of the target's that
+failed with no test named excuses no test. A failure whose log names no test (a
+whole-tree step, a setup step, a timeout) is the target's own only when the target's
+run has that job failing with no test named either, so a red target never excuses a
+candidate's whole-tree failure for a test it fails.
 
 `halves` splits a batch's members in two by join order, the first half the larger.
 """
@@ -75,11 +76,11 @@ def of_run(jobs: Sequence[str], tests: Mapping[str, Sequence[str]],
 def is_own(failure: Mapping, target: Sequence[Mapping]) -> bool:
     """Whether the target's failures `target` have `failure`, compared with the job it
     stands for."""
-    job = failure.get("stands_for") or failure.get("job")
     test = failure.get("test")
-    return any((test is not None and one.get("test") == test)
-               or (one.get("test") is None and one.get("job") == job)
-               for one in target)
+    if test is not None:
+        return any(one.get("test") == test for one in target)
+    job = failure.get("stands_for") or failure.get("job")
+    return any(one.get("test") is None and one.get("job") == job for one in target)
 
 
 def new(candidate: Sequence[Mapping], target: Sequence[Mapping]) -> list[dict]:

@@ -45,8 +45,11 @@ def test_the_targets_own_are_compared_by_test_across_jobs_and_by_job_alone():
                  {"job": "firefox", "test": None},
                  {"job": "firefox", "test": "tests/test_page.py::test_x"},
                  {"job": "local", "test": None}]
+    # A job of the target's that failed with no test named excuses no test of the
+    # candidate's, in that job or any other.
     assert failures.new(candidate, target) == [
         {"job": "scoped", "test": "tests/test_a.py::test_new"},
+        {"job": "firefox", "test": "tests/test_page.py::test_x"},
         {"job": "local", "test": None}]
 
 
@@ -70,12 +73,18 @@ def test_a_whole_tree_failure_is_mains_own_only_where_the_stood_for_job_names_no
         assert failures.new([SCOPED_WHOLE], target) == [SCOPED_WHOLE]
 
 
-def test_a_failed_test_is_compared_with_the_stood_for_job_and_by_id_across_jobs():
+def test_a_failed_test_is_the_targets_own_only_where_the_target_fails_that_test():
     failed = {"job": "scoped", "test": "t::x", "stands_for": "linux"}
-    assert failures.new([failed], [{"job": "linux", "test": None}]) == []
+    assert failures.new([failed], [{"job": "linux", "test": "t::x"}]) == []
     assert failures.new([failed], [{"job": "web", "test": "t::x"}]) == []
     assert failures.new([failed], [{"job": "linux", "test": "t::y"},
                                    {"job": "scoped", "test": None}]) == [failed]
+
+
+def test_main_red_on_a_whole_tree_step_in_linux_blames_a_new_test_in_scoped():
+    failed = {"job": "scoped", "test": "t::new", "stands_for": "linux"}
+    assert failures.new([failed, SCOPED_WHOLE], [{"job": "linux", "test": None}]) == [
+        failed]
 
 
 def test_with_no_stands_for_a_job_is_compared_by_its_own_name():

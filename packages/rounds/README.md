@@ -944,10 +944,11 @@ alone. It compares them with the target's own at the candidate's base: that comm
 full run, read once it has ended and, when red, after one rerun of its failed jobs, and
 `ci.local` run there once when `local` failed. Each failed job is compared with the job
 of that run it stands for, as its workflow's `stands_for` names it, else the job of its
-own name. A test counts as the target's own when that run fails it in any job, or fails
-that job naming no test; a job named alone (a whole-tree step, a setup step, a timeout),
-only when that run fails that job naming no test either, so a red target never excuses a
-candidate's whole-tree failure for a test it fails. Until the target's run is known the batch waits; if
+own name. A test counts as the target's own only when that run fails the same test, in
+any job; a job of that run failing with no test named excuses no test. A job named alone
+(a whole-tree step, a setup step, a timeout) counts only when that run fails that job
+naming no test either, so a red target never excuses a candidate's whole-tree failure
+for a test it fails, nor a candidate's new test for a whole-tree failure of its own. Until the target's run is known the batch waits; if
 the target moves meanwhile, the batch is rebuilt on it. With no failure the target
 lacks, the candidate lands, each member's `ci.read` and `queue.landed` naming the
 failures as `excused`. A new failure with one member ejects it with the failures. With

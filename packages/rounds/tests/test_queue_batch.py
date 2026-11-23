@@ -744,6 +744,22 @@ def test_a_whole_tree_failure_in_scoped_is_excused_only_by_a_no_test_failure_in_
         assert events(tmp_path, ROUND, "queue.ejected")[-1]["failures"] == [SCOPED_WHOLE]
 
 
+def test_main_red_on_a_whole_tree_step_in_linux_ejects_a_new_test_in_scoped(
+        repo, ready, fake, lander_pass, tmp_path):
+    main_head = repo.rev("main")
+    new_test = {**IN_SCOPED, "stands_for": "linux"}
+    ready()
+    fake.word, fake.failed = ci.RED, [new_test]
+    fake.words[main_head], fake.failed_at[main_head] = ci.RED, [{"job": "linux",
+                                                                 "test": None}]
+    lander_pass(0.0)
+    lander_pass(0.0)
+    lander_pass(0.0)
+    lander_pass(batching.ABSENT_S)
+    assert queue().member(ROUND, "B1").state == queue_file.EJECTED
+    assert events(tmp_path, ROUND, "queue.ejected")[-1]["failures"] == [new_test]
+
+
 def test_a_new_failure_with_one_member_ejects_it_with_the_failures(
         repo, ready, fake, lander_pass, tmp_path):
     ready()
