@@ -80,7 +80,8 @@ TYPES = _types(
     # `options` are the choices it offers, each key with its one line. A question
     # brought here from another log also says the record it was there (`moved_from`),
     # what it held up in the round it left (`held`), what a parked one waits for
-    # (`until`) and the keys that were `retired` from it. A question that came up in
+    # (`until`), the keys that were `retired` from it and every answer `prepared` for
+    # it, each with who recorded it there and when. A question that came up in
     # a build names that build's `builder`, whom the asker asked it for.
     EventType("question.asked",
               ("id", "text", "from", "blocks", "state", "asked_by", "asked_at", "record",
@@ -89,9 +90,9 @@ TYPES = _types(
               required=("id", "text", "from", "blocks", "state", "asked_by", "asked_at")),
     # A question changed by something that is no ruling: its state or what it holds
     # up, with who changed it and the operator's pointer when the change needs one;
-    # `options` added, each key with its one line, and the keys `retired`; a prepared
-    # answer; the record it became in another log when it was moved there
-    # (`moved_to`). A ruling of a question writes none of these: its own event says
+    # `options` added, each key with its one line, and the keys `retired`; an answer
+    # `prepared` for it, the keys of its block less `kind` and `question`; the record
+    # it became in another log when it was moved there (`moved_to`). A ruling of a question writes none of these: its own event says
     # what the question becomes.
     EventType("question.changed",
               ("id", "state", "blocks", "until", "by", "record", "options",
