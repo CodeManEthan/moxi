@@ -18,8 +18,8 @@
 // `Unread`, each message cut at four lines with `Show all`), `Waits on` with `Thread`,
 // `Directs`, `Directed by`, the send box (`box-model.ts`), and `Details` folded at its foot.
 // The box checks how a message would go as it opens and when its posture or `Deliver`
-// changes, sends once, and offers `Take back` on each of his messages the books can still
-// take back; after either act the mail state and the queue are read again. A box set to
+// changes, sends once, and offers `Take back` on each of the operator's messages the books
+// can still take back; after either act the mail state and the queue are read again. A box set to
 // answer a message quotes it, and the row's `Message` act clears that.
 //
 // Under the agents, the messages (`today-model.ts`): `Today`, newest first, each with `Open`
@@ -743,8 +743,8 @@ export class CommsPage extends LitElement {
 
   /** `Today`, `Earlier today`, the days added and `Before today`; dim with no acts while the
    * roster isn't up. */
-  /** The addresses that are the operator: the server's mark, and the authors of his
-   * messages the page holds. */
+  /** The addresses that are the operator: the server's mark, and the authors of the
+   * operator's messages the page holds. */
   #him(): Set<string> {
     return new Set(["operator", ...operatorAddresses(this.#mail?.value ?? null),
                     ...[this.#todayRead, ...this.#days].flatMap((read) =>
@@ -1005,8 +1005,8 @@ export class CommsPage extends LitElement {
     </div>`;
   }
 
-  /** The act at the right of one queued message: `Take back` on his own while the books can
-   * still take it back. */
+  /** The act at the right of one queued message: `Take back` on the operator's own while the
+   * books can still take it back. */
   protected queueAct(item: { message_id: string; takeable: boolean }, to: string): unknown {
     const box = this.#box;
     if (!item.takeable || box === null || box.to !== to) return html`<span></span>`;

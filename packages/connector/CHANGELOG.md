@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- The docstrings name the owner neutrally, never "he" or "his".
 - `moxi_connector.provider.Limit`, opt-in per provider: at most two calls at once, a third
   waiting up to 5 seconds before it refuses `busy`, each call's work in a thread and
   refused `timeout` 20 seconds after it began, a thread that outlives its call holding its

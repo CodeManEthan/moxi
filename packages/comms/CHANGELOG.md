@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+- The notes, refusals, docstrings and docs name the operator neutrally, never "he" or
+  "him": the `--held` and `--interrupt` notes for the operator end "so it went as an
+  ordinary message".
+
 ## 0.3.1 (2026-11-21)
 
 - Every digest comms hands turns, on Claude Code and on Codex, by `deliver` or `steer`,
