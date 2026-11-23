@@ -17659,9 +17659,7 @@ rounds	packages/rounds/src/moxi_rounds/private_files.py	out = git._run("rev-list
 rounds	packages/rounds/src/moxi_rounds/private_files.py	code, _out = git._run("check-ignore", "-q", "--", path, ok=(0, 1))	keep	ok	ok
 rounds	packages/rounds/src/moxi_rounds/private_files.py	code, out = Git(worktree)._run("check-ignore", "-v", "--no-index", "--", path,	keep	refusing	refusing
 rounds	packages/rounds/src/moxi_rounds/private_files.py	ok=(0, 1))	keep	ok	ok
-rounds	packages/rounds/src/moxi_rounds/private_files.py	earlier = set(earlier)	keep	set	set
 rounds	packages/rounds/src/moxi_rounds/private_files.py	place.parent.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
-rounds	packages/rounds/src/moxi_rounds/private_files.py	found = set()	keep	set	set
 rounds	packages/rounds/src/moxi_rounds/settings.py	seen = set()	keep	set	set
 rounds	packages/rounds/src/moxi_rounds/settings.py	if any(ord(char) < 32 or ord(char) == 127 for char in entry):	keep	any	any
 rounds	packages/rounds/src/moxi_rounds/settings.py	if any(char in entry for char in "*?["):	keep	any	any
@@ -17671,6 +17669,5 @@ rounds	packages/rounds/tests/test_private_files.py	assert cli.main(["projects", 
 rounds	packages/rounds/tests/test_private_files.py	path.parent.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
 rounds	packages/rounds/tests/test_private_files.py	path.parent.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
 rounds	packages/rounds/tests/test_private_files.py	assert not any(one.startswith("brought in") for one in made.block.lines)	keep	any	any
-rounds	packages/rounds/tests/test_private_files.py	Git(repo.root)._run("worktree", "add", "-q", "-b", "side", str(worktree))	keep	refusing	refusing
 rounds	packages/rounds/tests/test_private_files.py	assert any(all(part in one for part in said) for one in reasons), reasons	keep	any	any
 rounds	packages/rounds/tests/test_private_files.py	tree.commit("notes/readme.md", "changed")	keep	changed	changed

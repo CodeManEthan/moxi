@@ -11,7 +11,7 @@ the worktree checks out (`held`, read on that one commit); and git at the root r
 every entry as ignored, or nothing is copied. Then each source is copied to its place
 in the worktree, never linked, so an edit there never reaches the project's own file. A
 file already at a place is kept only when it is a regular file with the source's bytes;
-anything else stops the commission, and rounds never overwrites it. Each copy's
+anything else stops the commission instead of writing over it. Each copy's
 `sha256` is recorded, so the removal rule can tell a copy nobody changed
 (`is_unchanged`).
 
@@ -33,7 +33,7 @@ import shutil
 import stat
 import subprocess
 import threading
-from collections.abc import Iterable, Mapping, Sequence
+from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -396,10 +396,9 @@ def _negation(worktree: Path, path: str) -> str | None:
 
 
 def bring(root: Path, worktree: Path, entries: Sequence[str], *, branch: str,
-          is_new_branch: bool, earlier: Iterable[str] = (), again: str) -> list[dict]:
+          is_new_branch: bool, again: str) -> list[dict]:
     """Copy each private file of `entries` from the repo at `root` into `worktree`, and
-    give each one's `{"path", "from", "sha256"}`. `earlier` holds the `sha256` of copies
-    earlier events recorded, so a stop on a file rounds itself copied says so. Raises
+    give each one's `{"path", "from", "sha256"}`. Raises
     `RoundsError` with nothing copied when git in the worktree does not read every
     entry as ignored, and when a place holds anything but a regular file with the
     source's bytes; and on any failure of the copy, naming the entry."""
@@ -427,7 +426,6 @@ def bring(root: Path, worktree: Path, entries: Sequence[str], *, branch: str,
             f"remove the worktree and the branch commission made ({undo}), and fix "
             f"that .gitignore on the target or the branch, or take {path} out of "
             f"private_files; then: {again}")
-    earlier = set(earlier)
     todo = []
     for path in entries:
         source, place = root / path, worktree / path
@@ -437,14 +435,11 @@ def bring(root: Path, worktree: Path, entries: Sequence[str], *, branch: str,
                 continue
             if _is_regular(place) and _hash(place) == _hash(source):
                 continue
-            own_copy = _is_regular(place) and _hash(place) in earlier
         except OSError as exc:
             raise RoundsError(f"the private file {path} can't be read: {exc}",
                               f"look at {source} and {place}, then: {again}") from None
-        why = (f"{place} is there and is rounds' own earlier copy of {source}, which has "
-               "changed since; removing it is safe" if own_copy else
-               f"{place} is there and is not a copy of {source} as it is now")
-        raise RoundsError(f"{why}, and rounds never overwrites it",
+        raise RoundsError(f"{place} is there and is not a copy of {source} as it is now, "
+                          "and commission stops instead of writing over it",
                           f"look at {place}, remove it, then: {again}")
     copied = []
     for path in entries:
@@ -466,18 +461,6 @@ def bring(root: Path, worktree: Path, entries: Sequence[str], *, branch: str,
         copied.append({"path": path, "from": places.contract_home(source),
                        "sha256": digest})
     return copied
-
-
-def earlier_copies(history: Iterable[Mapping], repo: str) -> set[str]:
-    """The `sha256` of every copy the `build.commissioned` events of `history` in the
-    repo `repo` recorded."""
-    found = set()
-    for event in history:
-        if event.get("type") == "build.commissioned" and event.get("repo") == repo:
-            for one in _entries(event.get("brought")):
-                if isinstance(one.get("sha256"), str):
-                    found.add(one["sha256"])
-    return found
 
 
 # -- the removal rule ---------------------------------------------------------------------
@@ -510,4 +493,4 @@ def is_unchanged(place: Path, path: str, brought: object) -> bool:
 
 __all__ = ["NAMED_COMMITS", "Held", "Trees", "listed", "private_paths", "held", "words",
            "ignores_case", "exclude_file", "is_ignored", "unmet", "doctor_warnings",
-           "bring", "earlier_copies", "is_unchanged"]
+           "bring", "is_unchanged"]

@@ -31,7 +31,8 @@ def repo(git_repo, tmp_path):
     assert cli.main(["projects", "set", "proj-a", "--notes-root",
                      str(tmp_path / "notes")]) == 0
     exclude(git_repo, "AGENTS.md", ".venv")
-    (git_repo.root / "AGENTS.md").write_text(SECRET, encoding="utf-8")
+    # Bytes, so the file holds what `sha(SECRET)` hashes on every system's line endings.
+    (git_repo.root / "AGENTS.md").write_bytes(SECRET.encode())
     return git_repo
 
 
@@ -344,7 +345,7 @@ def test_a_rerun_keeps_its_own_unchanged_copy(repo, opened, monkeypatch):
 
 
 @pytest.mark.parametrize("what", ["other bytes", "a folder"])
-def test_a_rerun_never_overwrites_what_is_at_the_place(repo, opened, monkeypatch, what):
+def test_a_rerun_stops_at_anything_else_at_the_place(repo, opened, monkeypatch, what):
     stopped_before_the_scratch_dir(monkeypatch)
     place = worktree_place() / "AGENTS.md"
     place.unlink()
@@ -357,35 +358,9 @@ def test_a_rerun_never_overwrites_what_is_at_the_place(repo, opened, monkeypatch
         commission()
 
     assert f"{place} is there and is not a copy of" in caught.value.reason
-    assert "rounds never overwrites it" in caught.value.reason
+    assert "commission stops instead of writing over it" in caught.value.reason
     assert caught.value.fix.startswith(f"look at {place}, remove it, then:")
     assert commissioned(opened) == []
-
-
-def test_a_stop_on_rounds_own_earlier_copy_says_removing_it_is_safe(repo, tmp_path):
-    worktree = tmp_path / "wt"
-    Git(repo.root)._run("worktree", "add", "-q", "-b", "side", str(worktree))
-    (worktree / "AGENTS.md").write_text("as it was\n", encoding="utf-8")
-
-    with pytest.raises(RoundsError) as caught:
-        private_files.bring(repo.root, worktree, ["AGENTS.md"], branch="side",
-                            is_new_branch=True, earlier={sha("as it was\n")},
-                            again="again")
-
-    assert "is rounds' own earlier copy of" in caught.value.reason
-    assert "removing it is safe" in caught.value.reason
-    assert (worktree / "AGENTS.md").read_text(encoding="utf-8") == "as it was\n"
-
-
-def test_earlier_copies_are_read_from_the_repos_commission_events():
-    history = [
-        {"type": "build.commissioned", "repo": "proj-a",
-         "brought": [{"path": "AGENTS.md", "from": "~/x", "sha256": "aa"}]},
-        {"type": "build.commissioned", "repo": "proj-b",
-         "brought": [{"path": "AGENTS.md", "from": "~/y", "sha256": "bb"}]},
-        {"type": "build.commissioned", "repo": "proj-a", "brought": "junk"},
-        {"type": "build.commissioned", "repo": "proj-a"}]
-    assert private_files.earlier_copies(history, "proj-a") == {"aa"}
 
 
 def test_a_copy_that_fails_stops_naming_the_entry_and_a_rerun_brings(repo, opened,

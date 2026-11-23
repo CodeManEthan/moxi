@@ -233,9 +233,7 @@ def commission(name: str, stage_id: str | None = None, *, builder: str, by: str,
                   again)
         brought = private_files.bring(
             found.root, found.worktree, found.private, branch=found.branch,
-            is_new_branch=not existing,
-            earlier=private_files.earlier_copies(view.state.history, found.repo),
-            again=again)
+            is_new_branch=not existing, again=again)
         scratch = places.scratch_place(found.repo, found.branch, build_id, env)
         if not (found.adopt is not None and _is_own_scratch(scratch, build_id, names)):
             _make_scratch(scratch, places.marker(build_id, **names), again)
