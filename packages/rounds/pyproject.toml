@@ -51,6 +51,10 @@ rounds = "moxi_rounds.projects_link"
 [project.entry-points."moxi.turns.listeners"]
 rounds = "moxi_rounds.listeners"
 
+# The watched-paths guard, run by turns before a covered write while its switch is on.
+[project.entry-points."moxi.turns.guards"]
+rounds = "moxi_rounds.guards"
+
 [dependency-groups]
 # moxi-ui's pytest plugin runs rounds' page in a real shell; its testing extra brings
 # the browser. The browser tests import Playwright themselves, so it is named too.
