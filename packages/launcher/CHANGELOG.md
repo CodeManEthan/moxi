@@ -8,6 +8,12 @@
   launch that opts out under a comms without policy directors is refused, naming the
   upgrade. On the page, a bool row whose default is true sends its unticked box as
   `false`, so the opt-out is kept.
+- comms' policy directors count as directors of a launch with a comms identity that
+  didn't opt out: they may make a director's relaunch call and they hear of a failed
+  relaunch, beside the launch's own directors, each recipient once. The launcher reads
+  comms' `policy_directors()` at the call or the notice, so only names provisioned as
+  standing identities now, each as comms qualifies it (a bare name is the global
+  identity, never read in the launch's scope). A comms without the call adds none.
 - A launch follows its Claude session when Claude Code replaces the session's turns
   endpoint (each plugin reload does). A held Claude claim moves only to an endpoint whose
   parent process is the launch's own `claude`, the row's `pid` and `pid_started`

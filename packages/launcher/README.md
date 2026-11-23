@@ -403,6 +403,15 @@ relaunch that came back names its identity, slot, new session, posture and model
 whether comms has bound the name, waiting up to 60 s for the bind, or that comms could
 not be read. A director named without a scope is read in the launch's own scope.
 
+The box's policy directors (comms' `[policy] directors`) count as directors too, for a
+session launched with a comms identity that didn't opt out (`takes_policy_directors =
+false`): they may make the call and they hear of a failed relaunch, once each beside the
+session's own directors. The launcher reads the setting at the call or the notice, not
+as it was at the session's launch, and takes only the names provisioned as standing
+identities now (`moxi-comms-provision --standing NAME`); an unprovisioned name gets
+neither. A policy name is comms' own spelling, a bare one the global identity, never read
+in the launch's scope.
+
     moxi launcher relaunch --status RUN
     moxi launcher relaunch --stop RUN
     moxi launcher relaunch --from-record RUN
@@ -415,7 +424,7 @@ armed run: before the exit the run ends `stopped` and a self run's session is to
 the exit on, the run ends once the relaunch has been tried. A repair's session is down
 already, so a stop of a repair is recorded and the run ends once its launch has been
 tried. A relaunch that exited the session and failed to start the new one tells the
-session's directors (or the comms identity in `relaunch.fallback`) through comms, naming
+session's directors and policy directors (or the comms identity in `relaunch.fallback`) through comms, naming
 the command that repairs it: `--from-record` starts the session again from the run's
 record, in its slot, or the lowest free one when someone outside the session's own line of
 launches has taken it. It refuses when the slot already runs the relaunched session, and
