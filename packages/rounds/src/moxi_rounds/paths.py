@@ -57,10 +57,6 @@ RUNTIME_DIR_ENV = "MOXI_ROUNDS_RUNTIME_DIR"
 LOCATOR_ENVS = (HOME_ENV, DATA_HOME_ENV, STATE_HOME_ENV, CACHE_HOME_ENV, CONFIG_HOME_ENV,
                 RUNTIME_DIR_ENV)
 
-#: The variables pytest sets while it runs: for each test's setup, call and teardown, and
-#: for the whole session (pytest 8.2 and later). A child process inherits both.
-_PYTEST_VARIABLES = ("PYTEST_CURRENT_TEST", "PYTEST_VERSION")
-
 #: The variable suffix of each root kind's own variable.
 _OWN_SUFFIX = {"data": "DATA_HOME", "state": "STATE_HOME", "cache": "CACHE_HOME",
                "config": "CONFIG_HOME", "runtime": "RUNTIME_DIR"}
@@ -70,8 +66,10 @@ def running_under_pytest(env: Mapping[str, str],
                          modules: Mapping[str, object]) -> str | None:
     """The sign that a test is running in the process whose environment is `env` and
     whose loaded modules are `modules`, in words ("PYTEST_VERSION is set"), or None when
-    there is none: `PYTEST_CURRENT_TEST` or `PYTEST_VERSION` set, or pytest imported."""
-    for variable in _PYTEST_VARIABLES:
+    there is none: `PYTEST_CURRENT_TEST` or `PYTEST_VERSION` set, or pytest imported.
+    pytest sets the first for each test's setup, call and teardown, and the second for
+    the whole session (pytest 8.2 and later); a child process inherits both."""
+    for variable in ("PYTEST_CURRENT_TEST", "PYTEST_VERSION"):
         if variable in env:
             return f"{variable} is set"
     if "pytest" in modules:

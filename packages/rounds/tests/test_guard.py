@@ -207,15 +207,17 @@ def _stand_in_env(fence) -> dict[str, str]:
     return env
 
 
-def _files_under(env) -> list[Path]:
-    """Every file under rounds' five directories as the defaults place them in `env`."""
+def _paths_under(env) -> list[Path]:
+    """rounds' five directories as the defaults place them in `env`, where they exist,
+    and every path under them, folders included."""
     from moxi.paths import Layout
 
     plain = Layout("rounds")
     found = []
     for kind in ("data", "state", "cache", "config", "runtime"):
         module_dir = getattr(plain, f"{kind}_root")(env) / "rounds"
-        found += [path for path in module_dir.rglob("*") if path.is_file()]
+        if os.path.lexists(module_dir):
+            found += [module_dir, *module_dir.rglob("*")]
     return sorted(dict.fromkeys(found))
 
 
@@ -251,4 +253,4 @@ def test_a_borrowed_or_unfenced_test_elsewhere_writes_nothing_of_rounds(fence, t
     on_its_own = run("test_on_its_own.py", WRITES_ON_ITS_OWN, pythonpath=False)
     assert "UnfencedTest" in on_its_own and "a test is running" in on_its_own
     assert real_config.read_bytes() == b"# the real config\n"
-    assert _files_under(env) == [real_config]
+    assert _paths_under(env) == sorted([Layout("rounds").config_dir(env), real_config])
