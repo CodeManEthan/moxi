@@ -12,7 +12,8 @@ from pathlib import Path
 import pytest
 from moxi import modules
 
-from moxi_rounds import api, asking, dropping, errors, log, opening, paths, ruling
+from moxi_rounds import (api, asking, dropping, errors, log, opening, paths, preparing,
+                         ruling)
 from moxi_rounds.cli import main
 
 A = "proj-a/a-round"
@@ -394,3 +395,24 @@ def test_the_package_registers_its_module_its_listener_its_refusal_and_no_git_ho
     groups = {point.group for point in metadata.distribution("moxi-rounds").entry_points}
     assert groups == expected
     assert "moxi.repo.git_hooks" not in groups
+
+
+def test_a_questions_entry_carries_its_prepared_answer(tmp_path, add_project, capsys):
+    add_project("proj-a", notes_root=tmp_path / "notes")
+    opening.open_round(A, description="a placeholder round", by="planner", flow="fix")
+    asking.ask(A, "Is it so?", origin="comms:11", by="scout",
+               options=["a=yes", "b=no"])
+    path = tmp_path / "answer.md"
+    path.write_text("```toml rounds\n" + "\n".join([
+        'kind = "answer"', 'question = "Q1"', 'by = "builder-1"', 'model = "a-model"',
+        'recommend = "b"', 'sure = "low"', 'why = "a guess"', 'flips = "a reading"',
+        'read = ["comms:1234567"]',
+        '[[option]]', 'key = "a"', 'costs = "time"', 'forecloses = "nothing"',
+        '[[option]]', 'key = "b"', 'costs = "more"', 'forecloses = "nothing"',
+    ]) + "\n```\n", encoding="utf-8")
+    preparing.prepare(A, "Q1", path, by="helper")
+
+    [entry] = api.questions(A)["entries"]
+    assert entry["prepared"]["recommend"] == "b" and entry["prepared"]["current"]
+    [question] = api.round_data(A)["questions"]
+    assert question["prepared"] == entry["prepared"]

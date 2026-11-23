@@ -60,7 +60,7 @@ from __future__ import annotations
 import json
 from collections.abc import Callable, Sequence
 
-from . import (brake, builds, checking, ci, closing, commission_block, drift, flows,
+from . import (answer_block, brake, builds, checking, ci, closing, commission_block, drift, flows,
                leads, log, model_tiers, places, queue_file, queue_view, rendering,
                report_block, showing, sizing, stages, steps, tracing, versions)
 from . import numbers as counted
@@ -74,8 +74,9 @@ from .errors import BadArgument
 OPERATOR = "operator"
 _OPERATOR_STEPS = (steps.QUESTIONS, "ratify")
 
-#: The kind of prepared block that has no schema in this version.
-ANSWER = "answer"
+#: The kinds of block whose empty text `schema` prints: the reports', and a prepared
+#: answer's.
+ANSWER = answer_block.KIND
 SCHEMAS = (*report_block.KINDS, ANSWER)
 
 #: The kinds of warning.
@@ -96,11 +97,12 @@ MANY_BUILDS = 5
 
 def schema(kind: str) -> str:
     """The empty data block of `kind`, one of `SCHEMAS`. Raises `BadArgument` for a
-    word that is no kind, and for the prepared answer, whose block this version does
-    not have."""
+    word that is no kind."""
     if kind == ANSWER:
-        raise BadArgument("the block of a prepared answer is not built in this version",
-                          f"name one of {', '.join(report_block.KINDS)}")
+        return answer_block.empty()
+    if kind not in report_block.KINDS:
+        raise BadArgument(f"{kind!r} is no kind of block",
+                          f"name one of {', '.join(SCHEMAS)}")
     return report_block.empty(kind)
 
 
