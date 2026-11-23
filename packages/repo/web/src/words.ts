@@ -113,7 +113,7 @@ function isWindowsHome(home: string): boolean {
  * A path as the page writes it: `~` when it is `home`, `~/rest` (`~\rest`) when it
  * continues `home` after a separator, else in full; in full too with no `home`. A Windows
  * home is compared without case, and takes either separator; any other takes `/` and is
- * compared as it is. `/home/jp2` is not under `/home/jp`.
+ * compared as it is. `/home/you2` is not under `/home/you`.
  */
 export function homeForm(path: string, home: string | null): string {
   if (home === null || home === "") return path;

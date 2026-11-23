@@ -33,10 +33,11 @@ The fence, around every test (the autouse fixture `fence`):
   test's `LOCALAPPDATA`, so whatever a module keeps only inside the user's profile (comms'
   token store) is inside the test's own. Every directory the fence gives is spelled in
   its long form, its real path: the runner's `TEMP` may be spelled with an 8.3 short name
-  (`C:\\Users\\RUNNER~1\\...`), and a test compares the fence's directories with paths
-  Windows hands back resolved. `TEMP` and `TMP` point where `TMPDIR` does. The system's own
-  variables a process needs (`SYSTEMROOT`, `PATHEXT`, `COMSPEC` and the rest of
-  `WINDOWS_KEPT_ENV`) are kept. Off Windows none of these is set or kept.
+  (`C:\\Users\\RUNNER~1\\...`, noqa: MX6 -- GitHub's Windows runner profile), and a
+  test compares the fence's directories with paths Windows hands back resolved. `TEMP`
+  and `TMP` point where `TMPDIR` does. The system's own variables a process needs
+  (`SYSTEMROOT`, `PATHEXT`, `COMSPEC` and the rest of `WINDOWS_KEPT_ENV`) are kept.
+  Off Windows none of these is set or kept.
   `MOXI_ANCHOR_HOME` stands in for the account's own folder, which the core reads from
   the user database or the shell and no other variable moves: it is the test's home (on
   Windows the test's `LOCALAPPDATA`), so the core's anchor, and the record of the
@@ -695,7 +696,8 @@ def _modules() -> list[str]:
 
 def _spelled_long(path: _P) -> _P:
     """On Windows, `path` in its long form: its real path, each part spelled in full
-    (`C:\\Users\\RUNNER~1` reads `C:\\Users\\runneradmin`). Elsewhere `path` as it is."""
+    (`C:\\Users\\RUNNER~1` reads `C:\\Users\\runneradmin`; noqa: MX6 -- GitHub's
+    Windows runner profile). Elsewhere `path` as it is."""
     return type(path)(ntpath.realpath(path)) if WINDOWS else path
 
 

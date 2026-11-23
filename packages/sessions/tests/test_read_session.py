@@ -626,11 +626,11 @@ def test_opencode_snapshot_is_what_the_tool_reads(db):
 
 def test_every_local_path_shown_is_cut_to_its_last_segment(projects):
     t = ClaudeTranscript(projects, cwd="/home/someone/work/app")
-    t.title("notes in /home/someone/notes/home/moxi")
-    t.user("look at /home/someone/notes/home/moxi/x.md and http://localhost:8080/api",
+    t.title("notes in /home/someone/notes/work/moxi")
+    t.user("look at /home/someone/notes/work/moxi/x.md and http://localhost:8080/api",
            origin="human")
     req = t.request()
-    req.tool_use("Read", {"file_path": "/home/someone/notes/home/moxi/x.md"})
+    req.tool_use("Read", {"file_path": "/home/someone/notes/work/moxi/x.md"})
     req.tool_use("Bash", {"command": "cat /srv/app/.env"})
     result, _ = read(claude_source(t))
     typed, call, secret = rows(result)

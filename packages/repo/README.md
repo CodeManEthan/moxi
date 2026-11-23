@@ -318,7 +318,7 @@ at PATH, or in the one you are in. It reads the two pieces above from the repo's
 config and always exits 0 on a repo:
 
 ```text
-commit rules for /home/alice/src/app
+commit rules for /home/you/src/app
 - trailers this repo refuses: Round, Reconciles
 - no text matching: \bTAG-[0-9]+\b
 - say what changed and why in plain words
@@ -379,7 +379,7 @@ git commit -m 'notes: add today' -m 'Commit-Check: 3fa1c2d4e5b6'
   the work tree to run it in:
 
 ```text
-repo: commit-msg refused by repo/commit-proof: commit proof: line 3 doesn't match the tree being committed in /home/alice/src/app: the index changed after the line was printed, or the line is another repo's; stage first, run: moxi repo rules /home/alice/src/app, and commit with the line it prints
+repo: commit-msg refused by repo/commit-proof: commit proof: line 3 doesn't match the tree being committed in /home/you/src/app: the index changed after the line was printed, or the line is another repo's; stage first, run: moxi repo rules /home/you/src/app, and commit with the line it prints
 ```
 
 - **The line once read** is dropped: a message the piece passes loses the `Commit-Check`
