@@ -28,7 +28,9 @@ SCOPED = shlex.join([sys.executable, "-c", "import sys; print(sys.argv)", "--bas
 class FakeCi:
     """The candidate's CI: what it reads (`word` for a commit pushed as a candidate,
     `main_word` for any other, `words` by commit, and `landed_word`, when set, for the
-    target's head as `main_of()` gives it), what a push says
+    target's head as `main_of()` gives it; `read_full`, the target's full run, reads
+    `full_word` where it is set and else the same, and records the commit in
+    `full_reads`), what a push says
     (`refusal`, None for a push that goes), the local run's exit code (`local_code`, or
     `local_codes` by commit), and a red run's failures (`failed`, or `failed_at` by
     commit)."""
@@ -48,6 +50,8 @@ class FakeCi:
         self.removed: list[str] = []
         self.reruns: list[tuple[tuple[str, ...], bool]] = []
         self.locals: list[str] = []
+        self.full_reads: list[str] = []
+        self.full_word: str | None = None
 
     def push(self, place, commit, ref):
         self.pushes.append((commit, ref))
@@ -73,6 +77,12 @@ class FakeCi:
             return queue_ci.Read(self.words[commit], ("101",))
         candidate = any(pushed == commit and "queue-" in ref for pushed, ref in self.pushes)
         return queue_ci.Read(self.word if candidate else self.main_word, ("101",))
+
+    def read_full(self, place, commit):
+        self.full_reads.append(commit)
+        if self.full_word is not None:
+            return queue_ci.Read(self.full_word, ("303",))
+        return self.read(place, commit)
 
     def failures(self, place, commit, read):
         return [dict(one) for one in self.failed_at.get(commit, self.failed)]

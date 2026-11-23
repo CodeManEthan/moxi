@@ -3,7 +3,11 @@ and whether CI's form of the check gate is met at a tip.
 
 **The setting** (`declared`): the workflows whose runs stand in for the full check, each
 named by its file's path in the repo and read whole, or by the jobs of its run the entry
-names (`Workflow`); `local`, the short local run of what CI can't do, or the word `none`
+names (`Workflow`): by name, and by name pattern (`matrix`, each `*` standing for any
+text), so a matrix's jobs need not be listed one by one. An entry may name its run's
+`pick` job, the job that picks which of the others run; and an entry marked
+`reads_candidates` reads a merge queue's candidate (`candidate_workflows`), where the
+others read a full run (`full_workflows`), a build's or the target's; `local`, the short local run of what CI can't do, or the word `none`
 where CI does all of it; `remote`, where `check` pushes the branch before it reads;
 `ref`, a template of the branch name it pushes to, one fixed prefix ending in `/` and
 then `{branch}` (`ref_problem`), where the ref is CI's own; `full_ref`, a second
@@ -20,10 +24,13 @@ standard output is read, as JSON. From `ids`: a list of objects, each with `id` 
 `status`, `conclusion` and `createdAt`, and `url` when there is one. From `jobs`, run
 once for each workflow read by its jobs that has a run at the tip, `{run}` filled with
 that run's `databaseId`: a list of objects, each with `name`, `status` and
-`conclusion`, and `url` when there is one. Any command failing to start, exiting other
+`conclusion`, and `url` when there is one. From `PICK_LOG`, run with the `--repo` the
+setting's commands give (`gh_repo`) for the pick job of a completed run, `{job}` filled
+with the job's `databaseId`: the job's log, whose last line holding `picked: ` and then
+a JSON list of names gives the picked packages. Any command failing to start, exiting other
 than 0, running past its limit, or printing anything else (an object missing a field,
-two `ids` objects with one `path`, a run read by its jobs with no `databaseId`) is a
-failed read (`ReadFailed`), and nothing is read from it.
+two `ids` objects with one `path`, a run read by its jobs with no `databaseId`, a pick
+job's log with no `picked:` line) is a failed read (`ReadFailed`), and nothing is read from it.
 
 **The reading** (`reading`). A path's id is the `id` of the one `ids` object with that
 path; a path none names reads `absent`. Of the `status` objects whose
@@ -32,11 +39,16 @@ path; a path none names reads `absent`. Of the `status` objects whose
 reads `absent`. A workflow read whole reads its run: `green` (completed, with success),
 `pending` (not completed) or `red` (completed, with any other conclusion). A workflow
 read by its jobs reads each job it names from the first of the run's jobs with exactly
-that name, in the same words; a name no job has reads `pending` while the run is not
-completed and `absent` once it is, and with no run at the tip each job it names reads
-`absent`, unasked. Such a workflow reads `green` only when every job it
-names does, else the first of `red`, `absent` and `pending` that one reads; so does the
-whole reading of every workflow.
+that name, in the same words, and by each `matrix` pattern every other job whose name the
+pattern matches; a name no job has, or a pattern none matches, reads `pending` while the
+run is not completed and `absent` once it is, and with no run at the tip each job it
+names reads `absent`, unasked. Where the entry names a `pick` job and it reads `green`,
+a job the pick did not run reads `skipped`: one concluded `skipped`, and a pattern no
+job matches once the run is completed. A named job the pick ran that is missing still
+reads `absent`. Such a workflow reads `green` only when every job it names reads `green`
+or `skipped`, else the first of `red`, `absent` and `pending` that one reads; so does the
+whole reading of every workflow. The picked packages are recorded as the workflow's
+`picked`.
 
 **CI's form of the gate** (`why_not`), apart from the target: the newest `ci.read` of
 the build at the tip reads `green` and named the workflows the setting names now, each
@@ -83,6 +95,8 @@ BRANCH = "{branch}"
 STATUS_TIMEOUT_S = 60
 
 GREEN = "green"
+#: A job the pick job did not run; it counts as green.
+SKIPPED = "skipped"
 PENDING = "pending"
 RED = "red"
 ABSENT = "absent"
@@ -94,15 +108,30 @@ _STATUS_FIELDS = ("headSha", "workflowDatabaseId", "status", "conclusion", "crea
 _JOB_FIELDS = ("name", "status", "conclusion")
 #: The placeholder of `jobs` that a run's id fills.
 RUN = "{run}"
+#: The placeholder of `PICK_LOG` that a job's id fills.
+JOB = "{job}"
+#: The command that prints a job's log, read for the pick job's `picked:` line.
+PICK_LOG = ("gh", "run", "view", "--job", JOB, "--log")
+#: The line of a pick job's log that names the picked packages, as a JSON list.
+_PICKED = re.compile(r"picked: (\[.*\])\s*$")
 
 
 @dataclass(frozen=True)
 class Workflow:
-    """One workflow the setting names: its file's `path` in the repo, and the `jobs`
-    read of its run, None where the whole run is read."""
+    """One workflow the setting names: its file's `path` in the repo, the `jobs` read of
+    its run by name (None where the whole run is read), the name patterns of the jobs
+    read by `matrix`, the `pick` job, and whether it `reads_candidates` of a queue."""
 
     path: str
     jobs: tuple[str, ...] | None = None
+    matrix: tuple[str, ...] = ()
+    pick: str | None = None
+    reads_candidates: bool = False
+
+    @property
+    def named(self) -> tuple:
+        """What a `ci.read` record must name for this entry: path, jobs, patterns, pick."""
+        return (self.path, self.jobs, self.matrix, self.pick)
 
 
 @dataclass(frozen=True)
@@ -134,10 +163,24 @@ class Declared:
         """Whether a workflow is read by its jobs, so the `jobs` command runs."""
         return any(one.jobs is not None for one in self.workflows)
 
+    @property
+    def full_workflows(self) -> tuple[Workflow, ...]:
+        """The workflows a full run is read by: every one not marked `reads_candidates`."""
+        return tuple(one for one in self.workflows if not one.reads_candidates)
+
+    @property
+    def candidate_workflows(self) -> tuple[Workflow, ...]:
+        """The workflows a queue's candidate is read by: those marked `reads_candidates`,
+        or, with none marked, the full run's."""
+        return (tuple(one for one in self.workflows if one.reads_candidates)
+                or self.full_workflows)
+
 
 def _workflow(entry) -> Workflow:
     if isinstance(entry, Mapping):
-        return Workflow(str(entry.get("path")), tuple(entry.get("jobs") or ()))
+        return Workflow(str(entry.get("path")), tuple(entry.get("jobs") or ()),
+                        tuple(entry.get("matrix") or ()), entry.get("pick"),
+                        reads_candidates=bool(entry.get("reads_candidates")))
     return Workflow(str(entry))
 
 
@@ -217,7 +260,7 @@ class Now:
 def now_of(found: Declared, values: Mapping[str, str]) -> Now:
     """What the setting `found` gives now for a build whose placeholders read `values`."""
     local = None if found.local is None else tuple(checking.fill(found.local, values))
-    return Now(found.workflows, local)
+    return Now(found.full_workflows, local)
 
 
 # -- the read ----------------------------------------------------------------------------
@@ -245,7 +288,8 @@ class Reading:
     jobs_argvs: tuple[tuple[str, ...], ...] = ()
 
 
-def _json(argv: Sequence[str], *, cwd, timeout_s: float):
+def _output(argv: Sequence[str], *, cwd, timeout_s: float) -> bytes:
+    """What `argv` printed on its standard output. Raises `ReadFailed` when it fails."""
     try:
         done = proc.run(list(argv), timeout_s=timeout_s, env=gitreads.git_env(),
                         cwd=cwd)
@@ -257,8 +301,12 @@ def _json(argv: Sequence[str], *, cwd, timeout_s: float):
         said = (done.stderr or b"").decode(errors="replace").strip().splitlines()
         tail = f": {said[-1]}" if said else ""
         raise ReadFailed(argv, f"exited {done.returncode}{tail}")
+    return done.stdout or b""
+
+
+def _json(argv: Sequence[str], *, cwd, timeout_s: float):
     try:
-        found = json.loads(done.stdout or b"")
+        found = json.loads(_output(argv, cwd=cwd, timeout_s=timeout_s))
     except ValueError:
         raise ReadFailed(argv, "printed something that is not JSON") from None
     if not isinstance(found, list) or not all(isinstance(one, dict) for one in found):
@@ -292,33 +340,66 @@ def _word(run: Mapping) -> str:
 
 
 def _whole(words: Sequence[str]) -> str:
-    """`green` when every word is, else the first of `_FIRST` that one is."""
-    return GREEN if all(word == GREEN for word in words) else next(
+    """`green` when every word is `green` or `skipped`, else the first of `_FIRST` that
+    one is."""
+    return GREEN if all(word in (GREEN, SKIPPED) for word in words) else next(
         word for word in _FIRST if word in words)
 
 
-def _job_words(names: Sequence[str], run: Mapping, jobs: Sequence[Mapping]) -> list[dict]:
-    """Each job of `names` as `{"name", "reading", "url"}`, read from the run's `jobs`."""
-    each = []
-    for name in names:
+def matches(pattern: str, name: str) -> bool:
+    """Whether the job name `name` matches the `matrix` pattern `pattern`, each `*` in it
+    standing for any text, the rest for itself."""
+    return re.fullmatch(".*".join(map(re.escape, pattern.split("*"))), name) is not None
+
+
+def _job_words(flow: Workflow, run: Mapping, jobs: Sequence[Mapping],
+               picked_of: Callable[[Mapping], list[str]] | None = None,
+               ) -> tuple[list[dict], list[str] | None]:
+    """Each job `flow` names, and each its `matrix` patterns match, as `{"name",
+    "reading", "url"}` (a pattern's also with `matrix`), read from the run's `jobs`; and
+    the packages its pick job picked, read by `picked_of`, None where none were read."""
+    ended = run.get("status") == "completed"
+    missing = ABSENT if ended else PENDING
+    each: list[tuple[dict, Mapping | None]] = []
+    for name in flow.jobs or ():
         job = next((one for one in jobs if one.get("name") == name), None)
-        if job is None:
-            word = PENDING if run.get("status") != "completed" else ABSENT
-        else:
-            word = _word(job)
-        each.append({"name": name, "reading": word,
-                     "url": None if job is None else job.get("url")})
-    return each
+        each.append(({"name": name, "reading": missing if job is None else _word(job),
+                      "url": None if job is None else job.get("url")}, job))
+    for pattern in flow.matrix:
+        found = [one for one in jobs if str(one.get("name")) not in (flow.jobs or ())
+                 and matches(pattern, str(one.get("name")))]
+        each += [({"name": str(job.get("name")), "matrix": pattern,
+                   "reading": _word(job), "url": job.get("url")}, job) for job in found]
+        if not found:
+            each.append(({"name": pattern, "matrix": pattern, "reading": missing,
+                          "url": None}, None))
+    pick = next((job for one, job in each
+                 if flow.pick is not None and one["name"] == flow.pick
+                 and "matrix" not in one and one["reading"] == GREEN), None)
+    if pick is None:
+        return [one for one, _job in each], None
+    for one, job in each:
+        if job is None and "matrix" in one and one["reading"] == ABSENT:
+            one["reading"] = SKIPPED
+        elif job is not None and job.get("status") == "completed" \
+                and job.get("conclusion") == "skipped":
+            one["reading"] = SKIPPED
+    picked = picked_of(pick) if ended and picked_of is not None else None
+    return [one for one, _job in each], picked
 
 
 def reading(workflows: Sequence[str | Workflow], ids: Mapping[str, object],
             runs: Sequence[Mapping], tip: str, *,
             jobs_of: Callable[[Mapping], Sequence[Mapping]] | None = None,
+            picked_of: Callable[[Mapping], list[str]] | None = None,
             ) -> tuple[tuple[dict, ...], str]:
     """Each workflow of `workflows` as `{"path", "id", "reading", "url"}`, read from the
     `ids` by path and the `runs` at `tip`, and the whole reading. A workflow read by its
     jobs also holds `jobs`, each as `{"name", "reading", "url"}`, read from what
-    `jobs_of` gives for its run, or each `absent` where it has no run at `tip`."""
+    `jobs_of` gives for its run, or each `absent` where it has no run at `tip`; with
+    `matrix` patterns or a `pick` job it names them too (`matrix`, `pick`), and the
+    packages its green pick job picked, which `picked_of` reads from that job, as
+    `picked`."""
     each = []
     for flow in workflows:
         flow = flow if isinstance(flow, Workflow) else Workflow(flow)
@@ -334,12 +415,20 @@ def reading(workflows: Sequence[str | Workflow], ids: Mapping[str, object],
         one = {"path": flow.path, "id": wanted,
                "reading": ABSENT if newest is None else _word(newest),
                "url": None if newest is None else newest.get("url")}
+        if flow.matrix:
+            one["matrix"] = list(flow.matrix)
+        if flow.pick is not None:
+            one["pick"] = flow.pick
         if flow.jobs is not None and newest is None:
             one["jobs"] = [{"name": name, "reading": ABSENT, "url": None}
-                           for name in flow.jobs]
+                           for name in flow.jobs] + [
+                {"name": pattern, "matrix": pattern, "reading": ABSENT, "url": None}
+                for pattern in flow.matrix]
         elif flow.jobs is not None:
-            one["jobs"] = _job_words(
-                flow.jobs, newest, jobs_of(newest) if jobs_of is not None else ())
+            one["jobs"], picked = _job_words(
+                flow, newest, jobs_of(newest) if jobs_of is not None else (), picked_of)
+            if picked is not None:
+                one["picked"] = picked
             one["reading"] = _whole([job["reading"] for job in one["jobs"]])
         each.append(one)
     return tuple(each), _whole([one["reading"] for one in each])
@@ -354,15 +443,17 @@ def _jobs(argv: Sequence[str], found: list[dict]) -> list[dict]:
 
 
 def read(found: Declared, *, values: Mapping[str, str], cwd) -> Reading:
-    """Read CI at the tip `values["tip"]` with the setting `found`, running its
-    commands in `cwd`. Raises `ReadFailed` for a failed read."""
+    """Read CI at the tip `values["tip"]` by the setting's full workflows
+    (`Declared.full_workflows`), running its commands in `cwd`. Raises `ReadFailed` for
+    a failed read."""
     return read_runs(found, values=values, cwd=cwd)[0]
 
 
-def read_runs(found: Declared, *, values: Mapping[str, str],
-              cwd) -> tuple[Reading, tuple[dict, ...]]:
-    """`read`'s reading, and the runs at the tip that each workflow read (the newest of
-    its file's runs there), as the `status` command printed them."""
+def read_runs(found: Declared, *, values: Mapping[str, str], cwd,
+              is_candidate: bool = False) -> tuple[Reading, tuple[dict, ...]]:
+    """`read`'s reading, by the candidate's workflows with `is_candidate`
+    (`Declared.candidate_workflows`), and the runs at the tip that each workflow read
+    (the newest of its file's runs there), as the `status` command printed them."""
     status = tuple(checking.fill(found.status, values))
     ids = tuple(checking.fill(found.ids, values))
     runs = _runs(status, _json(status, cwd=cwd, timeout_s=found.status_timeout_s))
@@ -376,10 +467,52 @@ def read_runs(found: Declared, *, values: Mapping[str, str],
         jobs_argvs.append(argv)
         return jobs
 
-    each, whole = reading(found.workflows, by_path, runs, values["tip"], jobs_of=jobs_of)
+    def picked_of(job: Mapping) -> list[str]:
+        if job.get("databaseId") is None:
+            raise ReadFailed(found.jobs, f"printed a pick job with no databaseId: "
+                                         f"{dict(job)!r}")
+        argv = (*(word.replace(JOB, str(job["databaseId"])) for word in PICK_LOG),
+                *gh_repo(found))
+        return picked_in(argv, _output(argv, cwd=cwd, timeout_s=found.status_timeout_s)
+                         .decode(errors="replace"))
+
+    flows = found.candidate_workflows if is_candidate else found.full_workflows
+    each, whole = reading(flows, by_path, runs, values["tip"], jobs_of=jobs_of,
+                          picked_of=picked_of)
     urls = {one.get("url") for one in each if one.get("url")}
     read_by = tuple(run for run in runs if run.get("url") in urls)
     return Reading(values["tip"], status, ids, each, whole, tuple(jobs_argvs)), read_by
+
+
+def picked_in(argv: Sequence[str], log: str) -> list[str]:
+    """The packages a pick job's `log` names: the JSON list after `picked: ` on its last
+    line that holds one. Raises `ReadFailed`, naming `argv`, when no line does."""
+    found = None
+    for line in log.splitlines():
+        match = _PICKED.search(line)
+        if match is None:
+            continue
+        try:
+            names = json.loads(match.group(1))
+        except ValueError:
+            continue
+        if isinstance(names, list) and all(isinstance(one, str) for one in names):
+            found = names
+    if found is None:
+        raise ReadFailed(argv, "printed no line picked: <JSON list of names>")
+    return found
+
+
+def gh_repo(found: Declared) -> tuple[str, ...]:
+    """The `--repo` argument the setting's `status`, `ids` or `jobs` command gives gh,
+    the first found, as `("--repo", NAME)`; empty when none gives one."""
+    for argv in (found.status, found.ids, found.jobs):
+        for index, word in enumerate(argv):
+            if word in ("--repo", "-R") and index + 1 < len(argv):
+                return ("--repo", argv[index + 1])
+            if word.startswith("--repo="):
+                return ("--repo", word.removeprefix("--repo="))
+    return ()
 
 
 def run_jobs(found: Declared, run: str, *, values: Mapping[str, str],
@@ -415,9 +548,9 @@ def why_not(state: states.State, stage: str, *, tip: str, now: Now) -> str | Non
     if found is None:
         return f"CI has no reading on record for {stage} at {tip[:12]}"
     named = [_named(one) for one in found.get("workflows") or ()]
-    if named != [(one.path, one.jobs) for one in now.workflows]:
+    if named != [one.named for one in now.workflows]:
         return (f"CI was read at {tip[:12]} for {_names(named)}, and the workflows "
-                f"named now are {_names((one.path, one.jobs) for one in now.workflows)}")
+                f"named now are {_names(one.named for one in now.workflows)}")
     if found.get("reading") != GREEN:
         return f"CI reads {found.get('reading')} at {tip[:12]}"
     if now.local is not None:
@@ -454,17 +587,25 @@ def candidate_why_not(state: states.State, stage: str, *, tip: str,
     return None
 
 
-def _named(recorded: Mapping) -> tuple[str, tuple[str, ...] | None]:
-    """A workflow of a `ci.read` record as the setting names one: its path, and the
-    names of the jobs read, None where the whole run was read."""
+def _named(recorded: Mapping) -> tuple:
+    """A workflow of a `ci.read` record as the setting names one (`Workflow.named`): its
+    path, the names of the jobs read by name (None where the whole run was read), its
+    `matrix` patterns and its `pick` job."""
     jobs = recorded.get("jobs")
     return (str(recorded.get("path")),
-            None if jobs is None else tuple(str(one.get("name")) for one in jobs))
+            None if jobs is None else tuple(str(one.get("name")) for one in jobs
+                                            if "matrix" not in one),
+            tuple(str(one) for one in recorded.get("matrix") or ()),
+            recorded.get("pick"))
 
 
 def _names(named) -> str:
-    return ", ".join(path if jobs is None else f"{path} (jobs {', '.join(jobs)})"
-                     for path, jobs in named)
+    def one(path, jobs, matrix, _pick) -> str:
+        if jobs is None:
+            return path
+        return f"{path} (jobs {', '.join((*jobs, *matrix))})"
+
+    return ", ".join(one(*each) for each in named)
 
 
 def met(state: states.State, stage: str, *, tip: str, now: Now) -> bool:
@@ -474,7 +615,8 @@ def met(state: states.State, stage: str, *, tip: str, now: Now) -> bool:
 
 
 __all__ = ["READ", "LOCAL", "NONE", "STATUS", "IDS", "JOBS", "BRANCH", "STATUS_TIMEOUT_S",
-           "GREEN", "PENDING", "RED", "ABSENT", "Workflow", "Declared", "declared",
+           "GREEN", "SKIPPED", "PENDING", "RED", "ABSENT", "Workflow", "Declared",
+           "declared", "matches", "JOB", "PICK_LOG", "picked_in", "gh_repo",
            "ref_problem", "overlap_problem", "prefix_of", "ref_for", "RUN", "Now", "now_of",
            "ReadFailed", "Reading", "reading", "read", "read_runs", "run_jobs", "newest",
            "why_not", "met",

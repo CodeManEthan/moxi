@@ -597,7 +597,8 @@ class _Pass:
     def read_head(self, head: str, *, push: bool = False) -> dict | None:
         """The target's full run at `head` as read: its `green` or `red` event, read once
         the run has ended and, when red, after one rerun of its failed jobs. None until
-        then. With `push`, a head with no run is pushed to the target's `ci` ref, again
+        then. Only the full run's workflows are read (`read_full`), so a candidate's
+        scoped run at the same commit never stands in for it. With `push`, a head with no run is pushed to the target's `ci` ref, again
         once when no run shows `ABSENT_S` after the push; then it is given up on
         (`GAVE_UP`) and the director is told."""
         queue = queue_file.read(self.repo, self.env)
@@ -607,7 +608,7 @@ class _Pass:
         runs = [one for one in queue.head_runs if one.get("head") == head]
         if _newest(runs, GAVE_UP) is not None:
             return None
-        read = self.ci.read(self.place, head)
+        read = self.ci.read_full(self.place, head)
         last = _newest(runs, READ)
         if last is None or last.get("reading") != read.word:
             runs.append(queue_file.append(self.repo, {
