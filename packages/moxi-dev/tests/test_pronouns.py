@@ -31,7 +31,8 @@ def test_a_word_that_only_holds_one_is_not_refused(text):
 
 @pytest.mark.parametrize("text, word", [
     ("he's out", "he"), ("'his'", "his"), ("(him)", "him"), ("him.", "him"),
-    ("`he`", "he"), ("at him, then", "him"),
+    ("`he`", "he"), ("at him, then", "him"), ("wait...he left", "he"),
+    ("done.He left", "He"), ("a..him", "him"),
 ])
 def test_a_word_beside_punctuation_is_refused(text, word):
     assert doc_words(text) == [(1, word)]
