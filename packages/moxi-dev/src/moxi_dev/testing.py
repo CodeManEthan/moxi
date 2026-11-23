@@ -737,9 +737,10 @@ def _make_test_short_dir(root: str) -> Path:
     Its name is one character, so a fenced test's short path is as short as a short dir
     `mx-` and 8 characters made straight in the root: on macOS `/tmp/mx-<6>/<1>`, 16
     bytes, and a module's sockets under it keep within macOS's 104-byte limit. The
-    names are given in a shuffled turn, so a name comes back only after every other has
-    been given; one that exists is passed over. When every one-character name exists,
-    the name is `tempfile`'s own."""
+    names are given in shuffled turns of 36: no name repeats within a turn, and each
+    turn is a fresh shuffle, so a name may come back as soon as the next turn starts.
+    A name that exists is always passed over, so the directory is always new. When every
+    one-character name exists, the name is `tempfile`'s own."""
     tried: list[str] = []
     while len(tried) < len(_SHORT_NAME_CHARS):
         if not _SHORT_NAMES:

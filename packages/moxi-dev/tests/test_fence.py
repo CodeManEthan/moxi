@@ -586,7 +586,8 @@ def test_a_test_s_short_dir_has_a_one_character_name(fence):
     assert fence.env["TMPDIR"] == str(fence.short)
 
 
-def test_the_short_names_come_in_a_turn_and_pass_over_one_that_exists(fence, monkeypatch):
+def test_no_short_name_repeats_in_a_turn_and_one_that_exists_is_passed_over(fence,
+                                                                             monkeypatch):
     names = testing._SHORT_NAME_CHARS
     root = fence.short / "names"
     root.mkdir()
@@ -596,8 +597,9 @@ def test_the_short_names_come_in_a_turn_and_pass_over_one_that_exists(fence, mon
         made = testing._make_test_short_dir(str(root))
         given.append(made.name)
         made.rmdir()
-    assert sorted(given) == sorted(names)           # each once before any comes back
+    assert sorted(given) == sorted(names)           # one turn: 36 distinct names
     (root / given[0]).mkdir()                        # one left behind
+    # The next turn's 35 gives: the existing name is passed over each time it comes up.
     made = {testing._make_test_short_dir(str(root)).name for _ in names[1:]}
     assert made == {*names} - {given[0]}
     longer = testing._make_test_short_dir(str(root))    # every one-character name is taken
