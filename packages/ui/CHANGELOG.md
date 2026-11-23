@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- On the modules view, each block's card says `Reading…` until its block first takes up
+  height, rather than showing an empty card while the block's script and first read
+  are out.
 - While reads that decide a page's layout are out, `client.js` marks the page root (the
   shell's `#moxi-panel`) with `data-reading="<n>"`, their count, and takes the mark away
   at none: each `api` read until its answer has been drawn, each `subscribe` until its

@@ -1,6 +1,7 @@
 // <moxi-ui-page>: the shell's own panel. With `route` "" it is Home, drawn by
 // <moxi-ui-home>. With `route` "modules" it is the modules view: every module's block
-// that asks for home and has no seat on Home, then every installed module with its state,
+// that asks for home and has no seat on Home (each card says `Reading…` until its block
+// first takes up height), then every installed module with its state,
 // its page and its components, and a Check that shows the doctor's rows for it, then the
 // shell's page servers block. With
 // `route` "settings" or under it, it is the Settings page, drawn by <moxi-ui-settings>,
@@ -89,6 +90,23 @@ const STYLES = css`
   ul.rows li > * { color: var(--moxi-text); }
   .problem { padding: 8px 12px; border-radius: var(--moxi-radius); background: var(--moxi-error-soft); color: var(--moxi-error); }
 `;
+
+/** The `Reading…` line a block's card shows until the block placed in `host` first takes
+ * up height, so a card is never drawn empty while its block's script and first read are
+ * out. */
+function readingLine(host: HTMLElement): HTMLElement {
+  const line = document.createElement("p");
+  line.className = "small dim";
+  line.dataset.line = "reading";
+  line.textContent = "Reading…";
+  const seen = new ResizeObserver(() => {
+    if (host.offsetHeight === 0) return;
+    seen.disconnect();
+    line.remove();
+  });
+  seen.observe(host);
+  return line;
+}
 
 export class UiPage extends LitElement {
   static styles = STYLES;
@@ -238,7 +256,7 @@ export class UiPage extends LitElement {
       const title = document.createElement("h2");
       title.textContent = block.title;
       const host = document.createElement("div");
-      card.append(title, host);
+      card.append(title, readingLine(host), host);
       (card.dataset.block === LAST_BLOCK ? last : home).append(card);
       // A script that gave no element and answers fine gets one more try; one with no
       // script declared has nothing to fetch again.

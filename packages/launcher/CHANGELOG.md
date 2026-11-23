@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- A `launches` value from the stream that leaves out a launch the page shows is read
+  again from `/api/launches` instead of drawn. The stream can hand over a list older than
+  the page's own read, which took a launch away from `Launches` for a moment and moved
+  everything under it, the past sessions' buttons included.
 - A launch follows its Claude session when Claude Code replaces the session's turns
   endpoint (each plugin reload does). A held Claude claim moves only to an endpoint whose
   parent process is the launch's own `claude`, the row's `pid` and `pid_started`

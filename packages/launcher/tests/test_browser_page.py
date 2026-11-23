@@ -436,16 +436,16 @@ def test_a_past_terminal_session_gives_the_command_to_resume(ui_shell, ui_page):
 
 
 def test_a_past_go_session_resumes_only_with_a_brief_which_its_command_carries(ui_shell,
-                                                                               ui_page):
+                                                                               ui_page, ui_press):
     sid = kit.seed(ui_shell, "past-go", target="terminal", posture="go")
     panel = kit.open_panel(ui_page)
     past = panel.locator('section.past li[data-request="past-go"]')
     resume = past.get_by_role("button", name="Command to resume")
-    resume.click()
+    ui_press(resume)
     refused = past.locator('[data-field="resumed"] [data-code]')
     expect(refused).to_have_attribute("data-code", "posture-brief")
     expect(refused).to_contain_text("posture go needs a brief on a resume")
     past.get_by_label("Brief", exact=True).fill("Carry on.")
-    resume.click()
+    ui_press(resume)
     expect(past.locator("[data-copy]")).to_have_text(
         f"moxi launcher resume {sid} --brief 'Carry on.'")
