@@ -147,7 +147,7 @@ whose `re:` names the root or a member; the verified ones count. It is closed wh
    `[threads] reply_cap` in comms' config file (default 8);
 2. its newest message has been readable by the replier for an hour. The daemon's
    `readable` read says when it handed each message over, and which it still
-   has in its queue for him; mail not yet handed over starts no clock;
+   has in its queue for him; mail not yet handed over starts no clock; <!-- noqa: MX5 -- the replier, any member -->
 3. a verified member carries `[no reply]`.
 
 A reply in a closed thread is refused with a text that names a new send as the cure,
