@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+- A project's `private_files` lists files its repo neither tracks nor shows, such as an
+  `AGENTS.md` that `.git/info/exclude` hides. `commission` copies each into the new
+  worktree, never linking it, records each copy's source and `sha256` in
+  `build.commissioned` as `brought`, and names each in the commission block. It refuses
+  an entry that is missing, not a file, tracked at the commit the worktree checks out,
+  or not ignored. The removal rule lets an unchanged copy go with the worktree and keeps
+  the worktree for an edited one. A new finish gate, 11, refuses while any commit
+  finishing would bring into the target holds a private file, a path under one, or a
+  file where its folder would be; `check` reads it before it runs and `finish` again
+  under its lock. `moxi rounds doctor` gains a private files row.
 - Under a test, rounds refuses its own directories when no Moxi variable places them
   (`MOXI_ROUNDS_<KIND>_HOME`, `MOXI_ROUNDS_HOME` or `MOXI_HOME`), and a project's folders
   when no Moxi variable places the projects registry: those are the real ones. It raises
