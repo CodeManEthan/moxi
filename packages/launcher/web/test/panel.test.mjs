@@ -225,6 +225,15 @@ test("each field kind's empty state goes in leave_out, and the harness never doe
   assert.deepEqual(requestOf(fields, { harness: null }, WITHHELD, new Set()), { values: {}, leave_out: [] });
 });
 
+test("a bool whose default is true sends unticked as false, since left out it would launch ticked", () => {
+  const fields = [field("takes_policy_directors", { type: "bool", default: "true" }),
+                  field("scratch", { type: "bool", default: "false" })];
+  assert.deepEqual(requestOf(fields, { takes_policy_directors: "false", scratch: "false" }, new Set(), new Set()),
+                   { values: { takes_policy_directors: "false" }, leave_out: ["scratch"] });
+  assert.deepEqual(requestOf(fields, { takes_policy_directors: "true" }, new Set(), new Set()),
+                   { values: { takes_policy_directors: "true" }, leave_out: [] });
+});
+
 test("a kept withheld text is in neither list; unticked it is left out; typed it is the user's own", () => {
   const fields = filled();
   assert.deepEqual(requestOf(fields, { brief: null }, WITHHELD, new Set(["brief"])), { values: {}, leave_out: [] });

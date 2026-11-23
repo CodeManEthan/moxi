@@ -40,6 +40,14 @@ outside comms.
   `identity_state(name, scope=None)`,
   `caller_identity(env=None)`, `record_dir()`, `daemon_socket()`.
 * Names: `GLOBAL`, `qualify`, `split_tag`, `NAME_RE`.
+* Directors: `policy_directors()`, the names the box's `[policy] directors` sets that
+  hold a standing row now, qualified (empty when comms' config or its directory can't be
+  read), and `effective(declared, *, own, use_policy)`, the one merge of a launch's own
+  directors with the box's policy directors, for an adapter kind built outside comms
+  (it loads the box's comms config; a comms caller may pass its own second): it returns
+  the whole list and the part only the policy gave, which the adapter's holder writes
+  into its claim as `directors` and `policy_directors`.
+  `Agent`, `Owner` and `RosterRow` carry both lists, read from the claim files.
 * `CODEX_RESUME`: True when the Codex wrapper, `moxi comms codex --name N`, takes
   `--resume THREAD_ID`; a comms without it has no resume.
 * `ENDS_ON_BIND_TIMEOUT`: a frozenset of harness names, `{"claude", "codex"}`: the
@@ -74,6 +82,7 @@ from moxi import modules as _modules
 from .. import cache as _cache
 from .. import claimfile as _claimfile
 from .. import config as _config
+from .. import directors as _directors
 from .. import directory as _directory
 from .. import kinds as _kinds
 from .. import machine_line as _machine_line
@@ -88,7 +97,7 @@ from ..claimhold import ClaimServer
 from ..client import DaemonError, DaemonOffline
 from ..constants import (BACKEND_ENV, CLAIM_SOCKET_ENV, COMMAND_ENV, DIRECTORS_ENV,
                          GLOBAL_ENV, MOCK_BACKEND_ENV, NAME_ENV, OPERATOR_ENV,
-                         PROJECT_ENV, SCOPE_ENV, SECRET_PREFIX_ENV, SHELL_REACH_ENV,
+                         POLICY_DIRECTORS_ENV, PROJECT_ENV, SCOPE_ENV, SECRET_PREFIX_ENV, SHELL_REACH_ENV,
                          SHIM_SOCKET_ENV, TOKEN_ENV, TOKEN_STORE_ENV, URL_ENV)
 from ..scoping import GLOBAL, NAME_RE, is_auto_name, qualify, split_tag
 from ..sending import (DELIVERIES, EXIT_CODES, OUTCOMES, DeleteResult, Recipient, Refusal,
@@ -324,8 +333,8 @@ def caller_identity(env=None) -> str | None:
 
 @dataclass(frozen=True)
 class Agent:
-    """A bound name: its binding as the daemon holds it, and the directors its session
-    declared at launch."""
+    """A bound name: its binding as the daemon holds it, the directors its session runs
+    with, and the part of them only the box's `[policy] directors` gave."""
 
     qualified: str
     name: str
@@ -333,6 +342,7 @@ class Agent:
     tier: str | None
     adapter: str | None
     directors: tuple = ()
+    policy_directors: tuple = ()
 
 
 @dataclass(frozen=True)
@@ -375,18 +385,20 @@ class Roster:
 @dataclass(frozen=True)
 class Owner:
     """Which identity owns one session id now (`identity` None when no live binding
-    does), its adapter kind, the directors it declared, and whom it awaits."""
+    does), its adapter kind, its directors (and the policy part of them), and whom it
+    awaits."""
 
     session_id: str
     identity: str | None
     adapter: str | None = None
     directors: tuple = ()
     awaiting: tuple = ()
+    policy_directors: tuple = ()
 
 
 def _declared_directors() -> dict:
-    """qualified -> the directors its live claim declares. Claim files that can't be
-    read declare none: the daemon's answer stands without them."""
+    """qualified -> (the directors its live claim holds, the policy part of them). Claim
+    files that can't be read declare none: the daemon's answer stands without them."""
     out = {}
     try:
         records = _claimfile.live_records()
@@ -396,12 +408,40 @@ def _declared_directors() -> dict:
         qualified = _claimfile.held_identity(record)
         if qualified:
             claim = record.get("claim") or {}
-            out.setdefault(qualified, tuple(claim.get("directors") or ()))
+            out.setdefault(qualified, (tuple(claim.get("directors") or ()),
+                                       tuple(claim.get("policy_directors") or ())))
     return out
 
 
+def policy_directors() -> tuple:
+    """The names the box's `[policy] directors` sets that hold a standing row now,
+    qualified, in the setting's order: the policy directors that can direct. Empty when
+    comms' config or its directory can't be read (`moxi comms doctor` says why)."""
+    try:
+        names = _config.load().policy.directors
+    except _config.ConfigError:
+        return ()
+    held = _directory.provisioned(names)
+    return tuple(name for name in names if name in held) if held else ()
+
+
+def effective(declared, config=None, *, own: str, use_policy: bool) -> tuple[list, list]:
+    """A launch's directors and the part of them only the box's policy gave
+    (`directors.effective`): `declared` then the policy directors not already there, when
+    `use_policy`, without `own`, the launching session's qualified identity.
+
+    `config` is left out by a caller outside comms: the box's comms config is then
+    loaded when `use_policy`, as comms' own wrappers load it. A comms caller holding one
+    already passes it. Raises `moxi.config.ConfigError` when that config can't be read,
+    and `ValueError` for a declared name that is not a name."""
+    if config is None and use_policy:
+        config = _config.load()
+    return _directors.effective(declared, config, own=own, use_policy=use_policy)
+
+
 def roster(*, timeout_s: float = READ_DEADLINE) -> Roster:
-    """The bound agents with their declared directors, the standing names (the
+    """The bound agents with their directors (the launch-declared ones and the policy
+    ones, `policy_directors` saying which), the standing names (the
     directory's standing rows and the reserved send-only names) and the mail waiting per
     name, as the daemon's `agents` answer lists them. Raises `DaemonOffline` or
     `DaemonError`."""
@@ -413,7 +453,8 @@ def roster(*, timeout_s: float = READ_DEADLINE) -> Roster:
     directors = _declared_directors()
     bound = tuple(Agent(qualified=b["qualified"], name=b.get("name"), scope=b.get("scope"),
                         tier=b.get("tier"), adapter=b.get("adapter"),
-                        directors=directors.get(b["qualified"], ()))
+                        directors=directors.get(b["qualified"], ((), ()))[0],
+                        policy_directors=directors.get(b["qualified"], ((), ()))[1])
                   for b in answer.get("bindings") or ())
     standing = tuple(Standing(qualified=s["qualified"], name=s.get("name"),
                               scope=s.get("scope"), kind=s.get("kind"),
@@ -459,18 +500,19 @@ def _reserved(qualified: str) -> tuple[bool, str | None, str | None]:
 
 
 def owner(session_id: str, *, timeout_s: float = READ_DEADLINE) -> Owner:
-    """Which identity owns `session_id` now, with its declared directors and whom it
-    awaits. Raises `DaemonOffline`, or `DaemonError` (an empty id among them)."""
+    """Which identity owns `session_id` now, with its directors (launch-declared and
+    policy, `policy_directors` saying which) and whom it awaits. Raises `DaemonOffline`,
+    or `DaemonError` (an empty id among them)."""
     client = _daemon(timeout_s)
     try:
         answer = client.call("owner", {"session_id": str(session_id)})
     finally:
         client.close()
     identity = answer.get("owner")
+    held, policy = _declared_directors().get(identity, ((), ())) if identity else ((), ())
     return Owner(session_id=answer.get("session_id", session_id), identity=identity,
-                 adapter=answer.get("adapter"),
-                 directors=_declared_directors().get(identity, ()) if identity else (),
-                 awaiting=tuple(answer.get("awaiting") or ()))
+                 adapter=answer.get("adapter"), directors=held,
+                 awaiting=tuple(answer.get("awaiting") or ()), policy_directors=policy)
 
 
 @dataclass(frozen=True)
@@ -495,7 +537,9 @@ class RosterRow:
     (the daemon's clock, epoch seconds), `awaiting` (whom that session waits on) and
     `cache` (a `CacheFact`) are a live row's, empty when the daemon couldn't say. `cache`
     is None too for any read but `warm` or `cold`, and for one with no age or lifetime,
-    so it is None for every row on a box without the cache module. `via` is comms' words
+    so it is None for every row on a box without the cache module. `policy_directors` is
+    the part of a live row's `directors` only the box's `[policy] directors` gave. `via`
+    is comms' words
     for what a live row's binding is when its adapter kind says so: `Claude's apps,
     through the connector` for the connector's kind while the connector module is
     installed; None for every other row."""
@@ -515,6 +559,7 @@ class RosterRow:
     cache: CacheFact | None = None
     holder: str | None = None
     via: str | None = None
+    policy_directors: tuple = ()
 
 
 #: The module that hosts comms' tools in the Claude apps, which bind as the connector kind.
@@ -564,7 +609,8 @@ def roster_rows(*, timeout_s: float = READ_DEADLINE, with_roster: bool = False):
             tier=agent.tier, adapter=agent.adapter, directors=tuple(agent.directors),
             session_id=session_id, bound_at=bound_at, awaiting=awaiting, cache=cache,
             holder=getattr(kept, "holder", None) if kept else None,
-            via=_via(agent.adapter)))
+            via=_via(agent.adapter),
+            policy_directors=tuple(getattr(agent, "policy_directors", ()) or ())))
     for row in standing.values():
         rows.append(RosterRow(
             qualified=row.qualified, name=row.name, scope=row.scope, live=False,
@@ -718,7 +764,8 @@ __all__ = [
     "session", "session_of", "caller_identity", "roster", "owner", "Roster", "Agent",
     "Standing", "Waiting", "Owner", "roster_rows", "RosterRow", "CacheFact",
     "identity_state", "IdentityState", "Holder", "IDENTITY_STATES", "record_dir",
-    "daemon_socket", "GLOBAL", "qualify", "split_tag", "NAME_RE",
+    "daemon_socket", "GLOBAL", "qualify", "split_tag", "NAME_RE", "policy_directors",
+    "effective", "POLICY_DIRECTORS_ENV",
     "DaemonError", "DaemonOffline", "BACKEND_ENV", "CLAIM_SOCKET_ENV", "COMMAND_ENV",
     "DIRECTORS_ENV", "GLOBAL_ENV", "MOCK_BACKEND_ENV", "NAME_ENV", "OPERATOR_ENV",
     "PROJECT_ENV", "SCOPE_ENV", "SECRET_PREFIX_ENV", "SHELL_REACH_ENV",

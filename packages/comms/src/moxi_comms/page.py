@@ -83,6 +83,8 @@ ROW = lb.Out("table", items={
     }),
     "holder": lb.Out("string", nullable=True),
     "via": lb.Out("string", nullable=True),
+    #: The part of `directors` only the box's `[policy] directors` gave.
+    "policy_directors": lb.Out("list", items=lb.Out("string")),
 })
 
 #: The rows and how they stand: `state` is `up`, `offline` or `error`; `detail` is null

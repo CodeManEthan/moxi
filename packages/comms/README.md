@@ -43,10 +43,12 @@ session's `prompt` listeners can tell a comms delivery from a prompt the user ty
 
 Two words come up throughout. The **operator** is the human running this system: you,
 sending from your own terminal as the `operator` identity; the operator's messages are
-always shown to an agent as directives. A **director** is an identity a session was told
-at launch to take direction from (`moxi comms claude --director <name>`); its verified
-messages are shown to that session as directives, and every other message as information
-from a peer.
+always shown to an agent as directives. A **director** is an identity a session takes
+direction from: one its launch names (`moxi comms claude --director <name>`), or one the
+box's own comms config names for every session, `[policy] directors` (by default
+`fleet-lead`, which directs only once it is provisioned as a standing identity; a launch
+opts out with `--no-policy-directors`). Its verified messages are shown to that session
+as directives, and every other message as information from a peer.
 
 ## Install
 

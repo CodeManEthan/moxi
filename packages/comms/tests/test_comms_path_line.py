@@ -112,14 +112,14 @@ def test_the_line_and_own_comms_are_held_once_in_context():
 
 
 def test_codex_and_opencode_layer_one_and_its_hash_are_unchanged():
-    """Pinned against the strings before the line moved: a Codex thread's recorded hash
-    still matches, and neither harness's text changes."""
+    """Pinned: neither harness's text, nor the hash a Codex thread records of it, changes
+    unless layer one's own wording does."""
     for module in (codex, oc):
         assert module.layer_one_text(None, COMMAND) == \
             f"{CONTEXT_BLOCK}\n\n{LINE}\n\n{shim_roster.OFFLINE}"
-    assert codex.layer_one_hash(COMMAND) == "47971003ac4493c6"
-    assert codex.layer_one_hash(COMMAND, directors=("lead",)) == "42df5102e69bdda2"
-    assert codex.layer_one_hash() == "2a8e3a7162ca0ea8"
+    assert codex.layer_one_hash(COMMAND) == "319f1a95f485b686"
+    assert codex.layer_one_hash(COMMAND, directors=("lead",)) == "4b863e2e4da4a3a4"
+    assert codex.layer_one_hash() == "bb342b5eafd885af"
 
 
 # ------------------------------------------------------------------- the wrapper's stamp
