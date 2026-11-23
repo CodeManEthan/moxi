@@ -9164,6 +9164,7 @@ rounds	packages/rounds/src/moxi_rounds/asking.py	written = write.record(write.Wh
 rounds	packages/rounds/src/moxi_rounds/asking.py	written = write.record(write.Where(home.project, home.folder, slug), actor=by,	use	home.folder	home.rounds_dir
 rounds	packages/rounds/src/moxi_rounds/asking.py	written = write.record(write.Where(home.project, home.folder, slug), by=by,	use	home.folder	home.rounds_dir
 rounds	packages/rounds/src/moxi_rounds/batching.py	"members": [{"round": one.name, "stage": one.stage, "tip": one.tip}	keep	round	round
+rounds	packages/rounds/src/moxi_rounds/batching.py	recorded = {(one.get("round"), one.get("stage"), one.get("tip"))	keep	round	round
 rounds	packages/rounds/src/moxi_rounds/batching.py	QueueGit(self.root).run_git("branch", "-D", "--quiet", branch, ok=(0, 1))	keep	ok	ok
 rounds	packages/rounds/src/moxi_rounds/batching.py	_builder, lead = self.people(str(one["round"]), str(one["stage"]))	keep	round	round
 rounds	packages/rounds/src/moxi_rounds/batching.py	elif any(one.get("kind") == PUSH_FAILED for one in batch.runs):	keep	any	any
@@ -9981,7 +9982,7 @@ rounds	packages/rounds/src/moxi_rounds/queue_file.py	key = (event.get("round"), 
 rounds	packages/rounds/src/moxi_rounds/queue_file.py	members=tuple((str(one["round"]), str(one["stage"]), str(one["tip"]))	keep	round	round
 rounds	packages/rounds/src/moxi_rounds/queue_file.py	name=str(event.get("round")), stage=str(event.get("stage")),	keep	round	round
 rounds	packages/rounds/src/moxi_rounds/queue_file.py	path.parent.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
-rounds	packages/rounds/src/moxi_rounds/queue_log.py	`show` read a member's standing from the round alone. `standing(state, stage)` gives the	keep	show	show
+rounds	packages/rounds/src/moxi_rounds/queue_log.py	without another member) writes `queue.requeued` for it, so the gates, `next` and `show`	keep	show	show
 rounds	packages/rounds/src/moxi_rounds/queue_view.py	for position, member in enumerate(members, start=1):	keep	start	start
 rounds	packages/rounds/src/moxi_rounds/readback.py	"record": ruling.record, "supersedes": ruling.supersedes,	keep	record	record
 rounds	packages/rounds/src/moxi_rounds/readback.py	if time is not None), default=None)	keep	default	default
@@ -11438,6 +11439,8 @@ rounds	packages/rounds/tests/test_queue_batch.py	candidate = any(pushed == commi
 rounds	packages/rounds/tests/test_queue_batch.py	hook.parent.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
 rounds	packages/rounds/tests/test_queue_batch.py	return {"event": queue_file.JOIN, "round": name, "stage": "B1", "tip": "a" * 40,	keep	round	round
 rounds	packages/rounds/tests/test_queue_batch.py	queue_file.append("proj-a", {"event": queue_file.LEFT, "round": OTHER, "stage": "B1",	keep	round	round
+rounds	packages/rounds/tests/test_queue_batch.py	for event in ({"event": queue_file.LEFT, "round": ROUND, "stage": "B1", "tip": old,	keep	round	round
+rounds	packages/rounds/tests/test_queue_batch.py	{"event": queue_file.JOIN, "round": ROUND, "stage": "B1", "tip": new,	keep	round	round
 rounds	packages/rounds/tests/test_queue_join.py	"members": [{"round": ROUND, "stage": "B1", "tip": tree.rev()}]})	keep	round	round
 rounds	packages/rounds/tests/test_queue_join.py	assert any("check of B1 has not passed" in one.reason for one in caught.value.unmet)	keep	any	any
 rounds	packages/rounds/tests/test_queue_join.py	assert cli.main(["projects", "set", "proj-a", "--notes-root",	keep	set	set
