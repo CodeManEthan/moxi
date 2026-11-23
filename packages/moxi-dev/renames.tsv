@@ -17657,8 +17657,8 @@ rounds	packages/rounds/src/moxi_rounds/private_files.py	proc.wait(timeout=GIT_TI
 rounds	packages/rounds/src/moxi_rounds/private_files.py	code, out = git._run("config", "--bool", "core.ignorecase", ok=(0, 1))	keep	ok	ok
 rounds	packages/rounds/src/moxi_rounds/private_files.py	out = git._run("rev-list", "--reverse", "--format=%T", tip, "--not", head)[1]	keep	refusing	refusing
 rounds	packages/rounds/src/moxi_rounds/private_files.py	code, _out = git._run("check-ignore", "-q", "--", path, ok=(0, 1))	keep	ok	ok
-rounds	packages/rounds/src/moxi_rounds/private_files.py	code, out = Git(worktree)._run("check-ignore", "-v", "--no-index", "--", path,	keep	refusing	refusing
-rounds	packages/rounds/src/moxi_rounds/private_files.py	ok=(0, 1))	keep	ok	ok
+rounds	packages/rounds/src/moxi_rounds/private_files.py	code, out = Git(worktree)._run("check-ignore", "-v", "-z", "--no-index", "--stdin",	keep	refusing	refusing
+rounds	packages/rounds/src/moxi_rounds/private_files.py	ok=(0, 1), stdin_data=path + "\0")	keep	ok	ok
 rounds	packages/rounds/src/moxi_rounds/private_files.py	place.parent.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
 rounds	packages/rounds/src/moxi_rounds/settings.py	seen = set()	keep	set	set
 rounds	packages/rounds/src/moxi_rounds/settings.py	if any(ord(char) < 32 or ord(char) == 127 for char in entry):	keep	any	any

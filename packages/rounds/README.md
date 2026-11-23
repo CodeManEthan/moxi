@@ -1282,13 +1282,13 @@ into the new worktree, the same way on every system, and never links it: it refu
 having made nothing, while one is missing or not a file at the root, is held by the
 commit the worktree checks out, or reads as not ignored to git at the root, and stops
 with nothing copied while git in the new worktree does not read each one as ignored
-(the fix names the exclude file, or the `.gitignore` line that un-ignores it). Each
-file must read as ignored, so `git add -A` in the worktree does not pick it up, and
-finish's gate 11 keeps any commit that holds one out of the target. A copy is the source
-as it was at the commission. An edit of it changes only the worktree's copy, and keeps
-the worktree when the build ends, as work, until the file is restored from its source
-or deleted; an unchanged copy goes with the worktree. `moxi rounds doctor` warns of an
-entry `commission` would refuse.
+(the fix names the exclude file, or the line, in a `.gitignore` or an exclude file,
+that un-ignores it). Each file must read as ignored, so `git add -A` in the worktree
+does not pick it up, and finish's gate 11 keeps any commit that holds one out of the
+target. A copy is the source as it was at the commission. An edit of it changes only the
+worktree's copy, and keeps the worktree when the build ends, as work, until the file is
+restored from its source or deleted; an unchanged copy goes with the worktree.
+`moxi rounds doctor` warns of an entry `commission` would refuse.
 
 A project's table may set `land`: `"finish"` (the default), where each build lands by
 its own finish, or `"queue"`, where a finish joins the repo's merge queue and a lander

@@ -383,25 +383,52 @@ def _is_regular(path: Path) -> bool:
         return False
 
 
-def _negation(worktree: Path, path: str) -> str | None:
-    """The `!` pattern that un-ignores `path` in the worktree, as `source:line:pattern`,
-    or None when no pattern matches it."""
-    code, out = Git(worktree)._run("check-ignore", "-v", "--no-index", "--", path,
-                                   ok=(0, 1))
-    said = out.split("\t", 1)[0].strip()
-    if code != 0 or not said:
+@dataclass(frozen=True)
+class Negation:
+    """A `!` `pattern` that un-ignores a path: the file it is in (`source`, as git names
+    it) and its `line`."""
+
+    source: str
+    line: str
+    pattern: str
+
+    def __str__(self) -> str:
+        return f"{self.source}:{self.line}:{self.pattern}"
+
+    @property
+    def in_tree(self) -> bool:
+        """Whether it is in a `.gitignore` of the work tree, which git names by a path
+        relative to it; an exclude file is named by its own path."""
+        source = Path(self.source)
+        return not source.is_absolute() and source.name == ".gitignore"
+
+
+def negation_of(said: str) -> Negation | None:
+    """The negation `git check-ignore -v -z` reports in `said`, its fields each ended by
+    a NUL, or None when it reports no pattern or one that is not a negation. The fields
+    are read by the NUL alone, so a colon in the file's path (a drive letter) or in the
+    pattern is read as text."""
+    fields = said.split("\0")
+    if len(fields) < 3 or not fields[0] or not fields[2].startswith("!"):
         return None
-    pattern = said.split(":", 2)[-1]
-    return said if pattern.startswith("!") else None
+    return Negation(source=fields[0], line=fields[1], pattern=fields[2])
+
+
+def _negation(worktree: Path, path: str) -> Negation | None:
+    """The `!` pattern that un-ignores `path` in the worktree, or None when no pattern
+    matches it."""
+    code, out = Git(worktree)._run("check-ignore", "-v", "-z", "--no-index", "--stdin",
+                                   ok=(0, 1), stdin_data=path + "\0")
+    return negation_of(out) if code == 0 else None
 
 
 def bring(root: Path, worktree: Path, entries: Sequence[str], *, branch: str,
           is_new_branch: bool, again: str) -> list[dict]:
     """Copy each private file of `entries` from the repo at `root` into `worktree`, and
-    give each one's `{"path", "from", "sha256"}`. Raises
-    `RoundsError` with nothing copied when git in the worktree does not read every
-    entry as ignored, and when a place holds anything but a regular file with the
-    source's bytes; and on any failure of the copy, naming the entry."""
+    give each one's `{"path", "from", "sha256"}`. Raises `RoundsError` with nothing
+    copied when git in the worktree does not read every entry as ignored, and when a
+    place holds anything but a regular file with the source's bytes; and on any failure
+    of the copy, naming the entry."""
     if not entries:
         return []
     worktree_git = Git(worktree)
@@ -410,12 +437,20 @@ def bring(root: Path, worktree: Path, entries: Sequence[str], *, branch: str,
         if code == 0:
             continue
         negation = _negation(worktree, path)
-        if negation is None:
+        if negation is None or not negation.in_tree:
             exclude = exclude_file(Git(root))
+        if negation is None:
             raise RoundsError(
                 f"git in the worktree {worktree} does not read the private file {path} "
                 "as ignored: no pattern there matches it, so nothing was copied",
                 f"add the line {path} to {exclude}, then: {again}")
+        if not negation.in_tree:
+            raise RoundsError(
+                f"git in the worktree {worktree} does not read the private file {path} as "
+                f"ignored: {negation} un-ignores it, and no pattern of the commit checked "
+                "out ignores it, so nothing was copied",
+                f"remove the line {negation.pattern} from {negation.source}, and add the "
+                f"line {path} to {exclude} if it is not there; then: {again}")
         undo = f"git -C {root} worktree remove {worktree}"
         if is_new_branch:
             undo += f", then git -C {root} branch -D {branch}"
@@ -493,4 +528,4 @@ def is_unchanged(place: Path, path: str, brought: object) -> bool:
 
 __all__ = ["NAMED_COMMITS", "Held", "Trees", "listed", "private_paths", "held", "words",
            "ignores_case", "exclude_file", "is_ignored", "unmet", "doctor_warnings",
-           "bring", "is_unchanged"]
+           "Negation", "negation_of", "bring", "is_unchanged"]

@@ -8,6 +8,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
 import shutil
 from pathlib import Path
 
@@ -318,6 +319,50 @@ def test_a_committed_negation_stops_naming_its_line_and_the_remove_fix(repo, ope
         # The exclude file alone does not win over the branch's own .gitignore.
         exclude(repo, "AGENTS.md")
     assert commissioned(opened) == []
+
+
+def test_a_negation_in_a_crlf_exclude_file_stops_naming_it_and_its_fix(repo, opened):
+    # The branch's commit has no .gitignore; main's ignores AGENTS.md, which wins over
+    # the exclude file at the root, so only the worktree reads the exclude's negation.
+    repo.switch("work", new_from="main")
+    repo.switch("main")
+    repo.commit(".gitignore", "AGENTS.md")
+    path = repo.root / ".git" / "info" / "exclude"
+    before = path.read_bytes()
+    with open(path, "ab") as fh:
+        fh.write(b"other.md\r\n!AGENTS.md\r\n")
+
+    with pytest.raises(RoundsError) as caught:
+        commission(existing=True)
+
+    assert re.search(r"info/exclude:\d+:!AGENTS\.md un-ignores it", caught.value.reason)
+    assert caught.value.fix.startswith("remove the line !AGENTS.md from ")
+    assert "info/exclude, and add the line AGENTS.md to" in caught.value.fix
+    assert "worktree remove" not in caught.value.fix
+    assert not (worktree_place() / "AGENTS.md").exists()
+    assert commissioned(opened) == []
+
+    path.write_bytes(before + b"other.md\r\n")
+    made = commission(existing=True)
+
+    assert made.adopted
+    assert (made.worktree / "AGENTS.md").read_text(encoding="utf-8") == SECRET
+
+
+@pytest.mark.parametrize("said, want", [
+    ("C:/Users/a/r/.git/info/exclude\x008\x00!AGENTS.md\x00AGENTS.md\x00",
+     ("C:/Users/a/r/.git/info/exclude", "8", "!AGENTS.md", False)),
+    ("sub/.gitignore\x002\x00!a:1:b\x00sub/a:1:b\x00", ("sub/.gitignore", "2", "!a:1:b", True)),
+    ("/home/a/ignore\x001\x00!.gitignore\x00.gitignore\x00",
+     ("/home/a/ignore", "1", "!.gitignore", False)),
+    (".gitignore\x001\x00AGENTS.md\x00AGENTS.md\x00", None),
+    ("\x00\x00\x00AGENTS.md\x00", None),
+    ("", None)])
+def test_a_negation_is_read_by_its_nul_ended_fields(said, want):
+    found = private_files.negation_of(said)
+
+    assert (found if found is None else
+            (found.source, found.line, found.pattern, found.in_tree)) == want
 
 
 # -- a rerun -------------------------------------------------------------------------------
