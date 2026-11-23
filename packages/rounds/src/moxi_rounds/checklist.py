@@ -189,6 +189,127 @@ def skills(found: Iterable[Item]) -> list[str]:
     return list(dict.fromkeys(skill for item in found for skill in item.skills))
 
 
+# -- what a step is told -----------------------------------------------------------------
+
+#: The kinds of group a checklist is said in: the designer drafting, the design's
+#: verification, and a build's steps (its build, its verification, a report step of the
+#: user's own and the commission block).
+DRAFTING = "design"
+CHECKING = "verify-design"
+BUILDING = "build"
+_KINDS = (DRAFTING, CHECKING, BUILDING)
+
+#: How a mark whose item its project's checklist no longer has is said.
+GONE = "no longer in the checklist"
+
+
+def _declared_repos(state) -> list[str]:
+    return stage_repos(state.versions[-1].declared) if state.versions else []
+
+
+def _without_design(state) -> bool:
+    from . import flows
+
+    return not flows.has(state.steps, "design")
+
+
+def told(state, home: str, settings, *, kind: str, repo: str | None = None) -> dict | None:
+    """What a group of `kind` (`DRAFTING`, `CHECKING` or `BUILDING`) is told of the
+    checklist of the round `state`, whose home project is `home`; `repo` is the repo of
+    the build a `BUILDING` group is of. None when the round has no marks and no weighed
+    project's checklist has an item, so a round whose projects have none is told
+    nothing.
+
+    The dict holds `marked`, the round's marks; `from`, where they come from (`v<N>`,
+    `opening` or None); `skills`, each skill the marked items name, once; `gone`, the
+    marks whose item the checklist no longer has. `DRAFTING` and `CHECKING` add `items`,
+    every item of each weighed project. A `BUILDING` group of a round with no design
+    step whose `repo` is not its home adds `unweighed`, that repo's items, when the
+    round marked none of them: its marks were made before the repo was known."""
+    if kind not in _KINDS:
+        raise ValueError(f"{kind!r} is no kind of group a checklist is said in")
+    repos = _declared_repos(state)
+    if kind == BUILDING and repo is not None:
+        repos = [*repos, repo]
+    projects = weighed(home, repos)
+    marks = marks_of(state)
+    if not marks.marked and not any(items(settings, one) for one in projects):
+        return None
+    found = resolved(marks.marked, home, settings)
+    said = {"marked": list(marks.marked), "from": marks.source,
+            "skills": skills(found),
+            "gone": [one.mark for one in found if one.text is None]}
+    if kind in (DRAFTING, CHECKING):
+        said["items"] = [one.data() for one in every_item(projects, home, settings)]
+    elif (repo is not None and repo.casefold() != home.casefold()
+          and _without_design(state)
+          and not any(one.project.casefold() == repo.casefold() for one in found)):
+        left = every_item([repo], home, settings)
+        if left:
+            said["unweighed"] = {"project": repo, "items": [one.data() for one in left]}
+    return said
+
+
+def verifier_lines(state, home: str, settings, *, kind: str,
+                   repo: str | None = None) -> list[str]:
+    """The `verifier_brief` lines a verifying group of `kind` prints: for `CHECKING`,
+    the home project's, then those of each project the newest version's stages name,
+    each project once; for `BUILDING`, those of the build's `repo`."""
+    if kind == CHECKING:
+        projects = weighed(home, _declared_repos(state))
+    else:
+        projects = [] if repo is None else [repo]
+    return [str(line) for one in projects
+            for line in own.project_setting(settings, one, "verifier_brief")]
+
+
+def _item_line(item: dict) -> str:
+    text = GONE if item["text"] is None else item["text"]
+    named = f" ({', '.join(item['skills'])})" if item["skills"] else ""
+    return f"{item['id']}: {text}{named}"
+
+
+def marks_said(said: dict) -> str:
+    """The marks of `told`, each a mark no longer in the checklist said as such, and
+    the skills to load: `a, b: load x, y`, or `none`."""
+    if not said["marked"]:
+        return "none"
+    gone = set(said["gone"])
+    marks = ", ".join(f"{one} ({GONE})" if one in gone else one for one in said["marked"])
+    return f"{marks}: load {', '.join(said['skills'])}" if said["skills"] else marks
+
+
+def lines(said: dict, kind: str) -> list[str]:
+    """What `told` gave for a group of `kind`, as lines."""
+    source = said["from"]
+    out = []
+    if kind == DRAFTING:
+        out.append("checklist: mark the items that apply in the block's checklist = [...]")
+        if source is not None:
+            by = "the opening" if source == "opening" else source
+            out.append(f"  {by} marks {marks_said(said)}")
+        out += [f"  {_item_line(one)}" for one in said["items"]]
+        if source is None or source == "opening":
+            out.append("  a stage in another project: mark its items as <key>:<id>")
+        return out
+    if kind == CHECKING:
+        by = "" if source is None else f"{source} "
+        out.append(f"checklist: {by}marks {marks_said(said)}")
+        out.append("  the items, to check the marks against:"
+                   + ("" if said["items"] else " none"))
+        out += [f"    {_item_line(one)}" for one in said["items"]]
+        return out
+    out.append("checklist: none marked" if not said["marked"]
+               else f"checklist: marks {marks_said(said)}")
+    unweighed = said.get("unweighed")
+    if unweighed is not None:
+        out.append(f"checklist: {unweighed['project']}'s items were not weighed at this "
+                   "round's opening:")
+        out += [f"  {_item_line(one)}" for one in unweighed["items"]]
+    return out
+
+
 __all__ = ["KEY", "NONE", "Item", "Marks", "split", "spelled", "items", "weighed",
            "stage_repos", "problems", "parse", "marks_of", "same", "resolved",
-           "every_item", "skills"]
+           "every_item", "skills", "DRAFTING", "CHECKING", "BUILDING", "GONE", "told",
+           "verifier_lines", "marks_said", "lines"]
