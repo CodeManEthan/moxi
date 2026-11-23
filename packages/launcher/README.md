@@ -222,7 +222,16 @@ sandbox = "workspace-write"
 
 Every key is a catalog row of the preset's harness or one of the launcher's rows. A seat's
 standing text is `instructions` or `instructions_file`, never both, and a preset names at
-most one place (`cwd`, `project`, `scratch`, or a seat's `home`). `moxi launcher presets
+most one place (`cwd`, `project`, `scratch`, or a seat's `home`).
+
+**Policy directors.** comms' config names policy directors (`[policy] directors`) that
+direct every comms session on the box, on top of the directors its launch names. A seat
+or project preset opts its sessions out with `takes_policy_directors = false` (needs comms;
+`--no-takes-policy-directors` for one launch, an unticked box on the page), and the
+launcher passes comms' wrapper `--no-policy-directors`. The seat keeps its own `director`
+lines. `[defaults]` refuses the row by name (`per-seat`): one line there would opt every
+seat out. A launch with an identity that opts out is refused (`not-yet`) when the
+installed comms is older than policy directors; upgrade `moxi-comms`. `moxi launcher presets
 check` checks the whole file: types and values, rows whose module is missing, project keys,
 that an instructions file can be read, and that an agent role a preset names is found in
 the harness's agent folders.

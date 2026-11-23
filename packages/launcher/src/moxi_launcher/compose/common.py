@@ -256,7 +256,9 @@ class Context:
     when it is not installed. `comms_codex` and `comms_headless` say whether comms takes
     its Codex wrapper's per-launch settings and its headless flags, and
     `comms_codex_resume` whether that wrapper resumes a thread it is told to (read only
-    for a resume). `is_windows` picks the command line limit.
+    for a resume). `comms_has_policy` says whether comms has policy directors, so its
+    wrappers take `--no-policy-directors` (`presets.comms_has_policy`). `is_windows` picks
+    the command line limit.
 
     A replay of a stored launch sets the rest. `posture` is the start posture the
     identity block shows in place of the values' own (a relaunch's), which the values,
@@ -289,6 +291,7 @@ class Context:
     comms_codex: bool = False
     comms_codex_resume: bool = False
     comms_headless: bool = False
+    comms_has_policy: bool = False
     windows: bool = os.name == "nt"
     posture: str | None = None
     resume: bool = False
@@ -649,6 +652,28 @@ def headless_words(values: Mapping[str, object], brief: str) -> list[str]:
     return words + ["--brief", brief]
 
 
+#: The launcher row that opts a seat out of comms' policy directors when false.
+TAKES_POLICY = "takes_policy_directors"
+
+
+def director_words(values: Mapping[str, object], ctx: Context) -> list[str]:
+    """The director flags of comms' wrapper: one `--director` per `director` value, in
+    order, then `--no-policy-directors` when the launch's `takes_policy_directors` is
+    false. A comms whose wrappers don't take that flag (`Context.comms_has_policy` false)
+    has no policy directors to opt out of, and such a launch is refused (`NotYet`)
+    rather than composed with a flag its wrapper refuses."""
+    words: list[str] = []
+    for director in values.get("director") or ():
+        words += ["--director", str(director)]
+    if values.get(TAKES_POLICY) is False:
+        if not ctx.comms_has_policy:
+            raise NotYet(TAKES_POLICY, "takes_policy_directors = false needs comms' "
+                         "policy directors, which this comms does not have",
+                         "upgrade moxi-comms, or leave takes_policy_directors out")
+        words.append("--no-policy-directors")
+    return words
+
+
 def commands(values: Mapping[str, object]) -> tuple[str, ...]:
     """The session commands a launch grants through turns: `exit`, then `clear` or
     `compact` for `recycle_on_expiry`, and `compact` for `recycle_at_limit`."""
@@ -888,11 +913,12 @@ __all__ = ["BASE_NAMES", "BASE_PREFIXES", "CODEX_KEEP", "COMMANDS", "CREDENTIAL"
            "ENV_CLASS", "HEADER", "KEEP_WARM_ENV", "KEEP_WARM_LINE",
            "PROVIDER_SWITCHES", "RECORDED", "RECORDED_PREFIXES", "RECYCLE_ON_EXPIRY_ENV",
            "RELAUNCH_ENV", "RELAUNCHED", "REQUEST_ENV", "SCRUB_NAMES", "SCRUB_PREFIXES",
-           "TERMINAL_NAMES",
+           "TAKES_POLICY", "TERMINAL_NAMES",
            "WINDOWS_BASE_NAMES", "WINDOWS_LINE", "WORD", "Additions", "Composition",
            "BYPASS", "Context", "NoBrief", "NotYet", "PromptFile", "SETTINGS_SUFFIX",
            "SKIP_BYPASS_WARNING", "SettingsFile", "TooLong", "TurnsAdditions",
-           "Unreadable", "agent_role", "base_env", "check_sizes", "commands", "encode",
+           "Unreadable", "agent_role", "base_env", "check_sizes", "commands",
+           "director_words", "encode",
            "env_class", "child_env", "first_turn", "headless_words", "identity_block",
            "LIMIT_FALLBACK", "limit_mark", "locator", "no_credentials", "option_stamps",
            "prompt_path", "read_settings", "usage_default_mark",

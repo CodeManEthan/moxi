@@ -61,6 +61,16 @@ sub = "Comms"
 label = "Directors"
 shown_with = "comms"
 
+[takes_policy_directors]
+type = "bool"
+default = true
+requires = "comms"
+doc = "Whether comms' policy directors direct the session too; false opts it out. Never in [defaults]."
+group = "seat"
+sub = "Comms"
+label = "Takes policy directors"
+shown_with = "comms"
+
 [instructions]
 type = "string"
 default = ""

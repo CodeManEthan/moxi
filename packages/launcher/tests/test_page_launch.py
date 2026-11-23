@@ -220,7 +220,8 @@ def form_of(preset: dict) -> dict:
 def filled(preset: dict) -> dict:
     """The request a form filled from `/api/form` for `preset` sends untouched, as the
     panel builds it: each field with a value in `values`, each empty one in `leave_out`
-    (an unticked bool among them), a withheld text kept and in neither."""
+    (an unticked bool among them, unless its default is true: that one sends "false"), a
+    withheld text kept and in neither."""
     said = form_of(preset)
     harness = said["harness"]
     values: dict = {"harness": harness}
@@ -229,10 +230,11 @@ def filled(preset: dict) -> dict:
         name = found["name"]
         if name == "harness" or found["withheld"]:
             continue
-        kind = catalog.row(harness, name).type
+        row = catalog.row(harness, name)
         if found["items"] is not None:
             values[name] = found["items"]
-        elif found["value"] is not None and not (kind == "bool" and found["value"] == "false"):
+        elif found["value"] is not None and not (row.type == "bool" and found["value"] == "false"
+                                                 and row.default is not True):
             values[name] = found["value"]
         else:
             leave_out.append(name)
@@ -569,8 +571,10 @@ def _sample(row: catalog.Row, work: Path) -> tuple[object, dict]:
         return "2x", {"recycle_at_limit": "compact"}
     if row.name == "slot":
         return "3", {"target": "slot"}
-    if row.optional_value or row.type == "bool":
+    if row.optional_value:
         return True, {}
+    if row.type == "bool":
+        return not row.default, {}
     if row.values:
         return next(v for v in row.values if v != row.default), {}
     if row.name == catalog.EXTRA:
@@ -590,7 +594,8 @@ EVERY_ROW = [(harness, name, layer)
              for harness in catalog.HARNESSES
              for name in catalog.offered(harness, _every_module_but_projects)
              if name not in ("harness", "project")
-             for layer in ("defaults", "seat")]
+             for layer in ("defaults", "seat")
+             if not (layer == "defaults" and name in presets.PER_SEAT)]
 
 
 def _resolved(request) -> tuple:
@@ -618,12 +623,39 @@ def test_every_row_a_layer_sets_is_kept_as_filled_and_left_out_when_emptied(
     request, command = pagehandlers.launch_request(body, "r1")
     assert dict(request.typed) == {} and tuple(request.left_out) == ()
     assert "--leave-out" not in command
+    row = catalog.row(harness, name)
+    if row.type == "bool" and row.default is True:
+        # The panel has no empty state for it: unticked sends false, ticked true.
+        return
     # Emptied as the panel empties it (a withheld text: its keep box unticked).
     request, command = pagehandlers.launch_request(edited(body, {}, [name]), "r2")
     assert dict(request.typed) == {} and tuple(request.left_out) == (name,)
     assert command[-2:] == ["--leave-out", name]
     line = api.LaunchRequest(seat="s", off_posture=True, left_out=(name,), request_id="r3")
     assert _resolved(request) == _resolved(line)
+
+
+def test_the_policy_opt_out_round_trips_through_the_form(work, monkeypatch):
+    # Its default is true, so the panel sends an unticked box as false, never a leave-out.
+    monkeypatch.setattr(slots, "links", _every_module_but_projects)
+    write_presets(f'[defaults]\ncwd = "{work}"\n[seat.s]\nidentity = "s"\n'
+                  'takes_policy_directors = false\n[seat.t]\nidentity = "t"\n')
+    body = filled({"seat": "s"})
+    assert body["values"]["takes_policy_directors"] == "false"
+    request, _ = pagehandlers.launch_request(body, "r1")
+    assert "takes_policy_directors" not in request.typed
+    assert presets.resolve(request, available=slots.links).values[
+        "takes_policy_directors"] is False
+    ticked, command = pagehandlers.launch_request(
+        edited(body, {"takes_policy_directors": "true"}, []), "r2")
+    assert ticked.typed["takes_policy_directors"] is True
+    assert "--takes-policy-directors" in command
+    body = filled({"seat": "t"})
+    assert body["values"]["takes_policy_directors"] == "true"
+    unticked, command = pagehandlers.launch_request(
+        edited(body, {"takes_policy_directors": "false"}, []), "r3")
+    assert unticked.typed["takes_policy_directors"] is False
+    assert "--no-takes-policy-directors" in command
 
 
 # --- groups of rows that exclude each other ---

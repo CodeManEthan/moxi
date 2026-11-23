@@ -123,6 +123,7 @@ def context(values: Mapping[str, object], *, request_id: str,
             trust_cwd=bool(common.with_defaults(harness, values).get("trust_cwd")))
 
     comms = bool(values.get("identity")) and "comms" in links
+    comms_api = presets.comms_api() if comms else None
     codex_comms = harness == "codex" and comms
     key = handoffs.key_of_row(SimpleNamespace(
         identity=values.get("identity") if comms else None, preset_kind=preset_kind,
@@ -159,8 +160,8 @@ def context(values: Mapping[str, object], *, request_id: str,
                    comms_codex=codex_comms and presets.comms_codex(),
                    comms_codex_resume=(codex_comms and bool((replay or {}).get("resume"))
                                        and presets.comms_codex_resume()),
-                   comms_headless=comms and harness in presets.comms_headless(
-                       presets.comms_api()),
+                   comms_headless=comms and harness in presets.comms_headless(comms_api),
+                   comms_has_policy=comms and presets.comms_has_policy(comms_api),
                    **dict(replay or {}))
 
 

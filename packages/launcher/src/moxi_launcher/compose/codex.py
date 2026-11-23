@@ -22,8 +22,8 @@ on `--brief`, and is refused where comms' wrapper takes no headless flags
                    [-m M] -s <S> [--skip-git-repo-check] [other rows] [extra flags]
     host         moxi-turns-codex-host --cwd <cwd> [--model M] --sandbox <S>
                    [--option ...] [extra flags]
-    host, comms  moxi comms codex --name N [--scope S] [--director D ...] [--model M]
-                   --sandbox <S> [--option ...]
+    host, comms  moxi comms codex --name N [--scope S] [--director D ...]
+                   [--no-policy-directors] [--model M] --sandbox <S> [--option ...]
                    [--headless [--exit W ...] --brief <first turn>]
 
 The host runs with its window (a headless launch's without one: comms' wrapper starts it
@@ -191,8 +191,7 @@ def compose(values: Mapping[str, object], ctx: Context) -> Composition:
         argv = [ctx.moxi, "comms", HARNESS, "--name", identity]
         if scope:
             argv += ["--scope", scope]
-        for director in values.get("director") or ():
-            argv += ["--director", str(director)]
+        argv += common.director_words(values, ctx)
         argv += flags
         if headless:
             argv += common.headless_words(values, str(prompt))

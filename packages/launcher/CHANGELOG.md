@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- A seat or project preset (or `--no-takes-policy-directors`) opts its sessions out of
+  comms' policy directors with the new row `takes_policy_directors = false`, composed as
+  `--no-policy-directors` on comms' wrapper. `[defaults]` refuses the row (`per-seat`). A
+  launch that opts out under a comms without policy directors is refused, naming the
+  upgrade. On the page, a bool row whose default is true sends its unticked box as
+  `false`, so the opt-out is kept.
 - A launch follows its Claude session when Claude Code replaces the session's turns
   endpoint (each plugin reload does). A held Claude claim moves only to an endpoint whose
   parent process is the launch's own `claude`, the row's `pid` and `pid_started`
