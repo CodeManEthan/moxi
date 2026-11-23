@@ -5,7 +5,8 @@
 - `MOXI_TEST_TEMP` (`disk` or `ram`, unset meaning `disk`) decides where a test run keeps
   its temp: on Linux `/var/tmp` or `/dev/shm`, elsewhere the system's own, where `ram`
   runs as `disk` and says so. The kit's short directories leave `/tmp` for the same root,
-  inside one recorded directory per pytest process. A run in memory removes a passed
+  inside one recorded directory per pytest process, where a test's own has a
+  one-character name to keep its socket paths short. A run in memory removes a passed
   test's files when it ends and the whole run's at the run's end, and goes to disk when
   RAM is short. Each top-level run sweeps what killed runs of the kit left, by the owner
   records they hold locked, and touches nothing else. A run nested in a test (the fence's

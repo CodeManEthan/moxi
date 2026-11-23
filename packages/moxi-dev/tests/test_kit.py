@@ -67,8 +67,8 @@ def test_served_serves_and_stops_within_its_poll(kind):
         if kind is _Unix:
             where = Path(server.server_address).parent
             # The test's short dir sits in its process's short process dir:
-            # /var/tmp/mx-<6>/<8>, 27 characters, and a short_dir inside it.
-            assert len(server.server_address) < 51
+            # /var/tmp/mx-<6>/<1>, 20 characters, and a short_dir inside it.
+            assert len(server.server_address) < 44
             assert where.is_dir()
         began = time.monotonic()
     stopped = time.monotonic() - began
@@ -90,7 +90,7 @@ def test_short_dir_is_short_and_goes():
     with short_dir() as where:
         assert where.is_dir()
         if hasattr(socket, "AF_UNIX"):
-            assert len(str(where)) < 41           # /var/tmp/mx-<6>/<8>/mx-<8>: 39
+            assert len(str(where)) < 34           # /var/tmp/mx-<6>/<1>/mx-<8>: 32
         else:
             # The bound is for a Unix socket's path, and Python has no Unix sockets here
             # (Windows): the directory is a short name right in the short root.

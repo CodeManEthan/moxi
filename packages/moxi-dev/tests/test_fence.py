@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import dataclasses
 import ntpath
 import os
 import shutil
@@ -17,7 +18,9 @@ from pathlib import Path, PurePosixPath, PureWindowsPath
 
 import pytest
 
-from moxi_dev import testing
+from moxi import paths
+
+from moxi_dev import temp, testing
 from moxi_dev.testing import FenceError
 
 #: The tests that need a POSIX name: the password database, Unix sockets or /tmp.
@@ -541,9 +544,73 @@ def test_temp_files_land_in_the_test_s_short_dir(fence):
     with testing.short_dir() as where:
         assert where.parent == fence.short
         if hasattr(socket, "AF_UNIX"):          # a Unix socket's bound; Windows has none
-            # /var/tmp/mx-<6>/<8>/mx-<8>/sock: the test's short dir is in its
+            # /var/tmp/mx-<6>/<1>/mx-<8>/sock: the test's short dir is in its
             # process's short process dir.
-            assert len(str(where / "sock")) < 51
+            assert len(str(where / "sock")) < 44
+
+
+def test_a_test_s_short_dir_has_a_one_character_name(fence):
+    assert len(fence.short.name) == 1
+    assert fence.env["TMPDIR"] == str(fence.short)
+
+
+def test_the_short_names_come_in_a_turn_and_pass_over_one_that_exists(fence, monkeypatch):
+    names = testing._SHORT_NAME_CHARS
+    root = fence.short / "names"
+    root.mkdir()
+    monkeypatch.setattr(testing, "_SHORT_NAMES", [])
+    given = []
+    for _ in names:                                  # made and removed, as a test's is
+        made = testing._make_test_short_dir(str(root))
+        given.append(made.name)
+        made.rmdir()
+    assert sorted(given) == sorted(names)           # each once before any comes back
+    (root / given[0]).mkdir()                        # one left behind
+    made = {testing._make_test_short_dir(str(root)).name for _ in names[1:]}
+    assert made == {*names} - {given[0]}
+    longer = testing._make_test_short_dir(str(root))    # every one-character name is taken
+    assert longer.parent == root and len(longer.name) > 1 and longer.is_dir()
+
+
+#: How macOS's realpath spells `/tmp`, the short root its kit uses: the longer spelling.
+MACOS_TMP = "/private/tmp"
+
+#: comms' claim socket name, `claim-` and a key as long as a UUID: the longest name a
+#: module gives `moxi.paths.socket_path`.
+CLAIM_NAME = f"claim-{uuid.UUID(int=0)}"
+
+#: macOS's limit on a Unix socket's path, in bytes.
+MACOS_SUN_PATH = 104
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="Unix socket paths")
+def test_on_macos_a_fenced_test_s_sockets_are_as_short_as_without_process_dirs(fence):
+    darwin = temp.Places(platform="darwin", system_temp="/var/folders/q2/abc/T")
+    assert darwin.macos_short_root == "/tmp"
+    # The kit's macOS branch, on a stand-in for /tmp the fence lets this test write.
+    stand_in = fence.short / "tmp"
+    stand_in.mkdir()
+    choice = temp.choose({}, where=dataclasses.replace(darwin,
+                                                       macos_short_root=str(stand_in)))
+    assert choice.short_root == str(stand_in)
+    process = temp.make_process_dir(choice.short_root)
+    try:
+        short = testing._make_test_short_dir(str(process.path))
+        on_macos = PurePosixPath(MACOS_TMP, process.path.name, short.name)
+    finally:
+        process.release()
+    straight = PurePosixPath(MACOS_TMP, "mx-" + "x" * 8)    # one made straight in /tmp
+    assert len(str(on_macos)) == len(str(straight)) == 24
+
+    # Each module's runtime dir, as moxi.paths builds it from the fenced environment.
+    modules = sorted({"comms", *testing._modules()})
+    env = testing._fenced_env({}, PurePosixPath("/Users/runner/home"), on_macos / "run",
+                              on_macos, modules)
+    for module in modules:
+        runtime = str(paths.Layout(module).runtime_dir(env))
+        assert runtime == f"{on_macos}/{module}/runtime/{module}"
+    claim = f"{paths.Layout('comms').runtime_dir(env)}/{CLAIM_NAME}.sock"
+    assert len(os.fsencode(claim)) < paths.SOCKET_MAX < MACOS_SUN_PATH, (len(claim), claim)
 
 
 @pytest.fixture(scope="module")

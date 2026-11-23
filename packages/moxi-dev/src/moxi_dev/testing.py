@@ -255,6 +255,7 @@ import json
 import math
 import ntpath
 import os
+import random
 import re
 import shutil
 import socket
@@ -703,6 +704,41 @@ def short_root() -> str:
     if _GUARD.active and _GUARD.short:
         return _GUARD.short
     return _SHORT.get("root") or tempfile.gettempdir()
+
+
+#: The characters of a test's short directory's one-character name.
+_SHORT_NAME_CHARS = "abcdefghijklmnopqrstuvwxyz0123456789"
+
+#: The one-character names this process's fence has still to give, in a shuffled turn.
+_SHORT_NAMES: list[str] = []
+
+
+def _make_test_short_dir(root: str) -> Path:
+    """Make the test's short directory, private, in `root`: `short_root()`, the process
+    dir, or in a nested run the outer test's short directory.
+
+    Its name is one character, so a fenced test's short path is as short as a short dir
+    `mx-` and 8 characters made straight in the root: on macOS `/tmp/mx-<6>/<1>`, 16
+    bytes, and a module's sockets under it keep within macOS's 104-byte limit. The
+    names are given in a shuffled turn, so a name comes back only after every other has
+    been given; one that exists is passed over. When every one-character name exists,
+    the name is `tempfile`'s own."""
+    tried: list[str] = []
+    while len(tried) < len(_SHORT_NAME_CHARS):
+        if not _SHORT_NAMES:
+            _SHORT_NAMES.extend(random.SystemRandom().sample(_SHORT_NAME_CHARS,
+                                                             len(_SHORT_NAME_CHARS)))
+        name = _SHORT_NAMES.pop()
+        if name in tried:
+            continue
+        tried.append(name)
+        path = os.path.join(root, name)
+        try:
+            os.mkdir(path, 0o700)
+        except FileExistsError:
+            continue
+        return Path(path)
+    return Path(tempfile.mkdtemp(prefix="", dir=root))
 
 
 def _modules() -> list[str]:
@@ -1660,7 +1696,7 @@ def fence(request: pytest.FixtureRequest, tmp_path: Path,
     # one back when it ends; the outermost leaves the hook idle.
     outer = _GUARD.save()
     basetemp = tmp_path_factory.getbasetemp()
-    short = Path(tempfile.mkdtemp(prefix="", dir=short_root()))
+    short = _make_test_short_dir(short_root())
     home = tmp_path / "home"
     runtime = short / "run"
     home.mkdir()
