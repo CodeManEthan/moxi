@@ -143,9 +143,9 @@ def matches(file: str, settings, *, added: bool = False) -> list[Match]:
     out = []
     for entry in entries:
         pattern = entry["pattern"]
-        folder = pattern.endswith("/")
-        wanted = [part for part in pattern.rstrip("/").split("/")]
-        if folder:
+        marks_dir = pattern.endswith("/")
+        wanted = pattern.rstrip("/").split("/")
+        if marks_dir:
             hit = next((parts[:n] for n in range(1, len(parts))
                         if matched(wanted, parts[:n])), None)
             if hit is None:
@@ -227,9 +227,9 @@ def _split(rel: str) -> list[str]:
     return [part for part in re.split(f"[{seps}]", rel) if part]
 
 
-def _git_holder(folder: str) -> str | None:
-    """The nearest folder at or above `folder` holding a `.git` entry, or None."""
-    current = folder
+def _git_holder(start_dir: str) -> str | None:
+    """The nearest folder at or above `start_dir` holding a `.git` entry, or None."""
+    current = start_dir
     while True:
         if os.path.lexists(os.path.join(current, ".git")):
             return current
@@ -257,8 +257,8 @@ def _main_work_tree(top: str) -> str | None:
 
 def _read_small(path: str) -> str | None:
     try:
-        with open(path, encoding="utf-8") as handle:
-            return handle.read(4096).strip()
+        with open(path, encoding="utf-8") as fh:
+            return fh.read(4096).strip()
     except (OSError, UnicodeDecodeError):
         return None
 

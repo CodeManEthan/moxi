@@ -85,14 +85,14 @@ def test_patterns_match_by_parts_case_blind(pattern, parts, expected):
     assert watching.matched(pattern.split("/"), parts) is expected
 
 
-def test_a_new_package_folder_gets_the_line_with_its_note_and_skills(root):
+def test_a_new_package_gets_the_line_with_its_note_and_skills(root):
     said = line_of(write(root / "packages" / "fresh" / "README.md"))
 
     assert said == ("rounds: watched path of proj-a: packages/fresh/ - A new package "
                     "folder. Load: layout-review.")
 
 
-def test_a_write_into_a_folder_that_was_there_is_not_new(root):
+def test_a_write_into_a_package_that_was_there_is_not_new(root):
     assert write(root / "packages" / "core" / "README.md") is None
 
 
