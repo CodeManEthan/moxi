@@ -22,6 +22,14 @@ Each is a `RoundsError`, carrying `reason`, `fix` and `exit_code`:
   project's too. `other` is that project and `shared_dir` the one folder both reach.
 - `BadBlock` (exit 3): a file's data block can't be used. `file` is the file and
   `problems` every thing wrong with it, each a `Problem` with its line and its fix.
+
+And one that is not a `RoundsError`:
+
+- `UnfencedTest` (exit 1): a test is running and rounds was about to use a directory of
+  its own, or a project's folders from the projects registry, that no Moxi variable
+  places: the real ones. It is an `Exception` but neither a `RoundsError` nor an
+  `OSError`, so no handler of those turns it into a value, and every broad handler in
+  rounds re-raises it first. The CLI prints it and exits 1.
 """
 
 from __future__ import annotations
@@ -257,6 +265,14 @@ class BadBlock(RoundsError):
         super().__init__("\n".join(lines))
 
 
-__all__ = ["RoundsError", "NoLog", "Unreadable", "TooNew", "Unmet", "Refused", "Locked",
-           "BadName", "BadArgument", "UnknownProject", "NoRound", "NoFolder",
+class UnfencedTest(Exception):
+    """A test is running and rounds refused a directory or a place no Moxi variable
+    places, before anything used it. The text names the place, the path, what shows a
+    test is running and the fix."""
+
+    exit_code = exits.ERROR
+
+
+__all__ = ["UnfencedTest", "RoundsError", "NoLog", "Unreadable", "TooNew", "Unmet",
+           "Refused", "Locked", "BadName", "BadArgument", "UnknownProject", "NoRound", "NoFolder",
            "SharedFolder", "Problem", "BadBlock"]

@@ -24,7 +24,7 @@ from __future__ import annotations
 
 from moxi.config import ConfigError, Schema
 
-from . import flows
+from . import flows, paths
 from .paths import MODULE
 
 SCHEMA_RESOURCE = "settings.toml"
@@ -41,9 +41,13 @@ def schema() -> Schema:
 
 
 def load():
-    """rounds' settings as they stand. Raises `moxi.config.ConfigError`."""
+    """rounds' settings as they stand. Raises `moxi.config.ConfigError`, or
+    `UnfencedTest` under a test whose rounds config directory no Moxi variable places:
+    the core reads the file through a layout of its own, so rounds' config directory is
+    resolved first, through `paths`."""
     from moxi import config
 
+    paths.config_dir()
     return check(config.load(MODULE, schema()))
 
 

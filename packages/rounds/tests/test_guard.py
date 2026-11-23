@@ -127,13 +127,13 @@ def _fixtures(tree: ast.Module) -> dict[str, list[str]]:
 def test_every_fixture_a_test_can_borrow_takes_the_fenced_one():
     fixtures = _fixtures(ast.parse((HERE / "conftest.py").read_text(encoding="utf-8")))
     assert {"fenced", "config_file", "write_config", "add_project", "without_notes",
-            "holder", "git_repo", "_git_template"} <= set(fixtures)
+            "holder", "git_repo", "_git_template"} <= fixtures.keys()
 
     def reaches(name: str, seen: frozenset = frozenset()) -> bool:
         taken = fixtures.get(name, [])
-        return "fenced" in taken or any(
-            reaches(other, seen | {name}) for other in taken
-            if other in fixtures and other not in seen)
+        through = [other for other in taken if other in fixtures and other not in seen
+                   and reaches(other, seen | {name})]
+        return "fenced" in taken or through != []
 
     # The session's git template writes only under pytest's own temp folder, and the
     # one fixture that takes it takes `fenced` too.

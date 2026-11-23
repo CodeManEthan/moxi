@@ -43,7 +43,8 @@ def fence_in_force(env, roots) -> str | None:
             found.append(f"{variable} is not set")
             continue
         real = Path(os.path.realpath(value))
-        if not any(real.is_relative_to(root) for root in real_roots):
+        inside = [root for root in real_roots if real.is_relative_to(root)]
+        if not inside:
             found.append(f"{variable} is {value}")
     if not found:
         return None

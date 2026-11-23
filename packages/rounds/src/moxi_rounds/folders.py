@@ -31,7 +31,8 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from . import log
-from .errors import BadName, NoFolder, RoundsError, SharedFolder, UnknownProject
+from .errors import (BadName, NoFolder, RoundsError, SharedFolder, UnfencedTest,
+                     UnknownProject)
 
 #: What a slug is: lower-case letters, digits and `-`.
 SLUG = re.compile(r"[a-z0-9-]+")
@@ -241,6 +242,8 @@ def _notes_dir(record) -> Path:
                                    f"({notes.reason})", known=False)
     try:
         found = notes.api.notes_root_for(record.root, record.kind, record.key)
+    except UnfencedTest:
+        raise
     except Exception as exc:  # noqa: BLE001 - whatever notes raises, the answer is none
         raise NoFolder(record.key, f"{relative} and notes could not give it one "
                                    f"({exc})", known=False) from None
