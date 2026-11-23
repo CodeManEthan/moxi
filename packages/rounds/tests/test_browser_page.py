@@ -59,8 +59,8 @@ def popover(panel):
 
 
 def test_the_page_keeps_the_contract(shell, ui_page, ui_component_check):
-    # The page acts on nothing, so its accent shows only on a selection or the focus;
-    # at rest it draws from the waiting line's tint and the dim text.
+    # The page's accent is on answering, in a popover and the tray, so at rest it draws
+    # from the waiting line's tint and the dim text.
     check = ui_component_check(ui_page, "rounds", "page", tokens=("state-yours-soft", "text-dim"))
     assert check.element == "moxi-rounds-page"
     assert any("/m/rounds/api/rounds" in url for url in check.requests), check.requests
@@ -98,8 +98,9 @@ def test_a_question_opens_from_its_marker_with_its_options_and_passage(shell, ui
     expect(pop.locator(".option").first).to_contain_text("the old name")
     expect(pop).to_contain_text("From design.md")
     expect(pop.locator(".passage")).to_contain_text("Q1 is asked here")
-    expect(pop).to_contain_text("To answer: tell the round's lead.")
-    expect(pop.locator(".well")).to_contain_text("moxi rounds rule kestrel/billing-export Q1 --chose K")
+    # The answer goes into the tray: nothing is picked yet, so there is nothing to add.
+    expect(pop.get_by_role("textbox", name="Or answer in your own words")).to_be_visible()
+    expect(pop.get_by_role("button", name="Add to answers")).to_be_disabled()
     expect(pop).to_contain_text("1 of 3")
 
 

@@ -13,15 +13,22 @@
 //
 // A marker opens its step's record in a popover; one that waits on the operator opens
 // the operator's items there. One thing is open at a time and the page writes it into its address, in place of
-// the entry it is on, so Back leaves the page. It only reads: nothing on it acts on a
-// round. Every word and every rule of what to draw comes from `model.ts`, and goes into
-// the page as text. At 720 px and under it is the phone layout: rounds as buttons, each
-// opening a sheet with one vertical rail.
+// the entry it is on, so Back leaves the page. Every word and every rule of what to draw
+// comes from `model.ts`, and goes into the page as text. At 720 px and under it is the
+// phone layout: rounds as buttons, each opening a sheet with one vertical rail.
+//
+// At the desk the operator acts from an item's popover: an answer goes into the tray,
+// `Your answers` (`tray.ts`), kept in the browser's storage, and `Send` posts the tray to
+// `/api/answers`; the popover and the tray's row then show each receipt. A step of a
+// stage with an open build offers `Drop this build…`, behind a confirm read from
+// `/api/drop`, posted to `/api/drop/build`. The foot's parked questions open their list.
+// Nothing acts at phone width.
 //
 // It reads `/api/rounds`, then follows the topic `rounds`, and reads the route again when
 // its tab is shown again. A record is read from `/api/record` when it opens, and again
 // when its round's `rev` changes while it is open. With turns installed it reads turns'
 // sessions, so a builder whose worktree is one live session's folder links to its row.
+// With comms installed the To picker reads `/api/agents` when it opens.
 
 import { css, html, LitElement, noChange, nothing } from "lit";
 import type { TemplateResult } from "lit";
@@ -29,10 +36,10 @@ import { Directive, directive, PartType } from "lit/directive.js";
 import type { ElementPart, PartInfo } from "lit/directive.js";
 import { api, installed, navigate, setAddress, subscribe } from "/m/ui/client.js";
 
-import { Feed, parseBoard, readRecord } from "./feed.ts";
-import type { Board, Cell, Column, Line, Recent, RecordRead, Round } from "./feed.ts";
+import { failureWhy, Feed, parseBoard, readRecord } from "./feed.ts";
+import type { Board, Cell, Column, Line, Recent, RecordRead, RecordValue, Round } from "./feed.ts";
 import {
-  addressRoute, ageWord, ALL_PROJECTS, ANSWER_LEAD, arrange, AT_DESK, CANT_READ, cardView, cellAt, chips, CLOSED_FOLD,
+  addressRoute, ageWord, ALL_PROJECTS, arrange, AT_DESK, CANT_READ, cardView, cellAt, chips, CLOSED_FOLD,
   closedFoldText, closedWords, EMPTY_HEAD, EMPTY_TEXT, foldKey, foldsOf, footWords, holdOf, isManyProjects, isOpenNow,
   isShown, isUnreadableShown, itemAddress, itemMarker, itemsOf, itemView, KEY_COLUMNS, KEY_HERE, KEY_STATES, KEY_TITLE,
   layoutOf, LOCAL, linesShown, markAttributes, markKey, moreLabel, noLongerOpen, NOTHING_WAITS, OPEN_ROUNDS,
@@ -41,9 +48,15 @@ import {
   READ_PASSAGE, READING, READING_AFTER_MS, recordQuery, revealing, sessionAt, sheetMarks, sheetQuestions, SHOW_LINE,
   slugOf, stageOf, stateWords, stepHead, stepName, stepSections, STRIP_CAPTION, STRIP_EMPTY, STRIP_HEAD, stripCard, stripKey,
   stripStep, stripTabs, UNREADABLE_LEAD, unreadableWords, WAITING_LEAD, waitingCounts, walkFoot, WALK_BUTTON,
-  walkStep,
+  walkStep, dropLines, dropReceipt, hasOpenBuild, leadOf, PARKED_HEAD, parkedGroups, parkedWords, parkingWords,
+  preparedView, RECOMMENDED,
 } from "./model.ts";
-import type { Address, Context, Filter, GroupView, Held, Item, Piece, Section } from "./model.ts";
+import type { Address, Context, DropFacts, Filter, GroupView, Held, Item, ItemKind, ItemView, Piece, Section } from "./model.ts";
+import {
+  bodyOf, chipOf, draftOf, EACH, isPageKind, kindWords, mintId, readBackOf, receiptLines, RULE_LINE, RULE_LINE_ALONE,
+  sendable, sendWords, Tray, trayKey,
+} from "./tray.ts";
+import type { Draft, Kind, Reach, Receipt, ReceiptLine, Store } from "./tray.ts";
 
 const TAG = "moxi-rounds-page";
 const MODULE = "rounds";
@@ -77,7 +90,42 @@ const DONE: Cell = { state: "done", word: null, count: null, settled: true, here
 
 /** Where an open popover hangs: a marker on the board, a strip card, a name, the waiting
  * line or the Key button. */
-type Anchor = { kind: "board" } | { kind: "strip"; card: string };
+type Anchor = { kind: "board" } | { kind: "strip"; card: string } | { kind: "parked"; key: string };
+
+/** An item a popover answers. */
+type ItemRef = { kind: ItemKind; holder: string; id: string };
+
+/** What the open popover's answer form holds: the choice made (an option, accept or
+ * reject, a read-back, a done job), the words typed, and which box is open. */
+interface Form {
+  choice: { kind: Kind; chose: string | null } | null;
+  text: string;
+  /** `correct` while `Not what I said…`'s box is open, with the ruling it corrects. */
+  correcting: string | null;
+}
+
+const EMPTY_FORM: Form = { choice: null, text: "", correcting: null };
+
+/** The drop's confirm while it is open: its act id, minted when it opens, its facts and
+ * the drop's receipt. */
+interface DropState {
+  round: string;
+  stage: string;
+  act: string;
+  facts: DropFacts | null;
+  why: string | null;
+  receipt: Receipt | null;
+  busy: boolean;
+}
+
+/** The browser's storage, or null where it can't be reached. */
+function browserStore(): Store | null {
+  try {
+    return window.localStorage;
+  } catch {
+    return null;
+  }
+}
 
 export class RoundsPage extends LitElement {
   static properties = { route: { type: String } };
@@ -212,6 +260,30 @@ export class RoundsPage extends LitElement {
              box-shadow: 0 -10px 30px var(--moxi-border-strong); }
     .sheet .sheetslug { font-size: 15px; }
     .sheet .x { float: right; background: none; border: 0; font-size: 18px; cursor: pointer; }
+
+    .btn { border: 1px solid var(--moxi-border-strong); background: var(--moxi-bg-raised); border-radius: 6px;
+           padding: 5px 10px; cursor: pointer; }
+    .btn.accent { background: var(--moxi-accent); border-color: var(--moxi-accent); color: var(--moxi-bg); }
+    .btn:disabled { opacity: 0.5; cursor: default; }
+    .acts { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; flex-basis: 100%; }
+    .option.pick { cursor: pointer; background: none; text-align: left; width: 100%; font: inherit; color: inherit; }
+    .option.pick[aria-pressed="true"] { border-color: var(--moxi-accent); box-shadow: 0 0 0 1px var(--moxi-accent); }
+    .option .rec { margin-left: auto; color: var(--moxi-text-dim); font-size: 11px; white-space: nowrap; }
+    textarea { font: inherit; color: inherit; background: var(--moxi-bg); border: 1px solid var(--moxi-border);
+               border-radius: 6px; padding: 6px 8px; width: 100%; box-sizing: border-box; min-height: 54px; resize: vertical; }
+    .receipt { flex-basis: 100%; display: flex; flex-direction: column; gap: 2px; overflow-wrap: anywhere; }
+    .tray { border: 1px solid var(--moxi-border-strong); border-radius: 8px; padding: 10px 14px; margin-bottom: 20px;
+            display: flex; flex-direction: column; gap: 8px; }
+    .tray .rule { color: var(--moxi-text-dim); }
+    .tray .trow { border-top: 1px solid var(--moxi-border); padding-top: 8px; display: flex; flex-direction: column; gap: 3px; }
+    .tray .trow .top { display: flex; gap: 8px; align-items: baseline; flex-wrap: wrap; }
+    .tray .chipline { color: var(--moxi-text-dim); overflow-wrap: anywhere; }
+    .tray .sendrow { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+    .parked { display: flex; flex-direction: column; gap: 4px; margin-top: 6px; color: var(--moxi-text); }
+    .parked .ph { font-weight: 600; margin-top: 4px; }
+    .parkedrow { text-align: left; }
+    .confirm { border: 1px solid var(--moxi-border-strong); border-radius: 8px; padding: 10px 12px;
+               display: flex; flex-direction: column; gap: 8px; }
   `;
 
   route = "";
@@ -237,18 +309,32 @@ export class RoundsPage extends LitElement {
   #placed = false;
   /** Whether the popover just opened, so its marker may be scrolled into room once. */
   #reveal = false;
+  #tray: Tray = new Tray(null, "");
+  #to = EACH;
+  #agents: string[] | null = null;
+  #agentsWhy: string | null = null;
+  #sending = false;
+  #sendNote: string | null = null;
+  #form: Form = { ...EMPTY_FORM };
+  #editing: string | null = null;
+  #parkedOpen = false;
+  #drop: DropState | null = null;
+  /** Each sent own-words draft's round `rev` when its record was last read. */
+  #readAt = new Map<string, string>();
 
   connectedCallback(): void {
     super.connectedCallback();
     this.#media = window.matchMedia(`(max-width: ${PHONE_PX}px)`);
     this.#phone = this.#media.matches;
     this.#media.addEventListener("change", this.#onMedia);
+    this.#tray = new Tray(browserStore(), trayKey(location.origin));
     const feed = new Feed<Board>(() => api(MODULE, "api/rounds"), parseBoard, () => this.#onValue(feed));
     this.#feed = feed;
     void feed.refresh().then(() => {
       if (this.#feed === feed) this.#stop = subscribe(MODULE, "rounds", (data) => feed.topic(data));
     });
     if (installed("turns")) void this.#readSessions();
+    window.addEventListener("storage", this.#onStorage);
     this.#timers.push(window.setTimeout(() => { this.#slow = true; this.requestUpdate(); }, READING_AFTER_MS),
                       window.setInterval(() => this.requestUpdate(), REDRAW_MS));
     document.addEventListener("visibilitychange", this.#onVisible);
@@ -269,7 +355,14 @@ export class RoundsPage extends LitElement {
     window.removeEventListener("keydown", this.#onKey);
     window.removeEventListener("resize", this.#onMove);
     window.removeEventListener("scroll", this.#onMove, true);
+    window.removeEventListener("storage", this.#onStorage);
   }
+
+  /** Another tab of this page server changed the tray. */
+  #onStorage = (): void => {
+    this.#tray.load();
+    this.requestUpdate();
+  };
 
   protected willUpdate(changed: Map<PropertyKey, unknown>): void {
     if (changed.has("route")) {
@@ -320,8 +413,49 @@ export class RoundsPage extends LitElement {
       if (round && this.#record && this.#record.rev !== null && round.rev !== this.#record.rev) {
         void this.#readRecord(this.#address!);
       }
+      void this.#readFound(value);
     }
     this.requestUpdate();
+  }
+
+  /** Reads again the question of each sent own-words draft whose round changed, so its
+   * row reads recorded once the agent's ruling appears. */
+  async #readFound(value: Board): Promise<void> {
+    for (const draft of this.#tray.sent.filter((one) => one.kind === "words" && one.receipt?.message?.id)) {
+      const rev = value.rounds.find((one) => one.name === draft.holder)?.rev ?? "";
+      if (this.#readAt.get(draft.act) === rev) continue;
+      this.#readAt.set(draft.act, rev);
+      const read = await readRecord(() => api(MODULE, recordQuery({ kind: "question", holder: draft.holder,
+                                                                     id: draft.item })!));
+      if (read.kind === "record") this.#takeFound(draft.holder, draft.item, read.record);
+    }
+  }
+
+  /** Puts the ruling a question's record holds on its sent own-words drafts. */
+  #takeFound(holder: string, item: string, record: RecordValue): void {
+    const ruling = record.ruling ?? null;
+    const sent = this.#tray.sent.filter((one) => one.kind === "words" && one.holder === holder && one.item === item);
+    let changed = false;
+    for (const one of sent) {
+      if (ruling && record.item?.state !== "parked" && one.found?.id !== ruling.id) {
+        this.#tray.setFound(one.act, ruling);
+        changed = true;
+      }
+    }
+    if (changed) this.requestUpdate();
+  }
+
+  /** Whether the tray holds a draft or a receipt of the item an address names, so its
+   * popover stays open after the item stops waiting. */
+  #trayHolds(address: Address): boolean {
+    const item = this.#itemOf(address);
+    return item !== null && this.#tray.of(item.holder, item.id) !== null;
+  }
+
+  #itemOf(address: Address | null): ItemRef | null {
+    if (address === null) return null;
+    if (address.kind === "walk") return address.item;
+    return "id" in address ? address : null;
   }
 
   /** The open round an address is on, if any. */
@@ -337,13 +471,18 @@ export class RoundsPage extends LitElement {
   #openFromAddress(value: Board): void {
     const address = this.#address;
     if (address === null) return;
-    if (!isOpenNow(address, value)) {
+    if (!isOpenNow(address, value) && !this.#trayHolds(address)) {
       this.#notes = [noLongerOpen(address)];
       this.#close({ focus: false });
       return;
     }
     if (address.kind === "walk") {
-      this.#sequence = itemsOf(value, this.#order(value));
+      // The walk keeps its items while it is open, so an item answered stays its place.
+      const item = address.item;
+      if (item === null || !this.#sequence.some((one) => one.kind === item.kind && one.holder === item.holder
+                                                       && one.id === item.id)) {
+        this.#sequence = itemsOf(value, this.#order(value));
+      }
       if (address.item === null) {
         this.#address = { kind: "walk", item: itemAddress(this.#sequence[0]) as Extract<Address, { id: string }> };
         setAddress(MODULE, addressRoute(this.#address));
@@ -367,6 +506,14 @@ export class RoundsPage extends LitElement {
     this.#record = { route, read: this.#record?.route === route ? this.#record.read : null, rev };
     const read = await readRecord(() => api(MODULE, route));
     if (this.#record?.route !== route) return;
+    if (read.kind === "gone" && this.#record?.read?.kind === "record" && this.#trayHolds(address)) {
+      // An item answered from the page keeps its popover, on the record it had, for the receipt.
+      this.#record = { ...this.#record, rev };
+      return;
+    }
+    if (read.kind === "record" && read.record.what === "question" && read.record.item) {
+      this.#takeFound(read.record.item.holder ?? "", read.record.item.id, read.record);
+    }
     if (read.kind === "gone") {
       this.#notes = [noLongerOpen(address)];
       this.#close({ focus: false });
@@ -386,6 +533,8 @@ export class RoundsPage extends LitElement {
     this.#anchor = anchor;
     if (address.kind !== "walk") this.#sequence = sequence;
     this.#shown.clear();
+    this.#form = { ...EMPTY_FORM };
+    this.#drop = null;
     if (this.#held === null) this.#held = holdOf(arrange(value));
     setAddress(MODULE, addressRoute(address));
     this.#openFromAddress(value);
@@ -399,6 +548,8 @@ export class RoundsPage extends LitElement {
     this.#sequence = [];
     this.#held = null;
     this.#anchor = { kind: "board" };
+    this.#form = { ...EMPTY_FORM };
+    this.#drop = null;
     setAddress(MODULE, "");
     this.requestUpdate();
     if (focus && was) void this.updateComplete.then(() => (this.#anchorOf(was) as HTMLElement | null)?.focus());
@@ -408,11 +559,17 @@ export class RoundsPage extends LitElement {
     if (this.#address === null || event.ctrlKey || event.metaKey || event.altKey) return;
     if (event.key === "Escape") {
       event.preventDefault();
-      this.#close();
+      if (this.#drop !== null) {
+        this.#drop = null;
+        this.requestUpdate();
+      } else {
+        this.#close();
+      }
       return;
     }
     const target = event.composedPath()[0] as HTMLElement | undefined;
     if (target && ["INPUT", "SELECT", "TEXTAREA"].includes(target.tagName)) return;
+    if (this.#answering() && this.#onAnswerKey(event, target)) return;
     if (this.#sequence.length > 1) {
       if (event.key === "ArrowRight" || event.key === "j") this.#walk(1);
       else if (event.key === "ArrowLeft" || event.key === "k") this.#walk(-1);
@@ -468,6 +625,7 @@ export class RoundsPage extends LitElement {
   #anchorOf(address: Address): Element | null {
     const root = this.renderRoot as ShadowRoot;
     if (this.#anchor.kind === "strip") return root.querySelector(`[data-card="${CSS.escape(this.#anchor.card)}"]`);
+    if (this.#anchor.kind === "parked") return root.querySelector(`[data-parked="${CSS.escape(this.#anchor.key)}"]`);
     const value = this.#feed?.value;
     if (!value) return null;
     const esc = (text: string) => CSS.escape(text);
@@ -503,7 +661,7 @@ export class RoundsPage extends LitElement {
     if (!anchor) return;
     const box = (rect: DOMRect) => ({ top: rect.top, left: rect.left, width: rect.width, height: rect.height });
     let marker = box(anchor.getBoundingClientRect());
-    const row = anchor.closest(".line, .waiting, .card, .head");
+    const row = anchor.closest(".line, .waiting, .card, .head, .parkedrow");
     if (this.#reveal && row && this.#record?.read !== null) {
       // Once the record is in and the popover has its height: scroll a marker or a card
       // near the window's foot up, so the popover opens under it rather than beside it.
@@ -554,6 +712,7 @@ export class RoundsPage extends LitElement {
     return html`
       <div class=${stale}>
         ${this.#waitingLine(value)}
+        ${this.#trayView(value)}
         ${this.#strip(value)}
         ${value.rounds.length + value.unreadable.length === 0 ? this.#empty(value) : this.#board(value)}
       </div>
@@ -699,7 +858,7 @@ export class RoundsPage extends LitElement {
 
   #isOpenLine(round: Round, line: Line): boolean {
     const address = this.#address;
-    if (address === null || this.#anchor.kind === "strip") return false;
+    if (address === null || this.#anchor.kind !== "board") return false;
     if (address.kind === "step" && address.round === round.name) {
       const column = this.#feed?.value?.columns.find((one) => one.id === address.column);
       return column?.part === "stage" ? round.lines.find((one) => one.stage === address.stage) === line
@@ -731,7 +890,7 @@ export class RoundsPage extends LitElement {
   /** The key of the mark on this line whose popover is open, if any. */
   #openKey(round: Round, line: Line): string | null {
     const address = this.#address;
-    if (address === null || this.#anchor.kind === "strip" || !this.#isOpenLine(round, line)) return null;
+    if (address === null || this.#anchor.kind !== "board" || !this.#isOpenLine(round, line)) return null;
     if (address.kind === "step") {
       const column = this.#feed?.value?.columns.find((one) => one.id === address.column);
       return markKey(address.column, column?.part === "stage" ? address.stage : null);
@@ -759,7 +918,26 @@ export class RoundsPage extends LitElement {
   #foot(value: Board): TemplateResult {
     const feed = this.#feed!;
     const lines = [...footWords(value, feed.readAt, feed.failure?.why ?? null, value.today), ...this.#notes];
-    return html`<div class="foot">${lines.map((one) => html`<span>${one}</span>`)}</div>`;
+    const parked = parkedWords(value);
+    // The parked questions' list opens from the foot at the desk only: the phone does not act.
+    return html`<div class="foot">${lines.map((one) => (one === parked && !this.#phone
+      ? html`<span><button type="button" class="linkish" aria-expanded=${this.#parkedOpen ? "true" : "false"}
+          @click=${() => { this.#parkedOpen = !this.#parkedOpen; this.requestUpdate(); }}>${one}</button></span>`
+      : html`<span>${one}</span>`))}
+      ${this.#parkedOpen && !this.#phone ? this.#parkedList(value) : nothing}</div>`;
+  }
+
+  #parkedList(value: Board): TemplateResult {
+    return html`<div class="parked" role="list" aria-label=${PARKED_HEAD}>
+      ${parkedGroups(value, this.#order(value)).map((group) => html`<div class="ph">${group.holder}</div>
+        ${group.rows.map((row) => {
+          const key = `${group.holder} ${row.id}`;
+          return html`<div role="listitem"><button type="button" class="link parkedrow" data-parked=${key}
+              @click=${() => this.#open({ kind: "question", holder: group.holder, id: row.id },
+                                        { anchor: { kind: "parked", key } })}>
+            <span class="strong">${row.id}</span> ${row.text}</button>
+            ${row.until ? html`<span class="dim">${row.until}</span>` : nothing}</div>`;
+        })}`)}</div>`;
   }
 
   // --- the popover -------------------------------------------------------------------------
@@ -784,9 +962,15 @@ export class RoundsPage extends LitElement {
       const cell = this.#cellFor(address, value);
       const top = stepHead(read.record, cell);
       head = { ...top, cell };
-      body = html`${this.#tabs(address, value)}${stepSections(read.record, ctx).map((one) => this.#section(one))}`;
-      if (this.#anchor.kind === "strip") {
-        foot = html`<button type="button" class="walkbtn" @click=${() => this.#showLine(address)}>${SHOW_LINE}</button>`;
+      body = html`${this.#tabs(address, value)}${stepSections(read.record, ctx).map((one) => this.#section(one))}
+        ${this.#drop ? this.#dropConfirm(value) : nothing}`;
+      const round = value.rounds.find((one) => one.name === address.round);
+      const droppable = round && hasOpenBuild(round, value.columns, address.stage) && this.#drop === null;
+      if (this.#anchor.kind === "strip" || droppable) {
+        foot = html`${this.#anchor.kind === "strip" ? html`<button type="button" class="walkbtn"
+            @click=${() => this.#showLine(address)}>${SHOW_LINE}</button>` : nothing}
+          ${droppable ? html`<button type="button" class="btn" @click=${() => void this.#openDrop(address.round, address.stage!)}>
+            Drop this build…</button>` : nothing}`;
       }
     } else if (read?.kind === "record" && address.kind === "round") {
       const card = cardView(read.record, ctx);
@@ -794,12 +978,13 @@ export class RoundsPage extends LitElement {
       body = html`${card.sections.map((one) => this.#section(one))}`;
     } else if (read?.kind === "record") {
       const view = itemView(read.record, ctx);
+      const item = this.#itemOf(address)!;
       head = { title: view.title, sub: view.sub, cell: { ...DONE, state: "yours", settled: false } };
       body = html`<div class="question">${view.text}</div>
         ${view.lines.map((one) => html`<div class="dim">${one}</div>`)}
-        ${view.options.map((one) => html`<div class="option"><span class="k">${one.key}</span><span>${one.text}</span></div>`)}
+        ${this.#itemBody(item, read.record, view, value)}
         ${view.passage ? this.#passage(view.passage) : nothing}`;
-      foot = html`<span class="answer">${ANSWER_LEAD}</span><div class="well answer">${view.answer}</div>`;
+      foot = this.#itemFoot(item, read.record, view, value);
     } else if (address.kind === "step") {
       head = { title: stepName(address.column, address.stage), sub: address.round, cell: this.#cellFor(address, value) };
       body = html`${this.#tabs(address, value)}`;
@@ -915,6 +1100,334 @@ export class RoundsPage extends LitElement {
       }}>${piece.text}</a>`;
     }
     return html`<span class=${classes}>${piece.text}</span>`;
+  }
+
+  // --- acting ------------------------------------------------------------------------------
+
+  #reach(value: Board): Reach {
+    return { comms: installed("comms"), to: this.#to, leadOf: leadOf(value) };
+  }
+
+  /** Whether the open popover is an item's with a form to answer it. */
+  #answering(): boolean {
+    return this.#itemOf(this.#address) !== null && this.#record?.read?.kind === "record";
+  }
+
+  /** Enter adds the answer to the tray; an option's key, or 1 to 4, picks it. */
+  #onAnswerKey(event: KeyboardEvent, target: HTMLElement | undefined): boolean {
+    if (target?.tagName === "BUTTON") return false;
+    const read = this.#record?.read;
+    const item = this.#itemOf(this.#address);
+    if (!item || read?.kind !== "record") return false;
+    if (event.key === "Enter") {
+      event.preventDefault();
+      this.#add(item, read.record);
+      return true;
+    }
+    const options = item.kind === "question" && read.record.item?.state !== "parked" ? read.record.item?.options ?? [] : [];
+    const at = /^[1-4]$/.test(event.key) ? Number(event.key) - 1 : -1;
+    const option = options.find((one) => one.key === event.key) ?? options[at];
+    if (!option) return false;
+    event.preventDefault();
+    this.#form = { ...this.#form, choice: { kind: "pick", chose: option.key } };
+    this.requestUpdate();
+    return true;
+  }
+
+  /** The draft the open form makes; null when it holds no answer. */
+  #formDraft(item: ItemRef, record: RecordValue): Draft | null {
+    const form = this.#form;
+    const about = record.item?.text ?? "";
+    const text = form.text.trim();
+    if (form.correcting) return text ? draftOf(item.holder, form.correcting, "correct", { text, about }) : null;
+    if (item.kind === "question" && record.item?.state === "parked") return draftOf(item.holder, item.id, "unpark", { about });
+    if (form.choice) {
+      return draftOf(item.holder, item.id, form.choice.kind, {
+        chose: form.choice.chose, about, text: form.choice.kind === "done" && installed("comms") ? text : null });
+    }
+    if (item.kind === "question" && text) return draftOf(item.holder, item.id, "words", { text, about });
+    return null;
+  }
+
+  /** Adds the form's answer to the tray; in the walk, moves on to the next item. */
+  #add(item: ItemRef, record: RecordValue, draft: Draft | null = this.#formDraft(item, record)): Draft | null {
+    if (draft === null) return null;
+    this.#tray.add(draft);
+    this.#form = { ...EMPTY_FORM };
+    if (this.#address?.kind === "walk" && this.#sequenceAt() < this.#sequence.length - 1) this.#walk(1);
+    this.requestUpdate();
+    return draft;
+  }
+
+  async #sendNow(item: ItemRef, record: RecordValue, draft: Draft | null = this.#formDraft(item, record)): Promise<void> {
+    if (draft === null) return;
+    this.#tray.add(draft);
+    this.#form = { ...EMPTY_FORM };
+    await this.#send([draft]);
+  }
+
+  /** Posts drafts to the answers route with the To choice, and takes the receipts. A post
+   * that gets no answer leaves the drafts as they were: their act ids make a second try
+   * safe. */
+  async #send(drafts: readonly Draft[]): Promise<void> {
+    if (this.#sending || drafts.length === 0) return;
+    this.#sending = true;
+    this.#sendNote = null;
+    this.requestUpdate();
+    try {
+      const going = this.#tray.toSend(drafts.map((one) => one.act));
+      const answer = await api(MODULE, "api/answers", bodyOf(going, this.#to));
+      const receipts = answer.data?.receipts;
+      if (answer.status === 200 && Array.isArray(receipts)) {
+        this.#tray.take(receipts, Array.isArray(answer.data.messages) ? answer.data.messages : []);
+      } else {
+        this.#sendNote = `Not sent: ${failureWhy(answer.status)}. The answers stay in the tray; Send tries them again.`;
+      }
+    } finally {
+      this.#sending = false;
+      this.requestUpdate();
+    }
+  }
+
+  async #readAgents(): Promise<void> {
+    const answer = await api(MODULE, "api/agents");
+    const names = answer.data?.agents;
+    this.#agents = answer.status === 200 && Array.isArray(names) ? names.filter((one) => typeof one === "string") : [];
+    this.#agentsWhy = answer.status === 200 ? answer.data?.reason ?? null : failureWhy(answer.status);
+    this.requestUpdate();
+  }
+
+  /** The To picker: each round's lead, or one agent comms knows. */
+  #picker(value: Board): TemplateResult | typeof nothing {
+    if (!installed("comms")) return nothing;
+    if (this.#agents === null) void this.#readAgents();
+    const names = [...new Set([...(this.#agents ?? []), ...(this.#to === EACH ? [] : [this.#to])])];
+    const notLed = this.#to === EACH ? [] : [...new Set(this.#tray.drafts.map((one) => one.holder))]
+      .filter((holder) => leadOf(value)(holder) !== this.#to);
+    return html`<label>To <select aria-label="Send to" @focus=${() => void this.#readAgents()} @change=${(event: Event) => {
+        this.#to = (event.target as HTMLSelectElement).value;
+        this.requestUpdate();
+      }}><option value=${EACH} ?selected=${this.#to === EACH}>Each round's lead</option>
+      ${names.map((name) => html`<option value=${name} ?selected=${this.#to === name}>${name}</option>`)}</select></label>
+      ${this.#agentsWhy ? html`<span class="dim">${this.#agentsWhy}</span>` : nothing}
+      ${notLed.length ? html`<span class="dim">${this.#to} does not lead ${notLed.join(", ")}</span>` : nothing}`;
+  }
+
+  #trayView(value: Board): TemplateResult | typeof nothing {
+    const tray = this.#tray;
+    if (tray.drafts.length + tray.sent.length === 0 && this.#sendNote === null) return nothing;
+    const reach = this.#reach(value);
+    const going = sendable(tray.drafts, reach);
+    return html`<section class="tray" aria-label="Your answers">
+      <div><h2>Your answers</h2> <span class="dim">${tray.drafts.length}</span></div>
+      <div class="rule">${reach.comms ? RULE_LINE : RULE_LINE_ALONE}</div>
+      ${tray.drafts.map((draft) => this.#trayRow(draft, value, reach))}
+      <div class="sendrow">${this.#picker(value)}<span class="grow"></span>
+        <button type="button" class="btn accent" ?disabled=${this.#sending || going.length === 0}
+          @click=${() => void this.#send(going)}>${sendWords(tray.drafts, reach)}</button></div>
+      ${this.#sendNote ? html`<div class="t-failed">${this.#sendNote}</div>` : nothing}
+      ${tray.sent.length ? html`<div><span class="strong">Sent</span>
+        <button type="button" class="linkish" @click=${() => { tray.clearSent(); this.requestUpdate(); }}>Clear</button></div>
+        ${tray.sent.map((draft) => html`<div class="trow" data-act=${draft.act}>
+          <div class="top"><span class="strong">${draft.holder} ${draft.item}</span><span>${kindWords(draft)}</span>
+            <span class="dim">${draft.receipt?.state ?? ""}</span></div>
+          ${this.#receiptView(draft, value)}</div>`)}` : nothing}
+    </section>`;
+  }
+
+  #trayRow(draft: Draft, value: Board, reach: Reach): TemplateResult {
+    const tray = this.#tray;
+    const notTold = draft.receipt?.state === "recorded-not-told";
+    const editing = this.#editing === draft.act;
+    const to = reach.to === EACH ? reach.leadOf(draft.holder) : reach.to;
+    const sendsAlone = reach.comms ? to !== null : isPageKind(draft.kind);
+    return html`<div class="trow" data-act=${draft.act}>
+      <div class="top"><span class="strong">${draft.holder} ${draft.item}</span><span>${kindWords(draft)}</span>
+        ${draft.text && !editing ? html`<span>"${draft.text}"</span>` : nothing}</div>
+      ${editing ? html`<textarea aria-label="Edit your words" .value=${draft.text ?? ""} @change=${(event: Event) => {
+          tray.edit(draft.act, (event.target as HTMLTextAreaElement).value);
+          this.#editing = null;
+          this.requestUpdate();
+        }}></textarea>` : nothing}
+      <div class="chipline">${chipOf(draft, reach)}</div>
+      ${draft.receipt ? this.#receiptView(draft, value) : nothing}
+      <div class="acts">
+        ${draft.text !== null && !notTold ? html`<button type="button" class="linkish"
+          @click=${() => { this.#editing = editing ? null : draft.act; this.requestUpdate(); }}>Edit</button>` : nothing}
+        ${notTold ? html`<button type="button" class="btn" ?disabled=${this.#sending} @click=${() => void this.#send([draft])}>
+          Send again</button>` : sendsAlone ? html`<button type="button" class="linkish" ?disabled=${this.#sending}
+          @click=${() => void this.#send([draft])}>${reach.comms ? `Send now to ${to ?? "the lead"}` : "Record now"}</button>`
+          : nothing}
+        ${notTold ? nothing : html`<button type="button" class="linkish" @click=${() => { tray.remove(draft.act); this.requestUpdate(); }}>
+          Remove</button>`}
+      </div></div>`;
+  }
+
+  /** A receipt's lines, with what they offer: Send again, and the read-back. */
+  #receiptView(draft: Draft, value: Board): TemplateResult {
+    const lines = receiptLines(draft, { today: value.today });
+    const line = (one: ReceiptLine) => html`<div class="${one.mono ? "mono well" : ""} ${one.tone ? `t-${one.tone}` : ""}">
+      ${one.text}</div>${one.offer === "send-again" ? html`<div class="acts"><button type="button" class="btn"
+        ?disabled=${this.#sending} @click=${() => void this.#send([draft])}>Send again</button></div>` : nothing}
+      ${one.offer === "read-back" ? this.#readBack(draft) : nothing}`;
+    return html`<div class="receipt">${lines.map(line)}</div>`;
+  }
+
+  /** `That's what I said` and `Not what I said…` on a recorded answer. */
+  #readBack(draft: Draft): TemplateResult | typeof nothing {
+    const ruling = readBackOf(draft);
+    if (ruling === null) return nothing;
+    const said = this.#tray.of(draft.holder, ruling);
+    if (said?.kind === "read-back" && said.receipt?.state === "recorded") return nothing;
+    const correcting = this.#form.correcting === ruling;
+    return html`<div class="acts">
+      <button type="button" class="btn" ?disabled=${this.#sending}
+        @click=${() => void this.#send([this.#addDraft(draftOf(draft.holder, ruling, "read-back", { about: draft.about }))])}>
+        That's what I said</button>
+      <button type="button" class="btn" aria-expanded=${correcting ? "true" : "false"} @click=${() => {
+          this.#form = { ...EMPTY_FORM, correcting: correcting ? null : ruling };
+          this.requestUpdate();
+        }}>Not what I said…</button></div>
+      ${correcting ? html`<textarea aria-label="What you said" .value=${this.#form.text} @input=${(event: Event) => {
+          this.#form = { ...this.#form, text: (event.target as HTMLTextAreaElement).value };
+        }}></textarea><div class="acts"><button type="button" class="btn accent" @click=${() => {
+          const text = this.#form.text.trim();
+          if (!text) return;
+          this.#addDraft(draftOf(draft.holder, ruling, "correct", { text, about: draft.about }));
+          this.#form = { ...EMPTY_FORM };
+        }}>Add to answers</button></div>` : nothing}`;
+  }
+
+  #addDraft(draft: Draft): Draft {
+    this.#tray.add(draft);
+    this.requestUpdate();
+    return draft;
+  }
+
+  /** An item's popover body: a question's prepared answer and its options to pick, or a
+   * parked question's parking. */
+  #itemBody(item: ItemRef, record: RecordValue, view: ItemView, value: Board): TemplateResult {
+    const parked = item.kind === "question" ? parkingWords(record, value.today) : "";
+    const lead = leadOf(value)(item.holder);
+    const prepared = item.kind === "question" ? preparedView(record.item?.prepared, lead) : null;
+    const open = item.kind === "question" && record.item?.state !== "parked"
+      && (record.item?.state ?? "open") === "open";
+    const chosen = this.#form.choice?.kind === "pick" ? this.#form.choice.chose : null;
+    return html`${parked ? html`<div>${parked}</div>${record.ruling?.record ? html`<div class="mono dim">
+        ${record.ruling.record}</div>` : nothing}` : nothing}
+      ${prepared ? html`<div class="dim">${prepared.line}</div>` : nothing}
+      ${view.options.map((one) => open && item.kind === "question"
+        ? html`<button type="button" class="option pick" aria-pressed=${chosen === one.key ? "true" : "false"}
+            @click=${() => { this.#form = { ...this.#form, choice: { kind: "pick", chose: one.key } }; this.requestUpdate(); }}>
+            <span class="k">${one.key}</span><span>${one.text}</span>
+            ${prepared?.recommend === one.key ? html`<span class="rec">${RECOMMENDED}</span>` : nothing}</button>`
+        : html`<div class="option"><span class="k">${one.key}</span><span>${one.text}</span>
+            ${prepared?.recommend === one.key ? html`<span class="rec">${RECOMMENDED}</span>` : nothing}</div>`)}`;
+  }
+
+  /** An item's popover foot: the tray's row or receipt for it, then the form that answers
+   * it, by kind. */
+  #itemFoot(item: ItemRef, record: RecordValue, view: ItemView, value: Board): TemplateResult {
+    const reach = this.#reach(value);
+    const comms = reach.comms;
+    const row = this.#tray.of(item.holder, item.id);
+    const done = row?.receipt && !["refused", "kept"].includes(row.receipt.state);
+    const state = record.item?.state ?? "open";
+    const answerable = !done && (item.kind !== "question" || state === "open" || state === "parked");
+    const choose = (kind: Kind, label: string) => html`<button type="button" class="btn"
+        aria-pressed=${this.#form.choice?.kind === kind ? "true" : "false"}
+        @click=${() => { this.#form = { ...this.#form, choice: { kind, chose: null } }; this.requestUpdate(); }}>${label}</button>`;
+    const box = (label: string) => html`<textarea aria-label=${label} placeholder=${label} .value=${this.#form.text}
+        @input=${(event: Event) => { this.#form = { ...this.#form, text: (event.target as HTMLTextAreaElement).value };
+                                     this.requestUpdate(); }}></textarea>`;
+    let form: TemplateResult | typeof nothing = nothing;
+    if (answerable && item.kind === "question" && state === "parked") {
+      form = html`<div class="acts"><span>Unpark takes the parking back: the question is open again.</span></div>`;
+    } else if (answerable && item.kind === "question") {
+      form = box("Or answer in your own words");
+    } else if (answerable && item.kind === "decision") {
+      form = html`<div class="acts">${choose("accept", "Accept")}${choose("reject", "Reject")}</div>`;
+    } else if (answerable && item.kind === "shown") {
+      form = html`<div class="acts">${choose("read-back", "That's what I said")}<button type="button" class="btn"
+          aria-expanded=${this.#form.correcting ? "true" : "false"} @click=${() => {
+            this.#form = { ...EMPTY_FORM, correcting: this.#form.correcting ? null : item.id };
+            this.requestUpdate();
+          }}>Not what I said…</button></div>${this.#form.correcting ? box("What you said") : nothing}`;
+    } else if (answerable && item.kind === "wait") {
+      form = html`<div class="acts">${choose("done", "I've done it")}</div>${comms && this.#form.choice?.kind === "done"
+        ? box("A note for the lead (optional)") : nothing}`;
+    }
+    const draft = answerable ? this.#formDraft(item, record) : null;
+    const to = draft ? (reach.to === EACH ? reach.leadOf(item.holder) : reach.to) : null;
+    const canNow = draft !== null && (comms ? to !== null : isPageKind(draft.kind));
+    const parkedNow = item.kind === "question" && state === "parked";
+    const acts = answerable ? html`<div class="acts">
+        <button type="button" class="btn accent" ?disabled=${draft === null} @click=${() => this.#add(item, record)}>
+          ${parkedNow ? "Unpark" : "Add to answers"}</button>
+        ${canNow ? html`<button type="button" class="btn" ?disabled=${this.#sending}
+          @click=${() => void this.#sendNow(item, record)}>${comms ? `Send now to ${to ?? "the lead"}` : "Record now"}</button>`
+          : nothing}
+        ${item.kind === "question" && state === "open" ? html`${comms ? html`<button type="button" class="btn"
+            @click=${() => this.#add(item, record, draftOf(item.holder, item.id, "explain",
+                                                            { text: this.#form.text, about: view.text }))}>
+            Ask the lead to explain</button>` : nothing}
+          <button type="button" class="btn" @click=${() => this.#add(item, record, draftOf(item.holder, item.id, "park",
+                                                                                          { about: view.text }))}>
+            Park</button>` : nothing}
+      </div>` : nothing;
+    const inTray = row && !row.receipt ? html`<div class="receipt"><span>In your answers: ${kindWords(row)}${row.text
+        ? ` "${row.text}"` : ""}</span><span class="dim">${chipOf(row, reach)}</span></div>` : nothing;
+    return html`${inTray}${row?.receipt ? this.#receiptView(row, value) : nothing}
+      ${answerable ? html`<div class="answer">${form}</div>${acts}` : nothing}`;
+  }
+
+  async #openDrop(round: string, stage: string): Promise<void> {
+    const act = mintId();
+    this.#drop = { round, stage, act, facts: null, why: null, receipt: null, busy: false };
+    this.requestUpdate();
+    const enc = encodeURIComponent;
+    const answer = await api(MODULE, `api/drop?round=${enc(round)}&stage=${enc(stage)}`);
+    if (this.#drop?.act !== act) return;
+    if (answer.status === 200 && answer.data) this.#drop = { ...this.#drop, facts: answer.data as DropFacts };
+    else this.#drop = { ...this.#drop, why: failureWhy(answer.status) };
+    this.#placed = false;
+    this.requestUpdate();
+  }
+
+  async #dropNow(): Promise<void> {
+    const drop = this.#drop;
+    if (drop === null || drop.busy) return;
+    this.#drop = { ...drop, busy: true };
+    this.requestUpdate();
+    const answer = await api(MODULE, "api/drop/build", { round: drop.round, stage: drop.stage, act: drop.act });
+    if (this.#drop?.act !== drop.act) return;
+    const receipt: Receipt = answer.status === 200 && answer.data ? answer.data as Receipt
+      : { act: drop.act, holder: drop.round, item: drop.stage, kind: "drop", state: "refused",
+          reason: `Not dropped: ${failureWhy(answer.status)}. Drop again tries it once more.` };
+    this.#drop = { ...this.#drop, busy: false, receipt };
+    if (receipt.state === "refused") void this.#feed?.refresh();
+    this.requestUpdate();
+  }
+
+  #dropConfirm(value: Board): TemplateResult {
+    const drop = this.#drop!;
+    const keep = html`<button type="button" class="btn" @click=${() => { this.#drop = null; this.requestUpdate(); }}>
+      ${drop.receipt ? "Close" : "Keep it"}</button>`;
+    if (drop.receipt) {
+      return html`<div class="confirm" role="status">${dropReceipt(drop.receipt, value.today, value.home)
+        .map((one) => html`<div>${one}</div>`)}<div class="acts">${keep}</div></div>`;
+    }
+    if (drop.why) return html`<div class="confirm"><div class="t-failed">${drop.why}</div><div class="acts">${keep}</div></div>`;
+    if (drop.facts === null) return html`<div class="confirm dim">${READING}</div>`;
+    if (!drop.facts.open) {
+      return html`<div class="confirm"><div>${drop.facts.reason ?? "No open build to drop."}</div>
+        <div class="acts">${keep}</div></div>`;
+    }
+    return html`<div class="confirm" role="group" aria-label="Drop ${drop.stage}'s build">
+      ${dropLines(drop.facts, value.today, value.home).map((one) => html`<div class="sec"><h3>${one.head}</h3>
+        ${one.rows.map((row) => html`<div class="row">${row}</div>`)}</div>`)}
+      <div class="acts"><button type="button" class="btn" ?disabled=${drop.busy}
+        @click=${() => void this.#dropNow()}>Drop ${drop.stage}'s build</button>${keep}</div></div>`;
   }
 
   // --- the phone ---------------------------------------------------------------------------

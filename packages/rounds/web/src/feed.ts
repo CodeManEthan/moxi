@@ -39,6 +39,29 @@ export interface Option {
   text: string;
 }
 
+/** A question's newest prepared answer: who prepared it, the option it recommends, how
+ * sure it is and why, and whether it was prepared for the options the question offers
+ * now (`current`). */
+export interface Prepared {
+  by: string | null;
+  model: string | null;
+  recommend: string | null;
+  sure: string | null;
+  why: string | null;
+  flips: string | null;
+  read: string[];
+  options: { key: string; text?: string | null; costs: string | null; forecloses: string | null }[];
+  actor: string | null;
+  at: string | null;
+  current: boolean;
+}
+
+/** A round's lead, its own or its project's (`from`: `round` or `project`). */
+export interface Lead {
+  name: string;
+  from: string;
+}
+
 /** A question or a decision, as what waits on the operator gives it. */
 export interface Entry {
   /** The round (`<project>/<slug>`) or the project that holds it. */
@@ -59,6 +82,10 @@ export interface Entry {
   alone?: boolean | null;
   /** For a decision not put to the operator, why not. */
   not_put?: string | null;
+  /** What a parked question waits for, if anything. */
+  until?: string | null;
+  /** A question's newest prepared answer; null when it has none. */
+  prepared?: Prepared | null;
 }
 
 /** A job for the operator. */
@@ -84,6 +111,8 @@ export interface Shown {
 
 export interface Waiting {
   questions: Entry[];
+  /** The parked questions: not put to the operator, listed apart. */
+  parked_questions?: Entry[];
   decisions: Entry[];
   waits: Job[];
   not_shown: { project: string; through: string | null; rows: Shown[] }[];
@@ -135,6 +164,7 @@ export interface Round {
   version: number | null;
   step: { step: string; stage: string | null; state: string } | null;
   counts: { open: number | null; parked: number | null; not_shown: number | null };
+  lead?: Lead | null;
   /** `yours`, `stuck`, `wrapping` or `moving`. */
   group: string;
   phrase: PhrasePart[];
@@ -255,6 +285,10 @@ export interface RecordValue {
   item?: Entry & Partial<Job> & Partial<Shown> & { project?: string | null; ruling?: string | null; chose?: string | null };
   answer?: string;
   passage?: string | null;
+  /** The ruling that put a question where it is: ruled, parked or withdrawn. */
+  ruling?: { id: string; text: string | null; record: string | null; actor: string | null; at: string | null;
+             shown: boolean } | null;
+  lead?: Lead | null;
 }
 
 /** A request that gave no readable value. */

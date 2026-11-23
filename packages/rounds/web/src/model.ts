@@ -8,7 +8,7 @@
 // tests read the same words in any zone and locale.
 
 import type {
-  Board, Cell, Closed, Column, Entry, Happened, Job, Line, PhrasePart, Recent, RecordValue, Round, Shown,
+  Board, Cell, Closed, Column, Entry, Happened, Job, Line, PhrasePart, Prepared, Recent, RecordValue, Round, Shown,
   Unreadable,
 } from "./feed.ts";
 
@@ -573,7 +573,8 @@ export function isOpenNow(address: Address, board: Board): boolean {
     case "walk": return items.length > 0 && (address.item === null
       || hasItem(address.item.kind, address.item.holder, address.item.id));
     case "key": return true;
-    default: return hasItem(address.kind, address.holder, address.id);
+    default: return hasItem(address.kind, address.holder, address.id)
+      || (address.kind === "question" && parkedOf(board, address.holder, address.id) !== null);
   }
 }
 
@@ -961,6 +962,139 @@ export function itemView(record: RecordValue, ctx: Context): ItemView {
            answer: record.answer ?? "" };
 }
 
+// --- acting --------------------------------------------------------------------------------
+
+/** A holder's lead: a round's from the board, a project's from any of its rounds led by
+ * the project's lead. Null for a round on the board with no lead; undefined when the
+ * board can't tell. */
+export function leadOf(board: Board): (holder: string) => string | null | undefined {
+  return (holder) => {
+    if (holder.includes("/")) {
+      const round = board.rounds.find((one) => one.name === holder);
+      return round ? round.lead?.name ?? null : undefined;
+    }
+    return board.rounds.find((one) => one.project === holder && one.lead?.from === "project")?.lead?.name;
+  };
+}
+
+/** What the popover says of a prepared answer: the option it marks `recommended` and the
+ * line over the passage, `The lead recommends b, sure: high: <why>`; null when there is
+ * none or it was prepared for other options. */
+export function preparedView(prepared: Prepared | null | undefined, lead: string | null | undefined)
+  : { recommend: string; line: string } | null {
+  if (!prepared || !prepared.current || !prepared.recommend) return null;
+  const who = !prepared.by || prepared.by === lead ? "The lead" : prepared.by;
+  const sure = prepared.sure ? `, sure: ${prepared.sure}` : "";
+  const why = prepared.why ? `. ${prepared.why}` : "";
+  return { recommend: prepared.recommend, line: `${who} recommends ${prepared.recommend}${sure}${why}` };
+}
+
+/** The word on a recommended option. */
+export const RECOMMENDED = "recommended";
+
+/** A parked question's entry, or null when it is not parked. */
+export function parkedOf(board: Board, holder: string, id: string): Entry | null {
+  return (board.waiting.parked_questions ?? []).find((one) => one.holder === holder && one.id === id) ?? null;
+}
+
+/** The parked questions, round by round in the board's order, each with what it waits
+ * for, if anything. */
+export function parkedGroups(board: Board, order: readonly string[] = board.rounds.map((one) => one.name))
+  : { holder: string; rows: { id: string; text: string; until: string | null }[] }[] {
+  const groups = new Map<string, { id: string; text: string; until: string | null }[]>();
+  for (const one of board.waiting.parked_questions ?? []) {
+    const rows = groups.get(one.holder) ?? [];
+    rows.push({ id: one.id, text: one.text ?? "", until: one.until ? `until ${one.until}` : null });
+    groups.set(one.holder, rows);
+  }
+  const rank = (holder: string) => (order.includes(holder) ? order.indexOf(holder) : order.length);
+  return [...groups.entries()].map(([holder, rows]) => ({ holder, rows }))
+    .sort((a, b) => rank(a.holder) - rank(b.holder) || a.holder.localeCompare(b.holder));
+}
+
+export const PARKED_HEAD = "Parked questions";
+
+/** A parked question's line: `Parked by C3 at 11:40`, with `until <what>` when it waits
+ * for something; empty when the record holds no parking. */
+export function parkingWords(record: RecordValue, today: string, clock: Clock = LOCAL): string {
+  const ruling = record.ruling;
+  if (!ruling || record.item?.state !== "parked") return "";
+  const at = ruling.at ? ` at ${timeWord(ruling.at, today, clock)}` : "";
+  const until = record.item?.until ? `, until ${record.item.until}` : "";
+  return `Parked by ${ruling.id}${at}${until}`;
+}
+
+/** Whether a stage has an open build to drop: its line's commission is done and its
+ * finish is not. The drop's confirm reads the build itself. */
+export function hasOpenBuild(round: Round, columns: readonly Column[], stage: string | null): boolean {
+  if (!stage) return false;
+  const line = round.lines.find((one) => one.stage === stage && one.kind !== "stage");
+  if (!line) return false;
+  return cellAt(line, columns, "commission")?.state === "done" && cellAt(line, columns, "finish")?.state !== "done";
+}
+
+/** What the drop's confirm says of one build, as `GET /api/drop` gives it. */
+export interface DropFacts {
+  round: string;
+  stage: string;
+  open: boolean;
+  reason: string | null;
+  branch: string | null;
+  builder: string | null;
+  at: string | null;
+  tip: string | null;
+  folders: { kind: string; path: string; goes: boolean; why: string | null }[];
+  refs: string[];
+}
+
+/** The drop's confirm, in the drop's own terms: what ends, what it removes if nothing
+ * would be lost, what it removes from the remote, what it keeps and what it records. */
+export function dropLines(facts: DropFacts, today: string, home: string | null, clock: Clock = LOCAL)
+  : { head: string; rows: string[] }[] {
+  const when = facts.at ? timeWord(facts.at, today, clock) : "at a time not on record";
+  const made = [{ head: "Ends", rows: [
+    `The open build of ${facts.stage} on branch ${facts.branch ?? "(none)"}, commissioned ${when}`
+      + `${facts.builder ? ` by ${facts.builder}` : ""}.`,
+    "The stage stays in the plan and owed: it can be commissioned again, or taken out of the plan by your ruling."] }];
+  made.push({ head: "Removes, if nothing in them would be lost", rows: facts.folders.length
+    ? facts.folders.map((one) => `The ${one.kind} ${tildePath(one.path, home)}: `
+                                 + (one.goes ? "will be removed" : `will be kept: ${one.why ?? "it fails the removal rule"}`))
+    : ["No folder of this build is on disk."] });
+  made.push({ head: "Removes from the remote", rows: facts.refs.length
+    ? facts.refs.map((ref) => `${ref}; a ref the remote refuses stays for moxi rounds drop --leftovers --refs`)
+    : ["No CI ref of this build."] });
+  made.push({ head: "Keeps", rows: [
+    `The branch ${facts.branch ?? "(none)"}${facts.tip ? ` at ${shortCommit(facts.tip)}` : ""}, with every commit on it, `
+      + "and the round's log, questions and holds as they are."] });
+  made.push({ head: "Records", rows: [`Your drop of ${facts.stage}'s build, with the page as the pointer.`] });
+  return made;
+}
+
+/** The drop's receipt: what the drop did, and whether the lead was told. */
+export function dropReceipt(receipt: { state: string; reason?: string | null; record?: string | null;
+                                       removed?: string[]; kept?: string[]; refs?: string[]; unscanned?: string[];
+                                       message?: { to: string | null; at: string | null; id: string | null } | null;
+                                       not_told?: string | null; to?: string | null },
+                            today: string, home: string | null, clock: Clock = LOCAL): string[] {
+  if (receipt.state !== "recorded" && receipt.state !== "recorded-not-told") {
+    return [receipt.reason ?? "The drop was refused."];
+  }
+  const made = ["Dropped.", ...(receipt.record ? [`Recorded with ${receipt.record}`] : [])];
+  for (const one of receipt.removed ?? []) made.push(`Removed ${tildePath(one, home)}`);
+  for (const one of receipt.kept ?? []) made.push(`Kept ${one}`);
+  for (const one of receipt.refs ?? []) made.push(`Ref ${one}`);
+  for (const one of receipt.unscanned ?? []) made.push(`Not scanned: ${one}`);
+  if (receipt.message?.id) {
+    made.push(`Told ${receipt.message.to} at ${receipt.message.at ? timeWord(receipt.message.at, today, clock) : ""}, `
+              + `comms ${receipt.message.id}`);
+  } else if (receipt.not_told) {
+    made.push(`Not told: ${receipt.not_told}`);
+  } else {
+    made.push("No lead was told: the round has no lead, or comms is not installed.");
+  }
+  return made;
+}
+
 // --- the key -------------------------------------------------------------------------------
 
 /** The key's lines: each state's marker and its words, then what `▼` means and the
@@ -1039,8 +1173,14 @@ export function footWords(board: Board | null, readAt: number | null, failed: st
     made.push(failed ? `Read ${timeWord(at, today, clock)}; the last read failed: ${failed}`
                      : `Read ${timeWord(at, today, clock)}`);
   }
-  if (board && board.waiting.parked > 0) made.push(count(board.waiting.parked, "parked question"));
+  const parked = board ? parkedWords(board) : null;
+  if (parked) made.push(parked);
   return made;
+}
+
+/** The foot's count of parked questions, which opens their list; null for none. */
+export function parkedWords(board: Board): string | null {
+  return board.waiting.parked > 0 ? count(board.waiting.parked, "parked question") : null;
 }
 
 // --- placing a popover ---------------------------------------------------------------------
