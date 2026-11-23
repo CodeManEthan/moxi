@@ -176,6 +176,13 @@ def step(repo: str, *, settings=None, candidate_ci=None, env=None,
         say(f"lander of {repo}: {exc}")
 
 
+def _not_landed(member) -> str:
+    """The tail of a leave whose member can no longer land: its commits stay on its
+    branch, and the lead or builder lands them in a build of their own."""
+    return (f"; its commits at {member.tip[:12]} are on its branch, not on the target: "
+            "land them in a new build")
+
+
 class _MemberGone(Exception):
     """A member no longer to be merged: `why` says why, `kind` is the queue event."""
 
@@ -247,10 +254,10 @@ class _Pass:
         except RoundsError as exc:
             raise _MemberGone(f"its round can't be read: {exc.reason}") from None
         if view.state.status != states.OPEN:
-            raise _MemberGone(f"its round is {view.state.status}")
+            raise _MemberGone(f"its round is {view.state.status}{_not_landed(member)}")
         build = builds.current(view.state, member.stage)
         if build is None or build.ended is not None:
-            raise _MemberGone("its build has ended")
+            raise _MemberGone(f"its build has ended{_not_landed(member)}")
         if QueueGit(self.root).branch(build.branch) != member.tip:
             raise _MemberGone(queue_file.MOVED)
         return where, build

@@ -560,7 +560,9 @@ def test_a_join_at_a_new_tip_the_fast_forward_overtakes_stays_queued_at_it(
     assert (member.state, member.tip) == (queue_file.QUEUED, new)
     assert queue().running() is None
     lander_pass()
-    assert queue().member(ROUND, "B1").state == queue_file.LEFT
+    gone = queue().member(ROUND, "B1")
+    assert gone.state == queue_file.LEFT
+    assert new[:12] in gone.reason and "not on the target" in gone.reason
     assert repo.git("merge-base", "main", new) != new
 
 
