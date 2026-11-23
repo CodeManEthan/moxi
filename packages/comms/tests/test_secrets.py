@@ -20,7 +20,7 @@ import sys
 import keyring.backend
 import keyring.errors
 import pytest
-from conftest import write_config
+from conftest import POSIX_MODES, write_config
 
 from moxi_comms import config, secrets
 from moxi_comms.record import RecordError
@@ -33,11 +33,11 @@ OWNER = owner_for_role("operator")
 
 # --------------------------------------------------------------------------- the order
 
-def test_env_beats_store_and_a_miss_falls_through_to_the_next(tmp_path):
+def test_env_beats_store_and_a_miss_falls_through_to_the_next(profile):
     """The declared order, proved by taking one step away. A step that does not hold the
     secret is a MISS and the next one answers; nothing is retried and nothing is
     reordered."""
-    store = TokenStore(tmp_path / "tokens")
+    store = TokenStore(profile / "tokens")
     store.write_secret(OWNER, SECRET_ID, "FROM-THE-STORE")
     env = {secrets.env_key(SECRET_ID): "FROM-THE-ENVIRONMENT"}
 
@@ -65,11 +65,11 @@ def test_the_env_step_looks_under_the_stated_key(tmp_path):
     assert got == {"value": "sk-x", "note": ""}
 
 
-def test_a_store_hit_is_keyed_by_the_holder_and_carries_no_note(tmp_path):
+def test_a_store_hit_is_keyed_by_the_holder_and_carries_no_note(profile):
     """The store step is the custody store's DECLARED READ and the store is a flat map,
     so a hit has an empty note. A lookup with no holder cannot be keyed at all and is a
     miss, never another holder's file."""
-    store = TokenStore(tmp_path / "tokens")
+    store = TokenStore(profile / "tokens")
     store.write_secret(OWNER, SECRET_ID, "STORED-TOKEN")
     chain = secrets.build(["store"], env={}, store=store)
 
@@ -82,12 +82,13 @@ def test_a_store_hit_is_keyed_by_the_holder_and_carries_no_note(tmp_path):
 
 # --------------------------------------------------------------- a break is not a miss
 
-def test_a_store_that_cannot_be_read_is_loud_and_names_the_step(tmp_path):
+@POSIX_MODES
+def test_a_store_that_cannot_be_read_is_loud_and_names_the_step(profile):
     """"the credential is not here" and "I could not tell whether it is here" are
     different sentences, and only one of them may be answered by the next step. A holder
     file the rest of the box can read is the store's own refusal (0600 is the whole
     mechanism), so the chain stops on it instead of shrugging and asking the next step."""
-    store = TokenStore(tmp_path / "tokens")
+    store = TokenStore(profile / "tokens")
     path = store.write_secret(OWNER, SECRET_ID, "STORED-TOKEN")
     os.chmod(path, 0o644)
     assert stat.S_IMODE(path.stat().st_mode) == 0o644
@@ -102,11 +103,11 @@ def test_a_store_that_cannot_be_read_is_loud_and_names_the_step(tmp_path):
 
 # --------------------------------------------------------------------------- the miss
 
-def test_the_all_miss_error_names_the_steps_tried_and_the_holder(tmp_path):
+def test_the_all_miss_error_names_the_steps_tried_and_the_holder(profile):
     """One sentence, in the caller's language (the send verb prints it): which steps were
     tried, in order, and WHOSE credential was being looked for. No path, no key, no
     value."""
-    chain = secrets.build(["env", "store"], env={}, store=tmp_path / "tokens")
+    chain = secrets.build(["env", "store"], env={}, store=profile / "tokens")
     with pytest.raises(RecordError) as e:            # SecretNotFound IS a RecordError
         chain.get(SECRET_ID, owner=OWNER)
     said = str(e.value)
@@ -149,12 +150,12 @@ print("ok")
 """
 
 
-def test_a_box_with_no_table_resolves_env_then_store_in_a_fresh_process(tmp_path):
+def test_a_box_with_no_table_resolves_env_then_store_in_a_fresh_process(profile):
     """In a fresh interpreter under the test's tmp roots, with no usable keychain: a box
     with no config file loads its defaults, builds `env, keychain, store` and resolves a
     real credential from the store."""
-    TokenStore(tmp_path / "tokens").write_secret(OWNER, SECRET_ID, "STORED-TOKEN")
-    out = subprocess.run([sys.executable, "-c", CHILD_DEFAULT, str(tmp_path / "tokens"),
+    TokenStore(profile / "tokens").write_secret(OWNER, SECRET_ID, "STORED-TOKEN")
+    out = subprocess.run([sys.executable, "-c", CHILD_DEFAULT, str(profile / "tokens"),
                           SECRET_ID], capture_output=True, text=True, timeout=60)
     assert out.returncode == 0, out.stderr
     assert out.stdout.strip() == "ok"
@@ -210,13 +211,13 @@ def test_the_secrets_table_may_not_hold_a_token_like_every_other_table():
 
 # ------------------------------------------------------------------- through the backends
 
-def test_the_operator_credential_reads_the_store_through_the_default_chain(tmp_path):
+def test_the_operator_credential_reads_the_store_through_the_default_chain(profile):
     from moxi_comms import directory
 
-    db = directory.init(tmp_path / "directory.db")
+    db = directory.init(profile / "directory.db")
     db.execute("INSERT INTO rooms VALUES ('names', '#names', 'names', '2026-01-01')")
     db.commit()
-    store = TokenStore(tmp_path / "tokens")
+    store = TokenStore(profile / "tokens")
     store.write_secret(OWNER, SECRET_ID, "STORED-TOKEN")
     try:
         assert operator_credential(db, store=store, env=os.environ) == \
@@ -225,28 +226,28 @@ def test_the_operator_credential_reads_the_store_through_the_default_chain(tmp_p
         db.close()
 
 
-def test_the_operator_credential_takes_the_env_step_first(tmp_path):
+def test_the_operator_credential_takes_the_env_step_first(profile):
     from moxi_comms import directory
 
-    db = directory.init(tmp_path / "directory.db")
+    db = directory.init(profile / "directory.db")
     db.execute("INSERT INTO rooms VALUES ('names', '#names', 'names', '2026-01-01')")
     db.commit()
     env = dict(os.environ, **{secrets.env_key(SECRET_ID): "ENV-TOKEN"})
     try:
-        assert operator_credential(db, store=TokenStore(tmp_path / "tokens"), env=env) == \
+        assert operator_credential(db, store=TokenStore(profile / "tokens"), env=env) == \
             ("ENV-TOKEN", "names")
     finally:
         db.close()
 
 
-def test_the_operator_credential_store_only_chain_ignores_the_env(tmp_path):
+def test_the_operator_credential_store_only_chain_ignores_the_env(profile):
     from moxi_comms import directory
 
     write_config(None, '[credentials]\nchain = ["store"]\n')
-    db = directory.init(tmp_path / "directory.db")
+    db = directory.init(profile / "directory.db")
     db.execute("INSERT INTO rooms VALUES ('names', '#names', 'names', '2026-01-01')")
     db.commit()
-    store = TokenStore(tmp_path / "tokens")
+    store = TokenStore(profile / "tokens")
     store.write_secret(OWNER, SECRET_ID, "STORED-TOKEN")
     env = dict(os.environ, **{secrets.env_key(SECRET_ID): "ENV-TOKEN"})
     try:
@@ -255,11 +256,11 @@ def test_the_operator_credential_store_only_chain_ignores_the_env(tmp_path):
         db.close()
 
 
-def test_every_step_returns_one_json_shape(tmp_path):
+def test_every_step_returns_one_json_shape(profile):
     """One shape for every step: `{"value", "note"}`. Pinned so a later step (a keyring,
     a client's own store) cannot quietly return something else and break the poster's
     rebuild."""
-    store = TokenStore(tmp_path / "tokens")
+    store = TokenStore(profile / "tokens")
     store.write_secret(OWNER, SECRET_ID, "STORED-TOKEN")
     for chain in (secrets.build(["env"], env={secrets.env_key(SECRET_ID): "E"}),
                   secrets.build(["store"], env={}, store=store)):
@@ -294,8 +295,8 @@ class BrokenKeychain(FakeKeychain):
         raise keyring.errors.KeyringError("the keychain is locked")
 
 
-def test_the_keychain_step_reads_and_writes_the_keychain_before_the_store(tmp_path):
-    store = TokenStore(tmp_path / "tokens")
+def test_the_keychain_step_reads_and_writes_the_keychain_before_the_store(profile):
+    store = TokenStore(profile / "tokens")
     fake = FakeKeychain()
     chain = secrets.build(secrets.DEFAULT_CHAIN, env={}, store=store, keychain=fake)
     assert chain.put(SECRET_ID, "IN-THE-KEYCHAIN", owner=OWNER) == "keychain"
@@ -307,11 +308,11 @@ def test_the_keychain_step_reads_and_writes_the_keychain_before_the_store(tmp_pa
     assert fake.kept == {}
 
 
-def test_a_keychain_with_no_usable_backend_is_a_miss_and_writes_go_to_the_store(tmp_path):
+def test_a_keychain_with_no_usable_backend_is_a_miss_and_writes_go_to_the_store(profile):
     import keyring.backends.fail
     import keyring.backends.null
 
-    store = TokenStore(tmp_path / "tokens")
+    store = TokenStore(profile / "tokens")
     for backend in (None, keyring.backends.null.Keyring(), keyring.backends.fail.Keyring()):
         chain = secrets.build(secrets.DEFAULT_CHAIN, env={}, store=store, keychain=backend)
         assert chain.put(SECRET_ID, "IN-THE-STORE", owner=OWNER) == "store"
@@ -319,8 +320,8 @@ def test_a_keychain_with_no_usable_backend_is_a_miss_and_writes_go_to_the_store(
         assert chain.delete(SECRET_ID, owner=OWNER) == ["store"]
 
 
-def test_a_keychain_backend_that_raises_is_a_failure_naming_the_step(tmp_path):
-    store = TokenStore(tmp_path / "tokens")
+def test_a_keychain_backend_that_raises_is_a_failure_naming_the_step(profile):
+    store = TokenStore(profile / "tokens")
     store.write_secret(OWNER, SECRET_ID, "IN-THE-STORE")
     chain = secrets.build(secrets.DEFAULT_CHAIN, env={}, store=store,
                           keychain=BrokenKeychain())
@@ -353,3 +354,49 @@ def test_on_windows_the_store_is_private_under_the_profile_whatever_the_mode(tmp
     assert not tokens.private_file(store.path_for(OWNER))
     with pytest.raises(tokens.TokenStoreError, match="outside it"):
         store.read_secret(OWNER, SECRET_ID)
+
+
+def test_on_windows_a_store_reached_through_a_link_out_of_the_profile_is_outside_it(
+        tmp_path, monkeypatch, needs_symlinks):
+    # Spelled under the profile, the store's real place is outside it: the profile's
+    # access list doesn't reach it there.
+    from moxi_comms import tokens
+
+    profile, outside = tmp_path / "profile", tmp_path / "outside"
+    profile.mkdir()
+    outside.mkdir()
+    (profile / "tokens").symlink_to(outside, target_is_directory=True)
+    store = TokenStore(profile / "tokens")
+    store.write_secret(OWNER, SECRET_ID, "T")
+    monkeypatch.setattr(tokens, "_PLATFORM", "win32")
+    monkeypatch.setenv("USERPROFILE", str(profile))
+    monkeypatch.delenv("LOCALAPPDATA", raising=False)
+    assert not tokens.private_file(store.path_for(OWNER))
+    with pytest.raises(tokens.TokenStoreError, match="outside it"):
+        store.read_secret(OWNER, SECRET_ID)
+    # A link that stays inside the profile is inside.
+    (profile / "inner").mkdir()
+    (profile / "linked").symlink_to(profile / "inner", target_is_directory=True)
+    assert tokens.private_file(profile / "linked" / "operator")
+
+
+def test_on_windows_a_short_spelling_of_a_place_in_the_profile_is_inside_it(tmp_path,
+                                                                           monkeypatch):
+    # An 8.3 short name spells the same place as the long one; the real path is long.
+    from moxi_comms import tokens
+
+    real = os.path.realpath
+    long_dir = tmp_path / "profile-of-a-long-name"
+    short_dir = tmp_path / "PROFIL~1"
+
+    def realpath(path, **kwargs):
+        text = os.fspath(path)
+        if text == str(short_dir) or text.startswith(str(short_dir) + os.sep):
+            text = str(long_dir) + text[len(str(short_dir)):]
+        return real(text, **kwargs)
+
+    monkeypatch.setattr(os.path, "realpath", realpath)
+    target = short_dir / "tokens" / "operator"
+    assert tokens.private_file(target, {"USERPROFILE": str(long_dir)})
+    assert tokens.private_file(long_dir / "tokens" / "operator", {"USERPROFILE": str(short_dir)})
+    assert not tokens.private_file(target, {"USERPROFILE": str(tmp_path / "elsewhere")})

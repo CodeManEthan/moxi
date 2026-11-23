@@ -12,7 +12,7 @@ from pathlib import Path
 import pytest
 
 from moxi_rounds import (builds, checking, ci, ci_refs, commissioning, dropping,
-                         listener, log, opening, settings, verdicts)
+                         listener, log, opening, queue_file, settings, verdicts)
 from moxi_rounds import state as states
 from moxi_rounds.cli import main
 
@@ -318,6 +318,48 @@ def test_an_unarmed_sweep_with_refs_and_remove_removes_nothing(pushed, repo, bar
 
     assert "ref would go origin ci/stale" in capsys.readouterr().out
     assert len(remote_refs(repo, bare)) == 5
+
+
+def batch_built(batch_id: str) -> None:
+    queue_file.append("proj-a", {"event": queue_file.BATCH, "state": queue_file.BUILT,
+                                 "id": batch_id, "n": 1, "main": "0" * 40,
+                                 "branch": queue_file.BRANCH_PREFIX + batch_id,
+                                 "members": [], "target": "main"})
+
+
+def test_a_running_candidate_s_ref_is_kept_and_an_ended_one_s_is_swept(
+        pushed, repo, bare, configure, capsys):
+    configure(extra=ARMED)
+    batch_built("aaaaaaaaaaaa-1")
+    batch_built("bbbbbbbbbbbb-1")
+    queue_file.append("proj-a", {"event": queue_file.BATCH, "state": queue_file.ENDED,
+                                 "id": "bbbbbbbbbbbb-1", "why": "landed"})
+    for ref in ("ci/queue-aaaaaaaaaaaa-1", "ci/queue-bbbbbbbbbbbb-1"):
+        repo.git("push", "-q", "origin", f"main:refs/heads/{ref}")
+    capsys.readouterr()
+
+    assert main(["drop", "--leftovers", "--refs", "--remove", "--json"]) == 0
+
+    found = {one["ref"]: (one["fate"], one["why"])
+             for one in json.loads(capsys.readouterr().out)["refs"]["refs"]}
+    assert found["ci/queue-aaaaaaaaaaaa-1"] == (
+        ci_refs.KEPT, "it is the ref of a candidate the queue runs: proj-a's batch "
+        "aaaaaaaaaaaa-1")
+    assert found["ci/queue-bbbbbbbbbbbb-1"][0] == ci_refs.REMOVED
+    assert remote_refs(repo, bare) == ["refs/heads/ci/queue-aaaaaaaaaaaa-1",
+                                       "refs/heads/ci/work"]
+
+
+def test_while_the_queue_file_can_t_be_read_only_candidates_refs_are_kept(repo, configure):
+    path = queue_file.queue_file("proj-a")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text('{"event": "batch", "state": "bui', encoding="utf-8")
+
+    rule = ci_refs.keep("proj-a", settings.load())
+
+    why = rule.why("ci/queue-cccccccccccc-2")
+    assert why is not None and "queue file of proj-a can't be read" in why
+    assert rule.why("ci/stale") is None
 
 
 def test_a_branch_ls_remote_lists_by_its_tail_alone_is_never_swept(pushed, repo, bare,

@@ -18,6 +18,7 @@ with catalog rows."""
 from __future__ import annotations
 
 import json
+import os
 import re
 import tomllib
 from pathlib import Path
@@ -36,6 +37,13 @@ LOCKED = "Locked for this run of the shell."
 TOKENS = Path(__file__).resolve().parents[1] / "web" / "tokens.json"
 # A clock time as the Save line words it, in the browser's own form.
 CLOCK = r"\d{1,2}:\d{2}(?:\s?[AP]M)?"
+
+
+def _kept_in(*parts):
+    """The foot's line for a file under the home, ending in `parts`, spelled with this
+    platform's separator as the page spells it."""
+    sep = re.escape(os.sep)
+    return re.compile(rf"^Kept in ~{sep}.+{sep}" + sep.join(map(re.escape, parts)) + "$")
 
 
 def _view(page):
@@ -121,7 +129,7 @@ def test_each_type_is_drawn_with_its_own_control(ui_page):
     expect(view.locator("[data-part=more]")).to_have_count(0)
     expect(view.locator("[data-line=default]")).to_have_count(0)
     foot = view.locator("[data-part=foot]")
-    expect(foot.locator("[data-line=file]")).to_have_text(re.compile(r"^Kept in ~/.+/fixture/config\.toml$"))
+    expect(foot.locator("[data-line=file]")).to_have_text(_kept_in("fixture", "config.toml"))
     expect(foot.get_by_role("link", name="Fixture")).to_have_attribute("href", "/m/fixture/")
 
 
@@ -159,7 +167,7 @@ def test_the_list_holds_the_core_ui_and_the_rest_and_settings_opens_the_core(ui_
     expect(ui_page).to_have_url(ui_shell.url + "/m/ui/settings")
     expect(_row(view, "skills.form")).to_have_count(0)
     expect(pane.locator("[data-part=foot] [data-line=file]")).to_have_text(
-        re.compile(r"^Kept in ~/.+/moxi/config\.toml$"))
+        _kept_in("moxi", "config.toml"))
     expect(pane.locator("[data-part=foot] a")).to_have_count(0)
     # ui's foot names its Modules page.
     names.and_(ui_page.locator("[data-list=ui]")).click()
@@ -255,7 +263,7 @@ def test_a_section_whose_file_wont_parse_says_why_in_the_pane(ui_shell, ui_page)
         expect(said.locator("[data-line=fix]")).to_contain_text("Fix: correct the file's TOML syntax")
         expect(said.get_by_role("button", name="Copy")).to_be_visible()
         expect(view.locator("[data-part=list] [data-line=unreadable]")).to_have_text("can't be read")
-        expect(view.locator("[data-part=foot] [data-line=file]")).to_contain_text("fixture/config.toml")
+        expect(view.locator("[data-part=foot] [data-line=file]")).to_contain_text(os.path.join("fixture", "config.toml"))
         # No rows: nothing in it takes input.
         expect(view.locator(".set")).to_have_count(0)
     finally:

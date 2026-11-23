@@ -272,7 +272,7 @@ export function harnessCounts(items: ItemsView): HarnessCount[] {
   return out;
 }
 
-/** The counts line: with nothing needing him `Claude Code 10 · Codex 9`, else `Claude
+/** The counts line: with nothing needing the user `Claude Code 10 · Codex 9`, else `Claude
  * Code 9 of 10 placed · Codex 7 of 9`. */
 export function countsLine(counts: readonly HarnessCount[], fine: boolean): string {
   return counts.map((count, at) => {

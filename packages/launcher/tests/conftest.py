@@ -1,8 +1,11 @@
 """What every test of the launcher shares: the one time its launches are named at, a
-short startup watch, and a `/tmp` of its own for scratch launches."""
+short startup watch, a `/tmp` of its own for scratch launches, and the `slot_target` mark,
+which skips a test of the slot target on native Windows unless the test is also marked
+`on_windows`."""
 
 from __future__ import annotations
 
+import sys
 from datetime import datetime
 
 import pytest
@@ -10,6 +13,26 @@ from moxi import config
 
 from moxi_launcher import names, settings, startup
 from moxi_launcher.compose import common
+
+#: Why a test marked `slot_target` is skipped on native Windows.
+SLOT_TARGET_SKIP = ("the slot target needs slots, which runs on Linux, macOS and WSL2, "
+                    "not native Windows")
+
+
+def pytest_configure(config):
+    config.addinivalue_line("markers", f"slot_target: a test of the slot target; {SLOT_TARGET_SKIP}")
+    config.addinivalue_line("markers", "on_windows: a slot target test of a path native Windows "
+                            "runs, such as its refusal there; it is not skipped there")
+
+
+def pytest_collection_modifyitems(items):
+    if sys.platform != "win32":
+        return
+    skip = pytest.mark.skip(reason=SLOT_TARGET_SKIP)
+    for item in items:
+        if item.get_closest_marker("slot_target") and not item.get_closest_marker("on_windows"):
+            item.add_marker(skip)
+
 
 #: The local time every launch a test makes in its own process is named at.
 NAMED_AT = datetime(2026, 11, 8, 12, 45)

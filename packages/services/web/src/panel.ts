@@ -14,7 +14,7 @@
 //   `/api/unit` and says under the field what the system says of it: found and what it
 //   is, missing, or why it can't be adopted. Only the answer for what the field holds now
 //   is drawn. Where the system can't tell a unit's kind, `It` asks it with none chosen, the
-//   unit is read again as the kind he picks, and Adopt waits for it. `It is` on or off, which he must say, with what the system
+//   unit is read again as the kind the user picks, and Adopt waits for it. `It is` on or off, which the user must say, with what the system
 //   says; `Project`; for a systemd timer the two sentences on the file adopting adds; and
 //   under `More`, the health check, the description and whether its runs launch sessions.
 //

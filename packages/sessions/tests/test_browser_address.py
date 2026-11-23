@@ -29,7 +29,7 @@ from moxi import modules
 from playwright.sync_api import Error, expect
 
 from moxi_sessions.testing import CodexRollout
-from test_browser_list import changed_at, claude, count_line, day_key, env_of, filter_button, group, noon, row, sid, tid
+from test_browser_list import changed_at, claude, count_line, env_of, filter_button, group, row, sid, tid
 from test_browser_running import running_topic
 
 pytestmark = [pytest.mark.browser, pytest.mark.timeout(240),
@@ -45,8 +45,11 @@ SMALL = ("sessions", "ui")
 RECENT = 100
 DAY = 45
 ALL = RECENT + DAY + 3 + 2 + 1
-#: The atlas day, and its newest session and one 35 rows down, which has a subagent.
-D2 = day_key(2)
+#: The module's one today, read when the first shell is seeded: the seed's days and the
+#: day keys the tests look for both come from it, so they agree across midnight.
+DAYS = pytest.importorskip("moxi_ui.testing.days", reason="ui is not installed").Days()
+#: The atlas day is `DAYS.key(2)`; its newest session, and one 35 rows down, which has a
+#: subagent.
 TOP = sid(300 + DAY - 1)
 DEEP = sid(310)
 AGENT = "a0190b0000000001"
@@ -76,18 +79,18 @@ def seed(env: dict[str, str]) -> None:
     for k in range(RECENT):
         claude(root, 100 + k, now - 600 - 10 * k, work_dir="harbor")
     for k in range(DAY):
-        claude(root, 300 + k, noon(2).timestamp() + 60 * k, typed=f"Task {k}.", work_dir="atlas",
+        claude(root, 300 + k, DAYS.noon(2).timestamp() + 60 * k, typed=f"Task {k}.", work_dir="atlas",
                subagents=1 if sid(300 + k) == DEEP else 0)
     for k in range(3):
-        claude(root, 400 + k, noon(2).timestamp() - 60 * (k + 1), program=True, work_dir="atlas")
+        claude(root, 400 + k, DAYS.noon(2).timestamp() - 60 * (k + 1), program=True, work_dir="atlas")
     for k, days in enumerate((20, 30)):
-        claude(root, 500 + k, noon(days).timestamp(), work_dir="atlas")
+        claude(root, 500 + k, DAYS.noon(days).timestamp(), work_dir="atlas")
     rollout = CodexRollout(Path(env["CODEX_HOME"]) / "sessions", thread_id=tid(1), cwd="/work/atlas",
-                           start=noon(4).timestamp() - 600)
+                           start=DAYS.noon(4).timestamp() - 600)
     rollout.turn()
     rollout.user("Do the thing.")
     rollout.assistant("Done.")
-    changed_at(rollout.write(), noon(4).timestamp())
+    changed_at(rollout.write(), DAYS.noon(4).timestamp())
 
 
 @pytest.fixture(scope="module", params=["small", "full"])
@@ -241,14 +244,14 @@ def the_full_list(page):
     view = open_list(page)
     narrow(view)
     at(page, NARROWED)
-    expect(rows(view, D2)).to_have_count(8)
-    show(view, D2)
-    expect(rows(view, D2)).to_have_count(38)
-    show(view, D2)
-    expect(rows(view, D2)).to_have_count(DAY)
-    show(view, D2, "program")
-    expect(rows(view, D2)).to_have_count(DAY + 3)
-    search = f"{NARROWED}&more={D2}:2&program={D2}:1"
+    expect(rows(view, DAYS.key(2))).to_have_count(8)
+    show(view, DAYS.key(2))
+    expect(rows(view, DAYS.key(2))).to_have_count(38)
+    show(view, DAYS.key(2))
+    expect(rows(view, DAYS.key(2))).to_have_count(DAY)
+    show(view, DAYS.key(2), "program")
+    expect(rows(view, DAYS.key(2))).to_have_count(DAY + 3)
+    search = f"{NARROWED}&more={DAYS.key(2)}:2&program={DAYS.key(2)}:1"
     at(page, search)
     open_row(view, TOP)
     open_row(view, DEEP)
@@ -261,8 +264,8 @@ def the_full_list(page):
 def restored(page, view, search: str, y: float | None) -> None:
     at(page, search)
     narrowed(view)
-    expect(rows(view, D2)).to_have_count(DAY + 3)
-    expect(group(view, D2).locator('[data-line="program"] button')).to_have_text("Hide")
+    expect(rows(view, DAYS.key(2))).to_have_count(DAY + 3)
+    expect(group(view, DAYS.key(2)).locator('[data-line="program"] button')).to_have_text("Hide")
     if y is None:
         expect(row(view, "claude", TOP)).not_to_have_attribute("open", "")
         expect(row(view, "claude", DEEP)).not_to_have_attribute("open", "")
@@ -375,7 +378,7 @@ def test_a_stale_address_narrows_to_nothing_or_reads_as_far_as_the_list_goes(fre
     expect(rows(view, "recent")).to_have_count(RECENT)
     at(page, "?more=recent:3")
 
-    view = open_list(page, f"?more={day_key(60)}:2")
+    view = open_list(page, f"?more={DAYS.key(60)}:2")
     expect(count_line(view)).to_have_text(f"{ALL} sessions")
     at(page, "")
     expect(view.locator('[data-line="address"]')).to_have_count(0)
@@ -387,9 +390,9 @@ def test_a_transcripts_links_carry_the_lists_query_through_its_moves(fresh):
     page = fresh()
     view = open_list(page)
     narrow(view)
-    show(view, D2)
-    expect(rows(view, D2)).to_have_count(38)
-    search = f"{NARROWED}&more={D2}:1"
+    show(view, DAYS.key(2))
+    expect(rows(view, DAYS.key(2))).to_have_count(38)
+    search = f"{NARROWED}&more={DAYS.key(2)}:1"
     at(page, search)
     link = open_row(view, DEEP).locator('[data-action="transcript"]')
     expect(link).to_have_attribute("href", f"/m/sessions/claude/{DEEP}{search}")
@@ -404,7 +407,7 @@ def test_a_transcripts_links_carry_the_lists_query_through_its_moves(fresh):
     head.click()
     at(page, search)
     narrowed(view)
-    expect(rows(view, D2)).to_have_count(38)
+    expect(rows(view, DAYS.key(2))).to_have_count(38)
 
     # Each link's href, opened in a page of its own, gives the same.
     other = fresh()
@@ -414,7 +417,7 @@ def test_a_transcripts_links_carry_the_lists_query_through_its_moves(fresh):
     other.goto(back.get_attribute("href"))
     view = other.locator(LIST)
     narrowed(view)
-    expect(rows(view, D2)).to_have_count(38)
+    expect(rows(view, DAYS.key(2))).to_have_count(38)
 
 
 # -- 9: the write guard --------------------------------------------------------------------
@@ -558,7 +561,7 @@ def test_with_launcher_a_reloads_scroll_lands_only_once_launchers_running_launch
     page.reload()
     view = page.locator(LIST)
     at(page, search)
-    expect(rows(view, D2)).to_have_count(DAY + 3)
+    expect(rows(view, DAYS.key(2))).to_have_count(DAY + 3)
     # Each opened row's read has answered; only launcher's answer is still out.
     for session in (TOP, DEEP):
         one = row(view, "claude", session)

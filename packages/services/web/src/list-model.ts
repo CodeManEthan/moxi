@@ -32,10 +32,10 @@ export interface RowFact {
 export const JOIN = " · ";
 /** Line one's dim words for a row whose runs launch agent sessions. */
 export const SPENDS = "spends usage";
-/** The group of his rows without projects installed, and of Moxi's rows. */
+/** The group of the user's rows without projects installed, and of Moxi's rows. */
 export const YOURS = "Yours";
 export const MOXI = "Moxi";
-/** The group of his rows that name no project, with projects installed. */
+/** The group of the user's rows that name no project, with projects installed. */
 export const NO_PROJECT = "No project";
 
 // -- times --------------------------------------------------------------------------------
@@ -238,9 +238,9 @@ export interface Group {
 }
 
 /** The list: the risen rows, in order, and the groups of the rest, each with rows. With
- * projects, one group per project key his rows carry (by key), then `No project`; without,
- * `Yours`. Then `Moxi`. A risen row is lifted out of its group. Within a group by name;
- * in `Moxi` by module then name, rows switched off last. With `quiet`, no row rises. */
+ * projects, one group per project key the user's rows carry (by key), then `No project`;
+ * without, `Yours`. Then `Moxi`. A risen row is lifted out of its group. Within a group by
+ * name; in `Moxi` by module then name, rows switched off last. With `quiet`, no row rises. */
 export function grouped(rows: readonly Row[], projects: boolean, when: When,
                         quiet = false): { risen: Row[]; groups: Group[] } {
   const up = quiet ? [] : risen(rows, when);
@@ -307,7 +307,7 @@ export function timingWords(timing: Timing | null): string | null {
   return `${listed(days.map((day) => DAY_NAMES[day][0]))} ${at}`;
 }
 
-/** His command without its directory: the first word's last part and the rest, a word
+/** The user's command without its directory: the first word's last part and the rest, a word
  * with a space or a quote quoted; null when it didn't reach this page. */
 export function commandWords(argv: Row["argv"]): string | null {
   const name = commandName(argv);
@@ -317,10 +317,10 @@ export function commandWords(argv: Row["argv"]): string | null {
   return [name, ...rest].join(" ");
 }
 
-/** Line one's dim words after the name: his `doc`, else his command without its
- * directory; Moxi's row, its module. On a risen row with projects, his row's project key
- * instead (a risen Moxi row keeps its module). Then a timer's timing, then `spends usage`
- * when its runs launch sessions. Null when there is none. */
+/** Line one's dim words after the name: the user's `doc`, else the user's command without
+ * its directory; Moxi's row, its module. On a risen row with projects, the project key of
+ * the user's row instead (a risen Moxi row keeps its module). Then a timer's timing, then
+ * `spends usage` when its runs launch sessions. Null when there is none. */
 export function whereOf(row: Row, options: { projects: boolean; risen: boolean }): string | null {
   const parts: string[] = [];
   let first: string | null;
@@ -366,15 +366,15 @@ export interface ListShape {
   /** `Nothing is down.` when no row rises, else null. */
   sentence: string | null;
   /** The sentence's dim words after it: `You have added no services yet.` when no row is
-   * his; else null. */
+   * the user's; else null. */
   more: string | null;
   /** The dim counts when no row rises, else null; null too when there is no row, and
-   * when no row is his. */
+   * when no row is the user's. */
   counts: string | null;
   /** `read <time>` from the rows' `at`, on the `Nothing is down.` line only: null when a
    * row rises, and without an `at`. */
   read: string | null;
-  /** Some row is his: `Add a service` goes under the label. With none, the page draws
+  /** Some row is the user's: `Add a service` goes under the label. With none, the page draws
    * `Yours` with what a service is and `Add a service` there. */
   his: boolean;
   groups: { group: Group; rows: RowView[] }[];
@@ -409,8 +409,8 @@ export function listShape(rows: readonly Row[], at: string | null, projects: boo
 
 // -- the filter ---------------------------------------------------------------------------
 
-/** The filter line's words and the rows it keeps: his rows of project `key`, and `3 of 14
- * services`, against every row. */
+/** The filter line's words and the rows it keeps: the user's rows of project `key`, and
+ * `3 of 14 services`, against every row. */
 export function filtered(rows: readonly Row[], key: string): { rows: Row[]; shown: string } {
   const kept = rows.filter((row) => row.form !== "module" && row.project === key);
   return { rows: kept, shown: `${kept.length} of ${servicesLabel(rows.length)}` };
@@ -421,13 +421,13 @@ export const PROJECT = "Project";
 /** The filter line's act: every row again. */
 export const SHOW_ALL = "Show all";
 
-/** The list under the filter when no row of his carries `key`. The page never says a
+/** The list under the filter when no row of the user's carries `key`. The page never says a
  * project doesn't exist: services can't know that from its own rows. */
 export function noServiceBelongs(key: string): string {
   return `No service belongs to ${key}.`;
 }
 
-/** The project keys his rows carry, by key: the projects the filter can name. */
+/** The project keys the user's rows carry, by key: the projects the filter can name. */
 export function projectKeys(rows: readonly Row[]): string[] {
   const keys = new Set<string>();
   for (const row of rows) if (row.form !== "module" && row.project !== null) keys.add(row.project);
@@ -446,9 +446,9 @@ export const NOT_ANSWERING = "Services' page server isn't answering";
 export const STORE_UNREAD = "Services' store can't be read.";
 /** The first row when every row is `unknown` for one reason. */
 export const NO_SUPERVISOR = "Can't read the supervisor";
-/** The sentence's dim words when no row is his. */
+/** The sentence's dim words when no row is the user's. */
 export const NOTHING_ADDED = "You have added no services yet.";
-/** What `Yours` says when no row is his. */
+/** What `Yours` says when no row is the user's. */
 export const WHAT_A_SERVICE_IS = "A service is a command this computer keeps running, such as a dev server, "
   + "or runs on a schedule, such as a nightly backup.";
 /** What the page says when services went away while it was open. */
@@ -473,7 +473,7 @@ export function lastReadLine(at: string | null, when: When): string | null {
  * - `error`: the store can't be read; `line` is its sentence, and no row is drawn.
  * - `unread`: every row is `unknown` for one reason: `Can't read the supervisor` and the
  *   reason in the first group's place; the rows dim in their groups, none risen.
- * - `up`: read (`empty` too: no row is his, which `ListShape.his` says).
+ * - `up`: read (`empty` too: no row is the user's, which `ListShape.his` says).
  * - `gone`: services went away while the page was open. */
 export interface PageState {
   state: "loading" | "down" | "error" | "unread" | "up" | "gone";

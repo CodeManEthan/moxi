@@ -56,7 +56,7 @@ export interface Opened {
   modulePage: string | null;
 }
 
-/** How often the page runs his own health check while it is open, in seconds. */
+/** How often the page runs the user's own health check while it is open, in seconds. */
 export const HEALTH_EVERY_S = 30;
 
 const sentence = (text: string): string => `${text[0].toUpperCase()}${text.slice(1)}.`;

@@ -131,7 +131,7 @@ export function messageRow(message: Message, readers: Readers, when: (at: number
   let said: string[];
   if (message.withdrawn) said = [TAKEN_BACK];
   else {
-    // His own copy has no read state on his page: he is reading it.
+    // The operator reads this page, so the operator's own copy shows no read state.
     said = [...new Set(message.rows.filter((row) => !readers.him(row.qualified))
       .map((row) => readWords(row, { bound: readers.bound(row.qualified), hasCache: readers.hasCache }))
       .filter((words): words is string => words !== null))];

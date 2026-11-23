@@ -17,8 +17,14 @@ OPTIONAL = {
     "notes": "Gives the default notes folder of a project that names none, for a "
              "relative rounds folder.",
     "turns": "Runs the leftover sweep at a session's start, when sweep.at_start is on.",
+    "comms": "The merge queue's lander tells builders, leads and the project's director "
+             "what became of their builds and of main, under the send-only name rounds. "
+             "Without it, moxi rounds next and moxi rounds queue are the only places "
+             "that news shows.",
 }
 GATED = {}
+#: The send-only comms name the lander's messages go out under.
+RESERVED_NAMES = ["rounds"]
 #: rounds reads its root locators through `moxi.paths` and no other variable.
 INTERNAL_ENV = {}
 #: rounds stamps no variable on a session.

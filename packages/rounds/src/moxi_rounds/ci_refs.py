@@ -16,7 +16,13 @@ repo: the project's target (its `into`, else the branch checked out at its root,
 new build would take) and the target each such build recorded; and when a build that
 has not ended recorded pushing it. While any round's log, or the project's target, can't
 be read, every ref is kept, since an open build may be recorded there, or the ref may be
-the target's. The rule is read again just before each deletion.
+the target's. A ref is kept too when it is the branch of a candidate the repo's merge
+queue shows running (`queue_file`'s `running_batches`), under any of those prefixes or
+none, since deleting it would cancel the candidate's run; while the queue file can't be
+read, every ref of a candidate's branch shape (`queue-...`) is kept. The lander removes a
+candidate's ref when its batch ends, and the sweep removes one a dead lander left once
+no running batch names it. The lander's own worktree (`<repo>/.queue`) is never the
+sweep's: no build's record names it. The rule is read again just before each deletion.
 
 **Removal** (`remove`), run from the repo's root: `git ls-remote --heads` for each ref
 first, then `git push <remote> --delete refs/heads/<ref>` for each one there that the
@@ -37,12 +43,12 @@ from __future__ import annotations
 
 import subprocess
 from collections.abc import Iterable, Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 from moxi import proc
 
-from . import builds, checking, ci, folders, gitreads, log
+from . import builds, checking, ci, folders, gitreads, log, queue_file
 from . import state as states
 from .errors import NoLog, RoundsError, SharedFolder, Unreadable
 
@@ -115,13 +121,17 @@ class Keep:
     `ref`'s and `full_ref`'s (none where it names no `ref`), the branches of its builds
     that have not ended (`branches`, each with the round and stage), its `targets`, the
     refs those builds recorded pushing (`pushed`), and why any log, or the project's
-    target, can't be read (`unreadable`, each a reason the rule keeps every ref)."""
+    target, can't be read (`unreadable`, each a reason the rule keeps every ref); the
+    branches of the candidates its queue shows running (`batches`), and why its queue
+    file can't be read (`queue_unread`, a reason the rule keeps every candidate's ref)."""
 
     templates: tuple[str, ...]
     branches: Mapping[str, str]
     targets: tuple[str, ...]
     pushed: Mapping[str, str]
     unreadable: tuple[str, ...]
+    batches: Mapping[str, str] = field(default_factory=dict)
+    queue_unread: str | None = None
 
     def why(self, ref: str, *, prefixes: Iterable[str] = ()) -> str | None:
         """Why the keep rule keeps `ref`, pushed under the `prefixes` besides the
@@ -133,6 +143,14 @@ class Keep:
         known = dict.fromkeys(prefixes)
         for template in self.templates:
             known[ci.prefix_of(template)] = None
+        for prefix in ("", *known):
+            if not ref.startswith(prefix):
+                continue
+            branch = ref[len(prefix):]
+            if branch in self.batches:
+                return f"it is the ref of a candidate the queue runs: {self.batches[branch]}"
+            if self.queue_unread is not None and branch.startswith(queue_file.BRANCH_PREFIX):
+                return self.queue_unread
         for prefix in known:
             if not ref.startswith(prefix):
                 continue
@@ -180,7 +198,20 @@ def keep(repo: str, settings) -> Keep:
                 targets[build.target] = None
                 for _remote, ref in recorded(state, build):
                     pushed[ref] = f"{name} {build.stage}"
-    return Keep(templates, branches, tuple(targets), pushed, tuple(unreadable))
+    batches, queue_unread = _running(repo)
+    return Keep(templates, branches, tuple(targets), pushed, tuple(unreadable), batches,
+                queue_unread)
+
+
+def _running(repo: str) -> tuple[dict[str, str], str | None]:
+    """The branch of each candidate `repo`'s queue shows running, with its batch; and,
+    when the queue file can't be read, why."""
+    try:
+        queue = queue_file.read(repo)
+    except (OSError, ValueError) as exc:
+        return {}, (f"the queue file of {repo} can't be read, and the ref may be a running "
+                    f"candidate's: {exc}")
+    return {one.branch: f"{repo}'s batch {one.id}" for one in queue.running_batches()}, None
 
 
 def _target(settings, repo: str) -> tuple[str | None, str | None]:

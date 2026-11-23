@@ -6,8 +6,8 @@
 // - One row per agent name, the part of an address before `@`. A row gathers every address
 //   the page knows with that name: the roster's rows and `waiting` names, and the authors
 //   of `owed` messages. A name none of whose addresses has a session, mail or an `owed`
-//   message is no row. The operator is never a row: an address the server marks as his
-//   is left out, though mail to him still shows in the message lists.
+//   message is no row. The operator is never a row: an address the server marks as the
+//   operator's is left out, though mail to the operator still shows in the message lists.
 // - The lead address is the one the row's single facts speak for: line one's `where` and
 //   cache fact, the bound cases of line two and the box's `to`.
 // - A row's case is the highest of `CASES` any of its addresses meets; the bound cases are
@@ -73,7 +73,7 @@ export function parsePageRoster(data: unknown, parse: (data: unknown) => Roster 
 }
 
 /** An author of waiting mail; `isOperator` is the server's mark for the operator
- * (`is_operator`), whatever name the directory gives him. */
+ * (`is_operator`), whatever name the directory gives the operator. */
 export interface Author {
   qualified: string;
   isOperator: boolean;
@@ -88,7 +88,7 @@ export interface Queued {
   from: Author[];
 }
 
-/** A message to the operator that waits for his reply. */
+/** A message to the operator that waits for the operator's reply. */
 export interface Owed {
   message_id: string;
   author: string;
@@ -204,7 +204,7 @@ export interface Address {
   waiting: Waiting | null;
   /** Its row in the books' summary. */
   queued: Queued | null;
-  /** The messages it wrote to the operator that wait for his reply, oldest first. */
+  /** The messages it wrote to the operator that wait for a reply, oldest first. */
   owed: Owed[];
   /** Its newest message within the last day. */
   last: number | null;

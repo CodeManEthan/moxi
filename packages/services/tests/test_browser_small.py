@@ -68,7 +68,7 @@ def test_the_small_install_says_what_a_service_is_and_lists_ui_shell_alone_under
     groups = panel.locator('section[data-part="group"]')
     expect(groups).to_have_count(2)
     yours, moxi = groups.first, groups.last
-    expect(yours).to_have_attribute("data-group", "his")
+    expect(yours).to_have_attribute("data-group", "yours")
     expect(yours.locator('[data-line="group"]')).to_have_text("Yours")
     expect(yours.locator('[data-line="what"]')).to_have_text(
         "A service is a command this computer keeps running, such as a dev server, or runs on a "

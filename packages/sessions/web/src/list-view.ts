@@ -190,7 +190,7 @@ const STYLES = css`
 
 const NOT_READ = { loading: false, gone: false, failure: null, refused: null, value: null };
 
-/** The acts of his that drop the saved scroll. */
+/** The user's acts that drop the saved scroll. */
 const ACTS = ["wheel", "touchstart", "touchmove", "pointerdown", "keydown"] as const;
 /** The scroll is written this long after scrolling stops. */
 const SCROLL_WAIT_MS = 300;
@@ -261,7 +261,7 @@ export class SessionsList extends LitElement {
     const inside = event.composedPath().some((node) => node instanceof Element && node.classList.contains("anchor"));
     if (!inside) this.#openMenu(null);
   };
-  /** An act of his drops the saved scroll; a press or a key also writes the scroll, so a
+  /** A user's act drops the saved scroll; a press or a key also writes the scroll, so a
    * band pick has it written before the shell moves. */
   #onAct = (event: Event): void => {
     const act = this.#scroll.take(event as Event & Act);
@@ -524,7 +524,7 @@ export class SessionsList extends LitElement {
 
   /** At the reads' first stop, once the opened rows then shown have each answered or
    * failed, scrolls once to the saved scroll, cut to the page's height, unless an act of
-   * his came first. */
+   * the user's came first. */
   #land(): void {
     const reader = this.#reader;
     if (reader === null || !reader.stopped || this.#landing || this.#scroll.settled) return;

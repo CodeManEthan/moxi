@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- On Windows usage depends on `tzdata`, so a zone named by its IANA name (`Europe/Paris`)
+  resolves there: Windows has no IANA time zone database of its own for `zoneinfo` to
+  read.
 - Every fast tier in the shipped model table carries its own cache prices, read from
   Anthropic's pricing page (platform.claude.com/docs/en/about-claude/pricing) on
   2026-11-21: Opus 5.5 fast cache reads $0.40, 5-minute writes $10, 1-hour $16; Opus 5 and
