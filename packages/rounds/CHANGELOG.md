@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+- A project's `private_files` lists files its repo neither tracks nor shows, such as an
+  `AGENTS.md` that `.git/info/exclude` hides. `commission` copies each into the new
+  worktree, never linking it, records each copy's source and `sha256` in
+  `build.commissioned` as `brought`, and names each in the commission block. It refuses
+  an entry that is missing, not a file, tracked at the commit the worktree checks out,
+  or not ignored. The removal rule lets an unchanged copy go with the worktree and keeps
+  the worktree for an edited one. A new finish gate, 11, refuses while any commit
+  finishing would bring into the target holds a private file, a path under one, or a
+  file where its folder would be; `check` reads it before it runs and `finish` again
+  under its lock. `moxi rounds doctor` gains a private files row.
+
+## 0.1.3 (2026-11-23)
+
 - Under a test, rounds refuses its own directories when no Moxi variable places them
   (`MOXI_ROUNDS_<KIND>_HOME`, `MOXI_ROUNDS_HOME` or `MOXI_HOME`), and a project's folders
   when no Moxi variable places the projects registry: those are the real ones. It raises
@@ -67,6 +80,19 @@
   `--existing`.
 - Tests: the rounds tests fail at setup when the test fence is not loaded, and a config
   path outside the test's own tmp fails the test.
+- Answers prepared ahead: `next --schema answer` prints the block of a prepared
+  answer, and `ask ROUND|PROJECT ID --prepared FILE` records one on a question that is
+  open or parked: the key it recommends, how sure it is (`low`, `medium` or `high`) and
+  why, the fact that would flip it, what it read, and each option's costs and what it
+  forecloses. It has one option for each the question offers and no other; a question
+  with no options takes them from the answer. A design's `[question.prepared]` is
+  recorded by `fold` the same way, a records-only fold included, where it was refused
+  before. No gate reads an answer. The newest is shown, and reads `prepared for other
+  options` once an option is added or retired. `show`, its `--json`, the questions
+  export, `list --questions` and the read API's `questions()` carry it, and `list
+  --waiting` says of each open question whether its answer is current. The index keeps
+  it, so rows written before read as stale and are answered from the logs. A question
+  moved to another log takes its answers with it.
 
 ## 0.1.2 (2026-11-21)
 

@@ -27,11 +27,12 @@ import threading
 import time
 
 import pytest
-from conftest import WAIT, wait_until
+from conftest import wait_until
 
 from moxi_comms import daemon as daemon_mod
 from moxi_comms.adapters import binding
 from moxi_comms.client import DaemonOffline
+from moxi_dev.testing import PROC_WAIT_S
 
 FAST = 0.05
 HOLD_S = 1.0
@@ -109,7 +110,7 @@ def test_mail_waiting_at_a_reconnect_is_injected_once_after_the_install(
     in_window, after = FLUSHES[way]
     shim = rig.shim(name="reviewer", scope="proj-a", autoreconnect=True,
                     backoff=itertools.repeat(FAST))
-    assert wait_until(lambda: not shim.offline, WAIT), "the shim bound"
+    assert wait_until(lambda: not shim.offline, PROC_WAIT_S), "the shim bound"
     injected_at: list = []
 
     def injector(text):
@@ -125,15 +126,16 @@ def test_mail_waiting_at_a_reconnect_is_injected_once_after_the_install(
                          sender=dict(name="main", scope="proj-a"))
     assert code == 0, out
     # Handed and queued; no boundary runs, so its row stays unhandled.
-    assert wait_until(lambda: shim.queue, WAIT), "the daemon handed the message"
+    assert wait_until(lambda: shim.queue, PROC_WAIT_S), "the daemon handed the message"
 
     rig.daemon.stop()
-    assert wait_until(lambda: shim.offline, WAIT), "the shim saw the daemon go"
+    assert wait_until(lambda: shim.offline, PROC_WAIT_S), "the shim saw the daemon go"
     hold.armed.set()
     rig.daemon = daemon_mod.Daemon(rig.record, clock=rig.clock,
                                    start_trim_thread=False).start()
 
-    assert wait_until(lambda: hold.released_at is not None and not shim.offline, WAIT), \
+    assert wait_until(lambda: hold.released_at is not None and not shim.offline,
+                      PROC_WAIT_S), \
         "the shim reconnected after the held install"
     assert hold.queued_in_window and hold.offline_in_window, \
         "the message was queued while the shim was offline, before the install"
@@ -179,7 +181,7 @@ def test_mail_is_injected_when_a_declined_register_s_close_lands_after_a_bind(
     injected."""
     shim = rig.shim(name="reviewer", scope="proj-a", autoreconnect=True,
                     backoff=itertools.repeat(FAST))
-    assert wait_until(lambda: not shim.offline, WAIT), "the shim bound"
+    assert wait_until(lambda: not shim.offline, PROC_WAIT_S), "the shim bound"
     injected: list = []
 
     def injector(text):
@@ -201,23 +203,23 @@ def test_mail_is_injected_when_a_declined_register_s_close_lands_after_a_bind(
     def on_close():
         if late.is_set():
             late.clear()
-            ran_late.append(wait_until(installed, WAIT))
+            ran_late.append(wait_until(installed, PROC_WAIT_S))
         handle_close()
 
     shim._on_close = on_close                  # read by every connect from here on
 
     rig.daemon.stop()
-    assert wait_until(lambda: shim.offline, WAIT), "the shim saw the daemon go"
+    assert wait_until(lambda: shim.offline, PROC_WAIT_S), "the shim saw the daemon go"
     late.set()
     decline.armed.set()
     rig.daemon = daemon_mod.Daemon(rig.record, clock=rig.clock,
                                    start_trim_thread=False).start()
-    assert wait_until(lambda: ran_late, WAIT), "the declined connection's close ran"
+    assert wait_until(lambda: ran_late, PROC_WAIT_S), "the declined connection's close ran"
     assert ran_late == [True], "it ran after the next register installed"
 
     code, out = rig.send("reviewer@proj-a", MARK, sender=dict(name="main", scope="proj-a"))
     assert code == 0, out
-    deadline = time.monotonic() + WAIT
+    deadline = time.monotonic() + PROC_WAIT_S
     while time.monotonic() < deadline and not injected:
         _idle(shim)
         time.sleep(TICK_S)

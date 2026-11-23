@@ -18,6 +18,7 @@ from types import SimpleNamespace
 import pytest
 from moxi import files, modules
 from moxi.paths import Layout
+from moxi_dev.testing import PROC_WAIT_S
 from moxi_ui.loopback.api import call, read_runtime, write_runtime
 
 from moxi_ui import health, listen
@@ -253,7 +254,7 @@ def _serve(**kwargs):
     shell.start()
     thread = threading.Thread(target=lambda: asyncio.run(shell.run()), daemon=True)
     thread.start()
-    deadline = time.monotonic() + 5
+    deadline = time.monotonic() + PROC_WAIT_S
     while shell._should_exit is None and time.monotonic() < deadline:
         time.sleep(0.01)
     return shell, thread
@@ -284,7 +285,7 @@ def test_the_shell_mounts_a_new_module_without_a_restart_and_serves_its_own_rout
         assert _get(port, "/m/sntwo/api/echo?n=2", browser)[0] == 404
         _module(site, "sntwo")
         os.utime(site)
-        deadline = time.monotonic() + 15
+        deadline = time.monotonic() + PROC_WAIT_S
         while time.monotonic() < deadline:
             if _get(port, "/m/sntwo/api/echo?n=2", browser) == (200, b'{"n":2}'):
                 break

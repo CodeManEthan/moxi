@@ -9,6 +9,8 @@ import sys
 import threading
 import time
 
+from moxi_dev.testing import PROC_WAIT_S
+
 IDENTITY = "pilot@proj-a"
 ENTER = b"\x1b[?1049h"
 LEAVE = b"\x1b[?1049l"
@@ -67,7 +69,7 @@ class PtyWrapper:
     def close(self) -> None:
         if self.proc.poll() is None:
             self.proc.kill()
-            self.proc.wait(timeout=10)
+            self.proc.wait(timeout=PROC_WAIT_S)
         self._reader.join(timeout=2)
         try:
             os.close(self.fd)

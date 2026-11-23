@@ -28,6 +28,7 @@ from moxi_comms.adapters import respawn, word
 from moxi_comms.claimhold import CLAIM_SOCKET_ENV
 from moxi_comms.constants import NAME_ENV
 from moxi_comms.membership import DEFAULT_PROC, TREE
+from moxi_dev.testing import PROC_WAIT_S
 
 KEY = "5e55a1d0-0000-4000-8000-0000000000c9"
 
@@ -523,7 +524,8 @@ def test_a_bound_claims_drop_reaches_the_respawner_and_a_refused_binds_does_not(
     time.sleep(0.3)
     assert drops.keys == [], "a refused bind made no binding, so no drop"
     held.stop()
-    assert wait_until(lambda: drops.keys == [{"claim-held"}], timeout=5), drops.keys
+    assert wait_until(lambda: drops.keys == [{"claim-held"}],
+                      timeout=PROC_WAIT_S), drops.keys
 
 
 def test_a_stopping_daemons_drops_reach_no_respawner(rig):

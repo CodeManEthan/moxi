@@ -8,6 +8,7 @@ import os
 import sys
 import time
 
+from moxi_dev.testing import PROC_WAIT_S
 import pytest
 
 import roster_kit
@@ -49,7 +50,7 @@ def live(data: dict) -> list[str]:
 
 def bound(rig, *names):
     wait_for(lambda: all(n in rig.daemon.bindings and rig.daemon.bindings[n].session_id
-                         for n in names), 5, what=f"{names} to bind")
+                         for n in names), PROC_WAIT_S, what=f"{names} to bind")
 
 
 def test_the_page_server_stops_when_idle_with_its_poller_running_and_starts_again(ui_shell,

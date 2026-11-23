@@ -91,7 +91,8 @@ ROUND_KEYS = ("flow", "dir", "ratify", "trace", "idle_days", "dormant_days",
               "slice_minutes", "sitting_at")
 #: The keys read for a build, from the build's repo.
 BUILD_KEYS = ("into", "land", "check", "ci", "finish", "check_on", "shared_paths",
-              "keep_branch", "lock_ref", "brief", "disposable", "director")
+              "keep_branch", "lock_ref", "brief", "disposable", "director",
+              "private_files")
 
 #: How a repo's builds land (`land`): each by its own finish, or through the repo's
 #: queue, where a finish joins the queue and the lander merges.
@@ -112,7 +113,8 @@ DEFAULT_FINISH = ({"do": MERGE},)
 #: project's table leaves it out. No `into` means the branch checked out at the repo's
 #: root, and no `lock_ref` rounds' own name for the lock.
 _PROJECT_ONLY = {"into": None, "land": LAND_FINISH, "check": None, "ci": None, "finish": DEFAULT_FINISH,
-                 "shared_paths": (), "keep_branch": False, "lock_ref": None, "brief": ()}
+                 "shared_paths": (), "keep_branch": False, "lock_ref": None, "brief": (),
+                 "private_files": ()}
 
 
 def round_setting(settings, project: str, key: str):
@@ -379,6 +381,47 @@ def _check_strings(file, where, value) -> None:
                           "give each item as a string")
 
 
+def _check_private_files(file, where, value) -> None:
+    """Refuse a `private_files` value that is not a list of literal paths, each relative
+    to the project's root, written with `/`, and named once. Whether a file is there,
+    tracked or ignored is the repo's state, read by `commission` and the doctor."""
+    _check_strings(file, where, value)
+    seen = set()
+    for entry in value:
+        problem = _private_file_problem(entry)
+        if problem:
+            raise ConfigError(file, where, f"holds {entry!r}, {problem}",
+                              "give each private file as a path relative to the "
+                              "project's root, with / between its parts, such as "
+                              "AGENTS.md or notes/local.md")
+        if entry in seen:
+            raise ConfigError(file, where, f"holds {entry!r} twice",
+                              "give each private file once")
+        seen.add(entry)
+
+
+def _private_file_problem(entry: str) -> str:
+    """What makes `entry` no literal relative path to a file, or "" when nothing does."""
+    if not entry:
+        return "which is empty"
+    if any(ord(char) < 32 or ord(char) == 127 for char in entry):
+        return "which holds a control character"
+    if "\\" in entry:
+        return "which holds a \\; write / between the parts"
+    if entry.startswith(("/", "~")) or (len(entry) > 1 and entry[1] == ":"):
+        return "which is not relative to the project's root"
+    if any(char in entry for char in "*?["):
+        return "which holds *, ? or [; each entry is a literal path, not a glob"
+    if entry.startswith(":"):
+        return "which starts with :, which git reads as pathspec magic"
+    parts = entry.split("/")
+    if any(part in ("", ".", "..") for part in parts):
+        return "which has an empty, . or .. part"
+    if any(part.casefold() == ".git" for part in parts):
+        return "which has a .git part"
+    return ""
+
+
 def _check_check(file, where, value, *, keys=("command", "timeout_s")) -> None:
     """The repo's check: a command line that splits into a command, and its time limit.
     The project's own check also takes `scoped`, the command line a queue project's
@@ -592,7 +635,7 @@ _PROJECT_CHECKS = {
     "land": _check_land, "check": _check_project_check, "ci": _check_ci, "finish": _check_finish,
     "shared_paths": _check_strings, "keep_branch": _check_bool,
     "lock_ref": lambda file, where, value: _check_string(file, where, value, "a git ref"),
-    "brief": _check_strings}
+    "brief": _check_strings, "private_files": _check_private_files}
 
 _KIND_WORDS = {"string": "a string", "bool": "a boolean", "int": "an int"}
 

@@ -9,7 +9,7 @@ A question lives in one log. Two calls carry one to the other log of the same pr
 
 **What is carried.** The sentence, where it came from, who asked it and when, the
 operator's pointer when the question is the operator's own, the options it offers and the keys
-retired from it, and its state as it reads now: open, or parked. A parked question that
+retired from it, the answers prepared for it, and its state as it reads now: open, or parked. A parked question that
 waits for another round still waits for it; a wait for a stage of the round it leaves
 is not carried, since the stage is not one of the log it arrives in. A ruled or
 withdrawn question is not moved.
@@ -360,6 +360,10 @@ def _arrival(question: state.Question, held: state.State, *, new_id: str, source
         fields["options"] = dict(question.options)
     if question.retired:
         fields["retired"] = list(question.retired)
+    if question.prepared:
+        # Each answer prepared for it keeps who recorded it and when.
+        fields["prepared"] = [{**one.body(), "actor": one.actor, "at": one.at}
+                              for one in question.prepared]
     # A wait for another round means the same in any log. A wait for a stage is for a
     # stage of the round the question leaves, and names nothing where it arrives.
     if now == questions.PARKED and (question.until or "").startswith(

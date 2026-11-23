@@ -80,7 +80,8 @@ TYPES = _types(
     # `options` are the choices it offers, each key with its one line. A question
     # brought here from another log also says the record it was there (`moved_from`),
     # what it held up in the round it left (`held`), what a parked one waits for
-    # (`until`) and the keys that were `retired` from it. A question that came up in
+    # (`until`), the keys that were `retired` from it and every answer `prepared` for
+    # it, each with who recorded it there and when. A question that came up in
     # a build names that build's `builder`, whom the asker asked it for.
     EventType("question.asked",
               ("id", "text", "from", "blocks", "state", "asked_by", "asked_at", "record",
@@ -89,9 +90,9 @@ TYPES = _types(
               required=("id", "text", "from", "blocks", "state", "asked_by", "asked_at")),
     # A question changed by something that is no ruling: its state or what it holds
     # up, with who changed it and the operator's pointer when the change needs one;
-    # `options` added, each key with its one line, and the keys `retired`; a prepared
-    # answer; the record it became in another log when it was moved there
-    # (`moved_to`). A ruling of a question writes none of these: its own event says
+    # `options` added, each key with its one line, and the keys `retired`; an answer
+    # `prepared` for it, the keys of its block less `kind` and `question`; the record
+    # it became in another log when it was moved there (`moved_to`). A ruling of a question writes none of these: its own event says
     # what the question becomes.
     EventType("question.changed",
               ("id", "state", "blocks", "until", "by", "record", "options",
@@ -133,10 +134,12 @@ TYPES = _types(
     EventType("ruling.shown", ("ids", "record"), required=("ids", "record")),
     # A build began: its stage, repo, branch, the commit it was cut from, the branch it
     # is headed for, its worktree and scratch folder, its builder, the go pointer, the
-    # machine that made its folders (`host`) and the id their markers carry (`build`).
+    # machine that made its folders (`host`) and the id their markers carry (`build`),
+    # and each private file it copied into the worktree (`brought`: `path`, `from`,
+    # `sha256`), written only when it copied one.
     EventType("build.commissioned",
               ("stage", "repo", "branch", "base", "target", "worktree", "scratch",
-               "builder", "record", "host", "build")),
+               "builder", "record", "host", "build", "brought")),
     # A command ran for a build: the step it ran as, the commit, that commit's merge-base
     # with the target, the argv, and how it went: its exit code (None for a run ended at
     # its time limit), its duration and the file its output went to. A check by CI's

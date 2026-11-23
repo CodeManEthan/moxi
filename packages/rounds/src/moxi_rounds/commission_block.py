@@ -1,13 +1,14 @@
 """The commission block: what a builder reads first, and what the lead is told beside it.
 
 `block(...)` gives the block of one build as `commission` made it, read from the round
-and its project's log as they stood under the commission's lock. It holds only what
-the builder needs: the round, stage and flow; the repo, branch, base and target; the
-two folders, the scratch folder said to be for logs and probes only; the commands the
-builder runs and the one way a question reaches the operator (through the lead); who
-finishes and what must be true first; what the build step reads; the rulings the
-build follows; the stage's slices; the operator's skips that reach it; and the repo's
-own `brief` lines.
+and its project's log as they stood under the commission's lock. It holds only what the
+builder needs: the round, stage and flow; the repo, branch, base and target; the two
+folders, the scratch folder said to be for logs and probes only; each private file
+copied into the worktree, with what an edit of it does and how to let it go; the
+commands the builder runs and the one way a question reaches the operator (through the
+lead); who finishes and what must be true first; what the build step reads; the rulings
+the build follows; the stage's slices; the operator's skips that reach it; and the
+repo's own `brief` lines.
 
 **The rulings a build follows** are the ones `tracing.given` gives for the stage, each
 as it stands now. In a flow with a design step they are exactly the ones its rows cite
@@ -185,10 +186,11 @@ def _uncited(state: states.State, register: states.State, stage: states.Stage,
 
 def block(state: states.State, register: states.State, *, name: str, stage: str,
           repo: str, branch: str, base: str, target: str, worktree: Path,
-          scratch: Path, settings) -> Block:
+          scratch: Path, settings, brought: Sequence[Mapping] = ()) -> Block:
     """The commission block of the build of `stage` in the round `name`, read from
     `state`, the round's state, and `register`, its project's, as they stood when the
-    build was commissioned. The other arguments are the build's, as recorded."""
+    build was commissioned. The other arguments are the build's, as recorded; `brought`
+    is the event's private files copied into the worktree."""
     planned = stages.find(state, stage)
     gives = tracing.given(state, register, stage)
     commands = _commands(state, settings, repo)
@@ -198,6 +200,7 @@ def block(state: states.State, register: states.State, *, name: str, stage: str,
         f"worktree {worktree}",
         f"scratch  {scratch}",
         "         (logs and probes only: removed when the build ends)",
+        *(_brought_line(one) for one in brought),
         f"you run {_NUMBERS.get(len(commands), len(commands))} commands, from the "
         f"worktree: {', '.join(commands)}",
         "a question for the operator: tell your lead",
@@ -217,6 +220,13 @@ def block(state: states.State, register: states.State, *, name: str, stage: str,
     uncited = (() if planned is None or planned.repo is None
                else _uncited(state, register, planned, gives))
     return Block(lines=tuple(lines), gives=gives, unshown=unshown, uncited=uncited)
+
+
+def _brought_line(one: Mapping) -> str:
+    return (f"brought in, not in the repo: {one.get('path')}, a copy of "
+            f"{one.get('from')}: an edit stays here and keeps the worktree when the "
+            "build ends; restore the file from its source, or delete it, then end the "
+            "build")
 
 
 # -- what changed since a block ----------------------------------------------------------

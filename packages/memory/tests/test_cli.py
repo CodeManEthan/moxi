@@ -7,7 +7,7 @@ import time
 
 import pytest
 from moxi import files
-from moxi_dev.testing import wait_for
+from moxi_dev.testing import PROC_WAIT_S, wait_for
 from moxi_sessions import api as sessions
 
 from moxi_memory import clock, cli, index, ingest, links, start, state
@@ -221,7 +221,7 @@ def test_ingest_and_reindex_return_before_their_child_finishes(capsys, slow_chil
     code, out, _ = memory(capsys, *argv)
     assert code == 0 and time.monotonic() - began < 1 and not slow_child.exists()
     assert out.splitlines()[-1] == "watch it with: moxi memory status"
-    wait_for(slow_child.exists, timeout=10)
+    wait_for(slow_child.exists, timeout=PROC_WAIT_S)
     assert slow_child.read_text().strip() == args
 
 
