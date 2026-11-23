@@ -28,30 +28,35 @@ having made nothing, while any of these does not hold:
   the finish gate orders the two; equal ranges overlap) and it did not come onto the
   target by another build's recorded landing;
 - nothing is at the worktree's place but the worktree of this commission's own stopped
-  run (below).
+  run (below);
+- each entry of the repo's `private_files` is a file at the project's root, is not held
+  by the tree of the commit the worktree checks out (the base, else the branch's tip),
+  and is read as ignored by git at the root (`private_files.unmet`).
 
 Then it makes, in this order: the **build id** (16 random hex digits); the branch, cut
 from the base, and its worktree, in one git call, at `<worktree_dir>/<repo>/<branch>`;
-the worktree's marker, in the worktree's own git folder; the scratch folder,
-`<cache dir>/scratch/<repo>/<branch>/<build id>`, with a create that fails on a folder
-already there, and its marker first in it. Then it appends `build.commissioned` with
-both folders, each under the home folder written `~/<rest>` (`places.contract_home`), the
-build id and this machine's host name, after the `stage.declared` of
-a stage declared here. A branch is percent-encoded in
-both paths (`places.encode`).
+the worktree's marker, in the worktree's own git folder; a copy of each private file in
+the worktree, once git there reads every one as ignored (`private_files.bring`); the
+scratch folder, `<cache dir>/scratch/<repo>/<branch>/<build id>`, with a create that
+fails on a folder already there, and its marker first in it. Then it appends
+`build.commissioned` with both folders, each under the home folder written `~/<rest>`
+(`places.contract_home`), the build id, this machine's host name and each private file
+copied (`brought`), after the `stage.declared` of a stage declared here. A branch is
+percent-encoded in both paths (`places.encode`).
 
 **A rerun after a stop.** A run stopped before its append left folders and no event. A
 rerun adopts the worktree at the place only when its marker names this round, stage,
 repo and branch and a build id no `build.commissioned` of the round records: its own
-stopped run. It keeps that id, and makes the scratch folder under it when it is
-missing. Its base is the merge base of the branch's tip and the target, the commit the
-stopped run cut the branch from: a build's base never moves, even when the target did
-between the runs. Any other folder at either place is refused, naming it: one with no
-marker (a stop between its create and its marker), and a worktree whose marker names a
-recorded build. rounds never adopts or removes a folder it can't tell it made; the user
-looks at it, removes it, and runs `commission` again. A stage declared here is declared
-in the same append as its build, so a rerun of the same command declares the same id
-and adopts its own stopped run's worktree.
+stopped run. It keeps that id, and makes the scratch folder under it when it is missing,
+and copies each private file not copied yet, keeping one already there only when it is a
+regular file with the source's bytes. Its base is the merge base of the branch's tip and
+the target, the commit the stopped run cut the branch from: a build's base never moves,
+even when the target did between the runs. Any other folder at either place is refused,
+naming it: one with no marker (a stop between its create and its marker), and a worktree
+whose marker names a recorded build. rounds never adopts or removes a folder it can't
+tell it made; the user looks at it, removes it, and runs `commission` again. A stage
+declared here is declared in the same append as its build, so a rerun of the same
+command declares the same id and adopts its own stopped run's worktree.
 
 **Again after a drop.** A dropped build counts for nothing: its stage is commissioned
 again under the same id, with `existing` on the branch the drop kept or on a fresh
@@ -71,8 +76,8 @@ from pathlib import Path
 from moxi import proc
 
 from . import (builds, by_branch, commission_block, design_block, ending, folders,
-               freezing, gitreads, index, open_builds, paths, places, pointers, sizing,
-               skips, stages, stepping, steps, versions, write)
+               freezing, gitreads, index, open_builds, paths, places, pointers,
+               private_files, sizing, skips, stages, stepping, steps, versions, write)
 from . import settings as own
 from . import state as states
 from .errors import BadArgument, RoundsError, Unmet
@@ -93,7 +98,8 @@ class Commissioned:
     `oversized` lists each slice this commission declared over the project's
     `slice_minutes`, as `{"stage", "slice", "minutes"}`, and `slice_minutes` is that
     limit as read now; `failed` pairs each after-append callback that raised with what
-    it raised."""
+    it raised; `brought` is each private file copied into the worktree, as the event
+    records it."""
 
     name: str
     stage: str
@@ -113,6 +119,7 @@ class Commissioned:
     oversized: tuple[dict, ...] = ()
     slice_minutes: int | None = None
     failed: tuple[tuple[Callable, Exception], ...] = ()
+    brought: tuple[dict, ...] = ()
 
 
 @dataclass
@@ -133,6 +140,8 @@ class _Look:
     unmet_place: bool = False
     #: The stage this commission declares, in the form that declares one.
     declared: states.Stage | None = None
+    #: The repo's private files, copied into the worktree.
+    private: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -222,14 +231,17 @@ def commission(name: str, stage_id: str | None = None, *, builder: str, by: str,
                                   f"look at {found.worktree}, remove it, then: {again}")
             _mark(git_dir / places.WORKTREE_MARKER, places.marker(build_id, **names),
                   again)
+        brought = private_files.bring(
+            found.root, found.worktree, found.private, branch=found.branch,
+            is_new_branch=not existing, again=again)
         scratch = places.scratch_place(found.repo, found.branch, build_id, env)
         if not (found.adopt is not None and _is_own_scratch(scratch, build_id, names)):
             _make_scratch(scratch, places.marker(build_id, **names), again)
-        return build_id, scratch, found.adopt is not None
+        return build_id, scratch, found.adopt is not None, brought
 
     def event(view, result) -> list[write.Entry]:
         found = look(view)
-        build_id, scratch, _adopted = result
+        build_id, scratch, _adopted, brought = result
         entries = []
         if found.declared is not None:
             stage = found.declared
@@ -243,6 +255,8 @@ def commission(name: str, stage_id: str | None = None, *, builder: str, by: str,
                   "builder": builder, "host": places.host(), "build": build_id}
         if record is not None:
             fields["record"] = record
+        if brought:
+            fields["brought"] = brought
         return [*entries, write.Entry("build.commissioned", fields)]
 
     written = write.record(
@@ -258,7 +272,8 @@ def commission(name: str, stage_id: str | None = None, *, builder: str, by: str,
     made = commission_block.block(
         after, written.view.project_state, name=name, stage=one["stage"],
         repo=one["repo"], branch=one["branch"], base=one["base"], target=one["target"],
-        worktree=worktree, scratch=scratch, settings=settings)
+        worktree=worktree, scratch=scratch, settings=settings,
+        brought=one.get("brought") or ())
     limit = own.round_setting(settings, home.project, sizing.LIMIT)
     declared = [event for event in written.events if event["type"] == "stage.declared"]
     return Commissioned(
@@ -267,7 +282,8 @@ def commission(name: str, stage_id: str | None = None, *, builder: str, by: str,
         scratch=scratch, build=one["build"], host=one["host"],
         builder=builder, record=record, adopted=written.result[2], event=one,
         block=made, oversized=freezing.oversized({"stage": declared}, limit),
-        slice_minutes=limit, failed=written.failed)
+        slice_minutes=limit, failed=written.failed,
+        brought=tuple(one.get("brought") or ()))
 
 
 # -- what is read under the lock ---------------------------------------------------------
@@ -483,6 +499,11 @@ def _read_git(found: _Look, git: Git, view, *, name: str, stage, existing: bool,
     if existing and tip is not None:
         unmet += _shares(found, git, name=name, stage=stage, opened=opened,
                          settings=settings, again=again)
+    found.private = tuple(private_files.listed(settings, repo))
+    checks_out = tip if (found.adopt is not None or existing) else found.base
+    if found.private and checks_out is not None:
+        unmet += private_files.unmet(git, found.private, checks_out, repo=repo,
+                                     again=again)
     return unmet
 
 
