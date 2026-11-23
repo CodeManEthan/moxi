@@ -1,6 +1,16 @@
 # Changelog
 
-## 0.2.7 (unreleased)
+## 0.2.8 (unreleased)
+
+- The guard API gains `touched_files(call)`, exported from `moxi_turns`: the files a
+  write call touches, in the call's order, each a `TouchedFile(path, kind, text)`.
+  Claude Code's `Write` and `Edit` and OpenCode's `write` and `edit` give one `write`
+  entry; a Codex `apply_patch` gives one entry per section, `add`, `update` or `delete`,
+  and an update with `*** Move to:` gives `moved-from` and `moved-to`. `path` is as the
+  call names it, `text` what the call puts in the file. A tool it does not know, or
+  input of the wrong shape, gives `()`; it never raises.
+
+## 0.2.7
 
 - A new request, `fork {text, by, ref?}` (the client's `fork(text, by=, ref=)`), and a new
   capability, `fork`: start a fork of the session's main loop with `text` as its task. It

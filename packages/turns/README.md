@@ -113,6 +113,13 @@ turns asks once, when the session starts; it then runs in those sessions with no
 and no entry on `guards.run`. `moxi doctor turns` asks that function in its own
 environment, so a guard on only in certain sessions reads off there.
 
+A guard's judge that needs to know where a call writes reads it with
+`touched_files(call)`: one `TouchedFile(path, kind, text)` per file the call touches, in
+its order. Claude Code's `Write` and `Edit` and OpenCode's `write` and `edit` give one
+`write` entry; a Codex `apply_patch` gives one per section, `add`, `update` or `delete`,
+and an update with `*** Move to:` gives `moved-from` and `moved-to`. The path is as the
+call names it, not joined with its working directory, and any other call gives none.
+
 A guard runs at the call step, before a tool call runs, unless it says `step = "ask"`:
 then it runs when Claude Code is about to ask you to approve a call, and it can refuse
 that ask (Claude Code denies the call and the agent reads why) but never approve one.
