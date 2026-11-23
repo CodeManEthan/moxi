@@ -27,8 +27,9 @@
   `moxi-dev` requires no longer picks them all; other dev-group edges still count (a ui
   change picks connector). A change in `moxi-dev` still picks every package, except one
   to its rename table alone, which picks `moxi-dev`. A root path a package's tests read
-  picks that package: `README.md` picks memory, and `.github/workflows/publishing.yml`
-  and `release.yml` pick publishing. The rest of `.github/`, `docs/` and
+  picks that package: `README.md` picks memory, `.github/workflows/publishing.yml`
+  and `release.yml` pick publishing, and `.github/workflows/ci.yml` and `queue.yml`
+  pick `moxi-dev` alone, whose tests read them. The rest of `.github/`, `docs/` and
   `CONTRIBUTING.md` pick no package; the lock, the root `pyproject.toml` and the other
   root files still pick every one.
 - `moxi-dev check --static` runs only the whole-tree static steps (tags, comment

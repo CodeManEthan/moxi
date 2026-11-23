@@ -5,11 +5,22 @@
 - A `ci.workflows` entry can read jobs by name pattern (`matrix = ["browser (*)"]`), name
   its run's `pick` job, and carry `reads_candidates = true`: a merge queue's candidate is
   then read by the entries so marked, and a build's check and the target's full run by
-  the others. Where the pick job reads green, a job it did not run reads `skipped`,
-  which counts as green, while a job the entry names that is missing still reads
-  `absent`; the packages it picked, from the `picked:` line of its log, are recorded in
-  `ci.read`. The lander reads the target's head by the full run's workflows alone, so a
-  candidate's scoped run at the same commit never stands in for it.
+  the others. Where the pick job reads green, a matrix job it did not run reads
+  `skipped`, which counts as green, and so does a pattern no job matches once the run
+  has completed, when the pick picked nothing for it (its log's
+  `picked for <pattern>:` line, else its `picked:` line, is an empty list); a pattern
+  it picked something for reads `absent`. A job the entry names as itself never reads
+  `skipped`: skipped, it reads `red`, and missing, `absent`. The packages the pick
+  picked, from the `picked:` line of its log, are recorded in `ci.read`. The lander
+  reads the target's head by the full run's workflows alone, so a candidate's scoped run
+  at the same commit never stands in for it.
+- A `ci.workflows` entry can carry `stands_for`, a table from a job of its run to the
+  job of the target's full run it stands for (`stands_for = { scoped = "linux" }`); the
+  config check refuses a value that is not a table of job names. The lander compares a
+  red candidate's failures with the job each stands for, else the job of its own name.
+  A failure whose log names no test is now the target's own only when that job failed
+  in the target's run with no test named either, so a candidate's whole-tree failure is
+  no longer excused because the target's job fails some test.
 - Under a test, rounds refuses its own directories when no Moxi variable places them
   (`MOXI_ROUNDS_<KIND>_HOME`, `MOXI_ROUNDS_HOME` or `MOXI_HOME`), and a project's folders
   when no Moxi variable places the projects registry: those are the real ones. It raises
