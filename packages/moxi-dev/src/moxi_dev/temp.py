@@ -412,7 +412,8 @@ def choose(env: Mapping[str, str], *, basetemp: str | None = None, workers: int 
                     mode, root, short, why = RAM, where.ram_root, where.ram_root, None
                 else:
                     why = f"ram was asked, but {unfit}" + (f"; {why}" if why else "")
-        over = given if given and not _same_path(given, root) else None
+        over = (given if given and not _same_path(given, root)
+                and not _is_default_root(given, where) else None)
         return Choice(mode=mode, root=root, short_root=short,
                       is_in_memory=in_memory(root, where), source=BY_SETTING,
                       asked=asked, why=why, over=over, can_ram=can_ram)

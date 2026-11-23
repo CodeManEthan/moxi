@@ -572,9 +572,10 @@ def test_the_rest_of_the_temp_dirs_is_outside(outside, fence, tmp_path_factory):
 def test_temp_files_land_in_the_test_s_short_dir(fence):
     fd, name = tempfile.mkstemp()
     os.close(fd)
-    assert Path(name).parent == fence.short
+    # Resolved on both sides: on macOS /tmp is a link to /private/tmp.
+    assert Path(name).parent.resolve() == fence.short.resolve()
     with testing.short_dir() as where:
-        assert where.parent == fence.short
+        assert where.parent.resolve() == fence.short.resolve()
         if hasattr(socket, "AF_UNIX"):          # a Unix socket's bound; Windows has none
             # /var/tmp/mx-<6>/<1>/mx-<8>/sock: the test's short dir is in its
             # process's short process dir.

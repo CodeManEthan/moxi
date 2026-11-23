@@ -158,6 +158,13 @@ def test_the_setting_overrides_another_temproot_and_says_so(machine, tmp_path):
                                 f"PYTEST_DEBUG_TEMPROOT={scratch}")
 
 
+def test_a_temproot_that_is_the_default_root_is_not_named_as_overridden(machine):
+    where = machine.places()
+    chosen = temp.choose({TEMP_ENV: "ram", TEMPROOT_ENV: str(machine.disk)}, where=where)
+    assert (chosen.root, chosen.over) == (str(machine.ram), None)
+    assert "over" not in chosen.header().split(";")[0]
+
+
 def test_a_temproot_is_honoured_when_the_setting_is_unset(machine, tmp_path):
     scratch = tmp_path / "scratch"
     scratch.mkdir()
