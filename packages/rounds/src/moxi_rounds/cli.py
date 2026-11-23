@@ -1417,8 +1417,9 @@ def _declare_check(verbs) -> None:
                       help="run the command step NAME of the round's flow, a step of "
                            "your own, in place of the repo's check")
     form.add_argument("--full", action="store_true",
-                      help="in a repo that declares ci, run the repo's declared check in "
-                           "place of reading CI")
+                      help="run the repo's declared check (check.command): in a repo "
+                           "that declares ci, in place of reading CI; in a queue "
+                           "project, in place of the scoped one")
     parser.add_argument("--timeout-s", metavar="N", type=float, dest="timeout_s",
                         help="end the run's whole process tree after N seconds, in place "
                              "of the check's or the step's own timeout_s (3600 when "

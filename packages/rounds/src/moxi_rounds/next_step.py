@@ -187,7 +187,7 @@ def _check(found: showing.Shown, step: steps.Step) -> dict:
     settings = own.load() if found.settings is None else found.settings
     if build is not None and checking.queued(settings, build.repo):
         said["then"] = [f"{said['then'][0]}: it runs the scoped local check, pushes "
-                        "nothing and reads no CI"]
+                        "nothing and reads no CI, or with --full the full check"]
         return said
     if build is None or ci.declared(settings, build.repo) is None:
         return said

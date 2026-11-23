@@ -15,12 +15,14 @@ do not count. A run of one step is never read for another.
 
 **A queue project's check** (`land = "queue"`) is the repo's `check.scoped` command,
 `{base}` filled in with the merge-base of `T` and the target's head: the check of the
-packages the build touched and their dependents. It pushes nothing and reads no CI, and
-`--full` is refused, since the full run of a queue project's build is its candidate's
-CI. The gate's argv fills `{base}` with the newest run's own `merge_base` when that run
-is at `T`, and with the merge-base read from git otherwise; the merge-base of `T` and
-the target does not change as the target moves forward, so the record stays good while
-the build waits in the queue.
+packages the build touched and their dependents. It pushes nothing and reads no CI.
+`--full` runs the repo's `check.command` there instead, as in any other project, and
+records it; `land` is neither read for it nor changed. The step is met at `T` by the
+newest run passing with either argv as the settings give it now (`steps.Seen.check`,
+`steps.Seen.full_check`). The scoped gate's argv fills `{base}` with the newest run's
+own `merge_base` when that run is at `T`, and with the merge-base read from git
+otherwise; the merge-base of `T` and the target does not change as the target moves
+forward, so the record stays good while the build waits in the queue.
 
 **The command line** is split as a shell would split it and run with no shell; a step of
 the user's own gives its words as a list. Each word may hold the placeholders `{round}`, `{stage}`, `{repo}`, `{root}`, `{branch}`, `{tip}`
@@ -363,6 +365,7 @@ def seen_of(state: states.State, name: str, *, settings,
             check=None if argv is None and declared(settings, build.repo) is None
             else tuple(argv or ()),
             values=None if head is None else values(name, build, root=root, tip=head),
+            full_check=_full_check(settings, name, build, root=root, tip=head),
             ci=(None if queued(settings, build.repo)
                 else _ci_now(settings, build, name=name, root=root, tip=head)),
             head=head, since=since, drift=moved, reported=reported,
@@ -372,6 +375,17 @@ def seen_of(state: states.State, name: str, *, settings,
             actions=tuple(own.build_setting(settings, build.repo, "finish")),
             shares=tuple(now.shares), ratify=ratify, private=private)
     return found
+
+
+def _full_check(settings, name: str, build: builds.Build, *, root,
+                tip: str | None) -> tuple[str, ...] | None:
+    """In a queue project, the argv the repo's `check.command` gives now at `tip`, which
+    meets the check step as the scoped argv does; None elsewhere, or with no tip or no
+    such command."""
+    words = declared(settings, build.repo)
+    if tip is None or words is None or not queued(settings, build.repo):
+        return None
+    return tuple(fill(words, values(name, build, root=root, tip=tip)))
 
 
 def _private_held(settings, build: builds.Build, commissioned: Mapping, git: Git,
@@ -873,11 +887,15 @@ def _output_file(scratch: Path) -> Path:
 
 
 def _command(state: states.State, build: builds.Build, step: str | None, *, name: str,
-             settings) -> tuple[list[str] | None, float | None, Unmet | None]:
+             settings, full: bool = False) -> tuple[list[str] | None, float | None,
+                                                    Unmet | None]:
     """The words of the command a run of `step` (the repo's check when None) runs,
-    placeholders as written, and its own time limit; or why there is none."""
+    placeholders as written, and its own time limit; or why there is none. With `full`,
+    the repo's check is its `check.command` in a queue project too, not its scoped
+    one."""
     if step is None:
-        words = scoped(settings, build.repo) or declared(settings, build.repo)
+        words = (None if full else scoped(settings, build.repo)) or declared(
+            settings, build.repo)
         if words is None:
             return None, None, Unmet(
                 f"{build.repo} declares no check, so a build in it has no check step",
@@ -913,7 +931,7 @@ def _look(view, *, name: str, stage: str, step: str | None, settings, again: str
         return found
     found.build = build
     words, own_timeout_s, missing = _command(state, build, step, name=name,
-                                             settings=settings)
+                                             settings=settings, full=full)
     if missing is not None:
         found.unmet.append(missing)
         return found
@@ -961,15 +979,10 @@ def _look(view, *, name: str, stage: str, step: str | None, settings, again: str
 
 def _queue_look(found: _Look, *, full: bool, name: str, stage: str) -> None:
     """A queue project's check: `{base}` filled in with the merge-base read at the
-    tip; refused with `--full`, or where the merge-base is not one commit."""
+    tip; refused where the merge-base is not one commit. With `full` the run is the
+    repo's `check.command`, which has no `{base}`: nothing is filled or refused."""
     build = found.build
-    if full:
-        found.unmet.append(Unmet(
-            f"{build.repo} lands through its queue, so a build's full run is its "
-            "candidate's CI and its own check is the scoped one",
-            f"moxi rounds check {name} {stage}"))
-        return
-    if found.argv is None:
+    if full or found.argv is None:
         return
     if found.merge_base is None:
         found.unmet.append(Unmet(
