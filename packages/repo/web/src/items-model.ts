@@ -1,5 +1,5 @@
-// What needs him, from `/api/repos`: one item per thing he fixes, each word one repo
-// states, and the verdict line over them. No DOM, so the Node tests read it.
+// What needs the user, from `/api/repos`: one item per thing the user fixes, each word
+// one repo states, and the verdict line over them. No DOM, so the Node tests read it.
 //
 // Per repo, items come from its problems, its events' chain lines, its open records and
 // its specs. A record that says the same thing as a problem or a spec is merged into that
@@ -14,7 +14,7 @@ import {
   refuseWord, repoName, whenWord,
 } from "./words.ts";
 
-/** `need` counts as a thing that needs him; `warn` as a warning. */
+/** `need` counts as a thing that needs the user; `warn` as a warning. */
 export type Weight = "need" | "warn";
 
 /** What an item was made from: the row of the item table it comes from. */
@@ -22,7 +22,7 @@ export type Source =
   | "no-module" | "gone" | "chain" | "problem" | "piece" | "refused" | "failed" | "held"
   | "commit" | "push" | "specs";
 
-/** An item's fix: a label over a text he copies, one sentence, or the Refresh act. */
+/** An item's fix: a label over a text the user copies, one sentence, or the Refresh act. */
 export interface Fix {
   /** `Take the piece out`, `Drop it from the list`; null for none. */
   label: string | null;
@@ -307,7 +307,7 @@ export interface Verdict {
   head: string;
   /** What follows it: `, 1 warning`, or `N repos · M pieces in place`; null for none. */
   rest: string | null;
-  /** The head is heavy: only when something needs him. */
+  /** The head is heavy: only when something needs the user. */
   heavy: boolean;
   needs: number;
   warnings: number;

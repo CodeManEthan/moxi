@@ -115,14 +115,19 @@ def private_file(path, env=None) -> bool:
     """On Windows, the store's privacy check: is `path` under the user's profile
     (`%USERPROFILE%` or `%LOCALAPPDATA%`)? A file's mode bits mean nothing there, so the
     POSIX check (0600 in 0700) would refuse every file; the profile's access list is what
-    keeps the file the user's own."""
+    keeps the file the user's own.
+
+    It compares real paths, the target's and each root's: links and junctions resolved,
+    each part spelled long. A path inside the profile that leads out of it through a
+    junction is outside, where the profile's access list doesn't reach; a short (8.3)
+    spelling of a place inside it is inside."""
     env = env if env is not None else os.environ
-    target = os.path.normcase(os.path.abspath(os.fspath(path)))
+    target = os.path.normcase(os.path.realpath(os.fspath(path)))
     for var in ("USERPROFILE", "LOCALAPPDATA"):
         root = (env.get(var) or "").strip()
         if not root:
             continue
-        root = os.path.normcase(os.path.abspath(root))
+        root = os.path.normcase(os.path.realpath(root))
         try:
             if os.path.commonpath([root, target]) == root:
                 return True

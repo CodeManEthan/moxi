@@ -72,7 +72,7 @@ from . import board, builds, checking, export, folders, index, listing, log, ope
 from . import paths, showing
 from . import settings as own
 from . import state as states
-from .errors import RoundsError
+from .errors import RoundsError, UnfencedTest
 
 _ui = modules.load("ui", interface=3)
 if not _ui.ok:
@@ -218,8 +218,8 @@ class Kept:
 class Held:
     """What the records answer from, replaced whole by each gather: the open rounds'
     parts and the closed ones the strip read, by name; each open build's git state as
-    the gather read it, by round and then stage; what waits on him as the value has it;
-    the round folders, by name; and the settings."""
+    the gather read it, by round and then stage; what waits on the operator as the value
+    has it; the round folders, by name; and the settings."""
 
     parts: Mapping[str, board.Part] = field(default_factory=dict)
     reading: Mapping[str, Mapping[str, open_builds.OpenBuild]] = field(
@@ -257,6 +257,8 @@ class Board:
         with self.lock:
             try:
                 token = take_token(self.memo)
+            except UnfencedTest:
+                raise
             except Exception as exc:  # noqa: BLE001 - the page shows it whole
                 _log_once(exc, "finding the rounds folders failed")
                 return self._failed(exc)
@@ -298,6 +300,8 @@ class Board:
         try:
             reading = open_builds.read(settings=settings, now=now)
             given = listing.projects(settings=settings, now=now, refresh=False)
+        except UnfencedTest:
+            raise
         except Exception as exc:  # noqa: BLE001 - the page shows it whole
             _log_once(exc, "reading the open builds or the projects failed")
             value.update(state="error", detail=_detail(exc))
@@ -330,6 +334,8 @@ class Board:
                     try:
                         kept = Kept(key, _make(summary.name, settings, on_closed,
                                                read=by_round.get(summary.name, {})))
+                    except UnfencedTest:
+                        raise
                     except Exception as exc:  # noqa: BLE001 - one round's, shown on its row
                         unreadable.append(_row(summary.name, exc))
                         continue
@@ -352,6 +358,8 @@ class Board:
                 rounds.append(board.round_value(
                     kept.part, columns, board.items_of(waiting, name),
                     step=board.step_of(kept.part), counts=counts.get(name, {})))
+            except UnfencedTest:
+                raise
             except Exception as exc:  # noqa: BLE001 - one round's, shown on its row
                 unreadable.append(_row(name, exc))
         ended = listing.rounds(given=given, now=now, ended=True)
@@ -385,6 +393,8 @@ class Board:
             if kept is None or kept.key != key:
                 try:
                     kept = Kept(key, _make(summary.name, token.settings, on_closed, read={}))
+                except UnfencedTest:
+                    raise
                 except Exception as exc:  # noqa: BLE001 - the strip goes on without it
                     _log_once(exc, "reading a closed round for the strip failed")
                     continue
@@ -501,8 +511,8 @@ def _when(stat: tuple[int, int]) -> str:
 
 
 def _entry(data: Mapping) -> dict:
-    """A question or decision as what waits on him gives it, with `blocks` a list and
-    `blocks_word` the word it may be instead."""
+    """A question or decision as what waits on the operator gives it, with `blocks` a
+    list and `blocks_word` the word it may be instead."""
     made = {key: value for key, value in data.items() if key != "held"}
     blocks = data.get("blocks")
     made["blocks"] = list(blocks) if isinstance(blocks, (list, tuple)) else []
@@ -511,9 +521,9 @@ def _entry(data: Mapping) -> dict:
 
 
 def _waiting(waited: listing.Waiting) -> dict:
-    """What waits on him, as the board carries it: his open questions, the majors not
-    ruled, his jobs (not the fixes the lead owes), the rulings not shown, and how many
-    questions are parked."""
+    """What waits on the operator, as the board carries it: the operator's open
+    questions, the majors not ruled, the operator's jobs (not the fixes the lead owes),
+    the rulings not shown, and how many questions are parked."""
     found = dict(waited.found)
     return {"questions": [_entry(one.data()) for one in found["open"]],
             "decisions": [_entry(one.data()) for one in found["decisions"]],
@@ -618,6 +628,8 @@ class _Feed:
         while True:
             try:
                 await self.tick()
+            except UnfencedTest:
+                raise
             except Exception as exc:  # noqa: BLE001 - the poller outlives every failure
                 _log_once(exc, "the rounds poller's tick failed")
             await asyncio.sleep(PERIOD_S)

@@ -89,12 +89,14 @@ def check_request(row, *, replacing=SID, hold=None, model_pin=None):
     return dataclasses.replace(request, replacing=replacing)
 
 
+@pytest.mark.slot_target
 def test_the_sessions_own_name_and_slot_pass(work, harness, rig, monkeypatch):
     rig.plan(slots=occupied())
     comms_holding(monkeypatch, SID)
     assert job.launch_check(check_request(launched(work))) is None
 
 
+@pytest.mark.slot_target
 def test_the_sessions_own_slot_under_the_runs_own_hold_passes(work, harness, rig,
                                                               monkeypatch):
     rig.plan(slots=occupied(hold={"holder": "run1", "until": 9e9}))
@@ -102,6 +104,7 @@ def test_the_sessions_own_slot_under_the_runs_own_hold_passes(work, harness, rig
     assert job.launch_check(check_request(launched(work), hold="run1")) is None
 
 
+@pytest.mark.slot_target
 def test_without_replacing_the_sessions_own_name_and_slot_are_refused(work, harness, rig,
                                                                      monkeypatch):
     rig.plan(slots=occupied())
@@ -130,6 +133,7 @@ def test_a_holder_that_reported_no_session_is_refused_in_words_that_say_so(
     assert "reported its session" in refused.hint
 
 
+@pytest.mark.slot_target
 @pytest.mark.parametrize("slot", [occupied(pane="%4"),
                                   occupied(hold={"holder": "someone", "until": 9e9})])
 def test_a_slot_another_pane_or_hold_has_is_refused(work, harness, rig, monkeypatch, slot):
@@ -148,6 +152,7 @@ def test_a_cwd_gone_is_refused(work, harness, rig, monkeypatch):
     assert refused is not None and refused.code == "no-cwd"
 
 
+@pytest.mark.slot_target
 def test_a_harness_not_on_the_path_is_refused(work, rig, monkeypatch, tmp_path):
     rig.plan(slots=occupied())
     comms_holding(monkeypatch, SID)
@@ -158,6 +163,7 @@ def test_a_harness_not_on_the_path_is_refused(work, rig, monkeypatch, tmp_path):
     assert refused is not None and refused.code == "not-found"
 
 
+@pytest.mark.slot_target
 def test_the_check_composes_the_launch_on_its_pin(work, harness, rig, monkeypatch):
     rig.plan(slots=occupied())
     comms_holding(monkeypatch, SID)
@@ -167,6 +173,7 @@ def test_the_check_composes_the_launch_on_its_pin(work, harness, rig, monkeypatc
     assert argv[argv.index("--model") + 1] == "claude-fable-5-2"
 
 
+@pytest.mark.slot_target
 def test_a_check_that_breaks_refuses(work, harness, rig, monkeypatch):
     def broken(*args, **kwargs):
         raise RuntimeError("boom")

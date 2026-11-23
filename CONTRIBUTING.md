@@ -13,6 +13,10 @@
    doesn't. A name from outside this repository (a Windows API, a Codex function) goes
    on a line of `.refs-allow`.
 4. A list that says it is complete ("every check", "in this order") is kept complete.
+5. Text a reader sees names the operator neutrally: "the operator", or "you" where it
+   speaks to the reader, never he, his, him or himself. `moxi-dev check`'s pronoun step
+   refuses them in a package's string literals, docstrings, web comments, README, docs and
+   bundled skills; a genuine use (a quotation) carries `noqa: MX5 -- <why>` on its line.
 
 ### Names anyone can see: config keys, flags, verbs, scripts, parameters, tools and output
 
@@ -86,6 +90,7 @@
 A line a check refuses on purpose carries `# noqa: <code> -- <why>`. In a
 `settings.toml` the mark goes on the key's `[table]` line. The codes are ruff's (`N`,
 `A`, `FBT`) and the naming check's own: `MX1` units, `MX2` environment constants, `MX3`
-one word per concept, `MX4` verbs and switch keys. The check refuses a bare `# noqa`,
+one word per concept, `MX4` verbs and switch keys; and the pronoun step's `MX5`, which a
+Markdown or TypeScript line writes in its own comment syntax. The check refuses a bare `# noqa`,
 and a mark for one of these codes without its `-- <why>`. A console script's name is
 held by contract check 7, which takes no mark.

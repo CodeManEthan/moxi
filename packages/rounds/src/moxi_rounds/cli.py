@@ -10,7 +10,7 @@
                            [--as NAME]
     moxi rounds check [ROUND STAGE] [--step NAME | --full] [--timeout-s N] [--no-wait]
                       [--as NAME]
-    moxi rounds finish [ROUND STAGE] [--again ID] [--as NAME]
+    moxi rounds finish [ROUND STAGE] [--again ID | --urgent | --leave] [--as NAME]
     moxi rounds ask ROUND|PROJECT TEXT --from PTR [--blocks LIST|none] [--record PTR]
                     [--option K=TEXT]... [--as NAME]
     moxi rounds ask ROUND TEXT --build B<n> [--blocks LIST|none] [--option K=TEXT]...
@@ -30,16 +30,20 @@
     moxi rounds mark ROUND B<n>.L<k> --fixed --commit SHA [--commit SHA]...
                      --no-behaviour-change [--as NAME]
     moxi rounds mark ROUND B<n>.W<k>|B<n>.M<k> --done --record PTR [--as NAME]
+    moxi rounds mark ROUND B<n>.M<k> --accept|--reject|--major --record PTR [--as NAME]
     moxi rounds mark ROUND thread:NAME --close|--accept-risk --record PTR [--as NAME]
     moxi rounds mark ROUND C<n>[,C<n>...] --shown --record PTR [--as NAME]
     moxi rounds mark ROUND B<n> --resync [--as NAME]
     moxi rounds mark ROUND REPORT.md --reread [--as NAME]
+    moxi rounds mark ROUND --restamp --record PTR [--as NAME]
     moxi rounds mark PROJECT S<n>[,S<n>...] --shown --record PTR [--as NAME]
     moxi rounds drop ROUND --by lead|operator --record PTR [--withdraw-questions]
                      [--as NAME]
     moxi rounds drop ROUND B<n> --by lead|operator --record PTR [--as NAME]
     moxi rounds drop --leftovers [--refs] [--remove] [--json]
     moxi rounds next [ROUND] [--json]
+    moxi rounds queue [--repo KEY] [--resume] [--as NAME]
+    moxi rounds land --repo KEY
     moxi rounds next --schema design|build|step|majors|retro
     moxi rounds show ROUND [--json]
     moxi rounds list [PROJECT] [--closed] [--json]
@@ -51,7 +55,7 @@
 `ROUND` is `<project>/<slug>` and `PROJECT` a project's key. `PTR` is a pointer: to
 where the operator said something, or to where a question came from. It is
 `comms:<digits>`, `<session>@<UTC time>`, an `https://` URL, `file:<path>#<anchor>` or
-`page:<page>/<act id>@<UTC time>`, his act on a page.
+`page:<page>/<act id>@<UTC time>`, the operator's act on a page.
 `ITEM` is what a ruling is on: a question's id for its answer, `park:Q<n>`,
 `narrow:Q<n>=LIST|none` or `withdraw:Q<n>`; with none the ruling stands on its own.
 `skip:STEP`, or `skip:STEP:B<n>` for a step of one stage, says a step is not done; a
@@ -74,10 +78,11 @@ A ruling is corrected by a later one: `--supersedes` names the earlier ruling of
 same thing that this one replaces, and the item `revoke:C<n>` (`revoke:S<n>` on a
 project) takes a ruling back with nothing in its place.
 `rule` prints each ruling as it was recorded, for whoever recorded it to show the
-operator, and `mark --shown` records, with a pointer to the message, session or page
-that showed him, that he saw it; a ruling is named by the round or project that holds
-it and its id. On a project, the item `readback=TIME` is his own word that he read the
-list of rulings not yet shown through `TIME`, the time that list was headed with.
+operator, and `mark --shown` records that the operator saw it, with a pointer to the
+message, session or page that showed it; a ruling is named by the round or project that
+holds it and its id. On a project, the item `readback=TIME` is the operator's own word
+of having read the list of rulings not yet shown through `TIME`, the time that list was
+headed with.
 `fold` freezes the round's design: it copies `design.md` in the round's folder to
 `versions/design-v<N>.md` and records that version with what the design's data block
 declares. A question, a stage, a stage another waits for and a wider hold are added to
@@ -117,10 +122,15 @@ report is recorded. It holds the round's close and is listed by `list --waiting`
 or the id of a commit the build's repo holds. A later report of the same build may list
 the item again with the same sentence; it is the same item. Each
 `[[decision]]`, an as-built choice the operator would notice, is a record of the round,
-`B<n>.M<k>`, with the options `accept` and `reject`, until he rules it with `rule ROUND
-B<n>.M<k>=accept|reject --record PTR`; a later report may list it again as heavy or
-heavier, never lighter. A rejected decision owes a fix, a waiting item `B<n>.M<k>`
-until `mark ... --done --record PTR` names it. A report of `kind = "majors"`, by a
+`B<n>.M<k>`, with the options `accept` and `reject`. One the close waits for the
+operator to rule (the flow has an unskipped `ratify` step, the project's `ratify`
+setting names its weight, and its build is finished and declared it) is the operator's
+to rule with `rule ROUND B<n>.M<k>=accept|reject --record PTR`; any other minor one of a
+finished build is the lead's to settle with `mark ROUND B<n>.M<k> --accept|--reject
+--record PTR`, and `mark ROUND B<n>.M<k> --major --record PTR` makes a decision major.
+A later report may list it again as heavy or heavier, never lighter. A rejected
+decision owes a fix, a waiting item `B<n>.M<k>` until `mark ... --done --record PTR`
+names it. A report of `kind = "majors"`, by a
 checker who built none of the stages it names, declares the decisions no build report
 carries.
 The lead repairs a record by deriving it again, never by giving a value: `mark ROUND
@@ -129,15 +139,20 @@ target still has, only after the target's history was rewritten under it; `mark 
 REPORT.md --reread` reads a recorded report again at the bytes its verdict recorded
 and adds the findings, waiting items and decisions its record lacks, and is refused
 when it would take away or change anything. Neither names a ruling, a skip or a
-verdict word.
+verdict word. `mark ROUND --restamp --record PTR` re-stamps the design's current
+version with the digest of its frozen copy, when an edit outside the round rewrote
+the copy and `design.md` alike; `--record` names where the lead said what edited them.
+It changes no standing, and is the one repair an ended round takes.
 `commission` authorizes the build of a stage of the plan once its step waits for
 nothing: it reads the target (the repo's `into` setting, else the branch checked out
 at the project's root) and takes the target's head as the build's base, cuts the
 stage's branch from it and adds its worktree under `worktree_dir` as
 `<repo>/<branch>`, makes its scratch folder in rounds' cache directory, writes a
 marker naming the build in each, and records the build. A `/` or `%` in a branch is
-written `%2F` or `%25` in a path. `--existing` builds on a branch that is there, and
-is refused when it shares commits with another open build. A repo's branch has one
+written `%2F` or `%25` in a path. `--existing` builds on a branch that is there: one
+strictly inside or around another open build's branch is taken, and `finish` orders the
+two; one that overlaps another open build's, or that came onto the target by another
+build's finish, is refused. A repo's branch has one
 open build at a time, across every round. In a flow that does not verify its design,
 a round builds one stage in a repo, and `commission ROUND --repo KEY --branch NAME`
 declares the stage as it commissions it, under the lowest `B<n>` the round has not
@@ -175,7 +190,11 @@ by its commit id, into the target with a merge commit. A failed action is record
 undoes nothing; a conflict is aborted and refused with the way through. After a merge
 it removes the build's worktree, scratch folder and branch where rounds made them and
 nothing would be lost, and with no merge only the scratch folder. Run with no round in
-a build's worktree, it finishes that build.
+a build's worktree, it finishes that build. In a repo whose `land` is `queue` it merges
+nothing: it reads the same gates but the target's, the check met by the scoped local
+check, and joins the repo's queue at the tip, printing its position; the repo's lander
+merges it. `--urgent` joins it ahead of every member that is not urgent, and `--leave`
+takes it out of the queue at once.
 `mark ROUND thread:NAME --close` or `--accept-risk`, with `--record` naming where the
 lead wrote why, is the lead's decision on a thread of the design's verification, made
 once the last two verdicts each sent the design back and it was frozen since: no
@@ -211,9 +230,10 @@ id adds options to it or retires them. `ask --adopt` brings a question of the pr
 list into a round, and `ask --move` puts a round's question on its project's list; the
 operator's pointer goes with a move that ends what the question holds up, and with a
 list of stages for a question that came from a round; a move or an adoption with
-his pointer is a ruling, and is printed as `rule` prints one. `list --questions` writes out
-the questions that wait on the operator, of one round or of one project with its open
-rounds, and after them the rulings not yet shown to him: as markdown, with `--json` as
+the operator's pointer is a ruling, and is printed as `rule` prints one. `list
+--questions` writes out the questions that wait on the operator, of one round or of one
+project with its open rounds, and after them the rulings not yet shown to the operator:
+as markdown, with `--json` as
 data, and with `--out DIR` as both, in the files `questions.md` and `questions.json`.
 A round's questions have two views, both with no `--view`: the docket, its open and
 parked questions; and the ratification, the decisions not yet ruled of its finished
@@ -234,16 +254,16 @@ build's worktree, `next` finds the open build on the branch checked out there an
 prints its round's next step. `next` records nothing.
 `show` shows one round: what it is for, its flow, the step it is at, what its close
 waits for, its stages and builds with their checks, verdicts, findings, waiting items
-and decisions, its questions by state, its rulings and whether each was shown to him,
-its history and, once it has ended, its numbers. `list` with no flag lists the open
+and decisions, its questions by state, its rulings and whether each was shown to the
+operator, its history and, once it has ended, its numbers. `list` with no flag lists the open
 rounds, each with its flow, its step and its counts, and with `--closed` the rounds
 that have ended; `list --waiting` lists what waits on the operator: the open and the
-parked questions, the open waiting items, the unruled major decisions, the builds to
-look at and the rulings not yet shown to him; `list --numbers` sums the numbers of
-the closed rounds. Each is of every project, or of the
-one named, and `--json` gives it as data. `show` and `list` record nothing. A verb
-that writes takes `--as NAME`, who is doing it; without it that is the user the
-command runs as.
+parked questions, the open waiting items, the unruled major decisions and the minor ones
+that are the operator's, the builds to look at and the rulings not yet shown to the
+operator; `list --numbers` sums the numbers of the closed rounds. Each is of every
+project, or of the one named, and `--json` gives it as data. `show` and `list` record
+nothing. A verb that writes takes `--as NAME`, who is doing it; without it that is the
+user the command runs as.
 
 Exit codes: 0 done; 1 an error; 2 bad arguments or a bad setting; 3 refused. A refusal
 says what stopped the verb and the command that fixes it, and has written nothing.
@@ -265,7 +285,7 @@ from collections.abc import Callable, Sequence
 from moxi import exit as codes
 from moxi.config import ConfigError
 
-from .errors import BadArgument, Refused, RoundsError, Unmet
+from .errors import BadArgument, Refused, RoundsError, UnfencedTest, Unmet
 
 
 # -- what every writing verb shares ------------------------------------------------------
@@ -303,13 +323,26 @@ def _warn_of(failed, prog: str, verb: str) -> None:
 
 
 def _say_closed(writes, out) -> None:
-    """Say, in a line, each round a write of the verb closed. No verb closes a round,
-    so the verb's own lines never say it: whichever write left the close nothing to
-    wait for did."""
+    """Say, in a line, each round a write of the verb closed, then a line for each
+    decision of a finished build it left open, with whether the project's `ratify`
+    setting puts it to the operator. No verb closes a round, so the verb's own lines never say
+    it: whichever write left the close nothing to wait for did."""
+    from . import closing, decisions
+    from . import settings as own
+    from . import state as states
+
     for written in writes:
-        if written.closed is not None:
-            print(f"closed {written.where.project}/{written.where.slug}: nothing is "
-                  "left for its close to wait for", file=out)
+        if written.closed is None:
+            continue
+        name = f"{written.where.project}/{written.where.slug}"
+        print(f"closed {name}: nothing is left for its close to wait for", file=out)
+        try:
+            setting = closing.ratify_of(own.load(), name)
+        except ConfigError:
+            # The close read it a moment ago; what it leaves open is in show.
+            continue
+        for one in decisions.left_open(states.fold(written.round_events), setting):
+            print(f"  {decisions.left_open_line(one)}", file=out)
 
 
 # -- open --------------------------------------------------------------------------------
@@ -395,7 +428,7 @@ def _left(opened) -> list[str]:
 
 def _declare_rule(verbs) -> None:
     said = ("Record a ruling of the operator's: one plain sentence, with a pointer to "
-            "where he said it. On a round it is the round's own; with --standing, or on "
+            "where the operator said it. On a round it is the round's own; with --standing, or on "
             "a project, it goes in the project's register and outlasts the round. With "
             "an ITEM it rules a question: answers it, parks it, narrows what it holds "
             "up, or withdraws it. A later ruling corrects an earlier one: with "
@@ -408,9 +441,9 @@ def _declare_rule(verbs) -> None:
             "unafter:B<n>=B<m> takes one stage off what another waits for. "
             "B<n>.M<k>=accept or B<n>.M<k>=reject rules a decision a build's report "
             "declared; a rejected one is a waiting item until its fix is marked done. "
-            "The ruling is printed as it was recorded, to show him. On a project, "
-            "the ITEM readback=TIME records that he read the list of rulings not yet "
-            "shown to him through TIME.")
+            "The ruling is printed as it was recorded, to show the operator. On a "
+            "project, the ITEM readback=TIME records that the operator read the list "
+            "of rulings not yet shown to the operator through TIME.")
     parser = verbs.add_parser("rule", help=said, description=said)
     parser.add_argument("target", metavar="ROUND|PROJECT",
                         help="the round the ruling is on, <project>/<slug>, or a "
@@ -435,18 +468,18 @@ def _declare_rule(verbs) -> None:
                              "that leaves the plan for good; unafter:B<n>=B<m>, a "
                              "stage B<n> that waits for B<m> no longer; or, on a "
                              "project, "
-                             "readback=TIME, the time the list of rulings he read "
+                             "readback=TIME, the time the list of rulings the operator read "
                              "was shown through, as 2026-01-02T03:04:05Z")
     parser.add_argument("--record", metavar="PTR",
                         help="a pointer to where the operator said it, one token: "
                              "comms:<digits>, <session>@<UTC time>, an https:// URL, "
                              "file:<path in the round's folder>#<anchor>, or "
-                             "page:<page>/<act id>@<UTC time>, his act on a page; a "
-                             "ruling without one is refused")
+                             "page:<page>/<act id>@<UTC time>, the operator's act on a "
+                             "page; a ruling without one is refused")
     parser.add_argument("--text", metavar="TEXT",
                         help="the ruling, in a sentence or a few that read on their own")
     parser.add_argument("--chose", metavar="K",
-                        help="with Q<n>, the key of the option he chose, one the "
+                        help="with Q<n>, the key of the option the operator chose, one the "
                              "question offers now; with no --text the option's line "
                              "is the sentence recorded")
     parser.add_argument("--reason", metavar="TEXT", help="why, in short")
@@ -497,16 +530,16 @@ def _recorded(ruled) -> list[str]:
     """What is printed for a ruling just recorded: its id and its sentence, exactly as
     the log now holds it, or what it rules when it has no sentence; the sentence of
     the question it answers; and what whoever recorded it does next, which is to show
-    him the sentence and then mark the ruling as shown. A read-back is his own word
-    and is not shown to him."""
+    the operator the sentence and then mark the ruling as shown. A read-back is the
+    operator's own word and is not shown to the operator."""
     from . import stages
 
     lines = [f"Recorded as {ruled.id}: "
              f"{ruled.event['rules'] if ruled.text is None else ruled.text}"]
     if ruled.read_back is not None:
         return [*lines, f"it covers every ruling of {ruled.holder} recorded at or "
-                        f"before {ruled.read_back}; a read-back is his own word, "
-                        "and is not itself shown to him"]
+                        f"before {ruled.read_back}; a read-back is the operator's own "
+                        "word, and is not itself shown to the operator"]
     if ruled.answers is not None:
         lines.append(f"in answer to {ruled.answers[0]}: {ruled.answers[1]}")
     if "covers" in ruled.event:
@@ -529,7 +562,7 @@ def _recorded(ruled) -> list[str]:
         lines.append(f"{stage} waits for {waited} no longer; anyone adds the wait "
                      f"again: moxi rounds mark {ruled.name} {stage} --after {waited}")
     return [*lines,
-            'show him this under "Recorded as" in your next message, then:',
+            'show the operator this under "Recorded as" in your next message, then:',
             f"  moxi rounds mark {ruled.holder} {ruled.id} --shown --record "
             "<pointer to that message>"]
 
@@ -563,9 +596,9 @@ def _declare_ask(verbs) -> None:
                              "refused")
     parser.add_argument("--record", metavar="PTR",
                         help="in place of --from, for a question that is the "
-                             "operator's own: a pointer to where he asked it; with "
-                             "--move, or with --adopt and a list, a pointer to where "
-                             "he said so")
+                             "operator's own: a pointer to where the operator asked it; "
+                             "with --move, or with --adopt and a list, a pointer to "
+                             "where the operator said so")
     parser.add_argument("--build", metavar="B<n>",
                         help="in place of --from, for a question that came up in the "
                              "open build of this stage: its builder told you, and you "
@@ -680,7 +713,7 @@ def _carry(args, out) -> int:
            if found.held is not None else "")
     print(f"moved from: {moved.source}{was}", file=out)
     if moved.ruling is not None:
-        # With his pointer the move is his ruling, in the log the question left: it
+        # With the operator's pointer the move is a ruling, in the log the question left: it
         # is printed as `rule` prints one, since its id is what a mark names.
         left = moved.events[-1]
         adopted = args.adopt is not None
@@ -699,10 +732,13 @@ def _declare_mark(verbs) -> None:
     said = ("Change a record in a way that is not the operator's ruling: make a "
             "question of a round hold up more stages, reopen a parked one, make a "
             "stage wait for more stages, mark a minor finding of a build fixed, mark "
-            "a waiting item done, move a round up to a heavier flow, decide a thread of the design's "
+            "a waiting item done, settle a minor decision that is not the operator's "
+            "or make a decision major, move a round up to a heavier flow, decide a "
+            "thread of the design's "
             "verification, size a worker's brief, say that rulings were shown to the "
             "operator as recorded, with a pointer to where, or repair a record: "
-            "read a build's base again from git, or a recorded report again.")
+            "read a build's base again from git, a recorded report again, or the "
+            "frozen copy of the design's current version for its digest.")
     parser = verbs.add_parser("mark", help=said, description=said)
     parser.add_argument("target", metavar="ROUND|PROJECT",
                         help="the round, <project>/<slug>; with --shown, the round "
@@ -713,14 +749,17 @@ def _declare_mark(verbs) -> None:
                              "stage, B<n>; with --fixed, a build's finding, "
                              "B<n>.L<k>; with --done, a waiting item, "
                              "B<n>.W<k>, or a rejected decision's fix, "
-                             "B<n>.M<k>; with --close or --accept-risk, a thread "
+                             "B<n>.M<k>; with --accept, --reject or --major, a "
+                             "decision, B<n>.M<k>; with --close or --accept-risk, a "
+                             "thread "
                              "of the design's verification, thread:NAME, the name "
                              "in letters, digits and . _ -; with --shown, the "
                              "rulings, C<n> of a round or S<n> of a project, "
                              "several separated by commas; with --resync, a stage, "
                              "B<n>; with --brief, the stage the brief is of, B<n>; "
                              "with --reread, a recorded report's file; left "
-                             "out with --flow and --lead, which mark the round")
+                             "out with --flow, --lead and --restamp, which mark the "
+                             "round")
     form = parser.add_mutually_exclusive_group(required=True)
     form.add_argument("--blocks", metavar="LIST|all",
                       help="the stages the question holds up from now on, as B2,B3, "
@@ -749,6 +788,17 @@ def _declare_mark(verbs) -> None:
                       help="a waiting item is done: the work a build's report said "
                            "waits on the operator; needs --record, a pointer or "
                            "the id of a commit the build's repo holds")
+    form.add_argument("--accept", action="store_true",
+                      help="the lead's settlement of a minor decision that is not the "
+                           "operator's to rule: accepted as built; needs --record")
+    form.add_argument("--reject", action="store_true",
+                      help="the lead's settlement of a minor decision that is not the "
+                           "operator's to rule: rejected, which owes a fix, marked "
+                           "with --done; needs --record")
+    form.add_argument("--major", action="store_true",
+                      help="the lead's raise of a decision to major, as a later "
+                           "report listing it heavier would; a settlement of it "
+                           "lapses; needs --record")
     form.add_argument("--flow", metavar="NAME",
                       help="move the round up to this flow: one later in the tiers "
                            "that has every step the round follows, or the round's "
@@ -782,6 +832,12 @@ def _declare_mark(verbs) -> None:
                            "the findings, waiting items and decisions its block "
                            "holds and the record lacks; refused when it would take "
                            "away or change anything")
+    form.add_argument("--restamp", action="store_true",
+                      help="re-stamp the design's current version: when design.md "
+                           "and its frozen copy hold the same bytes and neither holds "
+                           "the digest recorded at its freeze, record the copy's "
+                           "digest as the version's; needs --record; changes no "
+                           "standing, and an ended round takes it")
     parser.add_argument("--commit", metavar="SHA", action="append", default=[],
                         help="with --fixed, a commit of the fix, on the build's "
                              "branch; once for each")
@@ -798,10 +854,14 @@ def _declare_mark(verbs) -> None:
                              "<session>@<UTC time>, an https:// URL, file:<path "
                              "in the round's folder>#<anchor>, or page:<page>/<act "
                              "id>@<UTC time>; "
-                             "with --shown, a pointer to where he was shown them, one "
+                             "with --accept, --reject or --major, a pointer to "
+                             "where the lead wrote why, of those shapes; "
+                             "with --restamp, a pointer to where the lead named what "
+                             "edited the design, of those shapes; "
+                             "with --shown, a pointer to where the operator was shown them, one "
                              "token: comms:<digits> for the message, <session>@<UTC "
                              "time>, the https:// URL of a page that listed them, or "
-                             "page:<page>/<act id>@<UTC time> for his act on a page "
+                             "page:<page>/<act id>@<UTC time> for the operator's act on a page "
                              "that showed them; never a file, the pointer of one of "
                              "the rulings, a message from before one of them was "
                              "said, or a page's act from before one was recorded")
@@ -815,6 +875,8 @@ def _mark(args, out) -> int:
         return _mark_flow(args, out)
     if args.lead is not None:
         return _mark_lead(args, out)
+    if args.restamp:
+        return _mark_restamp(args, out)
     if args.id is None:
         raise BadArgument("nothing says what is marked",
                           "name the question, Q<n>, with --after the stage, B<n>, "
@@ -826,6 +888,8 @@ def _mark(args, out) -> int:
                           "finding with --fixed")
     if args.resync or args.reread:
         return _mark_repair(args, out)
+    if args.accept or args.reject or args.major:
+        return _mark_decision(args, out)
     if args.fixed:
         return _mark_fixed(args, out)
     if args.done:
@@ -865,6 +929,42 @@ def _mark_repair(args, out) -> int:
     else:
         done = repairs.reread(args.target, args.id, by=_actor(args))
     print(f"{done.name}: {done.said}", file=out)
+    _warn_of(done.failed, args.prog, args.verb)
+    return codes.OK
+
+
+def _mark_restamp(args, out) -> int:
+    """`mark ROUND --restamp`: the lead's re-stamp of the design's current version."""
+    from . import repairs
+
+    if args.id is not None:
+        raise BadArgument("--restamp re-stamps the round's current version of its "
+                          "design, and names nothing else", "leave the ID out")
+    done = repairs.restamp(args.target, record=args.record, by=_actor(args))
+    print(f"{done.name}: {done.said}", file=out)
+    _warn_of(done.failed, args.prog, args.verb)
+    return codes.OK
+
+
+def _mark_decision(args, out) -> int:
+    """`mark B<n>.M<k> --accept|--reject|--major`: the lead's settlement of a minor
+    decision, or its raise to major."""
+    from . import decisions, settling
+
+    if args.major:
+        done = settling.make_major(args.target, args.id, record=args.record,
+                                   by=_actor(args))
+    else:
+        done = settling.settle(args.target, args.id,
+                               decisions.ACCEPT if args.accept else decisions.REJECT,
+                               record=args.record, by=_actor(args))
+    one = done.decision
+    print(f"{done.name} decision {one.key}: {one.weight}, {one.state}"
+          + (f"   {decisions.settled_line(one)}" if one.state == decisions.SETTLED
+             else ""), file=out)
+    if one.state == decisions.SETTLED and one.chose == decisions.REJECT:
+        print(f"a fix is owed: moxi rounds mark {done.name} {one.key} --done --record "
+              "PTR", file=out)
     _warn_of(done.failed, args.prog, args.verb)
     return codes.OK
 
@@ -1147,9 +1247,8 @@ def _verdict(args, out) -> int:
         foreclosing = ", forecloses" if decision.forecloses else ""
         print(f"decision {decision.key}: {decision.weight}{foreclosing}, "
               f"{decision.state}: {decision.text}", file=out)
-        if decision.state == "open":
-            print(f"  his to rule: {decisions.rule_line(done.name, decision.key)}",
-                  file=out)
+        if decision.key in done.open_as:
+            print(f"  {done.open_as[decision.key]}", file=out)
     if one.kind in ("majors", "retro"):
         # Neither names a design version or a build: no standing or gates to print.
         _warn_of(done.failed, args.prog, args.verb)
@@ -1209,11 +1308,12 @@ def _declare_commission(verbs) -> None:
     parser.add_argument("--builder", metavar="NAME", required=True,
                         help="who builds it")
     parser.add_argument("--record", metavar="PTR",
-                        help="a pointer to where the operator gave the go, when he did")
+                        help="a pointer to where the operator gave the go, if the operator did")
     parser.add_argument("--existing", action="store_true",
                         help="build on the stage's branch that is already there, in "
-                             "place of cutting it; refused when it shares commits with "
-                             "another open build")
+                             "place of cutting it; refused when it overlaps another "
+                             "open build (a branch inside or around one is taken), or "
+                             "came onto the target by another build's finish")
     _writes(parser)
 
 
@@ -1340,11 +1440,20 @@ def _declare_finish(verbs) -> None:
                         help="run once more the command action ID, which started and "
                              "has no result at the tip, once you have looked at what "
                              "it did; taken for no other action")
+    queued = parser.add_mutually_exclusive_group()
+    queued.add_argument("--urgent", action="store_true",
+                        help="in a repo that lands through its queue, join as an urgent "
+                             "member, for a fix to a red target: ahead of every member "
+                             "that is not urgent, and batched even while the queue is "
+                             "paused")
+    queued.add_argument("--leave", action="store_true",
+                        help="in a repo that lands through its queue, take the build "
+                             "out of the queue at once")
     _writes(parser)
 
 
 def _finish(args, out) -> int:
-    from . import finishing
+    from . import finishing, joining
 
     name, stage = args.round, args.stage
     if name is None:
@@ -1356,6 +1465,12 @@ def _finish(args, out) -> int:
         raise BadArgument(f"{name} is named with no stage, and a finish is of one build",
                           f"moxi rounds finish {name} B<n>, or moxi rounds finish in the "
                           "build's worktree")
+    repo = joining.queue_repo(name, stage)
+    joining.refuse_flags(urgent=args.urgent, leave_=args.leave, repo=repo, name=name,
+                         stage=stage)
+    if repo is not None:
+        return _queue_finish(args, name, stage, out)
+
     def on_action(one) -> None:
         # Said as it is recorded, so it is seen even when the finish is refused after.
         if one.hand_merge:
@@ -1399,6 +1514,36 @@ def _finish(args, out) -> int:
               "finish's own and was left as it is; moxi doctor rounds names it if it "
               "stays", file=sys.stderr)
     _warn_of(done.failed, args.prog, args.verb)
+    return codes.OK
+
+
+def _queue_finish(args, name: str, stage: str, out) -> int:
+    """`finish` in a repo that lands through its queue: join it and start its lander,
+    or with `--leave` leave it."""
+    from . import joining, lander
+
+    if args.again is not None:
+        raise BadArgument("--again runs a finish action again, and a queued build's "
+                          "finish runs none: the lander merges it",
+                          f"moxi rounds finish {name} {stage}")
+    if args.leave:
+        left = joining.leave(name, stage, by=_actor(args))
+        print(f"left the queue: {left.name} {left.stage} at {left.tip[:12]}", file=out)
+        if left.rebuilds is not None:
+            print(f"it was in batch {left.rebuilds}: the lander builds that batch again "
+                  "without it, and its members' CI runs again", file=out)
+        return codes.OK
+    joined = joining.join(name, stage, by=_actor(args), urgent=args.urgent)
+    started = lander.start(joined.repo)
+    if joined.moved is not None:
+        print(f"left the queue at {joined.moved[:12]}: the branch moved", file=out)
+    how = "already queued" if joined.already else "queued"
+    urgent = ", urgent" if joined.urgent else ""
+    print(f"{how}: position {joined.position}{urgent}, {joined.name} {joined.stage} at "
+          f"{joined.tip[:12]}; the lander merges it, and moxi rounds next names what "
+          "becomes of it", file=out)
+    print(f"lander: started ({started.how}); it exits at once if another runs, and "
+          f"logs to {started.log}", file=out)
     return codes.OK
 
 
@@ -1458,7 +1603,7 @@ def _ci_way_on(name: str, stage: str, whole: str) -> list[str]:
 def _declare_drop(verbs) -> None:
     said = ("Drop a round, or with a stage the open build of that stage: end it short "
             "of its work. The operator drops any round or build, with a pointer to "
-            "where he said so; the lead drops only a round that holds none of the "
+            "where the operator said so; the lead drops only a round that holds none of the "
             "operator's acts, or a build that is gone or empty with no commit of its "
             "own, as git reads it now, with a pointer to why. A round's open and "
             "parked questions go to the project's list as they are, where they hold "
@@ -1479,18 +1624,19 @@ def _declare_drop(verbs) -> None:
                         help="whose drop it is: the operator's, of any round or "
                              "build, or the lead's, of a round that holds no ruling, "
                              "no skip, no question asked with the operator's "
-                             "pointer, no opening on his go, no build that reached "
-                             "its target or may have, no decision on such a build, "
-                             "no open waiting item and no open build he may not "
+                             "pointer, no opening on the operator's go, no build that "
+                             "reached its target or may have, no decision on such a "
+                             "build, "
+                             "no open waiting item and no open build the lead may not "
                              "drop; or of a build git reads as gone, or empty with "
                              "no commit of its own, that shares with no other")
     parser.add_argument("--record", metavar="PTR",
-                        help="with --by operator, a pointer to where he dropped it; "
+                        help="with --by operator, a pointer to where the operator dropped it; "
                              "with --by lead, a pointer to why; one token: "
                              "comms:<digits>, <session>@<UTC time>, an https:// URL, "
                              "file:<path in the round's folder>#<anchor>, or "
-                             "page:<page>/<act id>@<UTC time>, his act on a page; a "
-                             "drop without one is refused")
+                             "page:<page>/<act id>@<UTC time>, the operator's act on a "
+                             "page; a drop without one is refused")
     parser.add_argument("--withdraw-questions", action="store_true",
                         help="withdraw the round's open and parked questions, where "
                              "they would go to the project's list; the operator's "
@@ -1682,7 +1828,9 @@ def _declare_next(verbs) -> None:
     said = ("Say what is done next in a round: the step it is at, who does it, at "
             "which tier, what they read, the command that completes it and what it "
             "waits for, then what the lead should know. With --schema, print the "
-            "empty data block of a report of that kind. Nothing is recorded.")
+            "empty data block of a report of that kind. Nothing is recorded; where a "
+            "build of the round waits in a queue that no lander runs, a lander is "
+            "started and said.")
     parser = verbs.add_parser("next", help=said, description=said)
     parser.add_argument("round", metavar="ROUND", nargs="?",
                         help="the round, <project>/<slug>; left out in a build's "
@@ -1707,7 +1855,89 @@ def _next(args, out) -> int:
 
         name = by_branch.find(os.getcwd(), verb="next").round
     found = next_step.read(name)
-    out.write(next_step.as_json(found) if args.as_json else next_step.as_text(found))
+    started = _start_landers(found)
+    if args.as_json:
+        out.write(next_step.as_json({**found, "landers_started": started} if started
+                                    else found))
+        return codes.OK
+    out.write(next_step.as_text(found))
+    for repo in started:
+        print(f"lander: started for {repo}, since a member waits and none ran", file=out)
+    return codes.OK
+
+
+def _start_landers(found: dict) -> list[str]:
+    """Start a lander for each repo a group of `found` names a queued member in, where
+    none runs; the repos started for."""
+    from . import lander
+
+    repos = {group["queue"]["repo"] for group in found.get("groups") or ()
+             if group.get("queue") is not None}
+    return sorted(repo for repo in repos if lander.ensure(repo) is not None)
+
+
+# -- the queue and its lander ------------------------------------------------------------
+
+def _declare_queue(verbs) -> None:
+    said = ("Show each queue project's queue: whether its lander runs, a pause and its "
+            "reason, the running batch and its CI reading, the members still in the "
+            "queue in the order they are taken, and the target's last full run. Where a "
+            "member waits and no lander runs, start one and say so. With --resume, lift "
+            "a pause.")
+    parser = verbs.add_parser("queue", help=said, description=said)
+    parser.add_argument("--repo", metavar="KEY",
+                        help="the queue project; left out, every project whose land is "
+                             "queue")
+    parser.add_argument("--resume", action="store_true",
+                        help="lift the repo's pause, once what paused it is dealt with")
+    _writes(parser)
+
+
+def _queue(args, out) -> int:
+    from . import lander, queue_file, queue_view
+
+    repos = [args.repo] if args.repo else lander.queue_repos()
+    if args.resume:
+        if len(repos) != 1:
+            raise BadArgument("--resume lifts one repo's pause, and none is named",
+                              "moxi rounds queue --repo KEY --resume")
+        queue = queue_file.read(repos[0])
+        if queue.paused is None:
+            raise BadArgument(f"{repos[0]}'s queue is not paused",
+                              f"moxi rounds queue --repo {repos[0]}")
+        queue_file.append(repos[0], {"event": queue_file.RESUMED, "by": _actor(args),
+                                     "was": queue.paused})
+        print(f"resumed {repos[0]}'s queue, paused for: {queue.paused}", file=out)
+    if not repos:
+        print("no project lands through a queue: set land = \"queue\" in its table",
+              file=out)
+    for repo in repos:
+        started = lander.ensure(repo)
+        queue = queue_file.read(repo)
+        for line in queue_view.lines(queue, lander_runs=started is not None
+                                     or lander.held(repo),
+                                     started=None if started is None else started.how):
+            print(line, file=out)
+    return codes.OK
+
+
+def _declare_land(verbs) -> None:
+    said = ("Run a queue project's lander, the one process that builds its queued "
+            "builds into candidates, reads their CI and lands them. finish, next and "
+            "queue start it; it exits at once when another holds the repo's lock, and "
+            "by itself once nothing waits.")
+    parser = verbs.add_parser("land", help=said, description=said)
+    parser.add_argument("--repo", metavar="KEY", required=True,
+                        help="the queue project whose lander this is")
+
+
+def _land(args, out) -> int:
+    from . import batching, lander
+
+    def say(line: str) -> None:
+        print(line, file=out, flush=True)
+
+    lander.run(args.repo, say=say, step=lambda repo: batching.step(repo, say=say))
     return codes.OK
 
 
@@ -1741,10 +1971,11 @@ def _declare_list(verbs) -> None:
     said = ("List rounds, or what waits on the operator. With no option: the open "
             "rounds of every project, or of the one named, each with its flow, the "
             "step it is at, how many questions it has open and parked and how many of "
-            "its rulings were not yet shown to him; with --closed, the rounds that "
+            "its rulings were not yet shown to the operator; with --closed, the rounds that "
             "have ended. With --waiting: every open question, every parked one, the "
-            "open waiting items, the unruled major decisions, the builds to look at "
-            "and the rulings not yet shown to him. With --numbers: the numbers of the "
+            "open waiting items, the unruled major decisions and the minor ones "
+            "that are the operator's, the builds to look at "
+            "and the rulings not yet shown to the operator. With --numbers: the numbers of the "
             "closed rounds, summed. With --questions: the questions of one round or "
             "one project written out, the open ones, then the parked ones, then the "
             "rulings not yet shown; a round's in two views, its docket and its "
@@ -1826,7 +2057,7 @@ _DECLARE: tuple[Callable, ...] = (_declare_open, _declare_fold, _declare_verdict
                                   _declare_ask,
                                   _declare_rule,
                                   _declare_mark, _declare_drop, _declare_next,
-                                  _declare_show,
+                                  _declare_queue, _declare_land, _declare_show,
                                   _declare_list)
 
 #: Each verb's name -> the function that runs it, as `fn(args, out) -> int`.
@@ -1835,6 +2066,7 @@ _VERBS: dict[str, Callable] = {"open": _open, "fold": _fold, "verdict": _verdict
                                "finish": _finish,
                                "ask": _ask, "rule": _rule,
                                "mark": _mark, "drop": _drop, "next": _next,
+                               "queue": _queue, "land": _land,
                                "show": _show,
                                "list": _list}
 
@@ -1876,5 +2108,8 @@ def main(argv: Sequence[str] | None = None, *, prog: str = "moxi rounds") -> int
             print(f"  fix: {exc.fix}", file=sys.stderr)
         return exc.exit_code
     except ConfigError as exc:
+        print(f"{prog} {args.verb}: {exc}", file=sys.stderr)
+        return exc.exit_code
+    except UnfencedTest as exc:
         print(f"{prog} {args.verb}: {exc}", file=sys.stderr)
         return exc.exit_code

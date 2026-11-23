@@ -135,7 +135,7 @@ def test_each_verb_parses(argv, expected):
 def test_every_verb_has_a_handler():
     assert set(cli.VERBS) == {"run", "preview", "log", "presets", "catalog", "handoff",
                               "handoffs", "deliver", "relaunch", "exit-session", "exits",
-                              "sessions", "resume", "park", "restore", "unpark",
+                              "sessions", "resume", "fork", "park", "restore", "unpark",
                               "clear-expired", "keep-warm", "show"}
 
 
@@ -312,7 +312,8 @@ def test_run_whose_start_fails_exits_1_and_the_row_says_why(work, harness, monke
     (["run", "--", "--session-id", "x"], codes.REFUSED, "owned"),
     (["run", "--cwd", "/no/such/place"], codes.REFUSED, "no-cwd"),
     (["run", "--target", "headless"], codes.REFUSED, "no-brief"),
-    (["run", "--target", "slot"], codes.REFUSED, "no-slots"),
+    pytest.param(["run", "--target", "slot"], codes.REFUSED, "no-slots",
+                 marks=pytest.mark.slot_target),
     (["run", "--project", "moxi"], codes.REFUSED, "needs-module"),
     (["run", "--harness", "codex", "--", "--permissions", "p"], codes.REFUSED, "owned"),
 ])

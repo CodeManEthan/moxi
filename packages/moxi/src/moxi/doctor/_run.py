@@ -20,8 +20,9 @@
         stores in the module's state directory (`runs.jsonl`, `logs/`, `doctor.json`);
      6. home: a state or cache directory still read in place under a host folder;
      7. strays: each module installed where this moxi can't see it;
-     8. setup versions: a module whose installed version differs from the one its `SETUP`
-        last ran at;
+     8. setup versions: a module that declares a `SETUP` and whose installed version
+        differs from the one its `SETUP` last ran at, with `moxi._settle.setup_command`
+        as the fix;
      9. records left by `moxi.doctor.record`;
     10. placements: each placement `moxi.place` holds that is `stale`, `modified` or
         `missing` (a gone source reads "source missing: <path>"), and each harness row and
@@ -797,7 +798,7 @@ def _check_strays(ctx: _Context) -> list[Row]:
 def _check_setup(ctx: _Context) -> list[Row]:
     import json
 
-    from .._settle import setup_path
+    from .._settle import setup_command, setup_path
 
     path = setup_path()
     try:
@@ -810,13 +811,15 @@ def _check_setup(ctx: _Context) -> list[Row]:
         return [Row("moxi", "setup versions", "warn", f"{path} is not a JSON object")]
     rows = []
     for found in ctx.present:
+        if not found.setup:
+            continue  # no setup to run again, so no version of it can be stale
         entry = held.get(found.name)
         ran = entry.get("version") if isinstance(entry, dict) else entry
         if not isinstance(ran, str) or ran == found.version:
             continue
         rows.append(Row(found.name, "setup version", "warn",
                         f"{found.version} is installed, and its setup last ran at {ran}",
-                        f"moxi install {found.name}"))
+                        setup_command(found.name)))
     return rows
 
 

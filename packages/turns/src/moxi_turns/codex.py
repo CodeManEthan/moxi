@@ -22,6 +22,12 @@ empty transcript. The load is accepted, and raises Ready ``startup``, once Codex
 the item. A Codex without ``thread/inject_items`` is refused for good, with no retry and
 no turn sent in its place.
 
+A forked thread. A launch given ``fork`` makes its first load a ``thread/fork`` of that
+thread: Codex copies the thread's history into a new thread, live parent or not, and the
+new thread is the session. It is loaded as a resumed thread is, its turn list read and no
+item injected, since the copied history is its rollout. Its id names the session from
+the fork's answer on, so a later load resumes it.
+
 Unturned threads. A thread is unturned until its first turn has run. The mark is set
 when the inject is accepted, or on a resumed load whose turn list is empty. It is
 cleared when the hook server has answered the thread's first ``SessionStart`` since the
@@ -252,11 +258,16 @@ class CodexHarness(Harness):
                  binary: str = BINARY, ping=None, client_factory=None,
                  app_server_factory=None, window_factory=None,
                  verify_wait: float = VERIFY_WAIT, backoff_factory=None,
-                 resume: str | None = None, guards: GuardRunner | None = None):
+                 resume: str | None = None, guards: GuardRunner | None = None,
+                 fork: str | None = None):
         if options is not None and not isinstance(options, Mapping):
             raise TypeError("options must be a mapping")
         if resume is not None and (not isinstance(resume, str) or not resume.strip()):
             raise ValueError("resume names a Codex thread id")
+        if fork is not None and (not isinstance(fork, str) or not fork.strip()):
+            raise ValueError("fork names a Codex thread id")
+        if resume is not None and fork is not None:
+            raise ValueError("a launch resumes a thread or forks one, not both")
         conflicts = OWNED_OPTIONS.intersection(options or ())
         if conflicts:
             names = ", ".join(sorted(conflicts))
@@ -302,6 +313,10 @@ class CodexHarness(Harness):
         #: The thread: None until a fresh thread is started; a resume names it from
         #: the start, so the first load is a `thread/resume`.
         self.session_id: str | None = resume
+        #: The thread a fork launch copies: the first load forks it with `thread/fork`,
+        #: and the new thread's id then names the session, so every later load resumes
+        #: it. None once forked, and for any other launch.
+        self._fork: str | None = fork
         self.active_turn_id: str | None = None
         self.thread_active = False
         self.ws = None
@@ -680,7 +695,20 @@ class CodexHarness(Harness):
                     raise codex_hooks.HooksUntrusted(problem)
 
                 starting = self.session_id is None
-                if starting:
+                if starting and self._fork is not None:
+                    # A fork's thread has the copied history, so it is loaded as a
+                    # resumed one. Its id names the session at once: a load that fails
+                    # after this resumes it, and the parent is never forked twice.
+                    result = ws.call("thread/fork", proto.fork_params(
+                        self._fork, self.cwd, self.instructions, self.options,
+                    ))
+                    thread_id = (result.get("thread") or {}).get("id")
+                    if not thread_id:
+                        raise AppServerOffline("thread/fork returned no thread id")
+                    with self._lock:
+                        self.session_id, self._fork = thread_id, None
+                    starting = False
+                elif starting:
                     result = ws.call("thread/start", proto.start_thread_params(
                         self.cwd, self.instructions, self.options,
                     ))
@@ -1718,7 +1746,7 @@ _HOSTS_LOCK = threading.Lock()
 
 def launch(cwd, *, instructions: str | None = None, env=None,
            window: bool = True, options=None, verify=None, additions=None,
-           resume: str | None = None):
+           resume: str | None = None, fork: str | None = None):
     """Launch a hosted Codex thread and return its live turns ``Session``.
 
     ``options`` are the thread parameters each load sends: top-level ``sandbox`` or
@@ -1726,7 +1754,9 @@ def launch(cwd, *, instructions: str | None = None, env=None,
     ``additions`` is the launch's ``LaunchAdditions`` for ``codex``; without it the host
     asks ``launch_additions`` once itself, and with it asks nothing. Its variables go
     over ``env`` and its options under ``options``. A key turns owns in either is refused
-    with ``ValueError``. ``resume`` names a thread to resume instead of starting one.
+    with ``ValueError``. ``resume`` names a thread to resume instead of starting one;
+    ``fork`` names a thread to fork with ``thread/fork`` instead, and the session is the
+    new thread, which every later load resumes. A launch names one or neither.
 
     ``verify(answer) -> str | None`` checks each load's answer; a reason fails a resume
     (the app-server is stopped and the load retried) and is logged for a new thread.
@@ -1738,11 +1768,11 @@ def launch(cwd, *, instructions: str | None = None, env=None,
     """
     return _launch(cwd, instructions=instructions, env=env, window=window,
                    options=options, verify=verify, additions=additions,
-                   resume=resume)[0]
+                   resume=resume, fork=fork)[0]
 
 
 def _launch(cwd, *, instructions=None, env=None, window=True, options=None, verify=None,
-            additions=None, resume=None, opened: list | None = None):
+            additions=None, resume=None, fork=None, opened: list | None = None):
     """`launch`, returning the endpoint beside the session, for the host entry.
 
     With `opened`, the endpoint is appended to it as soon as it is open. A stop asked
@@ -1757,7 +1787,7 @@ def _launch(cwd, *, instructions=None, env=None, window=True, options=None, veri
         raise FileNotFoundError(f"Codex working directory does not exist: {path}")
     env, options = for_host("codex", additions, cwd=path, env=env, options=options)
     harness = CodexHarness(path, instructions=instructions, env=env, window=window,
-                           options=options, verify=verify, resume=resume)
+                           options=options, verify=verify, resume=resume, fork=fork)
     endpoint = Endpoint(harness, env=harness.env).open()
     if opened is not None:
         opened.append(endpoint)
@@ -1780,7 +1810,7 @@ def _launch(cwd, *, instructions=None, env=None, window=True, options=None, veri
 
 def launch_args(argv) -> dict:
     """The keywords of `launch` (``cwd``, ``options``, ``instructions``, ``resume``,
-    ``window``) from the flags of ``moxi-turns-codex-host``. A bad flag raises
+    ``fork``, ``window``) from the flags of ``moxi-turns-codex-host``. A bad flag raises
     ``moxi_turns.codex_host.UsageError``, a ``ValueError``."""
     from .codex_host import launch_args as parse
 

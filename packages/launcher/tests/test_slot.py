@@ -28,6 +28,8 @@ TESTS = Path(__file__).resolve().parent
 SID = "5f0c3a1e-7f43-4c8e-9e0a-1d2b3c4d5e6f"
 BRIEF = "Read the design and start the build."
 
+pytestmark = pytest.mark.slot_target
+
 
 @pytest.fixture(autouse=True)
 def no_turns(monkeypatch):
@@ -329,6 +331,7 @@ def test_without_slots_a_slot_launch_is_refused_naming_the_other_targets(work, h
     assert type(listed) is targets.NoSlots and nothing_written()
 
 
+@pytest.mark.on_windows
 def test_on_native_windows_a_slot_launch_is_refused(work, harness, rig, monkeypatch):
     monkeypatch.setattr(targets, "WINDOWS", True)
     with pytest.raises(targets.SlotsUnsupported) as raised:

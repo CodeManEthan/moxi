@@ -229,7 +229,7 @@ def bind_refusal(row) -> str:
 
 #: Names the daemon keeps for itself and the operator. A module that declares one gets a
 #: conflict line and no row: a `conflict` row refuses binds, and the operator's own
-#: session binds his name.
+#: session binds that name.
 _KEPT = (OPERATOR_NAME, AUTO_WORD)
 
 
@@ -242,7 +242,7 @@ def _bad_name(name: str) -> str | None:
     if is_auto_name(name):
         return "agent-N names are the daemon's"
     if name == OPERATOR_NAME:
-        return "it is the operator's name, and the daemon keeps it for him"
+        return "it is the operator's name, and the daemon keeps it"
     if name == AUTO_WORD:
         return "a bind of auto asks the daemon for an agent-N name, so the daemon keeps it"
     return None

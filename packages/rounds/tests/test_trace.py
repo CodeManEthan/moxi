@@ -253,7 +253,7 @@ def test_a_row_that_changes_a_ruling_with_no_pointer_and_no_open_question_fails(
     answered = "C6"
 
     fold(round_dir, question("Q1"),
-         row(one, how), row(two, how, record="he said so"),
+         row(one, how), row(two, how, record="the operator said so"),
          row(three, how, record=PTR), row(four, how, asks="Q1"),
          row(five, how, asks="Q2"), row(answered, how, asks="Q7"))
 

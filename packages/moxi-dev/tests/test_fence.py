@@ -79,7 +79,9 @@ def test_the_env_is_what_the_fence_says(fence, tmp_path):
         assert (fence.runtime.stat().st_mode & 0o777) == 0o700
     for module in modules:
         home = Path(os.environ[f"MOXI_{module.upper()}_HOME"])
-        assert home == fence.module_home(module) and home.parent == fence.short
+        assert home == fence.module_home(module)
+        assert home.parent == (Path(os.environ["LOCALAPPDATA"]) / "moxi" if testing.WINDOWS
+                               else fence.short)
     # The account's folder, which places the core's anchor, is the test's own.
     anchor = Path(os.environ[testing.ANCHOR_HOME_ENV])
     assert anchor == fence.anchor_home
@@ -181,7 +183,7 @@ def test_on_windows_the_fence_moves_the_user_s_dirs_and_keeps_the_system_s(
         "XDG_STATE_HOME": "D:\\t\\home\\.local\\state",
         "XDG_CACHE_HOME": "D:\\t\\home\\.cache", "CLAUDE_CONFIG_DIR": "D:\\t\\home\\.claude",
         "CODEX_HOME": "D:\\t\\home\\.codex", "XDG_RUNTIME_DIR": "D:\\s\\run",
-        "MOXI_COMMS_HOME": "D:\\s\\comms",
+        "MOXI_COMMS_HOME": "D:\\t\\home\\AppData\\Local\\moxi\\comms",
         "USERPROFILE": "D:\\t\\home", "HOMEDRIVE": "D:", "HOMEPATH": "\\t\\home",
         "LOCALAPPDATA": "D:\\t\\home\\AppData\\Local",
         "APPDATA": "D:\\t\\home\\AppData\\Roaming",
@@ -208,6 +210,36 @@ def test_on_windows_the_fence_moves_the_user_s_dirs_and_keeps_the_system_s(
     assert ntpath.expanduser("~\\x") == "D:\\t\\home\\x"
     monkeypatch.delenv("USERPROFILE")
     assert ntpath.expanduser("~\\x") == "D:\\t\\home\\x"      # from HOMEDRIVE + HOMEPATH
+
+
+def test_on_windows_every_module_home_is_in_the_tests_profile_spelled_long(monkeypatch):
+    # The runner's TEMP, which the short directory inherits, spelled with an 8.3 name;
+    # Windows's realpath gives each part's long name.
+    monkeypatch.setattr(testing, "WINDOWS", True)
+    monkeypatch.setattr(ntpath, "realpath",
+                        lambda path: ntpath.normpath(os.fspath(path)).replace("RUNNER~1", "runneradmin"))
+    temp = PureWindowsPath("C:/Users/RUNNER~1/AppData/Local/Temp")
+    home, short = temp / "pytest-of-r" / "pytest-0" / "t0" / "home", temp / "mx-1"
+    modules = ["comms", "turns", "ui"]
+    env = testing._fenced_env(WINDOWS_SOURCE, home, short / "run", short, modules)
+    local = PureWindowsPath(env["LOCALAPPDATA"])
+    assert local == PureWindowsPath(
+        "C:/Users/runneradmin/AppData/Local/Temp/pytest-of-r/pytest-0/t0/home/AppData/Local")
+    for module in modules:
+        module_home = PureWindowsPath(env[f"MOXI_{module.upper()}_HOME"])
+        assert module_home == local / "moxi" / module
+    assert not [key for key, value in env.items() if "~1" in value]
+    assert env["TEMP"] == env["TMP"] == "C:\\Users\\runneradmin\\AppData\\Local\\Temp\\mx-1"
+    assert env["XDG_RUNTIME_DIR"] == env["TEMP"] + "\\run"
+
+
+def test_a_profile_dir_is_new_and_in_the_tests_own_profile(fence):
+    store = fence.profile_dir("store")
+    assert store.is_dir() and store.parent == fence.home
+    if testing.WINDOWS:
+        assert store.parent == Path(os.environ["USERPROFILE"])
+    with pytest.raises(FileExistsError):
+        fence.profile_dir("store")
 
 
 def test_the_real_accounts_anchor_is_never_the_tests(fence):

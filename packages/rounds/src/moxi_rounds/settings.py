@@ -24,7 +24,7 @@ from __future__ import annotations
 
 from moxi.config import ConfigError, Schema
 
-from . import flows
+from . import flows, paths
 from .paths import MODULE
 
 SCHEMA_RESOURCE = "settings.toml"
@@ -41,9 +41,13 @@ def schema() -> Schema:
 
 
 def load():
-    """rounds' settings as they stand. Raises `moxi.config.ConfigError`."""
+    """rounds' settings as they stand. Raises `moxi.config.ConfigError`, or
+    `UnfencedTest` under a test whose rounds config directory no Moxi variable places:
+    the core reads the file through a layout of its own, so rounds' config directory is
+    resolved first, through `paths`."""
     from moxi import config
 
+    paths.config_dir()
     return check(config.load(MODULE, schema()))
 
 
@@ -65,6 +69,7 @@ def check(settings):
     _check_disposable(settings.file, "defaults.disposable",
                       settings["defaults.disposable"])
     _check_grace(settings.file, "sweep.grace_hours", settings["sweep.grace_hours"])
+    _check_director(settings.file, "defaults.director", settings["defaults.director"])
     named: dict[str, str] = {}
     for name, table in settings["projects"].items():
         first = named.setdefault(name.casefold(), name)
@@ -85,8 +90,16 @@ def check(settings):
 ROUND_KEYS = ("flow", "dir", "ratify", "trace", "idle_days", "dormant_days",
               "slice_minutes", "sitting_at")
 #: The keys read for a build, from the build's repo.
-BUILD_KEYS = ("into", "check", "ci", "finish", "check_on", "shared_paths", "keep_branch",
-              "lock_ref", "brief", "disposable")
+BUILD_KEYS = ("into", "land", "check", "ci", "finish", "check_on", "shared_paths",
+              "keep_branch", "lock_ref", "brief", "disposable", "director")
+
+#: How a repo's builds land (`land`): each by its own finish, or through the repo's
+#: queue, where a finish joins the queue and the lander merges.
+LAND_FINISH = "finish"
+LAND_QUEUE = "queue"
+#: What `{base}` in a check's `scoped` command line is filled in with: the merge-base of
+#: the build's tip and its target.
+BASE_FIELD = "{base}"
 
 #: What a finish action does.
 MERGE = "merge"
@@ -98,7 +111,7 @@ DEFAULT_FINISH = ({"do": MERGE},)
 #: A project's own keys, which `defaults` does not hold, each with what it reads when the
 #: project's table leaves it out. No `into` means the branch checked out at the repo's
 #: root, and no `lock_ref` rounds' own name for the lock.
-_PROJECT_ONLY = {"into": None, "check": None, "ci": None, "finish": DEFAULT_FINISH,
+_PROJECT_ONLY = {"into": None, "land": LAND_FINISH, "check": None, "ci": None, "finish": DEFAULT_FINISH,
                  "shared_paths": (), "keep_branch": False, "lock_ref": None, "brief": ()}
 
 
@@ -172,8 +185,16 @@ def _check_project(file, name, table) -> None:
             "check is the way past a CI run that is red or absent",
             f'declare the full check too: check = {{ command = "...", timeout_s = N }} '
             f"in [{key}]")
+    if table.get("land") == LAND_QUEUE and "scoped" not in (table.get("check") or {}):
+        raise ConfigError(
+            file, f"{key}.land", "is \"queue\" in a project whose check names no scoped "
+            "command, and a queued build is checked by that command alone",
+            f'give the check its scoped command too: check = {{ command = "...", '
+            f'scoped = "... --base {BASE_FIELD}", timeout_s = N }} in [{key}]')
     if "sitting_at" in table:
         _check_sitting_at(file, f"{key}.sitting_at", table["sitting_at"])
+    if "director" in table:
+        _check_director(file, f"{key}.director", table["director"])
     if "disposable" in table:
         _check_disposable(file, f"{key}.disposable", table["disposable"])
     if "dir" in table:
@@ -205,6 +226,23 @@ def _check_sitting_at(file, where, value) -> None:
         raise ConfigError(file, where, f"is {value}, below 0",
                           "give the count of open questions at which a sitting is "
                           "suggested, or 0 to suggest none")
+
+
+def _check_director(file, where, value) -> None:
+    """The director's comms name: empty, or a name with a lead's name's shape."""
+    from . import leads
+
+    if value and not leads.is_name(value):
+        raise ConfigError(file, where, f"is {value!r}, which is not a comms name",
+                          "give the director's comms name: letters, digits, . _ -, and "
+                          'at most one @scope; or "" to name nobody')
+
+
+def _check_land(file, where, value) -> None:
+    if value not in (LAND_FINISH, LAND_QUEUE):
+        raise ConfigError(file, where, f"is {value!r}, which it cannot be",
+                          f'use "{LAND_FINISH}" (each build lands by its own finish) or '
+                          f'"{LAND_QUEUE}" (a finish joins the repo\'s queue)')
 
 
 def _check_grace(file, where, value) -> None:
@@ -341,32 +379,46 @@ def _check_strings(file, where, value) -> None:
                           "give each item as a string")
 
 
-def _check_check(file, where, value) -> None:
-    """The repo's check: a command line that splits into a command, and its time limit."""
-    import shlex
-
+def _check_check(file, where, value, *, keys=("command", "timeout_s")) -> None:
+    """The repo's check: a command line that splits into a command, and its time limit.
+    The project's own check also takes `scoped`, the command line a queue project's
+    build is checked by, `{base}` in it filled in at each run (`_check_project_check`);
+    `ci.local` takes the first two alone."""
     if not isinstance(value, dict):
         raise ConfigError(file, where, f"is {flows.kind_of(value)}, not a table",
                           'write it as { command = "make check", timeout_s = 600 }')
     for other in value:
-        if other not in ("command", "timeout_s"):
+        if other not in keys:
             raise ConfigError(file, f"{where}.{other}", "is not a key of a check",
-                              "remove it; a check takes `command` and `timeout_s`")
-    command = value.get("command")
+                              "remove it; a check takes "
+                              + ", ".join(f"`{key}`" for key in keys))
+    _check_command_line(file, f"{where}.command", value.get("command"))
+    if "scoped" in value:
+        _check_command_line(file, f"{where}.scoped", value["scoped"])
+    flows.check_timeout(file, f"{where}.timeout_s", value.get("timeout_s"))
+
+
+def _check_project_check(file, where, value) -> None:
+    _check_check(file, where, value, keys=("command", "scoped", "timeout_s"))
+
+
+def _check_command_line(file, where, command) -> None:
+    """A check's command line: one string that splits into a command."""
+    import shlex
+
     if not isinstance(command, str):
-        raise ConfigError(file, f"{where}.command",
+        raise ConfigError(file, where,
                           "is missing" if command is None else "is not a command line",
                           "give the check's command line as one string")
     try:
         words = shlex.split(command)
     except ValueError as exc:
-        raise ConfigError(file, f"{where}.command",
+        raise ConfigError(file, where,
                           f"does not split into a command and its arguments ({exc})",
                           "close every quote, as you would in a shell") from None
     if not words:
-        raise ConfigError(file, f"{where}.command", "splits into no command",
+        raise ConfigError(file, where, "splits into no command",
                           "name the command to run, or remove `check`")
-    flows.check_timeout(file, f"{where}.timeout_s", value.get("timeout_s"))
 
 
 #: The keys of `ci`.
@@ -537,7 +589,7 @@ _ACTION_KEYS = {MERGE: ("do", "id"), PUSH: ("do", "id", "remote"),
 
 _PROJECT_CHECKS = {
     "into": lambda file, where, value: _check_string(file, where, value, "a branch's name"),
-    "check": _check_check, "ci": _check_ci, "finish": _check_finish,
+    "land": _check_land, "check": _check_project_check, "ci": _check_ci, "finish": _check_finish,
     "shared_paths": _check_strings, "keep_branch": _check_bool,
     "lock_ref": lambda file, where, value: _check_string(file, where, value, "a git ref"),
     "brief": _check_strings}
@@ -546,6 +598,6 @@ _KIND_WORDS = {"string": "a string", "bool": "a boolean", "int": "an int"}
 
 
 __all__ = ["MODULE", "SCHEMA_RESOURCE", "schema", "load", "check_text", "check",
-           "ROUND_KEYS", "BUILD_KEYS", "MERGE", "PUSH", "COMMAND", "DEFAULT_FINISH",
+           "ROUND_KEYS", "BUILD_KEYS", "LAND_FINISH", "LAND_QUEUE", "BASE_FIELD", "MERGE", "PUSH", "COMMAND", "DEFAULT_FINISH",
            "round_setting", "build_setting", "project_table", "finish_actions",
            "has_notes_dir"]

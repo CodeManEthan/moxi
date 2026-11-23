@@ -4,6 +4,7 @@ import os
 
 import pytest
 
+from conftest import CHECKS_MODE_BITS
 from moxi_comms import directory
 from moxi_comms.mock_record import MockRecord
 from moxi_comms.paths import comms_db
@@ -19,7 +20,8 @@ def table_names(conn) -> set[str]:
 def test_schema_and_file_posture():
     gw = MockRecord()
     provision(gw, comms_db(), standing=[("planner", "proj-a")])
-    assert oct(os.stat(comms_db()).st_mode & 0o777) == "0o600"
+    if CHECKS_MODE_BITS:
+        assert oct(os.stat(comms_db()).st_mode & 0o777) == "0o600"
     conn = directory.connect(comms_db())
     try:
         tables = table_names(conn)
@@ -112,18 +114,18 @@ def test_standing_row_refused_while_the_name_is_live_as_chosen(rig):
 # `secret_id` in the same call that created the row -- which is what makes a first run
 # against `local` need no portal, no pasting and no operator beyond running the verb.
 
-def local_rig(tmp_path):
+def local_rig(profile):
     """A local record and its store, the pair `moxi-comms-provision --backend local` builds."""
     from moxi_comms.local_record import LocalRecord
     from moxi_comms.tokens import TokenStore
 
-    return LocalRecord(tmp_path / "record.db"), TokenStore(tmp_path / "store")
+    return LocalRecord(profile / "record.db"), TokenStore(profile / "store")
 
 
-def test_only_the_operator_token_lands_in_the_store(tmp_path):
+def test_only_the_operator_token_lands_in_the_store(profile):
     from moxi_comms import tokens
 
-    gw, store = local_rig(tmp_path)
+    gw, store = local_rig(profile)
     try:
         provision(gw, comms_db(), standing=[("planner", "proj-a")],
                   operator=("900001", "operator"), store=store)
@@ -135,10 +137,10 @@ def test_only_the_operator_token_lands_in_the_store(tmp_path):
         [tokens.OPERATOR_SECRET_ID]
 
 
-def test_the_record_keeps_only_the_operator_hash(tmp_path):
+def test_the_record_keeps_only_the_operator_hash(profile):
     from moxi_comms import tokens
 
-    gw, store = local_rig(tmp_path)
+    gw, store = local_rig(profile)
     try:
         provision(gw, comms_db(), standing=[("planner", "proj-a")],
                   operator=("900001", "operator"), store=store)
@@ -149,7 +151,7 @@ def test_the_record_keeps_only_the_operator_hash(tmp_path):
     minted = [store.read_secret(owner, tokens.OPERATOR_SECRET_ID)]
     assert all(minted)
 
-    for db in ((tmp_path / "record.db"), comms_db()):
+    for db in ((profile / "record.db"), comms_db()):
         for path in db.parent.glob(db.name + "*"):        # the WAL and the shm too
             blob = path.read_bytes()
             for token in minted:
@@ -163,13 +165,13 @@ def test_the_record_keeps_only_the_operator_hash(tmp_path):
     assert "webhooks" not in tables
 
 
-def test_a_second_run_converges_and_rotates_nothing(tmp_path):
+def test_a_second_run_converges_and_rotates_nothing(profile):
     """Re-provisioning is the same promise the directory rows have always made: what is
     there is found, only what is missing is made, and no holder loses the credential it
     is already spending."""
     from moxi_comms import tokens
 
-    gw, store = local_rig(tmp_path)
+    gw, store = local_rig(profile)
     try:
         first = provision(gw, comms_db(), standing=[("planner", "proj-a")],
                           operator=("900001", "operator"), store=store)
@@ -190,13 +192,13 @@ def test_a_second_run_converges_and_rotates_nothing(tmp_path):
     assert second.operator_token_written is False, "the second run rotated the operator"
 
 
-def test_half_an_operator_pair_is_replaced_rather_than_left_unusable(tmp_path):
+def test_half_an_operator_pair_is_replaced_rather_than_left_unusable(profile):
     """A stored token whose hash is not in the record is a lane nobody can use, so the
     converging run mints -- and the two halves agree again afterwards."""
     from moxi_comms import tokens
     from moxi_comms.local_record import META_OPERATOR_TOKEN_HASH, token_hash
 
-    gw, store = local_rig(tmp_path)
+    gw, store = local_rig(profile)
     owner = tokens.owner_for_role(tokens.ROLE_OPERATOR)
     try:
         provision(gw, comms_db(), operator=("900001", "operator"), store=store)
@@ -214,12 +216,12 @@ def test_half_an_operator_pair_is_replaced_rather_than_left_unusable(tmp_path):
     assert stored == token_hash(token)
 
 
-def test_the_mock_is_not_given_a_store(tmp_path):
+def test_the_mock_is_not_given_a_store(profile):
     """The mock keeps the token in its own record, so there is nothing here to keep and
     provision writes nothing."""
     from moxi_comms.tokens import TokenStore
 
-    store = TokenStore(tmp_path / "store")
+    store = TokenStore(profile / "store")
     provision(MockRecord(), comms_db(), standing=[("planner", "proj-a")])
 
     assert store.owners_present() == []
@@ -227,7 +229,7 @@ def test_the_mock_is_not_given_a_store(tmp_path):
 
 # ------------------------------------------------- the first start and `[provision]`
 
-def test_the_first_start_makes_what_provision_in_config_says(tmp_path):
+def test_the_first_start_makes_what_provision_in_config_says(profile):
     """The operator is read when the step runs; with no file it is `operator`."""
     from conftest import write_config
     from moxi_comms import provision as prov
@@ -238,9 +240,9 @@ def test_the_first_start_makes_what_provision_in_config_says(tmp_path):
     write_config(None, '[provision]\noperator = "alice"\n')
     assert prov.configured() == ("operator", "alice")
 
-    gw = LocalRecord(tmp_path / "record.db")
+    gw = LocalRecord(profile / "record.db")
     try:
-        prov.first_start(TokenStore(tmp_path / "store"))(gw, comms_db())
+        prov.first_start(TokenStore(profile / "store"))(gw, comms_db())
         conn = directory.connect(comms_db(), read_only=True)
         try:
             assert {"slots", "webhooks"}.isdisjoint(table_names(conn))
@@ -250,7 +252,7 @@ def test_the_first_start_makes_what_provision_in_config_says(tmp_path):
             conn.close()
         # A provisioned directory is left alone, whatever the config says now.
         write_config(None, '[provision]\noperator = "bob"\n')
-        prov.first_start(TokenStore(tmp_path / "store"))(gw, comms_db())
+        prov.first_start(TokenStore(profile / "store"))(gw, comms_db())
         conn = directory.connect(comms_db(), read_only=True)
         try:
             assert {"slots", "webhooks"}.isdisjoint(table_names(conn))

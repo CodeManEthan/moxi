@@ -2,6 +2,17 @@
 
 ## 0.1.11 (unreleased)
 
+- New `moxi install <module> --setup-only`: runs an installed module's `SETUP` again in a
+  fresh process under the core lock and records the version it ran at in `setup.json`,
+  as an install's settle step does, and nothing else: no install, no index, no catalogue
+  gate, no home move, units, skills, questions or listeners. It works on a module the
+  catalogue marks unreleased, or one another tool installed. A module not installed here
+  is refused (exit 3); one that declares no `SETUP` is said and nothing is recorded; a
+  `SETUP` that fails exits 1 and leaves the record as it was. It takes no other option.
+- The doctor's `setup version` row names `moxi install <module> --setup-only` as its
+  fix, in place of `moxi install <module>`, which refuses a module not on PyPI. A module
+  that declares no `SETUP` no longer gets the row: it has no setup to run again.
+- The terminal walk's docstring names the person neutrally, never "his".
 - A `moxi.ipc` Unix server closed within a second of an accept failing at the
   file-descriptor limit no longer logs errors after close: `close()` cancels the accept
   retries asyncio still holds for its listener, each of which logged

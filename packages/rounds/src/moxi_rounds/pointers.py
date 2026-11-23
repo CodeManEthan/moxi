@@ -1,7 +1,7 @@
 """Pointers: where the operator said something.
 
-An act that is the operator's is recorded with a pointer to where he said it. A pointer
-is one token, with no white space, of one of five shapes:
+An act that is the operator's is recorded with a pointer to where the operator said it.
+A pointer is one token, with no white space, of one of five shapes:
 
 - `comms:<digits>`: a message;
 - `<8 or more hex digits>@<UTC time>`: a moment in a session, the time written

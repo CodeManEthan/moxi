@@ -1,11 +1,11 @@
 import assert from "node:assert/strict";
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import test from "node:test";
 
 import { listView, NO_FILTERS, queryOf, refresh, runningGroup, runningRowView } from "../src/list.ts";
 import {
-  answered, caseOf, expired, factOf, KEEP_WARM_PATH, keepWarmOf, keepWarmTitle, leadOf, NO_PRESSES, ordered, parseRunning,
-  pressBody, pressed, pressNote, PRESS_WAIT_MS, runningRead, valueCame, whereText,
+  answered, caseOf, countedKinds, expired, factOf, KEEP_WARM_PATH, keepWarmOf, keepWarmTitle, leadOf, NO_PRESSES, ordered, parseRunning,
+  pressBody, pressed, pressNote, PRESS_WAIT_MS, runningRead, valueCame, WAITED_KINDS, whereText,
 } from "../src/running.ts";
 
 // Times in UTC as `HH:MM`, so the words are the same in any zone.
@@ -185,4 +185,19 @@ test("the words, the path and the wait are launcher's own, where its source sits
     assert.equal(keepWarmOf(one, true), launcher.keepWarmOf(their[index], true)?.title ?? null, one.request_id);
   });
   assert.deepEqual(ordered(ours).map((one) => one.request_id), launcher.ordered(their).map((one) => one.request_id));
+});
+
+test("the kinds a subagents wait counts are launcher's keep-warm's, where its source sits beside sessions'", () => {
+  const theirs = new URL("../../../launcher/src/moxi_launcher/keepwarm.py", import.meta.url);
+  if (!existsSync(theirs)) return;
+  const line = readFileSync(theirs, "utf8").match(/^SIGNAL_KINDS = \(([^)]*)\)$/m);
+  assert.ok(line, "keepwarm.py has no one-line SIGNAL_KINDS tuple");
+  assert.deepEqual(WAITED_KINDS, [...line[1].matchAll(/"([^"]*)"/g)].map((kind) => kind[1]));
+});
+
+test("the heavy lead counts the waited kinds after waiting on n subagents only", () => {
+  assert.deepEqual(countedKinds(uncovered("a", { waits: { kind: "subagents", count: 2 } })), WAITED_KINDS);
+  assert.deepEqual(countedKinds(uncovered("a")), []);
+  assert.deepEqual(countedKinds(uncovered("a", { waits: { kind: "subagents", count: 2 }, covered: true })), []);
+  assert.deepEqual(countedKinds(entry("a")), []);
 });

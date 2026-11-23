@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.2.6 (unreleased)
+## 0.2.7 (unreleased)
 
 - A new request, `fork {text, by, ref?}` (the client's `fork(text, by=, ref=)`), and a new
   capability, `fork`: start a fork of the session's main loop with `text` as its task. It
@@ -52,6 +52,24 @@
   refuses to send `keep` to it. One `ref` holds one kept end: a `keep` under a `ref` whose
   kept end in the session is not acked yet is answered invalid params, so no kept end
   replaces another.
+
+## 0.2.6 (unreleased)
+
+- The Codex host takes `--fork THREAD_ID` (`codex.launch(fork=...)`), beside and never
+  with `--resume`: its first load forks that thread with `thread/fork`, live or not, into a
+  new thread that holds a copy of its conversation, and hosts the new one. The new thread
+  is loaded as a resumed one, with no item injected, and its id names the session from
+  the fork on, so a later load resumes it and the thread is never forked twice. Ready is
+  `resume`, or `startup` when the forked thread has had no turn.
+- The page's `Reading…` line, while its first read is out, shows once that read has
+  been out 400 ms in every browser. In Firefox it could stay blank until the page's
+  next redraw, up to a minute later, since the page checked the wait against
+  `Date.now()`, which Firefox coarsens. It now takes the wait from moxi-ui's
+  `WaitClock`, so the `ui` extra asks for moxi-ui 0.2.6 or later.
+- With `moxi-sessions` installed, `Live sessions` leaves the browser UI shell's band of
+  pages: the Sessions page shows the running sessions with turns' live state. `/m/turns/`
+  still opens the panel. It needs ui 0.2.5 or later, which reads `band_unless`; an older
+  ui keeps the entry.
 
 ## 0.2.5 (2026-11-22)
 
