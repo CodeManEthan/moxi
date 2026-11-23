@@ -109,11 +109,14 @@ A file under a package is a test when a directory below the package is named `te
 `test`, or its name is `conftest.py`, starts with `test_` or holds `.test.`. It refuses:
 
 - a path into one user's home folder (`/home/<user>`, `/var/home/<user>`,
-  `/Users/<user>`, `<drive>:\Users\<user>`) in shipped text. A placeholder, an example
-  user (`you`, `me`, `user`, `username` or `name`, in any case, with or without digits)
-  and a folder every machine has (`Public`, `Default`, `Shared`, `All Users`) pass, and
-  so does a path from the reader's own home (`~/...`). Tests pass this rule: a test's
-  made-up home is data no machine resolves.
+  `/Users/<user>`, `<drive>:\Users\<user>`, and WSL's `/mnt/<drive>/Users/<user>`) in
+  shipped text, the user starting with a letter or digit in any script. A placeholder,
+  an example user (`you`, `me`, `user`, `username` or `name`, in any case, with or
+  without digits) and a folder that is no one person's pass: Windows' `Public`,
+  `Default` and `All Users` (in any case, as Windows reads them), macOS' `Shared` and
+  `Guest`, and `linuxbrew`, the account Homebrew on Linux installs into. So does a path
+  from the reader's own home (`~/...`). Tests pass this rule: a test's made-up home is
+  data no machine resolves.
 - a name from your own private-names list, the one secrets keeps in its config, in any
   file. No line the step prints names it: on a line that holds one, the home-folder
   line prints the root alone (`home folder /home/`), and a segment of a file's path
@@ -121,10 +124,15 @@ A file under a package is a test when a directory below the package is named `te
   list secrets can't read stops the check with exit 2 (`moxi config secrets check`
   says why).
 - a package-manager command in any file: apt-get, apt, aptitude, dnf, yum, zypper,
-  pacman, apk, brew, port, snap, flatpak, choco, winget or scoop, followed by a verb
-  such as install, remove or update (flags and `sudo` allowed), pacman with its
-  operation flag, or the same as an argv list. A sentence that only names a manager
-  passes, and service managers (systemctl, launchctl and the like) are not in the rule.
+  pacman, apk, brew, port, snap, flatpak, choco, winget or scoop, by its name or called
+  from a folder (`/usr/bin/apt-get`), followed by a verb such as install, remove,
+  update or dist-upgrade (flags allowed), or pacman with its operation flag. It counts
+  only where a command starts: at the start of a line (past a comment's opening, a
+  shell prompt such as `$ ` or `PS C:\> `, and any `NAME=value` assignments), or after
+  `sudo`, `&&`, `||`, `;`, `&`, `|` or a backtick that opens inline code; as an argv
+  list, when the quoted manager comes first. A manager and a verb in the middle of a
+  sentence or a list of words ("each port update is logged") pass, and service managers
+  (systemctl, launchctl and the like) are not in the rule.
 
 Each hit prints as `path:line: machine text: ...` with the fix. A genuine use, a line
 written for one platform or naming a place every machine of a kind has, carries

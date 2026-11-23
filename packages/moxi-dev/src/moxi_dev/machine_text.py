@@ -5,24 +5,32 @@ machine it was written on. The check refuses three kinds of text that hold on on
 machine only:
 
 - a home folder: a path rooted at one user's home folder (`/home/<user>`,
-  `/var/home/<user>`, `/Users/<user>`, `<drive>:\\Users\\<user>` with either slash),
-  unless the user is a placeholder (`<user>`, `$USER`, `${USER}`, `{user}`,
-  `%USERNAME%`, `*`), an example user (`you`, `me`, `user`, `username` or `name`, in any
-  case, with or without trailing digits) or a folder every machine of that platform has
-  (`Public`, `Default`, `Shared`, `All Users`). A word, a dot, a tilde or a hyphen just
-  before the root means it isn't one, so a relative path passes. A path from the reader's
-  own home (`~/...`) is not this rule's. Tests pass this rule: a test's made-up home is
-  data no machine resolves.
+  `/var/home/<user>`, `/Users/<user>`, `<drive>:\\Users\\<user>` with either slash, and
+  WSL's `/mnt/<drive>/Users/<user>`), unless the user is a placeholder (`<user>`,
+  `$USER`, `${USER}`, `{user}`, `%USERNAME%`, `*`), an example user (`you`, `me`, `user`,
+  `username` or `name`, in any case, with or without trailing digits) or a folder that
+  is no one person's: a shared folder every machine of a platform ships (Windows'
+  `Public`, `Default` and `All Users`, macOS' `Shared` and `Guest`, and `linuxbrew`, the
+  account Homebrew on Linux installs into), in any case under a Windows root. A user
+  starts with a letter or a digit in any script. A word, a dot, a tilde or a hyphen just
+  before the root means it isn't one, so a relative path passes. A path from the
+  reader's own home (`~/...`) is not this rule's. Tests pass this rule: a test's made-up
+  home is data no machine resolves.
 - a private name: a name from the running contributor's own private-names list, the one
   `moxi_secrets` keeps in its config, outside every repository. No line the check prints
   names it: the private-name line names no text, on a line that holds one the
   home-folder line names the root alone, and a segment of a file's path that holds one
   prints as `HIDDEN`. A list secrets can't read raises `moxi_secrets.SetUnavailable`; an
   empty one finds nothing.
-- a package-manager command: one of `MANAGERS` followed by one of `VERBS` (with `sudo`
-  and flags allowed between), pacman with its operation flag, or the same as an argv
-  list of quoted words. Case-sensitive, since commands are lower case. A sentence that
-  only names a manager passes; service managers are not managers here.
+- a package-manager command: one of `MANAGERS`, called by its name or from a folder
+  (`/usr/bin/apt-get`, `C:\\...\\choco.exe`), followed by one of `VERBS` (flags allowed
+  between), or pacman with its operation flag, where a command starts: at the line's
+  start (past a comment's opening, a shell prompt such as `$ `, `% ` or `PS C:\\> `, and
+  any `NAME=value` assignments), or after `sudo`, `&&`, `||`, `;`, `&`, `|` or a backtick that opens
+  inline code. The same as an argv list counts when the quoted manager comes first in
+  the list. Case-sensitive, since commands are lower case. A sentence that names a
+  manager, or a manager and a verb in the middle of prose or data ("each port update is
+  logged"), passes; service managers are not managers here.
 
 The check reads every tracked and untracked-but-not-ignored file that reads as UTF-8,
 every line of it, comments included, but those `read` leaves out: `.github/`, the core's
@@ -70,20 +78,25 @@ HIDDEN = "<private name>"
 
 # -- the home-folder rule ------------------------------------------------------------------
 
-#: The roots of one user's home folder: Linux (and Fedora's image-based variants), macOS
-#: and Windows (one or two backslashes, or a slash). The path pieces are spelled apart so
-#: this file passes its own check.
+#: The roots of one user's home folder: Linux (and Fedora's image-based variants), macOS,
+#: Windows (one or two backslashes, or a slash) and Windows seen from WSL. The path pieces
+#: are spelled apart so this file passes its own check.
 _SLASH = r"(?:\\\\|\\|/)"
+_LINUX_ROOT = r"(?<![\w.~-])/(?:var/)?" + "ho" + r"me/"
+_MACOS_ROOT = r"(?<![\w.~-])/" + "Us" + r"ers/"
+_WINDOWS_ROOT = r"(?<![A-Za-z])[A-Za-z]:" + _SLASH + r"(?i:users)" + _SLASH
+_WSL_ROOT = r"(?<![\w.~-])/mnt/[A-Za-z]/(?i:users)/"
 HOME_ROOT = re.compile(
-    r"(?<![\w.~-])/(?:var/)?" + "ho" + r"me/"
-    r"|(?<![\w.~-])/" + "Us" + r"ers/"
-    r"|(?<![A-Za-z])[A-Za-z]:" + _SLASH + r"(?i:users)" + _SLASH)
-#: The user segment after a root. A placeholder starts with none of these characters.
-USER = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*")
+    _LINUX_ROOT + "|" + _MACOS_ROOT + "|(?P<windows>" + _WINDOWS_ROOT + "|" + _WSL_ROOT + ")")
+#: The user segment after a root: a letter or a digit, in any script, then letters, digits,
+#: `.`, `_` and `-`. A placeholder starts with none of these characters.
+USER = re.compile(r"[^\W_][\w.-]*")
 #: An example user, the whole segment, in any case.
 EXAMPLE_USER = re.compile(r"(?:you|me|user|username|name)\d*", re.I)
-#: The folders every machine of a platform has under its home root.
-SHARED_HOMES = ("Public", "Default", "Shared", "All Users")
+#: The folders under a home root that are no one person's: Windows' shared and template
+#: profiles, macOS' shared folder and guest account, and the account Linuxbrew installs
+#: into. Under a Windows root they pass in any case, as Windows reads them.
+SHARED_USERS = ("Public", "Default", "All Users", "Shared", "Guest", "linuxbrew")
 
 # -- the package-manager rule ----------------------------------------------------------------
 
@@ -92,16 +105,34 @@ MANAGERS = ("apt-get", "aptitude", "apt", "dnf", "yum", "zypper", "pacman", "apk
             "port", "snap", "flatpak", "choco", "winget", "scoop")
 #: The verbs that make a manager's name a command.
 VERBS = ("install", "reinstall", "remove", "uninstall", "erase", "purge", "autoremove",
-         "upgrade", "update", "search", "info", "add", "del")
-_MANAGER = "(?P<manager>" + "|".join(map(re.escape, MANAGERS)) + ")"
-_VERB = "(?P<verb>" + "|".join(VERBS) + ")"
-#: A manager followed by a verb, `sudo` and flags allowed; or pacman's operation flag.
+         "upgrade", "update", "search", "info", "add", "del", "dist-upgrade", "full-upgrade",
+         "groupinstall", "groupremove")
+#: Where a command starts: the line's start, past a comment's opening (`#`, `//`, `/*`,
+#: `*`, `<!--`), a shell prompt (`$ `, `% `, `# `, `> `, `PS C:\> `) and any variable
+#: assignments (`NAME=value `); or after `&&`, `||`, `;`, `&`, `|` or a backtick that
+#: opens inline code.
+_COMMENT = r"(?:(?://|/\*+|\*|<!--|#)\s*)?"
+_PROMPT = r"(?:(?:PS\s+)?[^\s$%#>]*[$%#>]\s+)?"
+_START = r"(?:^\s*" + _COMMENT + _PROMPT + r"(?:\w+=\S*\s+)*|(?<=[;&|`])\s*)"
+#: `sudo` and its flags.
+_SUDO = r"(?:sudo(?:\s+-[\w-]+)*\s+)?"
+#: The folder a manager is called from: an absolute path (`/usr/bin/`), one from the home
+#: folder (`~/`) or from a drive (`C:\...\`).
+_CALLED_FROM = r"(?:(?:~|[A-Za-z]:)?(?:" + _SLASH + r"[\w.-]+)*" + _SLASH + ")?"
+_MANAGER = "(?P<manager>" + "|".join(map(re.escape, MANAGERS)) + r")(?:\.exe)?"
+_VERB = "(?P<verb>" + "|".join(map(re.escape, VERBS)) + ")"
+#: A manager followed by a verb, flags allowed between; or pacman with its operation
+#: flag. Each starts a command, `sudo` allowed before it.
 COMMAND = re.compile(
-    r"(?<![\w./-])(?:sudo\s+)?(?:" + _MANAGER + r"\s+(?:--?[\w-]+\s+)*" + _VERB
+    _START + _SUDO + "(?:" + _CALLED_FROM + _MANAGER + r"\s+(?:--?[\w-]+\s+)*" + _VERB
     + r"(?![\w-])|(?P<pacman>pacman)\s+(?P<flag>-[SRUQ]\w*))")
-#: The same as an argv list: a quoted manager, any quoted flags, then a quoted verb.
-ARGV = re.compile(r"[\"']" + _MANAGER + r"[\"']\s*,\s*(?:[\"']-[\w-]+[\"']\s*,\s*)*"
-                  r"[\"']" + _VERB + r"[\"']")
+#: The same as an argv list: a quoted manager first in the list (or after a quoted
+#: `sudo`), any quoted flags, then a quoted verb.
+_QUOTE = r"[\"']"
+ARGV = re.compile(
+    r"[\[(]\s*(?:" + _QUOTE + "sudo" + _QUOTE + r"\s*,\s*)?" + _QUOTE + _CALLED_FROM
+    + _MANAGER + _QUOTE + r"\s*,\s*(?:" + _QUOTE + r"-[\w-]+" + _QUOTE + r"\s*,\s*)*"
+    + _QUOTE + _VERB + _QUOTE)
 
 #: The fix each rule's line names.
 HOME_FIX = ("write it from the home folder (~/...) or with an example user (/home/you), "
@@ -189,6 +220,17 @@ def is_test(path: str) -> bool:
             or name.startswith("test_") or ".test." in name)
 
 
+def _shared(rest: str, *, windows: bool) -> bool:
+    """Whether `rest`, the text after a home root, starts with a whole `SHARED_USERS`
+    segment, in any case under a Windows root."""
+    for shared in SHARED_USERS:
+        head = rest[:len(shared)]
+        same = head.casefold() == shared.casefold() if windows else head == shared
+        if same and not USER.match(rest[len(shared):]):
+            return True
+    return False
+
+
 def home_paths(line: str) -> list[str]:
     """Each home folder `line` names that isn't a placeholder, an example user or a shared
     folder, as its root and user."""
@@ -196,8 +238,7 @@ def home_paths(line: str) -> list[str]:
     for root in HOME_ROOT.finditer(line):
         rest = line[root.end():]
         user = USER.match(rest)
-        if user is None or any(rest.startswith(shared) and not USER.match(
-                rest[len(shared):]) for shared in SHARED_HOMES):
+        if user is None or _shared(rest, windows=root.group("windows") is not None):
             continue
         if EXAMPLE_USER.fullmatch(user.group(0)):
             continue

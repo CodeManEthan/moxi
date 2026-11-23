@@ -62,6 +62,18 @@ def no_names(monkeypatch):
     ("cd /home/u", "/home/u"),
     ("(/Users/Publicity)", "/Users/Publicity"),
     ("/home/someone_2/x", "/home/someone_2"),
+    ("/mnt/c/Users/ann/x", "/mnt/c/Users/ann"),
+    ("/mnt/d/users/Bo", "/mnt/d/users/Bo"),
+    ("/home/jöran/x", "/home/jöran"),
+    ("/home/Ølsen", "/home/Ølsen"),
+    ("/Users/ñandu/Library", "/Users/ñandu"),
+    ("C:\\Users\\Zoë\\AppData", "C:\\Users\\Zoë"),
+    ("/home/ann.ünal/x", "/home/ann.ünal"),
+    ("/home/1bob", "/home/1bob"),
+    ("/Users/guest", "/Users/guest"),
+    ("/Users/Publicity", "/Users/Publicity"),
+    ("/home/Linuxbrew", "/home/Linuxbrew"),
+    ("route('/home/settings')", "/home/settings"),
 ])
 def test_a_home_path_hits(line, home):
     assert home_paths(line) == [home]
@@ -74,6 +86,10 @@ def test_a_home_path_hits(line, home):
     "/home/${USER}/x", "/home/{user}/x", "/home/*/x", "/home/<you>", "docs/home/moxi",
     "/x/home/u", "~/home/u", "a.home/u", "/homebrew", "/home/", "~/.config/moxi",
     "~/code/app", "/root/.cache", "/opt/homebrew/bin", "XC:\\Users\\ann",
+    "/Users/Guest/x", "/home/linuxbrew/.linuxbrew/bin", "c:\\users\\public",
+    "C:\\USERS\\DEFAULT\\x", "c:/users/all users/x", "/mnt/c/Users/Public",
+    "/mnt/c/users/default/x", "/mnt/c/Users/<you>", "/mnt/c/Users/you",
+    "/home/_x", "x/mnt/c/Users/ann", "/mnt/cd/Users/ann",
 ])
 def test_a_near_miss_is_no_home_path(line):
     assert home_paths(line) == []
@@ -96,6 +112,36 @@ def test_each_home_path_on_a_line_is_found():
     (cmd("run `zypper| remove x`"), cmd("zypper| remove")),
     (cmd('["apt-get"|, "install", "-y", "x"]'), cmd("apt-get| install")),
     (cmd("('dnf'|, '-y', 'install')"), cmd("dnf| install")),
+    (cmd("/usr/bin/apt-get| install x"), cmd("apt-get| install")),
+    (cmd("/opt/homebrew/bin/brew| install tmux"), cmd("brew| install")),
+    (cmd("sudo /usr/bin/dnf| install x"), cmd("dnf| install")),
+    (cmd("~/.linuxbrew/bin/brew| upgrade"), cmd("brew| upgrade")),
+    (cmd("C:\\ProgramData\\chocolatey\\bin\\choco.exe| install git"), cmd("choco| install")),
+    (cmd("winget.exe| install Git.Git"), cmd("winget| install")),
+    (cmd("apt-get| dist-upgrade"), cmd("apt-get| dist-upgrade")),
+    (cmd("apt| full-upgrade -y"), cmd("apt| full-upgrade")),
+    (cmd("dnf| groupinstall 'Development Tools'"), cmd("dnf| groupinstall")),
+    (cmd("yum| groupremove x"), cmd("yum| groupremove")),
+    (cmd("$ brew| install tmux"), cmd("brew| install")),
+    (cmd("% brew| install tmux"), cmd("brew| install")),
+    (cmd("PS C:\\> winget| install x"), cmd("winget| install")),
+    (cmd("me@box:~$ sudo apt-get| install x"), cmd("apt-get| install")),
+    (cmd("# apt-get| install x"), cmd("apt-get| install")),
+    (cmd("    // brew| install x"), cmd("brew| install")),
+    (cmd("<!-- dnf| install x -->"), cmd("dnf| install")),
+    (cmd(" * snap| install x"), cmd("snap| install")),
+    (cmd("  scoop| install git"), cmd("scoop| install")),
+    (cmd("cd x && apt-get| install y"), cmd("apt-get| install")),
+    ("make || " + cmd("dnf| install y"), cmd("dnf| install")),
+    (cmd("echo; yum| install x"), cmd("yum| install")),
+    (cmd("start & choco| install x"), cmd("choco| install")),
+    ("yes | " + cmd("pacman| -S x"), cmd("pacman| -S")),
+    (cmd("DEBIAN_FRONTEND=noninteractive apt-get| install x"), cmd("apt-get| install")),
+    (cmd("sudo -E apt-get| install x"), cmd("apt-get| install")),
+    ("| " + cmd("`port| install tmux`") + " |", cmd("port| install")),
+    (cmd('["sudo", "apt-get"|, "install"]'), cmd("apt-get| install")),
+    (cmd('["/usr/bin/apt-get"|, "install"]'), cmd("apt-get| install")),
+    (cmd("( 'apk'|, 'add', 'x')"), cmd("apk| add")),
 ])
 def test_a_package_manager_command_hits(line, command):
     assert manager_commands(line) == [command]
@@ -107,6 +153,12 @@ def test_a_package_manager_command_hits(line, command):
     'values["port"]', 'Socket("port", 8460)', "port 8460", "the support port",
     "Brew install", "xbrew install", "./brew install", "brew installer",
     "systemctl --user restart moxi", "launchctl load x", "pacman -s x",
+    cmd("each port| update is logged"), cmd('("host", "port"|, "update")'),
+    cmd("the port| search runs first"), cmd("a snap| info line"), cmd("the apk| add step"),
+    cmd("install it with apt-get| install"), cmd("Run brew| install tmux."),
+    cmd("bin/brew| install x"), cmd("x/usr/bin/apt-get| install"), cmd("CMD=apt-get| install"),
+    cmd('"brew| install tmux (or port| install tmux)"'), cmd("- dnf| install x"),
+    cmd("apt-get| dist-upgrader"), cmd("dnf| group install"),
 ])
 def test_a_near_miss_is_no_command(line):
     assert manager_commands(line) == []
@@ -254,7 +306,7 @@ def test_the_files_the_check_reads(path):
 
 def test_a_marked_line_lets_its_home_path_and_command_stand(no_names):
     source = (f"a = '/home/bob'  # noqa: {CODE} -- one user's sample\n"
-              + cmd(f"b = 'brew| install x'  # noqa: {CODE} -- macOS\n")
+              + cmd(f"b = ['brew'|, 'install', 'x']  # noqa: {CODE} -- macOS\n")
               + "c = '/home/bob'\n")
     assert check_text("a.py", source) == [Hit("a.py", 3, "home", "/home/bob")]
 
@@ -337,7 +389,7 @@ def test_a_json_line_takes_no_mark(no_names):
 
 
 def test_a_line_with_two_rules_gives_one_line_each(names):
-    source = cmd("ann: /home/bob /home/cy, brew| install x, dnf| install y\n")
+    source = cmd("ann: /home/bob /home/cy; brew| install x; dnf| install y\n")
     assert check_text("a.md", source) == [
         Hit("a.md", 1, "home", "/home/"), Hit("a.md", 1, "manager", cmd("brew| install")),
         Hit("a.md", 1, "name")]

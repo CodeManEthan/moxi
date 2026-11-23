@@ -37,9 +37,9 @@ from .places import MODULE
 from .settings import REINSTALL, SETUP_BY
 
 #: How tmux is installed, by system.
-INSTALL = {support.MACOS: "brew install tmux (or port install tmux)",  # noqa: MX6 -- macOS
-           support.LINUX: "your package manager: apt install tmux, dnf install tmux, ...",  # noqa: MX6 -- Linux
-           support.WSL2: "your distribution's package: apt install tmux, dnf install "  # noqa: MX6 -- WSL2
+INSTALL = {support.MACOS: "brew install tmux (or port install tmux)",
+           support.LINUX: "your package manager: apt install tmux, dnf install tmux, ...",
+           support.WSL2: "your distribution's package: apt install tmux, dnf install "
                          "tmux, ..."}
 
 
