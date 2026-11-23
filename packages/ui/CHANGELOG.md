@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+- Settings compares a `path` key's value with its default as paths: a default under the
+  home folder is joined with the platform's separator, and both sides are normalised
+  (and case-folded on Windows) before the comparison. On Windows a path key left at its
+  default no longer counts as changed in the list's counts and the changed view.
+
 ## 0.2.5 (2026-11-22)
 
 - A page may announce `band_unless`, a list of module names: while any of them is
@@ -14,10 +21,6 @@
 
 ## 0.2.4 (2026-11-20)
 
-- Settings compares a `path` key's value with its default as paths: a default under the
-  home folder is joined with the platform's separator, and both sides are normalised
-  (and case-folded on Windows) before the comparison. On Windows a path key left at its
-  default no longer counts as changed in the list's counts and the changed view.
 - On the Modules view the Page servers block now sits last, under the Installed list, and
   its list is mostly drawn with the rest of the page. When the list arrives late it no
   longer pushes the blocks and links already on the page down by a few hundred pixels, so
