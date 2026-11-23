@@ -25,7 +25,7 @@ from pathlib import Path
 
 import pytest
 from moxi import modules
-from moxi_dev.testing import wait_for
+from moxi_dev.testing import PROC_WAIT_S, wait_for
 from moxi_ui.testing.browser import copied, ready_copying
 from playwright.sync_api import expect
 
@@ -916,7 +916,7 @@ def test_a_change_held_when_the_shell_sends_the_modules_again_stays_and_the_page
         status, value = shell.session().get("/m/ui/api/modules")
         return any(row["name"] == "fixture" and row.get("version") == "0.2.0" for row in value["modules"])
 
-    wait_for(seen_new, 10, interval=0.2, what="the snapshot to see version 0.2.0")
+    wait_for(seen_new, PROC_WAIT_S, interval=0.2, what="the snapshot to see version 0.2.0")
     expect(html).to_have_attribute("data-fixture-version", "0.2.0")
     expect(page.locator("#moxi-panel > moxi-ui-page[data-placed=first]")).to_be_attached()
     expect(box).to_have_value("12")

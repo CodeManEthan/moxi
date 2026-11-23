@@ -15,6 +15,7 @@ import time
 import pytest
 
 from moxi import files
+from moxi_dev.testing import PROC_WAIT_S
 from moxi_slots import cli, launch, places, registry, runs, slots, tmux
 from moxi_slots.errors import Refused, TryAgain, UsageError
 from moxi_slots.model import Last, RunEnd
@@ -41,7 +42,7 @@ def go(slot, *argv, env, cwd, **kw):
     return launch.start(slot, list(argv), env=env, cwd=str(cwd), **kw)
 
 
-def ended_of(number: int, timeout: float = 10.0) -> RunEnd:
+def ended_of(number: int, timeout: float = PROC_WAIT_S) -> RunEnd:
     return wait_for(lambda: registry.read().rows[number].last.ended, timeout=timeout,
                     what=f"slot {number}'s ended record")
 
@@ -118,7 +119,7 @@ def test_the_hook_waits_for_the_lock(server, base, tmp_path):
         wait_for(lambda: pane_field(pane, "pane_dead") == "1", what="the pane to die")
         assert registry.read().rows[1].last.ended is None
     finally:
-        holder.wait(timeout=10)
+        holder.wait(timeout=PROC_WAIT_S)
     assert ended_of(1).signal == signal.SIGTERM
 
 
@@ -132,7 +133,7 @@ def test_record_gives_up_after_its_wait_and_main_never_fails(tmux_path, tmp_path
             runs.write_ended(2, "t-1", 0, None, 5.0, timeout_s=0.2)
     finally:
         holder.kill()
-        holder.wait(timeout=5)
+        holder.wait(timeout=PROC_WAIT_S)
     assert runs.LOCK_WAIT_S == 60.0
     gone = tmp_path / "gone"
     assert runs.main([str(gone), "x", "t-1", "", "", ""]) == 0
@@ -156,7 +157,7 @@ def test_the_hook_reaches_a_state_dir_with_awkward_characters(server, tmp_path):
               "set-hook", "-w", "-t", window, runs.HOOK,
               runs.hook_command(1, "tok", state_dir))
     got = wait_for(lambda: registry.read(state_dir / "slots.json").rows[1].last.ended,
-                   timeout=10, what="the record in the odd directory")
+                   timeout=PROC_WAIT_S, what="the record in the odd directory")
     assert got.status == 5
     assert not places.hooks_log(state_dir).exists()
     assert pane_field(pane, "pane_dead") == "1"
@@ -178,7 +179,8 @@ def test_a_hook_that_cannot_start_leaves_a_line_for_the_doctor(server, tmp_path,
     tmux.call("set-option", "-w", "-t", window, "remain-on-exit", "on", ";",
               "set-hook", "-w", "-t", window, runs.HOOK, command)
     log = places.hooks_log(state_dir)
-    [logged] = wait_for(lambda: log.exists() and files.read_records(log), timeout=10,
+    [logged] = wait_for(lambda: log.exists() and files.read_records(log),
+                        timeout=PROC_WAIT_S,
                         what="the hooks log line")
     assert (logged["slot"], logged["run"]) == ("1", "tok")
     assert logged["error"] == f"the hook could not start {gone} (exit 127)"
@@ -203,7 +205,8 @@ def test_a_hook_a_signal_ends_is_logged_as_that_signal(server, tmp_path, monkeyp
     tmux.call("set-option", "-w", "-t", window, "remain-on-exit", "on", ";",
               "set-hook", "-w", "-t", window, runs.HOOK, command)
     log = places.hooks_log(state_dir)
-    [logged] = wait_for(lambda: log.exists() and files.read_records(log), timeout=10,
+    [logged] = wait_for(lambda: log.exists() and files.read_records(log),
+                        timeout=PROC_WAIT_S,
                         what="the hooks log line")
     assert logged["error"] == f"the hook {killed} was ended by signal 15"
     assert log.stat().st_mode & 0o777 == 0o600
@@ -229,7 +232,7 @@ def restart(old: subprocess.Popen | None = None) -> subprocess.Popen:
     """Kill the server answering on the test's socket and start another."""
     tmux.attempt("kill-server")
     if old is not None:
-        old.wait(timeout=10)
+        old.wait(timeout=PROC_WAIT_S)
     wait_for(lambda: tmux.ping(timeout=0.5) is None, what="the server to go")
     proc = start_server()
     wait_answer()

@@ -20,7 +20,7 @@ import time
 import warnings
 
 import pytest
-from moxi_dev.testing import timed_slack
+from moxi_dev.testing import PROC_WAIT_S, timed_slack
 from conftest import wait_until, write_config
 
 from moxi_comms import bindings, claimfile, config, wire
@@ -785,10 +785,10 @@ def test_an_endpoint_that_fails_after_it_started_stops_the_daemon_nonzero(
     port = port_of(daemon)
     assert ask_daemon("mcp_endpoint")["served"]
     loops[0].call_soon_threadsafe(crash.set)
-    assert wait_until(lambda: fatal, 10)
+    assert wait_until(lambda: fatal, PROC_WAIT_S)
     assert fatal == ["comms' tools endpoint failed"] and daemon.fatal == fatal[0]
     assert endpoint() == {"served": False, "url": None, "why": "failed"}
-    assert wait_until(lambda: refused_connect(port), 5)
+    assert wait_until(lambda: refused_connect(port), PROC_WAIT_S)
 
 
 # =========================================================================== config

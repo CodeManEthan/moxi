@@ -11,6 +11,7 @@ import time
 import pytest
 
 from moxi import paths
+from moxi_dev.testing import PROC_WAIT_S
 from moxi_slots import launchfile, trampoline
 from moxi_slots.trampoline import EXEC, NOT_RUN, TAKEN, TERM_NAMES, child_env
 
@@ -78,7 +79,7 @@ def test_the_launch_leaves_the_file_as_soon_as_it_is_taken(tmp_path):
         # this test doesn't take, so a read can land between the two and see it empty.
         # Each poll reads once, an empty read counts as not yet written, and both checks
         # judge that same last read.
-        deadline = time.monotonic() + 5
+        deadline = time.monotonic() + PROC_WAIT_S
         seen = content(path)
         while (seen == "" or seen.startswith("{")) and time.monotonic() < deadline:
             time.sleep(0.01)
@@ -156,7 +157,7 @@ def test_a_file_removed_while_the_trampoline_waits_for_its_lock_runs_nothing(tmp
     finally:
         fcntl.flock(fd, fcntl.LOCK_UN)
         os.close(fd)
-    _, err = proc.communicate(timeout=10)
+    _, err = proc.communicate(timeout=PROC_WAIT_S)
     assert proc.returncode == NOT_RUN
     assert "gave up on this launch" in err or "launch file is gone" in err
     assert not marker.exists()

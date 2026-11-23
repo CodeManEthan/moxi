@@ -16,6 +16,7 @@ import pytest
 import moxi_turns as turns
 from conftest import write_config
 from moxi import paths
+from moxi_dev.testing import PROC_WAIT_S
 from moxi_turns import claude_setup
 
 @pytest.fixture
@@ -649,7 +650,7 @@ def test_the_reach_is_none_past_its_bound_and_kills_a_child_holding_the_pipes(
     assert claude_setup.reach(timeout_s=0.5) is None
     assert time.monotonic() - began < 5.0
     child = int((fake_claude / "child").read_text())
-    deadline = time.monotonic() + 5.0
+    deadline = time.monotonic() + PROC_WAIT_S
     while _alive(child) and time.monotonic() < deadline:
         time.sleep(0.05)
     assert not _alive(child)

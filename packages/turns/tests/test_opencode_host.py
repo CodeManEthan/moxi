@@ -13,6 +13,7 @@ import pytest
 
 import fake_opencode
 from fake_opencode import DROP_ADMITTED, DROP_UNADMITTED, FakeOpenCode
+from moxi_dev.testing import PROC_WAIT_S
 from moxi_turns import opencode
 from moxi_turns.client import TurnsError
 from moxi_turns.results import (Agent, Ended, Failed, Lost, Ran, Refused, Started,
@@ -20,7 +21,7 @@ from moxi_turns.results import (Agent, Ended, Failed, Lost, Ran, Refused, Starte
 from conftest import bare, end_endpoint, opener
 
 
-def until(pred, timeout=5.0):
+def until(pred, timeout=PROC_WAIT_S):
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
         if pred():
@@ -653,7 +654,7 @@ def test_launch_spawns_opencode_serve_from_path_and_stops_it(turns_env, tmp_path
         endpoint.stop("the test ended")
     pid = serve["pid"]
     assert until(lambda: not os.path.exists(f"/proc/{pid}") or
-                 open(f"/proc/{pid}/stat").read().split()[2] == "Z", 10)
+                 open(f"/proc/{pid}/stat").read().split()[2] == "Z", PROC_WAIT_S)
 
 
 def test_a_launch_whose_server_never_listens_fails_with_the_reason(turns_env, tmp_path,

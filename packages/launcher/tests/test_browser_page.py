@@ -19,7 +19,7 @@ import sys
 from typing import Any
 
 import pytest
-from moxi_dev.testing import wait_for
+from moxi_dev.testing import PROC_WAIT_S, wait_for
 from playwright.sync_api import expect
 
 import launcher_page_kit as kit
@@ -393,11 +393,13 @@ def test_a_headless_launch_runs_the_harness_and_its_row_arrives_by_push(ui_shell
     assert len(reads) == 2, reads
     # The job ran the fake harness found on the shell's PATH, in the directory, with the
     # brief; its output went to the launch's run log.
-    [run] = wait_for(lambda: [run for run in harness.runs() if run["cwd"] == str(work)], 10,
+    [run] = wait_for(lambda: [run for run in harness.runs() if run["cwd"] == str(work)],
+                     PROC_WAIT_S,
                      what="the fake harness's run in the launch's directory")
     assert run["argv"][1] == "-p" and BRIEF in run["argv"][2], run["argv"]
     log = targets.run_log(request_id, env=ui_shell.env)
-    wait_for(lambda: log.is_file() and "the fake harness ran" in log.read_text(), 10,
+    wait_for(lambda: log.is_file() and "the fake harness ran" in log.read_text(),
+             PROC_WAIT_S,
              what="the fake harness's line in the launch's run log")
 
 

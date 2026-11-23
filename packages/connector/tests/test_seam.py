@@ -16,6 +16,7 @@ from kit import GRANT_OF, Fake, bearer, call, echo_tool, provider, request
 
 from moxi_connector import providers as providers_mod
 from moxi_connector.provider import TOOL_FAILED, Provider, Result, Tool
+from moxi_dev.testing import PROC_WAIT_S
 
 SRC = Path(__file__).resolve().parents[1] / "src" / "moxi_connector"
 
@@ -102,7 +103,7 @@ def test_a_caller_that_hangs_up_on_a_real_socket_cancels_the_tool_and_settles_fa
         assert status == 200
         wait_for(lambda: fake.written == [True])
         hang_up(d.port, call("slow"), until=lambda: began)
-        wait_for(lambda: ended, within=5)
+        wait_for(lambda: ended, within=PROC_WAIT_S)
         wait_for(lambda: fake.written == [True, False])
         assert ended[0] - began[0] < 5
         wait_for(lambda: len([r for r in host.calllog.rows if r.get("tool") == "slow"]))
