@@ -16,6 +16,7 @@ from moxi_rounds import (batching, checking, ci, commissioning, finishing, joini
                          opening, queue_ci, queue_file, verdicts)
 from moxi_rounds import state as states
 from moxi_rounds.cli import main
+from moxi_rounds.errors import Refused
 
 ROUND = "proj-a/a-round"
 OTHER = "proj-a/b-round"
@@ -378,6 +379,40 @@ def test_a_candidate_on_the_target_already_is_finished_member_by_member(
     assert queue().member(ROUND, "B1").state == queue_file.LANDED
     assert repo.git("branch", "--list", "work").strip()
     assert tree.root.is_dir()
+
+
+def test_a_leave_after_the_fast_forward_is_refused_and_the_member_lands(
+        repo, ready, fake, lander_pass, tmp_path):
+    ready()
+    lander_pass()
+    batch = queue().running()
+    repo.git("merge", "--ff-only", "--quiet", batch.candidate)
+    with pytest.raises(Refused, match="has landed on main"):
+        joining.leave(ROUND, "B1", by="coder")
+    lander_pass()
+    assert queue().member(ROUND, "B1").state == queue_file.LANDED
+    assert events(tmp_path, ROUND, finishing.DONE)
+
+
+def test_a_leave_the_fast_forward_overtakes_is_overruled_by_the_landing(
+        repo, ready, fake, lander_pass, tmp_path):
+    ready()
+    ready(OTHER, branch="other", file="other.txt")
+    lander_pass()
+    batch = queue().running()
+    repo.git("merge", "--ff-only", "--quiet", batch.candidate)
+    member = queue().member(OTHER, "B1")
+    queue_file.append("proj-a", {"event": queue_file.LEFT, "round": OTHER, "stage": "B1",
+                                 "tip": member.tip, "reason": queue_file.BY_HAND,
+                                 "by": "coder", "batch": batch.id})
+    lander_pass()
+    for name in (ROUND, OTHER):
+        assert queue().member(name, "B1").state == queue_file.LANDED
+        assert events(tmp_path, name, finishing.ACTION)[-1]["state"] == finishing.FOUND
+        assert events(tmp_path, name, finishing.DONE)
+    landed = events(tmp_path, OTHER, "queue.landed")[-1]
+    assert landed["left_late"] is True
+    assert "left_late" not in events(tmp_path, ROUND, "queue.landed")[-1]
 
 
 # -- the read ----------------------------------------------------------------------------

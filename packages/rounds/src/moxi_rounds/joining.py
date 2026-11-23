@@ -21,7 +21,10 @@ queue is paused. Who passed it is recorded (`by`).
 `leave` takes a member out at once: `left {reason: "by hand", by}` in the queue file and
 `queue.left` in the round's log. A member inside a running batch leaves too; the lander's
 landing re-read finds it gone and builds the rest again without it, with a new CI run,
-which `Left.rebuilds` names.
+which `Left.rebuilds` names. A member whose batch's candidate is on the target already
+has landed: `leave` refuses it, and so does `join` at a new tip. A leave the lander's
+fast-forward overtakes between the read and the write is overruled by the landing,
+which records the member `landed` with `left_late`.
 
 Neither writes anything to git; the lander makes every merge.
 """
@@ -131,6 +134,7 @@ def join(name: str, stage: str, *, by: str, urgent: bool = False, settings=None,
                 return (queue.position(name, stage), True, None, member.urgent)
             moved = None
             if member is not None and member.waiting:
+                _refuse_landed(queue, member, build.repo)
                 moved = member.tip
                 add({"event": queue_file.LEFT, "round": name, "stage": stage,
                      "tip": member.tip, "reason": queue_file.MOVED, "by": by})
@@ -189,6 +193,7 @@ def leave(name: str, stage: str, *, by: str, settings=None,
             if member is None or not member.waiting:
                 raise Refused([Unmet(f"{stage} of {name} left {repo}'s queue meanwhile",
                                      f"moxi rounds queue --repo {repo}")])
+            _refuse_landed(queue, member, repo)
             rebuilds = member.batch if member.state == queue_file.IN_BATCH else None
             add({"event": queue_file.LEFT, "round": name, "stage": stage,
                  "tip": member.tip, "reason": queue_file.BY_HAND, "by": by,
@@ -206,6 +211,23 @@ def leave(name: str, stage: str, *, by: str, settings=None,
     tip, rebuilds = written.result
     return Left(name=name, stage=stage, repo=read["build"].repo, tip=tip,
                 rebuilds=rebuilds)
+
+
+def _refuse_landed(queue: queue_file.Queue, member: queue_file.Member, repo: str) -> None:
+    """Raise `Refused` when the member's batch's candidate is on its target already: the
+    member has landed, and the lander is recording it."""
+    batch = None if member.state != queue_file.IN_BATCH else queue.batch(str(member.batch))
+    if batch is None or batch.candidate is None or batch.target is None:
+        return
+    _key, root = folders.root(repo)
+    git = Git(root)
+    head = git.branch(batch.target)
+    if head is None or not git.present([batch.candidate]) \
+            or not git.is_ancestor(batch.candidate, head):
+        return
+    raise Refused([Unmet(
+        f"{member.stage} of {member.name} has landed on {batch.target} in batch "
+        f"{batch.id}, and the lander is recording it", f"moxi rounds queue --repo {repo}")])
 
 
 def _full(name: str, settings) -> str:

@@ -47,7 +47,9 @@ at the next pass. Otherwise the checkout is fast-forwarded to the candidate (`gi
 --ff-only`). Still under the lock, each member in batch order gets its check records at
 `T` naming the candidate (`ci.read` and, where `ci.local` ran, `check.ran` under
 `check.local`) and is finished by `finishing.finish_member`. Then the lock is released,
-each member is recorded `landed` at its own merge commit, and the batch ends.
+each member is recorded `landed` at its own merge commit, and the batch ends. Every
+member the candidate holds lands, whatever its queue state reads: one that left, or
+joined again at a new tip, after the fast-forward has its `landed` name `left_late`.
 
 A candidate found on the target already (a lander killed after the fast-forward) is
 landed from its member finishes on, with no re-read.
@@ -88,6 +90,7 @@ one comms could not take is tried again at each pass for `telling.UNSENT_S`.
 
 from __future__ import annotations
 
+import dataclasses
 import time
 from collections.abc import Callable
 from pathlib import Path
@@ -837,7 +840,8 @@ class _Pass:
             queue = queue_file.read(self.repo, self.env)
             for name, stage, tip in batch.members:
                 member = queue.member(name, stage)
-                if member is None or member.state != queue_file.IN_BATCH:
+                if member is not None and member.state == queue_file.LANDED \
+                        and member.batch == batch.id:
                     continue
                 self.write_check_records(batch, name, stage, tip)
                 try:
@@ -854,9 +858,12 @@ class _Pass:
         excused = (_newest(batch.runs, EXCUSED) or {}).get("failures") or None
         for name, stage, tip, landing in landed:
             member = queue.member(name, stage)
-            if member is not None:
-                self.end_member(member, queue_file.LANDED, batch=batch.id, landing=landing,
-                                excused=excused)
+            if member is None:
+                continue
+            late = member.tip != tip or not member.waiting
+            self.end_member(dataclasses.replace(member, tip=tip), queue_file.LANDED,
+                            batch=batch.id, landing=landing, excused=excused,
+                            left_late=late or None)
         self.end_batch(batch, LANDED_WHY)
         self.say(f"lander of {self.repo}: batch {batch.id} landed at "
                  f"{str(batch.candidate)[:12]}")
@@ -999,7 +1006,7 @@ class _Pass:
         allowed = {queue_log.LEFT: ("reason", "batch"),
                    queue_log.EJECTED: ("batch", "reason", "blocker", "run", "failures",
                                        "output"),
-                   queue_log.LANDED: ("batch", "landing", "excused")}[mirrored]
+                   queue_log.LANDED: ("batch", "landing", "excused", "left_late")}[mirrored]
         self.mirror(member.name, member.stage, mirrored,
                     {"tip": member.tip, **{key: fields[key] for key in allowed
                                            if key in fields}}

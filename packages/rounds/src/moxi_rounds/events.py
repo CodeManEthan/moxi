@@ -177,8 +177,10 @@ TYPES = _types(
     EventType("queue.batch", ("stage", "tip", "batch", "main", "candidate"),
               required=("stage", "batch")),
     # A member landed in its batch, at its landing commit, with the failures its
-    # candidate's run had that were the target's own (`excused`).
-    EventType("queue.landed", ("stage", "tip", "batch", "landing", "excused"),
+    # candidate's run had that were the target's own (`excused`); `left_late` when it
+    # left, or joined again, after the candidate reached the target.
+    EventType("queue.landed", ("stage", "tip", "batch", "landing", "excused",
+                               "left_late"),
               required=("stage", "batch")),
     # A member was sent back: a conflict with an earlier member (`blocker`), a commit
     # hook's or the publishing scan's refusal, or a new failure in its batch's CI run.
