@@ -440,7 +440,8 @@ def _prepared(asked: design_block.Question, have: states.Question | None, add,
         offered = () if have is None else have.options
     body = preparing.stored(prepared)
     newest = have.prepared[-1] if have is not None and have.prepared else None
-    if (newest is not None and newest.body() == body and offered
+    if (newest is not None and offered
+            and _without_offered(newest.body(), offered) == _without_offered(body, offered)
             and {one.key for one in newest.options} == {key for key, _text in offered}):
         return
     wrong = preparing.problems(prepared, asked.id, offered=offered, retired=retired,
@@ -451,6 +452,16 @@ def _prepared(asked: design_block.Question, have: states.Question | None, add,
     if not offered:
         add("options", asked.id, {"options": preparing.given_options(prepared)})
     add("prepared", asked.id, body)
+
+
+def _without_offered(body: dict, offered: tuple[tuple[str, str], ...]) -> dict:
+    """The stored answer `body` less each option's `text` where it is the line the
+    question offers under that key, so an answer that gives the line and one that
+    leaves it out read the same."""
+    lines = dict(offered)
+    return {**body, "option": [{key: value for key, value in one.items()
+                                if not (key == "text" and value == lines.get(one["key"]))}
+                               for one in body["option"]]}
 
 
 def _pending(one: states.Pending) -> dict:

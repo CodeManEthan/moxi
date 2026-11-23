@@ -972,6 +972,43 @@ def test_a_second_fold_with_the_same_answer_adds_nothing(round_dir):
     assert len(folded(round_dir).questions[0].prepared) == 1
 
 
+def test_the_answer_on_record_less_the_lines_the_question_offers_adds_nothing(
+        round_dir, tmp_path):
+    design(round_dir, question("Q1"))
+    fold()
+    file = tmp_path / "answer.md"
+    file.write_text("""```toml rounds
+kind = "answer"
+question = "Q1"
+recommend = "a"
+by = "helper"
+model = "a-model"
+sure = "medium"
+why = "It reads so."
+flips = "A reading the other way."
+read = ["comms:1234567"]
+
+[[option]]
+key = "a"
+text = "one"
+costs = "Costs of a."
+forecloses = "nothing"
+
+[[option]]
+key = "b"
+text = "two"
+costs = "Costs of b."
+forecloses = "nothing"
+```
+""", encoding="utf-8")
+    assert main(["ask", ROUND, "Q1", "--prepared", str(file), "--as", "helper"]) == 0
+    design(round_dir, question("Q1") + prepared("a", "b"), prose="Prepared again.")
+
+    assert fold().plan.added == {}
+    found = folded(round_dir).questions[0]
+    assert len(found.prepared) == 1 and questions.prepared_now(found).current
+
+
 def test_a_changed_answer_or_a_stale_one_is_recorded_again(round_dir):
     design(round_dir, question("Q1", options=TWO) + prepared("a", "b"))
     fold()
