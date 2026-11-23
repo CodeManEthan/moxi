@@ -445,6 +445,27 @@ def test_remove_where_this_process_holds_the_lock_neither_blocks_nor_raises(box)
     assert list(box.root.glob("moxi-demo-*")) == []
 
 
+def test_moxi_install_setup_only_runs_setup_alone_in_a_child_and_records_it(box):
+    """The whole command, as the fleet runs it: a real `moxi install --setup-only` takes
+    the core lock, its child runs `SETUP` and records the installed version, and nothing
+    else of the settle step runs: no move, no unit written, stopped or started."""
+    box.installed(DAEMONS=ONE)
+    box.module(DAEMONS=TWO, version="0.2.0")
+    old = box.legacy()
+    env = {**box.env,
+           "PYTHONPATH": os.pathsep.join([str(box.site.root), str(Path(HELPER).parent)])}
+    done = subprocess.run([PY, "-m", "moxi", "install", "demo", "--setup-only"], env=env,
+                          stdin=subprocess.DEVNULL, capture_output=True, text=True,
+                          timeout=60)
+    assert done.returncode == 0, done.stdout + done.stderr
+    assert "setup demo: done" in done.stdout
+    assert box.events("setup", "end") != []
+    assert _settle.setup_version("demo") == "0.2.0"
+    assert box.events("sup") == []
+    assert (old / "data.txt").exists()
+    assert held_elsewhere() is None
+
+
 # -- interrupts, on a terminal ---------------------------------------------------------------
 
 class Job:

@@ -6258,6 +6258,7 @@ moxi	packages/moxi/src/moxi/install.py	help="install moxi-<module> from the inde
 moxi	packages/moxi/src/moxi/install.py	help="move a unit file or a placed skill moxi did not write out "	keep	help	help
 moxi	packages/moxi/src/moxi/install.py	help="place each module's skills without asking")	keep	help	help
 moxi	packages/moxi/src/moxi/install.py	help="place no module's skills, without asking")	keep	help	help
+moxi	packages/moxi/src/moxi/install.py	help="run the installed module's setup again and record it, "	keep	help	help
 moxi	packages/moxi/src/moxi/install.py	help="set how skills are placed (the core's skills.form) "	keep	help	help
 moxi	packages/moxi/src/moxi/install.py	if any(normalize(req.name) == own for req in self.froms):	keep	any	any
 moxi	packages/moxi/src/moxi/install.py	if any(r.url for r in reqs) or self.froms:	keep	any	any
