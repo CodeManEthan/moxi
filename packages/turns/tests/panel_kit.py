@@ -25,6 +25,7 @@ import json
 import os
 import re
 import stat
+import sys
 import time
 from pathlib import Path
 from collections.abc import Iterator
@@ -46,6 +47,21 @@ SESSIONS = "/m/turns/api/sessions"
 T = r"\d{1,2}:\d\d(?: [AP]M)?"
 #: Seconds a wait on the page server's list may take: a scan, then a first read.
 LISTED_S = 20.0
+#: Seconds a browser test may take, its setup and teardown included.
+TEST_S = 120
+
+#: Every browser test module's marks. Its bound is kept by a thread that, past `TEST_S`,
+#: prints every thread's stack and ends the test's process: under xdist the run reports
+#: the worker crashed while running that test, and goes on in a new worker. The default
+#: way, a signal, raises once inside the test, and that is not enough here: Playwright's
+#: sync calls that close a context or a browser, stop a trace or run a script take no
+#: timeout of their own, so once the browser stops answering, the teardown after that one
+#: raise waits on it with no end. A raise that lands in one of asyncio's callbacks is
+#: also caught there, and the test then waits on.
+MARKS = [pytest.mark.browser, pytest.mark.timeout(TEST_S, method="thread"),
+         pytest.mark.skipif(not sys.platform.startswith("linux"),
+                            reason="turns' panel is checked in a browser on Linux; the Windows "
+                                   "and macOS runs are owed")]
 
 
 def others() -> list[str]:
