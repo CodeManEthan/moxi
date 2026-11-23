@@ -41,7 +41,7 @@ is a page with the sign-in page's headers (`moxi_connector.page.slow_down`).
 
 **The page's entry.** The sign-in page (`OAuth.page`, a factory of the ASGI app for
 `/authorize` under one `Under`) checks a request with `Under.check(params)`, keeps it with
-`Under.open(request)`, and, once the owner proved himself, finishes it with
+`Under.open(request)`, and, once the owner has proved ownership, finishes it with
 `Under.issue(pending_id, label=...)`, which spends the pending request and answers the URL
 to redirect the browser to, carrying the OAuth code, the state and the issuer.
 """

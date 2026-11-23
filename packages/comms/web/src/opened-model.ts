@@ -49,7 +49,7 @@ export interface QueueItem {
   /** `you`, or the author's name. */
   author: string;
   text: string;
-  /** His own, and the books say it can still be taken back. */
+  /** The operator's own, and the books say it can still be taken back. */
   takeable: boolean;
 }
 

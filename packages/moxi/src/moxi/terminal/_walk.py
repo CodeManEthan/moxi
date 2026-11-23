@@ -19,8 +19,8 @@ run's process tree and returns the first thing it finds:
     is a program run from a file descriptor, its first argument `/proc/self/fd/<n>` (as
     Claude Code's Linux sandbox runs it), or the run's own start environment holds a
     harness's tool mark (`CLAUDECODE`). E2 can only stop a record, so it errs wide: a
-    person's own `codex-x` stops it too, and so does a terminal of his that inherited
-    `CLAUDECODE`;
+    person's own `codex-x` stops it too, and so does that person's terminal that
+    inherited `CLAUDECODE`;
   - `"E3"`, a Moxi unit: on Linux its cgroup is a `moxi-<module>-<name>.service`, on
     macOS it is the running process of a `moxi.<module>.<name>` launchd job;
   - `"E4"`, the start mark: `MOXI_STARTED_BY` is in the environment it started with
