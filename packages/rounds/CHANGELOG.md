@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.1.3 (2026-11-23)
+## 0.1.4 (unreleased)
 
 - A `ci.workflows` entry can read jobs by name pattern (`matrix = ["browser (*)"]`), name
   its run's `pick` job, and carry `reads_candidates = true`: a merge queue's candidate is
@@ -23,6 +23,9 @@
   no longer excused because the target's job fails some test; and a failed test is the
   target's own only when the target's run fails that same test, so a job of the
   target's that failed with no test named no longer excuses a candidate's new test.
+
+## 0.1.3 (2026-11-23)
+
 - Under a test, rounds refuses its own directories when no Moxi variable places them
   (`MOXI_ROUNDS_<KIND>_HOME`, `MOXI_ROUNDS_HOME` or `MOXI_HOME`), and a project's folders
   when no Moxi variable places the projects registry: those are the real ones. It raises
