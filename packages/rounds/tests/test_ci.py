@@ -204,7 +204,7 @@ def test_a_matrix_is_read_by_its_pattern_and_the_picked_packages_recorded():
     assert scoped(jobs)[1] == ci.RED
 
 
-def test_a_job_the_pick_did_not_run_reads_skipped_and_counts_green():
+def test_a_matrix_job_the_pick_did_not_run_reads_skipped_and_counts_green():
     skipped = job("browser", conclusion="skipped")
 
     flow, whole, _asked = scoped([*FIXED, skipped], picked=())
@@ -213,9 +213,17 @@ def test_a_job_the_pick_did_not_run_reads_skipped_and_counts_green():
     assert readings(flow)[3] == ("browser (*)", ci.SKIPPED)
     flow, whole, _asked = scoped([*FIXED, job("browser (, )", conclusion="skipped")])
     assert (readings(flow)[3], whole) == (("browser (, )", ci.SKIPPED), ci.GREEN)
-    flow, whole, _asked = scoped([*FIXED[:2], job("web (ubuntu-latest)",
-                                                  conclusion="skipped")])
-    assert (readings(flow)[2], whole) == (("web (ubuntu-latest)", ci.SKIPPED), ci.GREEN)
+
+
+@pytest.mark.parametrize("name", ["scoped", "web (ubuntu-latest)"])
+def test_a_job_the_entry_names_as_itself_concluded_skipped_reads_red(name):
+    jobs = [job(name, conclusion="skipped") if one["name"] == name else one
+            for one in FIXED]
+
+    flow, whole, _asked = scoped([*jobs, job("browser (ui, chromium)")])
+
+    assert (dict(readings(flow))[name], flow["reading"], whole) == (ci.RED, ci.RED,
+                                                                     ci.RED)
 
 
 def test_a_job_the_pick_ran_that_is_missing_reads_absent():

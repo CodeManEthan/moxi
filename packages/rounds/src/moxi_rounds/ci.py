@@ -43,8 +43,9 @@ that name, in the same words, and by each `matrix` pattern every other job whose
 pattern matches; a name no job has, or a pattern none matches, reads `pending` while the
 run is not completed and `absent` once it is, and with no run at the tip each job it
 names reads `absent`, unasked. Where the entry names a `pick` job and it reads `green`,
-a job the pick did not run reads `skipped`: one concluded `skipped`, and a pattern no
-job matches once the run is completed. A named job the pick ran that is missing still
+a job of a `matrix` pattern the pick did not run reads `skipped`: one concluded
+`skipped`, and a pattern no job matches once the run is completed. A job the entry names
+as itself never reads `skipped`: concluded `skipped`, it reads `red`, and missing, it
 reads `absent`. Such a workflow reads `green` only when every job it names reads `green`
 or `skipped`, else the first of `red`, `absent` and `pending` that one reads; so does the
 whole reading of every workflow. The picked packages are recorded as the workflow's
@@ -95,7 +96,7 @@ BRANCH = "{branch}"
 STATUS_TIMEOUT_S = 60
 
 GREEN = "green"
-#: A job the pick job did not run; it counts as green.
+#: A job of a `matrix` pattern the pick job did not run; it counts as green.
 SKIPPED = "skipped"
 PENDING = "pending"
 RED = "red"
@@ -379,7 +380,11 @@ def _job_words(flow: Workflow, run: Mapping, jobs: Sequence[Mapping],
     if pick is None:
         return [one for one, _job in each], None
     for one, job in each:
-        if job is None and "matrix" in one and one["reading"] == ABSENT:
+        # A job the entry names as itself never reads skipped: a skip of one is a lost
+        # check, not one the pick left out.
+        if "matrix" not in one:
+            continue
+        if job is None and one["reading"] == ABSENT:
             one["reading"] = SKIPPED
         elif job is not None and job.get("status") == "completed" \
                 and job.get("conclusion") == "skipped":
