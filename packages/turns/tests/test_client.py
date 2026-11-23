@@ -541,12 +541,61 @@ def _probe_threads() -> list[str]:
 
 
 def _fds() -> int:
-    return len(os.listdir("/dev/fd"))
+    """How many of this process's open descriptors are this test's: a socket bound or
+    connected to a turns endpoint, or a file in turns' runtime directory. The process's
+    others (another test's servers and sockets, closed whenever GC gets to them) are left
+    out, so they can't move the count."""
+    runtime = str(client.runtime_dir())
+    places = (runtime + os.sep, os.path.realpath(runtime) + os.sep)
+    root = protocol.v2_root(runtime)
+    addresses = {ipc.address("turns", d.name) for d in root.iterdir()} if root.is_dir() \
+        else set()
+    return sum(1 for fd in _open_fds()
+               if any(n in addresses or n.startswith(places) for n in _names_of(fd)))
+
+
+def _open_fds() -> list[int]:
+    return [int(name) for name in os.listdir("/dev/fd")]
+
+
+def _names_of(fd: int) -> list[str]:
+    """What descriptor `fd` names: a Unix socket's own address and its peer's, or a file's
+    path. Empty for anything else, and for a descriptor closed meanwhile."""
+    names: list[str] = []
+    try:
+        sock = socket.fromfd(fd, socket.AF_UNIX, socket.SOCK_STREAM)
+    except OSError:
+        return names
+    with sock:
+        for read in (sock.getsockname, sock.getpeername):
+            try:
+                name = read()
+            except OSError:
+                break
+            if isinstance(name, str) and name:
+                names.append(name)
+    path = _path_of(fd)
+    if path is not None:
+        names.append(path)
+    return names
+
+
+def _path_of(fd: int) -> str | None:
+    """The path of the file open on `fd`, as the system tells it: macOS through
+    `F_GETPATH`, Linux through the descriptor's link in `/dev/fd`."""
+    import fcntl
+
+    try:
+        if hasattr(fcntl, "F_GETPATH"):
+            return os.fsdecode(fcntl.fcntl(fd, fcntl.F_GETPATH, bytes(1024)).rstrip(b"\0"))
+        return os.readlink(f"/dev/fd/{fd}")
+    except OSError:
+        return None
 
 
 def _settles_to(count: int, within: float = 3.0) -> bool:
-    """Whether this process's open descriptors come back to `count`: an endpoint served
-    here closes its side of a probe's connection a moment after the probe does."""
+    """Whether this test's open descriptors come back to `count`: an endpoint served here
+    closes its side of a probe's connection a moment after the probe does."""
     deadline = time.monotonic() + within
     while _fds() != count:
         if time.monotonic() > deadline:

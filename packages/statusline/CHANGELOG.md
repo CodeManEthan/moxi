@@ -32,7 +32,10 @@ The first version.
   and Off lists, each with a switch and up and down buttons; the line's options; a
   preview rendered by the real command over a sample input, with its time; Save and
   Discard, so the config is written only on Save; and "Use Moxi's line" and "Put my old
-  line back", disabled while changes are unsaved.
+  line back", disabled while changes are unsaved. The preview is asked for through
+  moxi-ui's `readLater` once changes settle, so the page root's `data-reading` mark
+  counts it from the change until its lines are drawn; the `ui` extra asks for moxi-ui
+  0.2.8 or later.
 - An install listener compiles the bytecode a render loads at every module's install.
 - Doctor rows: the command Claude Code's setting names resolves, bytecode for what a
   render loads, one sample render against the budget, `show` items with nothing behind

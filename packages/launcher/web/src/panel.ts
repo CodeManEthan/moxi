@@ -381,8 +381,9 @@ export interface FormRequest {
  * The request from every field the form sends (`<moxi-ui-form>`'s values; a field shown
  * off sends none and is in neither list). Each kind's empty state goes in `leave_out`: an
  * empty text, a list with no items, a switch off, a bool unticked, the blank or "leave
- * out" choice. A switch on is `"true"` with no text, else its text. `harness` always has a
- * value. A withheld text left empty with its keep box ticked is in neither list, so the
+ * out" choice. A bool whose default is true is the exception: left out it would launch
+ * ticked, so unticked it sends `"false"`. A switch on is `"true"` with no text, else its
+ * text. `harness` always has a value. A withheld text left empty with its keep box ticked is in neither list, so the
  * launch takes the preset's text.
  */
 export function requestOf(fields: readonly FieldDescriptor[], values: Record<string, FormValue>,
@@ -397,6 +398,8 @@ export function requestOf(fields: readonly FieldDescriptor[], values: Record<str
     } else if (field?.optional_value === true) {
       if (value === null) out.leave_out.push(name);
       else out.values[name] = value === "" ? "true" : value;
+    } else if (field?.type === "bool" && value === "false" && field.default === "true") {
+      out.values[name] = value;
     } else if (value === null || (field?.type === "bool" && value === "false") || value === leaveOutChoice(field)) {
       if (name === HARNESS) continue;
       if (value === null && withheld.has(name) && keep.has(name)) continue;
@@ -667,6 +670,16 @@ export interface LaunchesView {
   state: "loading" | "up" | "empty" | "error" | "failed" | "gone";
   rows: LaunchItem[];
   detail: string | null;
+}
+
+/** Whether a `launches` topic value leaves out a launch the page shows now. The log only
+ * gains launches, and the topic is a snapshot the shell may have kept from before the last
+ * read, so such a value is read again from the route rather than drawn: drawing it would
+ * take a row away under the reader's press and put it back at the next snapshot. */
+export function dropsShown(shown: Launches | null, next: Launches | null): boolean {
+  if (shown === null || next === null || shown.state !== "up" || next.state !== "up") return false;
+  const kept = new Set(next.launches.map((row) => row.request_id));
+  return shown.launches.some((row) => !kept.has(row.request_id));
 }
 
 /** The launch log's newest rows, each live one marked so from the live launches' states. */

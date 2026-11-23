@@ -24,7 +24,7 @@
 
 import { css, html, LitElement, nothing } from "lit";
 import { live } from "lit/directives/live.js";
-import { api } from "/m/ui/client.js";
+import { api, readLater } from "/m/ui/client.js";
 
 import type { Projects } from "./feed.ts";
 import {
@@ -142,7 +142,8 @@ export class ServicesPanel extends LitElement {
   #asked: Asked | null = null;
   /** The supervisor can't tell a unit's kind, as an answer said: `It` is asked. */
   #asks = false;
-  #timer: ReturnType<typeof setTimeout> | null = null;
+  /** Cancels the unit's read waiting to be sent. */
+  #cancelUnit = (): void => {};
   #connected = 0;
 
   connectedCallback(): void {
@@ -153,8 +154,7 @@ export class ServicesPanel extends LitElement {
   disconnectedCallback(): void {
     super.disconnectedCallback();
     this.#connected += 1;
-    if (this.#timer !== null) clearTimeout(this.#timer);
-    this.#timer = null;
+    this.#cancelUnit();
   }
 
   protected willUpdate(changed: Map<PropertyKey, unknown>): void {
@@ -208,17 +208,14 @@ export class ServicesPanel extends LitElement {
     this.#set({ days: on ? [...days, day] : days });
   }
 
-  /** Reads the unit typed after the wait, unless the field moves on first. */
+  /** Reads the unit typed after the wait, unless the field moves on first. The page root
+   * counts the read as out from now, so a press waits for what it fills in. */
   #readUnit(waitMs: number): void {
-    if (this.#timer !== null) clearTimeout(this.#timer);
-    this.#timer = null;
+    this.#cancelUnit();
     const unit = this.#form.unit.trim();
     if (unit === "") return;
     const kind = kindToAsk(this.#form, this.#asks);
-    this.#timer = setTimeout(() => {
-      this.#timer = null;
-      void this.#askUnit(unit, kind);
-    }, waitMs);
+    this.#cancelUnit = readLater(() => this.#askUnit(unit, kind), waitMs);
   }
 
   async #askUnit(unit: string, kind: "daemon" | "timer" | null): Promise<void> {

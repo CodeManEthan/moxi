@@ -23,8 +23,8 @@
 //   reason, the rows dim in their groups; no row of the user's, `You have added no services
 //   yet.` and, under `Yours`, what a service is with `Add a service`.
 // - A row opened draws its labelled lines (`opened-model.ts`) from its own read,
-//   `/api/row`, and slots' server's `/api/ends`; then its foot's acts and a Moxi row's
-//   links.
+//   `/api/row`, and slots' server's `/api/ends`; then, once those reads have answered, its
+//   foot's acts and a Moxi row's links, so a line those answers add never moves them.
 // - The acts (`acts-model.ts`), at the desk: at most one on the closed row's line, the
 //   rest in the opened row's foot, by the row's cause and kind. A press is a plain
 //   `/api/act` with a job key minted for it; while its job runs the row's fact says what
@@ -923,9 +923,11 @@ export class ServicesPage extends LitElement {
     </div>`;
   }
 
-  /** The opened row's lines, each only when its fact is there, then its module's links. */
+  /** The opened row's lines, each only when its fact is there, then, once its own reads
+   * have answered, its foot and its module's links. */
   #opened(row: Row) {
     const reads = this.#reads?.id === row.id ? this.#reads : null;
+    const answered = reads !== null && !reads.one.loading && !(reads.ends?.loading ?? false);
     const opened: Opened = {
       phone: this.#phone, usage: installed("usage"),
       modulePage: components(row.module).some((item) => item.name === "page") ? row.module : null,
@@ -936,9 +938,9 @@ export class ServicesPage extends LitElement {
     return html`<div class="det" data-part="opened">
       ${lines.map((line) => line.label === "Details" ? this.#details(line)
         : line.label === "State" && ended !== null ? html`${this.#line(line)}${this.#endedPart(row, ended)}` : this.#line(line))}
-      ${this.#foot(row)}
+      ${answered ? this.#foot(row) : nothing}
       ${this.#asking?.where === row.id && !this.#phone ? this.#confirmPart(row, this.#asking) : nothing}
-      ${links.length ? html`<div class="links" data-part="links">${links.map((link) =>
+      ${answered && links.length ? html`<div class="links" data-part="links">${links.map((link) =>
         this.#link(link, "module-link"))}</div>` : nothing}
     </div>`;
   }

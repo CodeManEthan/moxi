@@ -16,7 +16,7 @@ def cut(text, env=ENV):
 
 
 def test_a_call_line_s_path_is_its_last_segment():
-    assert cut("Read(/home/someone/notes/home/moxi/x.md)") == "Read(x.md)"
+    assert cut("Read(/home/someone/notes/work/moxi/x.md)") == "Read(x.md)"
 
 
 def test_the_home_path_env_names_is_a_root():

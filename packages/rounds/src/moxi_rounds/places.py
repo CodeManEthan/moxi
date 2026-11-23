@@ -101,7 +101,7 @@ def expand_home(recorded: object) -> str:
 def contract_home(path: str | os.PathLike) -> str:
     """`path` as a round's record holds it: `~` for the home folder, `~` followed by the
     rest for a path under it, any other path as it is. A path that only starts with the
-    home folder's name, as `/home/ann2` does with `/home/ann`, is not under it."""
+    home folder's name, as `/home/you2` does with `/home/you`, is not under it."""
     text = os.fspath(path)
     seps = os.sep + (os.altsep or "")
     home = os.path.expanduser("~").rstrip(seps)

@@ -45,9 +45,52 @@ def test_the_targets_own_are_compared_by_test_across_jobs_and_by_job_alone():
                  {"job": "firefox", "test": None},
                  {"job": "firefox", "test": "tests/test_page.py::test_x"},
                  {"job": "local", "test": None}]
+    # A job of the target's that failed with no test named excuses no test of the
+    # candidate's, in that job or any other.
     assert failures.new(candidate, target) == [
         {"job": "scoped", "test": "tests/test_a.py::test_new"},
+        {"job": "firefox", "test": "tests/test_page.py::test_x"},
         {"job": "local", "test": None}]
+
+
+#: A whole-tree failure in the candidate's scoped job, which stands for main's linux.
+SCOPED_WHOLE = {"job": "scoped", "test": None, "stands_for": "linux"}
+
+
+def test_a_runs_failures_hold_the_job_their_job_stands_for():
+    assert failures.of_run(["scoped", "web"], {"scoped": ["t::a"]},
+                           {"scoped": "linux"}) == [
+        {"job": "scoped", "test": "t::a", "stands_for": "linux"},
+        {"job": "web", "test": None}]
+
+
+def test_a_whole_tree_failure_is_mains_own_only_where_the_stood_for_job_names_no_test():
+    assert failures.new([SCOPED_WHOLE], [{"job": "linux", "test": None}]) == []
+    # main's linux red on a test, or green, or red under the candidate's own job name:
+    # the candidate's whole-tree failure is its own.
+    for target in ([{"job": "linux", "test": "t::a"}], [],
+                   [{"job": "scoped", "test": None}]):
+        assert failures.new([SCOPED_WHOLE], target) == [SCOPED_WHOLE]
+
+
+def test_a_failed_test_is_the_targets_own_only_where_the_target_fails_that_test():
+    failed = {"job": "scoped", "test": "t::x", "stands_for": "linux"}
+    assert failures.new([failed], [{"job": "linux", "test": "t::x"}]) == []
+    assert failures.new([failed], [{"job": "web", "test": "t::x"}]) == []
+    assert failures.new([failed], [{"job": "linux", "test": "t::y"},
+                                   {"job": "scoped", "test": None}]) == [failed]
+
+
+def test_main_red_on_a_whole_tree_step_in_linux_blames_a_new_test_in_scoped():
+    failed = {"job": "scoped", "test": "t::new", "stands_for": "linux"}
+    assert failures.new([failed, SCOPED_WHOLE], [{"job": "linux", "test": None}]) == [
+        failed]
+
+
+def test_with_no_stands_for_a_job_is_compared_by_its_own_name():
+    scoped = {"job": "scoped", "test": None}
+    assert failures.new([scoped], [{"job": "linux", "test": None}]) == [scoped]
+    assert failures.new([scoped], [{"job": "scoped", "test": None}]) == []
 
 
 def test_halves_split_in_order_the_first_the_larger():
@@ -106,3 +149,20 @@ def test_queue_ci_gives_the_rerun_and_the_failed_log_the_settings_repo(tmp_path,
     for argv in (rerun, failed_log):
         assert argv[-2:] == ["--repo", "owner/name"], argv
     assert queue_ci.gh_repo(found) == ("--repo", "owner/name")
+
+
+def test_queue_ci_gives_each_failure_the_job_it_stands_for(tmp_path, monkeypatch):
+    jobs = [{"name": "scoped", "status": "completed", "conclusion": "failure"},
+            {"name": "web (ubuntu-latest)", "status": "completed", "conclusion": "failure"}]
+    log = "scoped\tTest\t2026-11-22T10:00:00Z FAILED tests/test_a.py::test_one - boom\n"
+    monkeypatch.setattr(ci, "run_jobs", lambda *args, **kwargs: ((), jobs))
+    monkeypatch.setattr(queue_ci, "_said", lambda *args, **kwargs: queue_ci.Said(0, log))
+    found = ci.Declared(workflows=(ci.Workflow("queue.yml"),), local=None,
+                        local_timeout_s=None, remote="origin", status=ci.STATUS,
+                        ids=ci.IDS, status_timeout_s=10)
+    read = queue_ci.Read(ci.RED, ("7",), ({"path": "queue.yml", "reading": ci.RED,
+                                           "stands_for": {"scoped": "linux"}},))
+    got = queue_ci.QueueCi(found, local_log=tmp_path / "local.log").failures(
+        tmp_path, "a" * 40, read)
+    assert got == [{**SCOPED_ONE, "stands_for": "linux"},
+                   {"job": "web (ubuntu-latest)", "test": None}]

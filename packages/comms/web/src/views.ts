@@ -21,6 +21,8 @@ export interface RowView {
   adapter: string | null;
   /** How long the session has held the name, "bound for 2h4m"; null when not live. */
   bound: string | null;
+  /** The directors as drawn: a policy director marked `(policy)`, or `(policy, not
+   * provisioned)` while its name holds no standing row. */
   directors: string[];
   awaiting: string[];
   /** The session a cache chip is placed for: a live row's `session_id`, else null. */
@@ -51,8 +53,19 @@ export function span(seconds: number): string {
   return `${Math.floor(total / 86400)}d`;
 }
 
-/** One row at the server's time `now` (null before the first read). */
-export function rowView(row: RosterRow, now: number | null): RowView {
+/** A row's directors as drawn: each policy director marked, `(policy, not provisioned)`
+ * when `standing` (the names with a standing row) is known and lacks it. */
+export function directorsView(row: RosterRow, standing: Set<string> | null): string[] {
+  const policy = new Set(row.policy_directors ?? []);
+  return row.directors.map((name) => {
+    if (!policy.has(name)) return name;
+    return standing !== null && !standing.has(name) ? `${name} (policy, not provisioned)` : `${name} (policy)`;
+  });
+}
+
+/** One row at the server's time `now` (null before the first read). `standing` is the
+ * names that hold a standing row, when the caller knows them. */
+export function rowView(row: RosterRow, now: number | null, standing: Set<string> | null = null): RowView {
   const tags = [row.live ? "live" : "standing"];
   if (row.kind === "send-only" || row.adapter === "send-only") tags.push("send-only");
   if (row.holder === "program") tags.push("registered by a program");
@@ -64,7 +77,7 @@ export function rowView(row: RosterRow, now: number | null): RowView {
     tags,
     adapter: row.adapter,
     bound: counted ? `bound for ${span(now - (row.bound_at as number))}` : null,
-    directors: row.directors,
+    directors: directorsView(row, standing),
     awaiting: row.awaiting,
     session: row.live && row.session_id ? row.session_id : null,
   };
@@ -73,7 +86,9 @@ export function rowView(row: RosterRow, now: number | null): RowView {
 /** The roster at the server's time `now`. Rows keep the server's order. */
 export function rosterView(data: FeedState, now: number | null): RosterView {
   const kept = data.value?.state === "up" ? data.value.rows : [];
-  const rows = kept.map((row) => rowView(row, now));
+  // A name holds a standing row when the roster lists it with the directory's kind.
+  const standing = new Set(kept.filter((row) => row.kind === "agent").map((row) => row.qualified));
+  const rows = kept.map((row) => rowView(row, now, standing));
   if (data.gone) return { state: "gone", rows: [], detail: null };
   if (data.failure !== null) return { state: "failed", rows, detail: data.failure.why };
   if (data.loading || data.value === null) return { state: "loading", rows: [], detail: null };

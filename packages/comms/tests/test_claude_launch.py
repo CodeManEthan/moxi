@@ -505,6 +505,7 @@ def test_the_additions_env_is_merged_and_a_launchers_grant_survives_the_scrub(
     stamp does not."""
     monkeypatch.setenv("MOXI_TURNS_COMMANDS", "exit,compact")
     monkeypatch.setenv("MOXI_COMMS_DIRECTORS", "someone-else")
+    monkeypatch.setenv("MOXI_COMMS_POLICY_DIRECTORS", "someone-else")
     calls = fake_additions(monkeypatch, argv=("--plugin-dir", "/p/runner"),
                            env={"MOXI_TURNS_EXTRA": "1"})
     code, seen = launched("--model", "haiku")
@@ -512,7 +513,9 @@ def test_the_additions_env_is_merged_and_a_launchers_grant_survives_the_scrub(
     env = seen["env"]
     assert env["MOXI_TURNS_COMMANDS"] == "exit,compact", "the launcher's grant survives"
     assert env["MOXI_TURNS_EXTRA"] == "1", "the additions' env is merged"
-    assert env["MOXI_COMMS_NAME"] == NAME and "MOXI_COMMS_DIRECTORS" not in env
+    assert env["MOXI_COMMS_NAME"] == NAME
+    # The inherited stamps are scrubbed; the box's default policy director is stamped.
+    assert env["MOXI_COMMS_DIRECTORS"] == env["MOXI_COMMS_POLICY_DIRECTORS"] == "fleet-lead"
     assert calls[0]["env"]["MOXI_TURNS_COMMANDS"] == "exit,compact"
     assert seen["cmd"][1:] == ["--session-id", SID, "--plugin-dir", "/p/runner",
                                "--model", "haiku", "-n", NAME]

@@ -468,7 +468,7 @@ def _check_command_line(file, where, command) -> None:
 _CI_KEYS = ("workflows", "local", "remote", "ref", "full_ref", "status", "ids", "jobs",
             "status_timeout_s")
 #: The keys of a `ci.workflows` entry written as a table.
-_WORKFLOW_KEYS = ("path", "jobs")
+_WORKFLOW_KEYS = ("path", "jobs", "matrix", "pick", "reads_candidates", "stands_for")
 
 
 def _check_ci(file, where, value) -> None:
@@ -491,6 +491,11 @@ def _check_ci(file, where, value) -> None:
                           'workflows = [".github/workflows/ci.yml"]')
     for entry in workflows:
         _check_workflow(file, f"{where}.workflows", entry)
+    if all(isinstance(entry, dict) and entry.get("reads_candidates") is True
+           for entry in workflows):
+        raise ConfigError(file, f"{where}.workflows",
+                          "marks every workflow reads_candidates, so none reads a full run",
+                          "name the full run's workflow too, with no reads_candidates key")
     local = value.get("local")
     if local is None:
         raise ConfigError(file, f"{where}.local", "is missing",
@@ -520,9 +525,22 @@ def _check_ci(file, where, value) -> None:
     flows.check_timeout(file, f"{where}.status_timeout_s", value.get("status_timeout_s"))
 
 
+def _names_problem(value) -> str | None:
+    """Why `value` is not a list of names, each once; None when it is."""
+    if (not isinstance(value, list) or not value
+            or not all(isinstance(one, str) and one.strip() for one in value)):
+        return "is not a list of job names"
+    if len(set(value)) != len(value):
+        return "names a job twice"
+    return None
+
+
 def _check_workflow(file, where, entry) -> None:
-    """One `ci.workflows` entry: a path inside the repo, or a table of the `path` and
-    the `jobs` read of its run."""
+    """One `ci.workflows` entry: a path inside the repo, or a table of the `path`, the
+    `jobs` read of its run by name, the `matrix` patterns of the jobs read by pattern
+    (one of the two at least), the `pick` job among `jobs`, `reads_candidates`, true
+    for the workflow a queue's candidate is read by, and `stands_for`, a table of job
+    names: each job of its run to the job of the target's full run it stands for."""
     from pathlib import PurePosixPath
 
     path = entry
@@ -533,16 +551,41 @@ def _check_workflow(file, where, entry) -> None:
                                   "is not a key of a workflow entry",
                                   "remove it; an entry takes " + ", ".join(_WORKFLOW_KEYS))
         path = entry.get("path")
-        jobs = entry.get("jobs")
-        if (not isinstance(jobs, list) or not jobs
-                or not all(isinstance(one, str) and one.strip() for one in jobs)):
-            raise ConfigError(file, f"{where}.jobs",
-                              "is missing" if jobs is None else "is not a list of job names",
-                              'name each job read as its run names it: jobs = ["linux"], '
-                              "or give the entry as its path alone to read the whole run")
-        if len(set(jobs)) != len(jobs):
-            raise ConfigError(file, f"{where}.jobs", "names a job twice",
-                              "name each job once")
+        jobs, matrix = entry.get("jobs"), entry.get("matrix")
+        if jobs is not None or matrix is None:
+            why = "is missing" if jobs is None else _names_problem(jobs)
+            if why is not None:
+                raise ConfigError(file, f"{where}.jobs", why,
+                                  'name each job read once, as its run names it: '
+                                  'jobs = ["linux"], or give the entry as its path '
+                                  "alone to read the whole run")
+        if matrix is not None:
+            why = _names_problem(matrix)
+            if why is not None:
+                raise ConfigError(file, f"{where}.matrix", why.replace("job names",
+                                                                       "name patterns"),
+                                  "give each pattern once, * for any text in a name: "
+                                  'matrix = ["browser (*)"]')
+        pick = entry.get("pick")
+        if pick is not None and (not isinstance(pick, str) or pick not in (jobs or ())):
+            raise ConfigError(file, f"{where}.pick", f"is {pick!r}, which jobs does not name",
+                              'name the job that picks the others, and list it in jobs: '
+                              'pick = "pick", jobs = ["pick", ...]')
+        reads = entry.get("reads_candidates")
+        if reads is not None and not isinstance(reads, bool):
+            raise ConfigError(file, f"{where}.reads_candidates",
+                              f"is {reads!r}, not true or false",
+                              "write reads_candidates = true on the workflow a queue's "
+                              "candidate is read by")
+        stands_for = entry.get("stands_for")
+        if stands_for is not None and (
+                not isinstance(stands_for, dict)
+                or not all(isinstance(one, str) and one.strip()
+                           for pair in stands_for.items() for one in pair)):
+            raise ConfigError(file, f"{where}.stands_for",
+                              f"is {stands_for!r}, not a table of job names",
+                              "map each job of this run to the job of the target's full "
+                              'run it stands for: stands_for = { scoped = "linux" }')
     parts = PurePosixPath(path).parts if isinstance(path, str) else ()
     if (not isinstance(path, str) or not path.strip() or path.startswith(("/", "\\"))
             or ".." in parts or ":" in path.split("/")[0]):

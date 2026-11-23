@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+- comms' config gains `[policy] directors`, by default the plain name `fleet-lead`:
+  names that direct every comms session on the box that doesn't opt out, after its
+  launch's own directors. Each directs only while its name holds a standing row
+  (`moxi-comms-provision --standing NAME`); `moxi comms doctor` warns for one that
+  doesn't. A launch opts out with `--no-policy-directors`, or a roster row with
+  `takes_policy_directors = false`. The claim, the stamps (`MOXI_COMMS_POLICY_DIRECTORS`
+  beside `MOXI_COMMS_DIRECTORS`), the API's `Agent`, `Owner` and `RosterRow`, and the
+  page carry which directors came from the setting; the API adds `policy_directors()`
+  and `effective`, which loads the box's comms config when it isn't given one.
 - On Windows the token store's profile check compares real paths: the store's and those
   of `USERPROFILE` and `LOCALAPPDATA`, with links and junctions resolved and every part
   spelled long. A store spelled inside the profile that leads out of it through a

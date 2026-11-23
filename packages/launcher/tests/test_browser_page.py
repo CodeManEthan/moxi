@@ -3,8 +3,9 @@ launcher's real page server: the contract check on the panel and both components
 session in the error colour, a session's state followed through a clear, the sessions
 block on the panel, the 360 px width check, the launch form filled from a preset and what
 an emptied field leaves out, a headless launch whose row arrives by push, a refusal met
-before a launch's row, and a past terminal session's command to resume, with the brief
-typed beside it.
+before a launch's row, a past terminal session's command to resume, with the brief typed
+beside it, and a press just after a topic value, which waits for the past sessions to be
+read again.
 
 The shell runs with a fake `claude` first on its `PATH`, which prints a line and exits, so
 a launch from the panel runs that and nothing else. Every test seeds rows of its own in
@@ -438,16 +439,71 @@ def test_a_past_terminal_session_gives_the_command_to_resume(ui_shell, ui_page):
 
 
 def test_a_past_go_session_resumes_only_with_a_brief_which_its_command_carries(ui_shell,
-                                                                               ui_page):
+                                                                               ui_page, ui_press):
     sid = kit.seed(ui_shell, "past-go", target="terminal", posture="go")
     panel = kit.open_panel(ui_page)
     past = panel.locator('section.past li[data-request="past-go"]')
     resume = past.get_by_role("button", name="Command to resume")
-    resume.click()
+    ui_press(resume)
     refused = past.locator('[data-field="resumed"] [data-code]')
     expect(refused).to_have_attribute("data-code", "posture-brief")
     expect(refused).to_contain_text("posture go needs a brief on a resume")
     past.get_by_label("Brief", exact=True).fill("Carry on.")
-    resume.click()
+    ui_press(resume)
     expect(past.locator("[data-copy]")).to_have_text(
         f"moxi launcher resume {sid} --brief 'Carry on.'")
+
+
+# --- a press after a topic value ------------------------------------------------------------
+
+# Counts the answers to the past sessions' read, and notes at every click in the document
+# how many had come and the page root's mark as it stood.
+_PAST_READS = """(() => {
+  const fetched = window.fetch.bind(window);
+  window.pastReads = 0;
+  window.fetch = async (input, init) => {
+    const answer = await fetched(input, init);
+    const url = typeof input === "string" ? input : input.url;
+    if (url.includes("/m/launcher/api/sessions")) window.pastReads += 1;
+    return answer;
+  };
+  window.clicks = [];
+  document.addEventListener("click", () => {
+    window.clicks.push({
+      pastReads: window.pastReads,
+      mark: document.getElementById("moxi-panel")?.getAttribute("data-reading") ?? null,
+    });
+  }, true);
+})()"""
+
+#: The past sessions' answers so far once the page has read them as it opened and again
+#: after the topics' first values, and nothing is out.
+_OPENED = """() => window.pastReads >= 2
+  && !document.getElementById("moxi-panel")?.hasAttribute("data-reading")"""
+
+#: The past sessions' answers so far, once the launch's row has come by the topic.
+_ROW_CAME = """(request) => {
+  const page = document.querySelector("#moxi-panel > moxi-launcher-page");
+  const row = page?.shadowRoot?.querySelector(`section.launches li[data-request="${request}"]`);
+  return row ? window.pastReads : null;
+}"""
+
+
+def test_a_press_just_after_a_topic_value_waits_for_the_past_sessions_read_again(
+        ui_shell, ui_page, ui_press):
+    ui_page.add_init_script(_PAST_READS)
+    kit.seed(ui_shell, "past-pressed", target="terminal")
+    panel = kit.open_panel(ui_page)
+    resume = panel.locator('section.past li[data-request="past-pressed"]').get_by_role(
+        "button", name="Command to resume")
+    expect(resume).to_be_visible()
+    ui_page.wait_for_function(_OPENED)
+    # A new launch comes by the `launches` topic, and the page reads its past sessions again
+    # a while after: the press must wait for that read, not land in the wait.
+    kit.seed(ui_shell, "came-later", live=True)
+    came = ui_page.wait_for_function(_ROW_CAME, arg="came-later", polling="raf").json_value()
+    ui_press(resume)
+    click = ui_page.evaluate("() => window.clicks").pop()
+    assert click["pastReads"] > came, (
+        f"the press landed before the past sessions were read again: {click}")
+    assert click["mark"] is None, click

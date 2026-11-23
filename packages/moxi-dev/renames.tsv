@@ -669,6 +669,7 @@ comms	packages/comms/src/moxi_comms/adapters/codex_wrapper.py	nobody.add_argumen
 comms	packages/comms/src/moxi_comms/adapters/codex_wrapper.py	help="when the session ends (repeatable, the first to fire wins): "	keep	help	help
 comms	packages/comms/src/moxi_comms/adapters/codex_wrapper.py	nobody.add_argument("--brief", metavar="TEXT", help="the session's first turn")	keep	help	help
 comms	packages/comms/src/moxi_comms/adapters/codex_wrapper.py	help="a file whose text is the session's first turn")	keep	help	help
+comms	packages/comms/src/moxi_comms/adapters/codex_wrapper.py	help="take none of the box's policy directors ([policy] directors in "	keep	help	help
 comms	packages/comms/src/moxi_comms/adapters/harness.py	"""The head of a wrapper's plan: the identity, roster, cwd, `record` (the	keep	record	record
 comms	packages/comms/src/moxi_comms/adapters/harness.py	HarnessAdapter	name	delivered	on_delivered
 comms	packages/comms/src/moxi_comms/adapters/harness.py	HarnessAdapter._open_batch	name	e	exc
@@ -775,6 +776,7 @@ comms	packages/comms/src/moxi_comms/adapters/session.py	self.dir.mkdir(parents=T
 comms	packages/comms/src/moxi_comms/adapters/session.py	stamp_tools(env, tools_url, token=MINTED_AT_LAUNCH if args.dry_run else None)	keep	dry_run	dry_run
 comms	packages/comms/src/moxi_comms/adapters/session.py	tools_endpoint	name	e	exc
 comms	packages/comms/src/moxi_comms/adapters/session.py	unnamed = (any(t in RESUMES_UNNAMED or t.startswith(("--from-pr=", "--teleport="))	keep	any	any
+comms	packages/comms/src/moxi_comms/adapters/session.py	help="take none of the box's policy directors ([policy] directors in "	keep	help	help
 comms	packages/comms/src/moxi_comms/adapters/shim_roster.py	delta	name	now	current
 comms	packages/comms/src/moxi_comms/adapters/shim_roster.py	diff	name	now	current
 comms	packages/comms/src/moxi_comms/adapters/shim_roster.py	fetch	name	e	exc
@@ -996,6 +998,7 @@ comms	packages/comms/src/moxi_comms/config.py	raise bad("threads.reply_cap", f"i
 comms	packages/comms/src/moxi_comms/config.py	raise bad(f"{table}.agents", f"holds {name!r} as a value",	keep	bad	bad
 comms	packages/comms/src/moxi_comms/config.py	raise bad(key, f"holds {item!r}", 'list qualified names, e.g. ["name@scope"]')	keep	bad	bad
 comms	packages/comms/src/moxi_comms/config.py	super().__init__(MODULE, schema(), env=env, report=report)	keep	env	env
+comms	packages/comms/src/moxi_comms/config.py	raise bad("policy.directors", f"holds a bad name: {exc}",	keep	bad	bad
 comms	packages/comms/src/moxi_comms/connector/__init__.py	link, result=self.api.Result, on_refused=self.api.Result.refused,	keep	refused	refused
 comms	packages/comms/src/moxi_comms/connector/__init__.py	record=self.record, env=dict(env))	keep	record	record
 comms	packages/comms/src/moxi_comms/connector/__init__.py	return self.api.Result.refused("offline", tools_mod.OFFLINE_TEXT)	keep	refused	refused
@@ -1170,7 +1173,12 @@ comms	packages/comms/src/moxi_comms/daemon.py	w.closed = True	keep	closed	closed
 comms	packages/comms/src/moxi_comms/daemon.py	archive.skip_ids(self.record)	keep	record	record
 comms	packages/comms/src/moxi_comms/directors.py	-	name	ENV_VAR	DIRECTORS_ENV
 comms	packages/comms/src/moxi_comms/directors.py	if author.get("name") in set(directors or ()):	keep	set	set
+comms	packages/comms/src/moxi_comms/directors.py	policy = set(policy or ())	keep	set	set
+comms	packages/comms/src/moxi_comms/directors.py	if name in set(policy or ()):	keep	set	set
+comms	packages/comms/src/moxi_comms/directors.py	if name in set(directors or ()):	keep	set	set
 comms	packages/comms/src/moxi_comms/directory.py	conn = opener(path, env=env)	keep	env	env
+comms	packages/comms/src/moxi_comms/directory.py	return set()	keep	set	set
+comms	packages/comms/src/moxi_comms/directory.py	held = set()	keep	set	set
 comms	packages/comms/src/moxi_comms/glossary.py	"not told; `moxi comms explain <name> <id>` says `expired`. A message that has "	keep	expired	expired
 comms	packages/comms/src/moxi_comms/glossary.py	aliases=("expires", "--expires", "expired"),	keep	expired	expired
 comms	packages/comms/src/moxi_comms/glossary.py	aliases=("record", "backend"),	keep	record	record
@@ -1940,6 +1948,7 @@ comms	packages/comms/tests/test_codex_wrapper.py	assert not any(codex_wrapper.se
 comms	packages/comms/tests/test_codex_wrapper.py	assert not codex_wrapper.sessions_dir().exists() or not any(	keep	any	any
 comms	packages/comms/tests/test_codex_wrapper.py	assert wait_until(lambda: not any(codex_wrapper.sessions_dir().glob("codex-*")),	keep	any	any
 comms	packages/comms/tests/test_codex_wrapper.py	proc.communicate(timeout=20)	keep	timeout	timeout
+comms	packages/comms/tests/test_codex_wrapper.py	proc.wait(timeout=20)	keep	timeout	timeout
 comms	packages/comms/tests/test_codex_wrapper.py	run_wrapper	name	environ	env
 comms	packages/comms/tests/test_codex_wrapper.py	return host.out.exists() and any(ln == word or ln.startswith(word + " ")	keep	any	any
 comms	packages/comms/tests/test_cold_every_sender.py	"unhandled": unhandled_d}, timeout=5.0)	keep	timeout	timeout
@@ -2562,6 +2571,7 @@ comms	packages/comms/tests/test_ping_order.py	return c._client, digests	keep	_cl
 comms	packages/comms/tests/test_ping_order.py	return client._client	keep	_client	_client
 comms	packages/comms/tests/test_policy.py	-	name	test_the_policy_reads_a_given_environment	test_the_policy_reads_a_given_env
 comms	packages/comms/tests/test_policy.py	other = {"MOXI_COMMS_CONFIG_HOME": str(tmp_path / "cfg"), "HOME": str(tmp_path)}	keep	HOME	HOME
+comms	packages/comms/tests/test_policy_directors.py	lambda s, found, cmd, env, **_: seen.update(s=s, env=env) or 0)	keep	env	env
 comms	packages/comms/tests/test_posture.py	-	name	test_a_failed_directory_read_lets_the_single_reply_check_through	test_a_failed_dir_read_lets_the_single_reply_check_through
 comms	packages/comms/tests/test_posture.py	ARCHIVIST = dict(name="archivist", env={"MOXI_COMMS_GLOBAL": "1"})	keep	env	env
 comms	packages/comms/tests/test_posture.py	assert wait_until(lambda: any(p["message_id"] == ask.id for p in reviewer.queue))	keep	any	any
@@ -4964,6 +4974,9 @@ launcher	packages/launcher/tests/test_relaunch_job.py	got = go(conn, run, sessio
 launcher	packages/launcher/tests/test_relaunch_job.py	session = FakeSession([Result("refused", "rate"), Result("ran")])	keep	refused	refused
 launcher	packages/launcher/tests/test_relaunch_job.py	assert got.outcome == "expired" and got.run.word == "rate"	keep	expired	expired
 launcher	packages/launcher/tests/test_relaunch_job.py	assert released == {"slot": "3", "holder": old.run_id, "released": True}	keep	released	released
+launcher	packages/launcher/tests/test_relaunch_job.py	self.policy, self.never_bound = policy, set(never_bound)	keep	set	set
+launcher	packages/launcher/tests/test_relaunch_job.py	if self.never_bound & set(to):	keep	set	set
+launcher	packages/launcher/tests/test_relaunch_job.py	return SimpleNamespace(outcome="refused", message_id=None,	keep	refused	refused
 launcher	packages/launcher/tests/test_replay.py	"HOME": "/h", "PATH": "/bin", "TMPDIR": "/t", "LC_ALL": "C"}	keep	HOME	HOME
 launcher	packages/launcher/tests/test_replay.py	"SESSIONNAME"} & set(short)	keep	set	set
 launcher	packages/launcher/tests/test_replay.py	-	name	test_a_replay_writes_its_row_where_the_callers_environment_puts_the_store	test_a_replay_writes_its_row_where_the_callers_env_puts_the_store
@@ -7683,11 +7696,14 @@ moxi-dev	packages/moxi-dev/src/moxi_dev/new.py	parser.add_argument("module", hel
 moxi-dev	packages/moxi-dev/src/moxi_dev/new.py	path.parent.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
 moxi-dev	packages/moxi-dev/src/moxi_dev/new.py	position = text.find("\n", end)	keep	find	find
 moxi-dev	packages/moxi-dev/src/moxi_dev/new.py	start = text.find("\n", found.end())	keep	find	find
+moxi-dev	packages/moxi-dev/src/moxi_dev/machine_text.py	return (any(part in TEST_DIRS for part in parts[2:-1]) or name == "conftest.py"	keep	any	any
+moxi-dev	packages/moxi-dev/src/moxi_dev/machine_text.py	hidden = any(first < end and last > start for first, last in spans)	keep	any	any
+moxi-dev	packages/moxi-dev/src/moxi_dev/machine_text.py	hits, used = [], set()	keep	set	set
+moxi-dev	packages/moxi-dev/src/moxi_dev/machine_text.py	marked, bare = marked_lines(text, CODE) if takes_marks else (set(), set())	keep	set	set
+moxi-dev	packages/moxi-dev/src/moxi_dev/marks.py	marked, bare = set(), set()	keep	set	set
 moxi-dev	packages/moxi-dev/src/moxi_dev/pronouns.py	end = text.find("\n", at)	keep	find	find
 moxi-dev	packages/moxi-dev/src/moxi_dev/pronouns.py	end = text.find("*/", at + 2)	keep	find	find
-moxi-dev	packages/moxi-dev/src/moxi_dev/pronouns.py	marked, bare = set(), set()	keep	set	set
 moxi-dev	packages/moxi-dev/src/moxi_dev/pronouns.py	hits, used = [], set()	keep	set	set
-moxi-dev	packages/moxi-dev/src/moxi_dev/pronouns.py	__all__ = ["CODE", "FIX", "Hit", "MARK", "WORD", "check_text", "doc_words", "kind",	keep	MARK	MARK
 moxi-dev	packages/moxi-dev/src/moxi_dev/refs.py	#: For a `.refs-allow` line (`stale`): "unused", "malformed" or "duplicate".	keep	stale	stale
 moxi-dev	packages/moxi-dev/src/moxi_dev/refs.py	exists = (unchecked or any(p == clean or p.endswith("/" + clean) for p in paths)	keep	any	any
 moxi-dev	packages/moxi-dev/src/moxi_dev/refs.py	flags: set[str] = set()	keep	set	set
@@ -7901,6 +7917,8 @@ moxi-dev	packages/moxi-dev/tests/test_naming.py	assert {hit.message.split("'")[1
 moxi-dev	packages/moxi-dev/tests/test_naming.py	hits = [hit for hit in naming.scan(root) if hit.part == "directory"]	keep	directory	directory
 moxi-dev	packages/moxi-dev/tests/test_naming.py	path.parent.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
 moxi-dev	packages/moxi-dev/tests/test_new.py	target.parent.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
+moxi-dev	packages/moxi-dev/tests/test_machine_text.py	config.parent.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
+moxi-dev	packages/moxi-dev/tests/test_machine_text.py	path.parent.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
 moxi-dev	packages/moxi-dev/tests/test_pronouns.py	path.parent.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
 moxi-dev	packages/moxi-dev/tests/test_refs.py	assert len(found) == 1 and found[0].stale and found[0].text == "GoneName"	keep	stale	stale
 moxi-dev	packages/moxi-dev/tests/test_refs.py	path.parent.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
@@ -9648,8 +9666,8 @@ rounds	packages/rounds/src/moxi_rounds/export.py	summary = index.read(home.proje
 rounds	packages/rounds/src/moxi_rounds/export.py	waiting	name	closed	on_closed
 rounds	packages/rounds/src/moxi_rounds/export.py	write	name	error	exc
 rounds	packages/rounds/src/moxi_rounds/export.py	write	name	folder	export_dir
-rounds	packages/rounds/src/moxi_rounds/failures.py	return any(one.get("job") == failure.get("job") for one in target)	keep	any	any
-rounds	packages/rounds/src/moxi_rounds/failures.py	return any(one.get("test") == test	keep	any	any
+rounds	packages/rounds/src/moxi_rounds/failures.py	return any(one.get("test") == test for one in target)	keep	any	any
+rounds	packages/rounds/src/moxi_rounds/failures.py	return any(one.get("test") is None and one.get("job") == job for one in target)	keep	any	any
 rounds	packages/rounds/src/moxi_rounds/findings.py	until = min(ends, default=None)	keep	default	default
 rounds	packages/rounds/src/moxi_rounds/findings.py	used = set()	keep	set	set
 rounds	packages/rounds/src/moxi_rounds/finish_gates.py	CHANGED = "changed"	keep	changed	changed
@@ -12504,6 +12522,7 @@ services	packages/services/tests/test_jobs.py	found = ended(table, "bad")	keep	b
 services	packages/services/tests/test_jobs.py	gate.set()	keep	set	set
 services	packages/services/tests/test_jobs.py	second.set()	keep	set	set
 services	packages/services/tests/test_jobs.py	table.submit("bad", "stop", "services/web", broken)	keep	bad	bad
+services	packages/services/tests/test_jobs.py	threading.Timer(0.2, gate.set).start()	keep	set	set
 services	packages/services/tests/test_lifecycle.py	assert set(found.stores) == {"registry"}	keep	set	set
 services	packages/services/tests/test_lifecycle.py	store_path.parent.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
 services	packages/services/tests/test_live.py	assert box.show(box.adopt)["state"] != "active"	keep	show	show
@@ -14890,9 +14909,11 @@ turns	packages/turns/tests/test_claude_setup.py	assert set(written) == {runner /
 turns	packages/turns/tests/test_client.py	-	name	test_a_v2_endpoint_beside_a_v1_directory_is_found	test_a_v2_endpoint_beside_a_v1_dir_is_found
 turns	packages/turns/tests/test_client.py	_hello	name	directory	endpoint_dir
 turns	packages/turns/tests/test_client.py	assert s._short._client is not s._reads._client	keep	_client	_client
+turns	packages/turns/tests/test_client.py	else set()	keep	set	set
 turns	packages/turns/tests/test_client.py	endpoint_dir.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
 turns	packages/turns/tests/test_client.py	gate.set()	keep	set	set
 turns	packages/turns/tests/test_client.py	h = s.handle_stops(lambda facts: asked.set() or "go on")	keep	set	set
+turns	packages/turns/tests/test_client.py	if any(n in addresses or n.startswith(places) for n in _names_of(fd)))	keep	any	any
 turns	packages/turns/tests/test_client.py	listens and never accepts, found by `sessions()` through a `hello.json` of its own,	keep	sessions	sessions
 turns	packages/turns/tests/test_client.py	release.set()	keep	set	set
 turns	packages/turns/tests/test_client.py	s._short._client.close()                          # the first connection closes too	keep	_client	_client
@@ -15868,6 +15889,7 @@ ui	packages/ui/src/moxi_ui/testing/browser.py	check_component	name	err	exc
 ui	packages/ui/src/moxi_ui/testing/browser.py	held: set[str] = set()	keep	set	set
 ui	packages/ui/src/moxi_ui/testing/browser.py	if any(parts.path.startswith(f"/m/{module}/") for module in modules):	keep	any	any
 ui	packages/ui/src/moxi_ui/testing/browser.py	if not held_read and any(urlsplit(url).path == PUSH_PATH for url in strays):	keep	any	any
+ui	packages/ui/src/moxi_ui/testing/browser.py	locator.wait_for(state="visible", timeout=wait_ms)	keep	timeout	timeout
 ui	packages/ui/src/moxi_ui/testing/browser.py	page.wait_for_function(_JS_RENDERED, arg=mark, timeout=RENDER_MS)	keep	timeout	timeout
 ui	packages/ui/src/moxi_ui/testing/browser.py	return set(), False	keep	set	set
 ui	packages/ui/src/moxi_ui/testing/phone.py	PhoneBridge	name	_guarded	_on_guarded
@@ -17713,6 +17735,9 @@ moxi-dev	packages/moxi-dev/tests/test_temp_kit.py	assert any(line == f"moxi-dev 
 moxi-dev	packages/moxi-dev/tests/test_temp_kit.py	child.communicate(timeout=60)	keep	timeout	timeout
 moxi-dev	packages/moxi-dev/tests/test_temp_kit.py	out, _ = after.communicate(timeout=120)	keep	timeout	timeout
 moxi-dev	packages/moxi-dev/tests/test_temp_kit.py	rest, _ = child.communicate(timeout=120)	keep	timeout	timeout
+moxi-dev	packages/moxi-dev/src/moxi_dev/check.py	help="print the packages the change picks, as one JSON line, and "	keep	help	help
+moxi-dev	packages/moxi-dev/tests/test_workflows.py	assert set(found) == {"pick", "scoped", "web", "browser"}	keep	set	set
+rounds	packages/rounds/src/moxi_rounds/settings.py	if len(set(value)) != len(value):	keep	set	set
 rounds	packages/rounds/src/moxi_rounds/events.py	"builder", "record", "host", "build", "brought")),	keep	record	record
 rounds	packages/rounds/src/moxi_rounds/private_files.py	proc.wait(timeout=GIT_TIMEOUT_S)	keep	timeout	timeout
 rounds	packages/rounds/src/moxi_rounds/private_files.py	code, out = git._run("config", "--bool", "core.ignorecase", ok=(0, 1))	keep	ok	ok

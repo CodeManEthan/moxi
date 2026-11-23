@@ -265,6 +265,7 @@ def test_the_unread_confirm_does_not_cover_a_count_read_since(slots, fake, route
     slots.slots = []
     status, body = post(route, {"id": SERVER, "ends_unread": True})
     assert status == 202, body
+    assert ended(job_of(route))["state"] == "done"
 
 
 def test_a_stop_is_refused_when_it_confirms_both_a_count_and_unread(slots, fake, route):

@@ -67,8 +67,11 @@ PATH finds first.
 qualified HERE -- bare -> the global identity, `name@scope` explicit, `name@global`
 renders bare -- and go two places, both of them already-qualified: `MOXI_COMMS_DIRECTORS` in
 the session environment (beside the identity stamp) and the adapter's claim, which is
-what makes the frame line say `directive from`. Authority is the recipient's grant, it is
-invisible on the wire, and it dies with the session.
+what makes the frame line say `directive from`. The box's `[policy] directors` join them
+here, after the launch's own (`directors.effective`), unless `--no-policy-directors`
+opts this session out; `MOXI_COMMS_POLICY_DIRECTORS` and the claim carry which they are.
+Authority is the recipient's grant -- its launch and its machine's config, never a
+sender's -- it is invisible on the wire, and it dies with the session.
 """
 
 from __future__ import annotations
@@ -152,7 +155,7 @@ def sessions_dir(env=None) -> Path:
 #: must never pass the outer session's token or URL on, or the inner session would send
 #: as the outer identity.
 INHERITED_COMMS_ENV = (NAME_ENV, SCOPE_ENV, GLOBAL_ENV,
-                       "MOXI_COMMS_DIRECTORS", SOCKET_ENV, "MOXI_COMMS_SOCKET",
+                       "MOXI_COMMS_DIRECTORS", "MOXI_COMMS_POLICY_DIRECTORS", SOCKET_ENV, "MOXI_COMMS_SOCKET",
                        PROJECT_ENV, CLAIM_SOCKET_ENV, COMMAND_ENV,
                        *mcp_additions.STAMPS)
 
@@ -169,9 +172,11 @@ def stamped_env(base=None, **claim) -> dict:
     Without the scrub, a child launched from inside a session comes out holding the
     PARENT session's `MOXI_COMMS_SHIM_SOCKET`, pointed at the control socket of the
     session that launched it. The socket is the visible symptom; the one that
-    matters is `MOXI_COMMS_DIRECTORS`, because authority is the recipient's own grant and
-    nobody may be handed one by proximity. An agent that declared no directors would
-    have inherited its wrapper's and rendered another agent's mail as `directive from`.
+    matters is `MOXI_COMMS_DIRECTORS` (and `MOXI_COMMS_POLICY_DIRECTORS` beside it),
+    because authority is granted by the recipient's own side -- its launch and its
+    machine's config -- and nobody may be handed one by proximity. An agent that
+    declared no directors would have inherited its wrapper's and rendered another
+    agent's mail as `directive from`.
 
     Every stamp site goes through here -- `Session.env`, the codex roster and the
     opencode roster -- because the leak was in the pattern, not in any one of them.
@@ -184,15 +189,17 @@ def stamped_env(base=None, **claim) -> dict:
 
 
 def identity_env(*, name=None, scope=None, global_=False,
-                 project=None, directors=()) -> dict:
+                 project=None, directors=(), policy_directors=()) -> dict:
     """The claim, stamped where the CLI reads it.
 
-    `MOXI_COMMS_DIRECTORS` rides beside it: the qualified,
-    comma-separated list this session was launched with. It is a declaration, not a
-    credential -- nothing downstream authorizes on it; the adapter renders with it.
+    `MOXI_COMMS_DIRECTORS` rides beside it: the qualified, comma-separated list this
+    session was launched with, its launch's own then the box's policy directors it
+    takes, and `MOXI_COMMS_POLICY_DIRECTORS` the part of it only the policy gave. They
+    are a declaration, not a credential -- nothing downstream authorizes on them; the
+    adapter renders with them.
     """
     env = {}
-    env.update(directors_mod.stamp(directors))
+    env.update(directors_mod.stamp(directors, policy_directors))
     if name:
         env[NAME_ENV] = name
     if global_:
@@ -209,7 +216,8 @@ class Session:
     """Everything one launched session needs, written down in one place."""
 
     def __init__(self, session_id: str, *, name=None, scope=None,
-                 global_=False, project=None, directors=(), native=None, comms=None):
+                 global_=False, project=None, directors=(), native=None, comms=None,
+                 policy_directors=()):
         self.id = session_id
         #: How the launching install's comms is run (`context.own_comms`), stamped as
         #: `MOXI_COMMS_COMMAND` for the listener to name in layer one; None stamps none.
@@ -228,8 +236,13 @@ class Session:
         self.project = project or project_key()
         self.scope = GLOBAL if self.global_ else scope
         # Qualified HERE and nowhere else, by the one rule: a bare director is the
-        # global identity.
+        # global identity. `directors` is the whole list the launch runs with
+        # (`directors.effective`, in `main`, never here: a respawn rebuilds a Session
+        # from the stamp and must not merge again), `policy_directors` the part of it
+        # only the box's `[policy] directors` gave.
         self.directors = directors_mod.declare(directors)
+        self.policy_directors = [name for name in directors_mod.validated(policy_directors)
+                                 if name in self.directors]
         self.dir = sessions_dir() / session_id
         #: The adapter's claim socket, keyed by the session id as its claim file is.
         self.claim_socket = claim_socket(session_id)
@@ -240,7 +253,8 @@ class Session:
         wrapper's comms command, over a scrubbed `base`."""
         env = stamped_env(base, name=self.name, scope=self.scope,
                           global_=self.global_, project=self.project,
-                          directors=self.directors)
+                          directors=self.directors,
+                          policy_directors=self.policy_directors)
         env[CLAIM_SOCKET_ENV] = str(self.claim_socket)   # scrubbed above; this session's
         if self.comms:
             env[COMMAND_ENV] = self.comms                # scrubbed above too
@@ -549,6 +563,15 @@ def not_given(additions, passthrough) -> list[str]:
     return out
 
 
+def directors_line(directors, policy=(), *, opted_out: bool = False) -> str | None:
+    """A launch print's directors line (`directors.describe`), each policy name marked,
+    and whether it holds a standing row now (`directory.provisioned`)."""
+    from ..directory import provisioned
+
+    return directors_mod.describe(directors, policy, provisioned(policy),
+                                  opted_out=opted_out)
+
+
 def main(argv=None, prog: str = "moxi-comms-claude") -> int:
     own, passthrough = split_passthrough(argv)
     ap = argparse.ArgumentParser(
@@ -566,6 +589,9 @@ def main(argv=None, prog: str = "moxi-comms-claude") -> int:
                          "from that identity, verified, render as directives. Qualified "
                          "here like any other name (bare -> the global identity, "
                          "name@scope explicit). One hop, no transitivity.")
+    ap.add_argument("--no-policy-directors", action="store_true",
+                    help="take none of the box's policy directors ([policy] directors in "
+                         "comms' config) for THIS session; --director still declares")
     ap.add_argument("--native-name", dest="native",
                     help="the label Claude Code shows for this session (-n), verbatim: "
                          "for a caller that names its sessions. Absent, -n is the "
@@ -579,7 +605,7 @@ def main(argv=None, prog: str = "moxi-comms-claude") -> int:
     args = ap.parse_args(own)
     from ..config import ConfigError, load
     try:
-        load()                  # a bad config file fails here, before claude starts
+        cfg = load()            # a bad config file fails here, before claude starts
     except ConfigError as exc:
         print(f"{prog}: {exc}", file=sys.stderr)
         return 2
@@ -619,12 +645,16 @@ def main(argv=None, prog: str = "moxi-comms-claude") -> int:
     # An unnamed resume states no id until the look; its runtime dir is still named, by
     # the wrapper's own --session-id when it has one, in lowercase as a stated id is.
     session_id = stated or (args.session_id or "").lower() or uuid.uuid4().hex[:8]
+    own = qualify(args.name, args.scope if args.scope and not args.global_ else GLOBAL)
     try:
+        # The box's policy directors join the launch's own here, once (`effective`).
+        full, policy = directors_mod.effective(
+            args.director, cfg, own=own, use_policy=not args.no_policy_directors)
         session = Session(session_id, name=args.name,
                           scope=args.scope, global_=args.global_,
                           project=args.project,
-                          directors=args.director, native=args.native,
-                          comms=own_comms())
+                          directors=full, policy_directors=policy,
+                          native=args.native, comms=own_comms())
     except directors_mod.BadDirector as exc:
         print(f"{prog}: {exc}", file=sys.stderr)
         return 2
@@ -666,9 +696,10 @@ def main(argv=None, prog: str = "moxi-comms-claude") -> int:
     # The native label is worth saying out loud: it is the caller's label when one was
     # given, else the identity spelling.
     print(f"  native -n  {session.native_label()}")
-    if session.directors:
-        print(f"  directors  {', '.join(session.directors)} "
-              "(verified messages from these render as directives)")
+    said = directors_line(session.directors, session.policy_directors,
+                          opted_out=args.no_policy_directors)
+    if said:
+        print(f"  directors  {said}")
     print(f"  claim      {session.claim_socket}")
     print(f"  adapter    log {session.log_path()}")
     if tools_url is not None:
@@ -807,7 +838,7 @@ def _adapter_process(session: Session, env: dict, harness_pid: int, handle: int,
 
 
 def adapter_shim(session: Session, harness_pid: int, **extra):
-    """The session's `ClaudeShim`: its claim (name, scope, directors) keyed by the
+    """The session's `ClaudeShim`: its claim (name, scope, both director lists) keyed by the
     session id, its claim socket in the session's directory with the `claude` process as
     the claim's root, and its supervisor on. The session id is the one the launch named
     to `claude`, stated from the bind until the first look replaces it; an
@@ -820,7 +851,8 @@ def adapter_shim(session: Session, harness_pid: int, **extra):
     root = root_of(harness_pid, TREE)
     shim = ClaudeShim(name=session.name, scope=None if session.global_ else session.scope,
                       global_=session.global_, project=session.project,
-                      directors=session.directors, autoreconnect=True,
+                      directors=session.directors,
+                      policy_directors=session.policy_directors, autoreconnect=True,
                       session_id="", claim_key=session.id,
                       claim_socket=session.claim_socket,
                       claim_roots=[root] if root else [], listen_claims=True, **extra)

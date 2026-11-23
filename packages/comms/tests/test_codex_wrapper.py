@@ -79,7 +79,8 @@ def test_the_launchers_line_reads_whole(tmp_path):
     assert config["check_for_update_on_startup"] is False
     assert config["sandbox_workspace_write"] == {
         "writable_roots": [str(extra), str(root)], "network_access": True}
-    assert launch.agent.directors == ["lead"]
+    assert launch.agent.directors == ["lead", "fleet-lead"]
+    assert launch.agent.policy_directors == ["fleet-lead"]
 
 
 def test_a_launch_that_sets_network_access_keeps_its_own(tmp_path):
@@ -214,12 +215,14 @@ def test_the_hosts_env_carries_this_identity_alone_and_no_lifeline(
         tmp_path, monkeypatch):
     launch = plan(args("--name", NAME, "--scope", "proj-a"), cwd=str(tmp_path))
     base = {"PATH": "/bin", "MOXI_LIFELINE_FD": "7", "STAMPED_BY_CALLER": "kept",
-            "MOXI_COMMS_DIRECTORS": "someone-else", CLAIM_SOCKET_ENV: "/parent.sock"}
+            "MOXI_COMMS_DIRECTORS": "someone-else",
+            "MOXI_COMMS_POLICY_DIRECTORS": "someone-else", CLAIM_SOCKET_ENV: "/parent.sock"}
     env = launch.env(base)
     assert env["PATH"] == "/bin" and env["STAMPED_BY_CALLER"] == "kept"
     assert (env["MOXI_COMMS_NAME"], env["MOXI_COMMS_SCOPE"]) == (NAME, "proj-a")
     assert env[CLAIM_SOCKET_ENV] == str(launch.claim_socket)
-    assert "MOXI_COMMS_DIRECTORS" not in env, "no director is handed by proximity"
+    # No director is handed by proximity: only the box's own policy director is stamped.
+    assert env["MOXI_COMMS_DIRECTORS"] == env["MOXI_COMMS_POLICY_DIRECTORS"] == "fleet-lead"
     assert "MOXI_LIFELINE_FD" not in env, "an exec'd host gets no lifeline"
 
 
@@ -588,6 +591,9 @@ def test_the_host_holds_the_lifeline_and_ends_when_the_adapter_dies(
         assert brief.read_text() == "go" and brief.stat().st_mode & 0o777 == 0o600
         os.kill(adapter_pid, signal.SIGKILL)
         assert wait_until(lambda: host_said(headless_host, "lifeline-closed"), PROC_WAIT_S)
+        # The wrapper exits a moment after its host wrote that line: its exit is what the
+        # test asserts, so wait for it here, before the `finally` may kill it.
+        proc.wait(PROC_WAIT_S)
     finally:
         if proc.poll() is None:
             proc.kill()

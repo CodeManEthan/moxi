@@ -421,11 +421,11 @@ def test_agents_json_prints_exactly_what_roster_rows_returns(monkeypatch):
         "module": None, "tier": "chosen", "adapter": "connector", "directors": ["boss"],
         "session_id": SID_LEAD, "bound_at": 12.5, "awaiting": [PLAN],
         "cache": {"kind": "warm", "until": 1300.0}, "holder": None,
-        "via": "Claude's apps, through the connector"}, {
+        "via": "Claude's apps, through the connector", "policy_directors": []}, {
         "qualified": "herald", "name": "herald", "scope": "global", "live": False,
         "kind": "agent", "module": None, "tier": None, "adapter": None, "directors": [],
         "session_id": None, "bound_at": None, "awaiting": [], "cache": None,
-        "holder": None, "via": None}]})
+        "holder": None, "via": None, "policy_directors": []}]})
     assert asked == [{"timeout_s": api.READ_DEADLINE}]
     agents_json(deadline=3)
     assert asked[-1] == {"timeout_s": 3}
