@@ -102,6 +102,15 @@ def resume_params(thread_id: str, instructions: str | None = None,
     return params
 
 
+def fork_params(thread_id: str, cwd: str, instructions: str | None = None,
+                options=None) -> dict:
+    """`thread/fork` of `thread_id` into a new thread in `cwd`, with the options a load
+    sends. Its answer is shaped as `thread/resume`'s, its thread the new one."""
+    params = resume_params(thread_id, instructions, options)
+    params["cwd"] = cwd
+    return params
+
+
 def start_thread_params(cwd: str, instructions: str | None = None,
                         options=None) -> dict:
     params = dict(options or {})
@@ -252,7 +261,7 @@ __all__ = [
     "STATUS_COMPLETED", "STATUS_IN_PROGRESS", "TERMINAL_STATUSES", "AppServerOffline",
     "NoReply", "CodexError", "NoActiveTurn", "ActiveTurnMismatch", "classify_error",
     "request", "notification",
-    "text_input", "initialize_params", "resume_params", "start_thread_params",
+    "text_input", "initialize_params", "resume_params", "fork_params", "start_thread_params",
     "steer_params", "start_params", "inject_params", "method_missing", "compact_params",
     "terminals_params", "terminate_params", "terminal_ids", "COLLAB_STATES", "COLLAB_ITEM", "AGENT_MESSAGE_ITEM",
     "SUBAGENT_ACTIVITY_ITEM",

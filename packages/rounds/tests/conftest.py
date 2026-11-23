@@ -5,6 +5,10 @@ The test kit points `MOXI_ROUNDS_HOME` and `MOXI_PROJECTS_HOME` into each test's
 the config file and the projects every call reads and writes are the test's own. Every
 test asks for the kit's fence by name, and the config fixtures refuse a path outside the
 test's tmp, so a run the kit does not fence fails instead of writing to the real homes.
+Every fixture here a test file elsewhere can borrow (by `-p conftest` or by importing it)
+takes `fenced`, which checks at setup that both homes are inside the test's own tmp, so a
+borrowed fixture fails before its body runs: without the kit with "fixture ... not found",
+and with the kit but not its environment with `fence_in_force`'s text.
 """
 
 from __future__ import annotations
@@ -22,11 +26,45 @@ import pytest
 from moxi_rounds import paths
 
 
+#: The variables the fence points into the test's tmp that this file's fixtures rely on:
+#: rounds' home and the projects list's.
+FENCED_HOMES = (paths.HOME_ENV, "MOXI_PROJECTS_HOME")
+
+
+def fence_in_force(env, roots) -> str | None:
+    """None when every variable of `FENCED_HOMES` is set in `env` and is inside one of
+    `roots` (the test's `tmp_path` and the fence's short directory), real paths compared
+    on both sides; else the text that fails the test, naming what was found."""
+    real_roots = [os.path.realpath(root) for root in roots]
+    found = []
+    for variable in FENCED_HOMES:
+        value = env.get(variable)
+        if not value:
+            found.append(f"{variable} is not set")
+            continue
+        real = Path(os.path.realpath(value))
+        inside = [root for root in real_roots if real.is_relative_to(root)]
+        if not inside:
+            found.append(f"{variable} is {value}")
+    if not found:
+        return None
+    return ("rounds' tests run only inside moxi-dev's test fence, which "
+            "packages/rounds/conftest.py loads, and this test's MOXI_ROUNDS_HOME or "
+            f"MOXI_PROJECTS_HOME is not inside its own tmp ({'; '.join(found)}). Put the "
+            "test in packages/rounds/tests and run pytest from packages/rounds.")
+
+
 @pytest.fixture(autouse=True)
-def fenced(fence):
+def fenced(fence, tmp_path):
     """Every test asks for the fence by name, so a run without the test kit's plugin (a
     copy of these tests outside the package, whose root conftest.py loads it) fails each
-    test at setup instead of writing to the real homes."""
+    test at setup instead of writing to the real homes. With the kit, the test fails at
+    setup unless the fence's homes are in force (`fence_in_force`). Every fixture a test
+    can borrow takes this one, so the check runs before any of them. It runs once, at
+    setup: a test body that moves a home afterwards is not checked here."""
+    refused = fence_in_force(os.environ, (tmp_path, fence.short))
+    if refused is not None:
+        pytest.fail(refused, pytrace=False)
     return fence
 
 
@@ -43,10 +81,10 @@ def own_path(path: Path, tmp_path: Path, fence) -> Path:
 
 
 @pytest.fixture
-def config_file(tmp_path, fence) -> Path:
+def config_file(tmp_path, fenced) -> Path:
     """The test's own config file (not yet created). A path outside the test's tmp fails
     the test."""
-    return own_path(paths.LAYOUT.config_file(), tmp_path, fence)
+    return own_path(paths.LAYOUT.config_file(), tmp_path, fenced)
 
 
 @pytest.fixture
@@ -64,7 +102,7 @@ def write_config(config_file):
 
 
 @pytest.fixture
-def add_project():
+def add_project(fenced):
     """`add_project(key, notes_root=None)`: add the project `key` to the test's projects
     list, its root a new folder under the test's home; with no `notes_root` its record
     names no notes folder. Returns the root."""
@@ -86,7 +124,7 @@ def add_project():
 
 
 @pytest.fixture
-def without_notes(monkeypatch):
+def without_notes(fenced, monkeypatch):
     """The notes module reads as not installed."""
     from moxi import modules
 
@@ -105,7 +143,7 @@ _HOLDER = textwrap.dedent("""
 
 
 @pytest.fixture
-def holder():
+def holder(fenced):
     """`holder(path)`: a real process that holds the lock on `path` until the test ends.
     Returns the process. A thread can't stand in: the lock refuses a second taker in
     its own process outright."""
@@ -190,7 +228,7 @@ def _git_template(tmp_path_factory) -> Path:
 
 
 @pytest.fixture
-def git_repo(_git_template, tmp_path) -> GitRepo:
+def git_repo(fenced, _git_template, tmp_path) -> GitRepo:
     """A git repo of the test's own, copied from one made once for the run: one commit
     on `main`, which is checked out."""
     root = tmp_path / "repo"

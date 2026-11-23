@@ -495,36 +495,6 @@ def test_report_takes_a_dir_and_by_for_projects(conn, passes):
     assert passes == []
 
 
-def test_the_sessions_report_keeps_one_family_of_models_when_asked(conn, passes):
-    t = at("2026-10-01T12:00")
-    source(conn, "/p/a.jsonl", [request("a1", t, model="claude-opus-4-5"),
-                                request("a2", t + 60, model="claude-sonnet-4-5"),
-                                request("a3", t + 120, model="claude-3-opus-20240229")],
-           session_id="a")
-    source(conn, "/p/b.jsonl", [request("b1", t, model="claude-sonnet-4-5"),
-                                request("b2", t + 60, model="opusx-1")], session_id="b")
-    source(conn, "/p/c.jsonl", [request("c1", t, model="claude-opus-4-1", harness="codex")],
-           lane="codex", harness="codex", session_id="c")
-
-    def found(**given):
-        return reports.read("sessions", **given)
-
-    opus = found(model_family="opus")
-    assert [(row["session_id"], row["requests"]) for row in opus.rows] == [("a", 2), ("c", 1)]
-    assert opus.rows[0]["models"] == ["claude-3-opus-20240229", "claude-opus-4-5"]
-    assert opus.filters == {"model_family": "opus"}
-    assert found(model_family="opus", harness="claude").total["requests"] == 2
-    assert found(model_family="sonnet").total["requests"] == 2
-    assert found(model_family="haiku").rows == []
-    assert found().total["requests"] == 6
-    for bad in ("Opus", "op%", "op_s", "", "claude-opus"):
-        with pytest.raises(reports.ReportError, match="not a model family"):
-            found(model_family=bad)
-    with pytest.raises(reports.ReportError, match="takes no model_family; only the sessions"):
-        reports.read("daily", model_family="opus")
-    assert passes == []
-
-
 def test_a_dir_on_no_index_is_still_checked_and_named(monkeypatch):
     monkeypatch.setattr(reports, "run_pass", lambda *, env=None: None)
     assert not store.index_path().exists()

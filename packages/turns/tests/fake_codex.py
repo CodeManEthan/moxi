@@ -213,6 +213,18 @@ class AppServer:
                                              f"{thread['id']}")
                     thread["loaded"] = _policy(params)
             return self.load_answer(thread)
+        if method == "thread/fork":
+            # A copy of the thread's history in a new thread, whose rollout is written at
+            # once, so a later app-server resumes it.
+            parent = self.thread(params)
+            thread = {"id": str(uuid.uuid4()), "cwd": params.get("cwd") or parent["cwd"],
+                      "turns": [dict(t) for t in parent["turns"]],
+                      "injected": parent.get("injected", 0) or 1,
+                      "forked_from": parent["id"], "loaded": _policy(params)}
+            with self.lock:
+                self.threads[thread["id"]] = thread
+                self.save()
+            return self.load_answer(thread)
         if method == "thread/inject_items" and not os.environ.get("FAKE_CODEX_NO_INJECT"):
             thread = self.thread(params)
             if not params.get("items"):

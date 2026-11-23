@@ -3325,6 +3325,7 @@ launcher	packages/launcher/src/moxi_launcher/catalog.py	taken: set = set()	keep	
 launcher	packages/launcher/src/moxi_launcher/catalog.py	unknown = sorted(set(meta) - {"harness", "checked", "help"})	keep	set	set
 launcher	packages/launcher/src/moxi_launcher/catalog.py	unknown = sorted(set(spec) - set(FIELDS))	keep	set	set
 launcher	packages/launcher/src/moxi_launcher/catalog.py	values[name] = found.check(value) if found is not None else value	keep	ok	ok
+launcher	packages/launcher/src/moxi_launcher/catalog.py	raise bad(f"has no fork class; class it {', '.join(FORK_CLASSES)}" if fork is None	keep	bad	bad
 launcher	packages/launcher/src/moxi_launcher/cli.py	"exit-session", help="exit a launched session", allow_abbrev=False,	keep	help	help
 launcher	packages/launcher/src/moxi_launcher/cli.py	"keep-warm", help="open, release or list this session's holds", allow_abbrev=False,	keep	help	help
 launcher	packages/launcher/src/moxi_launcher/cli.py	"relaunch", help="relaunch a session in its slot", allow_abbrev=False,	keep	help	help
@@ -3414,6 +3415,12 @@ launcher	packages/launcher/src/moxi_launcher/cli.py	run = verbs.add_parser("run"
 launcher	packages/launcher/src/moxi_launcher/cli.py	shown = {"key": key, "folder": str(folder)}	keep	folder	folder
 launcher	packages/launcher/src/moxi_launcher/cli.py	shown = {"key": key, "folder": str(handoff_dir)}	keep	folder	folder
 launcher	packages/launcher/src/moxi_launcher/cli.py	state.add_argument("--json", action="store_true", help="print one JSON object")	keep	help	help
+launcher	packages/launcher/src/moxi_launcher/cli.py	"fork", help="start a new session from a copy of a session's conversation",	keep	help	help
+launcher	packages/launcher/src/moxi_launcher/cli.py	fork.add_argument("session_id", metavar="SESSION_ID", help="the session to fork")	keep	help	help
+launcher	packages/launcher/src/moxi_launcher/cli.py	fork.add_argument("--target", choices=("terminal", "slot"), default="terminal",	keep	default	default
+launcher	packages/launcher/src/moxi_launcher/cli.py	help="where the fork runs: this terminal (the default) or a slot")	keep	help	help
+launcher	packages/launcher/src/moxi_launcher/cli.py	help="with --target slot: the slot; the lowest free one when unset")	keep	help	help
+launcher	packages/launcher/src/moxi_launcher/cli.py	fork.add_argument("--json", action="store_true", help="print one JSON object")	keep	help	help
 launcher	packages/launcher/src/moxi_launcher/cli.py	return _said(park.park(wait_s=args.wait_s, dry_run=args.dry_run), args)	keep	dry_run	dry_run
 launcher	packages/launcher/src/moxi_launcher/cli.py	"park", help="exit the sessions in slots and reserve their slots",	keep	help	help
 launcher	packages/launcher/src/moxi_launcher/cli.py	park.add_argument("--wait-s", type=float, metavar="SECONDS",	keep	type	type
@@ -5138,6 +5145,9 @@ launcher	packages/launcher/tests/test_target.py	self.closed += 1	keep	closed	clo
 launcher	packages/launcher/tests/test_target.py	self.closed = 0	keep	closed	closed
 launcher	packages/launcher/tests/test_waits.py	assert coder.closed == 1	keep	closed	closed
 launcher	packages/launcher/tests/test_waits.py	monkeypatch.setattr(waits, "_logged", set())	keep	set	set
+launcher	packages/launcher/src/moxi_launcher/fork.py	result = (launch or api.launch)(request, env=caller_env, warn=warn)	keep	env	env
+launcher	packages/launcher/src/moxi_launcher/fork.py	return any(key == name or (key.endswith("_") and name.startswith(key))	keep	any	any
+launcher	packages/launcher/tests/test_fork.py	assert calls == [((SID,), {"dry_run": True, "caller_env": {"A": "1"}})]	keep	dry_run	dry_run
 loadout	packages/loadout/src/moxi_loadout/adoption.py	-	name	at_its_folder	at_harness_dir
 loadout	packages/loadout/src/moxi_loadout/adoption.py	at_its_folder	name	folder	harness_dir
 loadout	packages/loadout/src/moxi_loadout/adoption.py	folder = None if row is None else row.folder(placed.kind)	use	row.folder	row.harness_dir
@@ -14393,6 +14403,7 @@ turns	packages/turns/src/moxi_turns/codex_host.py	parser.add_argument("--cwd", r
 turns	packages/turns/src/moxi_turns/codex_host.py	parser.add_argument("--model", help="the model the thread runs")	keep	help	help
 turns	packages/turns/src/moxi_turns/codex_host.py	parser.add_argument("--option", action="append", default=[], metavar="KEY=VALUE",	keep	default	default
 turns	packages/turns/src/moxi_turns/codex_host.py	state_dir.mkdir(mode=0o700, parents=True, exist_ok=True)	keep	exist_ok	exist_ok
+turns	packages/turns/src/moxi_turns/codex_host.py	help="fork this thread into a new one instead of starting one")	keep	help	help
 turns	packages/turns/src/moxi_turns/codex_mcp.py	McpSettle	name	notified	on_notified
 turns	packages/turns/src/moxi_turns/codex_mcp.py	`CodexError` for an error answer); `thread_id()` is the session's thread. `record` and	keep	record	record
 turns	packages/turns/src/moxi_turns/codex_mcp.py	run.done.set()	keep	set	set
@@ -14703,6 +14714,7 @@ turns	packages/turns/tests/fake_codex.py	install	name	folder	bin_dir
 turns	packages/turns/tests/fake_codex.py	signal.signal(signal.SIGTERM, lambda *_: stop.set())	keep	set	set
 turns	packages/turns/tests/fake_codex.py	thread["injected"] = thread.get("injected", 0) + len(params["items"])	keep	injected	injected
 turns	packages/turns/tests/fake_codex.py	ws.send(json.dumps(frame))	keep	fail	fail
+turns	packages/turns/tests/fake_codex.py	"injected": parent.get("injected", 0) or 1,	keep	injected	injected
 turns	packages/turns/tests/fake_harness.py	ep.command_ran(request.id, new_session_id=new_id, shells=self.stop_report)	keep	shells	shells
 turns	packages/turns/tests/fake_harness.py	ep.command_ran(request.id, shells=self.stop_report)	keep	shells	shells
 turns	packages/turns/tests/fake_harness.py	self.endpoint.refused(delivery.id, "idle")	use	refused	on_refused
@@ -14907,6 +14919,9 @@ turns	packages/turns/tests/test_codex_host_entry.py	host = rig.spawn("--no-windo
 turns	packages/turns/tests/test_codex_host_entry.py	monkeypatch.setattr(turns_client, "find", find)	keep	find	find
 turns	packages/turns/tests/test_codex_host_entry.py	proc.wait(timeout=WAIT)	keep	timeout	timeout
 turns	packages/turns/tests/test_codex_host_entry.py	return proc.wait(timeout=timeout)	keep	timeout	timeout
+turns	packages/turns/tests/test_codex_host_entry.py	parent = rig.spawn("--no-window", stdin=subprocess.DEVNULL)	keep	stdin	stdin
+turns	packages/turns/tests/test_codex_host_entry.py	fork = rig.spawn("--no-window", "--fork", thread, stdin=subprocess.DEVNULL)	keep	stdin	stdin
+turns	packages/turns/tests/test_codex_host_entry.py	again = rig.spawn("--no-window", "--resume", new, stdin=subprocess.DEVNULL)	keep	stdin	stdin
 turns	packages/turns/tests/test_codex_limits.py	assert set(fresh) == {"payload", "received_at"}	keep	set	set
 turns	packages/turns/tests/test_codex_limits.py	client.call("usage.codex_limits", {}, timeout=5)	use	timeout=	timeout_s=
 turns	packages/turns/tests/test_codex_mcp.py	app.note("comms", "failed")	keep	note	note
@@ -15672,11 +15687,13 @@ ui	packages/ui/src/moxi_ui/session.py	if any(isinstance(t, bool) or not isinstan
 ui	packages/ui/src/moxi_ui/session.py	if any(key.lower() in _BROWSER_HEADERS or key.lower().startswith(b"sec-fetch-")	keep	any	any
 ui	packages/ui/src/moxi_ui/session.py	if now - r.created >= self.max_age or now - r.used >= self.idle]	keep	used	used
 ui	packages/ui/src/moxi_ui/session.py	key, created, used = item.get("key"), item.get("created"), item.get("used")	keep	used	used
+ui	packages/ui/src/moxi_ui/session.py	key=lambda h: self._sessions[h].used)	keep	used	used
 ui	packages/ui/src/moxi_ui/session.py	names = os.listdir(self.directory)	keep	directory	directory
 ui	packages/ui/src/moxi_ui/session.py	names = os.listdir(self.directory)	use	self.directory	self.tickets_dir
 ui	packages/ui/src/moxi_ui/session.py	path = self.directory / name	keep	directory	directory
 ui	packages/ui/src/moxi_ui/session.py	path = self.directory / name	use	self.directory	self.tickets_dir
 ui	packages/ui/src/moxi_ui/session.py	record.saved_used = record.used	keep	used	used
+ui	packages/ui/src/moxi_ui/session.py	record.used = max(record.used, self.clock())	keep	used	used
 ui	packages/ui/src/moxi_ui/session.py	record.used = now	keep	used	used
 ui	packages/ui/src/moxi_ui/session.py	return any(value.strip().lower() == b"script"	keep	any	any
 ui	packages/ui/src/moxi_ui/session.py	return self.directory / _hash(ticket)[:32]	keep	directory	directory
@@ -16645,7 +16662,6 @@ usage	packages/usage/src/moxi_usage/limits.py	a time it was already read at, nor
 usage	packages/usage/src/moxi_usage/limits.py	got = fn(timeout=PULL_TIMEOUT)	use	timeout=	timeout_s=
 usage	packages/usage/src/moxi_usage/limits.py	return any(word.lower() in ("dollar", "dollars", "usd") for word in _WORDS.split(key))	keep	any	any
 usage	packages/usage/src/moxi_usage/limits.py	there is none; `fit` counts the readings it fitted. `opened` is when the window	keep	opened	opened
-usage	packages/usage/src/moxi_usage/limits.py	"project", "period", "opened", "label", "model_family", "dollars", "harness_rows",	keep	opened	opened
 usage	packages/usage/src/moxi_usage/mark.py	-	name	CROSSING_AT	CROSSING_AT_ENV
 usage	packages/usage/src/moxi_usage/mark.py	-	name	WARN_AT	WARN_AT_ENV
 usage	packages/usage/src/moxi_usage/mark.py	_said: set[str] = set()	keep	set	set
@@ -16715,8 +16731,6 @@ usage	packages/usage/src/moxi_usage/page.py	query={"top": lb.Field("int", requir
 usage	packages/usage/src/moxi_usage/page.py	query={"top": lb.Field("int", required=False, max=TOP_MAX), **FILTERS},	keep	required	required
 usage	packages/usage/src/moxi_usage/page.py	ref=lb.Out("table", nullable=True, items=SESSION_REF))	keep	nullable	nullable
 usage	packages/usage/src/moxi_usage/page.py	values=("project", "folder")), **FILTERS},	keep	folder	folder
-usage	packages/usage/src/moxi_usage/page.py	#: names none. `used` is this machine's sessions of the harness with requests since the	keep	used	used
-usage	packages/usage/src/moxi_usage/page.py	#: models, with a null `opened`, and when there is no index to read.	keep	opened	opened
 usage	packages/usage/src/moxi_usage/page.py	`folder` each take one key or several, one to a line, and keep the files any of them	keep	folder	folder
 usage	packages/usage/src/moxi_usage/page.py	_PLACES = lb.Field("string", required=False, max=16384)	keep	required	required
 usage	packages/usage/src/moxi_usage/page.py	"folder": _PLACES,	keep	folder	folder
@@ -16755,9 +16769,6 @@ usage	packages/usage/src/moxi_usage/pagehandlers.py	origins = _origins(sorted(go
 usage	packages/usage/src/moxi_usage/pagehandlers.py	used = _used(harness, row.opened) if main and row.opened is not None else None	keep	opened	opened
 usage	packages/usage/src/moxi_usage/pagehandlers.py	with a known `opened`, else null. The sessions module is asked once, for the	keep	opened	opened
 usage	packages/usage/src/moxi_usage/pagehandlers.py	work_dir = item["folder"]	keep	folder	folder
-usage	packages/usage/src/moxi_usage/pagehandlers.py	names one. `used` is the sessions of the harness since the window opened, with a	keep	used	used
-usage	packages/usage/src/moxi_usage/pagehandlers.py	known `opened`, for the harness's main limit and for a limit with a `model_family`,	keep	opened	opened
-usage	packages/usage/src/moxi_usage/pagehandlers.py	used = _used(harness, row.opened, family) if counted and row.opened is not None else None	keep	opened	opened
 usage	packages/usage/src/moxi_usage/pagehandlers.py	# A `project` or `folder` the page sends: one key, or several on lines of their own.	keep	folder	folder
 usage	packages/usage/src/moxi_usage/pagehandlers.py	"work_dir": _places(query.get("folder")), "model": query.get("model"),	keep	folder	folder
 usage	packages/usage/src/moxi_usage/prices.py	"""Fetch, convert, compare and (unless `dry_run`) write the snapshot layer.	keep	dry_run	dry_run
@@ -17318,6 +17329,7 @@ usage	packages/usage/tests/test_page.py	assert count("/api/terms", by="agent", s
 usage	packages/usage/tests/test_page.py	assert get("/api/projects", by="folder")["home"] == "/home/alice"	keep	folder	folder
 usage	packages/usage/tests/test_page.py	assert get("/api/window", **asked)["used"] == {	keep	used	used
 usage	packages/usage/tests/test_page.py	assert get("/api/window", **asked)["used"] is None	keep	used	used
+usage	packages/usage/tests/test_page.py	assert main["used"] is not None	keep	used	used
 usage	packages/usage/tests/test_page.py	assert marked(path, "path") == set(), path	keep	set	set
 usage	packages/usage/tests/test_page.py	assert not any("title" in row for row in body["rows"])	keep	any	any
 usage	packages/usage/tests/test_page.py	assert not any(route["confirmed"] for route in routes.values())	keep	any	any
@@ -17398,12 +17410,7 @@ usage	packages/usage/tests/test_page.py	source(conn, "/p/s3.jsonl", [request("v1
 usage	packages/usage/tests/test_page.py	source(conn, "/p/typed.jsonl", [request("n1", T0, input=9000)],	use	input=	input_tokens=
 usage	packages/usage/tests/test_page.py	source(conn, f"/p/s{n:03d}.jsonl", [request(f"r{n}", T0 + n, input=1000 + n)],	use	input=	input_tokens=
 usage	packages/usage/tests/test_page.py	used = get("/api/window", harness="codex", limit_id="codex", minutes=300)["used"]	keep	used	used
-usage	packages/usage/tests/test_page.py	assert body["opened"] == limits.iso(opened) and body["model_family"] == "opus"	keep	opened	opened
-usage	packages/usage/tests/test_page.py	used = body["used"]	keep	used	used
-usage	packages/usage/tests/test_page.py	assert (week["used"]["count"], week["used"]["requests"]) == (2, 4)	keep	used	used
 usage	packages/usage/tests/test_page.py	assert body["opened"] is not None	keep	opened	opened
-usage	packages/usage/tests/test_page.py	assert (body["model_family"], body["used"]) == (None, None)	keep	used	used
-usage	packages/usage/tests/test_page.py	assert main["model_family"] is None and main["used"] is not None	keep	used	used
 usage	packages/usage/tests/test_page.py	assert count(folder="/w/tool") == 3 and count(folder="/w/loose-a") == 1	keep	folder	folder
 usage	packages/usage/tests/test_page.py	assert count(folder="/w/tool\n/w/loose-a") == 4	keep	folder	folder
 usage	packages/usage/tests/test_page.py	assert count(folder="\n") == count() == 8	keep	folder	folder
