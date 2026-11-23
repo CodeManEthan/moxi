@@ -99,8 +99,7 @@ def test_rounds_reserves_its_send_only_name_and_takes_comms_as_optional():
     assert "comms" in module.OPTIONAL
 
 
-def test_a_landed_member_is_told_to_its_builder_and_its_rounds_lead_under_rounds(
-        repo, ready, lander_pass, comms):
+def test_a_held_builder_is_told_beside_the_lead(repo, ready, lander_pass, comms):
     ready()
     leads.mark(ROUND, "lead-a", by="planner")
     lander_pass()
@@ -126,18 +125,69 @@ def test_the_projects_lead_is_told_when_the_round_names_none(repo, ready, lander
     assert comms.to("proj-lead") and comms.to("coder")
 
 
-def test_with_no_lead_the_builder_alone_is_told_and_next_says_so(repo, ready, lander_pass,
-                                                                 comms, capsys):
+def test_a_builder_not_held_is_not_told_and_nothing_is_recorded_for_it(
+        repo, ready, lander_pass, comms):
     ready()
+    leads.mark(ROUND, "lead-a", by="planner")
+    comms.states["coder"] = "free"
+    lander_pass()
+    lander_pass()
+    assert queue().member(ROUND, "B1").state == queue_file.LANDED
+    assert {to for _module, _name, to, _text in comms.sent} == {("lead-a",)}
+    assert [one["to"] for one in told()] == ["lead-a"]
+    assert queue_view.told_lines(queue()) == []
+
+
+@pytest.mark.parametrize("state", ["free", "raises"])
+def test_with_no_lead_and_no_held_builder_the_director_is_told(
+        repo, ready, lander_pass, comms, capsys, write_config, state):
+    write_config(config_text(table='director = "dir-a"'))
+    ready()
+    comms.states["coder"] = state
     assert main(["next", ROUND]) == 0
-    assert "the round has no lead: the lander tells the builder alone" in (
-        capsys.readouterr().out)
+    assert ("the round has no lead: the lander tells the builder when it can receive, "
+            "else the director") in capsys.readouterr().out
+    lander_pass()
+    lander_pass()
+    assert comms.to("coder") == []
+    nobody = [one for one in told("landed") if one["delivery"] == telling.NOBODY]
+    assert nobody and nobody[0]["why"] == f"{ROUND} has no lead recorded"
+    notice = comms.to("dir-a")
+    assert len(notice) == 1 and notice[0].startswith(
+        f"For the director of proj-a: {ROUND} B1 landed in proj-a's queue")
+    words = "error" if state == "raises" else state
+    assert (f"It reached nobody: no lead: nobody ({ROUND} has no lead recorded); coder: "
+            f"not sent (comms reads no running session for it: {words}).") in notice[0]
+    lander_pass()
+    assert len(comms.to("dir-a")) == 1
+
+
+def test_with_no_lead_a_held_builder_alone_is_told(repo, ready, lander_pass, comms,
+                                                   write_config):
+    write_config(config_text(table='director = "dir-a"'))
+    ready()
     lander_pass()
     lander_pass()
     assert {to for _module, _name, to, _text in comms.sent} == {("coder",)}
-    nobody = [one for one in told("landed") if one["delivery"] == telling.NOBODY]
-    assert nobody and nobody[0]["why"] == f"{ROUND} has no lead recorded"
     assert not any("director" in line for line in queue_view.told_lines(queue()))
+
+
+def test_a_notice_no_name_received_goes_to_the_director_once(
+        repo, ready, lander_pass, comms, write_config):
+    write_config(config_text(table='director = "dir-a"'))
+    ready()
+    leads.mark(ROUND, "lead-a", by="planner")
+    comms.states["coder"] = "free"
+    comms.outcome["lead-a"] = "never-bound"
+    lander_pass()
+    lander_pass()
+    lander_pass(60.0)
+    notice = comms.to("dir-a")
+    assert len(notice) == 1
+    assert "It reached nobody: lead-a: refused (never-bound: " in notice[0]
+    assert "coder: not sent (comms reads no running session for it: free)" in notice[0]
+    assert [one["key"] for one in told("director")] == [
+        f"landed:{ROUND} B1:{queue().member(ROUND, 'B1').line}:director"]
 
 
 def test_without_comms_the_member_lands_and_nothing_is_sent(repo, ready, lander_pass):
@@ -205,7 +255,7 @@ def test_a_message_comms_cannot_take_is_tried_each_pass_and_keeps_the_lander(
         repo, ready, lander_pass, comms):
     ready()
     leads.mark(ROUND, "lead-a", by="planner")
-    comms.outcome["coder"] = "offline"
+    comms.outcome.update({"coder": "offline", "lead-a": "offline"})
     lander_pass()
     lander_pass()
     assert [one["delivery"] for one in told("landed") if one["to"] == "coder"] == [
@@ -215,7 +265,7 @@ def test_a_message_comms_cannot_take_is_tried_each_pass_and_keeps_the_lander(
     lander_pass(now=60.0)
     assert len(comms.to("coder")) == 2
     assert "tried again each pass" in "\n".join(queue_view.told_lines(queue()))
-    comms.outcome["coder"] = "sent"
+    comms.outcome.clear()
     lander_pass(now=120.0)
     assert [one["delivery"] for one in told("landed") if one["to"] == "coder"][-1] == "live"
     assert lander.settled("proj-a", queue())
@@ -225,7 +275,7 @@ def test_a_message_tried_past_the_bound_is_recorded_unsent_and_frees_the_lander(
         repo, ready, lander_pass, comms):
     ready()
     leads.mark(ROUND, "lead-a", by="planner")
-    comms.outcome["coder"] = "offline"
+    comms.outcome.update({"coder": "offline", "lead-a": "offline"})
     lander_pass()
     lander_pass()
     lander_pass(now=telling.UNSENT_S + 1)
@@ -250,4 +300,62 @@ def test_a_refusal_or_an_error_is_recorded_as_no_delivery_and_not_tried_again(
     assert lander.settled("proj-a", queue())
     lander_pass(now=60.0)
     assert len(comms.sent) == 2
-    assert "messages not delivered: 2" in queue_view.told_lines(queue())
+    said = queue_view.told_lines(queue())
+    assert "messages not delivered: 1" in said
+    assert any(line.startswith("  landed: lead-a: error (the socket broke); coder: "
+                               "refused (never-bound: ") for line in said)
+    assert said[0] == ("director: no director set; 1 notice(s) about the queue went to "
+                       "nobody")
+
+
+# -- what the queue says of undelivered messages -----------------------------------------
+
+def told_event(key: str, to: str | None, delivery: str, *, text: str = "B1 landed.",
+               why: str | None = None, member=(ROUND, "B1")) -> dict:
+    return {"event": queue_file.TOLD, "key": key, "to": to, "about": "landed",
+            "text": text, "delivery": delivery,
+            **({"why": why} if why else {}),
+            **({"member": list(member)} if member else {})}
+
+
+def test_a_refusal_beside_a_delivery_of_the_same_text_is_not_undelivered():
+    events = [
+        told_event("landed:a:coder", "a-builder", telling.REFUSED,
+                   why="never-bound: comms has never seen a-builder bound"),
+        told_event("landed:a:lead", "lead-a", "held-cold"),
+        # the same text for another member is another message
+        told_event("landed:b:coder", "b-builder", telling.REFUSED, why="never-bound: x",
+                   member=(ROUND, "B2")),
+    ]
+    found = telling.undelivered(queue_file.fold("proj-a", events))
+    assert [one["key"] for one in found] == ["landed:b:coder"]
+    assert "messages not delivered: 1" in queue_view.told_lines(
+        queue_file.fold("proj-a", events))
+
+
+def test_the_queue_names_a_fix_for_a_never_bound_lead_and_a_credential_refusal():
+    events = [
+        told_event("g:builder", "guard-builder", telling.REFUSED, text="guard landed.",
+                   why="never-bound: comms has never seen guard-builder bound"),
+        told_event("g:lead", "old-lead", telling.REFUSED, text="guard landed.",
+                   why="never-bound: comms has never seen old-lead bound"),
+        told_event("s:builder", "stamp-builder", telling.REFUSED, text="stamp landed.",
+                   why="credential: no token"),
+        told_event("s:lead", "old-lead", telling.REFUSED, text="stamp landed.",
+                   why="credential: no token"),
+        told_event("o:lead", "lead-a", telling.OFFLINE, text="other landed.",
+                   why="the daemon is down"),
+    ]
+    said = queue_view.told_lines(queue_file.fold("proj-a", events))
+    assert said == [
+        "messages not delivered: 3",
+        "  landed: guard-builder: refused (never-bound: comms has never seen "
+        "guard-builder bound); old-lead: refused (never-bound: comms has never seen "
+        "old-lead bound)",
+        f"    fix: name a lead who can receive: moxi rounds mark {ROUND} --lead NAME, or "
+        "moxi projects set proj-a --lead NAME",
+        "  landed: stamp-builder: refused (credential: no token); old-lead: refused "
+        "(credential: no token)",
+        "    fix: the lander holds no comms token: moxi doctor comms",
+        "  landed: lead-a: tried again each pass (the daemon is down)",
+    ]

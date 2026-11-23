@@ -537,7 +537,8 @@ def _queue_line(place: dict) -> str:
     if place.get("red"):
         said.append(place["red"])
     if place.get("lead") is False:
-        said.append("the round has no lead: the lander tells the builder alone")
+        said.append("the round has no lead: the lander tells the builder when it can "
+                    "receive, else the director")
     return "; ".join(said)
 
 

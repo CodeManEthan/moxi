@@ -90,11 +90,14 @@ and each member still in it, back to waiting in its place, gets `queue.requeued`
 round's log with the batch and why it ended.
 
 **Telling** (`telling`, through comms where it is installed): a member's end (landed,
-ejected, left) goes to its builder, the name its commission recorded, and to its
-round's lead (`leads.of`: the round's own, else the project's); with no lead recorded,
-to the builder alone, and that is recorded. When a member ends, each member ejected for
-a conflict with it is told too, with what to do now: after a landing, merge the target
-and finish again; after an ejection or a leave, finish again as it is. A pause, and a
+ejected, left) goes to its round's lead (`leads.of`: the round's own, else the
+project's), and to its builder, the name its commission recorded, only while comms reads
+that name held by a running session; with no lead recorded, that is recorded. A notice
+that reached no name (no lead, the builder not held, each send refused or failed) goes
+to the project's director once, naming who it could not reach and why. When a member
+ends, each member ejected for a conflict with it is told too, with what to do now: after
+a landing, merge the target and finish again; after an ejection or a leave, finish again
+as it is. A pause, and a
 wait on the target's checkout, go to the project's director (`director`), and "no
 director set" is recorded where none is. Each message is recorded once, as `told`, and
 one comms could not take is tried again at each pass for `telling.UNSENT_S`.
@@ -1187,17 +1190,38 @@ class _Pass:
 
     def tell_member(self, member: queue_file.Member, about: str, key: str,
                     text: str) -> None:
-        """Tell the member's builder and its round's lead, each once; with no lead
-        recorded, the builder alone, and that is recorded."""
+        """Tell the member's round's lead, and its builder only while comms reads that
+        name held by a running session (`telling.Teller.can_receive`), each once; a
+        builder passed over is neither sent nor recorded. With no lead recorded, that is
+        recorded. When no send reached a name (none was a delivery, and none is still
+        tried), the director is told once, naming who was not reached and why."""
         builder, lead = self.people(member.name, member.stage)
-        names = [one for one in dict.fromkeys((builder, lead)) if one]
-        for to in names:
-            self.teller.tell(to, about, f"{key}:{to}", text,
-                             member=[member.name, member.stage])
+        passed = None
+        if builder and builder != lead and not self.teller.can_receive(builder):
+            passed, builder = builder, None
+        tried: list[dict] = []
+        for to in [one for one in dict.fromkeys((lead, builder)) if one]:
+            record = self.teller.tell(to, about, f"{key}:{to}", text,
+                                      member=[member.name, member.stage])
+            tried.append(record or self.teller.record_of(f"{key}:{to}") or {})
         if lead is None:
-            self.teller.tell(None, about, f"{key}:lead", text,
-                             why_nobody=f"{member.name} has no lead recorded",
-                             member=[member.name, member.stage])
+            record = self.teller.tell(None, about, f"{key}:lead", text,
+                                      why_nobody=f"{member.name} has no lead recorded",
+                                      member=[member.name, member.stage])
+            tried.append(record or self.teller.record_of(f"{key}:lead") or {})
+        if self.teller.comms is None or any(
+                one.get("delivery") not in telling.NOT_DELIVERED
+                or one.get("delivery") == telling.OFFLINE for one in tried):
+            return
+        reasons = [f"{one.get('to') or 'no lead'}: {one.get('delivery')}"
+                   + (f" ({one['why']})" if one.get("why") else "") for one in tried]
+        if passed is not None:
+            reasons.append(f"{passed}: not sent (comms reads no running session for it: "
+                           f"{self.identity(passed)})")
+        director = self.director()
+        self.teller.tell(director, "director", f"{key}:director",
+                         f"For the director of {self.repo}: {text} It reached nobody: "
+                         + "; ".join(reasons) + ".", why_nobody="no director set")
 
     def tell_excused(self, member: queue_file.Member, who: str, fields: dict) -> None:
         """Tell main's owner, while a red spell holds, that a member landed past the
