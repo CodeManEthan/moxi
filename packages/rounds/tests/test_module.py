@@ -37,7 +37,8 @@ def test_ui_notes_turns_and_comms_are_the_optional_modules():
         "Gives the default notes folder of a project that names none, for a relative "
         "rounds folder.")
     assert dict(found.optional)["turns"] == (
-        "Runs the leftover sweep at a session's start, when sweep.at_start is on.")
+        "Runs the leftover sweep at a session's start, when sweep.at_start is on, and the "
+        "watched-paths guard, when watched_paths_guard.enabled is on.")
     assert "send-only name rounds" in dict(found.optional)["comms"]
     assert dict(found.gated) == {}
 
