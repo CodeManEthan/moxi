@@ -190,6 +190,14 @@ def _first_line(output) -> str:
     return ""
 
 
+def keeps_runs(row: Row) -> bool:
+    """True for a timer whose runs the gate records: a module timer, a written timer and
+    an adopted Linux timer (recorded as `services/<name>`)."""
+    if row.kind != "timer":
+        return False
+    return isinstance(row, ModuleRow) or row.form == "written" or is_wrapped(row)
+
+
 def last_runs(row: Row, n: int = 5) -> list[dict]:
     """A timer's newest `n` run lines from the gate, oldest first: a module timer's, a
     written timer's and an adopted Linux timer's (recorded as `services/<name>`). Every
@@ -201,6 +209,30 @@ def last_runs(row: Row, n: int = 5) -> list[dict]:
     if row.form == "written" or is_wrapped(row):
         return units.last_runs(MODULE, row.name, n)
     return []
+
+
+def unit_ids(row: Row) -> tuple[str, ...]:
+    """Every id the supervisor here knows a row by, in the order `moxi.units.ids` gives
+    them: an adopted row's own unit; none with no supervisor."""
+    if isinstance(row, UserRow) and row.form == "adopted":
+        return (row.unit,) if units.backend() is not None else ()
+    return tuple(units.ids(row.module, row.name, row.kind))
+
+
+def unit_of(row: Row) -> str | None:
+    """The one unit that runs a row: a daemon's service (on systemd the last of its
+    ids, since its first is a socket unit whether or not one exists), a timer's own
+    unit (the first), an adopted row's unit; None with no supervisor."""
+    found = unit_ids(row)
+    if not found:
+        return None
+    return found[-1] if row.kind == "daemon" else found[0]
+
+
+def read_foreign(ref: str, kind: str) -> units.UnitState | None:
+    """What the supervisor says of foreign unit `ref`, read as a `kind`."""
+    found = units.status([], foreign=[ref], kinds={ref: kind})
+    return next((st for st in found if st.name == ref), None)
 
 
 def flag(row: Row, settings: Mapping[str, bool] | None = None) -> bool | None:
@@ -221,4 +253,5 @@ def flag(row: Row, settings: Mapping[str, bool] | None = None) -> bool | None:
 
 __all__ = [
     "TABLE", "HEALTH_SECONDS", "key", "is_wrapped", "schema", "key_on", "switch_on",
-    "read", "read_with_sockets", "read_one", "health", "run_health", "last_runs", "flag"]
+    "read", "read_with_sockets", "read_one", "health", "run_health", "keeps_runs", "last_runs", "unit_ids", "unit_of",
+    "read_foreign", "flag"]

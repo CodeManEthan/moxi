@@ -4,9 +4,10 @@
 // directly. projects' README, "Facts on the Projects page", is the contract it fills.
 //
 // It reports services' own judgment, each row's verdict, by the table in `partOf` and
-// `lineOf`: never whether a row is down or stopped from its raw fields. A raw field is
-// read only for a time (`since`, `last_run.at`) or a word (`schedule`).
+// `linesOf`: never whether a row is down or stopped from its raw fields. A raw field is
+// read only for a time (`stopped`, `last_run.at`, `since`) or a word (`schedule`).
 
+import { NOTHING_OPEN, routeOf } from "./address.ts";
 import type { Row, Rows } from "./feed.ts";
 
 /** The event a facts component dispatches, with its report as the `detail`. */
@@ -179,11 +180,10 @@ function silent(row: Row): boolean {
 /**
  * A row's part for its project's second line, or null for none:
  *
- * - `fail`, cause `not-running`: heavy, ranked, `<name> failed at <time>`, the time from
- *   `since`, left out unless the supervisor's state is `failed` or `inactive` and `since`
- *   parses;
+ * - `fail`, cause `not-running`: heavy, ranked, `<name> down`;
  * - `fail`, any other cause: heavy, ranked, `<name> failed`;
- * - `warn` that services could read, cause `stopped`: a warning, `<name> is stopped`;
+ * - `warn` that services could read, cause `stopped`: a warning, `<name> stopped by hand at
+ *   <time>`, the time from `stopped`, left out when it doesn't parse;
  * - `warn` that services could read, cause `last-run`: a warning, `<name>'s last run failed
  *   at <time>`, the time from `last_run.at`, left out when it doesn't parse;
  * - every other verdict, and a cause services may add later: none.
@@ -191,13 +191,15 @@ function silent(row: Row): boolean {
 export function partOf(row: Row, when: When): Part | null {
   const { state, cause } = row.verdict;
   if (state === "fail") {
-    const time = cause === "not-running" && (row.state === "failed" || row.state === "inactive")
-      ? at(row.since, when) : null;
-    return { text: clip(time === null ? `${row.name} failed` : `${row.name} failed at ${time}`),
+    return { text: clip(cause === "not-running" ? `${row.name} down` : `${row.name} failed`),
              heavy: true, rank: BROKEN };
   }
   if (state !== "warn" || silent(row)) return null;
-  if (cause === "stopped") return { text: clip(`${row.name} is stopped`), warn: true };
+  if (cause === "stopped") {
+    const time = at(row.stopped, when);
+    return { text: clip(time === null ? `${row.name} stopped by hand` : `${row.name} stopped by hand at ${time}`),
+             warn: true };
+  }
   if (cause === "last-run") {
     const time = at(row.last_run?.at ?? null, when);
     return { text: clip(time === null ? `${row.name}'s last run failed` : `${row.name}'s last run failed at ${time}`),
@@ -213,17 +215,25 @@ function reasonOf(row: Row): Part[] {
 }
 
 /**
- * A failed or warned row's line in the opened `Services` row, or null for none: a failed
- * row's part, then its reason; a stopped row's or a failed last run's part; any other warn
- * services could read, its name as a warning, then its reason (`won't start at login`).
+ * A failed or warned row's lines in the opened `Services` row, none for another verdict:
+ * a failed row's part, then its reason on a line of its own; a stopped row's or a failed
+ * last run's part; any other warn services could read, its name as a warning, then its
+ * reason (`won't start at login`).
+ *
+ * The Projects page draws a line under one that leads with heavy words dim. A failed row's
+ * reason has its own line, so that line is the dim one, and every warned row's line, which
+ * comes after the failed rows', draws alike in the text colour.
  */
-export function lineOf(row: Row, when: When): Line | null {
+export function linesOf(row: Row, when: When): Line[] {
   const { state } = row.verdict;
-  if (state === "fail") return { parts: [partOf(row, when)!, ...reasonOf(row)] };
-  if (state !== "warn" || silent(row)) return null;
+  if (state === "fail") {
+    const reason = reasonOf(row);
+    return [{ parts: [partOf(row, when)!] }, ...(reason.length ? [{ parts: reason }] : [])];
+  }
+  if (state !== "warn" || silent(row)) return [];
   const part = partOf(row, when);
-  if (part !== null) return { parts: [part] };
-  return { parts: [{ text: clip(row.name), warn: true }, ...reasonOf(row)] };
+  if (part !== null) return [{ parts: [part] }];
+  return [{ parts: [{ text: clip(row.name), warn: true }, ...reasonOf(row)] }];
 }
 
 /**
@@ -272,20 +282,23 @@ export function capped(parts: Part[]): Part[] {
 
 const RANKED = { fail: 0, warn: 1, ok: 2, off: 2 } as const;
 
-/** The opened project's `Services` row: a line per failed row, then per warned row that has
- * one, at most five, then one quiet last line of the failed and warned rows past those
- * five (keeping their weight) and every `ok` and `off` row. Ranked while a row fails. */
-export function sectionOf(rows: readonly Row[], when: When): Section | null {
+/** Project `key`'s `Services` row: the lines of each failed row, then of each warned row,
+ * at most five lines, a row's lines whole or not at all; then one quiet last line of the
+ * failed and warned rows past those (keeping their weight) and every `ok` and `off` row.
+ * Ranked while a row fails. Its link opens services' page filtered to the project. */
+export function sectionOf(rows: readonly Row[], key: string, when: When): Section | null {
   const lines: Line[] = [];
   const past: Part[] = [];
   const quiet: Part[] = [];
+  let full = false;
   for (const row of rows) {
-    const line = lineOf(row, when);
-    if (line !== null) {
-      if (lines.length < LINES_MAX - 1) {
-        lines.push(line);
+    const own = linesOf(row, when);
+    if (own.length) {
+      if (!full && lines.length + own.length <= LINES_MAX - 1) {
+        lines.push(...own);
       } else {
-        past.push(partOf(row, when) ?? line.parts[0]);
+        full = true;
+        past.push(partOf(row, when) ?? own[0].parts[0]);
       }
       continue;
     }
@@ -295,7 +308,8 @@ export function sectionOf(rows: readonly Row[], when: When): Section | null {
   const last = [...past, ...quiet];
   if (last.length) lines.push({ parts: capped(last) });
   if (!lines.length) return null;
-  const section: Section = { label: LABEL, lines, link: { text: LABEL, module: "services", route: "" } };
+  const section: Section = { label: LABEL, lines,
+                             link: { text: LABEL, module: "services", route: routeOf({ ...NOTHING_OPEN, project: key }) } };
   if (rows.some((row) => row.verdict.state === "fail")) section.rank = BROKEN;
   return section;
 }
@@ -325,7 +339,7 @@ export function factsReport(rows: Rows | null, given: readonly Given[], open: st
     const parts = ordered.map((row) => partOf(row, when)).filter((part): part is Part => part !== null);
     if (parts.length) facts.parts = capped(parts);
     if (key === open) {
-      const section = sectionOf(ordered, when);
+      const section = sectionOf(ordered, key, when);
       if (section !== null) facts.sections = [section];
     }
     projects[key] = facts;

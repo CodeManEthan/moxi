@@ -34,9 +34,10 @@ The first case that matches gives the verdict:
                                                     (its gate holds the runs); else armed:
                                                     warn, not armed: off
 
-A user daemon's stop by hand is recorded; one older than the machine's last boot is
-ignored, since the daemon started again at login after it. A module daemon's stop is not
-recorded, so a module daemon that is on and not running is `fail`, "not running".
+A daemon's stop by hand is recorded, a user daemon's on its row and a module daemon's
+in the store's `module_stops`; one older than the machine's last boot is ignored, since
+the daemon started again at login after it. So a daemon that is on and not running is
+`fail`, "not running", only when no stop by hand holds.
 """
 
 from __future__ import annotations
@@ -49,7 +50,7 @@ from dataclasses import dataclass
 
 from moxi import units
 
-from . import state
+from . import state, store
 from .rows import ModuleRow, UserRow
 
 Row = UserRow | ModuleRow
@@ -67,12 +68,14 @@ AS_TIMER = ("judged as a timer, so if it should keep running, remove it and add 
             "without --timer")
 
 
-#: The words a verdict's `cause` may hold, so a reader tells a verdict's case without
-#: reading its reason: `not-running`, a daemon that is on and not running (`fail`);
-#: `stopped`, a daemon's stop by hand that still holds (`warn`); `last-run`, a timer whose
-#: last run failed (`warn`). Every other verdict's cause is None. The set may grow; a
-#: reader treats a word it does not know as it treats None.
-CAUSES = ("not-running", "stopped", "last-run")
+#: The words a verdict's `cause` holds, one per case `judge` tells apart, so a reader
+#: tells a verdict's case without reading its reason. services' README lists what each
+#: means. The set may grow; a reader treats a word it does not know, and None, as its
+#: fallback.
+CAUSES = ("elsewhere", "no-supervisor", "removing", "switched-off", "unknown", "not-here",
+          "missing", "not-wrapped", "listening", "stopped", "not-running", "no-login",
+          "running", "running-off", "login-off", "off", "armed-off", "not-armed",
+          "schedule-failed", "last-run", "armed", "health")
 
 
 @dataclass(frozen=True)
@@ -95,11 +98,14 @@ class Verdict:
 
 @dataclass(frozen=True)
 class LastRun:
-    """A timer's last run: `failed`, a few words, and when (as given, or None)."""
+    """A timer's last run: `failed`, a few words, when (as given, or None), and the exit
+    code its gate line gives (None for a result the supervisor gave, or a line with
+    none)."""
 
     failed: bool
     text: str
     at: str | None
+    exit: int | None = None
 
 
 def worst(states: Iterable[str]) -> str:
@@ -126,20 +132,27 @@ def last_run(st: units.UnitState | None) -> LastRun | None:
     return None
 
 
+def run_of(line: Mapping) -> LastRun:
+    """How the run one gate run line records went."""
+    return _gate_line(line)
+
+
 def _gate_line(line: Mapping) -> LastRun:
     at = line.get("at")
     result, code = line.get("result"), line.get("exit")
+    number = code if isinstance(code, int) and not isinstance(code, bool) else None
     if result == "off":
-        return LastRun(failed=False, text="held off by its switch", at=at)
+        return LastRun(failed=False, text="held off by its switch", at=at, exit=number)
     if result == "ran" and code == 0:
-        return LastRun(failed=False, text="ok", at=at)
+        return LastRun(failed=False, text="ok", at=at, exit=number)
     if result == "ran":
-        return LastRun(failed=True, text=f"exit {code}", at=at)
+        return LastRun(failed=True, text=f"exit {code}", at=at, exit=number)
     if result == "unreadable":
-        return LastRun(failed=True, text="its switch's config file could not be read", at=at)
+        return LastRun(failed=True, text="its switch's config file could not be read", at=at,
+                       exit=number)
     if result == "not-started":
-        return LastRun(failed=True, text="the command did not start", at=at)
-    return LastRun(code not in (0, None), f"{result}, exit {code}", at)
+        return LastRun(failed=True, text="the command did not start", at=at, exit=number)
+    return LastRun(code not in (0, None), f"{result}, exit {code}", at, number)
 
 
 def _supervisor_last(found: Mapping) -> LastRun | None:
@@ -200,6 +213,11 @@ def boot_time() -> float | None:
     return _booted[0]
 
 
+def utc_seconds(utc: str) -> float | None:
+    """Seconds since the epoch of a UTC time written `YYYY-MM-DDTHH:MM:SSZ`, or None."""
+    return _seconds(utc)
+
+
 def _seconds(utc: str) -> float | None:
     try:
         return float(calendar.timegm(time.strptime(utc, "%Y-%m-%dT%H:%M:%SZ")))
@@ -207,15 +225,18 @@ def _seconds(utc: str) -> float | None:
         return None
 
 
-def stop_recorded(row: Row, booted: float | None) -> str | None:
-    """The time of a user daemon's stop by hand that still holds, or None. A stop from
-    before the last boot no longer holds: the daemon started again at login since."""
-    if not isinstance(row, UserRow) or row.stopped is None:
+def stop_recorded(row: Row, booted: float | None,
+                  module_stop: str | None = None) -> str | None:
+    """The time of a daemon's stop by hand that still holds, or None: a user daemon's
+    from its row, a module daemon's from `module_stop`, its record in the store. A stop
+    from before the last boot no longer holds: the daemon started again at login since."""
+    recorded = row.stopped if isinstance(row, UserRow) else module_stop
+    if recorded is None:
         return None
-    when = _seconds(row.stopped)
+    when = _seconds(recorded)
     if booted is not None and when is not None and when < booted:
         return None
-    return row.stopped
+    return recorded
 
 
 # --- the verdict ------------------------------------------------------------------------
@@ -226,42 +247,44 @@ def _cmd(verb: str, row: Row) -> str:
 
 
 def _unknown(reason: str) -> Verdict:
-    return Verdict("warn", f"unknown: {reason}", None, unknown=True)
+    return Verdict("warn", f"unknown: {reason}", None, unknown=True, cause="unknown")
 
 
 def judge(row: Row, st: units.UnitState | None, *, is_enabled: bool | None, health: tuple[str, str] | None = None, socket: units.UnitState | None = None,
           supervisor: bool = True, booted: float | None = None,
-          unread: str | None = None) -> Verdict:
+          unread: str | None = None, module_stop: str | None = None) -> Verdict:
     """The verdict of one row.
 
     `st` is what the supervisor said of it (None when the read did not cover it, and
     then `unread` says why), `is_enabled` its on/off (`state.flag`; None when unreadable),
     `health` its health check's `(verdict, line)` when one ran, `socket` a module
-    daemon's listening-socket state, `supervisor` False when this system has none, and
-    `booted` the last boot time, before which a recorded stop no longer holds."""
+    daemon's listening-socket state, `supervisor` False when this system has none,
+    `booted` the last boot time, before which a recorded stop no longer holds, and
+    `module_stop` a module daemon's recorded stop by hand."""
     found = _state_verdict(row, st, is_enabled, socket=socket, supervisor=supervisor,
-                           booted=booted, unread=unread)
+                           booted=booted, unread=unread, module_stop=module_stop)
     if health is None or found.state not in ("ok", "warn") or found.unknown:
         return found
     said, line = health
     if said == "fail":
         return Verdict("fail", f"health check failed: {line}",
-                       st.log if st is not None else None)
+                       st.log if st is not None else None, cause="health")
     if said == "warn" and found.state == "ok":
-        return Verdict("warn", f"health check: {line}", None)
+        return Verdict("warn", f"health check: {line}", None, cause="health")
     return found
 
 
-def _state_verdict(row: Row, st, is_enabled, *, socket, supervisor, booted, unread) -> Verdict:
+def _state_verdict(row: Row, st, is_enabled, *, socket, supervisor, booted, unread,
+                   module_stop) -> Verdict:
     user = isinstance(row, UserRow)
     if user and not row.here:
-        return Verdict("off", f"added on {row.platform}")
+        return Verdict("off", f"added on {row.platform}", cause="elsewhere")
     if not supervisor or (st is not None and st.state == "nobackend"):
-        return Verdict("off", "no supervisor")
+        return Verdict("off", "no supervisor", cause="no-supervisor")
     if user and row.removing:
-        return Verdict("warn", "remove not finished", _cmd("remove", row))
+        return Verdict("warn", "remove not finished", _cmd("remove", row), cause="removing")
     if not user and is_enabled is False:
-        return Verdict("off", f"its switch {row.switch} is off")
+        return Verdict("off", f"its switch {row.switch} is off", cause="switched-off")
     if is_enabled is None:
         what = (f"its switch {row.switch}" if not user
                 else f"its key {state.key(row.name)}")
@@ -271,14 +294,15 @@ def _state_verdict(row: Row, st, is_enabled, *, socket, supervisor, booted, unre
     if st.state == "unknown":
         return _unknown(st.detail or "the supervisor did not say")
     if st.state == "off":
-        return Verdict("off", st.detail or "not for this system")
+        return Verdict("off", st.detail or "not for this system", cause="not-here")
     if st.state == "missing":
         return _missing(row, is_enabled=is_enabled)
     if user and state.is_wrapped(row) and st.wrapped is None:
         return Verdict("warn", "not wrapped: runs are neither gated nor recorded",
-                       _cmd("enable" if is_enabled else "disable", row))
+                       _cmd("enable" if is_enabled else "disable", row), cause="not-wrapped")
     if row.kind == "daemon":
-        return _daemon(row, st, is_enabled=is_enabled, socket=socket, booted=booted)
+        return _daemon(row, st, is_enabled=is_enabled, socket=socket, booted=booted,
+                       module_stop=module_stop)
     return _timer(row, st, is_enabled=is_enabled)
 
 
@@ -290,10 +314,10 @@ def _missing(row: Row, *, is_enabled: bool) -> Verdict:
     else:
         fix = _cmd("remove", row)
     what = "its unit is missing" if row.form != "adopted" else f"{row.unit} is missing"
-    return Verdict("fail" if is_enabled else "warn", what, fix)
+    return Verdict("fail" if is_enabled else "warn", what, fix, cause="missing")
 
 
-def _daemon(row: Row, st, *, is_enabled: bool, socket, booted) -> Verdict:
+def _daemon(row: Row, st, *, is_enabled: bool, socket, booted, module_stop) -> Verdict:
     running = st.state == "active"
     listening = (socket is not None and socket.state == "active" and not running
                  and st.state == "inactive")
@@ -302,9 +326,9 @@ def _daemon(row: Row, st, *, is_enabled: bool, socket, booted) -> Verdict:
         enabled = socket.enabled
     if is_enabled:
         if listening:
-            return Verdict("ok", "idle, socket listening")
+            return Verdict("ok", "idle, socket listening", cause="listening")
         if not running:
-            stopped = stop_recorded(row, booted)
+            stopped = stop_recorded(row, booted, module_stop)
             if stopped is not None:
                 return Verdict("warn", f"stopped by hand at {stopped}", _cmd("start", row),
                                cause="stopped")
@@ -318,39 +342,43 @@ def _daemon(row: Row, st, *, is_enabled: bool, socket, booted) -> Verdict:
         if enabled is False:
             fix = (f"moxi install {row.module}" if isinstance(row, ModuleRow)
                    else _cmd("enable", row))
-            return Verdict("warn", "won't start at login", fix)
-        return Verdict("ok", "running")
+            return Verdict("warn", "won't start at login", fix, cause="no-login")
+        return Verdict("ok", "running", cause="running")
     if running:
-        return Verdict("warn", "running, off at next login", _cmd("disable", row))
+        return Verdict("warn", "running, off at next login", _cmd("disable", row),
+                       cause="running-off")
     if enabled is None:
         return _unknown("whether it starts at login can't be read"
                         + (f" ({st.detail})" if st.detail else ""))
     if enabled:
-        return Verdict("warn", "starts at login, flag off", _cmd("disable", row))
-    return Verdict("off", "off")
+        return Verdict("warn", "starts at login, flag off", _cmd("disable", row),
+                       cause="login-off")
+    return Verdict("off", "off", cause="off")
 
 
 def _timer(row: Row, st, *, is_enabled: bool) -> Verdict:
     module_or_wrapped = isinstance(row, ModuleRow) or state.is_wrapped(row)
     if not is_enabled:
         if module_or_wrapped:
-            return Verdict("off", "off; its gate holds the runs")
+            return Verdict("off", "off; its gate holds the runs", cause="off")
         if st.enabled is None:
             return _unknown("whether its schedule is armed can't be read"
                             + (f" ({st.detail})" if st.detail else ""))
         if st.enabled:
-            return Verdict("warn", "schedule armed, flag off", _cmd("disable", row))
-        return Verdict("off", "off")
+            return Verdict("warn", "schedule armed, flag off", _cmd("disable", row),
+                           cause="armed-off")
+        return Verdict("off", "off", cause="off")
     if st.enabled is None:
         return _unknown("whether its schedule is armed can't be read"
                         + (f" ({st.detail})" if st.detail else ""))
     fix = (f"moxi install {row.module}" if isinstance(row, ModuleRow)
            else _cmd("enable", row))
     if st.enabled is False:
-        return Verdict("fail", "schedule not armed", fix)
+        return Verdict("fail", "schedule not armed", fix, cause="not-armed")
     if st.state == "failed":
         return Verdict("fail", "its schedule failed"
-                       + (f" ({st.detail})" if st.detail else ""), st.log or fix)
+                       + (f" ({st.detail})" if st.detail else ""), st.log or fix,
+                       cause="schedule-failed")
     last = last_run(st)
     if last is not None and last.failed:
         at = f" at {last.at}" if last.at else ""
@@ -358,8 +386,8 @@ def _timer(row: Row, st, *, is_enabled: bool) -> Verdict:
         return Verdict("warn", f"last run failed ({last.text}{at}){hint}", st.log,
                        cause="last-run")
     if last is None:
-        return Verdict("ok", "armed, no run yet")
-    return Verdict("ok", "armed")
+        return Verdict("ok", "armed, no run yet", cause="armed")
+    return Verdict("ok", "armed", cause="armed")
 
 
 def _adopted_task(row: Row, st) -> bool:
@@ -375,13 +403,14 @@ def _adopted_task(row: Row, st) -> bool:
 class View:
     """One row as the reads show it: the row, what the supervisor said (`st`, None when
     not read), its on/off (`is_enabled`), its health check's `(verdict, line)` when one ran,
-    and its verdict."""
+    its verdict, and its recorded stop by hand (`stopped`, UTC, or None)."""
 
     row: Row
     st: units.UnitState | None
     flag: bool | None
     health: tuple[str, str] | None
     verdict: Verdict
+    stopped: str | None = None
 
 
 def flags(rows: Sequence[Row]) -> dict[str, bool | None]:
@@ -485,18 +514,27 @@ def within(fn: Callable[[], object], seconds: float):
     return True, value
 
 
-def views(rows: Sequence[Row], *, check_health: bool = False,
-          status_seconds: float | None = None,
-          health_seconds: float | None = None, health_at_once: int | None = None,
-          known_health: Mapping[str, tuple[str, str]] | None = None) -> list[View]:
-    """Every row's view, from one supervisor read. With `check_health`, every running
-    daemon's check runs, all at once or `health_at_once` at a time, waited on for
-    `health_seconds` a turn (see `healths`);
-    `known_health` gives results of an earlier run to judge with instead. With
-    `status_seconds`, the read gets that long in a worker thread; past it every row read
-    is `unknown` and no health runs."""
+@dataclass(frozen=True)
+class Reading:
+    """What the supervisor and the store said of some rows, read together: each row's
+    unit state and socket by id, why the supervisor wasn't read (`unread`, else None),
+    each row's on/off, and the module daemons' recorded stops by hand."""
+
+    states: Mapping[str, units.UnitState | None]
+    sockets: Mapping[str, units.UnitState | None]
+    unread: str | None
+    flags: Mapping[str, bool | None]
+    module_stops: Mapping[str, str]
+
+
+def read(rows: Sequence[Row], *, status_seconds: float | None = None) -> Reading:
+    """One read of the supervisor for `rows`, then of their on/off and the module
+    daemons' stops by hand. With `status_seconds`, the supervisor read gets that long in
+    a worker thread; past it every row's state is None, with `unread` saying so. A
+    caller that holds the core lock across the store read that gave `rows` and this
+    gets one consistent picture: an act writes a row's stop and its unit under that
+    lock."""
     rows = list(rows)
-    supervisor = units.backend() is not None
     unread = None
     if status_seconds is None:
         states, sockets = state.read_with_sockets(rows)
@@ -507,8 +545,32 @@ def views(rows: Sequence[Row], *, check_health: bool = False,
         else:
             states, sockets = {r.id: None for r in rows}, {}
             unread = f"the supervisor did not answer in {status_seconds:g} s"
-            check_health = False
-    on = flags(rows)
+    module_stops = (store.read_module_stops()
+                    if any(isinstance(r, ModuleRow) and r.kind == "daemon" for r in rows)
+                    else {})
+    return Reading(states, sockets, unread, flags(rows), module_stops)
+
+
+def views(rows: Sequence[Row], *, check_health: bool = False,
+          status_seconds: float | None = None,
+          health_seconds: float | None = None, health_at_once: int | None = None,
+          known_health: Mapping[str, tuple[str, str]] | None = None,
+          reading: Reading | None = None) -> list[View]:
+    """Every row's view, from one supervisor read: `reading`, or one made now (see
+    `read`). With `check_health`, every running
+    daemon's check runs, all at once or `health_at_once` at a time, waited on for
+    `health_seconds` a turn (see `healths`);
+    `known_health` gives results of an earlier run to judge with instead. With
+    `status_seconds`, the read gets that long in a worker thread; past it every row read
+    is `unknown` and no health runs."""
+    rows = list(rows)
+    supervisor = units.backend() is not None
+    if reading is None:
+        reading = read(rows, status_seconds=status_seconds)
+    states, sockets, unread = reading.states, reading.sockets, reading.unread
+    if unread is not None:
+        check_health = False
+    on = reading.flags
     if check_health:
         checked = healths([(r, states.get(r.id)) for r in rows], health_seconds,
                           at_once=health_at_once)
@@ -518,15 +580,18 @@ def views(rows: Sequence[Row], *, check_health: bool = False,
     else:
         checked = {}
     booted = boot_time()
+    module_stops = reading.module_stops
     out = []
     for row in rows:
         st = states.get(row.id)
+        stopped = row.stopped if isinstance(row, UserRow) else module_stops.get(row.id)
         verdict = judge(row, st, is_enabled=on[row.id], health=checked.get(row.id),
                         socket=sockets.get(row.id), supervisor=supervisor, booted=booted,
-                        unread=unread)
-        out.append(View(row, st, on[row.id], checked.get(row.id), verdict))
+                        unread=unread, module_stop=module_stops.get(row.id))
+        out.append(View(row, st, on[row.id], checked.get(row.id), verdict, stopped))
     return out
 
 
-__all__ = ["STATES", "CAUSES", "Verdict", "LastRun", "View", "worst", "last_run",
-           "boot_time", "stop_recorded", "judge", "flags", "healths", "within", "views"]
+__all__ = ["STATES", "CAUSES", "Verdict", "LastRun", "View", "worst", "last_run", "run_of",
+           "boot_time", "utc_seconds", "stop_recorded", "judge", "flags", "healths", "within", "Reading",
+           "read", "views"]
