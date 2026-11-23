@@ -223,6 +223,25 @@ def test_a_mark_quoted_as_inline_code_is_an_example_not_a_mark():
     assert check_text("a.md", "he `# noqa: MX5 -- a sample`\n", "doc") == [Hit("a.md", 1, "he")]
 
 
+def test_a_mark_followed_by_inline_code_is_still_a_mark():
+    doc = "Ask `x` of him. <!-- noqa: MX5 -- a quotation --> Then `y`.\n"
+    assert check_text("a.md", doc, "doc") == []
+
+
+def test_a_comment_s_end_is_no_reason():
+    for doc in ("a reply to him <!-- noqa: MX5 -- -->\n", "a reply to him <!-- noqa: MX5 -->\n"):
+        assert check_text("a.md", doc, "doc") == [
+            Hit("a.md", 1, "", "reason"), Hit("a.md", 1, "him")], doc
+    web = "// as he types it  /* noqa: MX5 -- */\n"
+    assert check_text("a.ts", web, "web") == [
+        Hit("a.ts", 1, "", "reason"), Hit("a.ts", 1, "he")]
+
+
+def test_marks_are_numbered_as_the_words_are():
+    doc = "one\x0ctwo\nhe <!-- noqa: MX5 -- a quotation -->\n"
+    assert check_text("a.md", doc, "doc") == []
+
+
 def test_a_mark_whose_reason_cites_code_in_backticks_still_counts():
     source = "x = 'he'  # noqa: MX5 -- quotes `Row.label`\n"
     assert check_text("a.py", source, "python") == []

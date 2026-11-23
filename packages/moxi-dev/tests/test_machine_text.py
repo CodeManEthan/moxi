@@ -292,6 +292,22 @@ def test_a_mark_quoted_as_inline_code_is_an_example_not_a_mark(no_names):
         Hit("a.md", 1, "home", "/home/bob")]
 
 
+def test_a_mark_followed_by_inline_code_is_still_a_mark(no_names):
+    doc = cmd(f"Run `brew| install x`. <!-- noqa: {CODE} -- written for macOS --> Then `y`.\n")
+    assert check_text("a.md", doc) == []
+    doc = f"(`C:\\Users\\bot`, noqa: {CODE} -- the Windows runner) or `C:\\Users\\x`\n"
+    assert check_text("a.md", doc) == []
+
+
+def test_a_comment_s_end_is_no_reason(no_names):
+    doc = f"/home/bob <!-- noqa: {CODE} -- -->\n"
+    assert check_text("a.md", doc) == [
+        Hit("a.md", 1, "home", "/home/bob"), Hit("a.md", 1, "reason")]
+    web = f"const p = '/Users/bo';  /* noqa: {CODE} -- */\n"
+    assert check_text("a.ts", web) == [
+        Hit("a.ts", 1, "home", "/Users/bo"), Hit("a.ts", 1, "reason")]
+
+
 def test_a_json_line_takes_no_mark(no_names):
     source = f'{{"home": "/home/bob", "why": "noqa: {CODE} -- a sample"}}\n'
     assert check_text("a.json", source) == [Hit("a.json", 1, "home", "/home/bob")]

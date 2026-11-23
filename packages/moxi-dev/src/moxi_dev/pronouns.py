@@ -21,7 +21,8 @@ names, two hyphens and the reason, as CONTRIBUTING.md shows it. It is written in
 file's own comment syntax (`# ...` in Python, `// ...` in TypeScript, `<!-- ... -->` in
 Markdown) or, on a docstring's inner line, in the text itself. A mark with no reason is
 refused, and so is a mark on a line the check would not refuse. A mark quoted as inline
-code, in backticks, is an example of the form and not a mark.
+code, in backticks, is an example of the form and not a mark. `marks.py` reads the mark,
+for this step and the machine-text step alike.
 
 `scan(root)` reads every tracked and untracked-but-not-ignored file it covers and returns
 what it found.
@@ -39,6 +40,7 @@ from pathlib import Path
 
 from .contract import CORE
 from .contract import VENDORED as _CORE_VENDORED
+from .marks import marked_lines
 
 #: The code an exception mark names to let a pronoun stand.
 CODE = "MX5"
@@ -46,12 +48,6 @@ CODE = "MX5"
 #: lower-case word joined by one dot to the name before it is a name, not prose; after an
 #: ellipsis, or capitalised after a dot ("done.He"), it is prose.
 WORD = re.compile(r"(?<![\w-])(?<!\w\.(?=(?-i:[a-z])))h(?:e|is|im|imself)(?![\w-])", re.I)
-#: A mark that names `CODE` among its codes, then ` -- ` and a reason.
-MARK = re.compile(r"\bnoqa:\s*[A-Z0-9, ]*?\b" + CODE + r"\b[A-Z0-9, ]*?\s+--\s+\S")
-#: Any mark that names `CODE`, with or without a reason.
-ANY_MARK = re.compile(r"\bnoqa:\s*[A-Z0-9, ]*?\b" + CODE + r"\b")
-#: A mark quoted as inline code, an example of the form, which is not a mark itself.
-QUOTED_MARK = re.compile(r"`[^`\n]*\bnoqa:[^`\n]*`")
 #: The fix a refused word's line names.
 FIX = f"name the operator neutrally, or mark it # noqa: {CODE} -- <why>"
 
@@ -253,14 +249,7 @@ _READERS = {"python": python_words, "web": web_words, "doc": doc_words}
 def check_text(path: str, text: str, how: str) -> list[Hit]:
     """What the check refuses in `text`, read as `how` ("python", "web" or "doc"), for the
     file at `path`: each unmarked word, each mark with no reason and each unused mark."""
-    lines = text.splitlines()
-    marked, bare = set(), set()
-    for number, line in enumerate(lines, 1):
-        line = QUOTED_MARK.sub("", line)
-        if MARK.search(line):
-            marked.add(number)
-        elif ANY_MARK.search(line):
-            bare.add(number)
+    marked, bare = marked_lines(text, CODE)
     hits, used = [], set()
     for number, word in _READERS[how](text):
         if number in marked:
@@ -288,5 +277,5 @@ def scan(root: Path | str) -> list[Hit]:
     return sorted(hits)
 
 
-__all__ = ["CODE", "FIX", "Hit", "MARK", "WORD", "check_text", "doc_words", "kind",
+__all__ = ["CODE", "FIX", "Hit", "WORD", "check_text", "doc_words", "kind",
            "python_words", "scan", "web_texts", "web_words"]

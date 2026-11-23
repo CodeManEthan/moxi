@@ -38,8 +38,8 @@ inner line, in the text itself. It lets the line's home-folder and package-manag
 stand, never a private name: what is public on purpose goes in secrets'
 `private_names.allowed`. A mark with no reason is refused, and so is a mark on a line
 with no home-folder or package-manager hit. A mark quoted as inline code, in backticks,
-is an example of the form and not a mark. A JSON file has no comments, so its lines
-take no mark.
+is an example of the form and not a mark; `marks.py` reads the mark, as it does for the
+pronoun step. A JSON file has no comments, so its lines take no mark.
 
 `scan(root)` reads the files and returns what it found.
 """
@@ -56,6 +56,7 @@ from moxi_secrets import scan as secrets_scan
 
 from .contract import CORE
 from .contract import VENDORED as _CORE_VENDORED
+from .marks import marked_lines
 
 #: The code an exception mark names to let a home folder or a package manager stand.
 CODE = "MX6"
@@ -96,15 +97,6 @@ COMMAND = re.compile(
 #: The same as an argv list: a quoted manager, any quoted flags, then a quoted verb.
 ARGV = re.compile(r"[\"']" + _MANAGER + r"[\"']\s*,\s*(?:[\"']-[\w-]+[\"']\s*,\s*)*"
                   r"[\"']" + _VERB + r"[\"']")
-
-# -- the mark ------------------------------------------------------------------------------
-
-#: A mark that names `CODE` among its codes, then ` -- ` and a reason.
-MARK = re.compile(r"\bnoqa:\s*[A-Z0-9, ]*?\b" + CODE + r"\b[A-Z0-9, ]*?\s+--\s+\S")
-#: Any mark that names `CODE`, with or without a reason.
-ANY_MARK = re.compile(r"\bnoqa:\s*[A-Z0-9, ]*?\b" + CODE + r"\b")
-#: A mark quoted as inline code, an example of the form, which is not a mark itself.
-QUOTED_MARK = re.compile(r"`[^`\n]*\bnoqa:[^`\n]*`")
 
 #: The fix each rule's line names.
 HOME_FIX = ("write it from the home folder (~/...) or with an example user (/home/you), "
@@ -232,14 +224,8 @@ def check_text(path: str, text: str) -> list[Hit]:
     takes_marks = not path.endswith(".json")
     named = private_lines(text, path)
     hits, used = [], set()
-    marked, bare = set(), set()
+    marked, bare = marked_lines(text, CODE) if takes_marks else (set(), set())
     for number, line in enumerate(text.split("\n"), 1):
-        if takes_marks:
-            unquoted = QUOTED_MARK.sub("", line)
-            if MARK.search(unquoted):
-                marked.add(number)
-            elif ANY_MARK.search(unquoted):
-                bare.add(number)
         homes = home_paths(line) if shipped else []
         if number in named:
             homes = [HOME_ROOT.match(home).group(0) for home in homes]
@@ -273,6 +259,6 @@ def scan(root: Path | str) -> list[Hit]:
 
 
 __all__ = ["ARGV", "CODE", "COMMAND", "HOME_FIX", "HOME_ROOT", "Hit", "MANAGERS",
-           "MANAGER_FIX", "MARK", "NAME_FIX", "SetUnavailable", "VERBS", "check_text",
+           "MANAGER_FIX", "NAME_FIX", "SetUnavailable", "VERBS", "check_text",
            "home_paths", "is_test", "manager_commands", "private_lines", "read", "scan",
            "unreadable"]
