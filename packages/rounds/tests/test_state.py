@@ -181,7 +181,7 @@ def test_a_ruling_is_added_to_the_rulings_and_changes_nothing_else():
     first = event(2, "ruling.recorded", id="C1", text="a ruling", record="comms:12",
                   kind="substance", stages="all")
     second = {**event(3, "ruling.recorded", id="C2", record="comms:13", kind="process",
-                      rules="skip:retro", reason="he said so", stages=["B2", "B3"]),
+                      rules="skip:retro", reason="the operator said so", stages=["B2", "B3"]),
               "actor": "curator", "at": "2026-01-03T00:00:00Z"}
 
     after = state.fold([opened(), first, second])
@@ -190,7 +190,7 @@ def test_a_ruling_is_added_to_the_rulings_and_changes_nothing_else():
         state.Ruling(id="C1", text="a ruling", record="comms:12", reason=None,
                      kind="substance", rules=None, stages="all", scope=(),
                      actor="planner", at=AT),
-        state.Ruling(id="C2", text=None, record="comms:13", reason="he said so",
+        state.Ruling(id="C2", text=None, record="comms:13", reason="the operator said so",
                      kind="process", rules="skip:retro", stages=("B2", "B3"), scope=(),
                      actor="curator", at="2026-01-03T00:00:00Z")]
     assert dataclasses.replace(after, rulings=[], history=before.history) == before
@@ -414,12 +414,12 @@ def test_a_question_brought_from_another_log_says_what_it_was_there():
 
 def test_a_question_moved_to_another_log_is_moved_here_and_names_what_it_became():
     by_anyone = event(4, "question.changed", id="Q1", state="moved", moved_to="P3")
-    his = {**ruled_as(5, "C1", rules="move:Q2", state="moved", moved_to="P4"),
+    ruled = {**ruled_as(5, "C1", rules="move:Q2", state="moved", moved_to="P4"),
            "question": "Q2"}
     before = state.fold([opened(), asked(2), asked(3, id="Q2", blocks=["B1"])])
 
     after = state.fold([opened(), asked(2), asked(3, id="Q2", blocks=["B1"]),
-                        by_anyone, his])
+                        by_anyone, ruled])
 
     first, second = after.questions
     assert (first.state, first.moved_to, first.ruling, first.blocks) == (

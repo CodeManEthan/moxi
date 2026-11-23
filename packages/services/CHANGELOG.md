@@ -2,8 +2,24 @@
 
 ## Unreleased
 
+- The page is rebuilt around what needs you: the rows that need you rise into a first
+  group, worst first, the rest are grouped by project and Moxi's by module, each row
+  says in words what it is doing, and an opened row shows its lines and the acts of its
+  foot. Acts go at a press and are followed to their end, asking in place only where
+  they spend usage, remove a row or end slots' sessions; adding and adopting move into a
+  panel; the page has addresses for a row, a project, and the panel. With the gateway's
+  acts on, the phone offers every row act but Remove through the shell's sheet.
 - A verdict gains `cause` in `moxi services list --json`, `show --json`, `watch --json`
-  and the page's reads: `not-running`, `stopped` or `last-run`, else null.
+  and the page's reads: one word for each case a verdict tells apart, listed in the
+  README's "One verdict per row".
+- The page's rows gain a timer's declared schedule (`timing`), `ends_slots` on slots'
+  server, `has_settings` on a module row whose module has settings, the last run's
+  `exit` code, when its health check ran (`checked.at`), a failing timer's
+  `streak` and `wrapped` on an adopted Linux timer; the list gains `at`, when the supervisor was read, and the stream sends it
+  again at least once a minute. One row's read gains the unit that runs it, every id
+  the supervisor knows it by, and a timer's runs today; a new desk read says what the
+  supervisor knows of a unit not yet adopted. A module row in `moxi
+  services show --json` gains a timer's `every`, `at` and `days`.
 - With the `ui` extra, a `project-facts` component reports each project's failed and
   warned services to the Projects page, and the opened project's `Services` row.
 - The `adopted` switch table carries page fields, which `moxi config services show

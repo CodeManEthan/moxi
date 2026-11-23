@@ -215,7 +215,7 @@ def test_nothing_of_a_dropped_round_waits_on_the_operator(rounds, capsys):
     found = data(capsys, "--waiting")
     assert [(one["holder"], one["id"]) for one in found["open"]] == [(A, "Q1")]
     assert found["parked"] == []
-    # Its rulings are still his to be shown.
+    # Its rulings are still the operator's to be shown.
     assert {row["holder"] for row in found["not_shown"][0]["rows"]} == {B}
 
 
@@ -338,22 +338,22 @@ age: 3 days   options: a, b
     from: https://example.test/q   blocks: all   state: open   by: helper   \
 at: {T2}   age: 2 days   options: none
 
-parked questions, not put to him:
+parked questions, not put to the operator:
   {A} Q2: {OTHER}
     from: comms:11   blocks: B2   state: parked   by: scout   at: {T2}   until: B2
 
 open waiting items:
   none
 
-major decisions not yet ruled:
+decisions not yet ruled:
   none
 
-rulings not yet shown to him:
-  proj-a, not yet shown, through {T5}; once he has read them: moxi rounds rule \
+rulings not yet shown to the operator:
+  proj-a, not yet shown, through {T5}; once the operator has read them: moxi rounds rule \
 proj-a readback={T5} --record PTR
     {A} C1: park:Q2 (record: comms:12)
     {A} C2: {RULED} (record: comms:12)
-  proj-b, not yet shown, through {T3}; once he has read them: moxi rounds rule \
+  proj-b, not yet shown, through {T3}; once the operator has read them: moxi rounds rule \
 proj-b readback={T3} --record PTR
     proj-b S1: {RULED} (record: https://example.test/said)
 
@@ -438,7 +438,7 @@ def test_a_project_named_keeps_what_waits_to_its_own(rounds, capsys):
     assert [one["project"] for one in found["not_shown"]] == ["proj-b"]
     out = printed(capsys, "proj-b", "--waiting")
     assert out.startswith(f"waiting on the operator in proj-b, computed {NOW}\n")
-    assert "parked questions, not put to him:\n  none\n" in out
+    assert "parked questions, not put to the operator:\n  none\n" in out
     assert "proj-a" not in out
 
 
@@ -449,16 +449,16 @@ waiting on the operator, computed {NOW}
 open questions:
   none
 
-parked questions, not put to him:
+parked questions, not put to the operator:
   none
 
 open waiting items:
   none
 
-major decisions not yet ruled:
+decisions not yet ruled:
   none
 
-rulings not yet shown to him:
+rulings not yet shown to the operator:
   none
 
 builds idle, gone, empty, unclear, sharing or not read:
@@ -613,7 +613,9 @@ def close(round_dir, slug, held, *, at=T6):
 def test_the_numbers_of_the_closed_rounds_are_summed_and_a_dropped_one_s_are_not(
         rounds, tmp_path, capsys):
     close(rounds, "a-round", {"folds": 1, "step_time_s": {"commission B1": 30},
-                              "findings": {"major": 1, "minor": 0}})
+                              "findings": {"major": 1, "minor": 0},
+                              "round_time_s": 90, "longest_gap": {
+                                  "since": T6, "until": T6, "due": []}})
     close(tmp_path / "notes-b" / "rounds", "c-round",
           {"folds": 2, "step_time_s": {"commission B1": 5, "build B1": 60},
            "findings": {"major": 0, "minor": 2}})
@@ -624,10 +626,16 @@ def test_the_numbers_of_the_closed_rounds_are_summed_and_a_dropped_one_s_are_not
     assert found["rounds"] == [A, C] and found["uncounted"] == []
     assert found["numbers"] == {"folds": 3,
                                 "step_time_s": {"commission B1": 35, "build B1": 60},
-                                "findings": {"major": 1, "minor": 2}}
+                                "findings": {"major": 1, "minor": 2},
+                                "round_time_s": 90}
+    assert found["timed"] == [A]
     text = printed(capsys, "--numbers")
     assert text.startswith("numbers of 2 closed rounds\n  design: passes 0, ")
-    assert "\n  time in steps: commission B1 35s, build B1 1m\n" in text
+    assert ("\n  time in steps, overlapping (steps due side by side each count the same "
+            "time): commission B1 35s, build B1 1m\n") in text
+    assert "\n  time open: 1m 30s, open to close" in text
+    assert ("\n  time open sums 1 of the 2 rounds: the others closed before their "
+            "closing held it\n") in text
     assert data(capsys, "proj-a", "--numbers")["rounds"] == [A]
 
 
@@ -666,6 +674,80 @@ def test_the_numbers_are_a_listing_of_their_own(rounds, capsys):
         assert "are each a listing of their own" in capsys.readouterr().err
     assert main(["list", A, "--numbers"]) == 3
     assert f"moxi rounds show {A}" in capsys.readouterr().err
+
+
+# -- one reading for several listings ------------------------------------------------------
+
+def _counted_reads(monkeypatch):
+    from moxi_rounds import open_builds
+    calls = []
+    real = open_builds.read
+
+    def read(*args, **kwargs):
+        calls.append(1)
+        return real(*args, **kwargs)
+
+    monkeypatch.setattr(open_builds, "read", read)
+    return calls
+
+
+def test_projects_read_once_list_the_rounds_and_what_waits_the_same(rounds):
+    waiting_setup()
+    given = listing.projects(refresh=False)
+    assert (listing.rounds(given=given).data()
+            == listing.rounds(refresh=False).data())
+    assert (listing.rounds(given=given, ended=True).data()
+            == listing.rounds(refresh=False, ended=True).data())
+    assert (listing.waiting(given=given).data()
+            == listing.waiting(refresh=False).data())
+
+
+def test_the_open_builds_read_already_are_not_read_again(rounds, monkeypatch):
+    from moxi_rounds import open_builds
+    opening.open_round("proj-a/d-round", description="a placeholder round",
+                       by="planner", flow="fix", at=T1)
+    round_log = log.round_log(rounds / "d-round")
+    log.append(round_log, "stage.declared", {"id": "B1", "repo": "proj-a",
+                                             "branch": "branch-b1"}, by="planner")
+    log.append(round_log, "build.commissioned", {
+        "stage": "B1", "repo": "proj-a", "branch": "branch-b1", "base": "0" * 40,
+        "target": "main", "builder": "builder-1", "build": "0123456789abcdef"},
+        by="lead")
+    read = open_builds.read()
+    calls = _counted_reads(monkeypatch)
+    given = listing.rounds(read=read, refresh=False)
+    assert calls == []
+    assert given.data() == listing.rounds(refresh=False).data()
+    assert calls == [1]
+
+
+def test_seen_given_for_a_round_reads_no_git_for_its_step(rounds, monkeypatch):
+    from moxi_rounds import checking
+    opening.open_round("proj-a/d-round", description="a placeholder round",
+                       by="planner", flow="fix", at=T1)
+    round_log = log.round_log(rounds / "d-round")
+    log.append(round_log, "stage.declared", {"id": "B1", "repo": "proj-a",
+                                             "branch": "branch-b1"}, by="planner")
+    log.append(round_log, "build.commissioned", {
+        "stage": "B1", "repo": "proj-a", "branch": "branch-b1", "base": "0" * 40,
+        "target": "main", "builder": "builder-1", "build": "0123456789abcdef"},
+        by="lead")
+    calls = []
+    monkeypatch.setattr(checking, "seen_of", lambda *args, **kwargs: calls.append(1))
+    listing.rounds(refresh=False, seen={"proj-a/d-round": {}},
+                   on_closed=lambda name: False)
+    assert calls == []
+
+
+def test_what_waits_without_git_lists_no_build_and_reads_none(rounds, monkeypatch):
+    waiting_setup()
+    calls = _counted_reads(monkeypatch)
+    found = listing.waiting(refresh=False, read_git=False).data()
+    assert calls == []
+    assert found["builds"] == []
+    whole = listing.waiting(refresh=False).data()
+    assert {key: value for key, value in found.items() if key != "builds"} == {
+        key: value for key, value in whole.items() if key != "builds"}
 
 
 # -- the lead ----------------------------------------------------------------------------

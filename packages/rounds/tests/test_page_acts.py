@@ -124,7 +124,7 @@ def refused(call, *args, **more) -> list:
 
 
 def pick(target=ROUND, item="Q1", *, record=None, **more):
-    """The page's call for an answer: an option picked, or his own words."""
+    """The page's call for an answer: an option picked, or the operator's own words."""
     return ruling.rule(target, item=item, record=minted() if record is None else record,
                        by=actors.default(), wait_s=more.pop("wait_s", WAIT_S), **more)
 
@@ -179,7 +179,7 @@ def test_a_pick_on_the_projects_list_is_a_ruling_of_the_project(kit):
         "S2", "P1", "b", pointer)
 
 
-def test_his_own_words_are_the_ruling_with_no_key_chosen(kit):
+def test_the_operators_own_words_are_the_ruling_with_no_key_chosen(kit):
     pick(text="Export on each close, and nightly as well.")
 
     event = last(kit)
@@ -442,7 +442,7 @@ def drop(target=ROUND, stage="B1", *, record=None, wait_s=WAIT_S):
                                run_by=actors.default(), wait_s=wait_s)
 
 
-def test_a_drop_is_his_drop_with_the_pages_pointer_and_removes_the_kit_builds_dirs(
+def test_a_drop_is_the_operators_drop_with_the_pages_pointer_and_removes_the_kit_builds_dirs(
         kit, git_repo):
     build = builds.current(folded(kit), "B1")
     commissioned = log.read(log.round_log(kit))

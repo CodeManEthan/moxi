@@ -26,7 +26,11 @@ answer.
    is at `T`.
 8. **Steps of the user's own.** Each is done at `T`, or skipped for the stage.
 9. **Work.** The build reads `building` or `merged`.
-10. **Sharing.** The build shares commits with no other build.
+10. **Sharing.** The build overlaps no other build, and is held by none
+    (`builds.order`): of two builds one strictly inside the other, the inner one is
+    held while the outer reads merged, until the outer's finish records the landing;
+    the outer one is held, unless it reads merged, until the inner's work is on the
+    target.
 
 Gates 9 and 10 are not steps, so no skip meets them, and nothing here reads a skip of
 `finish`: the operator can't skip it.
@@ -200,11 +204,26 @@ def unmet(state: states.State, stage: str, *, seen, tip: str | None = None,
         add(WORK, f"{stage} has no work to finish: it reads {seen.state}, and only a "
             "build that reads building or merged finishes, under any skip", fix)
 
-    if seen.shares:
-        said = ", ".join(f"{other} {other_stage}" for other, other_stage in seen.shares)
+    merged = seen.state == builds.MERGED
+    overlapping = [one for one in seen.shares
+                   if builds.order(one, merged=merged) == builds.REFUSED]
+    if overlapping:
+        said = ", ".join(f"{one.round} {one.stage}" for one in overlapping)
         add(SHARING, f"{stage} shares commits with {said}; a build finishes only with "
             "work of its own", f"keep each build's work on its own branch, or end the "
-            f"other build first: moxi rounds show {seen.shares[0][0]}")
+            f"other build first: moxi rounds show {overlapping[0].round}")
+    for one in seen.shares:
+        held = builds.order(one, merged=merged)
+        other = f"{one.round} {one.stage}"
+        if held == builds.HELD_FOR_LANDING:
+            said = (f"{stage} is held until {other}'s finish records the landing that "
+                    f"brought {stage}'s work onto the target")
+        elif held == builds.HELD_FOR_WORK:
+            said = (f"{stage} is held until {other}'s work is on the target, which its "
+                    "finish does")
+        else:
+            continue
+        add(SHARING, said, f"finish that build first: moxi rounds next {other}")
     return tuple(found)
 
 

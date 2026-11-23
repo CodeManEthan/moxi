@@ -225,9 +225,12 @@ class _Record:
 
     __slots__ = ()
     _fields: tuple[str, ...] = ()
+    #: Fields a caller may leave out, with the value each then takes.
+    _defaults: dict[str, object] = {}
 
     def __init__(self, *args, **kwargs):
-        values = dict(zip(self._fields, args))
+        values = dict(self._defaults)
+        values.update(zip(self._fields, args))
         values.update(kwargs)
         for name in self._fields:
             object.__setattr__(self, name, values[name])
@@ -292,9 +295,13 @@ class UserRow(_Record):
 
 class ModuleRow(_Record):
     """A daemon or timer an installed module declares. `switch` is its settings key, or
-    None when it declares none; `platforms` the systems it is limited to, or None."""
+    None when it declares none; `platforms` the systems it is limited to, or None;
+    `every`, `at` and `days` a timer's schedule as declared (`at` and `days` tuples), each
+    None when not declared."""
 
-    __slots__ = _fields = ("module", "name", "kind", "switch", "doc", "platforms")
+    __slots__ = _fields = ("module", "name", "kind", "switch", "doc", "platforms",
+                           "every", "at", "days")
+    _defaults = {"every": None, "at": None, "days": None}
 
     form = "module"
 
@@ -334,9 +341,13 @@ def _entries(module: str, daemons: Mapping, timers: Mapping) -> list[ModuleRow]:
     for kind, table in (("daemon", daemons), ("timer", timers)):
         for name, entry in table.items():
             platforms = entry.get("platforms")
+            at, days = entry.get("at"), entry.get("days")
             rows.append(ModuleRow(module=module, name=name, kind=kind,
                                   switch=entry.get("switch"), doc=entry.get("doc", ""),
-                                  platforms=tuple(platforms) if platforms else None))
+                                  platforms=tuple(platforms) if platforms else None,
+                                  every=entry.get("every") if kind == "timer" else None,
+                                  at=tuple(at) if at and kind == "timer" else None,
+                                  days=tuple(days) if days and kind == "timer" else None))
     return rows
 
 

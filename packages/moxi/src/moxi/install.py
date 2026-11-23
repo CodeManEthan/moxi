@@ -809,7 +809,8 @@ def _core_lock():
                 stack.enter_context(files.lock(path, timeout_s=0))
             except files.LockTimeout as exc:
                 who = f"pid {exc.holder}" if exc.holder else "another process"
-                print(f"waiting for another install or uninstall ({who}) to finish",
+                print(f"waiting for the core lock, which {who} holds "
+                      "(an install or uninstall, or a module reading or changing its units)",
                       file=sys.stderr, flush=True)
                 stack.enter_context(files.lock(path))
             yield

@@ -307,11 +307,11 @@ def test_the_ruling_is_printed_with_the_flow_the_round_follows_from_then_on(
         "followed small"]
 
 
-def test_a_change_of_flow_without_his_pointer_is_refused(rounds):
+def test_a_change_of_flow_without_the_operators_pointer_is_refused(rounds):
     path = opened(rounds)
     before = path.read_bytes()
 
-    with pytest.raises(Refused, match="needs a pointer to where he said it"):
+    with pytest.raises(Refused, match="needs a pointer to where the operator said it"):
         rule("flow:fix", record=None)
 
     assert path.read_bytes() == before

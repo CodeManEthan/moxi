@@ -1,7 +1,9 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { Feed, parseProjects, parseRow, parseRows, parseStatus, RETRIES, statusPathOf } from "../src/feed.ts";
+import {
+  Feed, parseEnds, parseOne, parseProjects, parseRow, parseRows, parseStatus, RETRIES, statusPathOf,
+} from "../src/feed.ts";
 import { moduleRow, row, rows, timer } from "./fixtures.mjs";
 
 const settled = () => new Promise((done) => setImmediate(done));
@@ -17,24 +19,30 @@ function feedOf(answers, parse = parseRows) {
 }
 
 test("every row form and kind parses, and the value is a copy", () => {
-  const data = rows([row(), timer(), moduleRow()]);
+  const failing = timer({ id: "services/report", name: "report",
+                          streak: { count: 3, since: "2026-11-03T08:00:00Z", same_exit: true },
+                          timing: { every: null, at: ["09:00"], days: ["mon", "fri"] } });
+  const data = rows([row(), timer(), failing, moduleRow({ ends_slots: true, has_settings: true })]);
   const value = parseRows(data);
   assert.deepEqual(value, data);
   value.rows[0].argv.push("x");
+  value.rows[2].timing.days.push("sun");
   assert.equal(data.rows[0].argv.length, 3);
+  assert.deepEqual(data.rows[2].timing.days, ["mon", "fri"]);
 });
 
 test("on the phone every redacted text is null, and the rows still parse", () => {
   const phone = row({
     doc: null, detail: null, argv: null, health: null, cwd: "@h/0123456789ab/docs",
     verdict: { state: "fail", reason: null, fix: null, unknown: false, cause: "not-running" },
-    checked: { state: "fail", line: null },
+    checked: { state: "fail", line: null, at: "2026-11-03T10:04:30Z" },
   });
-  const value = parseRows(rows([phone, timer({ last_run: { failed: true, text: null, at: null } })],
+  const value = parseRows(rows([phone, timer({ last_run: { failed: true, text: null, at: null, exit: null } })],
                               { problems: [{ module: "notes", reason: null }] }));
   assert.equal(value.rows[0].verdict.reason, null);
   assert.equal(value.rows[0].verdict.cause, "not-running");
   assert.equal(value.rows[1].last_run.text, null);
+  assert.equal(value.rows[0].checked.at, "2026-11-03T10:04:30Z");
   assert.deepEqual(value.problems, [{ module: "notes", reason: null }]);
 });
 
@@ -49,16 +57,26 @@ test("a row that isn't one makes the whole list unreadable", () => {
     { ...row(), argv: "/bin/true" },
     { ...row(), last_run: { failed: "no", text: "ok", at: null } },
     { ...row(), launches_session: null },
+    { ...row(), last_run: { failed: true, text: "exit 1", at: null } },
+    { ...row(), last_run: { failed: true, text: "exit 1", at: null, exit: "1" } },
+    { ...row(), checked: { state: "ok", line: "ok" } },
+    { ...row(), streak: { count: 2, since: null } },
+    { ...row(), streak: { count: 1.5, since: null, same_exit: true } },
+    { ...row(), timing: { every: 5, at: null, days: null } },
+    { ...row(), timing: { every: null, at: ["09:00", null], days: null } },
+    { ...row(), ends_slots: null },
+    { ...row(), has_settings: undefined },
   ]) {
     assert.equal(parseRow(bad), null, JSON.stringify(bad));
     assert.equal(parseRows(rows([row(), bad])), null);
   }
-  assert.equal(parseRows({ state: "maybe", detail: null, rows: [], problems: [] }), null);
+  assert.equal(parseRows({ state: "maybe", detail: null, at: null, rows: [], problems: [] }), null);
+  assert.equal(parseRows({ state: "up", detail: null, at: 5, rows: [], problems: [] }), null);
   assert.equal(parseRows(null), null);
 });
 
 test("a store that can't be read is the error state with its detail", () => {
-  const value = parseRows({ state: "error", detail: "services' store is too new", rows: [], problems: [] });
+  const value = parseRows({ state: "error", detail: "services' store is too new", at: null, rows: [], problems: [] });
   assert.equal(value.state, "error");
   assert.equal(value.detail, "services' store is too new");
 });
@@ -141,6 +159,19 @@ test("a topic event that can't be read, or comes after a failure, reads the rout
   assert.equal(feed.value.rows.length, 0);
 });
 
+test("a subscription's first value reads the route again, and each later one is taken at once", async () => {
+  const { feed, reads } = feedOf([{ status: 200, data: rows([row()]) }, { status: 200, data: rows([]) }]);
+  await feed.refresh();
+  const listen = feed.listener();
+  listen(rows([row(), timer()]));
+  await settled();
+  assert.equal(reads.length, 2);
+  assert.equal(feed.value.rows.length, 0);
+  listen(rows([timer()]));
+  assert.equal(reads.length, 2);
+  assert.equal(feed.value.rows[0].id, "services/backup");
+});
+
 test("a closed feed drops every later answer and event", async () => {
   const { feed, changes } = feedOf([{ status: 200, data: rows([row()]) }]);
   const read = feed.refresh();
@@ -149,4 +180,25 @@ test("a closed feed drops every later answer and event", async () => {
   feed.topic(rows([timer()]));
   assert.equal(feed.value, null);
   assert.equal(changes(), 0);
+});
+
+test("an opened row's own read and the slots' read parse, and a wrong field refuses the value", () => {
+  const value = { row: timer(), log: "journalctl --user -u moxi-backup.service", unit: "moxi-backup.timer",
+                  units: ["moxi-backup.timer", "moxi-backup.service"], today: { runs: 3, failed: 1, more: false },
+                  runs: [{ at: "2026-11-03T02:00:00Z", result: "ran", exit: 0, seconds: 1.9 },
+                         { at: null, result: null, exit: null, seconds: null }] };
+  assert.deepEqual(parseOne(value), { runs: value.runs, log: value.log, unit: value.unit, units: value.units,
+                                      today: value.today });
+  assert.equal(parseOne({ ...value, today: null }).today, null);
+  for (const bad of [{ row: {} }, { runs: [{ at: 1 }] }, { units: [null] }, { today: { runs: 1 } }, { log: 3 }]) {
+    assert.equal(parseOne({ ...value, ...bad }), null, JSON.stringify(bad));
+  }
+  const ends = { read: true, why: null, sessions: [{ slot: 1, label: "fix it" }, { slot: 2, label: null }], open: 1, jobs: 0 };
+  assert.deepEqual(parseEnds(ends), ends);
+  // Counts the server couldn't read stay null, never 0.
+  const unread = { read: false, why: "slots didn't answer", sessions: null, open: null, jobs: null };
+  assert.deepEqual(parseEnds(unread), unread);
+  for (const bad of [{ read: "yes" }, { sessions: [{ slot: "1" }] }, { open: 1.5 }, { sessions: {} }]) {
+    assert.equal(parseEnds({ ...ends, ...bad }), null, JSON.stringify(bad));
+  }
 });

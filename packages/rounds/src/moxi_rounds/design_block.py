@@ -304,7 +304,8 @@ TRACE = Table("trace", "one for each ruling or commitment the design follows", (
     line("record", "amended and cut: the pointer to where the operator said so",
          required=False),
     ident("question", questions.ROUND_ID, "Q<n>",
-          "amended and cut, in place of record: the open question that asks him",
+          "amended and cut, in place of record: the open question that asks the "
+          "operator",
           required=False),
     idents("stages", questions.STAGE, "B<n>",
            "the stages the row is for; every stage when left out"),

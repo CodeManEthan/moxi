@@ -178,11 +178,24 @@ def test_a_stop_from_before_the_last_boot_is_ignored():
     assert (found.state, found.reason) == ("fail", "not running")
 
 
-def test_a_module_daemon_stopped_by_hand_fails_with_start_as_the_fix():
-    # A module daemon's stop is not stored, so nothing tells it from a crash.
+def test_a_module_daemon_down_with_no_stop_recorded_fails_with_start_as_the_fix():
     found = judge(module_row(), st(state="inactive", module="notes", name="sync"), is_enabled=True)
     assert (found.state, found.reason, found.fix) == (
         "fail", "not running", "moxi services start notes/sync")
+
+
+def test_a_module_daemon_stopped_by_hand_warns_as_a_user_daemon_does():
+    found = judge(module_row(), st(state="inactive", module="notes", name="sync"),
+                  is_enabled=True, booted=BOOTED, module_stop="2030-01-01T00:00:00Z")
+    assert (found.state, found.reason, found.fix, found.cause) == (
+        "warn", "stopped by hand at 2030-01-01T00:00:00Z", "moxi services start notes/sync",
+        "stopped")
+
+
+def test_a_module_daemons_stop_from_before_the_last_boot_is_ignored():
+    found = judge(module_row(), st(state="inactive", module="notes", name="sync"),
+                  is_enabled=True, booted=BOOTED, module_stop="2020-01-01T00:00:00Z")
+    assert (found.state, found.cause) == ("fail", "not-running")
 
 
 def test_a_module_daemon_idle_under_its_socket_is_ok():
@@ -345,90 +358,113 @@ def test_a_failed_last_run_has_the_cause_last_run_on_every_backend(backend):
         assert (found.state, found.cause) == ("warn", "last-run")
 
 
-def test_a_running_daemon_has_no_cause_even_with_a_stale_stop():
+def test_a_running_daemon_is_not_stopped_even_with_a_stale_stop():
     # The stop stays in the store until services starts or enables the row, but a
     # running daemon's warning is not a stop.
     row = user(enabled=True, stopped="2020-01-01T00:00:00Z")
     found = judge(row, st(enabled=False), is_enabled=True, booted=BOOTED)
     assert (found.state, found.reason, found.cause) == ("warn", "won't start at login",
-                                                        None)
+                                                        "no-login")
 
 
+#: Every other case `judge` tells apart: (state, cause) and the verdict.
 OTHER_VERDICTS = {
-    "another system": lambda: judge(
+    "another system": (("off", "elsewhere"), lambda: judge(
         user(platform="darwin" if sys.platform != "darwin" else "linux"), None,
-        is_enabled=True),
-    "no supervisor": lambda: judge(user(), None, is_enabled=True, supervisor=False),
-    "nobackend": lambda: judge(user(), st(state="nobackend", backend=None, enabled=None),
-                               is_enabled=True),
-    "removing": lambda: judge(user(removing=True), st(), is_enabled=True),
-    "module switched off": lambda: judge(module_row(switch="sync.enabled"),
-                                         st(state="inactive"), is_enabled=False),
-    "unreadable switch": lambda: judge(module_row(switch="sync.enabled"), st(),
-                                       is_enabled=None),
-    "unknown read": lambda: judge(user(), st(state="unknown", enabled=None),
-                                  is_enabled=True),
-    "not covered": lambda: judge(user(), None, is_enabled=True, unread="no answer"),
-    "not for this system": lambda: judge(user(), st(state="off", enabled=None),
-                                         is_enabled=True),
-    "missing, on": lambda: judge(user(enabled=True), st(state="missing", enabled=None),
-                                 is_enabled=True),
-    "missing, off": lambda: judge(user(), st(state="missing", enabled=None),
-                                  is_enabled=False),
-    "running": lambda: judge(user(enabled=True), st(), is_enabled=True),
-    "idle under its socket": lambda: judge(
+        is_enabled=True)),
+    "no supervisor": (("off", "no-supervisor"), lambda: judge(
+        user(), None, is_enabled=True, supervisor=False)),
+    "nobackend": (("off", "no-supervisor"), lambda: judge(
+        user(), st(state="nobackend", backend=None, enabled=None), is_enabled=True)),
+    "removing": (("warn", "removing"), lambda: judge(
+        user(removing=True), st(), is_enabled=True)),
+    "module switched off": (("off", "switched-off"), lambda: judge(
+        module_row(switch="sync.enabled"), st(state="inactive"), is_enabled=False)),
+    "unreadable switch": (("warn", "unknown"), lambda: judge(
+        module_row(switch="sync.enabled"), st(), is_enabled=None)),
+    "unknown read": (("warn", "unknown"), lambda: judge(
+        user(), st(state="unknown", enabled=None), is_enabled=True)),
+    "not covered": (("warn", "unknown"), lambda: judge(
+        user(), None, is_enabled=True, unread="no answer")),
+    "not for this system": (("off", "not-here"), lambda: judge(
+        user(), st(state="off", enabled=None), is_enabled=True)),
+    "missing, on": (("fail", "missing"), lambda: judge(
+        user(enabled=True), st(state="missing", enabled=None), is_enabled=True)),
+    "missing, off": (("warn", "missing"), lambda: judge(
+        user(), st(state="missing", enabled=None), is_enabled=False)),
+    "module missing": (("fail", "missing"), lambda: judge(
+        module_row(), st(state="missing", enabled=None, module="notes", name="sync"),
+        is_enabled=True)),
+    "running": (("ok", "running"), lambda: judge(
+        user(enabled=True), st(), is_enabled=True)),
+    "idle under its socket": (("ok", "listening"), lambda: judge(
         module_row(), st(state="inactive", enabled=None, module="notes", name="sync"),
-        is_enabled=True, socket=st("socket", enabled=True, module="notes", name="sync")),
-    "won't start at login": lambda: judge(user(enabled=True), st(enabled=False),
-                                          is_enabled=True),
-    "login start unread": lambda: judge(user(enabled=True), st(enabled=None),
-                                        is_enabled=True),
-    "health failed": lambda: judge(user(enabled=True), st(), is_enabled=True,
-                                   health=("fail", "connection refused")),
-    "health warned": lambda: judge(user(enabled=True), st(), is_enabled=True,
-                                   health=("warn", "slow")),
-    "running, flag off": lambda: judge(user(), st(), is_enabled=False),
-    "starts at login, flag off": lambda: judge(user(), st(state="inactive"),
-                                               is_enabled=False),
-    "daemon off": lambda: judge(user(), st(state="inactive", enabled=False),
-                                is_enabled=False),
-    "schedule not armed": lambda: judge(timer_row(enabled=True),
-                                        st("timer", state="inactive", enabled=False),
-                                        is_enabled=True),
-    "schedule failed": lambda: judge(timer_row(enabled=True),
-                                     st("timer", state="failed", detail="bad calendar"),
-                                     is_enabled=True),
-    "timer armed": lambda: judge(timer_row(enabled=True), st("timer", last=gate()),
-                                 is_enabled=True),
-    "timer, no run yet": lambda: judge(timer_row(enabled=True), st("timer", last=None),
-                                       is_enabled=True),
-    "timer held off": lambda: judge(timer_row(enabled=True),
-                                    st("timer", last=gate("off", 0)), is_enabled=True),
-    "timer off": lambda: judge(timer_row(), st("timer", enabled=False), is_enabled=False),
-    "schedule armed, flag off": lambda: judge(timer_row(), st("timer", enabled=True),
-                                              is_enabled=False),
-    "login start unread, flag off": lambda: judge(
-        user(), st(state="inactive", enabled=None), is_enabled=False),
-    "schedule unread, flag on": lambda: judge(timer_row(enabled=True),
-                                              st("timer", enabled=None), is_enabled=True),
-    "schedule unread, flag off": lambda: judge(timer_row(), st("timer", enabled=None),
-                                               is_enabled=False),
+        is_enabled=True, socket=st("socket", enabled=True, module="notes", name="sync"))),
+    "won't start at login": (("warn", "no-login"), lambda: judge(
+        user(enabled=True), st(enabled=False), is_enabled=True)),
+    "login start unread": (("warn", "unknown"), lambda: judge(
+        user(enabled=True), st(enabled=None), is_enabled=True)),
+    "health failed": (("fail", "health"), lambda: judge(
+        user(enabled=True), st(), is_enabled=True, health=("fail", "connection refused"))),
+    "health warned": (("warn", "health"), lambda: judge(
+        user(enabled=True), st(), is_enabled=True, health=("warn", "slow"))),
+    "running, flag off": (("warn", "running-off"), lambda: judge(
+        user(), st(), is_enabled=False)),
+    "starts at login, flag off": (("warn", "login-off"), lambda: judge(
+        user(), st(state="inactive"), is_enabled=False)),
+    "daemon off": (("off", "off"), lambda: judge(
+        user(), st(state="inactive", enabled=False), is_enabled=False)),
+    "schedule not armed": (("fail", "not-armed"), lambda: judge(
+        timer_row(enabled=True), st("timer", state="inactive", enabled=False),
+        is_enabled=True)),
+    "schedule failed": (("fail", "schedule-failed"), lambda: judge(
+        timer_row(enabled=True), st("timer", state="failed", detail="bad calendar"),
+        is_enabled=True)),
+    "timer armed": (("ok", "armed"), lambda: judge(
+        timer_row(enabled=True), st("timer", last=gate()), is_enabled=True)),
+    "timer, no run yet": (("ok", "armed"), lambda: judge(
+        timer_row(enabled=True), st("timer", last=None), is_enabled=True)),
+    "timer held off": (("ok", "armed"), lambda: judge(
+        timer_row(enabled=True), st("timer", last=gate("off", 0)), is_enabled=True)),
+    "timer off": (("off", "off"), lambda: judge(
+        timer_row(), st("timer", enabled=False), is_enabled=False)),
+    "module timer off": (("off", "switched-off"), lambda: judge(
+        module_row("timer", "snapshot.enabled", "snapshot"), st("timer", enabled=True),
+        is_enabled=False)),
+    "schedule armed, flag off": (("warn", "armed-off"), lambda: judge(
+        timer_row(), st("timer", enabled=True), is_enabled=False)),
+    "login start unread, flag off": (("warn", "unknown"), lambda: judge(
+        user(), st(state="inactive", enabled=None), is_enabled=False)),
+    "schedule unread, flag on": (("warn", "unknown"), lambda: judge(
+        timer_row(enabled=True), st("timer", enabled=None), is_enabled=True)),
+    "schedule unread, flag off": (("warn", "unknown"), lambda: judge(
+        timer_row(), st("timer", enabled=None), is_enabled=False)),
 }
 if sys.platform == "linux":
-    OTHER_VERDICTS["not wrapped"] = lambda: judge(
+    OTHER_VERDICTS["not wrapped"] = (("warn", "not-wrapped"), lambda: judge(
         user(form="adopted", name="backup"), st("timer", wrapped=None, module=None),
-        is_enabled=True)
-    OTHER_VERDICTS["gate holds the runs"] = lambda: judge(
+        is_enabled=True))
+    OTHER_VERDICTS["gate holds the runs"] = (("off", "off"), lambda: judge(
         user(form="adopted", name="backup"),
         st("timer", wrapped=Wrapped("services", "adopted.backup", "backup"), module=None),
-        is_enabled=False)
+        is_enabled=False))
 
 
 @pytest.mark.parametrize("case", sorted(OTHER_VERDICTS))
-def test_every_other_verdict_has_no_cause(case):
-    found = OTHER_VERDICTS[case]()
-    assert found.cause is None
-    assert found.as_dict()["cause"] is None
+def test_every_other_verdict_has_its_own_cause(case):
+    want, make = OTHER_VERDICTS[case]
+    found = make()
+    assert (found.state, found.cause) == want
+    assert found.as_dict()["cause"] == want[1]
+
+
+def test_every_cause_is_one_a_case_gives():
+    given = {cause for (_, cause), _ in OTHER_VERDICTS.values()}
+    given |= {"not-running", "stopped", "last-run"}
+    if sys.platform != "linux":
+        given.add("not-wrapped")
+    assert given == set(verdict.CAUSES)
+    assert len(verdict.CAUSES) == len(set(verdict.CAUSES))
 
 
 def test_the_cause_is_in_the_verdicts_dict():
@@ -436,7 +472,7 @@ def test_the_cause_is_in_the_verdicts_dict():
     assert found.as_dict() == {"state": "fail", "reason": "not running",
                                "fix": "moxi services start web", "unknown": False,
                                "cause": "not-running"}
-    assert verdict.CAUSES == ("not-running", "stopped", "last-run")
+    assert {"not-running", "stopped", "last-run"} <= set(verdict.CAUSES)
 
 
 # --- every row at once ------------------------------------------------------------------
@@ -452,6 +488,25 @@ def test_views_judge_every_row_from_one_read(fake):
     assert {v.row.id: v.verdict.state for v in found} == {
         "services/job": "warn", "services/web": "ok"}
     assert [c[0] for c in fake.calls].count("status") == 1
+
+
+def test_views_read_module_stops_from_the_store_by_row_id(fake):
+    from fake_units import Unit
+
+    for name in ("sync", "other"):
+        fake.modules[("notes", name)] = Unit("daemon", enabled=True, active=False)
+    store.write(lambda c: (
+        store.set_module_stop(c, "notes/sync", "2030-01-01T00:00:00Z", by="test"),
+        store.set_module_stop(c, "gone/daemon", "2030-01-01T00:00:00Z", by="test")))
+    user(enabled=True, stopped="2030-01-01T00:00:00Z")
+    rows = [*store.read_rows(), module_row(), module_row(name="other")]
+    found = {v.row.id: v for v in verdict.views(rows)}
+    assert set(found) == {"services/web", "notes/sync", "notes/other"}
+    assert (found["notes/sync"].verdict.cause, found["notes/sync"].stopped) == (
+        "stopped", "2030-01-01T00:00:00Z")
+    assert (found["notes/other"].verdict.cause, found["notes/other"].stopped) == (
+        "not-running", None)
+    assert found["services/web"].stopped == "2030-01-01T00:00:00Z"
 
 
 def test_views_past_the_status_limit_are_unknown_and_run_no_health(fake, monkeypatch):
@@ -634,3 +689,24 @@ def test_only_an_adopted_windows_timer_says_how_it_is_judged():
     found = judge(row, st("timer", backend="systemd", last=SUPERVISOR_FAILED["systemd"]),
                   is_enabled=True)
     assert found.state == "warn" and "judged as a timer" not in found.reason
+
+
+# --- a timer's last run's exit code ------------------------------------------------------
+
+@pytest.mark.parametrize(("line", "exit_code"), [
+    ({"at": "t", "result": "ran", "exit": 0}, 0),
+    ({"at": "t", "result": "ran", "exit": 1}, 1),
+    ({"at": "t", "result": "off", "exit": 0}, 0),
+    ({"at": "t", "result": "unreadable", "exit": 3}, 3),
+    ({"at": "t", "result": "not-started", "exit": 127}, 127),
+    ({"at": "t", "result": "ran"}, None),
+    ({"at": "t", "result": "ran", "exit": True}, None),
+])
+def test_a_gate_lines_exit_code_is_the_last_runs(line, exit_code):
+    assert verdict.last_run(st("timer", last=line)).exit == exit_code
+
+
+@pytest.mark.parametrize("backend", BACKENDS)
+def test_a_last_run_the_supervisor_gave_has_no_exit_code(backend):
+    last = verdict.last_run(st("timer", backend=backend, last=SUPERVISOR_FAILED[backend]))
+    assert last.failed and last.exit is None

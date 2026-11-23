@@ -857,7 +857,7 @@ def test_a_dropped_round_s_numbers_are_written_from_its_drop(rounds):
         f"- ended: dropped by operator at {LATER}, record comms:30; questions: Q1 to P1"
         "\n\n## Numbers\n\n")
     # Opened at T1 and dropped at LATER, all of it at the step that declares a stage.
-    assert "\n- time in steps: commission 769h 1m 5s\n" in text
+    assert "\n- time in steps, overlapping (steps due side by side each count the same time): commission 769h 1m 5s\n" in text
     assert "\n- questions by origin: comms 1\n" in text
     assert not retro(rounds, "b-round").exists()
 
