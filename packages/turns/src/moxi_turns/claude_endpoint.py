@@ -492,6 +492,11 @@ class ClaudeHarness(Harness):
             delivery = body.get("delivery")
             if isinstance(delivery, str):
                 ep.on_refused(delivery, "idle")
+        elif kind == leg.R_APPEND_HELD:
+            delivery = body.get("delivery")
+            if isinstance(delivery, str):
+                log.info("steer %s went in, but its turn ended before a request carried "
+                         "it; Claude Code holds it for the next request", delivery)
         elif kind == leg.R_COMMAND_DONE:
             self._command_done(body)
         elif kind in (leg.R_FORK_STARTED, leg.R_FORK_DONE, leg.R_FORK_LOST):

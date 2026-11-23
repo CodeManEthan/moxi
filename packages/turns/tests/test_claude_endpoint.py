@@ -671,6 +671,17 @@ def test_steer_appends_and_a_failed_append_refuses_idle(claude):
     assert bare(d.wait_ended(1)) == turns.Refused("idle")
 
 
+def test_the_runner_may_report_a_steer_held(claude):
+    ep, runner = claude()
+    s = turns.find(session_id="s-1")
+    runner.turn_start("T")
+    d = s.steer("the word is KIWI")
+    runner.next_line()
+    runner.report(leg.R_APPEND_DONE, delivery=d.id)
+    assert runner.report(leg.R_APPEND_HELD, delivery=d.id) == {"ok": True}
+    assert bare(d.wait_started(1)) == turns.Started("T")
+
+
 def test_the_endpoint_end_releases_a_held_turn_then_answers_lost(claude):
     ep, runner = claude()
     s = turns.find(session_id="s-1")

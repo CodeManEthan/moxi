@@ -54,6 +54,8 @@
 //              submit.bound   {delivery, reason}  the runner's bound (below)
 //              append.done    {delivery}  $.session.append resolved without a deny
 //              append.failed  {delivery, reason}
+//              append.held    {delivery}  the steer went in, but its turn ended before
+//                             any request carried it (the held note, below)
 //              command.done   {request, state: ran|refused|failed, reason, new_session_id,
 //                             shells?}  with stop_shells a `ran` carries
 //                             shells: {stopped: [id], left: [{id, why}], complete}
@@ -314,12 +316,24 @@
 // has in flight: the one whose text equals the hook input's, else the only one in flight.
 // While one of the runner's own submits is in flight only a text match counts; none:
 // null.
+//
+// The held note: a steer goes in as a plugin note, which Claude Code sends with the turn's
+// next request. A turn that makes no further request (the steer came while the model
+// wrote its last answer) ends with the note unsent, and Claude Code holds it for the
+// session's next request, whichever starts it. The runner keeps each steer appended into
+// the open main turn, with its text, until that turn's turn.complete. There it reads
+// `$.session.messages({as: 'api'})`, the messages the next request is built from: a steer
+// whose text is in a user message after the last assistant message was carried by no
+// request of the turn, and the runner reports `append.held` for it, ahead of the
+// turn.complete. A read that fails reports none held. An append that resolves while no
+// main turn is open reports `append.held` in place of `append.done`, since no request is
+// on its way to carry it.
 
 import type { EngineInterface, Register } from 'claude-code'
 
 type Dollar = EngineInterface
 
-const MOD_VERSION = '0.3.0'
+const MOD_VERSION = '0.3.1'
 const GATE = 'moxi-turns-gate'
 const MARGIN_MS = 1000
 const REPORT_WAIT_MS = 1000
@@ -412,6 +426,9 @@ type Win = {
   timer: { cancel: () => void } | null
 }
 
+/** A steer appended into the open main turn: its delivery and its text. */
+export type Steer = { delivery: string; text: string }
+
 /** A turn.complete of a held fork. */
 type ForkEnd = { reason: unknown; isAborted: boolean; answer: unknown }
 /** A fork the runner holds: its delivery, the ends it has not taken yet, and its waiter.
@@ -435,6 +452,8 @@ let ended = false
 let helloSeen: () => void = () => {}
 let helloP = new Promise<void>(resolve => { helloSeen = resolve })
 let turnOpen: string | null = null
+/** The steers appended into the open main turn, in order, each until its turn.complete. */
+let steers: Steer[] = []
 let win: Win | null = null
 let seq = 0
 let queue: Report[] = []
@@ -747,10 +766,48 @@ async function append($: Dollar, delivery: string, text: string): Promise<void> 
   try {
     const r = await $.session.append({ message: { type: 'user', content: [{ type: 'text', text }] } })
     const deny = (r as { deny?: string }).deny
-    if (deny !== undefined) void report($, 'append.failed', { delivery, reason: deny })
-    else void report($, 'append.done', { delivery })
+    if (deny !== undefined) {
+      void report($, 'append.failed', { delivery, reason: deny })
+    } else if (turnOpen === null) {
+      // The turn ended while the call ran: no request is on its way to carry the note.
+      log($, `steer ${delivery} went in after its turn ended; it is held`)
+      void report($, 'append.held', { delivery })
+    } else {
+      steers.push({ delivery, text })
+      void report($, 'append.done', { delivery })
+    }
   } catch (err) {
     void report($, 'append.failed', { delivery, reason: String(err) })
+  }
+}
+
+/** The steers of `of` that no request carried: each whose text is in a user message after
+ *  the last assistant message of `messages`, the messages the next request is built from
+ *  (`$.session.messages({as: 'api'})`). Anything else read carries nothing. */
+export function unsent(messages: unknown, of: readonly Steer[]): string[] {
+  if (!Array.isArray(messages) || of.length === 0) return []
+  const last = messages.findLastIndex(m => (m as { role?: unknown } | null)?.role === 'assistant')
+  const texts: string[] = []
+  for (const m of messages.slice(last + 1)) {
+    const { role, content } = (m ?? {}) as { role?: unknown; content?: unknown }
+    if (role !== 'user' || !Array.isArray(content)) continue
+    for (const b of content) {
+      const { type, text } = (b ?? {}) as { type?: unknown; text?: unknown }
+      if (type === 'text' && typeof text === 'string') texts.push(text)
+    }
+  }
+  return of.filter(s => s.text !== '' && texts.some(t => t.includes(s.text))).map(s => s.delivery)
+}
+
+/** The steers of the turn that just completed which Claude Code holds for the next
+ *  request; none when the messages cannot be read. */
+async function heldSteers($: Dollar, of: readonly Steer[]): Promise<string[]> {
+  if (of.length === 0) return []
+  try {
+    return unsent(await $.session.messages({ as: 'api' }), of)
+  } catch (err) {
+    log($, `the messages were not read, so no steer reads held: ${String(err)}`)
+    return []
   }
 }
 
@@ -1671,6 +1728,7 @@ export const register: Register = on => {
       if (e.agentId === undefined && headless !== true) openList(e.text)
       if (e.agentId !== undefined || headless === true || ended) return behind(hook, performance.now(), await next(e))
       turnOpen = e.turnId
+      steers = []
       stopTimer(win)
       await reportAndWait($, 'turn.start', { turn_id: e.turnId })
       return behind(hook, performance.now(), await next(e))
@@ -1686,6 +1744,12 @@ export const register: Register = on => {
       if (e.agentId !== undefined) noteForkEnd(held, e.agentId, e)
       if (e.agentId !== undefined || headless === true || ended) return behind(hook, performance.now(), await next(e))
       turnOpen = null
+      const mine = steers
+      steers = []
+      for (const delivery of await heldSteers($, mine)) {
+        log($, `steer ${delivery} was carried by no request of turn ${e.turnId}; it is held`)
+        void report($, 'append.held', { delivery })
+      }
       await reportAndWait($, 'turn.complete', { turn_id: e.turnId, reason: e.reason, is_aborted: e.isAborted, answer: e.answer })
       if (win !== null) arm($, win, IDLE_FAIL_MS)
       // A reading at every turn's end, whatever the measures said (the plain call is free).

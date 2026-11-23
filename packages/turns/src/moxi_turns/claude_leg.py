@@ -72,8 +72,15 @@ Then, in any order:
         it. The endpoint sends the next `submit` only once this one's window has closed.
     {"op": "append", "delivery": id, "text": "…"}
         `$.session.append` a user-role row into the running turn (a steer). The runner
-        reports `append.done` when the call resolves without a deny, else
-        `append.failed`.
+        reports `append.done` when the call resolves without a deny while a main-loop
+        turn is open, `append.held` when it resolves with none open, else
+        `append.failed`. Claude Code sends the row as a plugin note with the turn's next
+        request; a turn that makes no further request ends with the note unsent, and
+        Claude Code holds it for the session's next request. At each main-loop
+        `turn.complete` the runner reads `$.session.messages({as: "api"})`, the messages
+        the next request is built from, and reports `append.held`, ahead of the
+        `turn.complete`, for each steer of that turn whose text is in a user message
+        after the last assistant message. A read that fails reports none held.
     {"op": "command", "request": id, "name": "clear" | "exit" | "compact",
      "stop_shells": bool}
         `$.command.run` the command; the gate re-checks it (`/gate/command`). With
@@ -160,6 +167,9 @@ own count from 1 for this load, and `kind`:
     append.done    {delivery}                       a steer appended: `$.session.append`
                                                     resolved without a deny
     append.failed  {delivery, reason}               a steer the runner could not append
+    append.held    {delivery}                       a steer appended, which its turn
+                                                    ended without sending: Claude Code
+                                                    holds it for the next request
     fork.started   {delivery, agent_id}             the fork's spawn resolved with its
                                                     agent id, or a further round's task
                                                     was delivered
@@ -321,12 +331,12 @@ PATHS = (PATH_REPORT, PATH_LIVE, PATH_AGENTS, PATH_STOP, PATH_CONTEXT, PATH_GUAR
 #: The report kinds.
 R_SESSION, R_TURN_START, R_TURN_COMPLETE = "session", "turn.start", "turn.complete"
 R_SUBMIT_CLOSE, R_SUBMIT_BOUND = "submit.close", "submit.bound"
-R_APPEND_DONE, R_APPEND_FAILED = "append.done", "append.failed"
+R_APPEND_DONE, R_APPEND_FAILED, R_APPEND_HELD = "append.done", "append.failed", "append.held"
 R_COMMAND_DONE = "command.done"
 R_FORK_STARTED, R_FORK_DONE, R_FORK_LOST = "fork.started", "fork.done", "fork.lost"
 REPORTS = (R_SESSION, R_TURN_START, R_TURN_COMPLETE, R_SUBMIT_CLOSE, R_SUBMIT_BOUND,
-           R_APPEND_DONE, R_APPEND_FAILED, R_COMMAND_DONE, R_FORK_STARTED, R_FORK_DONE,
-           R_FORK_LOST)
+           R_APPEND_DONE, R_APPEND_FAILED, R_APPEND_HELD, R_COMMAND_DONE, R_FORK_STARTED,
+           R_FORK_DONE, R_FORK_LOST)
 
 #: A submit window's three ends.
 END_RESOLVE, END_DROP, END_FAIL = "resolve", "drop", "fail"
@@ -500,7 +510,7 @@ __all__ = ["LEG", "STOP_AFTER_CLEAR", "NOT_STOPPED_AFTER_CLEAR", "LINE_HELLO", "
            "PATH_AFTER_TOOL", "PATH_USAGE",
            "PATH_GATE_ENTRY", "PATH_GATE_COMMAND", "PATH_HOOK_TIMES", "PATHS", "R_SESSION",
            "R_TURN_START", "R_TURN_COMPLETE", "R_SUBMIT_CLOSE", "R_SUBMIT_BOUND", "R_APPEND_DONE",
-           "R_APPEND_FAILED",
+           "R_APPEND_FAILED", "R_APPEND_HELD",
            "R_COMMAND_DONE", "R_FORK_STARTED", "R_FORK_DONE", "R_FORK_LOST", "REPORTS", "END_RESOLVE", "END_DROP", "END_FAIL", "ENDS",
            "GATE_CODES", "NONCE_LINE", "LATE", "MAX_BODY",
            "BadRequest", "LineWriter", "LegServer"]
