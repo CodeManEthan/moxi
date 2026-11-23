@@ -1,8 +1,8 @@
 // <moxi-repo-page route="...">: repo's Git hooks page. Under the shell's top line, from top
 // to bottom, each group with its label in the left column:
 //
-// - `Hooks`: the verdict and `read <time>` at its right, then each thing that needs him or
-//   warns him, in three lines (what, where, the fix with `Copy` or one sentence), past five
+// - `Hooks`: the verdict and `read <time>` at its right, then each thing that needs the user
+//   or warns, in three lines (what, where, the fix with `Copy` or one sentence), past five
 //   items the warnings folded to one line with `Show`. An item made from a record has
 //   `Show` for the record's whole text.
 // - `Repos`: one `<moxi-ui-row>` per repo, its pieces in run order, heavy words at the
