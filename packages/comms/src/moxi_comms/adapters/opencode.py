@@ -841,8 +841,13 @@ class OpenCodeAdapter(HarnessAdapter):
         path = self.layer_one_path()
         path.parent.mkdir(parents=True, exist_ok=True)
         os.chmod(path.parent, 0o700)
+        from ..directors import launch_declared
+
+        # The director sentence keys on the launch's own directors, not the policy ones.
+        declared = launch_declared(getattr(self.agent, "directors", ()),
+                                   getattr(self.agent, "policy_directors", ()))
         text = layer_one_text(fetch_roster(self.socket_path), self.comms_path,
-                              directors=getattr(self.agent, "directors", ()),
+                              directors=declared,
                               form=layer_one_form(getattr(self, "added_env", {})))
         path.write_text(text)
 

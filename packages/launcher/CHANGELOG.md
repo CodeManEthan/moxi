@@ -24,6 +24,18 @@
 - `exit-session` exits a quiet Codex session under turns' Codex host by stopping the
   host: SIGTERM, then up to 15 seconds for it to end (`not-exited` when it still runs).
   It used to refuse every Codex session `no-exit`; one without the host still is.
+- A seat or project preset (or `--no-takes-policy-directors`) opts its sessions out of
+  comms' policy directors with the new row `takes_policy_directors = false`, composed as
+  `--no-policy-directors` on comms' wrapper. `[defaults]` refuses the row (`per-seat`). A
+  launch that opts out under a comms without policy directors is refused, naming the
+  upgrade. On the page, a bool row whose default is true sends its unticked box as
+  `false`, so the opt-out is kept.
+- comms' policy directors count as directors of a launch with a comms identity that
+  didn't opt out: they may make a director's relaunch call and they hear of a failed
+  relaunch, beside the launch's own directors, each recipient once. The launcher reads
+  comms' `policy_directors()` at the call or the notice, so only names provisioned as
+  standing identities now, each as comms qualifies it (a bare name is the global
+  identity, never read in the launch's scope). A comms without the call adds none.
 - A launch follows its Claude session when Claude Code replaces the session's turns
   endpoint (each plugin reload does). A held Claude claim moves only to an endpoint whose
   parent process is the launch's own `claude`, the row's `pid` and `pid_started`

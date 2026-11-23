@@ -62,8 +62,8 @@ def test_a_box_with_its_daemon_up(rig):
     assert r["credentials"] == "env, keychain, store (the default)"
     assert r["daemon"].startswith("answers at ")
     assert set(r) == {"device", "DATA", "STATE", "CACHE", "CONFIG", "RUNTIME", "config",
-                      "backend", "credentials", "cache", "claude", "codex", "opencode",
-                      "daemon", "waiting"}, out
+                      "backend", "credentials", "directors", "cache", "claude", "codex",
+                      "opencode", "daemon", "waiting"}, out
 
 
 def test_adapter_binaries_and_their_versions(tmp_path):
@@ -203,3 +203,29 @@ def test_a_stale_copy_of_a_programs_token_is_named_by_the_step_that_holds_it(pro
                                  "send-only:comms/send-only/ticker) holds a stale token "
                                  "for ticker")
     assert row.fix == "remove that stale copy; renew ticker only where it sends from"
+
+
+def test_the_policy_directors_and_a_warning_for_each_not_provisioned(tmp_path):
+    from conftest import write_config
+    from moxi_comms.mock_record import MockRecord
+    from moxi_comms.provision import provision
+
+    write_config(None, '[policy]\ndirectors = ["fleet-lead", "ops@acme"]\n')
+    code, out = doctor(socket_path=tmp_path / "none.sock")
+    assert rows(out)["directors"] == ("policy: fleet-lead (not provisioned), "
+                                      "ops@acme (not provisioned)")
+    assert ("warning: fleet-lead is not provisioned, so it directs nobody; provision it "
+            "with `moxi-comms-provision --standing fleet-lead`, or check the spelling") in out
+    provision(MockRecord(), paths.comms_db(), standing=[("fleet-lead", "global")])
+    code, out = doctor(socket_path=tmp_path / "none.sock")
+    assert rows(out)["directors"] == "policy: fleet-lead, ops@acme (not provisioned)"
+    assert "warning: fleet-lead" not in out and "warning: ops@acme is not" in out
+
+
+def test_an_empty_policy_says_so(tmp_path):
+    from conftest import write_config
+
+    write_config(None, "[policy]\ndirectors = []\n")
+    _code, out = doctor(socket_path=tmp_path / "none.sock")
+    assert rows(out)["directors"] == "policy: none ([policy] directors is empty)"
+    assert "warning:" not in out

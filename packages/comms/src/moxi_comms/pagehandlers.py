@@ -126,7 +126,7 @@ def _harness(row: api.RosterRow) -> str | None:
 def _row(row: api.RosterRow) -> dict:
     out = {key: getattr(row, key, None) for key in KEYS}
     out["harness"] = _harness(row)
-    for key in ("directors", "awaiting"):
+    for key in ("directors", "policy_directors", "awaiting"):
         out[key] = list(out[key] or ())
     if out["cache"] is not None:
         out["cache"] = {key: getattr(out["cache"], key, None)

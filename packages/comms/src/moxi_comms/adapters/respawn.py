@@ -550,14 +550,17 @@ def write_note(session_dir: Path, line: str) -> Path:
 
 def session_of(key: str, env: dict):
     """The launch's `Session` for the session keyed `key`, from the stamps in its
-    environment. The claim itself comes from the claim file, which the new shim reads."""
+    environment. The claim itself comes from the claim file, which the new shim reads,
+    both director lists with it; the stamps here are never merged again."""
     from .. import directors as directors_mod
     from ..constants import COMMAND_ENV, GLOBAL_ENV, NAME_ENV, PROJECT_ENV, SCOPE_ENV
     from .session import Session, _is_uuid
 
     session = Session(key, name=env.get(NAME_ENV), scope=env.get(SCOPE_ENV),
                       global_=bool(env.get(GLOBAL_ENV)), project=env.get(PROJECT_ENV),
-                      directors=directors_mod.from_env(env), comms=env.get(COMMAND_ENV))
+                      directors=directors_mod.from_env(env),
+                      policy_directors=directors_mod.policy_from_env(env),
+                      comms=env.get(COMMAND_ENV))
     session.stated_id = key if _is_uuid(key) else None
     return session
 

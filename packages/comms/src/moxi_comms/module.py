@@ -29,7 +29,10 @@ INTERNAL_ENV = {
     "MOXI_COMMS_NAME": "wrapper stamp: the session's chosen identity name",
     "MOXI_COMMS_SCOPE": "wrapper stamp: the session's identity scope",
     "MOXI_COMMS_GLOBAL": "wrapper stamp: the identity is the global one",
-    "MOXI_COMMS_DIRECTORS": "wrapper stamp: the directors this launch grants",
+    "MOXI_COMMS_DIRECTORS": "wrapper stamp: the session's directors, those its launch "
+                            "declared then the box's policy directors it takes",
+    "MOXI_COMMS_POLICY_DIRECTORS": "wrapper stamp: the session's directors that only the "
+                                   "box's [policy] directors gave",
     "MOXI_COMMS_SOCKET": "wrapper stamp: the daemon socket the session was launched "
                          "against",
     "MOXI_COMMS_CLAIM_SOCKET": "wrapper stamp: the claim socket the session's adapter "

@@ -70,9 +70,10 @@ WORKERS = 4
 #: The fields a current claim file may carry. Rebuilding at compatibility boundaries
 #: drops fields written by older releases without teaching live code their names.
 #: A headless launch's claim carries `headless` (true) and `exit`, its exit rule as its
-#: `--exit` values.
-CLAIM_KEYS = ("name", "scope", "global", "qualified", "tier", "directors", "headless",
-              "exit")
+#: `--exit` values. `directors` is the whole list the session runs with, and
+#: `policy_directors` the part of it only the box's `[policy] directors` gave.
+CLAIM_KEYS = ("name", "scope", "global", "qualified", "tier", "directors",
+              "policy_directors", "headless", "exit")
 
 #: The refusal any caller outside the socket's own session gets for `claim`.
 NOT_INSIDE = ("this process is not inside the session that holds this socket's identity")
@@ -572,7 +573,7 @@ class ClaimServer:
 
     def __init__(self, name: str, scope: str, *, kind: str,
                  directors=(), socket_path=None, arm: bool = False, daemon_socket=None,
-                 proc=None, global_: bool = False, backoff=None):
+                 proc=None, global_: bool = False, backoff=None, policy_directors=()):
         from .paths import claim_socket
         from .scoping import GLOBAL, qualify
 
@@ -583,7 +584,8 @@ class ClaimServer:
         self.claim = {"name": name, "scope": GLOBAL if global_ else scope,
                       "global": global_, "qualified": qualify(name, GLOBAL if global_
                                                               else scope),
-                      "tier": None, "directors": list(directors)}
+                      "tier": None, "directors": list(directors),
+                      "policy_directors": list(policy_directors)}
         key = f"srv-{me}-{start}-{self.claim['qualified']}"
         # Numbered per server: two servers for one name in one process (one waiting on
         # the other) each serve a socket of their own.
