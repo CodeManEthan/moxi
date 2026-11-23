@@ -11,8 +11,8 @@ two shared connections, each opened on first use and closed with the `Session` (
 `close()`, or its collection):
 
 - the first carries the calls whose answer never waits on the harness: `session`,
-  `deliver`, `steer`, `environ`, and the look-up by `ref` of a hand-in whose answer never
-  came;
+  `deliver`, `steer`, `fork`, `fork.continue`, `ack`, `environ`, and the look-up by `ref`
+  of a hand-in whose answer never came;
 - the second carries `facts` and `agents`, which wait on the harness's live read for up
   to its live bound, so a `deliver` never queues behind one.
 
@@ -32,19 +32,26 @@ When an answer does not come. The library reports a refusal only when it receive
 or when it never wrote the request:
 
 - Never written (nothing serves the address, or the connection failed during its
-  `rpc.hello` or `session`): `deliver`, `steer` and `command` read `Refused("gone")`;
-  `wait` reads `Lost` `unanswered`; `session`, `facts` and `agents` raise `TurnsError`.
-- The endpoint answered the `gone` error: `Refused("gone")` on `deliver`, `steer` and
-  `command`, `Lost` on `wait`, `TurnsError` on the reads.
+  `rpc.hello` or `session`): `deliver`, `steer`, `fork`, `fork_continue` and `command`
+  read `Refused("gone")`; `wait` reads `Lost` `unanswered`; `session`, `facts` and `agents`
+  raise `TurnsError`.
+- The endpoint answered the `gone` error: `Refused("gone")` on `deliver`, `steer`, `fork`,
+  `fork_continue` and `command`, `Lost` on `wait`, `TurnsError` on the reads.
 - Written and not answered (the bound passed, or the connection closed): the outcome is
-  unknown. `deliver` and `steer` give a `Delivery` whose `id` is None; its waits first
-  look the delivery up by its `ref` on the connection the request went on (the endpoint
-  serves that connection in order, so the answer follows the request's), or, when that
-  connection has closed, on a new one. `command` reads `Failed("unanswered")`, and the
-  command may still run. `wait` raises `TimeoutError`, as when the endpoint answers
-  `pending`. The reads raise `TurnsError`; asking again is safe.
+  unknown. `deliver`, `steer`, `fork` and `fork_continue` give a `Delivery` whose `id` is
+  None; its waits first look the delivery up by its `ref` on the connection the request
+  went on (the endpoint serves that connection in order, so the answer follows the
+  request's), or, when that connection has closed, on a new one. `command` reads
+  `Failed("unanswered")`, and the command may still run. `wait` raises `TimeoutError`, as
+  when the endpoint answers `pending`. The reads raise `TurnsError`; asking again is safe.
 
 A call whose bound passed leaves its connection open: `moxi.ipc` drops the late answer.
+
+Kept ends. A delivery asked with `keep` has its end kept in turns' state folder until its
+asker acks its `ref` (`kept.py`). A wait whose endpoint no longer serves, or answers
+`gone`, reads that end from the state folder before it reads `Lost`, and `ack` on such an
+endpoint removes the end there. `wait_ref` and `ack` at module level do the same for a
+caller that names the session by its id and holds no `Delivery`.
 """
 
 from __future__ import annotations
@@ -52,6 +59,7 @@ from __future__ import annotations
 import concurrent.futures
 import contextlib
 import logging
+import math
 import threading
 import time
 import weakref
@@ -62,10 +70,11 @@ from typing import Any
 from moxi import ipc
 from moxi.paths import Layout
 
+from . import kept as turns_kept
 from . import protocol
 from .procs import DEFAULT as DEFAULT_PROC, ProcView
-from .results import (COMMAND_WAIT_S, COMMANDS, ERROR_GONE, FAILED_UNANSWERED,
-                      LOST_UNANSWERED, MCP_SETTLE_S, REFUSED_GONE, STOP_SHELLS_WAIT_S, Agents, Ended,
+from .results import (COMMAND_WAIT_S, COMMANDS, ERROR_CAPABILITY, ERROR_GONE, FAILED_UNANSWERED,
+                      LOST_UNANSWERED, LOST_UNKNOWN, MCP_SETTLE_S, REFUSED_GONE, STOP_SHELLS_WAIT_S, Agents, Ended,
                       Facts, Failed, Gone, Lost, Passed, Ran, Refused, Started, StopFacts,
                       check_ref, from_notification, from_wire)
 
@@ -464,14 +473,20 @@ class Session:
     def deliver(self, text: str, *, only_if_idle: bool = False,
                 if_turn_number: int | None = None, refuse_draft: bool = False,
                 refuse_agents: bool = False, ref: str | None = None,
-                by: str | None = None, senders: Iterable[str] = ()) -> Delivery:
+                by: str | None = None, senders: Iterable[str] = (),
+                keep: bool = False) -> Delivery:
         """Hand `text` to the session as the next input. With `only_if_idle` it starts a
         turn only when none is open, and `if_turn_number`, `refuse_draft` and
         `refuse_agents` add their checks; without it those are a `ValueError`. `ref` is
         the caller's own name for the delivery (at most 256 bytes as UTF-8), echoed on
         its values and the turn notifications. `by` is the asking module's name and
         `senders` the names the text speaks for; the session's `prompt` listeners read
-        them on the prompt the delivery raises (`delivery_by`, `delivery_senders`)."""
+        them on the prompt the delivery raises (`delivery_by`, `delivery_senders`).
+        `keep` (with a `ref`; the session must offer `keep`): turns keeps the delivery's
+        end until `ack(ref)`, and its waits read that end even once the endpoint has
+        ended. One `ref` holds one kept end: while a kept end of the session still holds
+        `ref`, a `keep` under it raises `TurnsError` (invalid params) and nothing is
+        handed in."""
         _check_text(text)
         ref = check_ref(ref)
         asker = _asker(by, senders)
@@ -479,13 +494,11 @@ class Session:
                                  or refuse_agents):
             raise ValueError("if_turn_number, refuse_draft and refuse_agents are valid "
                              "only with only_if_idle=True")
-        params: dict[str, Any] = {"text": text, **asker}
-        if ref is not None:
-            params["ref"] = ref
+        params: dict[str, Any] = {"text": text, **asker, **_kept_params(ref, keep=keep)}
         if only_if_idle:
             params.update(only_if_idle=True, if_turn_number=if_turn_number,
                           refuse_draft=refuse_draft, refuse_agents=refuse_agents)
-        return self._hand("deliver", params, ref)
+        return self._hand("deliver", params, ref, keep=keep)
 
     def steer(self, text: str, *, ref: str | None = None, by: str | None = None,
               senders: Iterable[str] = ()) -> Delivery:
@@ -498,9 +511,53 @@ class Session:
             params["ref"] = ref
         return self._hand("steer", params, ref)
 
-    def _hand(self, method: str, params: dict[str, Any], ref: str | None) -> Delivery:
+    def fork(self, text: str, *, by: str, ref: str | None = None, keep: bool = False,
+             round_timeout_s: float | None = None) -> Delivery:
+        """Start a fork of the session's main loop with `text` as its task. `by` is the
+        asking module's name. The fork runs beside the main loop's turns, whatever turn
+        runs. `wait_started` reads `Started` with the fork's `agent_id`; `wait_ended`
+        reads `Ended` with the fork's answer, or `Lost` with a reason starting `denied`
+        (the harness refused the fork) or `gone` (it went away with no answer). `keep` as
+        `deliver`'s. `round_timeout_s`: how long the harness's half waits for the task's
+        answer before the fork reads `Lost` `gone`; None for its default (120 s on Claude
+        Code). An endpoint older than this option ignores it and keeps its default.
+        Raises `TurnsError` with the `capability` code on a session that cannot fork."""
+        _check_text(text)
+        ref = check_ref(ref)
+        if not isinstance(by, str) or not by:
+            raise ValueError("by is the asking module's name, a non-empty string")
+        params: dict[str, Any] = {"text": text, "by": by, **_kept_params(ref, keep=keep),
+                                  **_round_params(round_timeout_s)}
+        return self._hand("fork", params, ref, keep=keep)
+
+    def fork_continue(self, delivery: str, text: str, *, ref: str | None = None,
+                      keep: bool = False, round_timeout_s: float | None = None) -> Delivery:
+        """Give the fork that `delivery` (its `fork`'s id or an earlier round's) started its
+        next round, with `text` as the round's task. The fork must have answered: a new
+        delivery whose `wait_started` reads `Started` with the fork's `agent_id` once the
+        round went in, and `wait_ended` reads `Ended` with the round's answer. It reads
+        `Lost` with a reason starting `gone` when the endpoint knows no such fork, the
+        fork never started or its round was lost, or the fork went away with no answer,
+        and `denied` while a round of the fork is still open. Its asker is the fork's.
+        `keep` as `deliver`'s, and `round_timeout_s` as `fork`'s, for this round. Raises
+        `TurnsError` with the `capability` code on a session that cannot fork."""
+        if not isinstance(delivery, str) or not delivery:
+            raise ValueError("delivery is the fork's delivery id, a non-empty string")
+        _check_text(text)
+        ref = check_ref(ref)
+        params: dict[str, Any] = {"delivery": delivery, "text": text,
+                                  **_kept_params(ref, keep=keep),
+                                  **_round_params(round_timeout_s)}
+        return self._hand("fork.continue", params, ref, keep=keep)
+
+    def _hand(self, method: str, params: dict[str, Any], ref: str | None, *,
+              keep: bool = False) -> Delivery:
         try:
-            answer = _call(self._short.get(), method, params, READ_S)
+            client = self._short.get()
+            # An endpoint that does not offer `keep` would ignore it and keep nothing.
+            if keep and "keep" not in (self._capabilities or ()):
+                raise _lacks("keep")
+            answer = _call(client, method, params, READ_S)
         except _NotWritten as exc:
             log.info("%s was never written: %s", method, exc.error)
             return Delivery(self, None, ref, known=Refused(REFUSED_GONE))
@@ -519,6 +576,59 @@ class Session:
         if answer.get("result") is not None:
             known = self._value(answer["result"], method, (Refused, Lost, Started, Ended))
         return Delivery(self, answer["delivery"], answer.get("ref", ref), known=known)
+
+    def ack(self, ref: str) -> bool:
+        """Done with the kept end of `ref` (a delivery asked with `keep`): turns removes
+        it, the session's earlier endpoints' included. True when one was removed; an
+        ack of a ref with no kept end does nothing, so a second ack is harmless. Ack
+        only once the delivery has settled: one still open when acked is kept when it
+        settles. For an endpoint that is gone, the library removes the end from turns'
+        state folder itself. Raises `TurnsError` when the endpoint got the ack and did
+        not answer; asking again is safe."""
+        ref = check_ref(ref)
+        if ref is None:
+            raise ValueError("ref is the kept delivery's ref, a string")
+        try:
+            client = self._short.get()
+            if "keep" not in (self._capabilities or ()):
+                # An endpoint older than `keep` kept nothing; the state folder may hold
+                # an earlier endpoint's end of this session.
+                return self._remove_kept(ref)
+            answer = _call(client, "ack", {"ref": ref}, READ_S)
+        except _NotWritten as exc:
+            if exc.not_serving:
+                return self._remove_kept(ref)
+            raise exc.error from None
+        except _Unanswered as exc:
+            raise TurnsError(f"the endpoint at {self.address} did not answer ack: "
+                             f"{exc.cause}") from None
+        except ipc.RpcError as exc:
+            if exc.code == ERROR_GONE:
+                return self._remove_kept(ref)
+            raise _rpc_error(exc, self.address, "ack") from None
+        return bool(isinstance(answer, dict) and answer.get("removed"))
+
+    def _who(self) -> dict[str, Any]:
+        """The kept ends' names for this session: its ids and its endpoint's name."""
+        ids = (self.session_id, *(self._info.get("earlier") or ()))
+        harness, nonce = self._info.get("harness"), self._info.get("nonce")
+        endpoint = (protocol.endpoint_name(harness, nonce)
+                    if isinstance(harness, str) and isinstance(nonce, str) else None)
+        return {"session_ids": tuple(i for i in ids if isinstance(i, str)),
+                "endpoint": endpoint}
+
+    def _remove_kept(self, ref: str) -> bool:
+        return turns_kept.remove(ref, **self._who())
+
+    def _kept(self, ref: str | None, until: str, delivery: str | None = None):
+        """The kept end of `ref` in turns' state folder as a value, or None: for a wait
+        whose endpoint is gone. With `delivery`, only that delivery's."""
+        if ref is None:
+            return None
+        record = turns_kept.find(ref, **self._who())
+        if record is None or (delivery is not None and record.get("delivery") != delivery):
+            return None
+        return _kept_value(record, until)
 
     # -- commands -----------------------------------------------------------------------
 
@@ -631,6 +741,40 @@ class Session:
         return StopHandler(client, on_stop)
 
 
+def _round_params(round_timeout_s: float | None) -> dict[str, Any]:
+    """The `round_timeout_ms` param of a fork or a round, when its asker set one."""
+    if round_timeout_s is None:
+        return {}
+    if (isinstance(round_timeout_s, bool) or not isinstance(round_timeout_s, (int, float))
+            or not math.isfinite(round_timeout_s) or round_timeout_s <= 0):
+        raise ValueError("round_timeout_s is a number of seconds above 0, or None")
+    return {"round_timeout_ms": max(1, round(round_timeout_s * 1000))}
+
+
+def _kept_params(ref: str | None, *, keep: bool) -> dict[str, Any]:
+    """The `ref` and `keep` params of a hand-in. `keep` needs a `ref`."""
+    if keep and ref is None:
+        raise ValueError("keep needs a ref: a kept end is read and acked by its ref")
+    params: dict[str, Any] = {} if ref is None else {"ref": ref}
+    if keep:
+        params["keep"] = True
+    return params
+
+
+def _lacks(capability: str) -> TurnsError:
+    return TurnsError(f"this session does not offer {capability}", code=ERROR_CAPABILITY,
+                      data={"capability": capability})
+
+
+def _kept_value(record: dict[str, Any], until: str):
+    """A kept end's value until `started` or `ended`, or None when it does not read."""
+    try:
+        value = from_wire(record.get(until))
+    except ValueError:
+        return None
+    return value if isinstance(value, (Started, Ended, Refused, Lost)) else None
+
+
 def _check_text(text: Any) -> None:
     if not isinstance(text, str) or not text:
         raise ValueError("text is a non-empty string")
@@ -738,6 +882,10 @@ class Delivery:
                     client = self.session._short.get()
                 except _NotWritten as exc:
                     if exc.not_serving:
+                        kept = self.session._kept(self.ref, until)
+                        if kept is not None:
+                            self.id = kept.delivery
+                            return kept
                         self._known = Lost(LOST_UNANSWERED, ref=self.ref)
                         return self._known
                     # With no deadline a wait that cannot connect would ask again
@@ -757,6 +905,10 @@ class Delivery:
                 continue
             except ipc.RpcError as exc:
                 if exc.code == ERROR_GONE:
+                    kept = self.session._kept(self.ref, until)
+                    if kept is not None:
+                        self.id = kept.delivery
+                        return kept
                     self._known = Lost(f"{REFUSED_GONE}: {exc.message}", ref=self.ref)
                     return self._known
                 raise _rpc_error(exc, self.session.address, "wait") from None
@@ -790,7 +942,9 @@ class Delivery:
                 client, _, _ = _connect(self.session.address)
             except _NotWritten as exc:
                 if exc.not_serving:
-                    return Lost(LOST_UNANSWERED, delivery=self.id, ref=self.ref)
+                    kept = self.session._kept(self.ref, until, self.id)
+                    return kept if kept is not None else Lost(
+                        LOST_UNANSWERED, delivery=self.id, ref=self.ref)
                 # The endpoint listens but did not get through the hello or `session`:
                 # that says nothing of a delivery an earlier call recorded. An endpoint
                 # that is ending stops listening soon, and the next connect says so.
@@ -810,8 +964,9 @@ class Delivery:
                 continue
             except ipc.RpcError as exc:
                 if exc.code == ERROR_GONE:
-                    return Lost(f"{REFUSED_GONE}: {exc.message}", delivery=self.id,
-                                ref=self.ref)
+                    kept = self.session._kept(self.ref, until, self.id)
+                    return kept if kept is not None else Lost(
+                        f"{REFUSED_GONE}: {exc.message}", delivery=self.id, ref=self.ref)
                 raise _rpc_error(exc, self.session.address, "wait") from None
             finally:
                 client.close()
@@ -1105,6 +1260,44 @@ def wait_ready(*, session_id: str | None = None, pid: int | None = None,
         delay = min(delay * 2, 1.0)
 
 
+def wait_ref(ref: str, *, session_id: str, until: str = "ended",
+             timeout_s: float | None = None) -> Started | Ended | Refused | Lost:
+    """The value of the newest delivery to session `session_id` carrying `ref`, for a
+    caller that holds no `Delivery` for it (a process that took over another's work).
+    With a live endpoint it waits as `Delivery.wait_started` or `wait_ended` would; with
+    none, it reads the kept end turns holds for `ref`. With no delivery carrying `ref` and
+    no kept end of it, `Lost` with a reason starting `unknown delivery`. Raises
+    `TimeoutError` as the `Delivery` waits do, and `VersionError` as `find` does."""
+    ref = check_ref(ref)
+    if ref is None:
+        raise ValueError("ref is the delivery's ref, a string")
+    if until not in ("started", "ended"):
+        raise ValueError('until is "started" or "ended"')
+    session = find(session_id=session_id)
+    if session is None:
+        record = turns_kept.find(ref, session_ids=(session_id,))
+        value = None if record is None else _kept_value(record, until)
+        if value is not None:
+            return value
+        return Lost(f"{LOST_UNKNOWN}: no live endpoint of session {session_id}, and no "
+                    "kept end carries this ref", ref=ref)
+    with session:
+        return Delivery(session, None, ref)._wait(until, timeout_s)
+
+
+def ack(ref: str, *, session_id: str) -> bool:
+    """`Session.ack(ref)` on session `session_id`'s live endpoint, or, with none, on
+    turns' state folder: the kept end of `ref` is removed. True when one was removed."""
+    ref = check_ref(ref)
+    if ref is None:
+        raise ValueError("ref is the kept delivery's ref, a string")
+    session = find(session_id=session_id)
+    if session is None:
+        return turns_kept.remove(ref, session_ids=(session_id,))
+    with session:
+        return session.ack(ref)
+
+
 __all__ = ["CONNECT_S", "READ_S", "LIVE_READ_S", "MCP_RELOAD_S", "EXIT_BOUND_S",
            "NOT_EXITED", "TurnsError", "VersionError", "Session", "Delivery", "Watch", "StopHandler",
-           "runtime_dir", "sessions", "find", "wait_ready"]
+           "runtime_dir", "sessions", "find", "wait_ready", "wait_ref", "ack"]

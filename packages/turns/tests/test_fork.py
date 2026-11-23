@@ -1,0 +1,222 @@
+"""The `fork` request on the endpoint: handed on at once beside the main loop, its start
+naming the fork, its end carrying the fork's answer, and every way it can fail to.
+Driven on the fake harness through the client."""
+
+from __future__ import annotations
+
+import sys
+import time
+
+import pytest
+
+from fake_harness import FakeHarness
+from moxi_turns import results
+from moxi_turns.client import Session, TurnsError
+
+pytestmark = pytest.mark.skipif(sys.platform == "win32",
+                                reason="moxi.ipc's named pipe server comes later")
+
+CAN = ("deliver", "only-if-idle", "steer", "fork")
+
+
+def until(pred, timeout=5.0):
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if pred():
+            return True
+        time.sleep(0.01)
+    return pred()
+
+
+@pytest.fixture
+def forking(make_endpoint):
+    """An endpoint on the fake harness that offers `fork`, and a client session on it."""
+    sessions = []
+
+    def make(can=CAN):
+        ep, h = make_endpoint(FakeHarness(can=can))
+        s = Session(ep.address, ep.session(), endpoint_dir=ep.dir)
+        sessions.append(s)
+        return ep, h, s
+
+    yield make
+    for s in sessions:
+        s.close()
+
+
+def test_a_fork_starts_names_its_agent_and_ends_with_its_answer(forking):
+    ep, h, s = forking()
+    d = s.fork("recall what we said", by="memory", ref="r-1")
+    assert until(lambda: len(h.forked) == 1)
+    spec = h.forked[0]
+    assert (spec.kind, spec.text, spec.by, spec.ref) == ("fork", "recall what we said",
+                                                         "memory", "r-1")
+    ep.fork_started(spec.id, "agent-7")
+    started = d.wait_started(5)
+    assert isinstance(started, results.Started)
+    assert (started.agent_id, started.turn_id, started.delivery, started.ref) == (
+        "agent-7", None, spec.id, "r-1")
+    ep.fork_ended(spec.id, "two points")
+    ended = d.wait_ended(5)
+    assert isinstance(ended, results.Ended)
+    assert (ended.answer, ended.outcome, ended.turn_id, ended.ref) == (
+        "two points", "answer", None, "r-1")
+
+
+def test_a_fork_goes_in_while_a_turn_runs_and_holds_no_slot(forking):
+    ep, h, s = forking()
+    h.start_turn()
+    d = s.fork("look", by="memory")
+    assert until(lambda: len(h.forked) == 1)
+    later = s.deliver("next")
+    assert until(lambda: ep.facts().turn_open)
+    assert h.submitted == []          # held behind the running turn, not behind the fork
+    h.end_turn()
+    assert until(lambda: len(h.submitted) == 1) and h.submitted[0].id == later.id
+    ep.fork_ended(h.forked[0].id, None)
+    ended = d.wait_ended(5)
+    assert isinstance(ended, results.Ended) and ended.answer is None
+
+
+def test_a_session_that_cannot_fork_answers_the_capability_error(forking):
+    _, _, s = forking(can=("deliver",))
+    with pytest.raises(TurnsError) as caught:
+        s.fork("look", by="memory")
+    assert caught.value.code == results.ERROR_CAPABILITY
+
+
+def test_a_fork_needs_its_asker(forking):
+    _, _, s = forking()
+    with pytest.raises(ValueError):
+        s.fork("look", by="")
+
+
+@pytest.mark.parametrize("reason", ["denied: the harness refused the spawn",
+                                    "gone: the fork's warm-up never answered"])
+def test_a_fork_the_harness_could_not_run_reads_lost_with_its_reason(forking, reason):
+    ep, h, s = forking()
+    d = s.fork("look", by="memory")
+    assert until(lambda: len(h.forked) == 1)
+    ep.lost(h.forked[0].id, reason)
+    for value in (d.wait_started(5), d.wait_ended(5)):
+        assert isinstance(value, results.Lost) and value.reason == reason
+
+
+def test_a_fork_lost_after_it_started_keeps_its_start(forking):
+    ep, h, s = forking()
+    d = s.fork("look", by="memory")
+    assert until(lambda: len(h.forked) == 1)
+    ep.fork_started(h.forked[0].id, "agent-1")
+    ep.lost(h.forked[0].id, "gone: the harness did not take the task")
+    assert d.wait_started(5).agent_id == "agent-1"
+    assert d.wait_ended(5).reason.startswith(results.LOST_GONE)
+
+
+def test_the_endpoints_end_settles_an_open_fork_lost(forking):
+    ep, h, s = forking()
+    d = s.fork("look", by="memory", ref="r-9")
+    assert until(lambda: len(h.forked) == 1)
+    ep.fork_started(h.forked[0].id, "agent-1")
+    ep.stop("the session ended")
+    assert isinstance(d.wait_ended(5), results.Lost)
+    ended = ep.wait(d.id, "ended", 0)
+    assert isinstance(ended, results.Lost) and ended.ref == "r-9"
+    assert ended.reason == f"{results.LOST_GONE}: the session ended"
+
+
+def test_a_late_word_on_a_settled_fork_changes_nothing(forking):
+    ep, h, s = forking()
+    d = s.fork("look", by="memory")
+    assert until(lambda: len(h.forked) == 1)
+    fork_id = h.forked[0].id
+    ep.lost(fork_id, "denied: no")
+    ep.fork_started(fork_id, "agent-late")
+    ep.fork_ended(fork_id, "late answer")
+    assert isinstance(d.wait_ended(5), results.Lost)
+
+
+def test_a_fork_the_adapter_could_not_take_reads_unsupported(make_endpoint):
+    class Broken(FakeHarness):
+        def fork(self, delivery):
+            raise OSError("the runner's line is closed")
+
+    ep, _ = make_endpoint(Broken(can=CAN))
+    d = ep.fork("look", by="memory")
+    assert until(lambda: ep.wait(d.id, "ended", 0) is not None)
+    value = ep.wait(d.id, "ended", 0)
+    assert isinstance(value, results.Refused) and value.reason == "unsupported"
+
+
+def test_a_further_round_goes_to_the_fork_that_answered_with_its_asker(forking):
+    ep, h, s = forking()
+    d = s.fork("look", by="memory")
+    assert until(lambda: len(h.forked) == 1)
+    ep.fork_started(h.forked[0].id, "agent-1")
+    ep.fork_ended(h.forked[0].id, "first")
+    d.wait_ended(5)
+    r = s.fork_continue(d.id, "go on", ref="r-2")
+    assert until(lambda: len(h.forked) == 2)
+    spec = h.forked[1]
+    assert (spec.kind, spec.text, spec.agent_id, spec.by) == ("fork", "go on", "agent-1",
+                                                              "memory")
+    # A round asked while this one is open is denied at once.
+    busy = s.fork_continue(d.id, "and on")
+    assert busy.wait_ended(5).reason.startswith(results.LOST_DENIED)
+    ep.fork_started(spec.id, "agent-1")
+    ep.fork_ended(spec.id, "second")
+    assert r.wait_started(5).agent_id == "agent-1"
+    ended = r.wait_ended(5)
+    assert (ended.answer, ended.ref) == ("second", "r-2")
+
+
+@pytest.mark.parametrize("how", ["unknown", "open", "lost", "unstarted"])
+def test_a_further_round_with_no_fork_to_take_it_reads_lost(forking, how):
+    ep, h, s = forking()
+    d = s.fork("look", by="memory")
+    assert until(lambda: len(h.forked) == 1)
+    fork_id = h.forked[0].id
+    if how != "unstarted":
+        ep.fork_started(fork_id, "agent-1")
+    if how == "lost":
+        ep.lost(fork_id, "gone: no")
+    if how == "unstarted":
+        ep.fork_ended(fork_id, "answered with no start")
+    r = s.fork_continue("nobody" if how == "unknown" else d.id, "go on")
+    reason = r.wait_ended(5).reason
+    prefix = results.LOST_DENIED if how == "open" else results.LOST_GONE
+    assert reason.startswith(prefix), reason
+    assert len(h.forked) == 1
+
+
+def test_the_asker_sets_each_rounds_bound_and_none_leaves_the_default(forking):
+    ep, h, s = forking()
+    d = s.fork("look", by="memory", round_timeout_s=1800)
+    assert until(lambda: len(h.forked) == 1)
+    assert h.forked[0].round_timeout_s == 1800
+    ep.fork_started(h.forked[0].id, "agent-1")
+    ep.fork_ended(h.forked[0].id, "first")
+    d.wait_ended(5)
+    s.fork_continue(d.id, "go on", round_timeout_s=0.25)
+    assert until(lambda: len(h.forked) == 2)
+    assert h.forked[1].round_timeout_s == 0.25
+    s.fork("look again", by="memory")
+    assert until(lambda: len(h.forked) == 3)
+    assert h.forked[2].round_timeout_s is None
+
+
+@pytest.mark.parametrize("bad", [0, -1, float("inf"), float("nan"), True, "60"])
+def test_a_rounds_bound_is_a_number_of_seconds_above_0(forking, bad):
+    ep, h, s = forking()
+    with pytest.raises(ValueError, match="round_timeout_s"):
+        s.fork("look", by="memory", round_timeout_s=bad)
+    with pytest.raises(ValueError, match="round_timeout_s"):
+        s.fork_continue("d", "go on", round_timeout_s=bad)
+    assert h.forked == []
+
+
+def test_a_bound_past_the_runners_longest_timer_is_invalid_params(forking):
+    ep, h, s = forking()
+    with pytest.raises(TurnsError) as caught:
+        s.fork("look", by="memory", round_timeout_s=30 * 24 * 3600)
+    assert caught.value.code == -32602
+    assert h.forked == []

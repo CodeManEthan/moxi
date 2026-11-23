@@ -1572,7 +1572,7 @@ dev = [
 
 [[package]]
 name = "moxi-turns"
-version = "0.2.6"
+version = "0.2.7"
 source = { editable = "packages/turns" }
 dependencies = [
     { name = "moxi" },
