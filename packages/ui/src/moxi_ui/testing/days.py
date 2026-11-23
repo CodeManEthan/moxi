@@ -20,6 +20,10 @@ its page from start to end.
         expect(page.locator(f'section[data-group="{DAYS.key(2)}"]')).to_have_count(1)
 
 The `ui_days` fixture gives each test module one.
+
+A test whose own steps must fall on one date, whatever the anchor, calls
+`wait_out_midnight()` before them: two walks it compares, say, that each read the page
+server's date.
 """
 
 from __future__ import annotations
@@ -33,6 +37,21 @@ from datetime import date, datetime, time, timedelta
 MARGIN_S = 120.0
 #: Seconds the anchor waits past midnight, so the new day has surely begun.
 PAST_MIDNIGHT_S = 1.0
+
+
+def wait_out_midnight(margin_s: float = MARGIN_S, *,
+                      clock: Callable[[], float] = clock_time.time,
+                      sleep: Callable[[float], None] = clock_time.sleep) -> float:
+    """Wait past the next local midnight when it is at most `margin_s` seconds away, and
+    give the clock's reading after: steps that take less than `margin_s` then fall on one
+    date."""
+    at = clock()
+    today = datetime.fromtimestamp(at).date()
+    midnight = datetime.combine(today + timedelta(days=1), time()).timestamp()
+    if midnight - at <= margin_s:
+        sleep(midnight - at + PAST_MIDNIGHT_S)
+        at = clock()
+    return at
 
 
 class Days:
@@ -58,13 +77,11 @@ class Days:
             return self._now
 
     def _take(self) -> datetime:
-        at = self._clock()
-        today = datetime.fromtimestamp(at).date()
-        midnight = datetime.combine(today + timedelta(days=1), time()).timestamp()
-        if midnight - at <= self.margin_s:
-            self._sleep(midnight - at + PAST_MIDNIGHT_S)
-            at = self._clock()
-        return datetime.fromtimestamp(at)
+        return datetime.fromtimestamp(self.wait_out_midnight())
+
+    def wait_out_midnight(self) -> float:
+        """`wait_out_midnight` with this one's margin and clock; the anchor stays."""
+        return wait_out_midnight(self.margin_s, clock=self._clock, sleep=self._sleep)
 
     def today(self) -> date:
         """The anchored local date."""

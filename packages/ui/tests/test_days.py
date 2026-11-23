@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from datetime import date, datetime
 
-from moxi_ui.testing.days import MARGIN_S, PAST_MIDNIGHT_S, Days
+from moxi_ui.testing.days import MARGIN_S, PAST_MIDNIGHT_S, Days, wait_out_midnight
 
 
 class Clock:
@@ -52,6 +52,19 @@ def test_just_after_midnight_the_new_day_is_taken_at_once():
     clock = Clock(datetime(2026, 11, 23, 0, 0, 5))
     days = Days(clock=clock, sleep=clock.sleep, margin_s=600)
     assert days.today() == date(2026, 11, 23) and clock.slept == []
+
+
+def test_a_step_waits_out_a_close_midnight_and_leaves_the_anchor_where_it_was():
+    clock = Clock(datetime(2026, 11, 22, 23, 0, 0))
+    days = Days(clock=clock, sleep=clock.sleep)
+    assert days.today() == date(2026, 11, 22)
+    clock.at = datetime(2026, 11, 22, 23, 59, 30).timestamp()
+    after = days.wait_out_midnight()
+    assert clock.slept == [30 + PAST_MIDNIGHT_S]
+    assert datetime.fromtimestamp(after).date() == date(2026, 11, 23)
+    assert days.today() == date(2026, 11, 22)
+    assert wait_out_midnight(60, clock=clock, sleep=clock.sleep) == after
+    assert len(clock.slept) == 1
 
 
 def test_the_fixture_gives_one_days_to_the_module(ui_days, request):

@@ -55,6 +55,8 @@ A module whose `ui` is an optional extra uses these fixtures by name and never i
     anchor, read the first time it is asked and past midnight when that was less than two
     minutes away. `ui_days.noon(2)` seeds a fixture's data and `ui_days.key(2)` names the
     day the page groups it under, and the two agree even when the run crosses midnight.
+    `ui_days.wait_out_midnight()` waits out a midnight less than two minutes away, for
+    steps of a test that must fall on one date.
 `ui_component_check`
     `check(page, module, name, attrs=None, *, tokens=("accent",), allow=(), keep=False,
     token_ms=TOKEN_MS)`: the contract check on one component (see
