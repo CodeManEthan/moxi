@@ -412,3 +412,118 @@ def test_the_doctor_is_fine_with_a_listed_file_commission_would_bring(repo, list
     row = rows()["private files proj-a"]
 
     assert row.state == "ok" and "private files" not in rows()
+
+
+# -- a copy reads as ignored, and goes with the worktree while nobody changed it ------------
+
+def event_of(path: Path) -> dict:
+    [event] = commissioned(path)
+    return event
+
+
+def judge(event: dict):
+    from moxi_rounds import removal
+    from moxi_rounds import settings as own
+
+    return removal.judge(ROUND, event, removal.WORKTREE, settings=own.load())
+
+
+def test_a_copy_reads_as_ignored_to_every_reader_and_goes_with_the_worktree(
+        repo, opened):
+    from moxi_rounds import checking, removal
+    from moxi_rounds import settings as own
+
+    made = commission()
+    tree = type(repo)(made.worktree)
+    tree.commit("work.txt", "the work")
+    tree.git("add", "-A")
+
+    assert removal.changes(made.worktree) == ()
+    assert checking.read_tip(made.worktree, "work").clean
+    assert not Git(made.worktree).has_changes()
+    assert tree.git("status", "--porcelain") == ""
+    event = event_of(opened)
+    assert isinstance(judge(event), removal.Proven)
+
+    assert removal.remove(ROUND, event, removal.WORKTREE,
+                          settings=own.load()) == made.worktree
+
+    assert not made.worktree.exists()
+    assert (repo.root / "AGENTS.md").read_text(encoding="utf-8") == SECRET
+
+
+def test_an_edited_copy_keeps_the_worktree_at_b3_naming_it(repo, opened):
+    made = commission()
+    (made.worktree / "AGENTS.md").write_text("edited\n", encoding="utf-8")
+
+    found = judge(event_of(opened))
+
+    assert (found.check, found.work) == ("B3", ("AGENTS.md",))
+
+
+def test_a_copy_equal_to_the_source_now_goes_though_its_hash_moved_on(repo, opened):
+    from moxi_rounds import removal
+
+    made = commission()
+    (repo.root / "AGENTS.md").write_text("changed at the root\n", encoding="utf-8")
+    (made.worktree / "AGENTS.md").write_text("changed at the root\n", encoding="utf-8")
+
+    assert isinstance(judge(event_of(opened)), removal.Proven)
+
+
+def test_a_copy_replaced_by_a_link_is_work(repo, opened):
+    made = commission()
+    copy = made.worktree / "AGENTS.md"
+    copy.unlink()
+    try:
+        os.symlink(repo.root / "AGENTS.md", copy)
+    except OSError:
+        pytest.skip("this system makes no symlink here")
+
+    assert judge(event_of(opened)).check == "B3"
+
+
+def test_an_ignored_parent_holding_only_copies_and_globbed_paths_goes(repo, opened,
+                                                                      listing):
+    from moxi_rounds import removal
+
+    exclude(repo, "notes/")
+    (repo.root / "notes").mkdir()
+    (repo.root / "notes" / "local.md").write_text("local\n", encoding="utf-8")
+    listing("AGENTS.md", "notes/local.md")
+    made = commission()
+    (made.worktree / "notes" / ".venv").mkdir()
+    (made.worktree / "notes" / ".venv" / "x").write_text("", encoding="utf-8")
+
+    assert isinstance(judge(event_of(opened)), removal.Proven)
+
+    (made.worktree / "notes" / "mine.md").write_text("mine\n", encoding="utf-8")
+    found = judge(event_of(opened))
+    assert (found.check, found.work) == ("B3", ("notes/",))
+
+
+def test_a_drop_removes_the_worktree_of_a_build_with_an_unchanged_copy(repo, opened):
+    from moxi_rounds import dropping
+
+    made = commission()
+
+    dropped = dropping.drop_build(ROUND, "B1", by="operator", record="comms:1234567",
+                                  run_by="planner")
+
+    assert made.worktree in dropped.removed and dropped.kept == ()
+    assert (repo.root / "AGENTS.md").read_text(encoding="utf-8") == SECRET
+
+
+def test_a_kept_worktree_may_go_once_its_copy_is_restored(repo, opened):
+    from moxi_rounds import dropping, removal
+
+    made = commission()
+    (made.worktree / "AGENTS.md").write_text("edited\n", encoding="utf-8")
+    dropped = dropping.drop_build(ROUND, "B1", by="operator", record="comms:1234567",
+                                  run_by="planner")
+    [kept] = dropped.kept
+    assert (kept.check, kept.work) == ("B3", ("AGENTS.md",))
+
+    # The sweep reads the same rule, again at each run.
+    shutil.copyfile(repo.root / "AGENTS.md", made.worktree / "AGENTS.md")
+    assert isinstance(judge(event_of(opened)), removal.Proven)
