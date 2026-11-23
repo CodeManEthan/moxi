@@ -2218,6 +2218,7 @@ comms	packages/comms/tests/test_hygiene.py	== set(sub.choices)) \	keep	set	set
 comms	packages/comms/tests/test_hygiene.py	_shipped_text	name	f	fh
 comms	packages/comms/tests/test_hygiene.py	assert len(set(ADAPTER_KINDS)) == 5	keep	set	set
 comms	packages/comms/tests/test_hygiene.py	assert set(sub.choices) == {"send", "reply", "agents", "history", "help", "whois",	keep	set	set
+comms	packages/comms/tests/test_hygiene.py	wait_until(lambda: any(message_id in r.getMessage() for r in list(caplog.records)))	keep	any	any
 comms	packages/comms/tests/test_kinds.py	assert set(kinds.BUILT_IN) <= names	keep	set	set
 comms	packages/comms/tests/test_launcher_reads.py	-	name	test_a_socket_outside_the_runtime_directory_is_none	test_a_socket_outside_the_runtime_dir_is_none
 comms	packages/comms/tests/test_launcher_reads.py	runtime_root().mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
@@ -16365,6 +16366,7 @@ ui	packages/ui/tests/test_terminal.py	record.parent.mkdir(parents=True, exist_ok
 ui	packages/ui/tests/test_terminal.py	tool	name	folder	bin_dir
 ui	packages/ui/tests/test_terminal.py	write_record({**os.environ, "HOME": ""})	keep	HOME	HOME
 ui	packages/ui/tests/test_terminal.py	write_record({**os.environ, "HOME": "ada"})	keep	HOME	HOME
+ui	packages/ui/tests/test_testing.py	again = ui_shell.session(timeout=10)	keep	timeout	timeout
 ui	packages/ui/tests/test_testing.py	assert [r["name"] for r in modules["fixture"]["refused"]] == ["later"]	keep	refused	refused
 ui	packages/ui/tests/test_testing.py	assert any("elsewhere.held" in url and "fixture.count" in url for url in check.requests)	keep	any	any
 ui	packages/ui/tests/test_testing.py	assert any(url.endswith("/m/fixture/tag.js") for url in tag.requests)	keep	any	any
@@ -16713,6 +16715,7 @@ usage	packages/usage/tests/conftest.py	changed = sorted(path for path in set(now
 usage	packages/usage/tests/conftest.py	if not any(real == base or base in real.parents for base in allowed):	keep	any	any
 usage	packages/usage/tests/conftest.py	path.parent.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
 usage	packages/usage/tests/conftest.py	return any(full == root or root in full.parents for root in GUARDED)	keep	any	any
+usage	packages/usage/tests/conftest.py	return any(full == store or store in full.parents for store in LIVE)	keep	any	any
 usage	packages/usage/tests/conftest.py	writing = ((isinstance(mode, str) and any(c in mode for c in "wax+"))	keep	any	any
 usage	packages/usage/tests/test_allowlist.py	"HOME": home,	keep	HOME	HOME
 usage	packages/usage/tests/test_allowlist.py	"rebase main", "push", "push origin main", "pull", "fetch", "stash", "show", "show HEAD",	keep	show	show
@@ -17261,6 +17264,7 @@ usage	packages/usage/tests/test_page.py	assert count(folder="\n") == count() == 
 usage	packages/usage/tests/test_page.py	assert body["filters"] == [{"name": "folder", "value": "/w/tool, /w/app"}]	keep	folder	folder
 usage	packages/usage/tests/test_prices_index.py	touched: set[int] = set()	keep	set	set
 usage	packages/usage/tests/test_readings.py	rollout = builders.CodexRollout(tmp_path / "sessions", start=NOW - 600)	keep	sessions	sessions
+usage	packages/usage/tests/test_real_root_guard.py	assert not any(root == store or root in store.parents for store in conftest.LIVE)	keep	any	any
 usage	packages/usage/tests/test_reports.py	"""The `session` report's total equals its `sessions` row under the same filters."""	keep	sessions	sessions
 usage	packages/usage/tests/test_reports.py	"folder": "/w/app"}	keep	folder	folder
 usage	packages/usage/tests/test_reports.py	# a `compacted` line, then a `context_compacted` event for the same compaction	keep	compacted	compacted
