@@ -192,7 +192,7 @@ def test_the_topic_carries_when_the_supervisor_was_read(monkeypatch):
     async def go():
         stream = Stream(served())
         try:
-            _, data = await stream.next(5)
+            _, data = await stream.next(PROC_WAIT_S)
             assert data["at"] is not None and data["at"].endswith("Z")
         finally:
             await stream.close()
