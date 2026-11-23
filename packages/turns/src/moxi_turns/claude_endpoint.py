@@ -388,9 +388,9 @@ class ClaudeHarness(Harness):
                     return
                 d = w.spec
             line = {"op": leg.LINE_SUBMIT, "delivery": d.id, "kind": w.kind,
-                    "text": d.text, "nonce": w.nonce}
+                    "text": HELD_PROMPT if d.kind == "steer" else d.text, "nonce": w.nonce}
             if d.kind == "steer":
-                line.update(text=HELD_PROMPT, note=d.text)
+                line["note"] = d.text
             if self._lines.write(line):
                 return
             with self._lock:
