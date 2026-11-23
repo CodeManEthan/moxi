@@ -109,6 +109,8 @@ LAUNCHER = "launcher"
 #: The launcher row that holds the flags passed on to the harness, last on its argv.
 #: The parser fills it from unknown flags and the words after `--`.
 EXTRA = "extra_flags"
+#: The launcher row whose `false` opts a seat out of comms' policy directors.
+TAKES_POLICY = "takes_policy_directors"
 #: Flags with no row of their own that set what a posture row sets, per harness: the
 #: posture row each one stands in for. Passed on, each would change the posture without
 #: the posture check, so each is refused like that row, in every mode. Claude's two skip

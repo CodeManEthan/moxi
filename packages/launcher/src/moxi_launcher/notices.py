@@ -52,6 +52,7 @@ from collections.abc import Callable, Mapping, Sequence
 from typing import Any
 
 from . import store
+from .catalog import TAKES_POLICY
 
 log = logging.getLogger("moxi.launcher.notices")
 
@@ -218,10 +219,6 @@ def directors(row: store.LaunchRow | None) -> list[str]:
     return [str(name).strip() for name in named if str(name).strip()]
 
 
-#: The launch row whose stored `false` opts the launch out of comms' policy directors.
-TAKES_POLICY = "takes_policy_directors"
-
-
 def policy_directors(row: store.LaunchRow | None, comms: Any | None) -> list[str]:
     """The box's policy directors that direct the launch now: comms'
     `policy_directors()`, read at this call, so the names provisioned as standing
@@ -354,6 +351,6 @@ def settings_of(current: Mapping[str, Any]) -> dict[str, Any]:
 
 __all__ = ["LEFT_IN_PLACE", "MODULE", "NAME_RESERVED", "NOTE", "NOTES", "NOTE_NOT_TAKEN",
            "NOTE_OUTCOMES", "NOTICE_OUTCOMES", "OFFLINE_RETRY_S", "RELAUNCHED",
-           "RESERVED_RETRY_S", "SENDER", "TAKES_POLICY", "directors", "is_flagged", "note",
+           "RESERVED_RETRY_S", "SENDER", "directors", "is_flagged", "note",
            "note_text", "notify", "owes_note", "policy_directors", "recipients",
            "settings_of", "text"]

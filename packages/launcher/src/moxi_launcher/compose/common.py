@@ -34,6 +34,7 @@ from types import MappingProxyType
 from moxi import config, files, modules, names, paths
 
 from .. import catalog, store
+from ..catalog import TAKES_POLICY
 from ..codex_trust import Trust
 from ..listeners import RELAUNCH_ENV, REQUEST_ENV
 
@@ -652,10 +653,6 @@ def headless_words(values: Mapping[str, object], brief: str) -> list[str]:
     return words + ["--brief", brief]
 
 
-#: The launcher row that opts a seat out of comms' policy directors when false.
-TAKES_POLICY = "takes_policy_directors"
-
-
 def director_words(values: Mapping[str, object], ctx: Context) -> list[str]:
     """The director flags of comms' wrapper: one `--director` per `director` value, in
     order, then `--no-policy-directors` when the launch's `takes_policy_directors` is
@@ -913,7 +910,7 @@ __all__ = ["BASE_NAMES", "BASE_PREFIXES", "CODEX_KEEP", "COMMANDS", "CREDENTIAL"
            "ENV_CLASS", "HEADER", "KEEP_WARM_ENV", "KEEP_WARM_LINE",
            "PROVIDER_SWITCHES", "RECORDED", "RECORDED_PREFIXES", "RECYCLE_ON_EXPIRY_ENV",
            "RELAUNCH_ENV", "RELAUNCHED", "REQUEST_ENV", "SCRUB_NAMES", "SCRUB_PREFIXES",
-           "TAKES_POLICY", "TERMINAL_NAMES",
+           "TERMINAL_NAMES",
            "WINDOWS_BASE_NAMES", "WINDOWS_LINE", "WORD", "Additions", "Composition",
            "BYPASS", "Context", "NoBrief", "NotYet", "PromptFile", "SETTINGS_SUFFIX",
            "SKIP_BYPASS_WARNING", "SettingsFile", "TooLong", "TurnsAdditions",

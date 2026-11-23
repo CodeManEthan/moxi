@@ -84,8 +84,8 @@ COMMS_INTERFACE = 2
 #: Opting out of comms' policy directors is one seat's choice; as a default it would
 #: undo the policy for every seat.
 PER_SEAT = MappingProxyType({
-    "takes_policy_directors": "one line in [defaults] would opt every seat out of comms' "
-                              "policy directors"})
+    catalog.TAKES_POLICY: "one line in [defaults] would opt every seat out of comms' "
+                          "policy directors"})
 #: The start postures every install takes; `with:<identity>` needs comms.
 POSTURES = ("operator", "go")
 WITH = "with:"
