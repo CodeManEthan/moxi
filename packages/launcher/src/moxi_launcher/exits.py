@@ -3,13 +3,17 @@
     exit_session(session_id)       # exit-session SESSION_ID: exit one launched session
     exits()                        # exits: the exit log, newest first
 
-Anyone with a shell may exit a session the launcher launched; the consent is the launch's
-own, the commands it granted turns (`MOXI_TURNS_COMMANDS`), which turns checks at the exit.
-Only a harness whose turns session offers `exit` (Claude Code today) is exited.
+Anyone with a shell may exit a session the launcher launched. A session whose turns
+session offers `exit` (Claude Code's) is exited through turns, and the consent is the
+launch's own, the commands it granted turns (`MOXI_TURNS_COMMANDS`), which turns checks at
+the exit. A Codex session under turns' Codex host offers no `exit`: it is ended by
+stopping its host, the process its turns claim names, which ends its session on SIGTERM.
+Any other session is refused `no-exit`.
 
 The steps, in this process (no job: the exit is over before the verb returns):
 
-1. The session (`target.find`): launched, claimed, live, and offering `exit`.
+1. The session (`target.find`): launched, claimed, live, and offering `exit` or hosted by
+   turns' Codex host.
 2. The run (`runs`, kind `exit`, mode `verb`), written at once with this process as its
    job. One open run per launch, so the exit loses at insert to any other act on the
    launch, and every other act loses to it while it lasts.
@@ -24,10 +28,13 @@ The steps, in this process (no job: the exit is over before the verb returns):
    that can't be read holds `unreadable`. Park's exit skips this step (below).
 5. The exit, through turns, with the turn number the quiet read saw. turns checks the
    consent, idleness and the number again. A refusal that clears by itself ends the run
-   `held`; `not-allowed` and `unsupported` end it `not-exited`.
-6. For a launch in a slot, Claude's exit dialog, answered through slots after its last
-   checks, as a relaunch answers it; a check that fails there leaves the dialog for a
-   person (`at-dialog`). Outside a slot the dialog can't be answered: unless turns saw the
+   `held`; `not-allowed` and `unsupported` end it `not-exited`. For Codex under the host,
+   in its place, SIGTERM to the host, then a wait of up to `HOST_STOP_S` seconds for it to
+   end: `exited` when it has, `not-exited` when it still runs. In a slot the pane ends
+   with the host, and there is no dialog.
+6. For a Claude launch in a slot, Claude's exit dialog, answered through slots after its
+   last checks, as a relaunch answers it; a check that fails there leaves the dialog for
+   a person (`at-dialog`). Outside a slot the dialog can't be answered: unless turns saw the
    harness exit, the run ends `at-dialog` and a person answers it.
 
 **Every exit writes one row in the exit log**, whatever its verdict: `exited`, `held`,
@@ -50,6 +57,7 @@ reboot that ends them anyway.
 from __future__ import annotations
 
 import os
+import signal
 import sqlite3
 import time
 from collections.abc import Callable, Mapping
@@ -70,6 +78,10 @@ OUTCOMES = {"exit-pending": "at-dialog", "relaunch-failed": "not-exited"}
 #: The verdict an exit's run outcome is logged as; a fault is `not-exited`.
 VERDICT_OF = {"error": "not-exited"}
 
+#: How long an exit waits for a Codex host it sent SIGTERM to end, in seconds.
+HOST_STOP_S = 15.0
+# How often that wait looks, in seconds.
+_HOST_POLL_S = 0.1
 #: How often park's exit reads quiet again, and tries again a launch another run holds,
 #: in seconds.
 PARK_POLL_S = 3.0
@@ -129,10 +141,11 @@ def _exit(conn: sqlite3.Connection, found: target.Target, api: Any, env: Mapping
         offers = "exit" in found.session.capabilities
     except Exception as exc:
         raise target.TurnsFailed(exc) from exc
-    if not offers:
+    host = None if offers else codex_host(row)
+    if not offers and host is None:
         raise Refused("no-exit", f"the {row.harness} session does not offer exit through "
                                  "turns", "exit it in its own terminal")
-    in_slot = row.target == "slot" and bool(row.slot) and _slots_here(api)
+    in_slot = host is None and row.target == "slot" and bool(row.slot) and _slots_here(api)
     data = {"session_id": sid, "request_id": row.request_id, "slot": row.slot}
     person_s = float(current["relaunch.person_s"])
     if dry_run:
@@ -145,7 +158,8 @@ def _exit(conn: sqlite3.Connection, found: target.Target, api: Any, env: Mapping
             return Result(codes.TEMPFAIL, (f"held: {hold}; nothing would be done now",),
                           data={**data, "outcome": "held", "word": hold.word,
                                 "detail": hold.detail})
-        how = (f"through its exit dialog in slot {row.slot}" if in_slot
+        how = ("by stopping its Codex host" if host is not None
+               else f"through its exit dialog in slot {row.slot}" if in_slot
                else "through turns")
         stop = (f", stopping its {_count(shells.found)} (idle an hour or more)"
                 if shells.found else "")
@@ -155,8 +169,9 @@ def _exit(conn: sqlite3.Connection, found: target.Target, api: Any, env: Mapping
         conn, kind="exit", mode=mode, request_id=row.request_id, session_id=sid,
         by=first.actor(env), state="acting", slot=row.slot, pane_id=row.pane_id,
         job=own_job(), gone=lambda j: job.gone(j, slots_api=api))
-    ran = ExitRun(conn, run, found, in_slot=in_slot, shells=shells, slots_api=api,
-                  settings=current, clock=clock, wall=wall, sleep=sleep, deadline=deadline)
+    ran = ExitRun(conn, run, found, in_slot=in_slot, shells=shells, host=host,
+                  slots_api=api, settings=current, clock=clock, wall=wall, sleep=sleep,
+                  deadline=deadline)
     ran.act()
     ended = store.get_run(conn, run.run_id)
     verdict = ran.verdict
@@ -256,16 +271,17 @@ def _count(pids: tuple[int, ...]) -> str:
 
 class ExitRun(job.RelaunchJob):
     """One exit-session run: the quiet read and the background shells, then the
-    relaunch's exit and dialog steps, in this process. Its outcome is its verdict."""
+    relaunch's exit and dialog steps, or for Codex under the host (`host`, the host
+    process) the host's stop, in this process. Its outcome is its verdict."""
 
     kind = "exit"
 
     def __init__(self, conn: sqlite3.Connection, run: store.Run, found: target.Target, *,
-                 in_slot: bool, shells: Shells, deadline: float | None = None,
-                 **seams: Any):
+                 in_slot: bool, shells: Shells, host: proc.ProcId | None = None,
+                 deadline: float | None = None, **seams: Any):
         super().__init__(conn, run.run_id, **seams)
         self.run, self.target, self.row = run, found, found.row
-        self.in_slot = in_slot
+        self.in_slot, self.host = in_slot, host
         self.shells = shells
         #: Park's exit waits for quiet until this time on `clock`; the verb's reads once.
         self.parking = run.mode == "park"
@@ -311,6 +327,8 @@ class ExitRun(job.RelaunchJob):
                                      turn_number=number):
                 self._ended_under()
             self.guard()
+            if self.host is not None:
+                self.stop_host()
             try:
                 kind, reason = self.exit(number)
                 break
@@ -326,6 +344,27 @@ class ExitRun(job.RelaunchJob):
         self.end("at-dialog", reason or kind,
                  f"turns asked the session to exit and said {said}; the launch is not in "
                  "a slot, so if Claude's exit dialog is up, a person answers it")
+
+    def stop_host(self) -> None:
+        """Codex's exit: SIGTERM to its host, then the wait for the host to end."""
+        host, sid = self.host, self.run.session_id
+        self.event("stop-host", {"pid": host.pid})
+        if proc.alive(host):
+            try:
+                os.kill(host.pid, signal.SIGTERM)
+            except ProcessLookupError:
+                pass
+            except OSError as exc:
+                self.end("not-exited", "signal", f"the Codex host (pid {host.pid}) could "
+                                                 f"not be stopped: {exc}")
+        deadline = self.clock() + HOST_STOP_S
+        while proc.alive(host):
+            if self.clock() >= deadline:
+                self.end("not-exited", "still-running",
+                         f"the Codex host (pid {host.pid}) still runs "
+                         f"{HOST_STOP_S:g} seconds after SIGTERM")
+            self.sleep(_HOST_POLL_S)
+        self.end("exited", None, f"session {sid} exited: its Codex host was stopped")
 
     def _quiet(self) -> int | None:
         """The quiet read and the background shells, once for the verb; for park, the
@@ -369,6 +408,18 @@ class ExitRun(job.RelaunchJob):
         store.add_exit(self.conn, run_id=self.run_id, request_id=ended.request_id,
                        session_id=ended.session_id, verdict=self.verdict, word=ended.word,
                        detail=ended.detail, slot=ended.slot, pane_id=ended.pane_id)
+
+
+def codex_host(row: store.LaunchRow) -> proc.ProcId | None:
+    """The host process of a Codex launch under turns' Codex host: the endpoint process
+    its turns claim names, which for the host is the host itself. None for any other
+    launch, and for a claim that names no start time."""
+    if row.harness != "codex" or row.values.get("mode") != "host" or not row.endpoint:
+        return None
+    parsed = store.parse_endpoint(row.endpoint)
+    if parsed is None or parsed[1] is None:
+        return None
+    return proc.ProcId(parsed[0], parsed[1])
 
 
 def park_exit(session_id: str, *, deadline: float,
@@ -461,6 +512,7 @@ def exit_line(row: store.ExitRow) -> str:
     return said
 
 
-__all__ = ["EXIT_CODES", "OUTCOMES", "PARK_POLL_S", "SHELL_SNAPSHOTS", "VERDICT_OF", "ExitRun",
-           "Refused", "Result", "Shells", "background_shells", "exit_line", "exit_session",
-           "exits", "is_tool_shell", "own_job", "park_exit"]
+__all__ = ["EXIT_CODES", "HOST_STOP_S", "OUTCOMES", "PARK_POLL_S", "SHELL_SNAPSHOTS",
+           "VERDICT_OF", "ExitRun", "Refused", "Result", "Shells", "background_shells",
+           "codex_host", "exit_line", "exit_session", "exits", "is_tool_shell", "own_job",
+           "park_exit"]

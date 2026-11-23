@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+- Under a test, rounds refuses its own directories when no Moxi variable places them
+  (`MOXI_ROUNDS_<KIND>_HOME`, `MOXI_ROUNDS_HOME` or `MOXI_HOME`), and a project's folders
+  when no Moxi variable places the projects registry: those are the real ones. It raises
+  `UnfencedTest`, an error that is not a `RoundsError`, before anything is written, and a
+  command prints it and exits 1. A test is running when `PYTEST_CURRENT_TEST` or
+  `PYTEST_VERSION` is set or pytest is imported. A process without those signs, another
+  agent writing the same notes folder among them, is never refused.
+- Every fixture of the tests' conftest that a test file elsewhere can borrow checks at
+  setup that the test fence's homes are in the test's own tmp, so a borrowed fixture
+  fails before it writes.
 - Stacked builds: of two open builds where one's commits are strictly part of the
   other's, `finish` lets the one whose work reaches the target first go first and holds
   the other until that work is on the target, in place of refusing both for sharing

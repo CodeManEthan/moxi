@@ -20,6 +20,7 @@ launched.
     moxi launcher exits [--limit N] [--before TIME] [--json]
     moxi launcher sessions [--limit N] [--before TIME] [--json]
     moxi launcher resume SESSION_ID [--slot N] [--brief TEXT | --brief-file FILE | --plain]
+    moxi launcher fork SESSION_ID [--target slot|terminal] [--slot N] [--json]
     moxi launcher park [--wait-s SECONDS] [--dry-run] [--json]
     moxi launcher restore [SLOT ...] [--dry-run] [--json]
     moxi launcher unpark SLOT ... | --all [--json]
@@ -45,11 +46,13 @@ back (`--from-record`).
 `exit-session` exits a launched session, and `exits` lists every exit tried. `sessions`
 lists past launches and whether each can be resumed; `resume` launches one again, resumed,
 with `--brief` or `--brief-file` sent as its first turn (a `go` launch's resume needs
-one), or with `--plain` and no first turn, a `go` launch's too. `park` exits every
-launched session in a slot and reserves each slot for its session, so that `restore`
-brings them back after a reboot; `unpark` gives a slot's reservation up without bringing
-its session back. `clear-expired` makes the expiry ask of every live launch that recycles
-on expiry, now, or with `--session ID` of the one whose current session is ID;
+one), or with `--plain` and no first turn, a `go` launch's too. `fork` starts a new
+session from a copy of a session's conversation, live or not, and prints the new
+session's id. `park` exits every launched session in a slot and reserves each slot for
+its session, so that `restore` brings them back after a reboot; `unpark` gives a slot's
+reservation up without bringing its session back. `clear-expired` makes the expiry ask
+of every live launch that recycles on expiry, now, or with `--session ID` of the one
+whose current session is ID;
 `keep-warm --session ID` makes the keep-warm ask of one session, now, and
 `keep-warm --dry-run` of every live launch keep-warm is on for. With `--dry-run` each ask
 takes its reads and writes nothing. `keep-warm hold`, `release` and `holds` open, release
@@ -667,6 +670,13 @@ def _unpark(args: argparse.Namespace, prog: str) -> int:
     return _said(restore.unpark(args.slots, every=args.every), args)
 
 
+def _fork(args: argparse.Namespace, prog: str) -> int:
+    from . import fork
+
+    return _said(fork.fork(args.session_id, target=args.target, slot=args.slot,
+                           warn=_warn), args)
+
+
 def _keep_warm(args: argparse.Namespace, prog: str) -> int:
     from . import keepwarm
 
@@ -699,6 +709,7 @@ VERBS: dict[str, Callable[[argparse.Namespace, str], int]] = {
     "exits": _exits,
     "sessions": _sessions,
     "resume": _resume,
+    "fork": _fork,
     "park": _park,
     "restore": _restore,
     "unpark": _unpark,
@@ -841,8 +852,9 @@ def _act_parsers(verbs) -> None:
 
     exit_session = verbs.add_parser(
         "exit-session", help="exit a launched session", allow_abbrev=False,
-        description="Exit a session the launcher launched, once it is quiet; in a slot, "
-                    "Claude Code's exit dialog is answered too.")
+        description="Exit a session the launcher launched, once it is quiet: Claude Code "
+                    "through turns, its exit dialog answered too in a slot; Codex under "
+                    "turns' Codex host by stopping the host.")
     exit_session.add_argument("session_id", metavar="SESSION_ID", help="the session to exit")
     exit_session.add_argument("--dry-run", action="store_true",
                               help="take the checks and the quiet read; exit nothing")
@@ -920,6 +932,22 @@ def _act_parsers(verbs) -> None:
     unpark.add_argument("--all", dest="every", action="store_true",
                         help="give up every parked slot")
     unpark.add_argument("--json", action="store_true", help="print one JSON object")
+
+    fork = verbs.add_parser(
+        "fork", help="start a new session from a copy of a session's conversation",
+        allow_abbrev=False,
+        description="Start a new session from a copy of a launched session's "
+                    "conversation, live or not, with the rows that shape what the "
+                    "harness sends copied from its launch and no comms name, brief or "
+                    "posture; print the new session's id. The session forked goes on as "
+                    "it was. A Codex session is forked by turns' Codex host, from "
+                    "moxi-turns 0.2.6 on.")
+    fork.add_argument("session_id", metavar="SESSION_ID", help="the session to fork")
+    fork.add_argument("--target", choices=("terminal", "slot"), default="terminal",
+                      help="where the fork runs: this terminal (the default) or a slot")
+    fork.add_argument("--slot", metavar="N",
+                      help="with --target slot: the slot; the lowest free one when unset")
+    fork.add_argument("--json", action="store_true", help="print one JSON object")
 
     keep_warm = verbs.add_parser(
         "keep-warm", help="ask keep-warm about a session now, or open, release or list "

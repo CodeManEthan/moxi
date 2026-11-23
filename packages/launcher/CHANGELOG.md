@@ -10,6 +10,28 @@
   again from `/api/launches` instead of drawn. The stream can hand over a list older than
   the page's own read, which took a launch away from `Launches` for a moment and moved
   everything under it, the past sessions' buttons included.
+- `moxi launcher fork SESSION_ID [--target slot|terminal] [--slot N] [--json]` starts a
+  new session from a copy of a launched session's conversation, live or not, and prints
+  its id. Claude Code forks with `--resume PARENT --fork-session`; Codex needs turns'
+  Codex host, which forks with `--fork THREAD_ID` from moxi-turns 0.2.6 on, and the
+  `turns` extra now requires that version. With an older turns a Codex fork is refused
+  `not-yet`, naming it. Every catalog row now carries a fork class, `copy`, `drop` or
+  `own`, and a row with none fails the catalog check: the fork copies the rows that shape
+  the request the harness sends, unsets those about who the session is, its first turn
+  and its life, and composes the launcher's own again. Its environment is a replay's,
+  never the asking shell's.
+- The launch log moves to schema version 4, adding `launches.fork_of`, the session id a
+  fork copies; a log at version 3 upgrades in place. A launch with it has the new launch
+  kind `fork`, first in the order `launch_kind` decides by, and a resume of a fork keeps
+  it. A fork is pointed to no handoff and marks none picked. An older launcher refuses
+  the log once it is at version 4.
+- Interface 3 adds `fork(session_id, target=, slot=, stamps=)` and
+  `exit_session(session_id, dry_run=)` to the API. A fork's `stamps` are set on its
+  environment after the scrub; each must be listed in the `SESSION_ENV` of the present
+  module its own prefix names, and the launcher's and turns' are refused.
+- `exit-session` exits a quiet Codex session under turns' Codex host by stopping the
+  host: SIGTERM, then up to 15 seconds for it to end (`not-exited` when it still runs).
+  It used to refuse every Codex session `no-exit`; one without the host still is.
 - A launch follows its Claude session when Claude Code replaces the session's turns
   endpoint (each plugin reload does). A held Claude claim moves only to an endpoint whose
   parent process is the launch's own `claude`, the row's `pid` and `pid_started`
