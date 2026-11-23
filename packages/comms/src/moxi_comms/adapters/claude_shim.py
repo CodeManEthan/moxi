@@ -233,13 +233,14 @@ def frame_marks(author: dict, *, suppress_unverified: bool = False) -> str:
 
 
 def frame_line(payload: dict, directors=(), *, suppress_unverified: bool = False,
-               now: float | None = None, steered: bool = False) -> str:
+               now: float | None = None, steered: bool = False, policy=()) -> str:
     """ONE attributed frame line per message: who is speaking is never inferred.
 
-    `directors` is the RECIPIENT's launch-time declaration, already qualified. A verified
-    message from one of them -- or any operator-tier message -- leads with `directive
-    from`; a declared director whose attribution is not verified stays information standing
-    and the line says why.
+    `directors` is the RECIPIENT's launch-time list, already qualified, and `policy` the
+    part of it only the box's `[policy] directors` gave. A verified message from one of
+    them -- or any operator-tier message -- leads with `directive from`; a director whose
+    attribution is not verified, or a policy director whose name isn't provisioned, stays
+    information standing and the line says why (`directors.standing_of`).
 
     Silence is the common case and it is load-bearing: no parenthetical means chosen
     and verified, both of which the machinery guarantees rather than guesses.
@@ -248,7 +249,7 @@ def frame_line(payload: dict, directors=(), *, suppress_unverified: bool = False
     interrupt says so (`[interrupt]`), so the reader knows why mail came mid-turn.
     """
     a = payload["author"]
-    standing = standing_of(a, directors)
+    standing = standing_of(a, directors, policy=policy)
     marks = frame_marks(a, suppress_unverified=suppress_unverified)
     bits = [f"[comms] {standing.lead} {a['name']}{marks}"]
     if standing.note:
@@ -333,7 +334,7 @@ def end_line(payload: dict) -> str:
 
 def render_message(payload: dict, directors=(), *,
                    suppress_unverified: bool = False, now: float | None = None,
-                   steered: bool = False) -> str:
+                   steered: bool = False, policy=()) -> str:
     """ONE delivered message: the frame line, the body inside it, the closing line.
 
     The body is somebody else's prose arriving in a context comms does not own, so it gets
@@ -343,7 +344,7 @@ def render_message(payload: dict, directors=(), *,
     """
     return "\n".join([
         frame_line(payload, directors, suppress_unverified=suppress_unverified, now=now,
-                   steered=steered),
+                   steered=steered, policy=policy),
         *envelope.body(str(payload.get("text") or "")),
         end_line(payload),
     ])
@@ -452,7 +453,7 @@ def digest_senders(payloads: list) -> tuple[str, ...]:
 
 
 def render_digest(payloads: list, notice: str | None = None, directors=(), *,
-                  clock=time.time, steered: bool = False) -> str:
+                  clock=time.time, steered: bool = False, policy=()) -> str:
     # The header's attribution note and the per-frame `(unverified)` marks are ONE
     # statement: whichever place says it, the other stays quiet. The note only ever
     # speaks for the REPLAYED frames (`replay_is_unverified`), so it can only silence
@@ -473,7 +474,7 @@ def render_digest(payloads: list, notice: str | None = None, directors=(), *,
     for p in payloads:
         suppress = note and bool(p.get("backlog"))
         parts.append(render_message(p, directors, suppress_unverified=suppress,
-                                    now=clock(), steered=steered))
+                                    now=clock(), steered=steered, policy=policy))
     return "\n\n".join(parts)
 
 

@@ -38,8 +38,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from .attribution import TIER_OPERATOR, VERIFIED
-from .constants import DIRECTORS_ENV
+from .attribution import TIER_OPERATOR, TIER_STANDING, VERIFIED
+from .constants import DIRECTORS_ENV, POLICY_DIRECTORS_ENV
 from .scoping import NAME_RE, identity_of, split_tag
 
 SEPARATOR = ","
@@ -52,6 +52,12 @@ _DIRECTOR_NOTE = "your director"
 #: granted does not apply to a message whose sender was not proven.
 _DEGRADED_NOTE = ("your declared director, but this message's attribution is "
                   "unverified — information standing")
+#: A policy director (one this box's `[policy] directors` names, not the launch) whose
+#: message is verified but whose name holds no standing row: anyone may bind an unheld
+#: name, so the box's setting grants nothing until the name is provisioned.
+_UNPROVISIONED_NOTE = "policy director, not provisioned: information standing"
+_POLICY_DEGRADED_NOTE = ("policy director, but this message's attribution is "
+                         "unverified — information standing")
 
 
 class BadDirector(ValueError):
@@ -90,10 +96,41 @@ def declare(tags) -> list[str]:
     return declared
 
 
-def stamp(directors) -> dict:
-    """The env stamp, beside the identity stamp. Empty declaration stamps nothing."""
-    directors = list(directors or ())
-    return {DIRECTORS_ENV: SEPARATOR.join(directors)} if directors else {}
+def effective(declared, config, *, own: str, use_policy: bool) -> tuple[list[str], list[str]]:
+    """The directors one launch runs with, and which of them only the box's setting gave.
+
+    Returns `(full, policy)`: `full` is the launch-declared names (`declared`, qualified
+    here as `declare` qualifies them), then each of `config.policy.directors` not already
+    present, when `use_policy`; `policy` is the names that came only from the setting.
+    Order is kept and names are de-duplicated. The session's own qualified identity
+    `own` is left out of the policy part, so a policy director's own session doesn't
+    direct itself; a name the launch declared stays whatever it is.
+
+    A wrapper calls this once, where it builds its declared list, so the stamp, the
+    claim, the prints and every render carry both lists from then on.
+    """
+    full = declare(declared)
+    policy: list[str] = []
+    if use_policy:
+        for name in getattr(getattr(config, "policy", None), "directors", ()) or ():
+            if name not in full and name != own:
+                full.append(name)
+                policy.append(name)
+    return full, policy
+
+
+def stamp(directors, policy=()) -> dict:
+    """The env stamps, beside the identity stamp: the full list, and the part of it only
+    the box's setting gave. An empty list stamps nothing."""
+    directors, policy = list(directors or ()), list(policy or ())
+    out = {DIRECTORS_ENV: SEPARATOR.join(directors)} if directors else {}
+    if policy:
+        out[POLICY_DIRECTORS_ENV] = SEPARATOR.join(policy)
+    return out
+
+
+def _split(raw) -> tuple:
+    return tuple(part.strip() for part in (raw or "").split(SEPARATOR) if part.strip())
 
 
 def from_env(env=None) -> tuple:
@@ -101,8 +138,22 @@ def from_env(env=None) -> tuple:
     import os
 
     env = os.environ if env is None else env
-    raw = env.get(DIRECTORS_ENV) or ""
-    return tuple(part.strip() for part in raw.split(SEPARATOR) if part.strip())
+    return _split(env.get(DIRECTORS_ENV))
+
+
+def policy_from_env(env=None) -> tuple:
+    """Read the policy stamp back: the names in the full stamp that only the box's
+    setting gave. Already qualified."""
+    import os
+
+    env = os.environ if env is None else env
+    return _split(env.get(POLICY_DIRECTORS_ENV))
+
+
+def launch_declared(directors, policy=()) -> tuple:
+    """The full list without its policy part: the names the launch itself declared."""
+    policy = set(policy or ())
+    return tuple(name for name in directors or () if name not in policy)
 
 
 def validated(tags) -> tuple:
@@ -135,22 +186,37 @@ class Standing:
         return self.kind == DIRECTIVE
 
 
-def standing_of(author: dict, directors=()) -> Standing:
+def standing_of(author: dict, directors=(), *, policy=()) -> Standing:
     """What standing this author has WITH THIS RECIPIENT. The whole authority check.
 
     Operator first, and unconditionally: the operator's word is a directive whether or
     not anything was declared. Then the declaration, gated on verified attribution --
     an unverified director keeps information standing and says so.
+
+    `policy` is the part of `directors` that only the box's `[policy] directors` gave
+    (`effective`'s second list). Such a name is a directive only when the message is
+    verified AND its author is at the standing tier, which only provisioning writes; the
+    tier is read from the message, so provisioning the name later counts at once. A name
+    in `policy` is never also launch-declared (`effective` keeps the two apart), so a
+    name both declared and set takes the launch's rule.
     """
     author = author or {}
     if author.get("tier") == TIER_OPERATOR:
         return Standing(DIRECTIVE, "directive from", None)
-    if author.get("name") in set(directors or ()):
+    name = author.get("name")
+    if name in set(policy or ()):
+        if author.get("attribution") != VERIFIED:
+            return Standing(INFORMATION, "from", _POLICY_DEGRADED_NOTE)
+        if author.get("tier") != TIER_STANDING:
+            return Standing(INFORMATION, "from", _UNPROVISIONED_NOTE)
+        return Standing(DIRECTIVE, "directive from", _DIRECTOR_NOTE)
+    if name in set(directors or ()):
         if author.get("attribution") == VERIFIED:
             return Standing(DIRECTIVE, "directive from", _DIRECTOR_NOTE)
         return Standing(INFORMATION, "from", _DEGRADED_NOTE)
     return Standing(INFORMATION, "from", None)
 
 
-__all__ = ["DIRECTORS_ENV", "SEPARATOR", "DIRECTIVE", "INFORMATION", "BadDirector", "Standing",
-           "declare", "from_env", "qualify_director", "stamp", "standing_of", "validated"]
+__all__ = ["DIRECTORS_ENV", "POLICY_DIRECTORS_ENV", "SEPARATOR", "DIRECTIVE", "INFORMATION",
+           "BadDirector", "Standing", "declare", "effective", "from_env", "launch_declared",
+           "policy_from_env", "qualify_director", "stamp", "standing_of", "validated"]
