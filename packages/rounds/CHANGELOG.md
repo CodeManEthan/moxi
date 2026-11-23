@@ -33,6 +33,36 @@
   finishing would bring into the target holds a private file, a path under one, or a
   file where its folder would be; `check` reads it before it runs and `finish` again
   under its lock. `moxi rounds doctor` gains a private files row.
+- The merge queue acts on a CI run only once it has finished. Until every run a read
+  names reads `completed`, the candidate, rerun and main paths read it as pending: they
+  rerun nothing, read no failure log and count nothing toward the failed reads. A batch
+  or head `read` event names the runs still going in `running`, and the lander's log and
+  `moxi rounds queue` say the run is still running.
+- Main's full run is never a candidate's run: the lander leaves out every run whose id a
+  batch's read recorded when it reads the target's head, and `green` and `red` events
+  that named a candidate's run, older ones included, no longer count as main's. With no
+  `ci.ref`, a head that shows no run for ten minutes is given up (`no ref`) and the
+  director told. `moxi rounds queue` names the last landing and its candidate's run.
+- The lander tells a member's builder only while comms reads the builder's name as held
+  by a live session; a builder passed over is neither sent to nor recorded. A member's
+  notice that no name received goes once to the project's director, saying who it could
+  not reach. A message counts as undelivered only when no name got its text, and
+  `moxi rounds queue` names each send and a fix for a never-bound name and for a refused
+  credential.
+- `moxi rounds check --full` runs in a queue project: it runs and records the repo's
+  `check.command` at the tip without reading or changing `land`, and a passing run meets
+  the check step, the join's gate 3 and finish's, also after `land` is flipped to
+  `finish`.
+- The machine's check lock is taken in the order the checks asked for it, through a line
+  of ticket files beside the lock (`check.line/`). A ticket whose process is gone (pid
+  and start time, read the same way on every system) is removed at the next poll; one
+  not touched for a minute is passed over until it is touched again. `--no-wait` is
+  refused while a ticket waits, and the waiting line names the holder's round and stage,
+  how long it has held the lock and how many are ahead. The holder keeps
+  `check.holder.json` beside the lock, and `moxi doctor`'s new `check lock` row shows the
+  holder, its output's size and last write and the line in order, and warns of a holder
+  whose output has been quiet for 30 minutes, of a stale ticket and of a lock held with no
+  holder record.
 
 ## 0.1.3 (2026-11-23)
 
