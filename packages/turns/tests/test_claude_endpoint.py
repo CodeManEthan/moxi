@@ -671,15 +671,103 @@ def test_steer_appends_and_a_failed_append_refuses_idle(claude):
     assert bare(d.wait_ended(1)) == turns.Refused("idle")
 
 
-def test_the_runner_may_report_a_steer_held(claude):
+def _ids(event):
+    return [(r.id, r.how) for r in event.deliveries]
+
+
+def test_a_steer_held_at_its_turns_end_opens_a_turn_of_its_own(claude):
+    from moxi_turns.claude_endpoint import HELD_PROMPT
+
     ep, runner = claude()
     s = turns.find(session_id="s-1")
-    runner.turn_start("T")
-    d = s.steer("the word is KIWI")
+    events = watcher(s)
+    runner.turn_start("T1")
+    d = s.steer("the word is KIWI", ref="r-1", by="comms", senders=["ann"])
     runner.next_line()
     runner.report(leg.R_APPEND_DONE, delivery=d.id)
-    assert runner.report(leg.R_APPEND_HELD, delivery=d.id) == {"ok": True}
-    assert bare(d.wait_started(1)) == turns.Started("T")
+    assert bare(d.wait_started(1)) == turns.Started("T1")
+    # The runner reads the note unsent: held, ahead of the turn's end.
+    runner.report(leg.R_APPEND_HELD, delivery=d.id)
+    runner.turn_complete("T1", answer="the essay")
+    line = runner.next_line()
+    # The held note comes with the next request, so the prompt does not repeat it.
+    assert line == {"op": "submit", "delivery": d.id, "kind": "deliver",
+                    "text": HELD_PROMPT, "nonce": line["nonce"]}
+    with pytest.raises(TimeoutError):
+        d.wait_ended(0.1)                        # the first turn's end does not settle it
+    assert runner.enter(line["nonce"])["verdict"] == "pass"
+    runner.turn_start("T2")
+    runner.close(d.id, leg.END_RESOLVE)
+    runner.turn_complete("T2", answer="KIWI")
+    assert bare(d.wait_ended(2)) == turns.Ended("T2", "answer", answer="KIWI")
+    assert d.wait_ended(0).ref == "r-1"
+    got = [e for e in drain(events) if type(e).__name__ != "Ready"]
+    assert [type(e).__name__ for e in got] == ["TurnStarted", "TurnSteered", "TurnEnded",
+                                               "TurnStarted", "TurnEnded"]
+    assert _ids(got[2]) == []                    # T1 ends without naming the held steer
+    assert _ids(got[3]) == [(d.id, "opened")] and got[3].turn_id == "T2"
+    assert _ids(got[4]) == [(d.id, "opened")]
+
+
+def test_a_steer_a_request_carried_starts_no_turn(claude):
+    ep, runner = claude()
+    s = turns.find(session_id="s-1")
+    runner.turn_start("T1")
+    d = s.steer("the word is FIG")
+    runner.next_line()
+    runner.report(leg.R_APPEND_DONE, delivery=d.id)
+    runner.turn_complete("T1", answer="FIG")
+    assert bare(d.wait_ended(2)) == turns.Ended("T1", "answer", answer="FIG")
+    assert runner.no_line()
+    assert not s.facts().turn_open
+
+
+def test_a_steer_held_in_place_of_done_opens_a_turn_once_the_turn_ended(claude):
+    ep, runner = claude()
+    s = turns.find(session_id="s-1")
+    runner.turn_start("T1")
+    d = s.steer("late note")
+    runner.next_line()
+    runner.turn_complete("T1", answer="done")
+    # The append resolved after the turn's end: held, with no append.done before it.
+    runner.report(leg.R_APPEND_HELD, delivery=d.id)
+    line = runner.next_line()
+    assert line["op"] == "submit" and line["delivery"] == d.id
+    assert runner.enter(line["nonce"])["verdict"] == "pass"
+    runner.turn_start("T2")
+    runner.close(d.id, leg.END_RESOLVE)
+    assert bare(d.wait_started(2)) == turns.Started("T2")
+
+
+def test_a_held_steer_goes_ahead_of_a_delivery_queued_behind_its_turn(claude):
+    ep, runner = claude()
+    s = turns.find(session_id="s-1")
+    runner.turn_start("T1")
+    queued = s.deliver("plain mail")
+    d = s.steer("held note")
+    runner.next_line()
+    runner.report(leg.R_APPEND_DONE, delivery=d.id)
+    runner.report(leg.R_APPEND_HELD, delivery=d.id)
+    runner.turn_complete("T1", answer="x")
+    assert runner.next_line()["delivery"] == d.id
+    assert runner.no_line()                      # one window at a time
+    with pytest.raises(TimeoutError):
+        queued.wait_started(0.1)
+
+
+def test_a_held_report_for_a_settled_steer_or_a_delivery_changes_nothing(claude):
+    ep, runner = claude()
+    s = turns.find(session_id="s-1")
+    runner.turn_start("T1")
+    d = s.steer("carried")
+    runner.next_line()
+    runner.report(leg.R_APPEND_DONE, delivery=d.id)
+    runner.turn_complete("T1", answer="x")
+    assert bare(d.wait_ended(2)) == turns.Ended("T1", "answer", answer="x")
+    runner.report(leg.R_APPEND_HELD, delivery=d.id)
+    runner.report(leg.R_APPEND_HELD, delivery="nobody")
+    assert runner.no_line()
+    assert bare(d.wait_ended(0)) == turns.Ended("T1", "answer", answer="x")
 
 
 def test_the_endpoint_end_releases_a_held_turn_then_answers_lost(claude):

@@ -77,7 +77,12 @@ origin's kind and `opens` (no main-loop turn was open in the runner), which go o
 window's delivery, whose `by` and `senders` the event carries.
 
 A steer reads `Started`, and its turn names it, once the runner reports `append.done`
-(`$.session.append` resolved without a deny); `append.failed` refuses it `idle`.
+(`$.session.append` resolved without a deny); `append.failed` refuses it `idle`. A steer
+the runner reports `append.held` (its turn ended before any request carried the note, and
+Claude Code holds the note for the next request) goes to the core's `on_steer_held`: it
+leaves its turn and opens one of its own. Its submit line carries `HELD_PROMPT` in place
+of its text, since Claude Code sends the held note beside that prompt, so the model reads
+the note once.
 
 A fork goes to the runner on a `fork` line, and a fork's further round
 (`fork.continue`) on a `fork.continue` line naming the fork's agent id; neither holds a
@@ -133,6 +138,10 @@ LIVE_WAIT_S = 1.0
 PARENT_POLL_S = 0.5
 #: How many closed windows the endpoint remembers, to name a late entry's delivery.
 CLOSED_KEPT = 64
+#: The prompt of the turn a held steer opens. Claude Code sends the held note with the
+#: session's next request, beside this prompt, so the prompt does not repeat its text.
+HELD_PROMPT = ("A note came in as your last turn ended, after its last request, so it "
+               "comes with this prompt. Read it and act on it.")
 
 
 @dataclass
@@ -370,8 +379,9 @@ class ClaudeHarness(Harness):
                 if w is None:
                     return
                 d = w.spec
+            text = HELD_PROMPT if d.kind == "steer" else d.text
             if self._lines.write({"op": leg.LINE_SUBMIT, "delivery": d.id,
-                                  "kind": w.kind, "text": d.text, "nonce": w.nonce}):
+                                  "kind": w.kind, "text": text, "nonce": w.nonce}):
                 return
             with self._lock:
                 if self._window is not w:
@@ -495,8 +505,7 @@ class ClaudeHarness(Harness):
         elif kind == leg.R_APPEND_HELD:
             delivery = body.get("delivery")
             if isinstance(delivery, str):
-                log.info("steer %s went in, but its turn ended before a request carried "
-                         "it; Claude Code holds it for the next request", delivery)
+                ep.on_steer_held(delivery)
         elif kind == leg.R_COMMAND_DONE:
             self._command_done(body)
         elif kind in (leg.R_FORK_STARTED, leg.R_FORK_DONE, leg.R_FORK_LOST):

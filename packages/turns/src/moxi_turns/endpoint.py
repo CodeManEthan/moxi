@@ -966,6 +966,33 @@ class Endpoint:
                                             answer=turn.answer))
             self._cond.notify_all()
 
+    def on_steer_held(self, delivery_id: str) -> None:
+        """The harness took a steer, but the turn it went into ended before any request
+        carried it, and the harness holds the text for the session's next request (Claude
+        Code's plugin note). The steer leaves that turn, whose `turn.ended` then does not
+        name it, and waits to open a turn of its own, ahead of every queued delivery: it
+        goes to the adapter's `submit` once no turn runs and none is in flight, and the
+        turn it opens names it, its end settling the steer. A word on a steer that has
+        settled, or on a delivery that is no steer, changes nothing."""
+        with self._lock:
+            d = self._deliveries.get(delivery_id)
+            if (self._gone is not None or d is None or d.spec.kind != "steer"
+                    or d.state not in (_STEERING, _STARTED) or d.expired):
+                log.info("steer %s reported held after it settled; it changes nothing",
+                         delivery_id)
+                return
+            turn = d.turn
+            if turn is not None and d.id in turn.steered:
+                turn.steered.remove(d.id)
+            log.info("steer %s was held at the end of turn %s; it opens a turn of its own",
+                     d.id, turn.turn_id if turn is not None else None)
+            d.turn = None
+            d.state = _QUEUED
+            d.handed_at = None
+            self._queue.appendleft(d.id)
+            self._cond.notify_all()
+        self._pump()
+
     def on_stop(self, facts: StopFacts) -> str | None:
         """A Stop of the main loop: ask the stop handler. A string holds the turn open
         with that text as the reason; None (no handler, no answer in time) lets it end."""
@@ -1205,8 +1232,8 @@ class Endpoint:
         recorded against the open turn and its `append` put on the worker under one hold
         of the lock. It reads `Started`, and watchers get `turn.steered`, once the adapter
         confirms the harness took it (`steered`); the harness's refusal settles it
-        `refused` `idle`. It never becomes a turn of its own. `by` and `senders` are as
-        `deliver`'s."""
+        `refused` `idle`. It becomes a turn of its own only when the harness reports it
+        held at its turn's end (`on_steer_held`). `by` and `senders` are as `deliver`'s."""
         with self._lock:
             d = self._new("steer", text, ref, by=by, senders=tuple(senders))
             reason = self._unable("steer")

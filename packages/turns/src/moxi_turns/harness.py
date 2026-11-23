@@ -75,6 +75,11 @@ happened comes back through the endpoint's adapter-side calls:
                                           only-if-idle one is re-checked against the
                                           ledger; a reason refuses it
     endpoint.on_steered(delivery_id)         the harness took a steer into the running turn
+    endpoint.on_steer_held(delivery_id)      the turn the steer went into ended before any
+                                          request carried it, and the harness holds the
+                                          text for the next request: the steer opens a
+                                          turn of its own, handed to `submit` with
+                                          `kind` "steer"
     endpoint.fork_started(delivery_id, agent_id)
                                           the harness started the fork a `fork` delivery
                                           asked for, under the id it gave it
@@ -107,7 +112,9 @@ The adapter's duty to settle: every delivery handed to `submit` ends in exactly 
 `turn_started(…, delivery.id)` or `turn_tied(…, delivery.id)` (the tie),
 `on_refused(delivery.id, reason)` or `lost(delivery.id, reason)`; every delivery handed to
 `append` in one `on_steered(delivery.id)`, `on_refused(delivery.id, "idle")` (the harness had no
-turn to take it into) or `lost(delivery.id, reason)`; every delivery handed to `fork` in
+turn to take it into), `on_steer_held(delivery.id)` (after `on_steered` or in its place;
+the steer then goes to `submit`, under the duty of a submitted delivery) or
+`lost(delivery.id, reason)`; every delivery handed to `fork` in
 one `fork_ended(delivery.id, …)` or `lost(delivery.id, reason)`, after at most one
 `fork_started(delivery.id, agent_id)`, the reason starting `denied` when the harness
 refused to start the fork and `gone` when the fork went away with no answer; and every
@@ -158,7 +165,10 @@ changes nothing.
 An only-if-idle delivery carries its preconditions (`Delivery.refuse_draft`,
 `Delivery.refuse_agents`), which the adapter checks with the live facts where the delivery
 takes effect, after `entering` passes. A steer is taken into the running turn or refused
-`idle`; it never becomes a turn of its own.
+`idle`. It becomes a turn of its own only when the adapter reports it held
+(`on_steer_held`): the harness took the text, but no request of the turn carried it before
+the turn ended. `submit` then gets it with `kind` "steer", and its prompt is the adapter's
+to choose, since the harness carries the held text with the next request itself.
 """
 
 from __future__ import annotations
@@ -214,7 +224,8 @@ class Live:
 @dataclass(frozen=True)
 class Delivery:
     """One text handed to the adapter. `kind` is "deliver" (a new turn, handed to
-    `submit`), "steer" (into the running turn, handed to `append`) or "fork" (a fork's
+    `submit`), "steer" (into the running turn, handed to `append`; handed to `submit` only
+    once the adapter reported it held) or "fork" (a fork's
     task, handed to `fork`). `only_if_idle`: the caller asked for a new turn only if none is open, so
     `entering` re-checks it, and the refusal flags apply. `ref` is the caller's, carried
     for the adapter's logs; turns never acts on it. `by` is the module that asked and
