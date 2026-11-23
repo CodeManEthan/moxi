@@ -88,7 +88,7 @@ def _files(root: Path, pattern: str | None = None) -> list[str]:
     if done.returncode == 0:
         return sorted(p for p in done.stdout.decode("utf-8", "surrogateescape").split("\0")
                       if p)
-    return sorted(str(p.relative_to(root)) for p in root.rglob("*") if p.is_file())
+    return sorted(p.relative_to(root).as_posix() for p in root.rglob("*") if p.is_file())
 
 
 def _table_lines(text: str) -> dict[str, int]:
@@ -481,7 +481,7 @@ def _numeric(parameter: inspect.Parameter) -> bool:
 def _source_location(root: Path, obj, qualified: str) -> tuple[str, int]:
     try:
         source = Path(inspect.getsourcefile(obj) or "").resolve()
-        path = str(source.relative_to(root.resolve()))
+        path = source.relative_to(root.resolve()).as_posix()
         lines, line = inspect.getsourcelines(obj)
         try:
             # A decorated definition's source starts at its first decorator; a mark goes
@@ -496,7 +496,7 @@ def _source_location(root: Path, obj, qualified: str) -> tuple[str, int]:
     module = sys.modules.get(getattr(obj, "__module__", ""))
     try:
         source = Path(module.__file__).resolve()
-        path = str(source.relative_to(root.resolve()))
+        path = source.relative_to(root.resolve()).as_posix()
         tree = ast.parse(source.read_text(encoding="utf-8"))
         wanted = qualified.split(".")[0] if qualified.endswith(".__init__") else qualified.split(".")[-1]
         node = next(one for one in ast.walk(tree)

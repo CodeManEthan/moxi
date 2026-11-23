@@ -16413,6 +16413,17 @@ ui	packages/ui/tests/test_settings.py	assert keys["idle_s"]["changed"] and keys[
 ui	packages/ui/tests/test_settings.py	assert keys["port"]["label"] == "Port" and not keys["port"]["changed"]	keep	changed	changed
 ui	packages/ui/tests/test_settings.py	assert status == 422 and data["refused"].endswith("moxi ui gateway enable")	keep	refused	refused
 ui	packages/ui/tests/test_settings.py	@pytest.mark.parametrize("module", ["nosuch", "Not A Module", "changed"])	keep	changed	changed
+ui	packages/ui/tests/test_settings.py	assert not changed(r"C:\Users\u\ui-shell16\notes", "~/notes")	keep	changed	changed
+ui	packages/ui/tests/test_settings.py	assert not changed(r"C:\Users\u\ui-shell16\notes\a", "~/notes/a")	keep	changed	changed
+ui	packages/ui/tests/test_settings.py	assert not changed("c:\\users\\U\\ui-shell16\\Notes\\", "~/notes")	keep	changed	changed
+ui	packages/ui/tests/test_settings.py	assert not changed(r"C:\Users\u\ui-shell16", "~")	keep	changed	changed
+ui	packages/ui/tests/test_settings.py	assert not changed("C:/Users/u/ui-shell16/notes", "~/notes")	keep	changed	changed
+ui	packages/ui/tests/test_settings.py	assert changed(r"C:\Users\u\ui-shell16\notes2", "~/notes")	keep	changed	changed
+ui	packages/ui/tests/test_settings.py	assert changed(r"D:\Users\u\ui-shell16\notes", "~/notes")	keep	changed	changed
+ui	packages/ui/tests/test_settings.py	assert not changed(None, "")	keep	changed	changed
+ui	packages/ui/tests/test_settings.py	assert changed(r"C:\x", "")	keep	changed	changed
+ui	packages/ui/tests/test_settings.py	assert not changed("/h/x", "~/x") and not changed("/h/x/", "~/x") and not changed("/h", "~")	keep	changed	changed
+ui	packages/ui/tests/test_settings.py	assert changed("/h/X", "~/x")	keep	changed	changed
 ui	packages/ui/tests/test_settings_save.py	run = run or Run(stdout=json.dumps({"changed": True, "problem": None, "fix": None,	keep	changed	changed
 ui	packages/ui/tests/test_settings_save.py	assert argv[5:] == ["set", "--by", "ui", "--json", "--", "demo", name, spelled]	keep	set	set
 ui	packages/ui/tests/test_settings_save.py	assert result["outcome"] == "refused" and run.writes == []	keep	refused	refused

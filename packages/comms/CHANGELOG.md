@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- On Windows the token store's profile check compares real paths: the store's and those
+  of `USERPROFILE` and `LOCALAPPDATA`, with links and junctions resolved and every part
+  spelled long. A store spelled inside the profile that leads out of it through a
+  junction is now refused, since the profile's access list doesn't reach it there, and a
+  short (8.3) spelling of a place inside the profile is now accepted.
 - An opened row of a bound agent draws its `Session` line as it opens, reading `Reading…`
   until launcher's and sessions' reads answer, and then their words in the same place.
   Before, the line arrived late above `Cache`, `Waits on` and the send box and pushed

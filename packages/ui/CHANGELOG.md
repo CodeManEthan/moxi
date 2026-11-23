@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+- Settings compares a `path` key's value with its default as paths: a default under the
+  home folder is joined with the platform's separator, and both sides are normalised
+  (and case-folded on Windows) before the comparison. On Windows a path key left at its
+  default no longer counts as changed in the list's counts and the changed view.
+
 ## 0.2.6 (2026-11-22)
 
 - `client.js` gains `WaitClock`, the wait a page shows a line after (`Reading…` once its
