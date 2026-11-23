@@ -590,7 +590,7 @@ def test_the_host_holds_the_lifeline_and_ends_when_the_adapter_dies(
         assert wait_until(lambda: host_said(headless_host, "lifeline-closed"), PROC_WAIT_S)
         # The wrapper exits a moment after its host wrote that line: its exit is what the
         # test asserts, so wait for it here, before the `finally` may kill it.
-        proc.wait(timeout=PROC_WAIT_S)
+        proc.wait(PROC_WAIT_S)
     finally:
         if proc.poll() is None:
             proc.kill()
