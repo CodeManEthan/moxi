@@ -692,7 +692,7 @@ def test_a_steer_held_at_its_turns_end_opens_a_turn_of_its_own(claude):
     line = runner.next_line()
     # The held note comes with the next request, so the prompt does not repeat it.
     assert line == {"op": "submit", "delivery": d.id, "kind": "deliver",
-                    "text": HELD_PROMPT, "nonce": line["nonce"]}
+                    "text": HELD_PROMPT, "nonce": line["nonce"], "note": "the word is KIWI"}
     with pytest.raises(TimeoutError):
         d.wait_ended(0.1)                        # the first turn's end does not settle it
     assert runner.enter(line["nonce"])["verdict"] == "pass"
@@ -776,6 +776,74 @@ def test_a_held_steer_goes_ahead_of_a_delivery_queued_behind_its_turn(claude):
     assert runner.no_line()                      # one window at a time
     with pytest.raises(TimeoutError):
         queued.wait_started(0.1)
+
+
+def test_a_late_held_steer_that_a_queued_delivery_carried_ends_with_that_turn(claude):
+    ep, runner = claude()
+    s = turns.find(session_id="s-1")
+    events = watcher(s)
+    runner.turn_start("T1")
+    queued = s.deliver("plain mail")
+    d = s.steer("late note", ref="r-1")
+    runner.next_line()
+    runner.turn_complete("T1", answer="x")
+    mail = runner.next_line()                    # the queued delivery goes first
+    assert mail["delivery"] == queued.id and "note" not in mail
+    # The append resolved after T1's end, once the delivery was already on its way.
+    runner.report(leg.R_APPEND_HELD, delivery=d.id)
+    assert runner.no_line()                      # one window at a time
+    assert runner.enter(mail["nonce"])["verdict"] == "pass"
+    runner.turn_start("T2")
+    runner.close(queued.id, leg.END_RESOLVE)
+    runner.turn_complete("T2", answer="mail and note answered")
+    line = runner.next_line()
+    assert line["delivery"] == d.id and line["note"] == "late note"
+    # The delivery's request carried the note: the runner submits nothing.
+    runner.close(d.id, leg.END_CARRIED)
+    assert bare(d.wait_ended(2)) == turns.Ended("T2", "answer",
+                                                answer="mail and note answered")
+    assert runner.no_line()
+    assert not s.facts().turn_open
+    got = [e for e in drain(events) if type(e).__name__ != "Ready"]
+    assert [type(e).__name__ for e in got] == ["TurnStarted", "TurnEnded", "TurnStarted",
+                                               "TurnEnded"]
+
+
+def test_a_held_steer_that_the_open_turn_carries_joins_it_as_a_steer(claude):
+    ep, runner = claude()
+    s = turns.find(session_id="s-1")
+    events = watcher(s)
+    runner.turn_start("T1")
+    d = s.steer("held note")
+    runner.next_line()
+    runner.report(leg.R_APPEND_DONE, delivery=d.id)
+    runner.report(leg.R_APPEND_HELD, delivery=d.id)
+    runner.turn_complete("T1", answer="x")
+    line = runner.next_line()
+    assert line["delivery"] == d.id
+    # The person's prompt started a turn before the runner read the line.
+    runner.turn_start("T2")
+    runner.close(d.id, leg.END_CARRIED)
+    assert bare(d.wait_started(2)) == turns.Started("T2")
+    with pytest.raises(TimeoutError):
+        d.wait_ended(0.1)
+    runner.turn_complete("T2", answer="noted")
+    assert bare(d.wait_ended(2)) == turns.Ended("T2", "answer", answer="noted")
+    got = [e for e in drain(events) if type(e).__name__ != "Ready"]
+    assert [type(e).__name__ for e in got] == ["TurnStarted", "TurnSteered", "TurnEnded",
+                                               "TurnStarted", "TurnSteered", "TurnEnded"]
+    assert got[3].turn_id == "T2" and _ids(got[3]) == []   # the person's turn
+    assert _ids(got[5]) == [(d.id, "steered")]
+
+
+def test_a_carried_close_for_a_delivery_that_is_no_held_steer_reads_lost(claude):
+    ep, runner = claude()
+    s = turns.find(session_id="s-1")
+    d = s.deliver("plain")
+    runner.next_line()
+    runner.close(d.id, leg.END_CARRIED)
+    got = bare(d.wait_ended(2))
+    assert isinstance(got, turns.Lost) and got.reason.startswith("untied")
 
 
 def test_a_held_report_for_a_settled_steer_or_a_delivery_changes_nothing(claude):

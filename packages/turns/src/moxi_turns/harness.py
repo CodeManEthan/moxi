@@ -80,6 +80,11 @@ happened comes back through the endpoint's adapter-side calls:
                                           text for the next request: the steer opens a
                                           turn of its own, handed to `submit` with
                                           `kind` "steer"
+    endpoint.on_steer_carried(delivery_id) -> bool
+                                          a held steer handed to `submit` needs no turn
+                                          of its own: another turn's request carried
+                                          the held text; False when it was no held steer
+                                          waiting, or no turn can take it
     endpoint.fork_started(delivery_id, agent_id)
                                           the harness started the fork a `fork` delivery
                                           asked for, under the id it gave it
@@ -110,7 +115,8 @@ happened comes back through the endpoint's adapter-side calls:
 
 The adapter's duty to settle: every delivery handed to `submit` ends in exactly one
 `turn_started(…, delivery.id)` or `turn_tied(…, delivery.id)` (the tie),
-`on_refused(delivery.id, reason)` or `lost(delivery.id, reason)`; every delivery handed to
+`on_refused(delivery.id, reason)`, `lost(delivery.id, reason)` or, for a held steer, an
+`on_steer_carried(delivery.id)` that answered True; every delivery handed to
 `append` in one `on_steered(delivery.id)`, `on_refused(delivery.id, "idle")` (the harness had no
 turn to take it into), `on_steer_held(delivery.id)` (after `on_steered` or in its place;
 the steer then goes to `submit`, under the duty of a submitted delivery) or
@@ -168,7 +174,9 @@ takes effect, after `entering` passes. A steer is taken into the running turn or
 `idle`. It becomes a turn of its own only when the adapter reports it held
 (`on_steer_held`): the harness took the text, but no request of the turn carried it before
 the turn ended. `submit` then gets it with `kind` "steer", and its prompt is the adapter's
-to choose, since the harness carries the held text with the next request itself.
+to choose, since the harness carries the held text with the next request itself. Where
+another turn's request carried the held text first, the adapter submits nothing and says
+so (`on_steer_carried`).
 """
 
 from __future__ import annotations

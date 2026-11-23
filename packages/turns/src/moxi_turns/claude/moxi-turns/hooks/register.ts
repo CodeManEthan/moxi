@@ -25,9 +25,10 @@
 //   guards   {op, table}   the guard table again, at each ready; it replaces the one held
 //   floors   {op, rows}    every after-tool row's floor, at each change; replaces the map
 //   failed   {op, leg, error}   the endpoint could not start: its only line
-//   submit   {op, delivery, kind, text, nonce}
+//   submit   {op, delivery, kind, text, nonce, note?}
 //            opens the submit's window and calls $.prompt.submit with the line
-//            `moxi-turns-window: <nonce>` first (entry, below); one window at a time
+//            `moxi-turns-window: <nonce>` first (entry, below); one window at a time.
+//            `note` comes only on a held steer's submit: its text (the held note, below)
 //   append   {op, delivery, text}             a steer: $.session.append, a user row
 //   live     {op, ask}                        the live facts: answered on POST /live
 //   agents   {op, ask}                        $.agent.list(): answered on POST /agents
@@ -50,7 +51,8 @@
 //                             drop (reason: the gate's code, else `dropped`; `unsupported`
 //                             when the gate is not loaded and nothing was submitted) or
 //                             fail (reason: words). Sent whenever it settles, after a
-//                             bound's report too.
+//                             bound's report too. A held steer's submit that another
+//                             request made needless closes `carried`, nothing submitted.
 //              submit.bound   {delivery, reason}  the runner's bound (below)
 //              append.done    {delivery}  $.session.append resolved without a deny
 //              append.failed  {delivery, reason}
@@ -328,6 +330,14 @@
 // turn.complete. A read that fails reports none held. An append that resolves while no
 // main turn is open reports `append.held` in place of `append.done`, since no request is
 // on its way to carry it.
+//
+// The endpoint then hands the held steer back on a `submit` line with its text as `note`.
+// Before it submits, the runner reads the messages again: the note may have gone out with
+// another request since (the person's prompt went first, or a delivery the endpoint handed
+// before the held report). A note in a user message before the last assistant message, or
+// any note while a main turn is open (that turn's requests carry it), was carried: the
+// runner submits nothing and reports `submit.close` with end `carried`. Otherwise it
+// submits the line's `text`, the prompt that points at the note.
 
 import type { EngineInterface, Register } from 'claude-code'
 
@@ -799,6 +809,41 @@ export function unsent(messages: unknown, of: readonly Steer[]): string[] {
   return of.filter(s => s.text !== '' && texts.some(t => t.includes(s.text))).map(s => s.delivery)
 }
 
+/** Where a held steer's note stands when its own submit comes, read from `messages`, the
+ *  messages the next request is built from (`$.session.messages({as: 'api'})`), and
+ *  `turnIsOpen`, whether a main turn is open: `carried` when a user message before the
+ *  last assistant message holds it, or when it is anywhere while a main turn is open (that
+ *  turn's requests carry it); else `held`. */
+export function noteStands(messages: unknown, note: string, turnIsOpen: boolean): 'held' | 'carried' {
+  if (!Array.isArray(messages)) return 'held'
+  const last = messages.findLastIndex(m => (m as { role?: unknown } | null)?.role === 'assistant')
+  let carried = false
+  let trailing = false
+  messages.forEach((m, i) => {
+    const { role, content } = (m ?? {}) as { role?: unknown; content?: unknown }
+    if (role !== 'user' || !Array.isArray(content)) return
+    for (const b of content) {
+      const { type, text } = (b ?? {}) as { type?: unknown; text?: unknown }
+      if (type !== 'text' || typeof text !== 'string' || !text.includes(note)) continue
+      if (i > last) trailing = true
+      else carried = true
+    }
+  })
+  if (turnIsOpen && (carried || trailing)) return 'carried'
+  return carried && !trailing ? 'carried' : 'held'
+}
+
+/** Where the note of the held steer `delivery` stands as its submit comes; `held` when the
+ *  messages cannot be read. */
+async function heldNote($: Dollar, delivery: string, note: string): Promise<'held' | 'carried'> {
+  try {
+    return noteStands(await $.session.messages({ as: 'api' }), note, turnOpen !== null)
+  } catch (err) {
+    log($, `the messages were not read at held steer ${delivery}'s submit: ${String(err)}`)
+    return 'held'
+  }
+}
+
 /** The steers of the turn that just completed which Claude Code holds for the next
  *  request; none when the messages cannot be read. */
 async function heldSteers($: Dollar, of: readonly Steer[]): Promise<string[]> {
@@ -1138,7 +1183,18 @@ async function onLine($: Dollar, line: string): Promise<void> {
       // Without a nonce the gate would drop the prompt: submit nothing, say so.
       void report($, 'submit.close', { delivery, end: 'fail', reason: 'the submit line carries no window nonce' })
     } else {
-      await openWindow($, delivery, str(m.text) ?? '', nonce)
+      const note = str(m.note)
+      if (note !== undefined && (await heldNote($, delivery, note)) === 'carried') {
+        // A new submit means the endpoint closed the last window, as at openWindow.
+        if (win !== null) {
+          stopTimer(win)
+          win = null
+        }
+        log($, `held steer ${delivery} needs no turn of its own: another request carried its note`)
+        void report($, 'submit.close', { delivery, end: 'carried', reason: null })
+      } else {
+        await openWindow($, delivery, str(m.text) ?? '', nonce)
+      }
     }
   } else if (op === 'append' && delivery !== undefined) {
     await append($, delivery, str(m.text) ?? '')

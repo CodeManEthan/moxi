@@ -256,7 +256,10 @@ A shell left over does not make the command a failure: the command ran.
   line saying a note came with it (Claude Code sends the held text beside that prompt).
   The session's `prompt` listeners read the steer's text as that prompt's `text`. That
   turn's `turn.started` and `turn.ended` name the steer as `opened`, and its `ended` is
-  that turn's end.
+  that turn's end. When another turn's request carried the held text first (the person's
+  prompt, or a delivery that went ahead of the steer), no turn of its own runs: with that
+  turn still open the steer joins it, as a `turn.steered` of it, and ends with it; else it
+  ends with that turn, whose `turn.ended` went out without naming it.
 - `source` is one of `startup`, `resume`, `clear`, `compact`, or null when the harness did
   not say.
 

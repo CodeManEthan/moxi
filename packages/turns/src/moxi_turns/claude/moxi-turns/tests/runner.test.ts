@@ -6,7 +6,7 @@
 import { describe, expect, test } from 'claude-code/testing'
 import { ROOT_ARGV, SOCK, commandRow, world } from './world'
 import type { World } from './world'
-import { skipsHold, unsent } from '../hooks/register'
+import { noteStands, skipsHold, unsent } from '../hooks/register'
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type E = any
@@ -1196,6 +1196,68 @@ describe('the held note', () => {
     expect(w.kinds()).not.toContain('append.held')
     await turnEnd($, 't1')
     expect(w.kinds().slice(1)).toEqual(['turn.start', 'append.done', 'append.held', 'turn.complete'])
+  })
+})
+
+describe('a held steer\'s submit', () => {
+  const note = (text: string) => ({ role: 'user', content: [{ type: 'text', text: `<system-reminder>\nNote from the moxi-turns plugin, not from the user:\n${text}\n</system-reminder>` }] })
+  const answer = (text: string) => ({ role: 'assistant', content: [{ type: 'text', text }] })
+  const ask = (text: string) => ({ role: 'user', content: [{ type: 'text', text }] })
+  const POINTER = 'a note came with this prompt'
+  const heldLine = (delivery: string, text: string) => ({ ...submitLine(delivery, POINTER), note: text })
+
+  test('a note still held: the pointer is submitted, and the note comes beside it', async ($: E, on) => {
+    const w = world(on)
+    await attached($, w)
+    w.messages = [ask('write an essay'), answer('the essay'), note('the word is KIWI')]
+    await w.line(heldLine('d1', 'the word is KIWI'))
+    expect(w.submits).toEqual([`moxi-turns-window: ${N1}\n${POINTER}`])
+    expect(closes(w)).toMatchObject([{ delivery: 'd1', end: 'resolve' }])
+  })
+
+  test('a note another request carried: nothing is submitted, and the window closes carried', async ($: E, on) => {
+    const w = world(on)
+    await attached($, w)
+    // The person's prompt went first and carried the note; its answer came after.
+    w.messages = [ask('write an essay'), answer('the essay'), note('the word is FIG'), ask('and now?'), answer('FIG, noted')]
+    await w.line(heldLine('d1', 'the word is FIG'))
+    expect(w.submits).toEqual([])
+    expect(closes(w)).toEqual([{ seq: 2, kind: 'submit.close', delivery: 'd1', end: 'carried', reason: null }])
+    expect(w.logs).toContain('moxi-turns: held steer d1 needs no turn of its own: another request carried its note')
+  })
+
+  test('a note still trailing while a main turn is open: that turn carries it, so nothing is submitted', async ($: E, on) => {
+    const w = world(on)
+    await attached($, w)
+    await turnStart($, 't2')
+    w.messages = [answer('the essay'), note('the word is PEAR'), ask('typed meanwhile')]
+    await w.line(heldLine('d1', 'the word is PEAR'))
+    expect(w.submits).toEqual([])
+    expect(closes(w)).toMatchObject([{ delivery: 'd1', end: 'carried' }])
+  })
+
+  test('a submit with no note reads no messages', async ($: E, on) => {
+    const w = world(on)
+    await attached($, w)
+    await w.line(submitLine('d1', 'plain'))
+    expect(w.messageReads).toBe(0)
+  })
+})
+
+describe('noteStands', () => {
+  const user = (text: string) => ({ role: 'user', content: [{ type: 'text', text }] })
+  const bot = { role: 'assistant', content: [{ type: 'text', text: 'ok' }] }
+
+  test('held after the last answer, carried before it, and carried at all while a turn is open', () => {
+    expect(noteStands([user('a'), bot, user('x NOTE y')], 'NOTE', false)).toBe('held')
+    expect(noteStands([user('x NOTE y'), bot], 'NOTE', false)).toBe('carried')
+    // An earlier copy of the same text does not hide the note still held.
+    expect(noteStands([user('NOTE'), bot, user('NOTE')], 'NOTE', false)).toBe('held')
+    expect(noteStands([bot, user('NOTE')], 'NOTE', true)).toBe('carried')
+    expect(noteStands([user('NOTE'), bot], 'NOTE', true)).toBe('carried')
+    // Only text blocks of user messages count.
+    expect(noteStands([{ role: 'assistant', content: [{ type: 'text', text: 'NOTE' }] }], 'NOTE', false)).toBe('held')
+    expect(noteStands({ deny: 'no' }, 'NOTE', false)).toBe('held')
   })
 })
 
