@@ -23,9 +23,11 @@ modes = ["interactive"]
 command = ["codex", "exec", "--help"]
 modes = ["exec"]
 """
-ROW = '[x]\ntype = "string"\ndefault = ""\ndoc = "d"\nflag = "-x"\nmodes = ["interactive"]\n'
+ROW = ('[x]\ntype = "string"\ndefault = ""\ndoc = "d"\nflag = "-x"\nmodes = ["interactive"]\n'
+       'fork = "copy"\n')
 PICK = ROW + 'values = ["a", "b"]\n'
-SWITCH = '[x]\ntype = "bool"\ndefault = false\ndoc = "d"\nflag = "-x"\nmodes = ["interactive"]\n'
+SWITCH = ('[x]\ntype = "bool"\ndefault = false\ndoc = "d"\nflag = "-x"\n'
+          'modes = ["interactive"]\nfork = "copy"\n')
 
 #: Where each settable row is drawn: group, then subgroup, then the rows in it.
 ASSIGNED = {
