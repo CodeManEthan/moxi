@@ -838,7 +838,7 @@ def _adapter_process(session: Session, env: dict, harness_pid: int, handle: int,
 
 
 def adapter_shim(session: Session, harness_pid: int, **extra):
-    """The session's `ClaudeShim`: its claim (name, scope, directors) keyed by the
+    """The session's `ClaudeShim`: its claim (name, scope, both director lists) keyed by the
     session id, its claim socket in the session's directory with the `claude` process as
     the claim's root, and its supervisor on. The session id is the one the launch named
     to `claude`, stated from the bind until the first look replaces it; an
@@ -851,7 +851,8 @@ def adapter_shim(session: Session, harness_pid: int, **extra):
     root = root_of(harness_pid, TREE)
     shim = ClaudeShim(name=session.name, scope=None if session.global_ else session.scope,
                       global_=session.global_, project=session.project,
-                      directors=session.directors, autoreconnect=True,
+                      directors=session.directors,
+                      policy_directors=session.policy_directors, autoreconnect=True,
                       session_id="", claim_key=session.id,
                       claim_socket=session.claim_socket,
                       claim_roots=[root] if root else [], listen_claims=True, **extra)

@@ -998,7 +998,7 @@ class CodexAdapter(HarnessAdapter):
         high = max(int(mid) for mid in ids)
         try:
             text = render_digest(batch, None, self.agent.directors, clock=self.clock,
-                                 steered=True)
+                                 steered=True, policy=self._policy_directors())
             self.marks[str(high)] = self.claims.hold_mark()
             receipt = self._hand_in(text, high, ids, steer=True,
                                     senders=digest_senders(batch))
@@ -1011,7 +1011,8 @@ class CodexAdapter(HarnessAdapter):
             directors = tuple(getattr(self.agent, "directors", None) or ())
             session_id = self.mirror_session()
             for p in batch:
-                self.reply_ledger.open(p, directors, session_id, now)
+                self.reply_ledger.open(p, directors, session_id, now,
+                                       policy=self._policy_directors())
         self.on_delivered(text, high, identity, len(batch), receipt)
         return text
 

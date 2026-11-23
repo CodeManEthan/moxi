@@ -496,7 +496,7 @@ class ClaudeShim:
                  clock=time.time, session_id=None, owed_query=None,
                  projects_root=None,
                  claim_key=None, claim_socket=None, claim_roots=None,
-                 listen_claims: bool = False, claim_proc=None):
+                 listen_claims: bool = False, claim_proc=None, policy_directors=()):
         #: The live Claude session behind this shim, the latest it has been told. It
         #: starts from the environment Claude
         #: Code spawned the shim with, which is right at spawn and goes stale after a
@@ -530,8 +530,10 @@ class ClaudeShim:
         self.scope = scope
         self.global_ = global_
         self.project = project if project is not None else project_key()
-        # the recipient's grant, qualified at launch and never re-qualified here
+        # the recipient's grant, qualified at launch and never re-qualified here: the
+        # whole list, and the part of it only the box's `[policy] directors` gave
         self.directors = tuple(directors or ())
+        self.policy_directors = tuple(policy_directors or ())
         self.injector = injector or (lambda text: None)
         #: `handover(text, digest, *, steer, senders)`: when set, a flush hands its
         #: digest here instead of to `injector`, with the digest's id, so the caller can
@@ -643,17 +645,19 @@ class ClaudeShim:
         scope = GLOBAL if self.global_ else (self.scope or GLOBAL)
         claim = {"name": name, "scope": scope, "global": bool(self.global_),
                  "qualified": qualify(name, scope) if name else None,
-                 "tier": None, "directors": list(self.directors)}
+                 "tier": None, "directors": list(self.directors),
+                 "policy_directors": list(self.policy_directors)}
         self.claims.start_launch(claim)
 
     def _apply_claim(self, claim: dict) -> None:
         """Register what the claim file holds, for a shim respawned inside its session:
-        the name with its declared directors."""
+        the name with its directors, both lists as the launch merged them."""
         self.name = claim.get("name")
         self.global_ = bool(claim.get("global"))
         self.scope = claim.get("scope")
         if claim.get("directors") is not None:
             self.directors = tuple(claim["directors"])
+            self.policy_directors = tuple(claim.get("policy_directors") or ())
 
     # ------------------------------------------------------------------ lifecycle
     @property
@@ -1285,7 +1289,8 @@ class ClaudeShim:
         batch, digest = self._open(batch)
         if not batch:
             return None
-        text = render_digest(batch, notice, self.directors, clock=self.clock)
+        text = render_digest(batch, notice, self.directors, clock=self.clock,
+                             policy=self.policy_directors)
         if self.handover is not None:
             self.handover(text, digest, steer=False, senders=digest_senders(batch))
         else:
@@ -1297,7 +1302,8 @@ class ClaudeShim:
             # each payload.
             now = self.clock()
             for p in batch:
-                self.ledger.open(p, self.directors, self.session_id, now)
+                self.ledger.open(p, self.directors, self.session_id, now,
+                                 policy=self.policy_directors)
         # The injection site, and the instant this adapter knows it injected. Armed
         # after the injector returns, because an injector that raised injected nothing.
         self.stall.arm(identity, high)
@@ -1341,7 +1347,8 @@ class ClaudeShim:
         batch, digest = self._open(batch)
         if not batch:
             return None
-        text = render_digest(batch, None, self.directors, clock=self.clock, steered=True)
+        text = render_digest(batch, None, self.directors, clock=self.clock, steered=True,
+                             policy=self.policy_directors)
         if self.handover is not None:
             self.handover(text, digest, steer=True, senders=digest_senders(batch))
         else:
@@ -1349,7 +1356,8 @@ class ClaudeShim:
         with self._lock:
             now = self.clock()
             for p in batch:
-                self.ledger.open(p, self.directors, self.session_id, now)
+                self.ledger.open(p, self.directors, self.session_id, now,
+                                 policy=self.policy_directors)
             self.injected.append(text)
             if digest is not None:
                 self.steered[digest] = (tuple(str(p["message_id"]) for p in batch),

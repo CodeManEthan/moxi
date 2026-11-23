@@ -362,3 +362,102 @@ def test_a_codex_roster_launch_refuses_the_opt_out_flag():
     with pytest.raises(Refused) as caught:
         plan(codex_args("a@p", "--no-policy-directors"))
     assert "--no-policy-directors" in str(caught.value)
+
+
+# ------------------------------------------------------------- the claim and holders
+
+def test_the_claim_keeps_the_policy_list():
+    from moxi_comms.claimhold import CLAIM_KEYS, ClaimServer
+
+    assert "policy_directors" in CLAIM_KEYS
+    server = ClaimServer("helper", "global", kind="test", directors=["lead", "fleet-lead"],
+                         policy_directors=["fleet-lead"])
+    assert server.claim["policy_directors"] == ["fleet-lead"]
+
+
+def test_a_harness_holder_writes_both_lists():
+    from types import SimpleNamespace
+
+    from moxi_comms.adapters.harness import HarnessAdapter
+
+    class Port(HarnessAdapter):
+        KIND = "test"
+
+    agent = SimpleNamespace(name="coder", scope="proj-a", qualified="coder@proj-a",
+                            directors=["lead", "fleet-lead"], policy_directors=["fleet-lead"])
+    port = Port(agent, autoreconnect=False)
+    assert port.claims.claim["directors"] == ["lead", "fleet-lead"]
+    assert port.claims.claim["policy_directors"] == ["fleet-lead"]
+    assert port._policy_directors() == ("fleet-lead",)
+
+
+def test_the_claude_shim_claims_both_lists_and_a_respawn_keeps_them():
+    import os
+
+    from moxi_comms.adapters import session
+
+    s = session.Session("pd1", name="worker", scope="proj-a", project="proj-a",
+                        directors=["lead", "fleet-lead"], policy_directors=["fleet-lead"])
+    shim = session.adapter_shim(s, os.getpid())
+    try:
+        assert shim.policy_directors == ("fleet-lead",)
+        assert shim.claims.claim["policy_directors"] == ["fleet-lead"]
+        shim.claims.save()
+        # A respawn rebuilds the Session from the stamps and never merges again; the
+        # claim file gives the new shim both lists.
+        again = session.Session("pd1", name="worker", scope="proj-a", project="proj-a")
+        respawned = session.adapter_shim(again, os.getpid())
+        try:
+            assert respawned.directors == ("lead", "fleet-lead")
+            assert respawned.policy_directors == ("fleet-lead",)
+        finally:
+            respawned.stop()
+    finally:
+        shim.stop(remove_claim_file=True)
+
+
+def test_a_policy_director_is_guarded_at_delivery(rig):
+    from conftest import wait_for_queue
+
+    worker = rig.shim(name="worker", scope="proj-a", directors=["main@proj-a", "lead@proj-a"],
+                      policy_directors=["main@proj-a", "lead@proj-a"])
+    code, _ = rig.cli(["send", "--posture", "none", "worker@proj-a", "from main"],
+                      name="main", scope="proj-a")
+    assert code == 0
+    wait_for_queue(worker, 1)
+    digest = worker.on_turn_boundary()
+    assert "directive from main@proj-a (standing)" in digest
+    code, _ = rig.cli(["send", "--posture", "none", "worker@proj-a", "from lead"],
+                      name="lead", scope="proj-a")
+    assert code == 0
+    wait_for_queue(worker, 1)
+    digest = worker.on_turn_boundary()
+    assert "from lead@proj-a" in digest and "directive from" not in digest
+    assert "policy director, not provisioned: information standing" in digest
+
+
+# ------------------------------------------------------------------------- the API
+
+def test_the_api_names_the_provisioned_policy_directors_only():
+    from moxi_comms import api
+
+    assert api.policy_directors() == ()
+    provision_standing("fleet-lead")
+    assert api.policy_directors() == ("fleet-lead",)
+    write_config(None, '[policy]\ndirectors = ["ops", "fleet-lead"]\n')
+    assert api.policy_directors() == ("fleet-lead",)
+    write_config(None, "[policy]\ndirectors = 3\n")
+    assert api.policy_directors() == ()
+    assert api.effective(["lead"], cfg("fleet-lead"), own="w", use_policy=True) == (
+        ["lead", "fleet-lead"], ["fleet-lead"])
+
+
+def test_the_page_row_carries_the_policy_list():
+    from moxi_comms import api, pagehandlers
+
+    row = api.RosterRow(qualified="w", name="w", scope=None, live=True, kind=None,
+                        module=None, tier="chosen", adapter="claude-shim",
+                        directors=("lead", "fleet-lead"), policy_directors=("fleet-lead",))
+    out = pagehandlers._row(row)
+    assert out["directors"] == ["lead", "fleet-lead"]
+    assert out["policy_directors"] == ["fleet-lead"]
