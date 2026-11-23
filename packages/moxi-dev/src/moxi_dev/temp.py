@@ -81,6 +81,8 @@ RAM_SPARE_MIB = 2048
 SWEEP_MIN_AGE_S = 60
 #: How long a run waits for the lock of a basetemp record another process left.
 TAKE_OVER_WAIT_S = 5.0
+#: How long removing a record on Windows tries again while another handle holds it open.
+UNLINK_WAIT_S = 1.0
 
 #: The suffix of an owner record, a sibling file of the path it holds.
 RECORD_SUFFIX = ".mx-owner"
@@ -507,11 +509,16 @@ if WINDOWS:
 else:
     import fcntl
 
+#: Where the Windows lock sits in a record: one byte far past its JSON. A Windows lock
+#: bars every other handle from the bytes it covers, so a lock on the JSON would leave
+#: the record unreadable while its owner runs.
+WINDOWS_LOCK_POSITION = 1 << 30
+
 
 def _try_lock(fd: int) -> bool:
     """Take the exclusive lock on the record open at `fd` without waiting."""
     if WINDOWS:
-        os.lseek(fd, 0, os.SEEK_SET)
+        os.lseek(fd, WINDOWS_LOCK_POSITION, os.SEEK_SET)
         try:
             msvcrt.locking(fd, msvcrt.LK_NBLCK, 1)
         except OSError:
@@ -536,20 +543,39 @@ def _lock_within(fd: int, wait_s: float) -> bool:
 def _drop_record(fd: int, record: Path) -> None:
     """Remove a record this process holds locked at `fd`: on POSIX unlink, then close;
     on Windows, which won't delete a file a process holds open, unlock and close, then
-    unlink."""
+    unlink (`_unlink_once_closed`)."""
     if WINDOWS:
         with contextlib.suppress(OSError):
-            os.lseek(fd, 0, os.SEEK_SET)
+            os.lseek(fd, WINDOWS_LOCK_POSITION, os.SEEK_SET)
             msvcrt.locking(fd, msvcrt.LK_UNLCK, 1)
         with contextlib.suppress(OSError):
             os.close(fd)
-        with contextlib.suppress(OSError):
-            os.unlink(record)
+        _unlink_once_closed(record)
         return
     with contextlib.suppress(OSError):
         os.unlink(record)
     with contextlib.suppress(OSError):
         os.close(fd)
+
+
+def _unlink_once_closed(record: Path) -> None:
+    """Unlink the record on Windows, trying again for up to `UNLINK_WAIT_S` while another
+    handle holds it open (a sweeper testing its lock). A handle still open then is one
+    that took the lock this process let go: a sweeper that removes the record itself, or
+    an owner that holds it anew. A handle closed past the wait without removing it leaves
+    a free record whose path is gone, which the next sweep removes."""
+    deadline = time.monotonic() + UNLINK_WAIT_S
+    while True:
+        try:
+            os.unlink(record)
+        except PermissionError:
+            if time.monotonic() >= deadline:
+                return
+            time.sleep(_POLL_S)
+        except OSError:                           # gone already: another removed it
+            return
+        else:
+            return
 
 
 def _same_file(fd: int, record: Path) -> bool:
@@ -778,6 +804,9 @@ def _sweep_one(path: Path, now: float, swept: Swept, *, has_workers: bool) -> No
         return
     fd = _open_free(record)
     if fd is None:
+        return
+    if not os.path.lexists(path):         # another removed it first: the record is free
+        _drop_record(fd, record)          # and its path gone, so it goes, uncounted
         return
     workers: list[tuple[int, Path]] = []
     removed = False

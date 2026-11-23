@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import signal
 import subprocess
 import sys
@@ -21,6 +22,9 @@ from moxi_dev.temp import DISK, FENCED_ENV, RAM, TEMP_ENV, TEMPROOT_ENV, Places
 
 POSIX = os.name == "posix"
 MIB = 1024 * 1024
+
+if POSIX:
+    import fcntl
 
 
 def _mount_line(number: int, point: Path | str, kind: str) -> str:
@@ -192,6 +196,7 @@ def test_a_missing_disk_root_falls_back_and_says_so(machine):
         "(MOXI_TEST_TEMP=disk keeps them)")
 
 
+@pytest.mark.skipif(not POSIX, reason="a mount table names POSIX paths")
 def test_a_root_in_memory_is_in_memory_whatever_chose_it(machine, tmp_path):
     shm_scratch = machine.ram / "scratch"
     shm_scratch.mkdir()
@@ -372,8 +377,100 @@ class Holder:
 
 
 def _old(path: Path) -> None:
+    """Set `path`'s own mtime past the sweep's age; where `os.utime` can't leave a link
+    alone (Windows), the path's, which is never a link there."""
     past = time.time() - temp.SWEEP_MIN_AGE_S - 30
-    os.utime(path, (past, past), follow_symlinks=False)
+    if os.utime in os.supports_follow_symlinks:
+        os.utime(path, (past, past), follow_symlinks=False)
+    else:
+        os.utime(path, (past, past))
+
+
+def _wait_exited(pid: int) -> None:
+    """Wait until the child `pid` has exited, without reaping it: by `os.waitid` where
+    the system has it, else (macOS) until `ps` shows it a zombie."""
+    if hasattr(os, "waitid"):
+        os.waitid(os.P_PID, pid, os.WEXITED | os.WNOWAIT)
+        return
+    deadline = time.monotonic() + 30
+    while time.monotonic() < deadline:
+        shown = subprocess.run(["ps", "-o", "stat=", "-p", str(pid)], capture_output=True,
+                               text=True, check=False).stdout.strip()
+        if shown.startswith("Z"):
+            return
+        time.sleep(0.05)
+    raise AssertionError(f"{pid} did not exit within 30 s")
+
+
+class _Locking:
+    """`msvcrt.locking` as `fcntl.flock` stands in for it, the position of each call
+    kept."""
+
+    LK_UNLCK = 0
+    LK_NBLCK = 2
+
+    def __init__(self) -> None:
+        self.positions: list[int] = []
+
+    def locking(self, fd: int, mode: int, nbytes: int) -> None:
+        self.positions.append(os.lseek(fd, 0, os.SEEK_CUR))
+        if mode == self.LK_UNLCK:
+            fcntl.flock(fd, fcntl.LOCK_UN)
+        else:
+            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+
+
+class _WindowsFiles:
+    """`os` as `temp` meets it on Windows: a file another handle holds open can't be
+    unlinked. Everything else is the real `os`."""
+
+    def __init__(self) -> None:
+        self.open_fds: dict[int, str] = {}
+        self.refusals = 0
+        self._guard = threading.Lock()
+
+    def __getattr__(self, name: str):
+        return getattr(os, name)
+
+    def open(self, path, flags: int, mode: int = 0o777) -> int:
+        fd = os.open(path, flags, mode)
+        with self._guard:
+            self.open_fds[fd] = os.fspath(path)
+        return fd
+
+    def close(self, fd: int) -> None:
+        with self._guard:
+            self.open_fds.pop(fd, None)
+        os.close(fd)
+
+    def unlink(self, path) -> None:
+        with self._guard:
+            is_open = os.fspath(path) in self.open_fds.values()
+            if is_open:
+                self.refusals += 1
+        if is_open:
+            raise PermissionError(13, "The process cannot access the file", os.fspath(path))
+        os.unlink(path)
+
+
+@pytest.fixture
+def windows_like(monkeypatch) -> SimpleNamespace:
+    """`temp` run as on Windows, on POSIX: its Windows branches, `msvcrt.locking` and
+    Windows' refusal to unlink an open file stood in."""
+    if not POSIX:
+        pytest.skip("on Windows the real limits run in the test's other case")
+    files, locks = _WindowsFiles(), _Locking()
+    monkeypatch.setattr(temp, "WINDOWS", True)
+    monkeypatch.setattr(temp, "msvcrt", locks, raising=False)
+    monkeypatch.setattr(temp, "os", files)
+    return SimpleNamespace(files=files, locks=locks)
+
+
+@pytest.fixture(params=["here", "windows-like"])
+def system(request) -> SimpleNamespace | None:
+    """Each test that takes it runs on this system, then as on Windows (`windows_like`)."""
+    return request.getfixturevalue("windows_like") if request.param == "windows-like" \
+        else None
 
 
 def _basetemp_parent(machine: Machine) -> Path:
@@ -481,14 +578,17 @@ def test_a_free_record_that_does_not_parse_is_left_with_its_path(machine):
 
 
 @pytest.mark.skipif(not POSIX, reason="SIGKILL and zombies are POSIX")
-def test_a_killed_owner_and_a_zombie_hold_nothing(machine, tmp_path):
+@pytest.mark.parametrize("waiter", ["waitid", "ps"])
+def test_a_killed_owner_and_a_zombie_hold_nothing(machine, tmp_path, monkeypatch, waiter):
+    if waiter == "ps":                              # as on macOS, which has no waitid
+        monkeypatch.delattr(os, "waitid", raising=False)
     where = machine.places()
     killed = Holder(tmp_path, "dir", machine.disk)
     killed.proc.send_signal(signal.SIGKILL)
     killed.proc.wait(timeout=30)
     zombie = Holder(tmp_path, "dir", machine.disk)
     zombie.proc.stdin.close()
-    os.waitid(os.P_PID, zombie.proc.pid, os.WEXITED | os.WNOWAIT)   # exited, not reaped
+    _wait_exited(zombie.proc.pid)                   # exited, not reaped
     for path in (killed.path, zombie.path):
         _old(path)
     assert temp.sweep(where).count == 2
@@ -510,7 +610,7 @@ def test_a_child_forked_from_the_owner_holds_nothing_once_the_owner_is_gone(mach
         os.kill(grandchild, signal.SIGKILL)
 
 
-def test_an_owner_and_a_sweeper_leave_no_record_behind(machine):
+def test_an_owner_and_a_sweeper_leave_no_record_behind(machine, system):
     held = temp.make_process_dir(machine.disk)
     held.release()
     assert sorted(os.listdir(machine.disk)) == []
@@ -583,7 +683,7 @@ def test_a_sweep_with_no_places_does_nothing_inside_a_test(machine):
     assert path.is_dir()
 
 
-def test_two_sweeps_at_once_both_end_clean(machine):
+def test_two_sweeps_at_once_both_end_clean(machine, system):
     where = machine.places()
     parent = _basetemp_parent(machine)
     made = []
@@ -611,3 +711,87 @@ def test_two_sweeps_at_once_both_end_clean(machine):
     assert not errors
     assert sum(result.count for result in results) == len(made)
     assert os.listdir(machine.disk) == [] and os.listdir(parent) == []
+
+
+def test_a_path_another_removed_first_is_not_counted_and_its_record_goes(machine,
+                                                                        monkeypatch, system):
+    path = machine.disk / "mx-abc123"
+    path.mkdir()
+    temp.record_of(path).write_text('{"kit": "moxi-dev"}')
+    _old(path)
+    real_open_free = temp._open_free
+
+    def another_sweeper_first(record):
+        fd = real_open_free(record)
+        shutil.rmtree(path, ignore_errors=True)    # gone before this one held the lock
+        return fd
+
+    monkeypatch.setattr(temp, "_open_free", another_sweeper_first)
+    assert temp.sweep(machine.places()).count == 0
+    assert os.listdir(machine.disk) == []
+
+
+def test_the_age_is_set_where_utime_cannot_leave_a_link_alone(machine, monkeypatch):
+    real_utime = os.utime
+
+    def windows_utime(path, times=None, *, follow_symlinks=True):
+        if not follow_symlinks:
+            raise NotImplementedError("utime: follow_symlinks unavailable on this platform")
+        real_utime(path, times)
+
+    monkeypatch.setattr(os, "utime", windows_utime)
+    monkeypatch.setattr(os, "supports_follow_symlinks", frozenset())
+    path = machine.disk / "mx-abc123"
+    path.mkdir()
+    temp.record_of(path).write_text('{"kit": "moxi-dev"}')
+    _old(path)
+    assert temp.sweep(machine.places()).count == 1
+    assert os.listdir(machine.disk) == []
+
+
+def test_on_windows_the_lock_sits_past_the_json_so_a_held_record_reads(machine,
+                                                                       windows_like):
+    basetemp = _basetemp_parent(machine) / "pytest-3"
+    basetemp.mkdir()
+    orphan = temp.record_of(basetemp)
+    orphan.write_text(json.dumps({"kit": "moxi-dev", "pid": 123456789,
+                                  "made": "2026-01-01T00:00:00Z", "note": "x" * 400}))
+    taken = temp.hold(basetemp)                     # takes the free orphan over
+    made = temp.make_process_dir(machine.disk)
+    try:
+        for path in (basetemp, made.path):
+            body = temp.record_of(path).read_bytes()
+            data = json.loads(body)
+            assert data["pid"] == os.getpid() and "note" not in data
+            assert len(body) < temp.WINDOWS_LOCK_POSITION
+        positions = windows_like.locks.positions
+        assert positions and all(position == temp.WINDOWS_LOCK_POSITION for position in positions)
+    finally:
+        taken.release()
+        made.release()
+    assert os.listdir(machine.disk) == [] and not orphan.exists()
+
+
+def test_on_windows_a_record_open_elsewhere_goes_once_that_handle_closes(machine,
+                                                                         windows_like):
+    held = temp.make_process_dir(machine.disk)
+    peek = windows_like.files.open(held.record, os.O_RDONLY)   # a sweeper testing it
+    closer = threading.Timer(0.2, windows_like.files.close, [peek])
+    closer.start()
+    held.release()
+    closer.join()
+    assert windows_like.files.refusals > 0
+    assert os.listdir(machine.disk) == []
+
+
+def test_on_windows_a_record_open_past_the_wait_goes_at_the_next_sweep(machine,
+                                                                       windows_like,
+                                                                       monkeypatch):
+    monkeypatch.setattr(temp, "UNLINK_WAIT_S", 0.1)
+    held = temp.make_process_dir(machine.disk)
+    peek = windows_like.files.open(held.record, os.O_RDONLY)
+    held.release()
+    assert not held.path.exists() and held.record.exists()
+    windows_like.files.close(peek)
+    temp.sweep(machine.places())
+    assert os.listdir(machine.disk) == []
