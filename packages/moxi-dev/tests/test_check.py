@@ -963,6 +963,96 @@ def test_only_renames_reads_the_whole_tree_and_filters_printing(repo, monkeypatc
     assert check.main(["--only", "renames", "packages/cache"]) == 0
 
 
+# --- --static: the whole-tree static steps alone ------------------------------------------
+
+STATIC_NOT_RUN = ("| stamps not run | web not run | sync not run | lint not run | "
+                  "no suites run | timed not run | durations none |")
+
+
+def test_static_runs_the_static_steps_and_nothing_else(repo, monkeypatch):
+    commit_file(repo, "packages/sessions/x.py")
+    monkeypatch.setattr(check, "changed_paths", lambda *a: pytest.fail("read changes"))
+    monkeypatch.setattr(check, "worker_args", lambda *a: pytest.fail("read workers"))
+    monkeypatch.setattr(check.stamp, "check_stamps", lambda *a, **kw: pytest.fail("stamps"))
+    scanned = []
+    for module in (check.tags, check.refs, check.naming, check.ruff_check,
+                   check.release):
+        real = module.scan
+        monkeypatch.setattr(module, "scan", lambda root, real=real, name=module.__name__:
+                            scanned.append(name) or real(root))
+    runs = Runs()
+    result = run_check(repo, runs, static=True)
+    assert result.code == 0 and runs.calls == [], "no command runs: no lock, sync or suite"
+    assert scanned == ["moxi_dev.tags", "moxi_dev.refs", "moxi_dev.naming",
+                       "moxi_dev.ruff_check", "moxi_dev.release"]
+    line = result.line()
+    assert LINE.match(line), line
+    assert ("| packages: none | lock not run | tags pass | refs pass | names pass | "
+            "ruff pass | renames none | release pass " + STATIC_NOT_RUN) in line
+
+
+def test_static_runs_the_renames_step_when_there_is_a_table(repo):
+    with_renames(repo, {X: "fresh = 1\n"}, (X, "-", "name", "old", "fresh"))
+    result = run_check(repo, Runs(), static=True)
+    assert result.code == 0 and "| ruff pass | renames pass | release pass |" in result.line()
+
+
+def test_a_leftover_fails_static_with_the_full_check_s_lines(repo, capsys):
+    with_renames(repo, {X: "def fresh():\n    pass\nthing.old\n"},
+                 (X, "-", "name", "old", "fresh"))
+    runs = Runs()
+    result = run_check(repo, runs, static=True)
+    assert result.code == 1 and result.renames == "fail" and runs.calls == []
+    static_out = [line for line in capsys.readouterr().out.splitlines() if "renames:" in line]
+    assert static_out and static_out[0].startswith(
+        f"moxi-dev check: renames: leftover: {X}:3: unresolved attribute")
+    run_check(repo, Runs())
+    full_out = [line for line in capsys.readouterr().out.splitlines() if "renames:" in line]
+    assert static_out == full_out
+
+
+def test_static_steps_all_run_after_one_fails(repo, monkeypatch, capsys):
+    tag = "[B5]"
+    commit_file(repo, "packages/sessions/x.py", f"# see {tag}\n")
+    monkeypatch.setattr(check.ruff_check, "scan", lambda root: [
+        check.ruff_check.Hit("packages/sessions/x.py", 1, 1, "N802", "bad name")])
+    result = run_check(repo, Runs(), static=True)
+    assert result.code == 1 and result.tags == "fail" and result.ruff == "fail"
+    assert result.refs == result.names == result.release == "pass"
+    out = capsys.readouterr().out
+    assert f"moxi-dev check: packages/sessions/x.py:1: tag {tag!r}" in out
+    assert "moxi-dev check: packages/sessions/x.py:1: N802: ruff: bad name" in out
+
+
+def test_main_static_prints_the_line_last_and_returns_its_code(repo, monkeypatch, capsys):
+    tag = "[B5]"
+    commit_file(repo, "packages/turns/x.py", f"# see {tag}\n")
+    runs = Runs()
+    monkeypatch.setattr(check, "_run", runs)
+    monkeypatch.chdir(repo / "packages" / "turns")
+    assert check.main(["--static"]) == 1
+    out = capsys.readouterr().out.splitlines()
+    assert LINE.match(out[-1]) and out[-1].endswith("exit 1") and "tags fail" in out[-1]
+    assert runs.calls == []
+
+
+def test_a_bad_member_stops_static_with_exit_2(repo, monkeypatch, capsys):
+    (repo / "packages" / "turns" / "pyproject.toml").write_text("[tool.x]\n")
+    monkeypatch.chdir(repo)
+    assert check.main(["--static"]) == 2
+    out, err = capsys.readouterr()
+    assert out.splitlines()[-1].endswith("exit 2") and "names no project" in err
+
+
+@pytest.mark.parametrize("args", [["--full"], ["--base", "main"], ["--finding", "L1"],
+                                  ["--only", "refs"], ["packages/a"]])
+def test_static_takes_no_other_mode(repo, monkeypatch, args):
+    monkeypatch.chdir(repo)
+    with pytest.raises(SystemExit) as stop:
+        check.main(["--static", *args])
+    assert stop.value.code == 2
+
+
 # --- the summary line -------------------------------------------------------------------
 
 LINE = re.compile(

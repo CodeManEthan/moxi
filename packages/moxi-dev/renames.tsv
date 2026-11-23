@@ -7557,6 +7557,7 @@ moxi-dev	packages/moxi-dev/src/moxi_dev/check.py	check	name	environ	env
 moxi-dev	packages/moxi-dev/src/moxi_dev/check.py	f"{round(summary.slowest_share * 100)}%")	keep	round	round
 moxi-dev	packages/moxi-dev/src/moxi_dev/check.py	help="check every package, whatever changed, and run every "	keep	help	help
 moxi-dev	packages/moxi-dev/src/moxi_dev/check.py	help="count the changes since HEAD left REV, and compare the "	keep	help	help
+moxi-dev	packages/moxi-dev/src/moxi_dev/check.py	help="run only the tag, comment-reference, naming, Ruff, renames "	keep	help	help
 moxi-dev	packages/moxi-dev/src/moxi_dev/check.py	help="run only the tests marked with this finding; may be given "	keep	help	help
 moxi-dev	packages/moxi-dev/src/moxi_dev/check.py	help="run only this whole-tree code check")	keep	help	help
 moxi-dev	packages/moxi-dev/src/moxi_dev/check.py	help="with --only, print findings only under these paths")	keep	help	help

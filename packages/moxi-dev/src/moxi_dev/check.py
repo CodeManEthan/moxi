@@ -1,7 +1,8 @@
 """`moxi-dev check`: the checks a change must pass before it merges.
 
 Run from the repository's root as
-`uv run --locked moxi-dev check [--full] [--base REV] [--finding L<n>]`.
+`uv run --locked moxi-dev check [--full] [--base REV] [--finding L<n>]`, or as
+`uv run --locked moxi-dev check --static` for step 2 alone (see the end).
 It first reads the workspace, the worker count and the changed paths; a bad workspace,
 worker count or base stops it there, before any step runs. Then, in order:
 
@@ -100,6 +101,12 @@ The exit code is 0 only when every step passed, 1 when one failed, and 2 when th
 could not start or a step could not be run (not in a workspace, a member with no readable
 `pyproject.toml` or no project name, no merge base, a bad `MOXI_TEST_WORKERS` or
 `--finding`, `uv` not on PATH). The summary line is printed in every case.
+
+`--static` reads the workspace and runs step 2 alone, over the whole repository: the
+tag, comment-reference, naming, Ruff, renames and release steps, with the same printed
+lines, the same summary line (every other step `not run`, `packages: none`) and the same
+exit codes. It reads no changed paths and no worker count, and runs no lock check, so no
+step needs the network.
 """
 
 from __future__ import annotations
@@ -487,10 +494,11 @@ def check_findings(findings: Sequence[str]) -> list[str]:
 
 
 def check(root: Path, *, full: bool = False, base: str | None = None,
-          finding: Sequence[str] = (), env: Mapping[str, str] | None = None,
-          run: Run | None = None, plan: Plan | None = None,
-          probe: Probe | None = None) -> Result:
-    """Run the check's steps on the workspace at `root`; the result holds the exit code."""
+          finding: Sequence[str] = (), static: bool = False,
+          env: Mapping[str, str] | None = None, run: Run | None = None,
+          plan: Plan | None = None, probe: Probe | None = None) -> Result:
+    """Run the check's steps on the workspace at `root`; the result holds the exit code.
+    With `static`, run only the whole-tree static steps (`_Steps.static`)."""
     env = os.environ if env is None else env
     run = run or _run
     plan = plan or lint.plan
@@ -501,6 +509,12 @@ def check(root: Path, *, full: bool = False, base: str | None = None,
         findings = check_findings(finding)
         result.commit = _commit(root)
         packages = load_workspace(root)
+        if static:
+            result.packages = []
+            steps = _Steps(root, packages, (), env, run, plan, result, probe=probe)
+            result.code = 0 if steps.static() else 1
+            result.seconds = time.monotonic() - started
+            return result
         workers = worker_args(env)
         changed = None if full else changed_paths(root, base or "main")
         chosen = list(packages) if changed is None else pick(packages, changed)
@@ -539,12 +553,7 @@ class _Steps:
         result.lock = "pass" if ok else "fail"
         if not ok:
             return False
-        ok = self.tags()
-        ok = self.references() and ok
-        ok = self.names() and ok
-        ok = self.ruff() and ok
-        ok = self.renames() and ok
-        ok = self.release() and ok
+        ok = self.static()
         if not chosen:
             result.stamps = result.web = result.sync = "skipped"
             return ok
@@ -566,6 +575,16 @@ class _Steps:
         for package in chosen:
             ok = self.lint(package, venv, suite_env) and ok
         return self.suites(chosen, venv, suite_env) and ok
+
+    def static(self) -> bool:
+        """The tag, comment-reference, naming, Ruff, renames and release steps over the
+        whole tree, each run even when one before it failed; True when all passed."""
+        ok = self.tags()
+        ok = self.references() and ok
+        ok = self.names() and ok
+        ok = self.ruff() and ok
+        ok = self.renames() and ok
+        return self.release() and ok
 
     def selection_env(self, work: Path) -> dict[str, str]:
         """The kit's variables for what the suites run besides the plain run."""
@@ -843,6 +862,9 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--finding", metavar="L<n>", action="append", default=[],
                         help="run only the tests marked with this finding; may be given "
                              "more than once")
+    parser.add_argument("--static", action="store_true",
+                        help="run only the tag, comment-reference, naming, Ruff, renames "
+                             "and release steps, over the whole repository")
     parser.add_argument("--only", choices=("refs", "names", "ruff", "renames"),
                         help="run only this whole-tree code check")
     parser.add_argument("paths", nargs="*", metavar="PATH",
@@ -880,6 +902,9 @@ def main(argv: list[str]) -> int:
         _parser().error("PATH may be given only with --only")
     if args.only and (args.full or args.base or args.finding):
         _parser().error("--only cannot be combined with --full, --base or --finding")
+    if args.static and (args.only or args.full or args.base or args.finding):
+        _parser().error("--static cannot be combined with --only, --full, --base or "
+                        "--finding")
     try:
         root = Path(_git(Path.cwd(), "rev-parse", "--show-toplevel").strip())
     except CheckError as exc:
@@ -889,6 +914,7 @@ def main(argv: list[str]) -> int:
         return result.code
     if args.only:
         return only(root, args.only, args.paths)
-    result = check(root, full=args.full, base=args.base, finding=args.finding)
+    result = check(root, full=args.full, base=args.base, finding=args.finding,
+                   static=args.static)
     print(result.line(), flush=True)
     return result.code
