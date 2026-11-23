@@ -373,3 +373,113 @@ def test_a_prepared_answer_rides_on_the_question_and_its_record(kit, tmp_path):
             if one["holder"] == BUSY and one["id"] == "Q1"]
     assert (q1["prepared"]["recommend"], q1["prepared"]["current"]) == ("new", True)
     assert record["record"]["item"]["prepared"]["why"] == "the old name is read nowhere"
+
+
+# -- the acts ----------------------------------------------------------------------------
+
+ACTS = {"/api/answers", "/api/drop/build"}
+READS = {"/api/agents", "/api/drop"}
+
+
+def test_the_act_routes_are_acts_at_the_desk_and_none_is_the_gateways():
+    routes = {one.path: one for one in page.PAGE.routes}
+
+    assert {path for path, one in routes.items() if one.kind == "act"} == ACTS
+    assert READS <= {path for path, one in routes.items() if one.kind == "read"}
+    assert not any(one.gateway for one in page.PAGE.routes)
+    receipt = page.RECEIPT.items
+    assert receipt["removed"].items.mark == "path"
+    assert {receipt[key].mark for key in ("reason", "fix", "not_told", "command")} == {
+        "scrub"}
+    assert page.DROP_FACTS["folders"].items.items["path"].mark == "path"
+
+
+async def post(app, path: str, body: dict) -> tuple[int, dict | None]:
+    sent = {"status": 0, "body": b""}
+    data = json.dumps(body).encode()
+    asked = [False]
+
+    async def receive():
+        if not asked[0]:
+            asked[0] = True
+            return {"type": "http.request", "body": data, "more_body": False}
+        await asyncio.sleep(3600)
+
+    async def send(message):
+        if message["type"] == "http.response.start":
+            sent["status"] = message["status"]
+        elif message["type"] == "http.response.body":
+            sent["body"] += message.get("body", b"")
+
+    asked_scope = {**scope(path), "method": "POST"}
+    asked_scope["headers"] = [*asked_scope["headers"], (b"content-type", b"application/json"),
+                              (b"content-length", str(len(data)).encode())]
+    await app(asked_scope, receive, send)
+    return sent["status"], json.loads(sent["body"]) if sent["body"] else None
+
+
+def run_posts(*calls) -> list[tuple[int, dict | None]]:
+    async def main():
+        app = served()
+        return [await post(app, path, body) for path, body in calls]
+    return asyncio.run(main())
+
+
+@pytest.fixture
+def no_comms(monkeypatch):
+    monkeypatch.setattr(ph, "RECEIPTS", ph.pageacts.Receipts())
+    monkeypatch.setattr(ph, "comms_api", lambda: None)
+
+
+def answers_body(**more) -> dict:
+    return {"act": ["A" * 43, "B" * 43], "holder": [BUSY, BUSY], "item": ["Q1", "Q2"],
+            "kind": ["pick", "words"], "chose": ["new", ""], "text": ["", "keep both"],
+            "tell": ["", ""], "to": "each", **more}
+
+
+def test_an_answers_post_fits_its_shape_and_a_repeat_is_answered_from_the_store(
+        kit, no_comms):
+    lb = loopback()
+    route = next(one for one in page.PAGE.routes if one.path == "/api/answers")
+    shape = lb.Out("table", items=route.returns)
+
+    [(status, first), (again, second)] = run_posts(("/api/answers", answers_body()),
+                                                   ("/api/answers", answers_body()))
+
+    assert (status, again) == (200, 200), first
+    assert conforms(first, shape) and conforms(second, shape)
+    assert [one["state"] for one in first["receipts"]] == ["recorded", "kept"]
+    assert first["receipts"][1]["fix"].startswith("moxi rounds rule kestrel/billing-export Q2")
+    assert second["receipts"][0]["repeat"]
+
+
+def test_an_answers_post_that_cant_be_read_is_refused(kit, no_comms):
+    [(status, sent)] = run_posts(("/api/answers", answers_body(kind=["pick", "shout"])))
+
+    assert status == 400, sent
+
+
+def test_the_agents_and_the_drop_reads_fit_their_shapes(kit, no_comms):
+    lb = loopback()
+    routes = {one.path: one for one in page.PAGE.routes}
+
+    [(status, agents), (dropped, facts)] = run(
+        ("/api/agents", None), ("/api/drop", {"round": BUSY, "stage": "B1"}))
+
+    assert (status, dropped) == (200, 200)
+    assert agents == {"agents": [], "reason": "comms is not installed"}
+    assert conforms(facts, lb.Out("table", items=routes["/api/drop"].returns))
+    assert facts["open"] and facts["branch"] == "branch-b1"
+
+
+def test_a_drop_post_fits_its_shape(kit, no_comms):
+    lb = loopback()
+    route = next(one for one in page.PAGE.routes if one.path == "/api/drop/build")
+    body = {"round": BUSY, "stage": "B1", "act": "C" * 43}
+
+    [(status, sent), (again, second)] = run_posts(("/api/drop/build", body),
+                                                  ("/api/drop/build", body))
+
+    assert (status, again) == (200, 200), sent
+    assert conforms(sent, lb.Out("table", items=route.returns))
+    assert sent["state"] == "recorded" and second["repeat"]
