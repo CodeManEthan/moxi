@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- A `ci.workflows` entry can read jobs by name pattern (`matrix = ["browser (*)"]`), name
+  its run's `pick` job, and carry `reads_candidates = true`: a merge queue's candidate is
+  then read by the entries so marked, and a build's check and the target's full run by
+  the others. Where the pick job reads green, a job it did not run reads `skipped`,
+  which counts as green, while a job the entry names that is missing still reads
+  `absent`; the packages it picked, from the `picked:` line of its log, are recorded in
+  `ci.read`. The lander reads the target's head by the full run's workflows alone, so a
+  candidate's scoped run at the same commit never stands in for it.
 - Stacked builds: of two open builds where one's commits are strictly part of the
   other's, `finish` lets the one whose work reaches the target first go first and holds
   the other until that work is on the target, in place of refusing both for sharing

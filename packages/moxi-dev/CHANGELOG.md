@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- `moxi-dev check --pick [--base REV]` prints the packages the change picks as one JSON
+  line, `{"packages": [...]}`, and runs no step, so a workflow can run only the picked
+  packages' jobs.
 - On Windows the test fence places each module's `MOXI_<MODULE>_HOME` at
   `moxi\<module>` under the test's own `LOCALAPPDATA`, inside the test's profile, so a
   file a module keeps only inside the user's profile (comms' token store) is inside the
