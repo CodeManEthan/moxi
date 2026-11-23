@@ -45,7 +45,7 @@ CODE = "MX5"
 #: The refused words, whole words in any case. Spelled in parts so no word stands here. A
 #: lower-case word joined by one dot to the name before it is a name, not prose; after an
 #: ellipsis, or capitalised after a dot ("done.He"), it is prose.
-WORD = re.compile(r"(?<![\w-])(?<!(?<!\.)\w\.(?=(?-i:[a-z])))h(?:e|is|im|imself)(?![\w-])", re.I)
+WORD = re.compile(r"(?<![\w-])(?<!\w\.(?=(?-i:[a-z])))h(?:e|is|im|imself)(?![\w-])", re.I)
 #: A mark that names `CODE` among its codes, then ` -- ` and a reason.
 MARK = re.compile(r"\bnoqa:\s*[A-Z0-9, ]*?\b" + CODE + r"\b[A-Z0-9, ]*?\s+--\s+\S")
 #: Any mark that names `CODE`, with or without a reason.
