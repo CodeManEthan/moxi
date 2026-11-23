@@ -25,6 +25,10 @@ worker count or base stops it there, before any step runs. Then, in order:
    requirement one member places on another admits that member's version, and each
    member has the metadata, the CHANGELOG entry and the README links PyPI needs. Each
    problem's line names the member, the field and the fix.
+   Then the pronoun step (`moxi_dev.pronouns`): the text each package shows or ships
+   (its Python string literals and docstrings, its web sources' strings and comments,
+   its README, docs and bundled skills) names the operator neutrally. Each refused word
+   is printed as `path:line: word`, with the fix: reword it, or mark a genuine use.
 3. Pick the packages. The changed paths are the commits since the branch left `main`
    (`git merge-base main HEAD`, or `--base REV` in place of `main`) plus the working
    tree's staged, unstaged and untracked files. A path under `packages/<p>/` picks `p`;
@@ -81,15 +85,16 @@ worker count or base stops it there, before any step runs. Then, in order:
 8. Read each suite's durations (the kit writes them), keep the commit's record and find
    the newest record on `main` to compare with (`moxi_dev.durations`).
 9. Print one summary line, the last line of the output: the commit, the packages, the
-   lock, tag, reference, name, Ruff, renames, release, stamp, web, sync and lint
+   lock, tag, reference, name, Ruff, renames, release, pronoun, stamp, web, sync and lint
    results, each package's tests and seconds (and `without its browser tests` where
    Chromium couldn't start), `timed held <n>` with the number of timed tests the suites
    held back (`timed none` when they held none, `timed not run` when the suites never
    ran), the tests' own seconds with the slowest 5 %'s share of them and the delta
    against main, the total and the exit code.
 
-The tags, references, names, Ruff, renames and release steps, each package's lint and each
-package's tests all run even when one before them failed, so one run shows every failure.
+The tags, references, names, Ruff, renames, release and pronoun steps, each package's lint
+and each package's tests all run even when one before them failed, so one run shows every
+failure.
 
 The exit code is 0 only when every step passed, 1 when one failed, and 2 when the check
 could not start or a step could not be run (not in a workspace, a member with no readable
@@ -97,10 +102,10 @@ could not start or a step could not be run (not in a workspace, a member with no
 `--finding`, `uv` not on PATH). The summary line is printed in every case.
 
 `--static` reads the workspace and runs step 2 alone, over the whole repository: the
-tag, comment-reference, naming, Ruff, renames and release steps, with the same printed
-lines, the same summary line (every other step `not run`, `packages: none`) and the same
-exit codes. It reads no changed paths and no worker count, and runs no lock check, so no
-step needs the network.
+tag, comment-reference, naming, Ruff, renames, release and pronoun steps, with the same
+printed lines, the same summary line (every other step `not run`, `packages: none`) and
+the same exit codes. It reads no changed paths and no worker count, and runs no lock
+check, so no step needs the network.
 """
 
 from __future__ import annotations
@@ -117,7 +122,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable, Mapping, Sequence
 
-from . import durations, lint, naming, refs, release, rename, ruff_check, stamp, tags
+from . import (durations, lint, naming, pronouns, refs, release, rename, ruff_check,
+               stamp, tags)
 from .testing import (CHANGED_ENV, DURATIONS_ENV, FINDING_ENV, FINDING_NAME,
                       LEAVE_OUT_ENV, TIERS_ENV, TIMED_ENV)
 
@@ -385,6 +391,7 @@ class Result:
     ruff: str = "not run"
     renames: str = "not run"
     release: str = "not run"
+    pronouns: str = "not run"
     stamps: str = "not run"
     web: str = "not run"
     sync: str = "not run"
@@ -434,7 +441,7 @@ class Result:
         return (f"moxi-dev check: commit {self.commit} | packages: {names} | "
                 f"lock {self.lock} | tags {self.tags} | refs {self.refs} | "
                 f"names {self.names} | ruff {self.ruff} | renames {self.renames} | "
-                f"release {self.release} | "
+                f"release {self.release} | pronouns {self.pronouns} | "
                 f"stamps {self.stamps} | "
                 f"web {self.web} | sync {self.sync} | "
                 f"lint {linted} | {suites} | timed {timed} | {self.timing()} | "
@@ -540,14 +547,15 @@ class _Steps:
         return self.suites(chosen, venv, suite_env) and ok
 
     def static(self) -> bool:
-        """The tag, comment-reference, naming, Ruff, renames and release steps over the
-        whole tree, each run even when one before it failed; True when all passed."""
+        """The tag, comment-reference, naming, Ruff, renames, release and pronoun steps over
+        the whole tree, each run even when one before it failed; True when all passed."""
         ok = self.tags()
         ok = self.references() and ok
         ok = self.names() and ok
         ok = self.ruff() and ok
         ok = self.renames() and ok
-        return self.release() and ok
+        ok = self.release() and ok
+        return self.pronouns() and ok
 
     def selection_env(self, work: Path) -> dict[str, str]:
         """The kit's variables for what the suites run besides the plain run."""
@@ -673,6 +681,16 @@ class _Steps:
             print(f"moxi-dev check: {problem}", flush=True)
         self.result.release = "fail" if problems else "pass"
         return not problems
+
+    def pronouns(self) -> bool:
+        try:
+            hits = pronouns.scan(self.root)
+        except (OSError, subprocess.SubprocessError) as exc:
+            raise CheckError(f"the pronoun check could not list the files ({exc})") from exc
+        for hit in hits:
+            print(f"moxi-dev check: {hit}", flush=True)
+        self.result.pronouns = "fail" if hits else "pass"
+        return not hits
 
     def references(self) -> bool:
         try:
@@ -810,8 +828,8 @@ def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="moxi-dev check",
         description="Run the checks a change must pass before it merges: the lock, the "
-                    "tag, comment-reference, naming and Ruff checks, the renames step "
-                    "and the release step, "
+                    "tag, comment-reference, naming and Ruff checks, the renames step, "
+                    "the release step and the pronoun step, "
                     "then the import rules and the tests "
                     "of every package the change touches and of every package that "
                     "depends on one, in an environment of the check's own. Run it from "
@@ -826,9 +844,9 @@ def _parser() -> argparse.ArgumentParser:
                         help="run only the tests marked with this finding; may be given "
                              "more than once")
     parser.add_argument("--static", action="store_true",
-                        help="run only the tag, comment-reference, naming, Ruff, renames "
-                             "and release steps, over the whole repository")
-    parser.add_argument("--only", choices=("refs", "names", "ruff", "renames"),
+                        help="run only the tag, comment-reference, naming, Ruff, renames, "
+                             "release and pronoun steps, over the whole repository")
+    parser.add_argument("--only", choices=("refs", "names", "ruff", "renames", "pronouns"),
                         help="run only this whole-tree code check")
     parser.add_argument("paths", nargs="*", metavar="PATH",
                         help="with --only, print findings only under these paths")
@@ -847,7 +865,7 @@ def _shown(path: str, selected: Sequence[str]) -> bool:
 def only(root: Path, step: str, paths: Sequence[str] = ()) -> int:
     """Run one whole-tree code check and print its selected findings."""
     scanner = {"refs": refs.scan, "names": naming.scan, "ruff": ruff_check.scan,
-               "renames": _renames_scan}[step]
+               "renames": _renames_scan, "pronouns": pronouns.scan}[step]
     try:
         hits = scanner(root)
     except (rename.RenameError, OSError, subprocess.SubprocessError) as exc:

@@ -431,7 +431,7 @@ def test_a_stale_lock_stops_before_the_sync(repo):
     result = run_check(repo, runs)
     assert result.code == 1 and len(runs.calls) == 1
     assert ("lock fail | tags not run | refs not run | names not run | ruff not run | "
-            "renames not run | release not run | "
+            "renames not run | release not run | pronouns not run | "
             "stamps not run | web not run | sync not run | lint not run") in result.line()
 
 
@@ -447,7 +447,7 @@ def test_nothing_picked_checks_the_lock_and_passes(repo):
     assert result.code == 0
     assert [cmd for cmd, _, _ in runs.calls] == [["uv", "lock", "--check"]]
     assert ("packages: none | lock pass | tags pass | refs pass | names pass | ruff pass | "
-            "renames none | release pass "
+            "renames none | release pass | pronouns pass "
             "| stamps skipped | web skipped | sync skipped | lint not run | no suites run") \
         in result.line()
 
@@ -884,7 +884,7 @@ def test_static_runs_the_static_steps_and_nothing_else(repo, monkeypatch):
     monkeypatch.setattr(check.stamp, "check_stamps", lambda *a, **kw: pytest.fail("stamps"))
     scanned = []
     for module in (check.tags, check.refs, check.naming, check.ruff_check,
-                   check.release):
+                   check.release, check.pronouns):
         real = module.scan
         monkeypatch.setattr(module, "scan", lambda root, real=real, name=module.__name__:
                             scanned.append(name) or real(root))
@@ -892,11 +892,11 @@ def test_static_runs_the_static_steps_and_nothing_else(repo, monkeypatch):
     result = run_check(repo, runs, static=True)
     assert result.code == 0 and runs.calls == [], "no command runs: no lock, sync or suite"
     assert scanned == ["moxi_dev.tags", "moxi_dev.refs", "moxi_dev.naming",
-                       "moxi_dev.ruff_check", "moxi_dev.release"]
+                       "moxi_dev.ruff_check", "moxi_dev.release", "moxi_dev.pronouns"]
     line = result.line()
     assert LINE.match(line), line
     assert ("| packages: none | lock not run | tags pass | refs pass | names pass | "
-            "ruff pass | renames none | release pass " + STATIC_NOT_RUN) in line
+            "ruff pass | renames none | release pass | pronouns pass " + STATIC_NOT_RUN) in line
 
 
 def test_static_runs_the_renames_step_when_there_is_a_table(repo):
@@ -926,7 +926,7 @@ def test_static_steps_all_run_after_one_fails(repo, monkeypatch, capsys):
         check.ruff_check.Hit("packages/sessions/x.py", 1, 1, "N802", "bad name")])
     result = run_check(repo, Runs(), static=True)
     assert result.code == 1 and result.tags == "fail" and result.ruff == "fail"
-    assert result.refs == result.names == result.release == "pass"
+    assert result.refs == result.names == result.release == result.pronouns == "pass"
     out = capsys.readouterr().out
     assert f"moxi-dev check: packages/sessions/x.py:1: tag {tag!r}" in out
     assert "moxi-dev check: packages/sessions/x.py:1: N802: ruff: bad name" in out
@@ -972,6 +972,7 @@ LINE = re.compile(
     r"ruff (pass|fail|not run) \| "
     r"renames (pass|fail|none|not run) \| "
     r"release (pass|fail|not run) \| "
+    r"pronouns (pass|fail|not run) \| "
     r"stamps (pass|fail|none|skipped|not run) \| "
     r"web (pass|fail|none|skipped|not run) \| "
     r"sync (pass|fail|skipped|not run) \| "
