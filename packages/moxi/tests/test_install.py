@@ -240,6 +240,7 @@ class Fake:
         self.runs: list[list[str]] = []
         self.envs: list[dict] = []
         self.setups: list[str] = []
+        self.setup_onlys: list[str] = []
         self.fail_setup: set[str] = set()
         self.interrupt: set[str] = set()
         self.replaces: list[bool] = []
@@ -253,6 +254,7 @@ class Fake:
         monkeypatch.setattr(install, "run", self.run)
         monkeypatch.setattr(install, "snapshot", self.snapshot)
         monkeypatch.setattr(install, "run_settle", self.run_settle)
+        monkeypatch.setattr(install, "run_setup", self.run_setup)
         real_which = shutil.which
         monkeypatch.setattr(shutil, "which",
                             lambda name, *a, **k: "/fake/uv" if name == "uv"
@@ -280,6 +282,16 @@ class Fake:
         self.setups.append(module)
         self.replaces.append(replace)
         self.skills.append(install_skills)
+        if module in self.interrupt:
+            return _settle.Outcome(_settle.INTERRUPTED)
+        return _settle.Outcome(1 if module in self.fail_setup else 0)
+
+    def run_setup(self, python, module):
+        from moxi import _settle, files, paths
+
+        # `--setup-only` holds the core lock while its child runs, as the install does.
+        files._descriptor(paths.core_lock())
+        self.setup_onlys.append(module)
         if module in self.interrupt:
             return _settle.Outcome(_settle.INTERRUPTED)
         return _settle.Outcome(1 if module in self.fail_setup else 0)
@@ -711,6 +723,67 @@ def test_an_unlisted_module_already_installed_runs_its_setup_again(fake, capsys)
     code, out, err = moxi_install(capsys, "extra")
     assert code == 0, err
     assert "extra is already installed" in out
+
+
+def _unreleased_turns(monkeypatch):
+    import moxi.catalogue as catalogue
+
+    marked = catalogue.Catalogue(1, (catalogue.Entry("turns", "moxi-turns", "Turns.",
+                                                     unreleased=True),), "shipped")
+    monkeypatch.setattr(catalogue, "load", lambda env=None: marked)
+
+
+def test_setup_only_runs_an_installed_module_s_setup_with_no_install(fake, capsys,
+                                                                    monkeypatch):
+    """The fleet's case: a module the catalogue marks unreleased, installed here by other
+    means. `--setup-only` passes no catalogue gate, environment check or index."""
+    _unreleased_turns(monkeypatch)
+    monkeypatch.setattr(install, "install_env", lambda: pytest.fail("environment checked"))
+    monkeypatch.setattr(install, "snapshot", lambda python: pytest.fail("snapshot taken"))
+    fake.site.module("turns", SETUP="'moxi_turns.setup:run'")
+    code, out, err = moxi_install(capsys, "turns", "--setup-only")
+    assert code == 0, err
+    assert fake.setup_onlys == ["turns"]
+    assert fake.runs == [] and fake.setups == []
+
+
+def test_setup_only_of_a_module_not_installed_is_refused(fake, capsys):
+    code, _, err = moxi_install(capsys, "turns", "--setup-only")
+    assert code == 3
+    assert "turns is not installed here, so it has no setup to run; install it: " \
+           "moxi install turns" in err
+    assert fake.setup_onlys == [] and fake.runs == []
+
+
+def test_a_failed_or_interrupted_setup_only_exits_1(fake, capsys):
+    fake.site.module("turns")
+    fake.fail_setup.add("turns")
+    code, _, _ = moxi_install(capsys, "turns", "--setup-only")
+    assert code == 1
+    fake.fail_setup.clear()
+    fake.interrupt.add("turns")
+    code, _, err = moxi_install(capsys, "turns", "--setup-only")
+    assert code == 1
+    assert "interrupted in turns's setup. Run `moxi install turns --setup-only` again" in err
+
+
+@pytest.mark.parametrize("other", [["--none"], ["--with", "codex"], ["--replace"],
+                                   ["--no-skills"], ["--skills-form", "copy"],
+                                   ["--from", "moxi-turns @ git+https://h/turns"]])
+def test_setup_only_takes_no_other_option(fake, capsys, other):
+    fake.site.module("turns")
+    code, _, err = moxi_install(capsys, "turns", "--setup-only", *other)
+    assert code == 2
+    shown = "--no-skills" if other[0] == "--no-skills" else other[0]
+    assert f"--setup-only runs the module's setup alone and takes no other option; " \
+           f"drop {shown}" in err
+    assert fake.setup_onlys == []
+
+
+@pytest.mark.parametrize("name", ["moxi", "doctor", "Bad"])
+def test_setup_only_refuses_what_install_refuses_by_name(fake, capsys, name):
+    code, _, _ = moxi_install(capsys, name, "--setup-only")
+    assert code != 0 and fake.setup_onlys == []
 
 
 def test_a_listed_name_installs_the_catalogue_s_distribution(fake, capsys, monkeypatch):
