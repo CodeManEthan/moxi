@@ -1,27 +1,28 @@
 """Shown: whether the operator was shown a ruling as it was recorded.
 
-A ruling is recorded by someone else than the operator, in a sentence he may never have
-seen. So each ruling is shown, or it is not, and a project's read-back list is the
+A ruling is recorded by someone else than the operator, in a sentence the operator may
+never have seen. So each ruling is shown, or it is not, and a project's read-back list is the
 rulings that are not. Nothing waits on it: no gate reads the mark.
 
 A ruling is shown when one of two records covers it:
 
 - **a mark**: a `ruling.shown` event in the log that holds the ruling, which names its
-  id and carries a pointer to where he was shown the sentence. `mark(...)` writes it.
+  id and carries a pointer to where the operator was shown the sentence. `mark(...)` writes it.
   The mark is the claim of whoever recorded it, not the operator's word, so its pointer
   must be able to be a showing: a message, a moment in a session, or a page (its
-  `https://` URL, or the pointer a page gives one act of his on it), never a file,
-  never the pointer of a ruling the call names (that is where he said it), never a
+  `https://` URL, or the pointer a page gives one act of the operator's on it), never a
+  file, never the pointer of a ruling the call names (that is where the operator said
+  it), never a
   message that came before one of those rulings was said, and never a page's act
   from before one of them was recorded: a page can only show a ruling on record;
-- **a read-back**: a ruling of the project's own, `readback=TIME`, his word with his
-  pointer that he read the list through `TIME`. It covers every ruling of the project,
+- **a read-back**: a ruling of the project's own, `readback=TIME`, the operator's word,
+  with a pointer, of having read the list through `TIME`. It covers every ruling of the project,
   in its register and in its rounds, recorded at or before `TIME`. Each read-back is a
   ruling of its own, and the latest time among them covers all the earlier ones.
 
 A mark is no new work, so a round that was closed or dropped still takes one: a
-ruling recorded on it, a correction recorded after it ended included, is shown to him
-like any other.
+ruling recorded on it, a correction recorded after it ended included, is shown to the
+operator like any other.
 
 Only a pointer makes a mark: no read, print or export sets one, and none is ever taken
 off. A read-back is never taken back either, and is itself never on the list.
@@ -71,7 +72,7 @@ class Row:
     """One ruling not yet shown: the `holder` (the round or the project whose log has
     it) and its `id`, which together name it; its `text`, None for one with no
     sentence; the item it `rules`, None for one that stands on its own; the `record`,
-    the pointer to where he said it; the ruling it `supersedes` and the one it
+    the pointer to where the operator said it; the ruling it `supersedes` and the one it
     `revokes`, each None when it does neither; and `at`, when it was recorded."""
 
     holder: str
@@ -202,8 +203,8 @@ def ends_a_list(time: str, *, name: str, at: str) -> write.Gate:
             unread = "".join(f"; {error.reason}" for error in unreadable)
             unmet.append(Unmet(
                 f"no ruling of {name} was recorded at {time}, so no list of its "
-                f"rulings ended there{unread}; TIME below is the time the list he "
-                "read was shown through",
+                f"rulings ended there{unread}; TIME below is the time the list the "
+                "operator read was shown through",
                 again))
         if time >= at:
             unmet.append(Unmet(
@@ -250,9 +251,9 @@ def mark(target: str, ids: str | Iterable[str], *, by: str, record: str | None =
          settings=None, wait_s: float = write.WAIT_S, at: str | None = None) -> Marked:
     """Mark rulings as shown to the operator: `ids` of the round `target`,
     `<project>/<slug>`, as `C12,C13`, or of the project `target`'s register, as
-    `S4,S5`. `record` points to where he was shown them: the message, the moment in a
-    session or the page that put the sentences in front of him, or his act on a page
-    that showed them (`page:<page>/<act>@<time>`).
+    `S4,S5`. `record` points to where the operator was shown them: the message, the
+    moment in a session or the page that put the sentences in front of the operator, or
+    the operator's act on a page that showed them (`page:<page>/<act>@<time>`).
 
     One `ruling.shown` event is appended to the log that holds the rulings, naming the
     ids that were not shown yet. When every one was shown already nothing is written.
@@ -305,19 +306,20 @@ def mark(target: str, ids: str | Iterable[str], *, by: str, record: str | None =
         return [Unmet(f"{name} has no ruling {one}", listing)
                 for one in own_ids if one not in have]
 
-    def are_not_his_own_word(view):
-        return [Unmet(f"{ruling.id} is a read-back, the operator's own word that he "
+    def are_not_the_operators_own_word(view):
+        return [Unmet(f"{ruling.id} is a read-back, the operator's own word of having "
                       "read the list: it is never on the list, and there is nothing "
-                      "to show him", again)
+                      "to show the operator", again)
                 for ruling in found(view) if read_back(ruling) is not None]
 
     def is_a_showing(view):
         if record is None:
-            return Unmet("a mark needs a pointer to where he was shown the sentence; "
+            return Unmet("a mark needs a pointer to where the operator was shown the "
+                         "sentence; "
                          f"PTR below is one token: {_SHOWINGS}", again)
         shape = pointers.shape(record)
         if shape is None:
-            return Unmet(f"{record!r} is not a pointer to where he was shown the "
+            return Unmet(f"{record!r} is not a pointer to where the operator was shown the "
                          f"sentence; PTR below is one token: {_SHOWINGS}", again)
         if shape == pointers.FILE:
             return Unmet(f"{record} is a file, and a file is not a showing; PTR below "
@@ -326,16 +328,16 @@ def mark(target: str, ids: str | Iterable[str], *, by: str, record: str | None =
         for ruling in found(view):
             if pointers.same(ruling.record, record):
                 unmet.append(Unmet(
-                    f"{record} is the pointer of {ruling.id} itself: that is where he "
-                    "said it, and a showing is the later message that put the "
-                    "sentence as recorded in front of him", again))
+                    f"{record} is the pointer of {ruling.id} itself: that is where the "
+                    "operator said it, and a showing is the later message that put the "
+                    "sentence as recorded in front of the operator", again))
             elif (shape == pointers.COMMS
                   and pointers.shape(ruling.record) == pointers.COMMS
                   and pointers.number(record) < pointers.number(ruling.record)):
                 unmet.append(Unmet(
-                    f"{record} came before {ruling.record}, where he said "
+                    f"{record} came before {ruling.record}, where the operator said "
                     f"{ruling.id}: a message from before a ruling can't have shown "
-                    "it to him", again))
+                    "it to the operator", again))
             elif shape == pointers.PAGE and pointers.page_at(record) < ruling.at:
                 unmet.append(Unmet(
                     f"{record} is before {ruling.id} was recorded at {ruling.at}: a "
@@ -358,7 +360,7 @@ def mark(target: str, ids: str | Iterable[str], *, by: str, record: str | None =
         written = write.record(
             write.Where(home.project, home.rounds_dir, slug), by=by,
             # No gate asks whether the round has ended: a mark adds no work to it.
-            gates=[are_named_by_what_holds_them, are_on_record, are_not_his_own_word,
+            gates=[are_named_by_what_holds_them, are_on_record, are_not_the_operators_own_word,
                    is_a_showing],
             event=shown, wait_s=wait_s, at=at)
     except NoLog:
@@ -372,7 +374,7 @@ def mark(target: str, ids: str | Iterable[str], *, by: str, record: str | None =
 _SHOWINGS = ("comms:<digits> for a message, <8 or more hex digits>@<UTC time> "
              "(2026-01-02T03:04Z) for a moment in a session, the https:// URL of a "
              "page that listed it, or page:<page>/<act id>@<UTC time to the second> "
-             "(2026-01-02T03:04:05Z) for his act on a page that showed it")
+             "(2026-01-02T03:04:05Z) for the operator's act on a page that showed it")
 
 
 __all__ = ["READBACK", "TIME", "Row", "ReadBack", "Marked", "read_back", "through",

@@ -60,7 +60,7 @@ from __future__ import annotations
 import json
 from collections.abc import Callable, Sequence
 
-from . import (brake, builds, checking, ci, closing, commission_block, drift, flows,
+from . import (brake, builds, checking, ci, closing, commission_block, drift, flows, log,
                model_tiers, places, rendering, report_block, showing, sizing, stages, steps,
                tracing, versions)
 from . import numbers as counted
@@ -69,9 +69,10 @@ from . import shown as showings
 from . import state as states
 from .errors import BadArgument
 
-#: Who does a step that takes no `by`: the questions and the ratifying are his.
+#: Who does a step that takes no `by`: the questions and the ratifying are the
+#: operator's.
 OPERATOR = "operator"
-_HIS = (steps.QUESTIONS, "ratify")
+_OPERATOR_STEPS = (steps.QUESTIONS, "ratify")
 
 #: The kind of prepared block that has no schema in this version.
 ANSWER = "answer"
@@ -240,7 +241,7 @@ def _retro(found: showing.Shown, step: steps.Step) -> dict:
     will hold, the note and the reports, the report's block, and the verdict."""
     settings = own.load() if found.settings is None else found.settings
     return {**_retro_uncounted(found, step),
-            "numbers": counted.of(found.state,
+            "numbers": counted.of(found.state, now=log.stamp(),
                                   ratify=closing.ratify_of(settings, found.name))}
 
 
@@ -310,7 +311,7 @@ def group(found: showing.Shown, step: steps.Step, models, seen=None, *,
     entry = step.entry or {}
     group = {"step": step.step, "stage": step.stage, "state": step.state,
              "built": step.state != steps.NOT_BUILT,
-             "by": OPERATOR if step.step in _HIS else entry.get("by"),
+             "by": OPERATOR if step.step in _OPERATOR_STEPS else entry.get("by"),
              "tier": entry.get("model"), "model": None, "reads": [], "write": None,
              "then": [], "questions": list(step.questions), "waits": _waits(step)}
     if step.owes:
@@ -389,7 +390,7 @@ def _warnings(found: showing.Shown) -> list[dict]:
                         "held to"))
     if found.register is None:
         warnings.append(_warning(
-            READ_BACK_UNKNOWN, "what he has read back is not known: "
+            READ_BACK_UNKNOWN, "what the operator has read back is not known: "
                                f"{found.register_unreadable.reason}"))
     else:
         unseen = [one for one in state.rulings

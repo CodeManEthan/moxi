@@ -1,14 +1,14 @@
 """rounds' page in a browser, through a real shell that starts rounds' real page server
-over `page_kit`'s rounds, seeded under the shell's own home. The shell has only ui, rounds
-and projects. One test per job of the page: the contract check; no style the shell's
-policy refuses; what waits on him and the walk through it; a question with its options
-and passage from its marker; a failed check's red job, run and output file; a build in a
-git repo, on the small flow, with its state and its check failed at the tip; a build's
-verdict; a strip card and its stage's tabs, and the card staying open with its build when
-the strip moves; the folds of a many-stage round; a round's
-card and the key; an address that opens its popover; a ruling of a round with no docket,
-under its line; a new question without a reload; the strip's way back to a line a filter hides; a closed round's card; and the phone
-layout at 390 px."""
+over `page_kit`'s rounds, seeded under the shell's own home. The shell has only ui,
+rounds and projects. One test per job of the page: the contract check; no style the
+shell's policy refuses; what waits on the operator and the walk through it; a question
+with its options and passage from its marker; a failed check's red job, run and output
+file; a build in a git repo, on the small flow, with its state and its check failed at
+the tip; a build's verdict; a strip card and its stage's tabs, and the card staying
+open with its build when the strip moves; the folds of a many-stage round; a round's
+card and the key; an address that opens its popover; a ruling of a round with no
+docket, under its line; a new question without a reload; the strip's way back to a line
+a filter hides; a closed round's card; and the phone layout at 390 px."""
 
 from __future__ import annotations
 
@@ -66,21 +66,22 @@ def test_the_page_keeps_the_contract(shell, ui_page, ui_component_check):
     assert any("/m/rounds/api/rounds" in url for url in check.requests), check.requests
 
 
-def test_he_sees_what_waits_and_walks_it_in_order(shell, ui_page):
+def test_the_operator_sees_what_waits_and_walks_it_in_order(shell, ui_page):
     panel = open_panel(ui_page)
     waiting = panel.locator(".waiting")
     expect(waiting).to_contain_text("Waiting on you")
     expect(waiting).to_contain_text("3 questions in 2 rounds")
-    expect(waiting).to_contain_text("1 decision")
+    # B1's decision is not put to the operator while B1 is not finished.
+    expect(waiting).not_to_contain_text("decision")
     expect(waiting).to_contain_text("1 job")
     expect(waiting).to_contain_text("1 ruling to read back")
     waiting.get_by_role("button", name="Go through in order").click()
     pop = popover(panel)
     expect(pop.locator(".title")).to_have_text("Question Q1")
-    expect(pop).to_contain_text("1 of 6")
+    expect(pop).to_contain_text("1 of 5")
     expect(ui_page).to_have_url(re.compile(r"/m/rounds/walk/question/kestrel/billing-export/Q1$"))
     ui_page.keyboard.press("ArrowRight")
-    expect(pop).to_contain_text("2 of 6")
+    expect(pop).to_contain_text("2 of 5")
     ui_page.keyboard.press("j")
     expect(pop.locator(".title")).to_have_text("Ruling C1, to read back")
     ui_page.keyboard.press("Escape")

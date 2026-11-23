@@ -20,7 +20,7 @@ RIGHT = [
     (f"page:rounds/{'a' * 64}@2026-01-02T03:04:05Z", pointers.PAGE),
 ]
 WRONG = [
-    None, "", 12, "he said so in chat", "comms:", "comms:12a", "comms:-3", "msg:12",
+    None, "", 12, "the operator said so in chat", "comms:", "comms:12a", "comms:-3", "msg:12",
     "0a1b2c3@2026-01-02T03:04Z",         # seven hex digits
     "0a1b2c3g@2026-01-02T03:04Z",        # not hex
     "0a1b2c3d@2026-01-02T03:04",         # no Z: not said to be UTC

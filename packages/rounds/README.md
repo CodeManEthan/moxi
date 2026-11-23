@@ -6,8 +6,8 @@ operator's rulings on it, and each project's standing rulings.
 A round is one proposal, from its design to the step that puts what was built where it
 goes. rounds is for anyone who directs agents that write code in git repos: one person,
 here called the operator, with a lead agent that runs the round and workers that build
-and check. Everything the operator decides is recorded as his, with a pointer to where he
-said it, and is shown back to him as it was recorded.
+and check. Everything the operator decides is recorded as the operator's, with a pointer
+to where it was said, and is shown back to the operator as it was recorded.
 
 ```sh
 moxi projects add alpha --root ~/code/alpha --notes-root ~/notes/alpha
@@ -84,13 +84,13 @@ lower-case letters, digits and `-`.
 | `moxi rounds rule ROUND --text TEXT --record PTR [--reason TEXT] [--stages B<n>[,...]]` | record a ruling of the round, as `C<n>`; `--stages` names the stages it applies to, when not all |
 | `moxi rounds rule ROUND --standing --text TEXT --record PTR [--scope SPEC]`, `rule PROJECT --text TEXT --record PTR [--scope SPEC]` | record a standing ruling in the project's register, as `S<n>` |
 | `moxi rounds rule ROUND\|PROJECT Q<n>\|P<n> (--text TEXT \| --chose K) --record PTR` | answer a question |
-| `moxi rounds rule ROUND\|PROJECT park:Q<n> --record PTR [--until round:ROUND]` | park a question, so it is not put to him until it is reopened; `--until` names another round it waits for |
+| `moxi rounds rule ROUND\|PROJECT park:Q<n> --record PTR [--until round:ROUND]` | park a question, so it is not put to the operator until it is reopened; `--until` names another round it waits for |
 | `moxi rounds rule ROUND park:Q<n> --record PTR --until B<n>` | park a question until a stage is finished |
 | `moxi rounds rule ROUND narrow:Q<n>=B<n>[,...]\|none --record PTR` | make a question hold up fewer stages, or nothing |
 | `moxi rounds rule ROUND\|PROJECT withdraw:Q<n> --record PTR` | withdraw a question |
 | `moxi rounds rule ROUND\|PROJECT ... --supersedes C<n>\|S<n>` | replace an earlier ruling of the same thing |
 | `moxi rounds rule ROUND\|PROJECT revoke:C<n>\|S<n> --record PTR` | take a ruling back and put nothing in its place |
-| `moxi rounds rule PROJECT readback=TIME --record PTR` | record that he read the list of rulings not yet shown to him through TIME |
+| `moxi rounds rule PROJECT readback=TIME --record PTR` | record that the operator read the list of rulings not yet shown to the operator through TIME |
 | `moxi rounds rule ROUND skip:STEP[:B<n>] --record PTR` | say that a step is not done, for the round or for one stage |
 | `moxi rounds rule ROUND skip-action:B<n>=ID --record PTR` | say that the finish action `ID` is not run for one stage: `finish` treats it as done and writes no record of it; the way out of a command that ran but whose result was lost, or that can't pass again |
 | `moxi rounds rule ROUND flow:NAME --record PTR` | move the round to another flow, whichever it is |
@@ -105,12 +105,15 @@ lower-case letters, digits and `-`.
 | `moxi rounds mark ROUND B<n> --brief FILE` | size a worker's brief before the worker gets it: one slice of the stage within `slice_minutes`, or one verification, or the whole of a stage that declares no slices |
 | `moxi rounds mark ROUND B<n>.L<k> --fixed --commit SHA... --no-behaviour-change` | the lead's mark of a minor or note finding fixed, naming every commit of the fix; run again with the same commits, it writes nothing |
 | `moxi rounds mark ROUND B<n>.W<k> --done --record PTR` | a waiting item is done, with a pointer to the report, commit or message that shows it |
+| `moxi rounds mark ROUND B<n>.M<k> --accept\|--reject --record PTR` | the lead's settlement of a minor decision that is not the operator's to rule; a reject owes a fix, a waiting item until `--done` names it |
+| `moxi rounds mark ROUND B<n>.M<k> --major --record PTR` | the lead's raise of a decision to major; a settlement of it lapses |
 | `moxi rounds mark ROUND thread:NAME --close\|--accept-risk --record PTR` | the lead's decision on a design that was sent back twice in a row |
 | `moxi rounds mark ROUND\|PROJECT C<n>\|S<n>[,...] --shown --record PTR` | say that rulings were shown to the operator as recorded |
 | `moxi rounds mark ROUND B<n> --resync` | read a build's base again from git: moved only after the target's history was rewritten under it |
 | `moxi rounds mark ROUND REPORT.md --reread` | read a recorded report again and add the findings, waiting items and decisions its verdict's record lacks; never removes or changes one |
+| `moxi rounds mark ROUND --restamp --record PTR` | re-stamp the design's current version with the digest of its frozen copy, when an edit outside the round rewrote the copy and `design.md` alike; changes no standing, and an ended round takes it too |
 | `moxi rounds commission ROUND --repo KEY --branch NAME --builder NAME [--slice ID=TEXT --minutes N]...` | in a flow that does not verify its design: declare a stage under the lowest `B<n>` not used, and commission it as below |
-| `moxi rounds commission ROUND B<n> --builder NAME [--record PTR] [--existing]` | build a stage: cut its branch from the target, add its worktree under `worktree_dir` as `<repo>/<branch>` and its scratch folder in rounds' cache directory, each with a marker naming the build, and record the build; `--existing` builds on a branch that is there. It prints the commission block, which goes first in the builder's brief, then tells you which of the block's rulings the operator has not been shown |
+| `moxi rounds commission ROUND B<n> --builder NAME [--record PTR] [--existing]` | build a stage: cut its branch from the target, add its worktree under `worktree_dir` as `<repo>/<branch>` and its scratch folder in rounds' cache directory, each with a marker naming the build, and record the build; `--existing` builds on a branch that is there, one strictly inside or around another open build's branch included, and refuses one that overlaps another open build's or that a recorded landing already brought onto the target. It prints the commission block, which goes first in the builder's brief, then tells you which of the block's rulings the operator has not been shown |
 | `moxi rounds check [ROUND B<n>] [--step NAME \| --full] [--timeout-s N] [--no-wait]` | run the repo's declared check for a build at its tip, in its worktree, and record the run: its commit, that commit's merge-base with the target, the argv, its exit code and duration. The worktree must be clean on the build's branch and the build must have work. Its output goes to `check-<n>.log` in the build's scratch folder; at the check's `timeout_s`, or `--timeout-s`, else 3600 s, its whole process group gets SIGINT and 30 s later SIGKILL. One check runs at a time on the machine: a run waits for the check lock (`check.lock` in rounds' folder of lock files) while another holds it, or with `--no-wait` is refused. Nothing is recorded when the tip or the worktree changed while it ran. With no round, in a build's worktree, it checks that build; it exits 1 when the check failed. With `--step NAME` it runs the command step `NAME` of the round's flow, a step of your own, the same way, and records the run under that name. In a repo that declares `ci` it checks by CI instead: it pushes the tip to `ci.remote` when set (forced, to the branch `ci.ref` gives, when that is set), runs the local part (recorded under `check.local`) unless it passed at the tip, and reads CI, recording the reading; `--full` runs the full check there |
 | `moxi rounds finish [ROUND B<n>] [--again ID]` | finish a build at its branch's tip once every gate of finish holds there: take the repo's finish lock, the ref `refs/rounds/finishing/<into>` or the repo's `lock_ref`; read again the gates a move of the target can change; run the repo's finish actions in order, each recorded under its `id` before the next starts, an action recorded `ok` or `found` at the tip not run again; a merge already on the target (made by hand, by a fast-forward of the target, or by a finish that stopped before recording it) is recorded `found` with where it landed and is not made again, and a hand merge is printed as `found hand merge <commit>:` with what it put on the target; and record the finish when the gates read on the log still hold at the tip it merged, though the branch moved since. The `merge` action merges the tip, by its commit id, into the target with a merge commit, in the checkout that has the target, or in one it adds under `worktree_dir` and removes after. A conflict is aborted and refused with the way through; a failed action is recorded, undoes nothing, and exits 1. A refusal or failure after anything was recorded names each thing done and recorded, and says the build reads merged, not finished, when its merge is on the target. A lock left by a process on this machine that has ended is cleared and recorded; any other holder is named, with the git command that clears it. A `push` pushes the target at the merge's landing, or with no merge before it the build's branch at the tip, both by commit id. A push of the target git refuses still passes when the remote's target already holds the landing, so a rerun does not fail because the target moved on there; nothing is forced, so the remote's target never moves back. To read that, finish fetches the remote's target when the repo lacks its commit, which refreshes the repo's remote-tracking branch for it (`refs/remotes/<remote>/<into>`), as a push that succeeds would; no other ref changes. A `command` runs its argv with no shell in the build's worktree, placeholders filled as for a check, its output yours, with `started` recorded before it runs. A command that started and has no result may have done its work: it is run again, saying so, when its `repeat` is true, or once with `--again ID` after you have looked at what it did; otherwise it is refused with both ways on, that and the operator's `skip-action`. `--again` is refused for any other action. An action the operator skipped for the stage is not run and counts as done. Then it cleans up: after a merge, and only while the branch is still at the tip it finished, it removes the build's worktree and scratch folder and deletes the branch with `git branch -d` (not with `keep_branch`); with no merge it removes only the scratch folder. Each removal obeys the removal rule below, and a folder the rule keeps is named with the check that kept it. Before anything is written, finish is refused while a process of yours uses the build's scratch folder (its working folder, an open file, an argument or an environment value), naming the process: end it or leave the folder, then finish again. A scratch folder a process came to use after that read is not moved and is left for the sweep, named with the process. Where the processes can't be read, finish says the scratch gate was not run and goes on. Last, it removes from the remote CI's own refs of the build (see `ref` and `full_ref` under Config), each named with what became of it. With no round, in a build's worktree, it finishes that build |
 | `moxi rounds show ROUND [--json]` | one round: status, lead, flow, the step it is at, what its close waits for, its design and stages, its builds (for a build not finished, the newest record of each finish action at its head, with its state and landing), questions by state, rulings, verdicts and history |
@@ -301,6 +304,26 @@ operator's ruling took off (`narrow:`, `unafter:`) stays off while the block lis
 as it did before, whatever else of the entry changed; `fold` prints a `kept off:` line
 for each, with the ruling. `mark` holds it again, with `--blocks` or `--after`.
 
+`next`, `commission` and the check read whether `design.md` still holds the current
+version's digest. When it does not, they say `design.md changed since v<N> was frozen`,
+and the fix is the fold. When `design.md` and the frozen copy hold the same bytes and
+neither is what the version was frozen from, an edit outside the round rewrote both:
+they say the frozen copy was edited after the freeze, as `design.md` was, and offer the
+repair `mark ROUND --restamp --record PTR`, the pointer being where the lead named what
+edited them. The re-stamp records the copy's SHA-256 as the version's re-stamped digest
+in one `repair` event (`what = "digest"`, `version`, `record`, the digest was and now,
+and the copy it read). It refuses a round with no frozen version, a copy that can't be
+read, and a `design.md` that differs from the copy (the fold is the fix), and writes
+nothing when `design.md` holds the digest already. A version keeps the digest recorded
+at its freeze beside the re-stamped one, and each comparison of a version with the one
+before it reads the earlier one's digest as it stood when the later was frozen, so a
+re-stamp changes no standing, no run of sent-back versions and no brake answer; a
+freeze of the same text after it reads as the same text. It is the one repair that
+takes `--record`, and the one an ended round takes, since it corrects a record and adds
+no work. `show` lists it under Repairs, `digest of v8: 1a2b3c4d5e6f to 0f9e8d7c6b5a,
+record ...`, and its versions line gives the re-stamped digest with `(re-stamped from
+1a2b3c4d5e6f)`.
+
 ### Verifying it
 
 A checker reads the frozen version, writes a report in the round's folder and records
@@ -430,6 +453,13 @@ with `--existing` on the branch the drop kept, or on a fresh branch once that on
 deleted; a worktree the drop kept is removed first. Whatever held the stage still
 holds it. A repo's branch has one open build at a time, across every round: a
 commission on a branch another round's open build is on is refused, naming that round.
+`--existing` takes a branch whose span is strictly inside, or strictly around, another
+open build's, so a stage stacked on another can be commissioned on purpose and gate 10
+of `finish` orders the two. It refuses a branch that overlaps another open build's, or
+holds the same commits, naming the build and the relation, and a branch a recorded
+landing of another build already brought onto the target, naming that build: drop the
+round, or, for work still to do, delete the branch (`git branch -d`, as the target holds
+its commits) and commission without `--existing`, which cuts a new one.
 `next` warns once a round plans five or more stages that are builds, and refuses
 nothing for it: a part of the work that stands on its own can be a child round.
 
@@ -492,9 +522,40 @@ one that does not hold with its number and the command that meets it:
    are left), and the branch is still at the tip;
 8. each step of your own is done at the tip, or the operator skipped it;
 9. the build has work: it reads `building` or `merged`;
-10. it shares no commits with another build.
+10. it shares no commits with another build, unless one of the two is stacked inside
+    the other and this one goes first (below).
 
 No skip meets gates 9 and 10, and `finish` itself is never skipped.
+
+Gate 10 reads each other open build of the repo and target that shares commits with
+this one by the two spans, each the commits in `target_before..head`. This build is
+**inside** the other when its span is strictly part of the other's, **contains** it when
+the other's is strictly part of its own, and otherwise the two **overlap**: each has a
+commit the other lacks, or the spans are equal. Of two stacked builds, the one whose
+work reaches the target first goes first:
+
+| this build is | the other reads | gate 10 |
+|---|---|---|
+| inside it | not merged | passes |
+| inside it | merged | held until the other's finish records the landing that brought this build's work onto the target |
+| around it | anything, this one not merged | held until the other's work is on the target |
+| around it | anything, this one merged | passes: a merged build holds no other |
+| overlapping it | anything | refused: a build finishes only with work of its own |
+
+A held build's line has the fix `moxi rounds next ROUND` of the build to finish first.
+The rule is per pair, so a chain finishes from the inside out, and two builds inside
+one outer build that overlap each other refuse each other. Once the inner build's work
+is on the target it leaves the outer build's span, so the outer passes on its next
+read with nothing written. An outer build merged by hand, or fast-forwarded by hand,
+finishes first and records the landing; the inner build then reads `empty` with
+nothing of its own, does not finish, and ends by a drop, its stage still owed. Two
+builds with the same work are refused both, and one is dropped. `finish` reads gate 10
+again under the finish lock, so of two finishes run at once the second reads the
+target the first left. `next` gives a held finish as waiting with the held line;
+`show`, `list` and the drop refusal word each share by its relation (`inside ROUND B1
+(finishes first)`, `contains ROUND B2 (held until its work is on the target)`, `shares
+with ROUND B3` for an overlap), and `--json` gives each share a `relation`: `inside`,
+`contains` or `overlaps`.
 
 The lead may mark a `minor` or `note` finding fixed without a re-check: `mark ROUND
 B<n>.L<n> --fixed --commit SHA [--commit SHA]... --no-behaviour-change`, naming every
@@ -516,7 +577,7 @@ newest report is `publishable` and counts at the tip by the rule above, read on 
 step's reports alone; a report of the build does not do a report step, nor a step's
 report the build's verification.
 
-Work that can't be done without the operator, such as a check on his phone, is a
+Work that can't be done without the operator, such as a check on the operator's phone, is a
 `[[wait]]` in the report. When the report is recorded each is an open waiting item of
 the round, `B1.W1`, at once. It does not hold the build's finish; it holds the round's
 close, and `list --waiting` lists it, until `mark ROUND B1.W1 --done --record PTR` names
@@ -529,25 +590,75 @@ An as-built choice the operator would notice is a `[[decision]]`, with a `weight
 (`major` or `minor`) and whether it `forecloses` a capability (then it is major). Each
 is a record of the round, `B1.M1`, with the options `accept` and `reject`; it holds no
 stage. A later report may list it again with the same sentence, as heavy or heavier,
-never lighter; another sentence under its id is refused. He rules it
-with `rule ROUND B1.M1=accept|reject --record PTR`; a rejected one is also a waiting
-item, `B1.M1`, until `mark ROUND B1.M1 --done --record PTR` names the fix. A report of
+never lighter; another sentence under its id is refused. The operator rules it with
+`rule ROUND B1.M1=accept|reject --record PTR`; a rejected one is also a waiting item,
+`B1.M1`, until `mark ROUND B1.M1 --done --record PTR` names the fix. A report of
 `kind = "majors"`, by a checker who built none of the stages it names, declares
 decisions no build report carries, each with its `stage`, and names the builds it covers in
-`stages`. `list --waiting` and a project's export list each unruled major.
+`stages`. `list --waiting` and a project's export list each unruled major, and each
+minor one that is the operator's.
+
+**Whose a decision is.** One rule says it, and the close, the `ratify` step, the
+labels, the export and `list --waiting` all read it. An open decision is the
+operator's exactly when the close waits for the operator's ruling of it: the round's
+flow has a `ratify` step (every flow with a `build` step has one) and it is not
+skipped, the project's `ratify` setting names its weight (below), its stage is finished,
+and the build that finished it declared it. Under each open decision `show`, the round
+note, `verdict`'s output and `list --waiting` print:
+
+| Open decision | Its line |
+|---|---|
+| the operator's (major or minor) | `the operator's to rule: <rule command>` |
+| its stage not finished, the rest of the rule holding | `not yet put to the operator (stage B1 is not finished): <rule command>` |
+| major, not the operator's | `not put to the operator (<why>); recorded only if the operator rules it: <rule command>` |
+| minor, not the operator's | `the lead's to settle: moxi rounds mark ROUND B1.M1 --accept, --reject or --major --record PTR` |
+
+The why is the first part of the rule that fails: `the flow has no ratify step`,
+`ratify is skipped`, `ratify is off` (or `ratify is majors`, for a minor one), `stage B1
+is not finished`, or `the build that finished B1 did not declare it`. A settled one
+reads `settled by the lead: accept, record PTR`. In a round that has ended none takes a
+ruling: each open one reads `left open, put to the operator and not ruled` or `left
+open, not put to the operator (<why>)`, with no command. `show --json` gives an open
+decision `put`, `not_put` and the line as `open_as`; a row of `list --waiting --json`
+that is not put has `not_put`.
+
+**The lead's settlement.** Every open minor decision of a finished build that is not the
+operator's holds the close until the lead settles it, in every flow:
+`mark ROUND B1.M1 --accept --record PTR`, or `--reject`, PTR a pointer to where the lead
+wrote why. Where the minor decision promises a follow-up, the pointer names the task
+filed for it; where nothing was filed, the lead rejects it. A settlement is one
+`decision.settled` event with `chose`, `record` and `by = "lead"`; the decision reads
+`settled`, never `ruled`. A reject owes a fix, the waiting item `B1.M1 rejected: fix
+owed`, until `mark ROUND B1.M1 --done --record PTR` names it. The settlement is refused
+for a key that is no decision of the round, a major decision, one ruled or settled
+already, a minor one that is the operator's or will be once its stage finishes, a
+missing or malformed pointer, and a round that has ended. The operator's ruling of a
+settled decision replaces the settlement and names its line (`settlement` in the
+ruling's event). `mark ROUND B1.M1 --major --record PTR` makes a decision major, one
+`decision.raised` event, as a later report listing it heavier does; it is refused for a
+major one, one the operator ruled, a missing pointer and an ended round. A settlement
+covers a minor decision only: once its weight rises, by `--major` or a later report, the
+decision is open again, as a major one, and a reject's fix is no longer owed (a `--done`
+already marked stays in the log). The index keeps a settled decision with the state
+`settled`, which no export draws.
 
 A round's export has two views. The docket (`--view docket`) is its open questions and,
 after them, the parked ones. The ratification (`--view ratify`) is the unruled decisions
-of the builds that are finished when it runs, named under `covers`; what it puts to the
-operator is the project's `ratify` setting: `majors` (the default) each major decision,
-`majors+minors` the minor ones too, drawn as one group that lists their ids and is
-still ruled one id at a time, and `off` none. The major decisions of builds not yet
+of the builds that are finished when it runs, named under `covers`, each the operator's
+by the rule above; what it puts to the operator is the project's `ratify` setting:
+`majors` (the default) each major decision, `majors+minors` the minor ones too, drawn as
+one group that lists their ids and is still ruled one id at a time, and `off` none. A
+round whose flow has no `ratify` step, or whose `ratify` is skipped, puts none either,
+and its export says why under `not_ratified`, which it learns from the round's
+decisions: with none to draw, the markdown says what it puts only where the flow
+ratifies. The major decisions of builds not yet
 finished are listed under `later`, and come in an export run once their build is
 finished. A build answers only for the decisions its own reports declared: a dropped
 build counts for nothing, so a decision only a dropped build declared is in neither
 list until a report of a later build of its stage lists it again. A decision that
 forecloses a capability is an entry of its own everywhere:
-`alone` in the data, its own heading in the markdown, never in a group.
+`alone` in the data, its own heading in the markdown, never in a group, a minor one
+from a log written before reports refused that pairing included.
 
 A verdict records the head it read and that head's merge-base with the target. When the
 target moves on, `show` reads whether the move touches the build: `target moved 4
@@ -568,9 +679,9 @@ parked, ruled, withdrawn or moved.
 
 A round's question holds up every stage of the round, or the stages its `blocks`
 names, until the operator rules on it. One that holds up no stage still keeps the round
-from closing. Only he lets go of it: his answer, `park:`, `narrow:` and `withdraw:` are
-rulings. `mark` changes a question only towards holding up more, and reopens a parked
-one. A question comes from `ask` or from the design's block, where `fold` adds it.
+from closing. Only the operator lets go of it: the operator's answer, `park:`, `narrow:` and
+`withdraw:` are rulings. `mark` changes a question only towards holding up more, and
+reopens a parked one. A question comes from `ask` or from the design's block, where `fold` adds it.
 
 A project's list holds questions that have no round yet, and they hold up nothing.
 `--adopt` brings one into a round, where it holds up every stage. `--move` puts a
@@ -592,14 +703,14 @@ Every ruling is printed as it was recorded:
 ```text
 Recorded as C1: No, live notes only
 in answer to Q1: Should search read archived notes too?
-show him this under "Recorded as" in your next message, then:
+show the operator this under "Recorded as" in your next message, then:
   moxi rounds mark alpha/search C1 --shown --record <pointer to that message>
 ```
 
 Until `mark --shown` names it, a ruling is listed by `list --waiting` among the rulings
-not yet shown to him, with the project's own and its rounds' together. `rule PROJECT
-readback=TIME` records instead that he read that list through TIME, the time of the last
-ruling on it, and covers every ruling of the project recorded up to then.
+not yet shown to the operator, with the project's own and its rounds' together. `rule
+PROJECT readback=TIME` records instead that the operator read that list through TIME, the
+time of the last ruling on it, and covers every ruling of the project recorded up to then.
 
 ## The trace check
 
@@ -646,7 +757,7 @@ no `build` step the close waits for:
 $ moxi rounds rule alpha/ranking Q1 --chose b --record comms:21
 Recorded as C1: Only an exact title match
 in answer to Q1: Should a title match always rank above a body match?
-show him this under "Recorded as" in your next message, then:
+show the operator this under "Recorded as" in your next message, then:
   moxi rounds mark alpha/ranking C1 --shown --record <pointer to that message>
 closed alpha/ranking: nothing is left for its close to wait for
 $ moxi rounds mark alpha/ranking C1 --shown --record comms:22
@@ -665,29 +776,58 @@ one it takes no new question and no new ruling; a correction of one of its rulin
 still recorded, and its rulings are still marked as shown.
 
 A round whose flow has a `build` step closes once every stage in its plan is finished,
-no build is open, and its decisions are settled: every major decision of a finished
-build is ruled, and every finished build has a report that declares its decisions (a
-build report, or a majors report naming its stage). The operator's skip of `ratify`, or
-the project's `ratify = "off"`, lets the decisions past. While a major decision of a
-finished build is unruled, `next`, `show` and `list` give the round's `ratify` step as
+no build is open, and its decisions are done with: every decision of a finished build
+that is the operator's (the rule under Verifying a build) is ruled, every finished build
+has a report that declares its decisions (a build report, or a majors report naming
+its stage), and every other minor decision of a finished build is settled by the lead,
+each open one read as `decision B1.M1, minor, not yet settled by the lead` (the command
+is under the decision in `show`). The operator's skip of `ratify`, the project's
+`ratify = "off"`, or a flow with no `ratify` step puts no decision to the operator; the
+lead's settlements are waited for in every flow. While a decision that is the
+operator's is unruled, `next`, `show` and `list` give the round's `ratify` step as
 ready and the operator's, with the command that rules each.
+
+The write that closes a round prints, after its `closed ROUND: ...` line, a line for each
+decision of a finished build still open, worded by the rule under Verifying a build:
+`left open, not put to the operator: decision B1.M1, major: <text>`. Since the close
+waits for every decision that is the operator's and for the lead's settlement of every
+other minor one, the list holds only major decisions the operator was not put (`ratify =
+"off"`, a skip of `ratify`, or no `ratify` step). `left open, put to the operator and not
+ruled` is said only of a round dropped with one open. A decision only a dropped build
+declared is not among them. `show` of an ended round gives the same list under the line
+that says how it ended, with the `ratify` setting as it is now, and `--json` has it as
+the ending's `left_open`. A round that ended before the close waited for the lead's
+settlements is read as it is: its open minor decisions keep their `left open` lines.
 
 The event that ends a round, its close or its drop, holds the round's numbers, counted
 from its log: design passes, `fold-first` verdicts of any kind, folds and records-only
 folds, the lead's decisions (on a thread, or a records-only fold that made a design
 sent back stand at `lead-decision`), the time spent at each step, findings by
 severity, re-checks and drift re-checks, failed check runs, questions by where they
-came from, decisions accepted and rejected, skips, step-ups, repairs, corrections,
+came from, decisions the operator accepted and rejected, the minor ones the lead
+settled (`settled`, accept and reject; numbers written before it read it as zero),
+skips, step-ups, repairs, corrections,
 dropped builds, cleared locks, and reports flagged `extra-full-pass` or
 `model-below-tier`. The time at each step is in whole seconds, under the step's name
 or `<step> B<n>` for a stage's: the log is read once at the end, and the time from
 each event to the next goes to every step that was ready or waiting then, so steps
-due side by side each get it. The steps are read from the log alone: a build has work
+due side by side each get it, and the line says so: `time in steps, overlapping (steps
+due side by side each count the same time): ...`. Beside them, `round_time_s` is the
+round's own time, from its first event to the one that ended it (`time open: 2h 5m,
+open to close`), and `longest_gap` the longest stretch with no event, the stretch to
+the end included, as `since`, `until` and `due`, the steps due across it, the earliest
+of equal ones (`longest stretch with nothing logged: 96h 0m 12s, since ..., while
+finish B1 was due`): that is where a build that sat idle shows. The retro step's
+numbers in `next` run these two to now. For a round that ended before they were
+counted, `show` computes both from its log up to the ending event and writes nothing,
+reading `due` with the `ratify` setting as it is now. The steps are read from the log alone: a build has work
 once a record names a commit of it, its check is done when its newest run passed at
 the newest commit the log names, and its verification when a publishable report, or
 a lead's mark of what came after it, covers the commits named since. `show` gives them under the line that says how the
 round ended, `retro.md` beside the round's note holds them, and `list --numbers` sums
-those of the closed rounds (a dropped round's stay with it).
+those of the closed rounds (a dropped round's stay with it): `round_time_s` over the
+closings that hold it, saying how many rounds that is when it is fewer than all
+(`timed` in `--json`), and never `longest_gap`, which does not add across rounds.
 
 A flow with a `retro` step (`full` and `small` as shipped) waits for it too. The step
 is due once the close waits for nothing else, and `next` then gives it with the
@@ -699,12 +839,13 @@ numbers only, and the operator's `skip:retro` lets the round close without one.
 
 ## Dropping a round
 
-`drop --by operator` ends any round, with a pointer to where he said so. `drop --by lead`
-ends only a round that holds none of the operator's acts: no ruling, no question asked
-with his pointer, no opening on his go. The round's open and parked questions go to the
-project's list as they are, or with `--withdraw-questions`, which is the operator's
-alone, are withdrawn. Its open builds end with it, each branch's tip recorded, and
-the lead's drop is refused while one of them is not his to drop (below).
+`drop --by operator` ends any round, with a pointer to where the operator said so. `drop
+--by lead` ends only a round that holds none of the operator's acts: no ruling, no
+question asked with the operator's pointer, no opening on the operator's go. The round's
+open and parked questions go to the project's list as they are, or with
+`--withdraw-questions`, which is the operator's alone, are withdrawn. Its open builds
+end with it, each branch's tip recorded, and the lead's drop is refused while one of
+them is not the lead's to drop (below).
 
 A dropped round takes no new question and no new ruling. A correction of one of its
 rulings is still recorded, and its rulings are still marked as shown.
@@ -998,7 +1139,9 @@ index, and nothing on it acts on a round. Top to bottom:
   on the operator, counted with the number of rounds they are in, or `Nothing waits on
   you.` `Go through in order` opens each item in turn at its marker: rounds in the
   board's order, and in each its questions, rulings, decisions and jobs, then the
-  project-level items. The arrow keys and `j`/`k` move, Esc closes.
+  project-level items. The arrow keys and `j`/`k` move, Esc closes. A decision that
+  `list --waiting` says is not put to the operator is not counted, here or in a round's
+  line.
 - **Last acted on.** The ten builds with the newest recorded step, across projects and
   closed rounds, each with a small rail of its stage and the act in words (`landed`,
   `CI green`). A card opens its build's current step, with the stage's five steps as
