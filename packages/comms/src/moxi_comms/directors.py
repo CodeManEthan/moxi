@@ -1,18 +1,21 @@
 """Recipient-declared director authority.
 
-Authority is granted by the RECIPIENT at launch, never claimed by the sender. The whole
-declaration surface is `moxi-comms-claude --director <name>` (repeatable) and the codex
-roster's `directors` list; a sender can no more assert authority over its reader than it
-can assert a routing tag it is entitled to, and for the same reason: tags are
-spoofable, names are cooperative labels, and nothing builds authorization on tag
-contents.
+Authority is granted by the RECIPIENT's side, never claimed by the sender: at launch, and
+through its machine's own comms config. The declaration surface is `moxi-comms-claude
+--director <name>` (repeatable), the codex and opencode rosters' `directors` lists, and the
+box's `[policy] directors`, which every launch takes after its own (`effective`) unless it
+opts out (`--no-policy-directors`, `takes_policy_directors = false`). A sender can no more
+assert authority over its reader than it can assert a routing tag it is entitled to, and
+for the same reason: tags are spoofable, names are cooperative labels, and nothing builds
+authorization on tag contents.
 
 It is INVISIBLE ON THE WIRE. No record, payload, daemon or protocol change: two things
 exist and nothing else does.
 
   * the DECLARATION -- qualified ONCE, at launch, and stamped into the session
     environment as `MOXI_COMMS_DIRECTORS` (comma-separated, qualified) beside the identity
-    stamp `MOXI_COMMS_NAME` / `MOXI_COMMS_SCOPE`;
+    stamp `MOXI_COMMS_NAME` / `MOXI_COMMS_SCOPE`, with the part only the box's policy
+    gave in `MOXI_COMMS_POLICY_DIRECTORS`;
   * the RENDERING -- `standing_of()`, which both adapters' frame line asks about every
     delivered payload before it writes the line.
 
@@ -27,8 +30,10 @@ Directive standing requires VERIFIED attribution. A
 declared director whose message is not verified degrades to information standing and
 the frame line says why (it renders `(unverified)` and the reason; the wire value is
 still `labeled`) -- standing-tier directors are the recommended shape because they stay
-verified through replay. Operator-tier messages are ALWAYS directives, declared or not. No
-transitivity: one hop, declared at launch, dead with the session.
+verified through replay. A POLICY director (one only the box's setting gave) needs the
+standing tier too: anyone may bind an unheld name, so the box's setting grants nothing
+until the name is provisioned. Operator-tier messages are ALWAYS directives, declared or
+not. No transitivity: one hop, fixed at launch, dead with the session.
 
 Truth in labeling: this is authority CALIBRATION, not access control. A
 model can ignore its director or obey a stranger; what this fixes is the default.
