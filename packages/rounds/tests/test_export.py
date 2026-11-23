@@ -10,7 +10,7 @@ import pytest
 from moxi import cli
 
 from moxi_rounds import (asking, dropping, export, folders, index, log, moving, opening,
-                         options, paths, questions, ruling, state)
+                         options, paths, preparing, questions, ruling, state)
 from moxi_rounds.cli import main
 from moxi_rounds.errors import BadArgument, NoRound, Refused, Unreadable
 
@@ -307,6 +307,68 @@ def test_a_question_with_options_is_exported_with_them_in_the_order_added(
     assert ("- options:\n  - b: both follow the settings\n"
             "  - a: prose yes, parsed rows no\n  - c: neither does\n"
             ) in printed(capsys, A, "--questions")
+
+
+def prepare(tmp_path, *keys, target=A, question_id="Q1", recommend="a"):
+    """Record an answer prepared for the question, with an option under each key."""
+    lines = ['kind = "answer"', f'question = "{question_id}"', 'by = "builder-1"',
+             'model = "a-model"', f'recommend = "{recommend}"', 'sure = "medium"',
+             'why = "prose is what a person reads"', 'flips = "a parsed row read aloud"',
+             'read = ["comms:4611686018427394085"]']
+    for key in keys:
+        lines += ["[[option]]", f'key = "{key}"', f'costs = "the cost of {key}"',
+                  'forecloses = "nothing"']
+    path = tmp_path / f"answer-{len(list(tmp_path.glob('answer-*')))}.md"
+    path.write_text("```toml rounds\n" + "\n".join(lines) + "\n```\n", encoding="utf-8")
+    return preparing.prepare(target, question_id, path, by="helper", at=T5)
+
+
+def test_a_prepared_question_is_exported_with_its_newest_answer(rounds, tmp_path,
+                                                                capsys):
+    ask(options=["a=prose yes, parsed rows no", "b=both follow the settings"])
+    prepare(tmp_path, "a", "b", recommend="b")
+    prepare(tmp_path, "b", "a")
+
+    [entry] = entries()
+
+    assert set(entry) == BARE | {"options", "prepared"}
+    assert entry["prepared"] == {
+        "by": "builder-1", "model": "a-model", "recommend": "a", "sure": "medium",
+        "why": "prose is what a person reads", "flips": "a parsed row read aloud",
+        "read": ["comms:4611686018427394085"],
+        "options": [{"key": "b", "costs": "the cost of b", "forecloses": "nothing"},
+                    {"key": "a", "costs": "the cost of a", "forecloses": "nothing"}],
+        "actor": "helper", "at": T5, "current": True}
+    assert ("- prepared by builder-1 (a-model, sure: medium): recommends a. prose is "
+            "what a person reads. Flips if: a parsed row read aloud.\n"
+            "  - b: costs the cost of b; forecloses nothing\n"
+            "  - a: costs the cost of a; forecloses nothing\n"
+            ) in printed(capsys, A, "--questions")
+    data = json.loads(printed(capsys, A, "--questions", "--json"))
+    assert data["entries"][0]["prepared"] == entry["prepared"]
+
+
+def test_an_answer_prepared_for_other_options_is_exported_as_such(rounds, tmp_path,
+                                                                 capsys):
+    ask(options=["a=prose yes, parsed rows no", "b=both follow the settings"])
+    prepare(tmp_path, "a", "b")
+    options.fill(A, "Q1", by="helper", options=["c=neither does"])
+
+    [entry] = entries()
+
+    assert entry["prepared"]["current"] is False
+    text = printed(capsys, A, "--questions")
+    assert "recommends a." in text
+    assert "  - prepared for other options\n" in text
+    assert "costs the cost of a" not in text
+
+
+def test_a_projects_export_carries_the_answers_of_its_rounds(rounds, tmp_path):
+    ask(options=["a=prose yes, parsed rows no", "b=both follow the settings"])
+    prepare(tmp_path, "a", "b")
+
+    [entry] = [one for one in entries("proj-a") if one["id"] == "Q1"]
+    assert entry["prepared"]["recommend"] == "a"
 
 
 def test_a_retired_option_is_in_no_form_of_the_export(rounds, tmp_path, capsys):

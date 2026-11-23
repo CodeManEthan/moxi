@@ -299,8 +299,9 @@ def waiting(state: states.State) -> Iterator[tuple[str, Mapping]]:
     for the index. The body holds the record as the log leaves it, at the depth it has:
     the sentence, where it came from, what it holds up, the recorded state, who asked it
     and when; then, each only when the question has it, what a parked one waits for,
-    the options it offers now as `{"key", "text"}` in the order they were added, and
-    the record it was moved here from with what it held up there.
+    the options it offers now as `{"key", "text"}` in the order they were added, the
+    newest answer prepared for it as `prepared_data` gives it, and the record it was
+    moved here from with what it held up there.
 
     A parked question's state is the recorded one. When it waits for a stage of its own
     round and that stage is finished, the body says `reached`; whether another round it
@@ -322,6 +323,8 @@ def waiting(state: states.State) -> Iterator[tuple[str, Mapping]]:
         if question.options:
             body["options"] = [{"key": key, "text": line}
                                for key, line in question.options]
+        if question.prepared:
+            body["prepared"] = prepared_data(question)
         if question.moved_from is not None:
             body["moved_from"] = question.moved_from
         if question.held is not None:
