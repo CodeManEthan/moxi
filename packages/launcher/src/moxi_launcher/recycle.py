@@ -52,8 +52,11 @@ group. usage calls it in turns' endpoint once per rise of the main session's con
 the launch's `limit_at` mark, with at most 200 ms to answer. It
 reads the store, writes at most one row, and returns; it never waits on the session.
 `relaunch` writes an event and returns a line that tells the agent its launch lets it
-recycle itself, at its next pause point and only when it is mid-work (`relaunch_line`),
-but never to a scratch launch, which can't recycle itself (`SCRATCH_RECYCLE`);
+recycle itself, at its next pause point and only when it is mid-work (`RELAUNCH_LINE`),
+once per session id: a crossing that fires again in the same session id, after a
+compaction, gets no line, and a clear or a resume that names a new id is told afresh. It
+never tells a scratch launch, which can't recycle itself (`SCRATCH_RECYCLE`). usage
+appends the line to its notice on the same call, so the agent reads one line;
 `compact` writes a compact run and spawns its job, which waits for the session to be idle
 (`job.CompactJob`). A compact crossing that meets an open run leaves a pending compact,
 which the run's end takes up (`store.end_run`): it is never dropped silently.
@@ -102,15 +105,14 @@ CROSSING_BUSY_S = 0.1
 #: A hand-run sweep's wait for the launch log, in seconds.
 SWEEP_BUSY_S = 5.0
 
-#: The line a `relaunch` crossing returns, filled by `relaunch_line` with `RELAUNCH_AFTER`
-#: when the crossing names its mark.
-RELAUNCH_LINE = ("This launch lets you recycle yourself{after}. Only if you are mid-work with "
-                 "more to do: at your next pause point (let running subagents finish, start "
-                 "nothing new), write a handoff with your handoff skill, then run `moxi "
-                 "launcher relaunch --self --handoff <file>` as your last act and end your "
-                 "turn. If your work is nearly done, finish it and stop as usual; don't "
-                 "recycle at the end of a task.")
-RELAUNCH_AFTER = ", now that its context has passed the {mark} mark"
+#: The line a `relaunch` crossing returns. usage appends it to its notice, which names the
+#: mark, so it names none itself.
+RELAUNCH_LINE = ("This launch lets you recycle yourself. Only if you are mid-work with more "
+                 "to do: at your next pause point (let running subagents finish, start "
+                 "nothing new), write a handoff with the handoff skill, stop your background "
+                 "shells, then run `moxi launcher relaunch --self --handoff <file>` as your "
+                 "last act and end your turn. If your work is nearly done, finish it and "
+                 "stop as usual; don't recycle at the end of a task.")
 COMPACT_LINE = ("This launch compacts at its limit: the launcher compacts this session at "
                 "its next idle.")
 
@@ -515,13 +517,13 @@ def crossing_line(conn: sqlite3.Connection, crossing: Any, *, pid: int,
     if value == "relaunch":
         if is_scratch_relaunch(row.values):
             return None
-        if not _told(conn, row.request_id, key):
+        if not _told(conn, row.request_id, session_id):
             try:
                 store.add_event(conn, "recycle-told", {"crossing_key": key},
                                 request_id=row.request_id, session_id=session_id)
             except store.Busy:
                 pass
-            return relaunch_line(getattr(crossing, "mark", None))
+            return RELAUNCH_LINE
         return None
     if value != "compact" or store.crossing_known(conn, key):
         return None
@@ -544,17 +546,11 @@ def is_scratch_relaunch(values: Mapping[str, Any]) -> bool:
     return bool(values.get("scratch")) and values.get("recycle_at_limit") == "relaunch"
 
 
-def relaunch_line(mark: Any) -> str:
-    """The line a `relaunch` crossing returns, naming the crossing's `mark` when it has
-    one."""
-    return RELAUNCH_LINE.format(after=RELAUNCH_AFTER.format(mark=mark) if mark else "")
-
-
-def _told(conn: sqlite3.Connection, request_id: str, key: str) -> bool:
+def _told(conn: sqlite3.Connection, request_id: str, session_id: str) -> bool:
+    """Whether the launch was told it may recycle itself in session `session_id`."""
     return conn.execute(
         "SELECT 1 FROM events WHERE request_id = ? AND kind = 'recycle-told' "
-        "AND json_extract(detail_json, '$.crossing_key') = ? LIMIT 1",
-        (request_id, key)).fetchone() is not None
+        "AND session_id = ? LIMIT 1", (request_id, session_id)).fetchone() is not None
 
 
 def start_compact(conn: sqlite3.Connection, run: store.Run, *, spawn: Any | None = None,
@@ -607,9 +603,9 @@ def _words(error: BaseException) -> str:
 
 
 __all__ = ["BLOCKED_REFUSALS", "BUSY_WORDS", "COMPACT_LINE", "CROSSING_BUSY_S", "EXPIRY",
-           "FAILED_REFUSALS", "QUIET_REFUSALS", "RAN", "RELAUNCH_AFTER", "RELAUNCH_LINE",
+           "FAILED_REFUSALS", "QUIET_REFUSALS", "RAN", "RELAUNCH_LINE",
            "SCRATCH_RECYCLE", "SHELLS_IDLE_S", "STOP_SHELLS", "SWEEP_BUSY_S", "UNCONFIRMED",
            "Asked", "Verdict", "ask_expiry", "cache_read", "claude_projects", "clear_expired",
            "codex_sessions", "crossing_line", "end", "is_scratch_relaunch", "on_crossing",
-           "relaunch_line", "start_compact", "stops_shells", "sweep_log", "swept",
+           "start_compact", "stops_shells", "sweep_log", "swept",
            "verdict_of"]

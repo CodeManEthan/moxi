@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+- The relaunch line is Core's instruction with Moxi's verb: "write a handoff with the
+  handoff skill, stop your background shells, then run `moxi launcher relaunch --self
+  --handoff <file>`". It no longer names the mark (usage's notice, which it is appended
+  to, does), so `RELAUNCH_AFTER` and `relaunch_line` are gone; the crossing returns
+  `RELAUNCH_LINE`. A `relaunch` launch is told once per session id: a crossing that fires
+  again in the same id after a compaction gets no line, and a clear or a resume that
+  names a new id is told afresh. A `compact` launch still compacts at every rise.
+- The `moxi-handoff` skill's recycle steps stop your background shells before the
+  relaunch.
 - After a topic value the page reads its past sessions again through moxi-ui's
   `readLater`, so the page root's `data-reading` mark counts that read from the moment it
   is scheduled until its answer is drawn, and a test's press waits for the list it

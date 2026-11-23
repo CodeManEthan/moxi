@@ -602,7 +602,10 @@ own reads:
   usage): once the context passes the mark, tell the agent it may relaunch itself with a
   handoff, or compact it once it is idle, waiting up to `recycle.limit_wait_s`.
   `relaunch` is what lets a session recycle itself (it also needs slots and a slot
-  launch); its line opens "This launch lets you recycle yourself". A scratch launch has
+  launch); its line opens "This launch lets you recycle yourself", rides on usage's
+  notice as one line, and comes once per session id: a compaction that brings the context
+  back past the mark gets no second line, and a clear or a resume is told afresh. A
+  scratch launch has
   no notes directory to keep a handoff in, so it can't take `relaunch`
   (`scratch-recycle`, exit 3) typed or set by its preset: the launch and its preview, on
   the command line and the page, refuse the pair, and `presets check` flags a preset

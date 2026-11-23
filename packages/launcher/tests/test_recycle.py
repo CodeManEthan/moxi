@@ -639,18 +639,27 @@ def limit(conn, value):
 def test_a_relaunch_crossing_tells_the_agent_and_records_that_it_was_told(conn):
     limit(conn, "relaunch")
     line = recycle.crossing_line(conn, crossing(), pid=os.getpid())
-    assert line == recycle.relaunch_line("1x") and "relaunch --self --handoff" in line
+    assert line == recycle.RELAUNCH_LINE and "relaunch --self --handoff" in line
     [told] = [e for e in store.events(conn, "r1") if e.kind == "recycle-told"]
     assert told.detail["crossing_key"] == f"{SID}|1x|2026-10-31T10:00:00Z"
     assert store.runs(conn, request_id="r1") == []
 
 
-def test_the_same_crossing_twice_writes_once(conn):
+def test_a_relaunch_launch_is_told_once_per_session_id(conn):
     limit(conn, "relaunch")
-    recycle.crossing_line(conn, crossing(), pid=os.getpid())
+    assert recycle.crossing_line(conn, crossing(), pid=os.getpid()) == recycle.RELAUNCH_LINE
     assert recycle.crossing_line(conn, crossing(), pid=os.getpid()) is None
-    assert recycle.crossing_line(conn, crossing(at="later"), pid=os.getpid())
-    assert len([e for e in store.events(conn, "r1") if e.kind == "recycle-told"]) == 2
+    # The crossing re-armed after a compaction and fired again: same id, no second line.
+    assert recycle.crossing_line(conn, crossing(at="later"), pid=os.getpid()) is None
+    assert len([e for e in store.events(conn, "r1") if e.kind == "recycle-told"]) == 1
+    # A clear names a new id, which is told afresh.
+    store.learn_session(conn, "r1", NEW, "clear")
+    assert recycle.crossing_line(conn, crossing(at="after clear", session_id=NEW),
+                                 pid=os.getpid()) == recycle.RELAUNCH_LINE
+    assert recycle.crossing_line(conn, crossing(at="again", session_id=NEW),
+                                 pid=os.getpid()) is None
+    told = [e for e in store.events(conn, "r1") if e.kind == "recycle-told"]
+    assert [e.session_id for e in told] == [SID, NEW]
 
 
 def test_a_crossing_of_a_launch_off_unknown_or_claimed_elsewhere_is_none(conn):
@@ -700,6 +709,19 @@ def test_a_compact_crossing_twice_writes_one_run(conn, script):
     assert len(store.runs(conn, request_id="r1")) == 1 and len(spawn.calls) == 1
 
 
+def test_a_compact_launch_compacts_at_each_rise_in_one_session_id(conn, script):
+    limit(conn, "compact")
+    spawn = Spawned()
+    assert recycle.crossing_line(conn, crossing(), pid=os.getpid(),
+                                 spawn=spawn) == recycle.COMPACT_LINE
+    [first] = store.runs(conn, request_id="r1")
+    store.end_run(conn, first.run_id, "compacted")
+    # The compaction brought the context below the mark; it climbed back past it.
+    assert recycle.crossing_line(conn, crossing(at="2026-10-31T11:00:00Z"), pid=os.getpid(),
+                                 spawn=spawn) == recycle.COMPACT_LINE
+    assert len(store.runs(conn, request_id="r1")) == 2 and len(spawn.calls) == 2
+
+
 def test_a_compact_job_that_does_not_start_ends_its_run_failed(conn, script):
     limit(conn, "compact")
     recycle.crossing_line(conn, crossing(), pid=os.getpid(), spawn=Spawned(OSError("no")))
@@ -734,25 +756,22 @@ def through_usage(group, at):
     return group.mark.run_handlers(crossing, wait=5.0)
 
 
-def test_the_relaunch_line_says_the_launch_lets_the_agent_recycle_at_the_mark(conn):
+def test_the_relaunch_line_is_cores_instruction_with_moxis_verb(conn):
     limit(conn, "relaunch")
     line = recycle.crossing_line(conn, crossing(mark="1.5x"), pid=os.getpid())
-    assert line.startswith("This launch lets you recycle yourself, now that its context "
-                           "has passed the 1.5x mark.")
-    assert "start nothing new" in line and "as your last act" in line
-    assert "don't recycle at the end of a task" in line
-    assert "background shells" not in line
-
-
-def test_a_crossing_with_no_mark_gets_the_line_without_its_clause():
-    assert recycle.relaunch_line(None).startswith(
-        "This launch lets you recycle yourself. Only if you are mid-work")
+    assert line == (
+        "This launch lets you recycle yourself. Only if you are mid-work with more to do: at "
+        "your next pause point (let running subagents finish, start nothing new), write a "
+        "handoff with the handoff skill, stop your background shells, then run "
+        "`moxi launcher relaunch --self --handoff <file>` as your last act and end your "
+        "turn. If your work is nearly done, finish it and stop as usual; don't recycle at "
+        "the end of a task.")
 
 
 def test_a_relaunch_crossing_reaches_the_launcher_through_usage_s_group_once(usage_group):
     limit(usage_group.conn, "relaunch")
-    assert recycle.relaunch_line("1x") in through_usage(usage_group, 1761904800.0)
-    assert recycle.relaunch_line("1x") not in through_usage(usage_group, 1761904800.0)
+    assert recycle.RELAUNCH_LINE in through_usage(usage_group, 1761904800.0)
+    assert recycle.RELAUNCH_LINE not in through_usage(usage_group, 1761904800.0)
     told = [e for e in store.events(usage_group.conn, "r1") if e.kind == "recycle-told"]
     assert len(told) == 1
 
@@ -941,7 +960,7 @@ def test_a_relaunch_crossing_keeps_its_line_when_the_store_is_locked(conn, tmp_p
     lock_conn = store.connect(tmp_path / "launcher.db")
     lock_conn.execute("BEGIN IMMEDIATE")
     try:
-        assert recycle.on_crossing(crossing()) == recycle.relaunch_line("1x")
+        assert recycle.on_crossing(crossing()) == recycle.RELAUNCH_LINE
     finally:
         lock_conn.execute("ROLLBACK")
         lock_conn.close()
