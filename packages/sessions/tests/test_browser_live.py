@@ -147,7 +147,9 @@ def test_running_rows_say_their_state_what_is_busy_and_their_trouble(full_shell,
     # Opened, the row adds turns' lines, each with its label.
     working.get_by_role("button", name="Open").click()
     opened = working.locator('[data-part="opened"]')
-    expect(opened.locator('[data-line="now"]')).to_have_text(re.compile(rf"^Now\s*working on turn 9 since {T}$"))
+    # The turn opened five minutes ago: just after midnight that was yesterday.
+    expect(opened.locator('[data-line="now"]')).to_have_text(
+        re.compile(rf"^Now\s*working on turn 9 since (?:yesterday )?{T}$"))
     expect(opened.locator('[data-line="agent"]')).to_have_text(
         [re.compile(r"Check the plan · subagent ·\s*running"), re.compile(r"^subagent ·\s*done$")])
     expect(opened.locator('[data-line="prompt-box"]')).to_have_text(re.compile(r"^Prompt box\s*empty$"))
