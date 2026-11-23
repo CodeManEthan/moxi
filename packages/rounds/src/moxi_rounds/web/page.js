@@ -292,7 +292,7 @@ var gt=globalThis,mt=gt.ShadowRoot&&(gt.ShadyCSS===void 0||gt.ShadyCSS.nativeSha
       </div></div>`}#V(t,e){let i=os(t,{today:e.today}),r=o=>d`<div class="${o.mono?"mono well":""} ${o.tone?`t-${o.tone}`:""}">
       ${o.text}</div>${o.offer==="send-again"?d`<div class="acts"><button type="button" class="btn"
         ?disabled=${this.#h} @click=${()=>{this.#b([t])}}>Send again</button></div>`:h}
-      ${o.offer==="read-back"?this.#jt(t):h}`;return d`<div class="receipt">${i.map(r)}</div>`}#jt(t){let e=ls(t);if(e===null)return h;let i=this.#l.of(t.holder,e);if(i?.kind==="read-back"&&i.receipt?.state==="recorded")return h;let r=this.#n.correcting===e;return d`<div class="acts">
+      ${o.offer==="read-back"?this.#jt(t):h}`;return d`<div class="receipt">${i.map(r)}</div>`}#jt(t){let e=ls(t);if(e===null)return h;let i=this.#l.of(t.holder,e);if(i?.kind==="read-back"&&["recorded","recorded-not-told"].includes(i.receipt?.state??""))return h;let r=this.#n.correcting===e;return d`<div class="acts">
       <button type="button" class="btn" ?disabled=${this.#h}
         @click=${()=>{this.#b([this.#ft(E(t.holder,e,"read-back",{about:t.about}))])}}>
         That's what I said</button>

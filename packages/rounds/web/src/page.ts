@@ -1306,7 +1306,10 @@ export class RoundsPage extends LitElement {
     const ruling = readBackOf(draft);
     if (ruling === null) return nothing;
     const said = this.#tray.of(draft.holder, ruling);
-    if (said?.kind === "read-back" && said.receipt?.state === "recorded") return nothing;
+    // A read-back recorded, told or not, is not offered again.
+    if (said?.kind === "read-back" && ["recorded", "recorded-not-told"].includes(said.receipt?.state ?? "")) {
+      return nothing;
+    }
     const correcting = this.#form.correcting === ruling;
     return html`<div class="acts">
       <button type="button" class="btn" ?disabled=${this.#sending}
