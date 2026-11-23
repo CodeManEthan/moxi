@@ -5,6 +5,7 @@ and system prompt file, and what a launch records."""
 from __future__ import annotations
 
 import sys
+from types import SimpleNamespace
 
 import pytest
 from moxi import modules
@@ -460,6 +461,67 @@ def test_a_headless_codex_launch_with_an_identity_runs_the_wrapper_with_its_head
     assert got.mode == "host" and got.first is None and got.prompt == BRIEF
     assert first_mod.on_argv(got.argv)
     assert "--no-window" not in got.argv and "--cwd" not in got.argv
+
+
+# -- the policy directors opt-out -------------------------------------------------------------
+
+
+def test_a_seat_opted_out_of_policy_directors_passes_the_flag_after_its_directors():
+    values = claude_values(identity="planner", director=["lead"],
+                           takes_policy_directors=False)
+    got = claude.compose(values, ctx(modules=frozenset({"comms"}), comms_has_policy=True))
+    assert list(got.argv[:9]) == ["moxi", "comms", "claude", "--name", "planner",
+                                  "--director", "lead", "--no-policy-directors",
+                                  "--session-id"]
+    assert got.values["takes_policy_directors"] is False
+    values = codex_values(identity="coder", takes_policy_directors=False)
+    got = codex.compose(values, ctx(session_id=None, modules=frozenset({"turns", "comms"}),
+                                    host=HOST, comms_codex=True, comms_has_policy=True,
+                                    brief="b"))
+    assert list(got.argv[:6]) == ["moxi", "comms", "codex", "--name", "coder",
+                                  "--no-policy-directors"]
+
+
+@pytest.mark.parametrize("taken", [True, None])
+def test_a_seat_that_takes_policy_directors_passes_no_flag(taken):
+    values = claude_values(identity="planner")
+    if taken is not None:
+        values["takes_policy_directors"] = taken
+    got = claude.compose(values, ctx(modules=frozenset({"comms"}), comms_has_policy=True))
+    assert "--no-policy-directors" not in got.argv
+
+
+def test_an_opt_out_with_a_comms_older_than_policy_directors_is_refused():
+    # Its wrapper's argparse would refuse the flag; the launch says how to fix it instead.
+    with pytest.raises(common.NotYet, match="policy directors") as raised:
+        claude.compose(claude_values(identity="planner", takes_policy_directors=False),
+                       ctx(modules=frozenset({"comms"})))
+    assert raised.value.row == "takes_policy_directors"
+    assert "upgrade moxi-comms" in raised.value.hint
+    with pytest.raises(common.NotYet, match="policy directors"):
+        codex.compose(codex_values(identity="coder", takes_policy_directors=False),
+                      ctx(session_id=None, modules=frozenset({"turns", "comms"}),
+                          host=HOST, comms_codex=True, brief="b"))
+
+
+def test_an_opt_out_without_an_identity_composes_no_wrapper_and_no_refusal():
+    got = claude.compose(claude_values(takes_policy_directors=False), ctx())
+    assert got.argv[0] == "claude" and "--no-policy-directors" not in got.argv
+
+
+@pytest.mark.parametrize("api, has", [
+    (None, False), (SimpleNamespace(HEADLESS=()), False),
+    (SimpleNamespace(HEADLESS=(), policy_directors=lambda: ()), True)],
+    ids=["no-comms", "older-comms", "comms-with-policy"])
+def test_the_context_probes_comms_for_policy_directors(monkeypatch, api, has):
+    monkeypatch.setattr(compose.presets, "comms_api", lambda: api)
+    values = claude_values(identity="planner")
+    got = compose.context(values, request_id="r1", modules=frozenset({"comms"}), env={})
+    assert got.comms_has_policy is has
+    # Without an identity comms' wrapper doesn't run, so nothing is probed.
+    plain = compose.context(claude_values(), request_id="r1", modules=frozenset({"comms"}),
+                            env={})
+    assert plain.comms_has_policy is False
 
 
 def test_a_headless_codex_launch_with_no_exit_rule_passes_no_exit():

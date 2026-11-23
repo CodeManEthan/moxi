@@ -381,8 +381,9 @@ export interface FormRequest {
  * The request from every field the form sends (`<moxi-ui-form>`'s values; a field shown
  * off sends none and is in neither list). Each kind's empty state goes in `leave_out`: an
  * empty text, a list with no items, a switch off, a bool unticked, the blank or "leave
- * out" choice. A switch on is `"true"` with no text, else its text. `harness` always has a
- * value. A withheld text left empty with its keep box ticked is in neither list, so the
+ * out" choice. A bool whose default is true is the exception: left out it would launch
+ * ticked, so unticked it sends `"false"`. A switch on is `"true"` with no text, else its
+ * text. `harness` always has a value. A withheld text left empty with its keep box ticked is in neither list, so the
  * launch takes the preset's text.
  */
 export function requestOf(fields: readonly FieldDescriptor[], values: Record<string, FormValue>,
@@ -397,6 +398,8 @@ export function requestOf(fields: readonly FieldDescriptor[], values: Record<str
     } else if (field?.optional_value === true) {
       if (value === null) out.leave_out.push(name);
       else out.values[name] = value === "" ? "true" : value;
+    } else if (field?.type === "bool" && value === "false" && field.default === "true") {
+      out.values[name] = value;
     } else if (value === null || (field?.type === "bool" && value === "false") || value === leaveOutChoice(field)) {
       if (name === HARNESS) continue;
       if (value === null && withheld.has(name) && keep.has(name)) continue;

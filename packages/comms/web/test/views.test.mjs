@@ -59,3 +59,12 @@ test("the roster's states", () => {
   assert.deepEqual([failed.state, failed.rows.length, failed.detail], ["failed", 1, "answered 500"]);
   assert.equal(rosterView({ ...up([row()]), gone: true }, NOW).state, "gone");
 });
+
+test("a policy director is marked, and says when its name holds no standing row", () => {
+  const worker = row({ directors: ["lead", "fleet-lead"], policy_directors: ["fleet-lead"] });
+  assert.deepEqual(rowView(worker, NOW).directors, ["lead", "fleet-lead (policy)"]);
+  const held = rosterView(up([worker, row({ qualified: "fleet-lead", live: false, kind: "agent" })]), NOW);
+  assert.deepEqual(held.rows[0].directors, ["lead", "fleet-lead (policy)"]);
+  const unheld = rosterView(up([worker]), NOW);
+  assert.deepEqual(unheld.rows[0].directors, ["lead", "fleet-lead (policy, not provisioned)"]);
+});

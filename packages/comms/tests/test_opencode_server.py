@@ -81,11 +81,12 @@ def test_a_row_loads_with_the_default_model_and_its_session_file(tmp_path):
     agent = roster.load(path).require("coder@proj-a")
     assert (agent.cwd, agent.models) == ("/w", list(roster.DEFAULT_MODELS))
     assert agent.session_file == roster.session_path("coder@proj-a")
-    assert agent.directors == ["main"], "a bare director is the global identity"
+    assert agent.directors == ["main", "fleet-lead"], "a bare director is the global identity"
     env = agent.env({"MOXI_COMMS_DIRECTORS": "boss@x", "PATH": "/bin"})
     assert (env["MOXI_COMMS_NAME"], env["MOXI_COMMS_SCOPE"]) == ("coder", "proj-a")
     assert "MOXI_COMMS_SLOT" not in env
-    assert env["MOXI_COMMS_DIRECTORS"] == "main", "the wrapper's own grant never leaks"
+    assert env["MOXI_COMMS_DIRECTORS"] == "main,fleet-lead", \
+        "the wrapper's own grant never leaks"
 
 
 def test_a_model_list_names_the_default_and_then_its_fallbacks(tmp_path):

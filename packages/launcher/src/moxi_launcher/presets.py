@@ -20,9 +20,11 @@ place by `moxi.config` and edited by the user. Moxi ships no presets.
 Every key of a seat or project preset is a row of the preset's harness or a launcher row
 (`moxi launcher catalog` lists them); a seat may also name its `home`. A `[defaults]` key
 is a launcher row or a row of any harness, and applies to launches of the harnesses that
-have it. A seat's standing text is `instructions` or `instructions_file`, never both. A
-preset names at most one place: `cwd`, `project`, `scratch` or (a seat's) `home`. A `home`
-holding `/` or `\\`, or starting with `~` or `.`, is a path; any other is a project key.
+have it; `takes_policy_directors` is refused there by name (`PER_SEAT`), since it is
+one seat's choice. A seat's standing text is `instructions` or `instructions_file`, never
+both. A preset names at most one place: `cwd`, `project`, `scratch` or (a seat's)
+`home`. A `home` holding `/` or `\\`, or starting with `~` or `.`, is a path; any other is
+a project key.
 
 Resolving one launch. Each row's value is, each later one winning: the catalog's shipped
 default; `[defaults]`; the one preset named, if any; the flags typed. A launch names at
@@ -78,6 +80,12 @@ CODEX_HOST = "moxi-turns-codex-host"
 #: The comms interface whose names the launcher calls: `identity_state`, and the Codex
 #: wrapper `moxi comms codex` that ships with it. An older comms offers neither.
 COMMS_INTERFACE = 2
+#: The rows `[defaults]` refuses, each with why: one line there would set every launch.
+#: Opting out of comms' policy directors is one seat's choice; as a default it would
+#: undo the policy for every seat.
+PER_SEAT = MappingProxyType({
+    catalog.TAKES_POLICY: "one line in [defaults] would opt every seat out of comms' "
+                          "policy directors"})
 #: The start postures every install takes; `with:<identity>` needs comms.
 POSTURES = ("operator", "go")
 WITH = "with:"
@@ -404,11 +412,16 @@ def _value_rules(preset: Preset, values: Mapping[str, object],
 
 def _check_defaults(table: Mapping[str, object], avail) -> tuple[dict, list[Problem]]:
     """`[defaults]`: each key a launcher row or a row of some harness, its value checked
-    against each such row."""
+    against each such row; a row in `PER_SEAT` is refused by name (`per-seat`)."""
     values: dict = {}
     problems: list[Problem] = []
     where = "defaults"
     for key, value in table.items():
+        if key in PER_SEAT:
+            problems.append(Problem(where, key, f"{key} can't be set in [defaults]: "
+                                    f"{PER_SEAT[key]}", f"set {key} on each seat or "
+                                    "project preset that opts out", "per-seat"))
+            continue
         rows = ([catalog.launcher()[key]] if key in catalog.launcher() else
                 [catalog.load(h)[key] for h in catalog.HARNESSES if key in catalog.load(h)])
         if not rows:
@@ -1358,6 +1371,13 @@ def comms_headless(api: object | None) -> frozenset[str]:
         return frozenset()
 
 
+def comms_has_policy(api: object | None) -> bool:
+    """Whether comms has policy directors, so its wrappers take `--no-policy-directors`:
+    its API offers `policy_directors`. False with no comms, and from a comms older than
+    that call, whose wrappers refuse the flag."""
+    return api is not None and getattr(api, "policy_directors", None) is not None
+
+
 def codex_host() -> str | None:
     """turns' Codex host, when it can start here, else None: its script is installed in
     this environment, and turns says the host can start (`codex_host_available()`, true
@@ -1499,13 +1519,14 @@ def _show(value: object) -> str:
 __all__ = [
     "Agent", "BadPreset", "CACHE_TIMER_ROWS", "CODEX_START_CEILING", "COLD_GAP",
     "COMMS_INTERFACE", "ERROR", "HEADLESS_EXIT", "KINDS",
-    "LEFT_OUT", "Layered", "NeedsProjects", "NotYet", "OffPosture", "PostureBrief",
+    "LEFT_OUT", "PER_SEAT", "Layered", "NeedsProjects", "NotYet", "OffPosture",
+    "PostureBrief",
     "Preset", "Presets",
     "Problem", "ProjectsBusy", "ProjectsUnreadable", "Request", "Resolved", "ScratchNotes",
     "UnknownPreset", "UnknownProject", "WARNING", "check", "check_resume_brief", "comms_api",
     "comms_bind_wait",
-    "comms_codex", "comms_codex_resume", "comms_ends_on_bind_timeout", "comms_headless",
-    "harness_of",
+    "comms_codex", "comms_codex_resume", "comms_ends_on_bind_timeout", "comms_has_policy",
+    "comms_headless", "harness_of",
     "layered", "mode_of", "needed", "off_posture_rows", "path", "project_agents",
     "projects_api", "read",
     "resolve", "roles", "schema",

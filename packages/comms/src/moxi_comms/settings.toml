@@ -83,6 +83,15 @@ read = "start"
 label = "Send-only identities"
 line = "Each qualified name, with the words its refusal uses."
 
+[policy.directors]
+type = "list"
+default = ["fleet-lead"]
+doc = "Names that direct every comms session on this box that doesn't opt out (--no-policy-directors, takes_policy_directors = false), each once it is provisioned as a standing identity; written as --director is: a bare name is the global identity, name@scope is that scope's."
+read = "start"
+label = "Directors of every agent"
+line = "Each directs every agent on this machine that hasn't opted out, once provisioned as a standing identity. Empty: none."
+hurts = { when = "add", says = "directs every agent on this machine that hasn't opted out", confirm = "From each agent's next launch or relaunch, this name's verified messages are directives to every agent on this machine that hasn't opted out, once the name is provisioned as a standing identity." }
+
 [provision.operator]
 type = "string"
 default = "operator"

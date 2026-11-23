@@ -21,6 +21,7 @@ line of doc and, for a few, the one variable that overrides it for one process:
     [policy]
     cache_callers = ["operator"]            # the identities `moxi comms cache` answers
     labels = { "notifier@proj" = "the notifier, which only sends" }
+    directors = ["fleet-lead"]              # direct every session that doesn't opt out
 
     [provision]
     operator = "operator"                   # the human's identity name
@@ -137,11 +138,14 @@ class CredentialsConfig:
 
 @dataclass
 class PolicyConfig:
-    """`[policy]`: the identities `moxi comms cache` answers, and each send-only
-    identity's refusal words, by qualified name."""
+    """`[policy]`: the identities `moxi comms cache` answers, each send-only
+    identity's refusal words, by qualified name, and the policy directors: the names
+    that direct every comms session on this box that doesn't opt out, qualified as
+    `--director` is (`directors.declare`)."""
 
     cache_callers: tuple = tuple(_default("policy.cache_callers"))
     labels: dict = field(default_factory=dict)
+    directors: tuple = tuple(_default("policy.directors"))
 
 
 @dataclass
@@ -468,7 +472,8 @@ def _typed(settings, path: Path | None) -> CommsConfig:
                               roles=_roles(bad, v["credentials.roles"])),
         policy=PolicyConfig(cache_callers=_names(bad, "policy.cache_callers",
                                                  v["policy.cache_callers"]),
-                            labels=_labels(bad, v["policy.labels"])),
+                            labels=_labels(bad, v["policy.labels"]),
+                            directors=_policy_directors(bad, v["policy.directors"])),
         provision=ProvisionConfig(operator=operator),
         cache=CacheConfig(required=v["cache.required"]),
         delivery=DeliveryConfig(expiry=str(v["delivery.expiry"]).strip().lower()),
@@ -538,6 +543,19 @@ def _names(bad, key: str, value) -> tuple:
             raise bad(key, f"holds {item!r}", 'list qualified names, e.g. ["name@scope"]')
         names.append(item.strip())
     return tuple(names)
+
+
+def _policy_directors(bad, value) -> tuple:
+    """`[policy] directors`: each name qualified once, as `--director` qualifies it (a
+    bare name is the global identity, `name@global` is bare), de-duplicated in order."""
+    from .directors import BadDirector, declare
+
+    try:
+        return tuple(declare(value))
+    except BadDirector as exc:
+        raise bad("policy.directors", f"holds a bad name: {exc}",
+                  "write each as name or name@scope (letters, digits, dots, dashes, "
+                  "underscores), or remove it") from None
 
 
 def _roles(bad, value) -> tuple:
