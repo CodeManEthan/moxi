@@ -870,8 +870,8 @@ project is refused: `land is queue: finish enqueues`.
 **The queue file** is `queue/<repo>/queue.jsonl` in rounds' state directory, one event a
 line, appended under its lock. The queue's state is read from it and nowhere else. Each
 event about a member is mirrored into the member's round log (`queue.join`,
-`queue.batch`, `queue.landed`, `queue.ejected`, `queue.left`), which `next` and the
-gates read: while the build is queued at its tip, its finish step waits on the lander,
+`queue.batch`, `queue.landed`, `queue.ejected`, `queue.left`, and `queue.requeued` when
+its batch ends without it), which `next` and the gates read: while the build is queued at its tip, its finish step waits on the lander,
 and `next` gives its position, its batch and a pause; once it was ejected or left, the
 reason is owed beside the step.
 

@@ -744,7 +744,7 @@ ACT_WORDS: dict[str, str] = {
     "round.closed": "round closed", "lead.changed": "lead changed",
     "queue.join": "joined the queue", "queue.left": "left the queue",
     "queue.batch": "batched", "queue.landed": "landed by the queue",
-    "queue.ejected": "ejected from the queue",
+    "queue.ejected": "ejected from the queue", "queue.requeued": "back in the queue",
     "decision.settled": "decision settled", "decision.raised": "decision made major"}
 
 
@@ -837,6 +837,7 @@ EVENT_STEPS: dict[str, str | None] = {
     "check.ran": None, "brief.sized": None, "lead.changed": None,
     "queue.join": steps.FINISH, "queue.left": steps.FINISH, "queue.batch": steps.FINISH,
     "queue.landed": steps.FINISH, "queue.ejected": steps.FINISH,
+    "queue.requeued": steps.FINISH,
     "decision.settled": steps.RATIFY, "decision.raised": steps.RATIFY}
 
 

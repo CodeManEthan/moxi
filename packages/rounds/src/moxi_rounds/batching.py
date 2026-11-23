@@ -80,7 +80,9 @@ pass rebuilds on the target's head then. Members that join meanwhile wait until 
 batch runs and no group waits to be built. While the queue is paused, a group with no
 urgent member is not built and keeps no urgent member waiting.
 
-When a batch ends, its ref is removed from the remote and its local branch deleted.
+When a batch ends, its ref is removed from the remote and its local branch deleted,
+and each member still in it, back to waiting in its place, gets `queue.requeued` in its
+round's log with the batch and why it ended.
 
 **Telling** (`telling`, through comms where it is installed): a member's end (landed,
 ejected, left) goes to its builder, the name its commission recorded, and to its
@@ -1076,11 +1078,16 @@ class _Pass:
     def end_batch(self, batch: queue_file.Batch, why: str, *,
                   regroups: list | None = None) -> None:
         """End the batch, naming the groups of its members to build as batches of their
-        own (`regroups`), and remove its ref and branch."""
-        queue_file.append(self.repo, {"event": queue_file.BATCH, "state": queue_file.ENDED,
-                                      "id": batch.id, "why": why,
-                                      **({"regroups": regroups} if regroups else {})},
-                          self.env)
+        own (`regroups`), and remove its ref and branch. Each member still in it waits
+        again, and its round's log says so."""
+        with queue_file.appending(self.repo, self.env) as (queue, add):
+            back = [one for one in queue.members.values()
+                    if one.state == queue_file.IN_BATCH and one.batch == batch.id]
+            add({"event": queue_file.BATCH, "state": queue_file.ENDED, "id": batch.id,
+                 "why": why, **({"regroups": regroups} if regroups else {})})
+        for member in back:
+            self.mirror(member.name, member.stage, queue_log.REQUEUED,
+                        {"tip": member.tip, "batch": batch.id, "why": why})
         ref = (batch.branch if self.ref_template is None
                else ci.ref_for(self.ref_template, batch.branch))
         self.drop_branch(batch.branch, ref if any(

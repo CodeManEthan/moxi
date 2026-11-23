@@ -195,6 +195,11 @@ TYPES = _types(
     # hook's or the publishing scan's refusal, or a new failure in its batch's CI run.
     EventType("queue.ejected", ("stage", "tip", "batch", "reason", "blocker", "run",
                                 "failures", "output"), required=("stage", "reason")),
+    # A member's batch ended without landing or ejecting it (`why`: paused, absent,
+    # split, the target moved, rebuilt without another member), so it waits again in
+    # its place.
+    EventType("queue.requeued", ("stage", "tip", "batch", "why"),
+              required=("stage", "batch")),
     # A dead holder's finish lock was cleared.
     EventType("lock.cleared", ("ref", "holder")),
     # A build or the whole round was withdrawn: by whom, the pointer, each open build's

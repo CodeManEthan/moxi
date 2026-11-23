@@ -968,6 +968,7 @@ _HANDLERS: dict[str, Callable[[State, dict], None]] = {
     "queue.batch": _kept,
     "queue.landed": _kept,
     "queue.ejected": _kept,
+    "queue.requeued": _kept,
 }
 
 __all__ = ["OPEN", "DROPPED", "CLOSED", "FROZEN_FILE", "QUESTION", "STAGE", "AFTER", "BLOCKS",

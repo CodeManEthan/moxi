@@ -13,7 +13,7 @@ from pathlib import Path
 import pytest
 
 from moxi_rounds import (batching, checking, ci, commissioning, finishing, joining, log,
-                         opening, queue_ci, queue_file, verdicts)
+                         opening, queue_ci, queue_file, queue_log, verdicts)
 from moxi_rounds import state as states
 from moxi_rounds.cli import main
 from moxi_rounds.errors import Refused
@@ -172,6 +172,25 @@ def events(tmp_path: Path, name: str, kind: str) -> list[dict]:
 
 def queue() -> queue_file.Queue:
     return queue_file.read("proj-a")
+
+
+def back_from(tmp_path: Path, name: str, batch: str) -> str:
+    """The member's standing as its round's log reads it, which must be queued again
+    after `batch` ended without it; the line `next` says."""
+    standing = queue_log.standing(
+        states.fold(log.read_round(round_log_of(tmp_path, name))), "B1")
+    assert standing.queued and standing.last == queue_log.REQUEUED
+    assert standing.fields["batch"] == batch
+    return standing.line()
+
+
+def rebuilt_after(tmp_path: Path, name: str, batch: str) -> bool:
+    """Whether the member's round log says it went back to waiting when `batch` ended
+    and was then taken into the batch built in the same pass."""
+    found = [(one["type"], one.get("batch")) for one in log.read_round(
+        round_log_of(tmp_path, name)) if one["type"].startswith("queue.")]
+    return (found[-2] == (queue_log.REQUEUED, batch)
+            and found[-1][0] == "queue.batch" and found[-1][1] != batch)
 
 
 # -- take --------------------------------------------------------------------------------
@@ -435,13 +454,16 @@ def test_a_member_held_after_joining_is_dropped_and_the_rest_and_the_inner_land(
 
 
 def test_the_target_moved_by_hand_before_the_landing_rebuilds_on_it(
-        repo, ready, fake, lander_pass):
+        repo, ready, fake, lander_pass, tmp_path):
     ready()
     lander_pass()
     repo.commit("hand.txt", "a hand commit on main")
     hand = repo.rev("main")
     lander_pass()
-    assert queue().batches[-1].why == batching.MOVED_WHY
+    moved = queue().batches[-1]
+    assert moved.why == batching.MOVED_WHY
+    assert back_from(tmp_path, ROUND, moved.id).endswith(
+        f"back from batch {moved.id}: {batching.MOVED_WHY}")
     lander_pass()
     assert queue().running().main == hand
     lander_pass()
@@ -553,7 +575,7 @@ def test_a_pending_run_waits(repo, ready, fake, lander_pass):
 
 
 def test_a_cancelled_run_is_rerun_once_then_the_queue_pauses(repo, ready, fake,
-                                                             lander_pass):
+                                                             lander_pass, tmp_path):
     ready()
     fake.word = queue_ci.CANCELLED
     lander_pass()
@@ -563,10 +585,12 @@ def test_a_cancelled_run_is_rerun_once_then_the_queue_pauses(repo, ready, fake,
     assert "cancelled twice" in queue().paused
     member = queue().member(ROUND, "B1")
     assert (member.state, queue().position(ROUND, "B1")) == (queue_file.QUEUED, 1)
+    line = back_from(tmp_path, ROUND, queue().batches[-1].id)
+    assert line.startswith(f"queued at {member.tip[:12]}") and "CI pending" not in line
 
 
 def test_an_absent_run_is_pushed_again_under_the_next_number_then_pauses(
-        repo, ready, fake, lander_pass):
+        repo, ready, fake, lander_pass, tmp_path):
     ready()
     fake.word = ci.ABSENT
     lander_pass(0.0)
@@ -574,6 +598,7 @@ def test_an_absent_run_is_pushed_again_under_the_next_number_then_pauses(
     assert queue().running().n == 1
     lander_pass(batching.ABSENT_S + 1)
     assert queue().batches[-1].why == batching.ABSENT_WHY
+    back_from(tmp_path, ROUND, queue().batches[-1].id)
     lander_pass(batching.ABSENT_S + 2)
     assert queue().running().n == 2 and len(fake.pushes) == 2
     lander_pass(3 * batching.ABSENT_S)
@@ -709,7 +734,7 @@ def test_a_red_candidate_waits_for_mains_run_and_ends_when_main_moves(
 
 
 def test_a_new_failure_splits_the_batch_and_the_earlier_green_half_lands_first(
-        repo, ready, fake, lander_pass):
+        repo, ready, fake, lander_pass, tmp_path):
     ready()
     ready(OTHER, branch="other", file="other.txt")
     fake.word, fake.failed = ci.RED, [IN_SCOPED]
@@ -719,6 +744,8 @@ def test_a_new_failure_splits_the_batch_and_the_earlier_green_half_lands_first(
     split = queue().running()
     lander_pass(batching.ABSENT_S)
     assert queue().batch(split.id).why == batching.SPLIT_WHY
+    for name in (ROUND, OTHER):
+        assert rebuilt_after(tmp_path, name, split.id)
     first, second = queue().running_batches()
     assert [one.members[0][0] for one in (first, second)] == [ROUND, OTHER]
     assert (first.source, second.source) == ((split.id, 0), (split.id, 1))
@@ -732,6 +759,7 @@ def test_a_new_failure_splits_the_batch_and_the_earlier_green_half_lands_first(
     lander_pass(batching.ABSENT_S)
     assert queue().member(ROUND, "B1").state == queue_file.LANDED
     assert queue().batch(second.id).why == batching.MOVED_WHY
+    assert rebuilt_after(tmp_path, OTHER, second.id)
     rebuilt = queue().running()
     assert rebuilt.source == (second.id, 0) and rebuilt.main == repo.rev("main")
     lander_pass(batching.ABSENT_S)
