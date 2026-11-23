@@ -659,7 +659,10 @@ class Endpoint:
         The event's `own` is true when the origin is on `prompt.own_origins`, read now.
         `delivery_id` is the delivery the adapter handed in as this prompt, whose `by` and
         `senders` the event carries as `delivery_by` and `delivery_senders` (None for a
-        prompt turns did not hand in). `opens` is true when the prompt opens a turn, false
+        prompt turns did not hand in). When that delivery is a steer the harness held
+        (`on_steer_held`), the event's `text` is the steer's text: the harness's prompt
+        only points at the text it holds, and the listeners read what the steer says, as
+        they read a delivery's prompt. `opens` is true when the prompt opens a turn, false
         when it joins one already running; the adapter says where it knows, else it is
         true when no main-loop turn is open now."""
         if self._gone is not None:
@@ -669,6 +672,8 @@ class Endpoint:
             if opens is None:
                 opens = self.ledger.open is None
         by, senders = (None, None) if d is None else (d.spec.by, d.spec.senders)
+        if d is not None and d.spec.kind == "steer":
+            text = d.spec.text
         event = self._event("prompt", text=text, origin=origin, own=self._own(origin),
                             delivery_by=by, delivery_senders=senders, opens=opens)
         return turns_listeners.ask(self.registry, event, self.prompt_wait_s,

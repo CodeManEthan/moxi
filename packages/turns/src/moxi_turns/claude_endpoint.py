@@ -82,7 +82,7 @@ the runner reports `append.held` (its turn ended before any request carried the 
 Claude Code holds the note for the next request) goes to the core's `on_steer_held`: it
 leaves its turn and opens one of its own. Its submit line carries `HELD_PROMPT` in place
 of its text, since Claude Code sends the held note beside that prompt, so the model reads
-the note once.
+the note once; the core hands the prompt listeners the steer's text as the prompt's.
 
 A fork goes to the runner on a `fork` line, and a fork's further round
 (`fork.continue`) on a `fork.continue` line naming the fork's agent id; neither holds a

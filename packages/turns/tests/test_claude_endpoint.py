@@ -709,6 +709,29 @@ def test_a_steer_held_at_its_turns_end_opens_a_turn_of_its_own(claude):
     assert _ids(got[4]) == [(d.id, "opened")]
 
 
+def test_the_prompt_listeners_read_a_held_steers_text_as_its_turns_prompt(claude):
+    from moxi_turns.claude_endpoint import HELD_PROMPT
+
+    events = []
+    ep, runner = claude(registry=Registry((Listener("sample", frozenset({"prompt"}),
+                                                    "sample.module:answer",
+                                                    _fn=events.append),)))
+    s = turns.find(session_id="s-1")
+    runner.turn_start("T1")
+    d = s.steer("the word is KIWI", by="comms", senders=["ann"])
+    runner.next_line()
+    runner.report(leg.R_APPEND_DONE, delivery=d.id)
+    runner.report(leg.R_APPEND_HELD, delivery=d.id)
+    runner.turn_complete("T1", answer="the essay")
+    line = runner.next_line()
+    assert line["text"] == HELD_PROMPT           # the model reads the held note once
+    assert runner.enter(line["nonce"])["verdict"] == "pass"
+    runner.post(leg.PATH_CONTEXT, {"event": "prompt", "session_id": "s-1",
+                                   "text": HELD_PROMPT, "origin": None, "opens": True})
+    assert [(e.text, e.delivery_by, e.delivery_senders, e.opens) for e in events] == [
+        ("the word is KIWI", "comms", ("ann",), True)]
+
+
 def test_a_steer_a_request_carried_starts_no_turn(claude):
     ep, runner = claude()
     s = turns.find(session_id="s-1")

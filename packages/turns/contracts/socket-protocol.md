@@ -254,8 +254,9 @@ A shell left over does not make the command a failure: the command ran.
   for the session's next request, and that turn's `turn.ended` does not name it. The steer
   then opens a turn of its own, ahead of every queued delivery, whose prompt is a short
   line saying a note came with it (Claude Code sends the held text beside that prompt).
-  That turn's `turn.started` and `turn.ended` name the steer as `opened`, and its `ended`
-  is that turn's end.
+  The session's `prompt` listeners read the steer's text as that prompt's `text`. That
+  turn's `turn.started` and `turn.ended` name the steer as `opened`, and its `ended` is
+  that turn's end.
 - `source` is one of `startup`, `resume`, `clear`, `compact`, or null when the harness did
   not say.
 
