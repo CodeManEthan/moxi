@@ -982,7 +982,7 @@ def test_held_is_accepted_for_archivist_and_ignored_for_the_operator(rig, bind):
     code, out = send(rig, "reviewer@proj-a,operator", "later", "--held")
     assert code == 0, out
     assert ("NOTE: --held was ignored for operator: the operator has no session to hold "
-            "it for, so it went to him as an ordinary message.") in out.splitlines()
+            "it for, so it went as an ordinary message.") in out.splitlines()
     mid = sent_id(out)
     assert wait_until(lambda: mid in held_of(rig))
     assert mid not in held_of(rig, "operator")

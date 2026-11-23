@@ -7,6 +7,9 @@
   spelled long. A store spelled inside the profile that leads out of it through a
   junction is now refused, since the profile's access list doesn't reach it there, and a
   short (8.3) spelling of a place inside the profile is now accepted.
+- The notes, refusals, docstrings and docs name the operator neutrally, never "he" or
+  "him": the `--held` and `--interrupt` notes for the operator end "so it went as an
+  ordinary message".
 
 ## 0.3.1 (2026-11-21)
 
@@ -61,6 +64,12 @@
   note of their send, and `send_and_wait` returns a `notes` field. The connector's refusals
   name only its own tools and parameters (`sending.CURES_CONNECTOR`). Agent sessions'
   tools and `moxi comms send` keep the refusal and its text.
+- A connector `send` or `send_and_wait` to a name whose session has no turns endpoint now
+  says in chat `NOTE: <name>'s session can't be reached right now, so the message is held
+  until it is reachable.`, in its text and its `notes` field. It no longer names `moxi
+  comms doctor`, which the person in the chat can't run. `moxi comms send` and agent
+  sessions' tools keep their note, with how long the session has had no endpoint and where
+  to look.
 - With turns installed, comms' page reads turns' `/api/sessions` while a send box is
   open, with each check and every 30 s, and joins each session whose turn is open to its
   address by session id. A message the dry run would deliver to that session now reads

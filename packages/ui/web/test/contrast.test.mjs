@@ -1,7 +1,8 @@
 // Every colour set in tokens.json holds these contrast floors, a set added later included:
 //
 // - 4.5:1 (body text) for each token that carries text, on each background and on its own
-//   -soft fill, and for `text` on every soft fill;
+//   -soft fill, and for `text` on every soft fill. A step's state colours count as text,
+//   since a marker's word is written in them;
 // - 4.5:1 for `bg` on each solid fill, as on a filled button, and for `on-accent` on
 //   `accent`;
 // - 3:1 (a mark that isn't text) for `border-strong` and each chart series on the page's
@@ -16,10 +17,10 @@ import test from "node:test";
 const tokens = JSON.parse(fs.readFileSync(new URL("../tokens.json", import.meta.url), "utf8"));
 
 const TEXT = ["text", "text-dim", "text-faint", "accent", "error", "danger", "warn", "ok", "live", "launching",
-              "selected", "attention"];
+              "selected", "attention", "state-done", "state-yours", "state-failed"];
 const BACKGROUNDS = ["bg", "bg-raised", "bg-sunken", "bg-hover"];
 const SOFT = ["accent-soft", "error-soft", "warn-soft", "live-soft", "launching-soft", "selected-soft",
-              "attention-soft", "add-soft", "del-soft"];
+              "attention-soft", "add-soft", "del-soft", "state-yours-soft"];
 const FILLS = ["accent", "error", "live", "launching", "selected", "attention"];
 const MARKS = ["border-strong", "series-1", "series-2", "series-3", "series-4", "series-5", "series-6"];
 

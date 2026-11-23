@@ -1,5 +1,5 @@
-"""The sign-in page at `/authorize`: where the owner proves he is the owner, by typing a code
-minted at his own terminal (`moxi connector code`).
+"""The sign-in page at `/authorize`: where the owner proves ownership by typing a code minted
+at the owner's own terminal (`moxi connector code`).
 
 `page(under)` makes the page's ASGI app under one origin's `oauth.Under`. The sign-in
 mounts it for GET and POST behind its per-minute caps.

@@ -46,13 +46,13 @@ is recorded with a flag, not refused, and the flag is counted in the round's num
 
 ## Is a decision major?
 
-A decision is a choice the build made that the operator would notice: what he gets
-differs from what he ruled or what the design said. The checker weighs it.
+A decision is a choice the build made that the operator would notice: what the operator
+gets differs from what was ruled or what the design said. The checker weighs it.
 
 - **Major**: it changes what a user sees or types, what a command accepts, refuses or
-  writes, a stored format, a default, or what one of his rulings plainly means. He would
-  want to rule on it, or at least to know it shipped.
-- **Minor**: the behaviour he ruled is intact and only the way there differs. An
+  writes, a stored format, a default, or what one of the operator's rulings plainly means. The
+  operator would want to rule on it, or at least to know it shipped.
+- **Minor**: the behaviour the operator ruled is intact and only the way there differs. An
   internal name, a function split in two, checks run in another order with the same
   outcome.
 - **Forecloses**: it rules something out later, such as a format other tools will read,
@@ -60,6 +60,12 @@ differs from what he ruled or what the design said. The checker weighs it.
 
 When unsure, call it major. A later report can make a decision heavier and can never make
 it lighter, so an under-call is the mistake that stays.
+
+A minor decision the close does not put to the operator is the lead's to settle before
+the round closes. Accept it when it stands as built; where it promises a follow-up, the
+pointer names the task filed for it, and where nothing was filed, reject it, which owes
+a fix. A minor decision that names a difference the operator would see was under-called:
+raise it to major rather than settle it.
 
 ## Cutting slices
 
@@ -85,10 +91,10 @@ sentence, or a few, saying what is built or not built.
 - Name the thing itself. Not "option b" or "what we said about the cache", but "Search
   reads live notes only; archived notes are left out."
 - State the rule, not its history: no "as discussed", no review ids, no account of how
-  he got there.
+  the operator got there.
 - One rule per ruling, so each can be corrected alone.
 - Add a short reason when the rule looks arbitrary without one.
-- Keep his meaning. The pointer is where he can check your wording.
+- Keep the operator's meaning. The pointer is where the operator can check your wording.
 
 ## Writing a question
 

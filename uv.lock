@@ -1294,7 +1294,7 @@ dev = [
 
 [[package]]
 name = "moxi-rounds"
-version = "0.1.1"
+version = "0.1.2"
 source = { editable = "packages/rounds" }
 dependencies = [
     { name = "moxi" },
@@ -1309,10 +1309,15 @@ notes = [
 turns = [
     { name = "moxi-turns" },
 ]
+ui = [
+    { name = "moxi-ui" },
+]
 
 [package.dev-dependencies]
 dev = [
     { name = "moxi-dev" },
+    { name = "moxi-ui", extra = ["testing"] },
+    { name = "playwright" },
     { name = "pytest" },
 ]
 
@@ -1322,13 +1327,16 @@ requires-dist = [
     { name = "moxi-notes", marker = "extra == 'notes'", editable = "packages/notes" },
     { name = "moxi-projects", editable = "packages/projects" },
     { name = "moxi-turns", marker = "extra == 'turns'", editable = "packages/turns" },
+    { name = "moxi-ui", marker = "extra == 'ui'", editable = "packages/ui" },
     { name = "psutil", specifier = ">=5.9" },
 ]
-provides-extras = ["notes", "turns"]
+provides-extras = ["notes", "turns", "ui"]
 
 [package.metadata.requires-dev]
 dev = [
     { name = "moxi-dev", editable = "packages/moxi-dev" },
+    { name = "moxi-ui", extras = ["testing"], editable = "packages/ui" },
+    { name = "playwright", specifier = ">=1.56,<2" },
     { name = "pytest" },
 ]
 
@@ -1385,6 +1393,9 @@ dependencies = [
 projects = [
     { name = "moxi-projects" },
 ]
+slots = [
+    { name = "moxi-slots" },
+]
 ui = [
     { name = "moxi-ui" },
 ]
@@ -1402,10 +1413,11 @@ dev = [
 requires-dist = [
     { name = "moxi", editable = "packages/moxi" },
     { name = "moxi-projects", marker = "extra == 'projects'", editable = "packages/projects" },
+    { name = "moxi-slots", marker = "extra == 'slots'", editable = "packages/slots" },
     { name = "moxi-ui", marker = "extra == 'ui'", editable = "packages/ui" },
     { name = "psutil", specifier = ">=5.9" },
 ]
-provides-extras = ["projects", "ui"]
+provides-extras = ["projects", "slots", "ui"]
 
 [package.metadata.requires-dev]
 dev = [
@@ -1598,7 +1610,7 @@ dev = [
 
 [[package]]
 name = "moxi-ui"
-version = "0.2.3"
+version = "0.2.5"
 source = { editable = "packages/ui" }
 dependencies = [
     { name = "h11" },

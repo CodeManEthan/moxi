@@ -9,7 +9,8 @@ repository's `uv sync` installs it, and no Moxi module depends on it at run time
   deptry) and the tests of the packages the change reaches. A test in the `slow`,
   `browser` or `build` tier runs when a path its `touches` mark names changed; `--full`
   runs every package and every tier but `live`; `--finding L<n>` runs only the tests
-  marked with that finding (see "The tag check" below). It runs no `timed` test, in any
+  marked with that finding (see "The tag check" below); `--static` runs only the
+  whole-tree static steps (see "The code checks" below). It runs no `timed` test, in any
   form: it holds each one back and its last line counts them as `timed held <n>`;
   `moxi-dev timed` runs them. A finding whose tests are all timed counts as found, with
   a line that says so. Its last line also gives the tests' seconds, the slowest 5 %'s
@@ -88,6 +89,13 @@ leftover and any row the script refuses, and prints the first ten with their sta
 `moxi-dev rename --dry-run` lists every one. It costs about 45 s on this repository's
 table of about 16,400 rows, and reads the whole tree whatever the change picks. A tree
 with no `packages/moxi-dev/renames.tsv` counts as `none`.
+
+`moxi-dev check --static` runs the tag, comment-reference, naming, Ruff, renames and
+release steps alone, over the whole repository, with the lines, summary line and exit
+codes they give in a full check, and nothing else: no lock check, no package picking, no
+stamps, web compare, sync, lint or tests, and nothing that needs the network. It takes
+about 80 to 140 s on this repository, the renames step about 60 s of it, so it suits a
+gate run before a push.
 
 Run one step without the lock, release, package, lint or test steps with
 `moxi-dev check --only refs [PATH...]`, `moxi-dev check --only names [PATH...]`,

@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+- With `moxi-sessions` installed, `Live sessions` leaves the browser UI shell's band of
+  pages: the Sessions page shows the running sessions with turns' live state. `/m/turns/`
+  still opens the panel. It needs ui 0.2.5 or later, which reads `band_unless`; an older
+  ui keeps the entry.
+
 ## 0.2.5 (2026-11-22)
 
 - A new listener event, `load`, observe only like `ready`: a Claude Code endpoint raises

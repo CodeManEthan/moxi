@@ -2,7 +2,7 @@
 no mark names, read from a log's state.
 
 A read-back is a ruling of a project's own log, `readback=TIME`: the operator's word
-that he read the list of rulings not yet shown through `TIME`. It covers every ruling
+of having read the list of rulings not yet shown through `TIME`. It covers every ruling
 of the project recorded at or before that time, in whichever log.
 
 So whether a ruling is shown takes two logs: its own, which holds the marks, and the
@@ -23,7 +23,7 @@ from collections.abc import Iterator, Mapping
 from . import corrections
 from . import state as states
 
-#: What starts the item of a read-back; the time he read the list through follows.
+#: What starts the item of a read-back; the time the list was read through follows.
 READBACK = corrections.READBACK
 
 #: A time as a log writes one: UTC, to the second.
@@ -50,8 +50,8 @@ def through(project_state: states.State) -> str | None:
 
 def unmarked(state: states.State) -> Iterator[tuple[str, Mapping]]:
     """The rulings of `state` that no mark names, a read-back aside, each as `(id,
-    body)` for the index: the sentence, the item it rules, the pointer to where he said
-    it, the ruling it replaces and the one it takes back, and when it was recorded.
+    body)` for the index: the sentence, the item it rules, the pointer to where the operator
+    said it, the ruling it replaces and the one it takes back, and when it was recorded.
     Whether a read-back of the project covers that time is not in this log."""
     for ruling in state.rulings:
         if ruling.id is None or ruling.shown is not None or read_back(ruling):
