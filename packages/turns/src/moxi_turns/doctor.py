@@ -3,7 +3,9 @@
 `check()` yields `moxi.doctor.Row`s of module `turns`: its config, the start list, the
 registered listeners (an after-tool row's floor that does not import fails its module's
 row), the guards, the launch-additions contributors, the live endpoints (dead ones
-are swept on the way) and any version 1 endpoint directory left behind, when a live
+are swept on the way) and any version 1 endpoint directory left behind, the kept ends
+(`kept ends`, and a `warn` row for each one older than a day, with its ref and its
+asker, since turns removes none by age), when a live
 Codex host last saw the account's rate limits (`codex limits`), the hook times,
 and each harness adapter's rows (`ADAPTER_ROWS`: the Claude plugins, the placed copy,
 `endpoint.json` and the Claude Code version; Codex; the OpenCode host's binary). turns
@@ -33,7 +35,7 @@ from collections.abc import Iterator
 from moxi import doctor as moxi_doctor
 from moxi.config import ConfigError
 
-from . import client, config, hooktimes, listeners, protocol
+from . import client, config, hooktimes, kept, listeners, protocol
 
 MODULE = "turns"
 
@@ -70,6 +72,7 @@ def check() -> Iterator[moxi_doctor.Row]:
     yield from _guard_rows(settings)
     yield from _additions_rows()
     yield from _endpoint_rows()
+    yield from _kept_rows()
     yield _codex_limits_row()
     yield from _hook_rows()
     for target in ADAPTER_ROWS:
@@ -325,6 +328,25 @@ def _endpoint_rows() -> Iterator[moxi_doctor.Row]:
             "removes",
             "reload that session's plugins or restart it; once no turns 0.1 session "
             "runs, remove the directory")
+
+
+def _kept_rows(now: float | None = None) -> Iterator[moxi_doctor.Row]:
+    """`kept ends`: how many there are; and one `warn` row for each older than a day."""
+    now = time.time() if now is None else now
+    found = [r for _, r in kept.records()]
+    ages = [(r, now - r["settled_at"]) for r in found
+            if isinstance(r.get("settled_at"), (int, float))]
+    old = [(r, age_s) for r, age_s in ages if age_s > kept.OLD_S]
+    yield Row("kept ends", ok=True,
+              detail=f"{len(found)} kept under {kept.kept_dir()}, {len(old)} older than a day")
+    for record, age_s in old:
+        age_h = age_s / 3600
+        by = record.get("by") or "an asker that gave no name"
+        yield moxi_doctor.Row(
+            MODULE, f"kept end {record['ref']}", "warn",
+            f"asked by {by}, settled {age_h:.0f} h ago in session "
+            f"{', '.join(record.get('session_ids') or ()) or '(not known)'}; not acked",
+            f"{by} acks it once it holds the end (turns.ack); turns keeps it until then")
 
 
 def _codex_limits_row() -> moxi_doctor.Row:

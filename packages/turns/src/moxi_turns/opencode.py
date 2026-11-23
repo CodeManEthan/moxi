@@ -233,7 +233,7 @@ class _Post:
 
 class OpenCodeHarness(Harness):
     name = "opencode"
-    can = frozenset({"deliver", "only-if-idle", "compact", "agents", "environ"})
+    can = frozenset({"deliver", "only-if-idle", "compact", "agents", "environ", "keep"})
     mod_version = None
 
     def __init__(self, cwd, *, instructions: str | None = None, env=None, options=None,
