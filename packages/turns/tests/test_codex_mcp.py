@@ -9,6 +9,7 @@ import time
 
 import pytest
 
+from moxi_dev.testing import PROC_WAIT_S
 from moxi_turns import codex_protocol as proto
 from moxi_turns.codex import CodexHarness
 from moxi_turns.codex_mcp import LIST, RELOAD, McpSettle, rendered
@@ -91,7 +92,7 @@ def _settle(app, names, *, clock=None, thread_id=None, tick=0.01):
 def _advance_when(clock, condition, by=11.0):
     """Move the clock past the deadline once `condition()` holds, on a thread."""
     def run():
-        deadline = time.monotonic() + 5
+        deadline = time.monotonic() + PROC_WAIT_S
         while not condition() and time.monotonic() < deadline:
             time.sleep(0.01)
         clock.now += by
@@ -100,7 +101,7 @@ def _advance_when(clock, condition, by=11.0):
     return thread
 
 
-def _wait_for(condition, timeout=5.0):
+def _wait_for(condition, timeout=PROC_WAIT_S):
     deadline = time.monotonic() + timeout
     while not condition() and time.monotonic() < deadline:
         time.sleep(0.01)

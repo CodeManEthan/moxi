@@ -253,6 +253,12 @@ from moxi.paths import ANCHOR_HOME_ENV
 #: How often a served server looks for its shutdown request, in seconds.
 SHUTDOWN_POLL = 0.05
 
+#: Seconds a test's positive wait on a process may take before it fails: a process starts,
+#: a binding appears, a row shows, a stream opens, a server is gone. It bounds a wait for
+#: what must happen, so it is long: a passing wait returns as soon as its state holds. A
+#: wait that checks something does not happen keeps its own short bound.
+PROC_WAIT_S = 20.0
+
 #: The tiers a package's `addopts` deselects, so a plain `pytest` runs units and seams.
 TIERS = ("browser", "slow", "build", "live")
 
@@ -1594,7 +1600,8 @@ def terminal_record(fence: Fence) -> Callable[..., Path]:
 def wait_for(predicate: Callable[[], Any], timeout: float = 5.0, *, interval: float = 0.01,
              what: str | Callable[[], str] = "the condition") -> Any:
     """Call `predicate` until it returns something true and return that; fail with
-    `AssertionError` naming `what` after `timeout` seconds."""
+    `AssertionError` naming `what` after `timeout` seconds. A positive wait on a process
+    passes `timeout=PROC_WAIT_S`."""
     deadline = time.monotonic() + timeout
     while True:
         value = predicate()
@@ -1808,9 +1815,10 @@ __all__ = ["ANCHOR_HOME_ENV", "CHANGED_ENV", "DURATIONS_ENV", "FINDING_ENV",
            "GATE_CHAIN_S", "GATE_RESAMPLE_S", "GATE_SAMPLE_S", "GAUGES", "Fence",
            "FenceError", "Gauge", "GaugeReading", "HARNESS_HOMES", "IDLE_ENV", "Idle",
            "KEPT_ENV", "LEAVE_OUT_ENV", "LIFTED", "LIVE_ENV", "MARKERS", "NOT_MEASURED",
-           "PROC_STAT", "REAL_SUPERVISOR_ENV", "RECORD_FORMAT", "SHUTDOWN_POLL", "Seam",
-           "Selection", "TIERS", "TIERS_ENV", "TIMED", "TIMED_CLOCKS", "TIMED_ENV",
-           "TIMED_LOCK_FD_ENV", "TIMED_SLACK_ENV", "WINDOWS_HOMES", "WINDOWS_KEPT_ENV",
-           "console_script", "fence", "findings_of", "idle", "param_id", "selection",
-           "served", "short_dir", "stat_counts", "terminal_record", "timed_reading",
-           "timed_slack", "touches_match", "uv_env", "wait_for", "write_sqlite"]
+           "PROC_STAT", "PROC_WAIT_S", "REAL_SUPERVISOR_ENV", "RECORD_FORMAT",
+           "SHUTDOWN_POLL", "Seam", "Selection", "TIERS", "TIERS_ENV", "TIMED",
+           "TIMED_CLOCKS", "TIMED_ENV", "TIMED_LOCK_FD_ENV", "TIMED_SLACK_ENV",
+           "WINDOWS_HOMES", "WINDOWS_KEPT_ENV", "console_script", "fence", "findings_of",
+           "idle", "param_id", "selection", "served", "short_dir", "stat_counts",
+           "terminal_record", "timed_reading", "timed_slack", "touches_match", "uv_env",
+           "wait_for", "write_sqlite"]

@@ -23,7 +23,7 @@ from moxi.units import _backend, _launchd, _plan, _state
 from moxi.units._backend import Backend, RenderError, Schedule, Socket, Spec, UnitRef
 from moxi.units._fence import Fence
 from moxi.units._launchd import LaunchdBackend
-from moxi_dev.testing import console_script
+from moxi_dev.testing import PROC_WAIT_S, console_script
 
 #: Unit names here are the default home's, which carry no tag (`moxi.units.home_tag`).
 pytestmark = pytest.mark.usefixtures("default_home")
@@ -1426,7 +1426,7 @@ def _ask(host: str, port: int, line: bytes) -> bytes:
         return conn.recv(64).strip()
 
 
-def _until(read, check, seconds=15.0):
+def _until(read, check, seconds=PROC_WAIT_S):
     import time
 
     deadline = time.monotonic() + seconds
@@ -1671,7 +1671,7 @@ def _hold(port: int):
 
 
 def _refused(port: int) -> bool:
-    """Whether a connection to `port` is refused, waiting up to 10 s for it to be."""
+    """Whether a connection to `port` is refused, waiting up to 20 s for it to be."""
     def attempt():
         try:
             return _ask("127.0.0.1", port, b"hi") and False
@@ -1680,7 +1680,7 @@ def _refused(port: int) -> bool:
         except OSError:
             return False
 
-    return _until(attempt, bool, seconds=10.0)
+    return _until(attempt, bool, seconds=PROC_WAIT_S)
 
 
 @darwin

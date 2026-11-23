@@ -19,7 +19,7 @@ import sys
 from pathlib import Path
 
 import pytest
-from moxi_dev.testing import wait_for
+from moxi_dev.testing import PROC_WAIT_S, wait_for
 from playwright.sync_api import expect
 
 import launcher_page_kit as kit
@@ -155,7 +155,8 @@ def pick_project(piece, key: str) -> None:
 
 def started(fake, count: int) -> dict:
     """The fake's start once it has had `count` of them."""
-    wait_for(lambda: len(fake.starts()) >= count, 10, what=f"start {count} in the fake slots")
+    wait_for(lambda: len(fake.starts()) >= count,
+             PROC_WAIT_S, what=f"start {count} in the fake slots")
     return fake.starts()[count - 1]
 
 

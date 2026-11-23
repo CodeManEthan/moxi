@@ -16,6 +16,7 @@ from conftest import cursor_of, send_turn, wait_for_queue, wait_until, write_con
 
 from moxi_comms import cli, constants, machine_line
 from moxi_comms.daemon import Daemon
+from moxi_dev.testing import PROC_WAIT_S
 
 
 def _queue(rig, q):
@@ -350,8 +351,9 @@ def test_a_message_handed_before_a_restart_keeps_its_row_and_goes_once_after(rig
 
     daemon = _reboot(rig)                 # start() runs the rescan before it returns
     assert _queue(rig, REVIEWER_Q) == {msg.id}, "the fenced row waits"
-    assert wait_until(lambda: REVIEWER_Q in daemon.bindings and not shim.offline, timeout=5)
-    assert wait_until(lambda: shim.replaying is False, timeout=5)
+    assert wait_until(lambda: REVIEWER_Q in daemon.bindings and not shim.offline,
+                      timeout=PROC_WAIT_S)
+    assert wait_until(lambda: shim.replaying is False, timeout=PROC_WAIT_S)
     time.sleep(0.2)
     assert msg.id in daemon.bindings[REVIEWER_Q].delivered, "released at the bind"
     assert [p["message_id"] for p in shim.queue] == [msg.id], "not handed twice"
@@ -379,16 +381,19 @@ def test_a_digest_open_at_a_restart_is_handed_again_and_acked_once_end_to_end(ri
 
     daemon = _reboot(rig)
     assert _queue(rig, REVIEWER_Q) == {msg.id}, "the fence put its row back"
-    assert wait_until(lambda: REVIEWER_Q in daemon.bindings and not shim.offline, timeout=5)
-    assert wait_until(lambda: [p["message_id"] for p in shim.queue] == [msg.id], timeout=5)
+    assert wait_until(lambda: REVIEWER_Q in daemon.bindings and not shim.offline,
+                      timeout=PROC_WAIT_S)
+    assert wait_until(lambda: [p["message_id"] for p in shim.queue] == [msg.id],
+                      timeout=PROC_WAIT_S)
     assert "in a digest when the daemon stops" in shim.on_turn_boundary()
     shim.on_turn_boundary()                          # that turn ends answered
-    assert wait_until(lambda: cursor_of(REVIEWER_Q) == msg.id, timeout=5)
+    assert wait_until(lambda: cursor_of(REVIEWER_Q) == msg.id, timeout=PROC_WAIT_S)
     assert _queue(rig, REVIEWER_Q) == set() and _waiting(rig, REVIEWER_Q) == 0
 
     daemon = _reboot(rig)
-    assert wait_until(lambda: REVIEWER_Q in daemon.bindings and not shim.offline, timeout=5)
-    assert wait_until(lambda: shim.replaying is False, timeout=5)
+    assert wait_until(lambda: REVIEWER_Q in daemon.bindings and not shim.offline,
+                      timeout=PROC_WAIT_S)
+    assert wait_until(lambda: shim.replaying is False, timeout=PROC_WAIT_S)
     time.sleep(0.2)
     assert shim.queue == [] and shim.on_turn_boundary() is None
 
@@ -436,7 +441,7 @@ def test_a_queued_row_a_day_old_is_still_released_at_a_first_bind(rig):
 
     again = rig.shim(**REVIEWER)
     (payload,) = wait_for_queue(again, 1)
-    assert wait_until(lambda: again.replaying is False, timeout=5)
+    assert wait_until(lambda: again.replaying is False, timeout=PROC_WAIT_S)
     assert payload["message_id"] == old.id and payload["held"] is True
     assert again.replay_notice is None, "nothing was bounded"
     assert _queue(rig, REVIEWER_Q) == {old.id}, "the row waits for handled"

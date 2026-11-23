@@ -23,6 +23,7 @@ from band_cases import CASES
 
 from moxi import modules
 from moxi_cache import api, page, pagehandlers, records
+from moxi_dev.testing import PROC_WAIT_S
 
 pytestmark = pytest.mark.skipif(not sys.platform.startswith("linux"),
                                 reason="cache runs on Linux only")
@@ -355,7 +356,7 @@ def test_the_first_event_is_the_current_value_and_a_rewrite_comes_within_3_s():
     async def go():
         stream = Stream(served())
         try:
-            assert await stream.next(3) == ("clocks", value([row(rec)]))
+            assert await stream.next(PROC_WAIT_S) == ("clocks", value([row(rec)]))
             assert stream.status == 200
             moved = dict(rec, last_request=rec["last_request"] + 30)
             put(moved)
@@ -374,9 +375,9 @@ def test_one_event_per_change_and_none_for_a_rewrite_that_changes_nothing(monkey
     async def go():
         stream = Stream(served())
         try:
-            await stream.next(3)
+            await stream.next(PROC_WAIT_S)
             put(record(B, last_request=rec["last_request"]))
-            _, data = await stream.next(3)
+            _, data = await stream.next(PROC_WAIT_S)
             assert [sent["session"] for sent in data["clocks"]] == [A, B]
             assert await stream.none_within(0.6)
             put(rec)
@@ -393,7 +394,7 @@ def test_the_topic_carries_the_reading_and_today():
     async def go():
         stream = Stream(served())
         try:
-            assert await stream.next(3) == ("clocks", value([], sent))
+            assert await stream.next(PROC_WAIT_S) == ("clocks", value([], sent))
         finally:
             await stream.close()
 
@@ -407,15 +408,15 @@ def test_one_event_per_watcher_tick_with_no_record(monkeypatch):
     async def go():
         stream = Stream(served())
         try:
-            assert await stream.next(3) == ("clocks", value([], first))
+            assert await stream.next(PROC_WAIT_S) == ("clocks", value([], first))
             for tick in (10, 20):
                 moved = put_reading(tick_at=1_800_000_000.0 + tick)
-                assert await stream.next(3) == ("clocks", value([], moved))
+                assert await stream.next(PROC_WAIT_S) == ("clocks", value([], moved))
                 assert await stream.none_within(0.4)
             put_reading(tick_at=1_800_000_020.0)       # rewritten, nothing changed
             assert await stream.none_within(0.4)
             stopped = put_reading(tick_at=1_800_000_030.0, listed_at=1_800_000_020.0)
-            assert await stream.next(3) == ("clocks", value([], stopped))
+            assert await stream.next(PROC_WAIT_S) == ("clocks", value([], stopped))
         finally:
             await stream.close()
 
@@ -432,10 +433,11 @@ def test_an_event_when_the_date_changes(monkeypatch):
     async def go():
         stream = Stream(served())
         try:
-            assert await stream.next(3) == ("clocks", value([row(rec)]))
+            assert await stream.next(PROC_WAIT_S) == ("clocks", value([row(rec)]))
             assert await stream.none_within(0.4)
             dates[0] = "2027-01-16"
-            assert await stream.next(3) == ("clocks", value([row(rec)], today="2027-01-16"))
+            assert await stream.next(PROC_WAIT_S) == ("clocks", value([row(rec)],
+                                                                  today="2027-01-16"))
             assert await stream.none_within(0.4)
         finally:
             await stream.close()
@@ -450,9 +452,9 @@ def test_a_reading_that_goes_is_published_as_null(monkeypatch):
     async def go():
         stream = Stream(served())
         try:
-            assert (await stream.next(3))[1]["reading"] == sent
+            assert (await stream.next(PROC_WAIT_S))[1]["reading"] == sent
             records.reading_path().unlink()
-            assert await stream.next(3) == ("clocks", value([]))
+            assert await stream.next(PROC_WAIT_S) == ("clocks", value([]))
         finally:
             await stream.close()
 
@@ -505,7 +507,7 @@ def test_a_second_stream_gets_the_current_value_first(monkeypatch):
         app = served()
         first = Stream(app)
         try:
-            await first.next(3)
+            await first.next(PROC_WAIT_S)
             second = Stream(app)
             try:
                 assert (await second.next(1))[1]["clocks"] == [row(rec)]
@@ -535,16 +537,16 @@ def test_the_topic_publishes_the_error_and_then_up_once_the_listing_recovers(mon
         app = served()
         stream = Stream(app)
         try:
-            _, data = await stream.next(3)
+            _, data = await stream.next(PROC_WAIT_S)
             assert data == {"state": "error", "detail": UNEXPECTED.format("PermissionError"),
                             "today": TODAY, "reading": None, "clocks": []}
             raising.pop(0)
-            _, data = await stream.next(3)
+            _, data = await stream.next(PROC_WAIT_S)
             assert data["detail"] == UNEXPECTED.format("RuntimeError")
             status, body = await get(app, "/api/clocks")
             assert status == 200 and body["state"] == "error"
             raising.pop(0)
-            _, data = await stream.next(3)
+            _, data = await stream.next(PROC_WAIT_S)
             assert data == value([row(rec)])
         finally:
             await stream.close()
@@ -567,7 +569,7 @@ def test_the_poller_outlives_a_gather_that_raises(monkeypatch, caplog):
     async def go():
         stream = Stream(served())
         try:
-            assert await stream.next(3) == ("clocks", value([]))
+            assert await stream.next(PROC_WAIT_S) == ("clocks", value([]))
         finally:
             await stream.close()
 
@@ -582,7 +584,7 @@ def test_the_poller_starts_with_the_first_stream_and_keeps_running_after_it(monk
     async def go():
         assert pagehandlers._current is None
         stream = Stream(served())
-        await stream.next(3)
+        await stream.next(PROC_WAIT_S)
         feed = pagehandlers._current
         await stream.close()
         await asyncio.sleep(0.3)

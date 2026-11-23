@@ -20,6 +20,7 @@ import pytest
 import moxi_turns as turns
 from fake_harness import FakeHarness
 from moxi import ipc
+from moxi_dev.testing import PROC_WAIT_S
 from moxi_turns import listeners, protocol
 from moxi_turns import results as results
 from moxi_turns.results import Passed, StopFacts
@@ -51,7 +52,7 @@ def connect():
         client.close()
 
 
-def notes(client, count: int, timeout: float = 5.0) -> list[tuple[str, object]]:
+def notes(client, count: int, timeout: float = PROC_WAIT_S) -> list[tuple[str, object]]:
     """The next `count` notifications on `client`."""
     out: list = []
     done = threading.Event()
@@ -255,7 +256,7 @@ def test_a_refused_connect_with_the_lock_held_removes_nothing(turns_env):
         assert (dead / "hello.json").exists() and os.path.lexists(address)
     finally:
         holder.stdin.close()
-        holder.wait(10)
+        holder.wait(PROC_WAIT_S)
 
 
 @pytest.fixture
@@ -511,7 +512,7 @@ def test_a_late_answer_is_not_taken_and_a_closed_handler_frees_the_slot(
         other.call("stops.handle", {}, timeout_s=5)
     assert caught.value.code == results.ERROR_STOP_HANDLER_TAKEN
     handler.close()
-    deadline = time.monotonic() + 5
+    deadline = time.monotonic() + PROC_WAIT_S
     while True:
         try:
             assert other.call("stops.handle", {}, timeout_s=5) == {}

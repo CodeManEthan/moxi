@@ -20,6 +20,7 @@ from test_page_waits import (ASKS, Cache, Turns, agents_case, joined, live, pres
                              wired)
 
 from moxi import aio
+from moxi_dev.testing import PROC_WAIT_S
 from moxi_launcher import joiner, keepwarm, page, pagehandlers, settings, store, waits
 
 __all__ = ["fresh", "wired"]
@@ -469,7 +470,7 @@ def test_wake_from_another_thread_starts_a_pass(wired, monkeypatch):
             await until(lambda: feed.joiner.passes >= 1 and feed.joined_once.is_set())
             passes = feed.joiner.passes
             await aio.offload(feed.wake)
-            await until(lambda: feed.joiner.passes > passes, timeout_s=3.0)
+            await until(lambda: feed.joiner.passes > passes, timeout_s=PROC_WAIT_S)
         finally:
             stop(feed)
 

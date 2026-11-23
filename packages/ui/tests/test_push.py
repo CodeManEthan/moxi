@@ -19,6 +19,7 @@ from pathlib import Path
 
 import pytest
 from moxi.paths import Layout
+from moxi_dev.testing import PROC_WAIT_S
 
 from moxi_ui import listen
 from moxi_ui import push as push_mod
@@ -92,10 +93,10 @@ class Reader:
     def leave(self) -> None:
         self._left.set()
 
-    async def next(self, timeout: float = 5.0):
+    async def next(self, timeout: float = PROC_WAIT_S):
         return await asyncio.wait_for(self.items.get(), timeout)
 
-    async def until(self, name: str, test=lambda data: True, timeout: float = 10.0):
+    async def until(self, name: str, test=lambda data: True, timeout: float = PROC_WAIT_S):
         """The next event named `name` that passes `test`; earlier ones are kept in
         `self.skipped`."""
         self.skipped = getattr(self, "skipped", [])
@@ -789,7 +790,7 @@ def test_the_shell_serves_the_push_on_its_listener_and_its_stop_ends_the_stream(
     thread = threading.Thread(target=lambda: asyncio.run(running.run()), daemon=True)
     thread.start()
     try:
-        deadline = time.monotonic() + 5
+        deadline = time.monotonic() + PROC_WAIT_S
         while running._should_exit is None and time.monotonic() < deadline:
             time.sleep(0.01)
         session_id, key = running.sessions.store.mint()

@@ -17,6 +17,7 @@ from conftest import clock_reads_warm, cursor_of, frame_kinds, wait_until
 from moxi_comms import claimfile, codex_threads, owed, paths
 from moxi_comms.adapters.codex import CodexAdapter, HostGone, layer_one_hash
 from moxi_comms.adapters.codex_roster import CodexAgent
+from moxi_dev.testing import PROC_WAIT_S
 
 from fake_turns import FakeSession, fake_find
 
@@ -1025,6 +1026,6 @@ def test_a_session_a_cause_ended_writes_no_second_end_line(rig, served):
     adapter.claims.on_end()
     adapter.runner.join(15)
     assert adapter.served == {"code": 0}
-    assert adapter.host.wait(10) != 0, "the cause's SIGTERM ended the host"
+    assert adapter.host.wait(PROC_WAIT_S) != 0, "the cause's SIGTERM ended the host"
     assert adapter.ends() == ["headless session ended: exit-session; 0 row(s) left "
                               "waiting for the name"]

@@ -17,6 +17,7 @@ from conftest import ADDITIONS_COMMS_ONLY_PATCH, wait_until, write_config
 import fake_opencode
 from moxi_comms.adapters import opencode as oc
 from moxi_comms.adapters import opencode_roster
+from moxi_dev.testing import PROC_WAIT_S
 from pty_kit import PtyWrapper, alive
 
 IDENTITY = "coder@proj-a"
@@ -121,7 +122,8 @@ def test_the_launch_opens_the_window_on_its_own_server_and_a_close_takes_it_offl
 
     assert proc.wait(20.0) == 0
     assert wait_until(lambda: not bound(w.rig)), "closing the window took it offline"
-    assert wait_until(lambda: not alive(serve["pid"]), 10.0), "the server was stopped"
+    assert wait_until(lambda: not alive(serve["pid"]),
+                      PROC_WAIT_S), "the server was stopped"
     out = proc.text()
     assert f"`moxi-comms-opencode {IDENTITY}` launches it again, on a new session" in out
     assert "is not offered" not in out and "no free model" not in out

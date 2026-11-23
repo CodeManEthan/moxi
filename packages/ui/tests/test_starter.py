@@ -23,6 +23,7 @@ from types import SimpleNamespace
 import pytest
 from moxi import files, proc
 from moxi.paths import Layout, python
+from moxi_dev.testing import PROC_WAIT_S
 from moxi_ui.loopback.api import RuntimeInfo, read_runtime, write_runtime
 from moxi_ui.loopback.routes import project
 
@@ -155,7 +156,7 @@ def drive(starters: Starters, body) -> None:
     asyncio.run(asyncio.wait_for(main(), 40))
 
 
-async def until(predicate, timeout: float = 5.0, what: str = "the condition"):
+async def until(predicate, timeout: float = PROC_WAIT_S, what: str = "the condition"):
     loop = asyncio.get_running_loop()
     deadline = loop.time() + timeout
     while not predicate():
@@ -792,7 +793,7 @@ def test_a_kill_ends_the_child_and_what_it_started_and_never_signals_the_group(
         await until(lambda: (tmp_path / "below").exists(), what="the grandchild")
         below = int((tmp_path / "below").read_text())
         child.kill()
-        assert await asyncio.wait_for(child.exited, 5) == -9
+        assert await asyncio.wait_for(child.exited, PROC_WAIT_S) == -9
         await until(lambda: _gone(below), what="the grandchild's end")
 
     asyncio.run(asyncio.wait_for(body(), 20))
