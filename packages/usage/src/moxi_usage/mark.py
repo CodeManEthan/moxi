@@ -35,14 +35,19 @@ session and `subagent` for an agent; thresholds are kept per (model, mark, popul
 and worked out again when the measure, the model table or usage's config changes.
 
 **Firing.** A purpose fires the first time its reader's context is at or above its
-threshold while it is armed, and is then fired. It is armed again by a later reading of
-the same reader below the threshold (after a compaction, or a clear that keeps the
-session id). So a mark fires once per rise past its threshold, not once per session.
+threshold while it is armed, and is then fired. A fired notice stays fired for the rest of
+the session id, so a compaction never brings it back; a clear or a resume that names a new
+session id starts afresh. A fired crossing is armed again by a later reading of the main
+session below the threshold (after a compaction, or a clear that keeps the session id), so
+a crossing fires once per rise past its threshold.
 
-**Delivery.** The answer is the notice when one fired, then the lines crossing handlers
-returned. A notice for an agent is the agent's own line, and leaves one line for its
-parent, `subagent agent-<id> <line>`; the main session's next call adds its agents'
-waiting lines after its own. Waiting lines live in memory only.
+**Delivery.** The notice is one line, `context 412k: past the 1x mark for <model>` (the
+context in thousands, halves up). The lines crossing handlers return on the same call are
+appended to it, each after `. `, so the model sees one line; a crossing on a call with no
+notice gives its handlers' lines on their own. A notice for an agent is the agent's own
+line, and leaves one line for its parent, `subagent agent-<id> <line>`; the main
+session's next call adds its agents' waiting lines after its own. Waiting lines live in
+memory only.
 
 **State.** In memory per session, in the endpoint's process. Only the fired purposes are
 kept on disk, in `STATE/usage/marks/<harness>-<session_id>.json` (written with
@@ -52,11 +57,12 @@ doctor's `marks` row sweeps any older than `marks.max_age_days`.
 
 **The floor.** For an event with an `agent_id` it is 0: turns gates only the main loop by
 it, and after an agent's call the parent's next call must come, to take its line. For
-the main session it is 0 while a line waits or a main purpose is fired (so the reading
+the main session it is 0 while a line waits or the crossing is fired (so the reading
 that re-arms it is seen); otherwise the smallest threshold among the main session's armed
 purposes for the models it has used, or over every model the measure has a row for when
-it has used none yet. With no threshold known it is 0; with both purposes off it is
-`NEVER`, since the listener has nothing to do. turns reads the floor again at each
+it has used none yet. A fired notice counts for nothing, since nothing can arm it again.
+With no threshold known it is 0; with both purposes off, or the notice fired and the
+crossing off, it is `NEVER`, since the listener has nothing to do. turns reads the floor again at each
 `ready` and after each call, so a change to `marks.default` reaches a main loop held off
 by `NEVER` at its next start, resume, clear or compaction, or after an agent's call.
 
@@ -509,10 +515,14 @@ def _number(value) -> bool:
 
 # --- the listener -----------------------------------------------------------------------
 
-def notice_line(tokens: int, mark: str, threshold: int, model: str | None) -> str:
-    """`context 412,330 passed the 1x restart point (398,112) for claude-opus-5-5`."""
-    return (f"context {tokens:,} passed the {mark} restart point ({threshold:,}) for "
-            f"{model or 'an unnamed model'}")
+def thousands(tokens: int) -> int:
+    """The nearest thousand, halves up: 412,330 is 412 and 412,500 is 413."""
+    return (int(tokens) + 500) // 1000
+
+
+def notice_line(tokens: int, mark: str, model: str | None) -> str:
+    """`context 412k: past the 1x mark for claude-opus-5-5`."""
+    return f"context {thousands(tokens)}k: past the {mark} mark for {model or 'an unnamed model'}"
 
 
 def agent_label(agent_id: str) -> str:
@@ -587,11 +597,11 @@ def observe(event, *, notice: str | None, crossing: str | None,
                         held.model = shown
                         changed = True
                         if name == NOTICE:
-                            own = notice_line(tokens, mark, limit, shown)
+                            own = notice_line(tokens, mark, shown)
                         else:
                             crossed = Crossing(harness, session_id, mark, tokens, limit,
                                                shown, when)
-                elif held.fired_at is not None:
+                elif held.fired_at is not None and name == CROSSING:
                     held.fired_at = held.tokens = held.threshold = held.model = None
                     changed = True
             if own is not None and agent_id is not None:
@@ -603,9 +613,11 @@ def observe(event, *, notice: str | None, crossing: str | None,
         except Exception:  # noqa: BLE001 - the mark still counts in memory
             _fail("persist", "the fired marks could not be written; a restarted endpoint "
                              "may say a mark again")
-    lines = [own] if own else []
-    if crossed is not None:
-        lines.extend(run_handlers(crossed))
+    handed = run_handlers(crossed) if crossed is not None else []
+    if own is not None and agent_id is None and handed:
+        own = ". ".join([own, *handed])          # one line: the notice, then each handler's
+        handed = []
+    lines = ([own] if own else []) + handed
     if agent_id is None:
         with session.lock:
             lines.extend(session.pending)
@@ -633,11 +645,17 @@ def floor(event) -> int:
             if session.pending:
                 return 0
             main = session.readers.get(None)
-            if main is not None and any(
-                    (p := main.purposes.get(name)) is not None and p.mark == mark
-                    and p.fired_at is not None for name, mark in wanted):
+
+            def fired(name: str, mark: str) -> bool:
+                held = main.purposes.get(name) if main is not None else None
+                return held is not None and held.mark == mark and held.fired_at is not None
+
+            if any(name == CROSSING and fired(name, mark) for name, mark in wanted):
                 return 0
+            wanted = [(name, mark) for name, mark in wanted if not fired(name, mark)]
             models = set(session.models)
+        if not wanted:
+            return NEVER
         _fresh_thresholds()
         known = [t for t in (_lowest(mark, models) for _name, mark in wanted)
                  if t is not None]
@@ -777,5 +795,5 @@ def _warn(message: str) -> None:
 __all__ = ["WARN_AT_ENV", "CROSSING_AT_ENV", "MARKS", "OFF", "NOTICE", "CROSSING", "PURPOSES",
            "GROUP", "STATE_DIR", "SCHEMA", "NEVER", "MAIN_READER", "Crossing", "selected",
            "config_default", "on_tool", "observe", "floor", "gone", "handlers",
-           "handler_wait", "run_handlers", "notice_line", "agent_label", "safe_id",
+           "handler_wait", "run_handlers", "notice_line", "thousands", "agent_label", "safe_id",
            "state_dir", "state_file", "read_record", "reset"]
