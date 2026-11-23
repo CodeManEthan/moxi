@@ -1579,43 +1579,19 @@ def test_an_opened_window_writes_nothing_and_pulls_nothing(pulls):
         conn.close()
 
 
-def test_a_scoped_limit_names_its_models_and_counts_only_their_requests(monkeypatch):
-    monkeypatch.setattr(models, "table", lambda *a, **k: table())
+def test_a_scoped_limit_opens_with_its_readings_and_no_sessions(seeded):
     now = time.time()
-    opened = now - 6 * 86400
     put_readings(*(Reading("claude", "opus", 10080, "seven_day_opus", used, now + 86400,
                            now - ago, "session-usage", "s1")
                    for used, ago in ((3.0, 7200), (4.0, 60))))
-    conn = store.open_index()
-    try:
-        source(conn, "/p/mixed.jsonl", [
-            request("m1", opened + 60, model="claude-opus-4-5"),
-            request("m2", opened + 120, model="claude-sonnet-4-5"),
-            request("m3", opened + 180, model="claude-opus-4-1")],
-            session_id="mixed", cwd="/w/app")
-        source(conn, "/p/sonnet.jsonl", [request("s1", opened + 60, model="claude-sonnet-4-5")],
-               session_id="sonnet-only", cwd="/w/app")
-        source(conn, "/p/early.jsonl", [request("e1", opened - 60, model="claude-opus-4-5")],
-               session_id="before", cwd="/w/app")
-        codex_session(conn, "thread", opened + 60)
-    finally:
-        conn.close()
     body = get("/api/window", harness="claude", limit_id="opus", minutes=10080)
-    assert body["opened"] == limits.iso(opened) and body["model_family"] == "opus"
+    assert body["opened"] == limits.iso(now - 6 * 86400)
     assert body["readings"]["count"] == 2 and body["readings"]["first"] is not None
-    used = body["used"]
-    assert used["since"] == limits.iso(opened)
-    assert [(row["session_id"], row["requests"]) for row in used["rows"]] == [("mixed", 2)]
-    assert (used["count"], used["requests"]) == (1, 2)
-    # The main windows of both harnesses name no family and count every model.
-    put_readings(Reading("claude", "plan", 10080, "seven_day", 9.0, now + 86400, now - 60,
-                         "session-usage", "s1"))
-    week = get("/api/window", harness="claude", limit_id="plan", minutes=10080)
-    assert week["model_family"] is None
-    assert (week["used"]["count"], week["used"]["requests"]) == (2, 4)
+    assert body["used"] is None
+    assert "model_family" not in body
 
 
-def test_a_scoped_limit_whose_reading_names_no_models_lists_no_sessions(seeded):
+def test_a_limit_that_is_not_the_main_one_lists_no_sessions(seeded):
     now = time.time()
     put_readings(Reading("claude", "oauth_apps", 10080, "seven_day_oauth_apps", 4.0,
                          now + 86400, now - 60, "session-usage", "s1"),
@@ -1627,8 +1603,8 @@ def test_a_scoped_limit_whose_reading_names_no_models_lists_no_sessions(seeded):
     main = get("/api/window", harness="codex", limit_id="codex", minutes=300)
     for body in (apps, other):
         assert body["opened"] is not None
-        assert (body["model_family"], body["used"]) == (None, None)
-    assert main["model_family"] is None and main["used"] is not None
+        assert body["used"] is None
+    assert main["used"] is not None
 
 
 def test_a_main_window_lists_the_sessions_that_used_it_since_it_opened(monkeypatch):

@@ -11,7 +11,7 @@ server:
 6. Is caching paying off?
 7. What is eating the 5-hour window? (a new reading read again)
 8. How fresh is this?
-9. What counts against the weekly Opus limit?
+9. Does a session on Opus count against the plan's 5-hour window?
 
 Each walk starts at the page's own address and reads only what the page shows. Each runs
 twice: on a small install, whose shell leaves out every module but ui, usage and
@@ -99,8 +99,8 @@ SESSIONS = WEEK + [CODEX] + EARLIER
 #: today's, so it adds to today's cost.
 LATE = {"harness": "claude", "session": session_id(30), "requests": 2, "folder": "proj-a", "ago": 10 * 60,
         "today": True, "model": SONNET, "title": None, "agents": []}
-#: A session on Opus twenty minutes before the moment, for the walk over the weekly Opus
-#: limit: today's, in the first project.
+#: A session on Opus twenty minutes before the moment, for the walk over the plan's
+#: window and the weekly Opus limit: today's, in the first project.
 ON_OPUS = {"harness": "claude", "session": session_id(31), "requests": 2, "folder": "proj-a",
            "ago": 20 * 60, "today": True, "model": OPUS, "title": None, "agents": []}
 #: The oldest of today's sessions, in seconds before the moment.
@@ -777,9 +777,9 @@ def test_each_part_says_when_it_was_read_and_read_new_sessions_brings_a_new_one_
     on_both(made, walk)
 
 
-# --- 9. What counts against the weekly Opus limit? -----------------------------------------
+# --- 9. Does a session on Opus count against the plan's 5-hour window? --------------------
 
-def test_the_weekly_opus_limit_names_the_sessions_whose_opus_requests_count(ui_shells, on_both):
+def test_an_opus_session_counts_against_the_plan_and_the_opus_limit_lists_no_one(ui_shells, on_both):
     made = two_installs(ui_shells)
     for shell in made.values():
         write(shell, [ON_OPUS], shell.moment)
@@ -793,15 +793,11 @@ def test_the_weekly_opus_limit_names_the_sessions_whose_opus_requests_count(ui_s
         expect(opus.locator(".u")).to_have_text("20% used")
         opus.click()
         expect(page).to_have_url(re.compile(r"/m/usage/limit/claude/opus/10080$"))
-        # Only the Opus session counts against it: the week's Sonnet and Haiku sessions,
-        # the dearest among them, are not listed, and the total names the models.
-        used = opened(panel).locator("[data-opened=used]")
-        expect(used.locator(".k")).to_have_text("Used by")
-        expect(used.locator("[data-part=used-row]")).to_have_text([
-            re.compile(rf"^\s*proj-a · started {NAMED} · 2 requests\s*{MONEY}$")])
-        expect(used.locator("[data-part=used-total]")).to_have_text(
-            re.compile(rf"^\s*1 session, 2 Opus requests since {WHEN}\s*{MONEY}$"))
-        # The plan's own 5-hour window, opened, still counts every model.
+        # A limit that is not the plan's own says when it opened and lists no one.
+        lines = opened(panel)
+        expect(lines.locator("[data-opened=window] .f")).to_have_text(re.compile(r"20% used$"))
+        expect(lines.locator("[data-opened=used]")).to_have_count(0)
+        # The plan's own 5-hour window, opened, counts every model, the Opus session too.
         limit(panel, FIVE).click()
         expect(page).to_have_url(re.compile(r"/m/usage/limit/claude/plan/300$"))
         expect(opened(panel).locator("[data-opened=used] [data-part=used-total]")).to_have_text(

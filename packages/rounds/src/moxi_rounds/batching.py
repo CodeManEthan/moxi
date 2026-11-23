@@ -107,7 +107,7 @@ from . import (builds, checking, ci, finish_gates, finish_lock, finishing, folde
 from . import failures as failing
 from . import settings as own
 from . import state as states
-from .errors import Refused, RoundsError, Unmet
+from .errors import Refused, RoundsError, UnfencedTest, Unmet
 from .gitreads import GitError
 
 #: Who the lander's records name.
@@ -831,6 +831,8 @@ class _Pass:
         read raised, which reads as no running session."""
         try:
             return str(self.teller.comms.identity_state(name).state)
+        except UnfencedTest:
+            raise
         except Exception:  # noqa: BLE001  (a read that raises reads as no session)
             return "error"
 

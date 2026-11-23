@@ -84,8 +84,7 @@ const NAMES: Record<string, string> = { claude: "Claude", codex: "Codex", openco
 /** The order of groups in which no row fills early; any other harness follows. */
 const ORDER = ["claude", "codex"];
 
-/** A word with its first letter capital: a limit's or a family's name, `Opus`. */
-export const capital = (text: string): string => text.charAt(0).toUpperCase() + text.slice(1);
+const capital = (text: string): string => text.charAt(0).toUpperCase() + text.slice(1);
 
 /** A harness as the page names it. */
 export function harnessName(harness: string): string {
