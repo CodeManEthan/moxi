@@ -2,6 +2,16 @@
 
 ## 0.2.7 (unreleased)
 
+- On Claude Code, a steer that lands while the model writes its last answer no longer
+  waits for the next prompt. Claude Code holds such a note for the session's next
+  request when the turn makes no further one; the runner now reads that at the turn's end
+  and reports the steer held, and the steer opens a turn of its own, ahead of every queued
+  delivery. That turn's prompt is a short line saying a note came with it, since Claude
+  Code sends the held note beside it, so the model reads the note once. The steer's
+  `turn.steered` names the first turn, whose `turn.ended` no longer names it; the new
+  turn's `turn.started` and `turn.ended` name it as the delivery that opened it, and its
+  `ended` is that turn's end. A steer a request carried ends with its turn as before. The
+  runner is version 0.3.1, so `moxi install turns` updates an install at user scope.
 - A new request, `fork {text, by, ref?}` (the client's `fork(text, by=, ref=)`), and a new
   capability, `fork`: start a fork of the session's main loop with `text` as its task. It
   runs beside the main loop's turns and holds no slot. Its `started` value carries the

@@ -250,6 +250,12 @@ A shell left over does not make the command a failure: the command ran.
   (a Claude Code turn with no visible text, a Codex turn with no agent message or an
   empty one), and where the harness gives none (an OpenCode host). Every delivery the
   turn took, steers included, ends with the same `answer`.
+  On Claude Code a steer can go in after the turn's last request: Claude Code holds it
+  for the session's next request, and that turn's `turn.ended` does not name it. The steer
+  then opens a turn of its own, ahead of every queued delivery, whose prompt is a short
+  line saying a note came with it (Claude Code sends the held text beside that prompt).
+  That turn's `turn.started` and `turn.ended` name the steer as `opened`, and its `ended`
+  is that turn's end.
 - `source` is one of `startup`, `resume`, `clear`, `compact`, or null when the harness did
   not say.
 
