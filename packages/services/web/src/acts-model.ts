@@ -29,7 +29,7 @@ export interface Act {
 
 /** ui's shell: its Stop closes the page. */
 export const SHELL = "ui/shell";
-/** Beside his daemon's Stop. */
+/** Beside Stop on the user's daemon. */
 export const STOP_LASTS = "Stop lasts until the next login. Turn off keeps it off.";
 /** In place of ui's shell's Stop, then its command with `Copy`. */
 export const SHELL_STOP = "Stopping it closes this page, so it is done at the terminal:";
@@ -59,7 +59,8 @@ const RUNNING = new Set(["running", "running-off", "no-login", "health", "listen
 const TIMER = new Set(["armed", "last-run", "not-wrapped", "armed-off"]);
 const NOT_RUN_HERE = new Set(["elsewhere", "removing", "no-supervisor", "not-here"]);
 
-/** His `Turn on` or `Turn off`, as fits its flag; both when the flag can't be read. */
+/** `Turn on` or `Turn off` for the user's row, as fits its flag; both when the flag can't
+ * be read. */
 function onOff(row: Row): ActName[] {
   if (row.flag === true) return ["disable"];
   if (row.flag === false) return ["enable"];
@@ -67,7 +68,7 @@ function onOff(row: Row): ActName[] {
 }
 
 /** The acts a row offers, the closed line's (at most one) and the foot's, by its cause and
- * kind, his or Moxi's. A cause the page doesn't name offers the acts of its kind. ui's
+ * kind, the user's or Moxi's. A cause the page doesn't name offers the acts of its kind. ui's
  * shell offers no Stop. */
 export function actsOf(row: Row): { closed: Act | null; foot: Act[] } {
   const c = cause(row);
@@ -228,8 +229,8 @@ export function shellWord(word: string): string {
   return /^[A-Za-z0-9_@%+=:,./-]+$/.test(word) ? word : `'${word.replaceAll("'", "'\\''")}'`;
 }
 
-/** The command that adds his written row again, as `moxi services add` takes it; null when
- * a word of it didn't reach this page. */
+/** The command that adds the user's written row again, as `moxi services add` takes it;
+ * null when a word of it didn't reach this page. */
 export function addAgain(row: Row): string | null {
   if (row.form !== "written" || row.argv === null || row.argv.some((w) => w === null)) return null;
   const words = ["moxi", "services", "add", row.name];
@@ -253,12 +254,12 @@ export function addAgain(row: Row): string | null {
   return [...words.map(shellWord), "--", ...(row.argv as string[]).map(shellWord)].join(" ");
 }
 
-/** Remove's closing line for a wrapped timer, as the adopt panel words it; for one he
- * turned off, whose runs only the file held off, its schedule is turned off first. */
+/** Remove's closing line for a wrapped timer, as the adopt panel words it; for one the
+ * user turned off, whose runs only the file held off, its schedule is turned off first. */
 export const WRAPPED_REMOVE = "Remove takes that file away and leaves the timer as it was.";
 export const WRAPPED_OFF_REMOVE = "It is off, so Remove turns its schedule off first, then takes that file away.";
 
-/** Remove's confirm of his row: what goes, what stays, and for a written row the command
+/** Remove's confirm of the user's row: what goes, what stays, and for a written row the command
  * that adds it again. A wrapped timer (the server's `wrapped`) loses the small file beside
  * it as well. */
 export function removeConfirm(row: Row): Confirm {

@@ -267,10 +267,10 @@ var rt=globalThis,lt=rt.ShadowRoot&&(rt.ShadyCSS===void 0||rt.ShadyCSS.nativeSha
             ${e.read!==null?p`<span class="read" data-line="read">${e.read}</span>`:c}</div>`:c}
           ${e.counts!==null?p`<div class="counts" data-line="counts">${e.counts}</div>`:c}`}
         </div></section>
-      ${!e.his&&this.#m===null?p`<section class="grp" data-part="group" data-group="his" data-project="">
+      ${!e.his&&this.#m===null?p`<section class="grp" data-part="group" data-group="yours" data-project="">
         <div class="gk" data-line="group">${Ft}</div><div class="gl"><div class="yours"><span data-line="what">${en}</span>${o?p`<button type="button" data-action="add" @click=${()=>this.#q()}>${qt}</button>`:c}</div></div></section>`:c}
-      ${gt(e.groups,({group:l})=>`${l.moxi?"moxi":"his"}:${l.project??l.label}`,({group:l,rows:a})=>p`
-        <section class="grp" data-part="group" data-group=${l.moxi?"moxi":l.project!==null?"project":"his"}
+      ${gt(e.groups,({group:l})=>`${l.moxi?"moxi":"yours"}:${l.project??l.label}`,({group:l,rows:a})=>p`
+        <section class="grp" data-part="group" data-group=${l.moxi?"moxi":l.project!==null?"project":"yours"}
           data-project=${l.project??""}><div class="gk" data-line="group">${l.label}</div>
           <div class="gl">${gt(a,d=>d.row.id,r)}</div></section>`)}
     </div>`}#it(e,s){let i=e.row,o=this.#t?.where===i.id?this.#t.said:null,r=this.#s,l=r!==null&&!r.ended&&r.where===i.id&&r.act!==null?fn(r.act):null,a=e.weight==="text"&&l===null,d=l??e.fact,h=s&&(!this.#u||Gn()),u=h&&this.#n===i.id,f=s&&!u?this.#V(i).closed:null;return p`<div class="item" data-id=${i.id} data-cause=${i.verdict.cause??""} data-verdict=${i.verdict.state}

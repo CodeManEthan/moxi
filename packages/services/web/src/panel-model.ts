@@ -32,7 +32,7 @@ export interface AddForm {
   /** The way `add`'s kind, as chosen. */
   kind: "daemon" | "timer";
   /** The way `adopt`'s kind, as chosen where the supervisor can't tell it (`""` until
-   * chosen: none is picked for him). Elsewhere the unit's name tells it. */
+   * chosen: none is picked for the user). Elsewhere the unit's name tells it. */
   adoptAs: "" | "daemon" | "timer";
   command: string;
   unit: string;
@@ -53,7 +53,7 @@ export interface AddForm {
 }
 
 /** A new form on `way`. A written row starts off, as `moxi services add` leaves it
- * without `--enable`: he turns on "Turn it on now" to start it now and at every login. */
+ * without `--enable`: the user turns on "Turn it on now" to start it now and at every login. */
 export function emptyForm(way: Way = "add"): AddForm {
   return { way, name: "", kind: "daemon", adoptAs: "", command: "", unit: "", enable: false, adoptOn: "",
            schedule: "every", every: "", at: "", days: [], cwd: "", health: "", project: "",
@@ -63,7 +63,7 @@ export function emptyForm(way: Way = "add"): AddForm {
 // -- the command's hint ---------------------------------------------------------------------
 
 /** The hint under `Command`: the first word is a full path, and the shell command that
- * prints the one he typed. */
+ * prints the one the user typed. */
 export function fullPathHint(command: string): { text: string; command: string } {
   const first = command.trim().split(/\s+/)[0] ?? "";
   const word = first.split("/").filter(Boolean).pop() ?? "";
