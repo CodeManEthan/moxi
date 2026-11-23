@@ -15578,11 +15578,13 @@ ui	packages/ui/src/moxi_ui/session.py	if any(isinstance(t, bool) or not isinstan
 ui	packages/ui/src/moxi_ui/session.py	if any(key.lower() in _BROWSER_HEADERS or key.lower().startswith(b"sec-fetch-")	keep	any	any
 ui	packages/ui/src/moxi_ui/session.py	if now - r.created >= self.max_age or now - r.used >= self.idle]	keep	used	used
 ui	packages/ui/src/moxi_ui/session.py	key, created, used = item.get("key"), item.get("created"), item.get("used")	keep	used	used
+ui	packages/ui/src/moxi_ui/session.py	key=lambda h: self._sessions[h].used)	keep	used	used
 ui	packages/ui/src/moxi_ui/session.py	names = os.listdir(self.directory)	keep	directory	directory
 ui	packages/ui/src/moxi_ui/session.py	names = os.listdir(self.directory)	use	self.directory	self.tickets_dir
 ui	packages/ui/src/moxi_ui/session.py	path = self.directory / name	keep	directory	directory
 ui	packages/ui/src/moxi_ui/session.py	path = self.directory / name	use	self.directory	self.tickets_dir
 ui	packages/ui/src/moxi_ui/session.py	record.saved_used = record.used	keep	used	used
+ui	packages/ui/src/moxi_ui/session.py	record.used = max(record.used, self.clock())	keep	used	used
 ui	packages/ui/src/moxi_ui/session.py	record.used = now	keep	used	used
 ui	packages/ui/src/moxi_ui/session.py	return any(value.strip().lower() == b"script"	keep	any	any
 ui	packages/ui/src/moxi_ui/session.py	return self.directory / _hash(ticket)[:32]	keep	directory	directory

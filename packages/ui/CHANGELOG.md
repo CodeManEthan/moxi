@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased
+
+- Past its 20 sessions, the shell's sign-in store now evicts the least recently used
+  session, not the oldest made, and never one that holds an open push stream or proxied
+  request. Twenty sign-ins (CLI tickets, a phone) no longer sign out a desktop tab in use
+  and end its live updates. When every session holds a stream, a sign-in still succeeds
+  and the store keeps more than 20 until a stream closes. A session's last use is the
+  last request it made, or the end of a stream it held. The gateway's phone sessions (4
+  per device, 16 in all) are evicted least recently used first too.
+
 ## 0.2.5 (2026-11-22)
 
 - A page may announce `band_unless`, a list of module names: while any of them is

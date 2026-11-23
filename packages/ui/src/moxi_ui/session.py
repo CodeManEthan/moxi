@@ -74,7 +74,9 @@ KEY_STORAGE = "moxi-ui-key"
 MAX_AGE = 90 * 24 * 3600
 #: A session ends after this long unused.
 IDLE = 30 * 24 * 3600
-#: At most this many sessions are kept; the oldest goes first.
+#: At most this many sessions are kept; past it the least recently used goes first. A
+#: session holding an open request (a push stream, a proxied request) is never evicted,
+#: so while every one of them does the store holds more for now.
 LIMIT = 20
 #: The last-used time is written to the store at most this often.
 TOUCH_EVERY = 3600
@@ -365,12 +367,19 @@ class SessionStore:
     epoch, and the last-used time at most once an hour; without an epoch, nothing is.
     Build one with `open_store`.
 
+    A session is used when it is minted, when a request is admitted with it (`use`), and
+    when a request it holds open (`watch`) ends. Past `limit`, minting evicts the least
+    recently used session that holds no open request; when every session holds one, the
+    mint still succeeds and the store goes over the limit until a later mint finds one
+    to evict.
+
     `watch` calls back when a session ends, however it ends: signed out, ended by a
-    worker's update check, evicted past the limit, or found expired.
+    worker's update check, or found expired. A watched session is never evicted.
 
     `max_age`, `idle` and `limit` are the shell's unless given. A session may have an
     `owner` (the gateway's device), kept in memory only; with `per_owner`, minting past
-    that many sessions of one owner evicts that owner's oldest first.
+    that many sessions of one owner evicts that owner's least recently used first, by the
+    same rule.
     """
 
     def __init__(self, *, epoch: str | None, path: Path | None,
@@ -444,7 +453,8 @@ class SessionStore:
     def watch(self, id_hash: str, on_end: Callable[[], None]) -> Callable[[], None]:
         """Call `on_end()` once, from whichever thread ends it, when the session
         `id_hash` ends; at once when it is already gone. Returns the call that drops the
-        watch, for a request that ended first."""
+        watch, for a request that ended first; it marks the session used then. While a
+        session has a watch, no mint evicts it."""
         with self._lock:
             if id_hash in self._sessions:
                 self._watches.setdefault(id_hash, []).append(on_end)
@@ -456,28 +466,35 @@ class SessionStore:
                             found.remove(on_end)
                             if not found:
                                 del self._watches[id_hash]
+                        record = self._sessions.get(id_hash)
+                        if record is not None:
+                            record.used = max(record.used, self.clock())
 
                 return stop
         on_end()
         return lambda: None
 
     def mint(self, owner: str | None = None) -> tuple[str, str]:
-        """A new session: `(session id, key)`, of `owner` when given. The oldest is evicted
-        past the limit, and past `per_owner` the owner's oldest."""
+        """A new session: `(session id, key)`, of `owner` when given. Past the limit the
+        least recently used session that holds no open request is evicted, and past
+        `per_owner` the owner's; with none to evict, the store goes over."""
         session_id, key = secrets.token_urlsafe(32), secrets.token_urlsafe(32)
         now = self.clock()
 
-        def oldest(hashes: list[str]) -> str:
-            return min(hashes, key=lambda h: self._sessions[h].created)
+        def evict_unheld(hashes: list[str], keep: int) -> None:
+            """Drop the least recently used of `hashes` holding no watch until fewer
+            than `keep` are left, or none such is."""
+            unheld = sorted((h for h in hashes if h not in self._watches),
+                            key=lambda h: self._sessions[h].used)
+            for id_hash in unheld[:max(0, len(hashes) - keep + 1)]:
+                self._drop(id_hash)
 
         with self._lock:
             self._prune()
             if owner is not None and self.per_owner is not None:
-                while len(own := [h for h, r in self._sessions.items()
-                                  if r.owner == owner]) >= self.per_owner:
-                    self._drop(oldest(own))
-            while len(self._sessions) >= self.limit:
-                self._drop(oldest(list(self._sessions)))
+                evict_unheld([h for h, r in self._sessions.items() if r.owner == owner],
+                             self.per_owner)
+            evict_unheld(list(self._sessions), self.limit)
             self._sessions[_hash(session_id)] = _Record(_hash(key), now, now, now, owner)
             self._save()
         self._on_ended()
