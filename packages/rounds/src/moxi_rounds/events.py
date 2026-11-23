@@ -151,8 +151,9 @@ TYPES = _types(
                "output", "pushed", "candidate", "batch")),
     # CI was read for a build: the commit, its merge-base with the target, the argvs
     # that ran, each workflow by path with the id it read as, its reading and its
-    # run's url, and for one read by its jobs each job's reading and url, the whole
-    # reading, and the remote and CI's own ref the tip was pushed to (`pushed`). A
+    # run's url, and for one read by its jobs each job's reading and url (with the
+    # entry's `matrix` patterns and `pick` job, and the packages that job picked), the
+    # whole reading, and the remote and CI's own ref the tip was pushed to (`pushed`). A
     # queue member's read, which the lander writes, also names the candidate commit, the
     # batch, the run ids and the failures excused as the target's own.
     EventType("ci.read",

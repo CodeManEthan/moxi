@@ -53,6 +53,25 @@ def test_a_landing_whose_head_has_its_candidates_full_run_pushes_nothing(
     assert lander.settled("proj-a", queue())
 
 
+def test_a_candidates_scoped_run_at_the_head_does_not_stand_in_for_its_full_run(
+        repo, ready, fake, lander_pass, with_ref):
+    ready()
+    lander_pass()
+    fake.full_word = ci.ABSENT
+    lander_pass()
+    assert queue().member(ROUND, "B1").state == queue_file.LANDED
+    head = repo.rev("main")
+    # The candidate read green at this very commit; only a full run counts for main.
+    assert head in fake.full_reads
+    assert queue().main_at(head) is None
+    assert main_pushes(fake) == [head]
+    assert not lander.settled("proj-a", queue())
+    fake.full_word = ci.GREEN
+    lander_pass(60.0)
+    assert queue().main_at(head)["event"] == queue_file.GREEN
+    assert lander.settled("proj-a", queue())
+
+
 def test_a_head_with_no_run_is_pushed_and_a_newer_head_waits_for_the_run_going(
         repo, ready, fake, lander_pass, with_ref):
     ready()
