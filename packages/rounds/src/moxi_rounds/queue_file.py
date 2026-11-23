@@ -39,9 +39,10 @@ group an ended batch named and no batch has been built from yet is `regrouped`.
 **A member** is a build's newest `join` and what came after it. It is waiting until it
 leaves, lands or is ejected; while a batch that names it has been built and not ended,
 it is in that batch, and a batch that ends without landing or ejecting it puts it back
-to waiting in its place. A member that left after its batch's candidate reached the
-target lands with that batch all the same: its `landed`, naming `left_late`, follows
-the `left`. Waiting members are taken urgent first, each group in join order
+to waiting in its place. An end at a tip other than the member's (a `landed` at the
+tip it had in a batch, after it joined again at a newer one) leaves it as it is. A
+member that left after its batch's candidate reached the target lands with that batch
+all the same: its `landed`, naming `left_late`, follows the `left`. Waiting members are taken urgent first, each group in join order
 (`waiting`).
 """
 
@@ -270,8 +271,9 @@ def _apply(queue: Queue, event: dict, line: int) -> None:
             tip=str(event.get("tip")), main=event.get("main"),
             urgent=bool(event.get("urgent")), by=event.get("by"),
             joined_at=event.get("at"), line=line)
-    elif kind in (LEFT, LANDED, EJECTED) and member is not None and (
-            member.waiting or _landed_late(member, event)):
+    elif kind in (LEFT, LANDED, EJECTED) and member is not None \
+            and event.get("tip") in (None, member.tip) and (
+                member.waiting or _landed_late(member, event)):
         member.state = kind
         member.reason = event.get("reason")
         member.landing = event.get("landing")

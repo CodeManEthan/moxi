@@ -50,8 +50,10 @@ at the next pass. Otherwise the checkout is fast-forwarded to the candidate (`gi
 `T` naming the candidate (`ci.read` and, where `ci.local` ran, `check.ran` under
 `check.local`) and is finished by `finishing.finish_member`. Then the lock is released,
 each member is recorded `landed` at its own merge commit, and the batch ends. Every
-member the candidate holds lands, whatever its queue state reads: one that left, or
-joined again at a new tip, after the fast-forward has its `landed` name `left_late`.
+member the candidate holds lands at the tip it had there, whatever its queue state
+reads: one that left, or joined again at a new tip, after the fast-forward has its
+`landed` name `left_late`. One that joined again stays queued at its new tip, and its
+build, finished at the old one, has the next pass record it `left`.
 
 A candidate found on the target already (a lander killed after the fast-forward) is
 landed from its member finishes on, with no re-read.
@@ -883,11 +885,12 @@ class _Pass:
                 return
             if not resumed and not self.fast_forward(batch, target):
                 return
-            queue = queue_file.read(self.repo, self.env)
+            recorded = {(one.get("round"), one.get("stage"), one.get("tip"))
+                        for one in queue_file.read(self.repo, self.env).events
+                        if one.get("event") == queue_file.LANDED
+                        and one.get("batch") == batch.id}
             for name, stage, tip in batch.members:
-                member = queue.member(name, stage)
-                if member is not None and member.state == queue_file.LANDED \
-                        and member.batch == batch.id:
+                if (name, stage, tip) in recorded:
                     continue
                 self.write_check_records(batch, name, stage, tip)
                 try:

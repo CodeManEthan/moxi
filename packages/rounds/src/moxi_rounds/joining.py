@@ -24,7 +24,9 @@ landing re-read finds it gone and builds the rest again without it, with a new C
 which `Left.rebuilds` names. A member whose batch's candidate is on the target already
 has landed: `leave` refuses it, and so does `join` at a new tip. A leave the lander's
 fast-forward overtakes between the read and the write is overruled by the landing,
-which records the member `landed` with `left_late`.
+which records the member `landed` with `left_late`. A join at a new tip it overtakes is
+not: the landing records the old tip `landed`, and the member stays queued at the new
+one.
 
 Neither writes anything to git; the lander makes every merge.
 """

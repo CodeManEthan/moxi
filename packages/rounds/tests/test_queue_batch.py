@@ -516,6 +516,32 @@ def test_a_leave_the_fast_forward_overtakes_is_overruled_by_the_landing(
     assert "left_late" not in events(tmp_path, ROUND, "queue.landed")[-1]
 
 
+def test_a_join_at_a_new_tip_the_fast_forward_overtakes_stays_queued_at_it(
+        repo, ready, fake, lander_pass, tmp_path):
+    tree = ready()
+    lander_pass()
+    batch = queue().running()
+    old = batch.members[0][2]
+    repo.git("merge", "--ff-only", "--quiet", batch.candidate)
+    new = tree.commit("late.txt", "a commit after the landing")
+    for event in ({"event": queue_file.LEFT, "round": ROUND, "stage": "B1", "tip": old,
+                   "reason": queue_file.MOVED, "by": "coder"},
+                  {"event": queue_file.JOIN, "round": ROUND, "stage": "B1", "tip": new,
+                   "main": batch.main, "urgent": False, "by": "coder"}):
+        queue_file.append("proj-a", event)
+    lander_pass()
+    assert events(tmp_path, ROUND, finishing.ACTION)[-1]["tip"] == old
+    assert events(tmp_path, ROUND, finishing.DONE)[-1]["tip"] == old
+    landed = events(tmp_path, ROUND, "queue.landed")[-1]
+    assert (landed["tip"], landed["left_late"]) == (old, True)
+    member = queue().member(ROUND, "B1")
+    assert (member.state, member.tip) == (queue_file.QUEUED, new)
+    assert queue().running() is None
+    lander_pass()
+    assert queue().member(ROUND, "B1").state == queue_file.LEFT
+    assert repo.git("merge-base", "main", new) != new
+
+
 # -- the read ----------------------------------------------------------------------------
 
 def test_a_pending_run_waits(repo, ready, fake, lander_pass):
