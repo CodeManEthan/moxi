@@ -33,7 +33,7 @@ import { css, html, LitElement, noChange, nothing } from "lit";
 import { Directive, directive, PartType } from "lit/directive.js";
 import type { ElementPart, PartInfo } from "lit/directive.js";
 import { repeat } from "lit/directives/repeat.js";
-import { api, navigate } from "/m/ui/client.js";
+import { api, navigate, WaitClock } from "/m/ui/client.js";
 
 import {
   actRequest, addRows, answerView, confirmView, folderLine, planFailWords, planPath, refreshCommand, rowAddTitle, transportView,
@@ -325,8 +325,8 @@ export class RepoPage extends LitElement {
   #scrollTo = false;
   /** Which `Copy` reads `Copied`. */
   #copied: string | null = null;
-  #since = Date.now();
-  #readingTimer: ReturnType<typeof setTimeout> | undefined;
+  /** The first read's wait, for its `Reading…`. */
+  #waited = new WaitClock(READING_AFTER_MS);
   #refreshTimer: ReturnType<typeof setInterval> | undefined;
   #copyTimer: ReturnType<typeof setTimeout> | undefined;
   #folderTimer: ReturnType<typeof setTimeout> | undefined;
@@ -337,11 +337,10 @@ export class RepoPage extends LitElement {
 
   connectedCallback(): void {
     super.connectedCallback();
-    this.#since = Date.now();
+    this.#waited.start(() => this.requestUpdate());
     this.#pending = parseRoute(this.route);
     this.#feed = new Feed(() => api("repo", "api/repos"), () => this.#read());
     void this.#feed.refresh();
-    this.#readingTimer = setTimeout(() => this.requestUpdate(), READING_AFTER_MS);
     this.#refreshTimer = setInterval(() => {
       if (document.visibilityState === "visible") void this.#feed?.refresh();
     }, REFRESH_MS);
@@ -352,7 +351,7 @@ export class RepoPage extends LitElement {
     super.disconnectedCallback();
     this.#feed?.close();
     this.#feed = null;
-    clearTimeout(this.#readingTimer);
+    this.#waited.stop();
     clearInterval(this.#refreshTimer);
     clearTimeout(this.#copyTimer);
     clearTimeout(this.#folderTimer);
@@ -670,7 +669,7 @@ export class RepoPage extends LitElement {
   render() {
     const feed = this.#feed;
     if (feed === null) return nothing;
-    const state = pageState(feed, Date.now() - this.#since);
+    const state = pageState(feed, this.#waited.waitedMs());
     if (state.state === "gone") return nothing;
     const drawn = state.drawn ? this.#drawing() : null;
     return html`<section data-part="page" data-state=${state.state}>

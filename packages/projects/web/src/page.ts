@@ -55,7 +55,7 @@ import type { ElementPart, PartInfo } from "lit/directive.js";
 import { live } from "lit/directives/live.js";
 import { keyed } from "lit/directives/keyed.js";
 import { repeat } from "lit/directives/repeat.js";
-import { api, components, installed, navigate, place, subscribe } from "/m/ui/client.js";
+import { api, components, installed, navigate, place, subscribe, WaitClock } from "/m/ui/client.js";
 
 import { keyIn, listState, noSuchProject, NOTHING_OPEN, parseRoute, pathToWrite, READING_AFTER_MS } from "./address.ts";
 import type { Address, ListState } from "./address.ts";
@@ -293,9 +293,8 @@ export class ProjectsPage extends LitElement {
   #unknown: string | null = null;
   /** The opened row takes the view once drawn. */
   #scrollTo: "open" | null = null;
-  /** When the page was connected, for the first read's `Reading…`. */
-  #since = Date.now();
-  #readingTimer: ReturnType<typeof setTimeout> | null = null;
+  /** The first read's wait, for its `Reading…`. */
+  #waited = new WaitClock(READING_AFTER_MS);
   #step: Step | null = null;
   /** Counts the steps opened, so an answer for one left behind is dropped. */
   #steps = 0;
@@ -359,8 +358,7 @@ export class ProjectsPage extends LitElement {
     const changed = (): void => this.requestUpdate();
     this.#first = new FirstOrder(Date.now());
     this.#holdTimer = setTimeout(() => this.requestUpdate(), HOLD_MS);
-    this.#since = Date.now();
-    this.#readingTimer = setTimeout(() => this.requestUpdate(), READING_AFTER_MS);
+    this.#waited.start(() => this.requestUpdate());
     this.#pending = parseRoute(this.route);
     this.#list = new Feed<Listing>(() => api("projects", "api/projects"), parseListing, () => this.#listed());
     this.#kinds = new Feed<Kinds>(() => api("projects", "api/kinds"), parseKinds, changed);
@@ -379,8 +377,9 @@ export class ProjectsPage extends LitElement {
     this.#list = this.#kinds = null;
     this.#stop?.();
     this.#stop = null;
-    for (const timer of [this.#holdTimer, this.#readingTimer]) if (timer !== null) clearTimeout(timer);
-    this.#holdTimer = this.#readingTimer = null;
+    if (this.#holdTimer !== null) clearTimeout(this.#holdTimer);
+    this.#holdTimer = null;
+    this.#waited.stop();
     this.#wanted = [];
     for (const [module, element] of this.#facts) {
       element.remove();
@@ -696,7 +695,7 @@ export class ProjectsPage extends LitElement {
   render() {
     const list = this.#list;
     if (list === null) return nothing;
-    const state = listState(list, Date.now() - this.#since);
+    const state = listState(list, this.#waited.waitedMs());
     if (state.state === "gone") return html`<p class="problem">projects is no longer installed.</p>`;
     const ask = this.#panelAsk();
     // A panel of its own for each thing it opens for: what it holds is that thing's alone.

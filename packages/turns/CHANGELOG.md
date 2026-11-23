@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+- The page's `Reading…` line, while its first read is out, shows once that read has
+  been out 400 ms in every browser. In Firefox it could stay blank until the page's
+  next redraw, up to a minute later, since the page checked the wait against
+  `Date.now()`, which Firefox coarsens. It now takes the wait from moxi-ui's
+  `WaitClock`.
+
 ## 0.2.5 (2026-11-22)
 
 - A new listener event, `load`, observe only like `ready`: a Claude Code endpoint raises

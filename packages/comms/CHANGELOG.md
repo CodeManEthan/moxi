@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+- The page's `Reading…` line, while its first read is out, shows once that read has
+  been out 400 ms in every browser. In Firefox it could stay blank until something
+  else redrew the page, since the page checked the wait against `Date.now()`, which
+  Firefox coarsens. It now takes the wait from moxi-ui's `WaitClock`.
+
 ## 0.3.1 (2026-11-21)
 
 - Every digest comms hands turns, on Claude Code and on Codex, by `deliver` or `steer`,

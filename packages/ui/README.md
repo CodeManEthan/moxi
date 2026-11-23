@@ -202,6 +202,26 @@ setAddress("ui", "settings/ui/more");  // the page's own address, in place
   asks it. It throws a `TypeError` when `module`'s panel isn't the one shown, or the route
   leaves `/m/<module>/`.
 
+## A line shown after a wait
+
+A page that shows a line only once a read has been out a while (`Reading…` after 400 ms)
+takes the wait from `WaitClock` in `/m/ui/client.js`:
+
+```js
+import { WaitClock } from "/m/ui/client.js";
+
+class Page extends LitElement {
+  #waited = new WaitClock(400);
+  connectedCallback() { super.connectedCallback(); this.#waited.start(() => this.requestUpdate()); }
+  disconnectedCallback() { super.disconnectedCallback(); this.#waited.stop(); }
+  render() { /* ...the Reading… line when this.#waited.waitedMs() >= 400 */ }
+}
+```
+
+`waitedMs()` is the time since `start` on the monotonic clock, and never less than the due
+time once the timer `start` armed has fired, so the render it asks for always draws the
+line.
+
 ## The gateway: the UI on your phone
 
 The gateway is a second listener of the shell, reached from a phone through the tunnel

@@ -327,3 +327,20 @@ export declare function setAddress(module: string, route?: string): void;
  * and `theme.palette`. A name theme.css has no block for shows the default theme. For the
  * settings view, after it writes either setting. */
 export declare function setTheme(mode: ThemeMode, name?: string): void;
+/**
+ * How long a page has waited since it was connected, for a line it shows only after a
+ * while (`Reading…` once its first read has been out 400 ms). `start(onDue)`, from
+ * `connectedCallback`, notes the time and arms a timer that calls `onDue` after `dueMs`;
+ * `waitedMs()`, from `render`, is the time since on the monotonic clock
+ * (`performance.now()`), and never less than `dueMs` once that timer has fired, so the
+ * render the timer asks for always finds the wait due; `stop()`, from
+ * `disconnectedCallback`, clears the timer.
+ */
+export declare class WaitClock {
+    #private;
+    readonly dueMs: number;
+    constructor(dueMs: number);
+    start(onDue: () => void): void;
+    stop(): void;
+    waitedMs(): number;
+}

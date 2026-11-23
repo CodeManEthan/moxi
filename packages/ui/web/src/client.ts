@@ -25,6 +25,7 @@ import type { Reach } from "./gateway-model.ts";
 import { fetchOpener, TabPush } from "./push.ts";
 import type { Opener } from "./push.ts";
 import { Gate } from "./hold-model.ts";
+import { waitedMs } from "./wait-model.ts";
 import { defineRow } from "./row.ts";
 import { defineRail } from "./rail.ts";
 import { apiTarget, checkAttributes, checkName, panelTarget, scriptUrl } from "./rules.ts";
@@ -637,6 +638,46 @@ export function setTheme(mode: ThemeMode, name?: string): void {
   }
   document.documentElement.dataset.theme = mode;
   if (name !== undefined) document.documentElement.dataset.themeName = name;
+}
+
+/**
+ * How long a page has waited since it was connected, for a line it shows only after a
+ * while (`Reading…` once its first read has been out 400 ms). `start(onDue)`, from
+ * `connectedCallback`, notes the time and arms a timer that calls `onDue` after `dueMs`;
+ * `waitedMs()`, from `render`, is the time since on the monotonic clock
+ * (`performance.now()`), and never less than `dueMs` once that timer has fired, so the
+ * render the timer asks for always finds the wait due; `stop()`, from
+ * `disconnectedCallback`, clears the timer.
+ */
+export class WaitClock {
+  readonly dueMs: number;
+  #sinceMs = performance.now();
+  #fired = false;
+  #timer: ReturnType<typeof setTimeout> | undefined;
+
+  constructor(dueMs: number) {
+    this.dueMs = dueMs;
+  }
+
+  start(onDue: () => void): void {
+    this.stop();
+    this.#sinceMs = performance.now();
+    this.#fired = false;
+    this.#timer = setTimeout(() => {
+      this.#timer = undefined;
+      this.#fired = true;
+      onDue();
+    }, this.dueMs);
+  }
+
+  stop(): void {
+    clearTimeout(this.#timer);
+    this.#timer = undefined;
+  }
+
+  waitedMs(): number {
+    return waitedMs(this.#sinceMs, performance.now(), this.dueMs, this.#fired);
+  }
 }
 
 // --- the gateway's worker ------------------------------------------------------------------

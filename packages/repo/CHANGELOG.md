@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- The page's `Reading…` line, while its first read is out, shows once that read has
+  been out 400 ms in every browser. In Firefox it could stay blank until something
+  else redrew the page, since the page checked the wait against `Date.now()`, which
+  Firefox coarsens. It now takes the wait from moxi-ui's `WaitClock`.
 - `repo/commit-rules` takes a `tag-check-trailers` setting, `true` or `false`. When true,
   the repo's tag patterns are matched against every line of the trailer block too,
   continuation lines included; off, as before, the trailers are not read for tags. The
