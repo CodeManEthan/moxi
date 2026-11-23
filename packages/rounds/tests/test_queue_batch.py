@@ -112,11 +112,12 @@ def round_log_of(tmp_path: Path, name: str) -> Path:
 @pytest.fixture
 def ready(repo, configure, capsys, tmp_path):
     """`ready(name, branch, file, text)`: B1 of the round `name` opened, declared,
-    commissioned, one commit writing `text` to `file`, checked, verified and joined.
-    Returns the worktree's repo."""
+    commissioned, its branch reset to `base` when given, one commit writing `text` to
+    `file` (none when `file` is None), checked, verified and joined. Returns the
+    worktree's repo."""
 
-    def make(name: str = ROUND, branch: str = "work", file: str = "work.txt",
-             text: str | None = None, *, joins: bool = True):
+    def make(name: str = ROUND, branch: str = "work", file: str | None = "work.txt",
+             text: str | None = None, *, joins: bool = True, base: str | None = None):
         opening.open_round(name, description="a placeholder round", by="planner",
                            flow="fix")
         path = round_log_of(tmp_path, name)
@@ -125,7 +126,10 @@ def ready(repo, configure, capsys, tmp_path):
                    by="planner")
         made = commissioning.commission(name, "B1", builder="coder", by="planner")
         tree = type(repo)(made.worktree)
-        tree.commit(file, text if text is not None else f"the work of {name}")
+        if base is not None:
+            tree.git("reset", "-q", "--hard", base)
+        if file is not None:
+            tree.commit(file, text if text is not None else f"the work of {name}")
         checking.check(name, "B1", by="coder")
         report = path.parent / "build-report-B1.md"
         report.write_text("# report\n\n```toml rounds\n" + "\n".join([
@@ -381,6 +385,53 @@ def test_a_member_whose_branch_moved_is_left_as_moved_at_the_landing(
     lander_pass()
     assert queue().member(OTHER, "B1").reason == queue_file.MOVED
     assert events(tmp_path, OTHER, "queue.left")[-1]["reason"] == queue_file.MOVED
+
+
+INNER = "proj-a/inner-round"
+OUTER = "proj-a/outer-round"
+
+
+def early_commit(repo) -> str:
+    """A commit on a branch of its own off the target: the inner build's work."""
+    repo.git("checkout", "--quiet", "-b", "early", "main")
+    early = repo.commit("inner.txt", "the inner work")
+    repo.git("checkout", "--quiet", "main")
+    return early
+
+
+def test_a_build_the_sharing_gate_holds_is_refused_at_join(repo, ready):
+    early = early_commit(repo)
+    ready(INNER, branch="inner", file=None, base=early, joins=False)
+    ready(OUTER, branch="outer", file="outer.txt", base=early, joins=False)
+    with pytest.raises(Refused, match=f"held until {INNER} B1's work is on the target"):
+        joining.join(OUTER, "B1", by="coder")
+    joining.join(INNER, "B1", by="coder")
+    assert queue().member(OUTER, "B1") is None
+
+
+def test_a_member_held_after_joining_is_dropped_and_the_rest_and_the_inner_land(
+        repo, ready, fake, lander_pass):
+    early = early_commit(repo)
+    ready(OUTER, branch="outer", file="outer.txt", base=early)
+    ready(OTHER, branch="other", file="other.txt")
+    lander_pass()
+    assert [one[:2] for one in queue().running().members] == [(OUTER, "B1"),
+                                                              (OTHER, "B1")]
+    ready(INNER, branch="inner", file=None, base=early, joins=False)
+    lander_pass()
+    outer = queue().member(OUTER, "B1")
+    assert outer.state == queue_file.LEFT
+    assert outer.reason.startswith("gate 10:") and "held until" in outer.reason
+    assert repo.rev("main") == queue().batches[-1].main
+    lander_pass()
+    assert [one[:2] for one in queue().running().members] == [(OTHER, "B1")]
+    lander_pass()
+    assert queue().member(OTHER, "B1").state == queue_file.LANDED
+    joining.join(INNER, "B1", by="coder")
+    lander_pass()
+    lander_pass()
+    assert queue().member(INNER, "B1").state == queue_file.LANDED
+    assert repo.git("merge-base", "--is-ancestor", early, "main") == ""
 
 
 def test_the_target_moved_by_hand_before_the_landing_rebuilds_on_it(
