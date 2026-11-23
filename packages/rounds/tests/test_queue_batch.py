@@ -188,6 +188,24 @@ def test_urgent_members_are_taken_alone_and_even_while_the_queue_is_paused():
     assert [one.name for one in batching.take(found)] == ["p/one", "p/two"]
 
 
+def test_while_paused_a_group_with_no_urgent_member_keeps_no_urgent_member_waiting(
+        repo, ready, fake, lander_pass):
+    ready()
+    ready(OTHER, branch="other", file="other.txt")
+    lander_pass()
+    batch = queue().running()
+    queue_file.append("proj-a", {
+        "event": queue_file.BATCH, "state": queue_file.ENDED, "id": batch.id,
+        "why": batching.SPLIT_WHY, "regroups": [[list(one)] for one in batch.members]})
+    queue_file.append("proj-a", {"event": queue_file.PAUSED, "reason": "a pause"})
+    urgent = "proj-a/c-round"
+    ready(urgent, branch="third", file="third.txt", joins=False)
+    joining.join(urgent, "B1", by="coder", urgent=True)
+    lander_pass()
+    assert [one[:2] for one in queue().running().members] == [(urgent, "B1")]
+    assert len(queue().regrouped()) == 2
+
+
 # -- a batch that lands ------------------------------------------------------------------
 
 def test_a_lone_member_lands_by_a_fast_forward_and_is_finished_as_found(

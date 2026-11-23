@@ -75,7 +75,8 @@ first, and a batch lands only when no older one still runs: so the earlier half 
 first, and a later green half waits for it. A half whose target moved, or that lost a
 member at the re-read, ends naming its remaining members as one group, which the next
 pass rebuilds on the target's head then. Members that join meanwhile wait until no
-batch runs and no group waits to be built.
+batch runs and no group waits to be built. While the queue is paused, a group with no
+urgent member is not built and keeps no urgent member waiting.
 
 When a batch ends, its ref is removed from the remote and its local branch deleted.
 
@@ -211,21 +212,23 @@ class _Pass:
             self.main_afterwards()
 
     def batches(self, queue: queue_file.Queue) -> None:
-        """Advance each running batch, build each waiting group, and take new members
-        when neither exists."""
+        """Advance each running batch, build each waiting group (while paused, only its
+        urgent members), and take new members when no batch ran and no group was
+        built."""
         running = queue.running_batches()
         for batch in running:
             now = queue_file.read(self.repo, self.env)
             found = now.batch(batch.id)
             if found is not None and not found.ended:
                 self.advance(now, found)
-        regrouped = queue_file.read(self.repo, self.env).regrouped()
-        for source, members in regrouped:
+        built = False
+        for source, members in queue_file.read(self.repo, self.env).regrouped():
             paused = queue_file.read(self.repo, self.env).paused
             members = [one for one in members if paused is None or one.urgent]
             if members:
                 self.build(queue_file.read(self.repo, self.env), members, source=source)
-        if running or regrouped:
+                built = True
+        if running or built:
             return
         members = take(queue)
         if members:
