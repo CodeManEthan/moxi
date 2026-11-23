@@ -302,7 +302,56 @@ def test_a_next_version_migrates_a_store_forward(monkeypatch):
     add(**written())
     monkeypatch.setattr(store, "STEPS", (*store.STEPS,
                                          "ALTER TABLE services ADD COLUMN extra TEXT;"))
-    monkeypatch.setattr(store, "VERSION", 2)
-    monkeypatch.setattr(store, "READS", frozenset({1, 2}))
+    monkeypatch.setattr(store, "VERSION", len(store.STEPS))
+    monkeypatch.setattr(store, "READS", store.READS | {len(store.STEPS)})
     assert store.migrate_existing() is True
     assert [r.name for r in store.read_rows()] == ["web"]
+
+
+# --- module stops -----------------------------------------------------------------------
+
+def _version_one(store_path):
+    """A store made by a release whose schema had only step 1."""
+    import moxi.store
+
+    store_path.parent.mkdir(parents=True)
+    conn = moxi.store.connect(str(store_path))
+    moxi.store.migrate(conn, store.STEPS[:1])
+    conn.close()
+
+
+def test_a_module_stop_is_recorded_by_row_id_and_cleared(store_path):
+    assert store.read_module_stops() == {}
+    assert not store_path.exists()
+    store.write(lambda c: store.set_module_stop(c, "notes/sync", "2030-01-01T00:00:00Z",
+                                                by="test"))
+    store.write(lambda c: store.set_module_stop(c, "notes/sync", "2030-01-02T00:00:00Z",
+                                                by="test"))
+    assert store.read_module_stops() == {"notes/sync": "2030-01-02T00:00:00Z"}
+    store.write(lambda c: store.set_module_stop(c, "notes/sync", None, by="test"))
+    assert store.read_module_stops() == {}
+    assert store.read_rows() == []
+
+
+def test_a_version_one_store_reads_as_no_module_stops(store_path):
+    _version_one(store_path)
+    assert store.read_module_stops() == {}
+    assert store.read_rows() == []
+    conn = sqlite3.connect(store_path)
+    assert conn.execute("PRAGMA user_version").fetchone()[0] == 1
+    conn.close()
+
+
+def test_a_version_one_store_migrates_to_step_two_on_a_write(store_path):
+    _version_one(store_path)
+    store.write(lambda c: store.set_module_stop(c, "notes/sync", "2030-01-01T00:00:00Z",
+                                                by="test"))
+    conn = sqlite3.connect(store_path)
+    assert conn.execute("PRAGMA user_version").fetchone()[0] == store.VERSION == 2
+    conn.close()
+    assert store.read_module_stops() == {"notes/sync": "2030-01-01T00:00:00Z"}
+
+
+def test_module_stops_of_a_store_too_new_are_refused(too_new):
+    with pytest.raises(TooNew):
+        store.read_module_stops()

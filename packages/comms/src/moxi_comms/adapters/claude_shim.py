@@ -25,9 +25,10 @@ seam -- `adapters/codex` renders through the same two functions.
 
 Injection seam: `injector(text)` is the ONE place the harness is touched. In a session
 `moxi comms claude` launches, the session's adapter process (`claude_adapter`) sets
-`handover(text, digest, steer=)` in its place, which hands the digest to turns with the
-digest's id as its ref (`deliver`, or `steer` for interrupt mail into a running turn) and
-settles it from the turn's outcome; `--inject-file` fills `injector` with a file writer,
+`handover(text, digest, steer=, senders=)` in its place, which hands the digest to turns
+with the digest's id as its ref (`deliver`, or `steer` for interrupt mail into a running
+turn), `by="comms"` and the digest's senders (`digest_senders`), and settles it from the
+turn's outcome; `--inject-file` fills `injector` with a file writer,
 which the tests read. While bound, the shim holds the
 binding's posting credential in memory and hands it only to sends inside its session.
 
@@ -104,6 +105,10 @@ log = logging.getLogger("comms.shim")
 ACTIVITY_READY, ACTIVITY_TURN = "ready", "turn"
 #: The daemon method each kind is sent as; no kind is a plain `activity`.
 ACTIVITY_METHODS = {ACTIVITY_READY: "ready", "look": "look"}
+
+#: The module name comms gives turns as `by` on every digest it hands in, by `deliver`
+#: or `steer`. A session's `prompt` listeners read it as the prompt's `delivery_by`.
+DELIVERY_BY = "comms"
 
 #: Exit codes, `moxi.exit`'s: a claim that was refused, and a daemon that was not there.
 EXIT_REFUSED, EXIT_OFFLINE = moxi_exit.REFUSED, moxi_exit.TEMPFAIL
@@ -434,6 +439,18 @@ def digest_header(payloads: list, *, clock=time.time) -> str | None:
     return f"== comms catch-up: {len(payloads)} message(s){said} =="
 
 
+def digest_senders(payloads: list) -> tuple[str, ...]:
+    """The names a digest speaks for, which comms gives turns as the delivery's
+    `senders`: each message's sender, its author's qualified name, once each, in the
+    digest's order. A payload with no author name adds none."""
+    names: list[str] = []
+    for p in payloads:
+        name = (p.get("author") or {}).get("name")
+        if isinstance(name, str) and name and name not in names:
+            names.append(name)
+    return tuple(names)
+
+
 def render_digest(payloads: list, notice: str | None = None, directors=(), *,
                   clock=time.time, steered: bool = False) -> str:
     # The header's attribution note and the per-frame `(unverified)` marks are ONE
@@ -515,9 +532,10 @@ class ClaudeShim:
         # the recipient's grant, qualified at launch and never re-qualified here
         self.directors = tuple(directors or ())
         self.injector = injector or (lambda text: None)
-        #: `handover(text, digest, *, steer)`: when set, a flush hands its digest here
-        #: instead of to `injector`, with the digest's id, so the caller can name it to
-        #: the harness. The Claude adapter sets it.
+        #: `handover(text, digest, *, steer, senders)`: when set, a flush hands its
+        #: digest here instead of to `injector`, with the digest's id, so the caller can
+        #: name it to the harness, and the names of its messages' senders
+        #: (`digest_senders`). The Claude adapter sets it.
         self.handover = None
         self.socket_path = socket_path
         self.status_sink = status_sink or (lambda text: log.warning("%s", text))
@@ -1268,7 +1286,7 @@ class ClaudeShim:
             return None
         text = render_digest(batch, notice, self.directors, clock=self.clock)
         if self.handover is not None:
-            self.handover(text, digest, steer=False)
+            self.handover(text, digest, steer=False, senders=digest_senders(batch))
         else:
             self.injector(text)
         high = max(int(p["message_id"]) for p in batch)
@@ -1324,7 +1342,7 @@ class ClaudeShim:
             return None
         text = render_digest(batch, None, self.directors, clock=self.clock, steered=True)
         if self.handover is not None:
-            self.handover(text, digest, steer=True)
+            self.handover(text, digest, steer=True, senders=digest_senders(batch))
         else:
             self.injector(text)
         with self._lock:
@@ -1452,6 +1470,7 @@ def _serve_inject_file(args, common) -> int:  # pragma: no cover - the smoke run
 
 
 __all__ = ["ClaudeShim", "frame_line", "frame_marks", "render_digest", "digest_header",
+           "digest_senders", "DELIVERY_BY",
            "held_mark", "humanize_age", "is_catch_up", "parse_timestamp",
            "replay_is_unverified",
            "backlog_frames",

@@ -633,7 +633,8 @@ def test_a_second_install_waits_for_the_first(fake, capsys):
     finally:
         holder.wait(10)
     assert code == 0, err
-    assert f"waiting for another install or uninstall (pid {holder.pid}) to finish" in err
+    assert f"waiting for the core lock, which pid {holder.pid} holds (an install or " \
+           "uninstall, or a module reading or changing its units)" in err
 
 
 def test_plain_env_without_uv_uses_pip(monkeypatch):

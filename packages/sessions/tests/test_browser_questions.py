@@ -12,7 +12,8 @@ twice: on a small install, which holds the core, ui and sessions and nothing els
 a full one, which holds every module of this environment. The two shells read the same
 records, written with `moxi_sessions.testing` under each shell's own home, and a walk
 keeps what the page showed at each step: the two installs must show the same, piece for
-piece, and the page must place no element that is not its own.
+piece, but for the list's link to turns' page, which the full install shows on every step
+of the list when it holds turns; and the page must place no element that is not its own.
 
 The records look like a few weeks of use: three folders; named and unnamed sessions;
 sessions with a typed message and without; sessions a program started; subagents; a day
@@ -83,6 +84,10 @@ LEFT_OUT = re.compile(r"\b(running|working|busy|warm|cold|waiting|slot|held|turn
 
 START_LINE = "This is the start of the session."
 
+#: What the list's link to turns' page adds to a step: before the count, or alone where
+#: no filter line is drawn.
+TURNS_LINK = (["[a]", "Live sessions", "·"], ["[a]", "Live sessions"])
+
 #: What a page shows, top to bottom: each run of text, each control, each element with a
 #: name of its own, and each row with the facts the list gave it.
 SHOWN = """el => {
@@ -111,6 +116,15 @@ SHOWN = """el => {
   walk(el);
   return out;
 }"""
+
+
+def without_turns_link(step: list[str]) -> list[str]:
+    """`step` with the list's link to turns' page taken out, once; it must be there."""
+    for link in TURNS_LINK:
+        for at in range(len(step) - len(link) + 1):
+            if step[at:at + len(link)] == link:
+                return step[:at] + step[at + len(link):]
+    raise AssertionError(f"no link to turns' page: {step}")
 
 
 def others() -> list[str]:
@@ -246,8 +260,9 @@ def installs(ui_shells, tmp_path_factory, moment) -> dict:
 def on_both(installs, ui_contexts):
     """`on_both(walk, **context_args)` runs `walk(page, shell)` on the small install and
     on the full one, each in a context of its own. A walk returns what the page showed at
-    each of its steps; the two must be the same, and hold no element that is not sessions'
-    own or the row. Returns what was shown."""
+    each of its steps; the two must be the same but for the full install's link to turns'
+    page, and hold no element that is not sessions' own or the row. Returns what was
+    shown."""
     def run(walk, **context_args) -> list:
         seen = {}
         for name, shell in installs.items():
@@ -257,7 +272,10 @@ def on_both(installs, ui_contexts):
             except AssertionError as exc:
                 exc.add_note(f"on the {name} install")
                 raise
-        assert seen["small"] == seen["full"]
+        full = seen["full"]
+        if "turns" in {found.name for found in modules.scan()}:
+            full = [without_turns_link(step) if "<moxi-sessions-list>" in step else step for step in full]
+        assert seen["small"] == full
         for step in seen["full"]:
             placed = {line for line in step if line.startswith("<")}
             assert placed <= {"<moxi-sessions-page>", "<moxi-sessions-list>", "<moxi-ui-row>"}, placed

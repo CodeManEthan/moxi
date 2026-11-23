@@ -44,6 +44,26 @@ test("a page with a wrong or absent group is in setup, and one with no order is 
     "setup:delta/:Delta", "setup:ui/modules:Modules"]);
 });
 
+test("a page leaves the band while a module its band_unless names is present, and comes back without it", () => {
+  const live = { name: "turns", page: { title: "Live sessions", group: "daily", order: 25, band_unless: ["sessions"] },
+                 refused: null };
+  const sessions = mod("sessions", "Sessions", "daily", 20);
+  assert.deepEqual(names(bandEntries([live, sessions])),
+                   ["daily:ui/:Home", "daily:sessions/:Sessions", "setup:ui/modules:Modules"]);
+  assert.deepEqual(names(bandEntries([live])),
+                   ["daily:ui/:Home", "daily:turns/:Live sessions", "setup:ui/modules:Modules"]);
+  // A present module counts with no page of its own, or with its page refused.
+  const bare = { name: "sessions", page: null, refused: "its script page.js is not an asset of its module's page" };
+  assert.deepEqual(names(bandEntries([live, bare])), ["daily:ui/:Home", "setup:ui/modules:Modules"]);
+  // A page that names no module, an empty list or one not present keeps its entry.
+  for (const band_unless of [null, [], ["memory"]]) {
+    const page = { ...live, page: { ...live.page, band_unless } };
+    assert.deepEqual(names(bandEntries([page, sessions])).includes("daily:turns/:Live sessions"), true);
+  }
+  // The top line still names the page its address opens.
+  assert.equal(pageName({ module: "turns", route: "" }, [live, sessions]), "Live sessions");
+});
+
 test("the band holds the shell's own two pages with no module, and never Settings", () => {
   assert.deepEqual(names(bandEntries([])), ["daily:ui/:Home", "setup:ui/modules:Modules"]);
   const full = bandEntries([mod("ui", "Modules", "setup", 500), mod("alpha", "Settings", "daily", 1)]);
