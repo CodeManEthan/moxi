@@ -522,8 +522,8 @@ when its condition ends; `moxi doctor --clear repo KEY` removes one by hand.
 Running `moxi install repo` again is how you upgrade repo, and each run runs repo's
 setup: `refresh` over every indexed repo, so an install that moved the
 environment rewrites every hook entry, shim and launcher to name the new interpreter. The
-doctor flags repo when its setup last ran at another version, with `moxi install repo` as
-the fix. One repo's problem, such as a repo that no longer exists, is printed with its
+doctor flags repo when its setup last ran at another version, with `moxi install repo
+--setup-only` as the fix: it runs repo's setup again without installing anything. One repo's problem, such as a repo that no longer exists, is printed with its
 fix and stays as a doctor row; the install still finishes. The setup fails only when it
 can't run at all: no git 2.39 or later while repos are indexed, or repo's config or its
 index can't be read.

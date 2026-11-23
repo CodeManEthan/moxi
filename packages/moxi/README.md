@@ -54,7 +54,11 @@ commands:
   gives its source.
 - `moxi install <module>` installs a module with the modules it requires, runs its setup,
   and offers each optional extra with a line saying what it enables. `--with`,
-  `--without`, `--all` and `--none` answer ahead.
+  `--without`, `--all` and `--none` answer ahead. `moxi install <module> --setup-only`
+  runs an installed module's setup again and records the version it ran at, installing
+  nothing and reaching no index, so it works for a module that isn't on PyPI or was
+  installed by other means. It is the doctor's fix when a module's setup last ran at
+  another version.
 - `moxi uninstall <module>` runs the module's teardown, then removes its daemons and
   timers, its skills and its package. Its config file is kept, and so are its stores
   unless `--purge` is given (`--yes` answers its questions).
