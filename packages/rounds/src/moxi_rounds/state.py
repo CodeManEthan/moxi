@@ -716,8 +716,8 @@ def _offered(value, have: tuple[tuple[str, str], ...] = (),
     return tuple(added)
 
 
-def _prepared(value, *, actor: str, at: str) -> Prepared | None:
-    """The prepared answer an event's `prepared` holds, recorded by `actor` at `at`, or
+def _prepared(value, *, by: str, at: str) -> Prepared | None:
+    """The prepared answer an event's `prepared` holds, recorded by `by` at `at`, or
     None for a value that is not one. An answer carried from another log keeps who
     recorded it there and when."""
     if not isinstance(value, dict):
@@ -737,14 +737,14 @@ def _prepared(value, *, actor: str, at: str) -> Prepared | None:
                            text=one.get("text") or None)
             for one in (listed if isinstance(listed, list) else ())
             if isinstance(one, dict) and isinstance(one.get("key"), str)),
-        actor=value.get("actor") if isinstance(value.get("actor"), str) else actor,
+        actor=value.get("actor") if isinstance(value.get("actor"), str) else by,
         at=value.get("at") if isinstance(value.get("at"), str) else at)
 
 
-def _carried(value, *, actor: str, at: str) -> tuple[Prepared, ...]:
+def _carried(value, *, by: str, at: str) -> tuple[Prepared, ...]:
     """The prepared answers a question brought from another log carries, oldest
     first."""
-    found = (_prepared(one, actor=actor, at=at)
+    found = (_prepared(one, by=by, at=at)
              for one in (value if isinstance(value, list) else ()))
     return tuple(one for one in found if one is not None)
 
@@ -762,7 +762,7 @@ def _question_asked(state: State, event: dict) -> None:
         retired=tuple(event.get("retired") or ()),
         moved_from=event.get("moved_from"), held=_blocks(event.get("held")),
         builder=event.get("builder"),
-        prepared=_carried(event.get("prepared"), actor=event["actor"], at=event["at"])))
+        prepared=_carried(event.get("prepared"), by=event["actor"], at=event["at"])))
 
 
 def _question_changed(state: State, event: dict) -> None:
@@ -790,7 +790,7 @@ def _change(state: State, event: dict, *, question_id: str | None,
                     retired=tuple(dict.fromkeys(
                         key for key in event.get("retired") or ()
                         if any(key == had for had, _text in question.options))),
-                    prepared=_prepared(event.get("prepared"), actor=event["actor"],
+                    prepared=_prepared(event.get("prepared"), by=event["actor"],
                                        at=event["at"]))
     state.questions[place] = replace(
         question,
