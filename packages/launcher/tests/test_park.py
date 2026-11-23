@@ -121,6 +121,19 @@ def test_park_reserves_each_slot_before_it_exits_and_records_the_outcomes(conn, 
                                 "1 exited, 0 not exited, 1 left running")
 
 
+def test_park_leaves_a_codex_session_running_and_records_that_exit_session_stops_one(
+        conn, rig):
+    launch_row(conn, "r5", SID5, slot="5", harness="codex")
+    rig.plan(slots={"5": running("r5")})
+    exits = Exits(rig)
+    result = go(conn, exits)
+    assert result.exit_code == 0 and exits.calls == []
+    [entry] = store.open_entries(conn)
+    assert (entry.outcome, entry.detail) == ("left-running", park.LEFT_RUNNING)
+    assert "park leaves Codex sessions running" in entry.detail
+    assert "exit-session stops one" in entry.detail and "no exit" not in entry.detail
+
+
 def test_park_names_a_session_by_its_comms_name(conn, rig):
     launch_row(conn, "r3", SID3, identity="fleet-helper")
     rig.plan(slots={"3": running("r3")})

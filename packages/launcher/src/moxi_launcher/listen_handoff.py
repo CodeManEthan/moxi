@@ -3,8 +3,9 @@ for other seats in the same folder.
 
 A `start` row that answers when a session starts or resumes (source `startup` or
 `resume`), not at a clear or compaction. It answers nothing on a relaunch
-(`MOXI_LAUNCHER_RELAUNCH`, whose first turn carries the handoff) and nothing in a headless
-launch.
+(`MOXI_LAUNCHER_RELAUNCH`, whose first turn carries the handoff), nothing in a headless
+launch, and nothing in a fork (`moxi launcher fork`), a short reader that marks no
+handoff picked.
 
 - **A launch this endpoint holds** (`listeners.claim`): the key comes from the row. The
   pointer names the newest handoff of the key still waiting, and records it as picked
@@ -55,7 +56,7 @@ def answer(event) -> str | None:
 
 def _launched(event, conn) -> list[str]:
     row = listeners.claim(event, conn)
-    if row is None or row.target == "headless":
+    if row is None or row.target == "headless" or row.fork_of:
         return []
     key = handoffs.key_of_row(row)
     try:

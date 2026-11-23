@@ -22,7 +22,7 @@ MINTED = "3c1d2e4f-5a6b-4c7d-8e9f-0a1b2c3d4e5f"
 CLEARED = "7e8f9a0b-1c2d-4e3f-9a5b-6c7d8e9f0a1b"
 COMPACTED = "a1b2c3d4-e5f6-4a7b-8c9d-0e1f2a3b4c5d"
 V1_TABLES = ("launches", "session_ids", "events", "picks")
-V1_COLUMNS = store.COLUMNS[:-1]
+V1_COLUMNS = store.COLUMNS[:-2]
 T0 = datetime(2026, 10, 30, 12, 0, tzinfo=timezone.utc)
 
 
@@ -89,12 +89,54 @@ def test_a_version_1_log_is_carried_forward_with_no_row_lost(tmp_path):
         assert conn.execute("PRAGMA user_version").fetchone()[0] == len(store.STEPS)
         assert snapshot(conn) == before
         assert [r[0] for r in conn.execute("SELECT base_env_json FROM launches")] == [None] * 4
+        assert [r[0] for r in conn.execute("SELECT fork_of FROM launches")] == [None] * 4
         assert all(row.base_env_json is None and row.base_env is None
                    for row in store.log(conn))
         for table in ("runs", "run_events", "pending_compacts", "warm_holds", "exits"):
             assert conn.execute(f"SELECT count(*) FROM {table}").fetchone()[0] == 0
     finally:
         conn.close()
+
+
+def test_a_version_3_log_moves_to_4_with_fork_of_and_keeps_its_park_entries(
+        tmp_path, monkeypatch):
+    db = version_1(tmp_path / "launcher.db")
+    with monkeypatch.context() as patched:
+        patched.setattr(store, "STEPS", store.STEPS[:3])
+        conn = store.connect(db)
+        try:
+            assert conn.execute("PRAGMA user_version").fetchone()[0] == 3
+            store.add_entry(conn, park_id="p1", kind="park", by="someone", slot=3,
+                            request_id="r-slot", session_id=COMPACTED, harness="claude")
+            before = snapshot(conn)
+        finally:
+            conn.close()
+    assert "fork_of" not in [r[1] for r in sqlite3.connect(db).execute(
+        "PRAGMA table_info(launches)")]
+
+    conn = store.connect(db)
+    try:
+        assert conn.execute("PRAGMA user_version").fetchone()[0] == 4 == len(store.STEPS)
+        assert snapshot(conn) == before
+        assert [r[0] for r in conn.execute("SELECT fork_of FROM launches")] == [None] * 4
+        assert [e.slot for e in store.open_entries(conn)] == [3]
+        assert conn.execute("SELECT 1 FROM sqlite_master WHERE type = 'index' "
+                            "AND name = 'launches_fork_of'").fetchone() is not None
+        launch(conn, "r-fork", fork_of=COMPACTED)
+        assert store.get(conn, "r-fork").fork_of == COMPACTED
+    finally:
+        conn.close()
+
+
+def test_a_fresh_log_is_made_at_version_4_with_fork_of(conn):
+    assert conn.execute("PRAGMA user_version").fetchone()[0] == 4 == len(store.STEPS)
+    columns = [r[1] for r in conn.execute("PRAGMA table_info(launches)")]
+    assert columns[-1] == "fork_of"
+    assert conn.execute("SELECT count(*) FROM park_entries").fetchone()[0] == 0
+    launch(conn, "r1")
+    launch(conn, "r2", fork_of="r1-0000-4000-8000-000000000000")
+    assert store.get(conn, "r1").fork_of is None
+    assert store.get(conn, "r2").fork_of == "r1-0000-4000-8000-000000000000"
 
 
 def test_the_carried_log_reads_as_it_did(tmp_path):
