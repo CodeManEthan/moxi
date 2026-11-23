@@ -8,7 +8,8 @@ is `P<n>` in the project's log. Each log numbers its own from 1.
 **The origin.** Every question says where it came from: `origin`, a pointer of a shape
 `pointers` knows (a message, a moment in a session, a page, or a place in a file of the
 round's folder, such as a section of its design). A question that is the operator's own
-is given with `record`, the pointer to where he asked it, and that pointer is its origin.
+is given with `record`, the pointer to where the operator asked it, and that pointer is
+its origin.
 A question that came up in a build is given with `build`, the stage whose open build it
 came up in: a builder tells its lead, and the lead asks it. Its origin is that stage
 and the tip of the build's branch when it is asked (`pointers.build_origin`), and the
@@ -75,8 +76,8 @@ def ask(target: str, text: str, *, by: str, origin: str | None = None,
     - `text`: the question, one sentence on one line.
     - `by`: who asks it; the event's actor and the question's asker.
     - `origin`: the pointer to where the question came from.
-    - `record`: the pointer to where the operator asked it, for a question that is his
-      own, in place of `origin`.
+    - `record`: the pointer to where the operator asked it, for a question that is the
+      operator's own, in place of `origin`.
     - `build`: the stage of the round whose open build the question came up in, in
       place of `origin`.
     - `blocks`: what a round's question holds up, `B2,B3`, `all` or `none`; every stage

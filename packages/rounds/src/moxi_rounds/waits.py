@@ -1,5 +1,5 @@
 """Waiting items: work a build's verification can't finish without the operator, such
-as a check on his phone.
+as a check on the operator's phone.
 
 A report of a build lists each as a `[[wait]]`. When its verdict is recorded, each is an
 open waiting item of the round at once, keyed `B2.W1` outside the report: its stage, its

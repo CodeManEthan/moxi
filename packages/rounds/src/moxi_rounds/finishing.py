@@ -162,7 +162,7 @@ class ActionFailed(RoundsError):
 class Action:
     """One finish action as this finish recorded or passed it: its `id` and `kind`, the
     `state` recorded (`OK`, `FAILED`, `FOUND`, `STARTED`), or `ran` false when a record
-    at the tip already settled it or the operator skipped it (`skipped_by`, his ruling;
+    at the tip already settled it or the operator skipped it (`skipped_by`, the operator's ruling;
     `state` is then `SKIPPED`); a merge's `landing` and `target_before`; what it
     printed, or for a merge found made by hand (`hand_merge`), what that merge put on
     the target. A command's `started` record that runs it again after an earlier start

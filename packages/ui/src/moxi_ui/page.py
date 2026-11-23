@@ -129,6 +129,7 @@ _COMPONENT = Out("table", items={
     "url": Out("string"), "title": Out("string"), "doc": Out("string"),
     "contract": Out("int"), "place": Out("string"), "home": Out("bool"),
     "home_as": _STRING, "group": _STRING, "order": _INT,
+    "band_unless": Out("list", nullable=True, items=Out("string")),
     "attributes": Out("list", items=_ATTRIBUTE)})
 _MODULE = Out("table", items={
     "name": Out("string"), "state": Out("string"),

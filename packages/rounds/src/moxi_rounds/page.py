@@ -51,9 +51,9 @@ BOOL = lb.Out("bool")
 WORDS = _list(TEXT)
 
 #: One step's cell: its state (one of the board's eight), its short word, the count of
-#: his items, whether it is settled or where its line is, rounds' own state word for
-#: the step, who does it and, when known, that one's name. A null cell is a column the
-#: round has no step in.
+#: the operator's items, whether it is settled or where its line is, rounds' own state
+#: word for the step, who does it and, when known, that one's name. A null cell is a
+#: column the round has no step in.
 CELL = lb.Out("table", nullable=True, items={
     "state": TEXT, "word": _s(), "count": lb.Out("int", nullable=True),
     "settled": BOOL, "here": BOOL, "step_state": _s(), "by": _s(), "who": _s(),
@@ -68,8 +68,9 @@ COLUMN = lb.Out("table", items={"id": TEXT, "label": TEXT, "part": TEXT})
 
 OPTION = lb.Out("table", items={"key": TEXT, "text": lb.Out("string", mark="scrub")})
 
-#: A question or a decision as what waits on him gives it. `blocks` is the stages it
-#: holds; `blocks_word` is `all` or `none` where the item says that in place of a list.
+#: A question or a decision as what waits on the operator gives it. `blocks` is the
+#: stages it holds; `blocks_word` is `all` or `none` where the item says that in place of
+#: a list.
 #: The keys after `at` are present only where the item has them.
 ENTRY = lb.Out("table", items={
     "holder": TEXT, "id": TEXT, "text": _s("scrub"), "from": _s("scrub"),
@@ -77,16 +78,17 @@ ENTRY = lb.Out("table", items={
     "builder": _s(), "left_as": _s(), "until": _s(), "options": _list(OPTION),
     "moved_from": _s(), "stage": _s(), "weight": _s(),
     "forecloses": lb.Out("bool", nullable=True), "alone": lb.Out("bool", nullable=True),
+    "not_put": _s(),
 })
 
-#: A job for him: the round that holds it, its id (`B<n>.W<k>`), its stage and text,
-#: the report that asked for it, who wrote that and when.
+#: A job for the operator: the round that holds it, its id (`B<n>.W<k>`), its stage and
+#: text, the report that asked for it, who wrote that and when.
 WAIT = lb.Out("table", items={
     "round": TEXT, "id": TEXT, "stage": _s(), "text": _s("scrub"),
     "report": _s("scrub"), "by": _s(), "at": _s(),
 })
 
-#: A ruling not yet shown to him, as a project's read-back list holds it.
+#: A ruling not yet shown to the operator, as a project's read-back list holds it.
 SHOWN = lb.Out("table", items={
     "holder": TEXT, "id": TEXT, "text": _s("scrub"), "rules": _s(), "record": _s("scrub"),
     "supersedes": _s(), "revokes": _s(), "at": _s(),
@@ -121,8 +123,8 @@ FOLDS = lb.Out("table", items={
 })
 
 #: One open round: what its show says of it, the step `next` reads for it and the
-#: rounds listing's counts, its group, phrase, how many of his items it holds, its newest
-#: event, a short hash of the whole (`rev`), its lines and its folds.
+#: rounds listing's counts, its group, phrase, how many of the operator's items it holds,
+#: its newest event, a short hash of the whole (`rev`), its lines and its folds.
 ROUND = lb.Out("table", items={
     "name": TEXT, "project": TEXT, "slug": TEXT, "description": _s("scrub"),
     "flow": _s(), "standing": _s(), "version": lb.Out("int", nullable=True),
@@ -219,8 +221,8 @@ RECORD = lb.Out("table", nullable=True, items={
     "phrase": PHRASE,
     "ended": lb.Out("table", nullable=True, items={"how": _s(), "at": _s()}),
     "ends": _list(lb.Out("table", items={"stage": TEXT, "how": TEXT})),
-    # a waiting item's record: the item as what waits on him has it, the command that
-    # records an answer today, and a question's passage
+    # a waiting item's record: the item as what waits on the operator has it, the command
+    # that records an answer today, and a question's passage
     "what": TEXT,
     "item": lb.Out("table", items={
         **ENTRY.items, **WAIT.items, **SHOWN.items, "project": _s(), "ruling": _s("scrub"),

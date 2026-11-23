@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- With turns installed, a running row on the page says its live state, in the words turns'
+  Live sessions panel uses: `working` while a turn is open, what is busy (`1 subagent
+  busy`, `2 shells running`), and a dim line when turns can't read the session. An opened
+  running row adds turns' `Now`, `Agents` and `Prompt box` lines. The page reads turns'
+  `/api/sessions` and follows its topic `sessions` at the desk; without turns, and on the
+  phone, nothing of it is drawn and turns is not read. turns' `Live sessions` leaves the
+  band of pages while sessions is installed, and the list links it beside its count.
 - sessions' connector tools need the secrets release with `chat_redact` (and its
   `between` step) and the connector release with `Limit`. No released version of the two
   carries them yet; the floors rise when they are released.
