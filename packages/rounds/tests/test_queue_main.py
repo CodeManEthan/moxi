@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import pytest
 from test_queue_batch import (  # noqa: F401 -- fixtures
-    OTHER, ROUND, configure, fake, queue, ready, repo)
+    OTHER, ROUND, configure, fake, queue, read_through_queue_ci, ready, repo)
 from test_queue_telling import (  # noqa: F401 -- fixtures
     comms, config_text, lander_pass, no_lander_process, told)
 
@@ -116,6 +116,25 @@ def test_a_head_whose_pushes_show_no_run_is_given_up_and_the_director_told(
     assert "never started" in comms.to("dir-a")[0]
     assert any("never started" in line for line in queue_view.lines(queue(),
                                                                    lander_runs=False))
+
+
+def test_mains_run_still_running_is_not_rerun_or_read(
+        repo, ready, fake, lander_pass, with_ref, monkeypatch):
+    ready()
+    landed(lander_pass)
+    head = hand_commit(repo, "one.txt")
+    runs = read_through_queue_ci(fake, monkeypatch, main=True)
+    lander_pass(0.0)
+    lander_pass(batching.ABSENT_S)
+    assert queue().main_at(head) is None
+    assert fake.reruns == [] and fake.failure_reads == [] and main_pushes(fake) == []
+    read = [one for one in queue().head_runs if one.get("head") == head]
+    assert [(one["kind"], one["reading"], one["running"]) for one in read] == [
+        (batching.READ, ci.PENDING, ["101"])]
+    assert not lander.settled("proj-a", queue())
+    runs.finish()
+    lander_pass(2 * batching.ABSENT_S)
+    assert fake.reruns == [(("101",), True)] and fake.failure_reads == []
 
 
 # -- red spells --------------------------------------------------------------------------

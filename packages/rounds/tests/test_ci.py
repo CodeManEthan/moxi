@@ -16,7 +16,7 @@ import pytest
 from moxi.config import ConfigError
 
 from moxi_rounds import (checking, ci, commissioning, doctor, log, opening, paths,
-                         settings, showing, steps)
+                         queue_ci, settings, showing, steps)
 from moxi_rounds import state as states
 from moxi_rounds.cli import main
 from moxi_rounds.errors import Refused
@@ -349,6 +349,55 @@ def test_a_candidate_is_read_by_its_workflows_and_a_full_run_by_the_rest(monkeyp
     # With no workflow marked, a candidate is read as a full run is.
     plain = ci.Declared(**{**found.__dict__, "workflows": (full,)})
     assert plain.candidate_workflows == plain.full_workflows == (full,)
+
+
+def whole_runs(*runs: dict) -> ci.Declared:
+    """A setting reading `FLOW` and `OTHER` whole, its `status` printing `runs`."""
+    return ci.Declared(
+        workflows=(ci.Workflow(FLOW), ci.Workflow(OTHER)), local=None,
+        local_timeout_s=None, remote=None, status=tuple(printing(list(runs))),
+        ids=tuple(printing([{"id": 11, "path": FLOW}, {"id": 12, "path": OTHER}])),
+        status_timeout_s=30)
+
+
+def test_read_runs_names_runs_with_no_url():
+    found = whole_runs({**run(databaseId=7), "url": None},
+                       {key: value for key, value in run(databaseId=8,
+                                                          workflowDatabaseId=12).items()
+                        if key != "url"})
+    _reading, runs = ci.read_runs(found, values={"tip": TIP}, cwd=None)
+    assert [one["databaseId"] for one in runs] == [7, 8]
+
+
+def test_read_runs_leaves_out_the_runs_it_is_told_not_to_read():
+    older = run(databaseId=7, createdAt="2026-11-01T09:00:00Z")
+    found = whole_runs(older, run(databaseId=8, conclusion="failure"))
+    reading, runs = ci.read_runs(found, values={"tip": TIP}, cwd=None, not_runs=("8",))
+    assert [one["databaseId"] for one in runs] == [7]
+    assert reading.workflows[0]["reading"] == ci.GREEN
+    assert reading.workflows[1]["reading"] == ci.ABSENT
+
+
+@pytest.mark.parametrize("second", [
+    {"conclusion": "cancelled"},
+    {"conclusion": "failure"},
+], ids=["cancelled", "red"])
+def test_a_queue_read_is_pending_while_any_run_it_names_has_not_completed(second):
+    going = run(databaseId=7, status="in_progress", conclusion="")
+    found = whole_runs(going, run(databaseId=8, workflowDatabaseId=12, **second))
+    read = queue_ci.QueueCi(found, local_log=Path("local.log")).read_full(None, TIP)
+    assert (read.word, read.runs, read.running) == (ci.PENDING, ("7", "8"), ("7",))
+
+
+def test_failures_refuses_a_running_read(monkeypatch):
+    ran = []
+    monkeypatch.setattr(ci, "run_jobs", lambda *args, **kwargs: ran.append(args))
+    monkeypatch.setattr(queue_ci, "_said", lambda *args, **kwargs: ran.append(args))
+    read = queue_ci.Read(ci.RED, ("7",), running=("7",))
+    with pytest.raises(ci.ReadFailed) as caught:
+        queue_ci.QueueCi(whole_runs(), local_log=Path("local.log")).failures(
+            None, TIP, read)
+    assert "7 has not completed" in str(caught.value) and ran == []
 
 
 def test_the_setting_reads_a_scoped_entry(write_config):

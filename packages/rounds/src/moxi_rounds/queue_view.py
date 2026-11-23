@@ -1,7 +1,9 @@
 """What `moxi rounds queue` says of a repo's queue, as lines: whether a lander runs, a
 pause and its reason, a wait on something outside the queue, each running batch and its
-CI reading (two or more while a red batch is split), each member still in the queue in the order it is taken, the target's last
-full run, and the messages the lander could not send.
+CI reading (two or more while a red batch is split) or the CI run it waits on to end,
+each member still in the queue in the order it is taken, the target's last full run, a
+full run still running at the newest head read, and the messages the lander could not
+send.
 
 Everything said is read from the queue file (`queue_file.read`); nothing is written.
 """
@@ -33,6 +35,10 @@ def lines(queue: queue_file.Queue, *, lander_runs: bool,
         run = running.run or {}
         reading = run.get("reading") or "not read yet"
         url = f"   {run['url']}" if run.get("url") else ""
+        read = next((one for one in reversed(running.runs) if one.get("kind") == "read"),
+                    None)
+        if read is not None and read.get("running"):
+            reading = f"still running: {_running(read)}"
         said.append(f"batch {running.id} on {running.main[:12]}: {len(running.members)} "
                     f"member(s), CI {reading}{url}")
     members = queue.queued()
@@ -48,6 +54,12 @@ def lines(queue: queue_file.Queue, *, lander_runs: bool,
         last = queue.mains[-1]
         said.append(f"main's last full run: {last['event']} at "
                     f"{str(last.get('head'))[:12]}, run {last.get('run')}")
+    head_read = next((one for one in reversed(queue.head_runs)
+                      if one.get("kind") == "read"), None)
+    if (head_read is not None and head_read.get("running")
+            and queue.main_at(str(head_read.get("head"))) is None):
+        said.append(f"main's full run at {str(head_read.get('head'))[:12]}: still "
+                    f"running: {_running(head_read)}")
     spell = spell_line(queue)
     if spell is not None:
         said.append(spell)
@@ -56,6 +68,11 @@ def lines(queue: queue_file.Queue, *, lander_runs: bool,
             said.append(f"main's full run at {str(one.get('head'))[:12]} never started: "
                         f"{one.get('ref')} was pushed twice")
     return said + told_lines(queue)
+
+
+def _running(read: dict) -> str:
+    """The runs a read event found still running, and since when."""
+    return f"run {', '.join(map(str, read['running']))}, since {read.get('at')}"
 
 
 def spell_line(queue: queue_file.Queue) -> str | None:

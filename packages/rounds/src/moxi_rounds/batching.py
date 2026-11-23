@@ -31,7 +31,11 @@ pass, before its CI is read, so nothing lands without it. A repo with no `ci` se
 has no CI to read a candidate by: the queue pauses, saying so.
 
 **Read** CI each pass until it reads `green`, `red`, `cancelled`, or `absent` for
-`ABSENT_S` after the push. A cancelled run is rerun once; an absent one ends the batch,
+`ABSENT_S` after the push. A read with a run that has not completed reads `pending`,
+whatever its jobs read so far (`queue_ci.Read.running`): nothing is rerun, no failure
+log is read and no failed read counted until every run it names has ended, and its
+`read` event names the runs still running. Rounds sets no limit on a running run; the
+CI's own job limits end one. A cancelled run is rerun once; an absent one ends the batch,
 so the next pass pushes it again under the next batch number. A second cancelled run,
 or a second absent one in a row, pauses the queue with that reason. A read that fails
 (`ci.ReadFailed`) is tried again at each pass, and the queue pauses once `READ_FAILS_MAX`
@@ -434,11 +438,12 @@ class _Pass:
             self.read_failed(batch, exc)
             return
         last = next((one for one in reversed(batch.runs) if one.get("kind") == READ), None)
-        if last is None or last.get("reading") != read.word:
+        if _read_differs(last, read):
             self.run_event(batch, READ, reading=read.word, runs=list(read.runs),
                            workflows=[dict(one) for one in read.workflows],
                            status_argv=list(read.status_argv),
-                           ids_argv=list(read.ids_argv))
+                           ids_argv=list(read.ids_argv), **_running(read))
+            self.say_running(f"batch {batch.id}", last, read)
         local = next((one for one in reversed(batch.runs) if one.get("kind") == LOCAL),
                      None)
         word = read.word
@@ -473,6 +478,13 @@ class _Pass:
             self.red(batch, read, target=target, local_red=local_red)
         except ci.ReadFailed as exc:
             self.read_failed(batch, exc)
+
+    def say_running(self, what: str, last: dict | None, read: queue_ci.Read) -> None:
+        """Say in the lander's log, once as a read first finds it, that a run `what`
+        names is still running, so nothing is done with it until it ends."""
+        if read.running and not (last or {}).get("running"):
+            self.say(f"lander of {self.repo}: {what}: run {', '.join(read.running)} is "
+                     "still running; waiting for it to end")
 
     def read_failed(self, batch: queue_file.Batch, exc: ci.ReadFailed) -> None:
         """Record a failed read of the batch's CI; the queue pauses once
@@ -611,10 +623,13 @@ class _Pass:
             return None
         read = self.ci.read_full(self.place, head)
         last = _newest(runs, READ)
-        if last is None or last.get("reading") != read.word:
+        if _read_differs(last, read):
             runs.append(queue_file.append(self.repo, {
                 "event": queue_file.RUN, "head": head, "kind": READ,
-                "reading": read.word, "runs": list(read.runs)}, self.env))
+                "reading": read.word, "runs": list(read.runs), **_running(read)},
+                self.env))
+            self.say_running(f"{self.target_name() or 'the target'}'s full run at "
+                             f"{head[:12]}", last, read)
         if read.word == ci.GREEN:
             return self.main_read(queue_file.GREEN, head, read, [])
         if read.word == ci.RED:
@@ -1221,6 +1236,18 @@ def _newest(runs: list[dict], kind: str, **fields) -> dict | None:
     """The newest of `runs` of `kind` whose `fields` match."""
     return next((one for one in reversed(runs) if one.get("kind") == kind
                  and all(one.get(key) == value for key, value in fields.items())), None)
+
+
+def _read_differs(last: dict | None, read: queue_ci.Read) -> bool:
+    """Whether `read` is to be recorded after the read event `last`: there is none, or
+    its reading or its runs still running differ."""
+    return (last is None or last.get("reading") != read.word
+            or list(last.get("running") or ()) != list(read.running))
+
+
+def _running(read: queue_ci.Read) -> dict:
+    """A read event's `running` field: the runs not completed, only when there is one."""
+    return {"running": list(read.running)} if read.running else {}
 
 
 def _runs(event: dict) -> str:
