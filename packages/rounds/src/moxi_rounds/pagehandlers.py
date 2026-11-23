@@ -218,8 +218,8 @@ class Kept:
 class Held:
     """What the records answer from, replaced whole by each gather: the open rounds'
     parts and the closed ones the strip read, by name; each open build's git state as
-    the gather read it, by round and then stage; what waits on him as the value has it;
-    the round folders, by name; and the settings."""
+    the gather read it, by round and then stage; what waits on the operator as the value
+    has it; the round folders, by name; and the settings."""
 
     parts: Mapping[str, board.Part] = field(default_factory=dict)
     reading: Mapping[str, Mapping[str, open_builds.OpenBuild]] = field(
@@ -501,8 +501,8 @@ def _when(stat: tuple[int, int]) -> str:
 
 
 def _entry(data: Mapping) -> dict:
-    """A question or decision as what waits on him gives it, with `blocks` a list and
-    `blocks_word` the word it may be instead."""
+    """A question or decision as what waits on the operator gives it, with `blocks` a
+    list and `blocks_word` the word it may be instead."""
     made = {key: value for key, value in data.items() if key != "held"}
     blocks = data.get("blocks")
     made["blocks"] = list(blocks) if isinstance(blocks, (list, tuple)) else []
@@ -511,9 +511,9 @@ def _entry(data: Mapping) -> dict:
 
 
 def _waiting(waited: listing.Waiting) -> dict:
-    """What waits on him, as the board carries it: his open questions, the majors not
-    ruled, his jobs (not the fixes the lead owes), the rulings not shown, and how many
-    questions are parked."""
+    """What waits on the operator, as the board carries it: the operator's open
+    questions, the majors not ruled, the operator's jobs (not the fixes the lead owes),
+    the rulings not shown, and how many questions are parked."""
     found = dict(waited.found)
     return {"questions": [_entry(one.data()) for one in found["open"]],
             "decisions": [_entry(one.data()) for one in found["decisions"]],

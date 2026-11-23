@@ -6,7 +6,7 @@ In the project `kestrel`:
 - `billing-export` on the `staged` flow (a step of the user's own): stages B1 to B6, so
   its other stages fold; a question with options and a huge one, a ruling not yet shown,
   B1 commissioned with its check failed, CI red, a verdict sent back with an open finding,
-  a major decision that forecloses and a job for him; B2 commissioned and dropped.
+  a major decision that forecloses and a job for the operator; B2 commissioned and dropped.
 - `ledger`, fresh: no stage in its plan.
 - `archive`, closed.
 - `broken`, whose log can't be read.

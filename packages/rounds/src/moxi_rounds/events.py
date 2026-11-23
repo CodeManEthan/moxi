@@ -49,7 +49,7 @@ TYPES = _types(
     # keep, not the operator's ruling, so it carries no pointer.
     EventType("lead.changed", ("lead", "was"), required=("lead",)),
     # The round moved to another flow: the name it had, the new name and its steps, and
-    # who moved it. The operator's move is his ruling, and that ruling's own event
+    # who moved it. The operator's move is a ruling, and that ruling's own event
     # holds the same three.
     EventType("flow.changed", ("was", "flow", "steps", "by")),
     # A design version was frozen: its number and digest, whether only records changed
@@ -76,7 +76,7 @@ TYPES = _types(
                "waits", "decisions", "applied", "not_applied", "flags")),
     # A question was put: its id, sentence, origin and what it holds up, its state, and
     # who asked it and when, which outlive a move to another log. `record` is the
-    # operator's pointer when the question is his own; it is then the origin too.
+    # operator's pointer when the question is the operator's own; it is then the origin too.
     # `options` are the choices it offers, each key with its one line. A question
     # brought here from another log also says the record it was there (`moved_from`),
     # what it held up in the round it left (`held`), what a parked one waits for
@@ -118,16 +118,18 @@ TYPES = _types(
     # of the round's flow holds the name the flow had (`was`), the new name (`flow`)
     # and its `steps`, and is the whole of the move. The operator's credit of a
     # fast-forward names the build by its commission's line (`build`) and holds the
-    # head it credits (`head`). A ruling
+    # head it credits (`head`). A ruling of a decision the lead settled names the
+    # settlement's line, `settlement`, which it replaces. A ruling
     # that replaces an earlier one names it in `supersedes`, and one that takes an
     # earlier one back in `revokes`; the earlier ruling's line is never changed.
     EventType("ruling.recorded",
               ("id", "text", "record", "reason", "scope", "stages", "kind", "rules",
                "chose", "question", "state", "until", "blocks", "covers", "supersedes",
-               "revokes", "moved_to", "was", "flow", "steps", "build", "head"),
+               "revokes", "moved_to", "was", "flow", "steps", "build", "head",
+               "settlement"),
               required=("id", "record", "kind")),
     # Rulings of this log were put in front of the operator: their ids, and the pointer
-    # to where he was shown them.
+    # to where the operator was shown them.
     EventType("ruling.shown", ("ids", "record"), required=("ids", "record")),
     # A build began: its stage, repo, branch, the commit it was cut from, the branch it
     # is headed for, its worktree and scratch folder, its builder, the go pointer, the
@@ -156,6 +158,13 @@ TYPES = _types(
     # A finding or a waiting item moved to a new state.
     EventType("finding.marked", ("id", "state", "commits", "record")),
     EventType("wait.marked", ("id", "state", "commits", "record")),
+    # The lead settled a minor decision that is not the operator's to rule: its key
+    # (`id`), what was chosen of it (`accept` or `reject`), the pointer, and `by`, the
+    # role, `lead`. It is never the operator's ruling.
+    EventType("decision.settled", ("id", "chose", "record", "by"),
+              required=("id", "chose", "record", "by")),
+    # The lead made a decision major: its key (`id`), the pointer, and `by`, `lead`.
+    EventType("decision.raised", ("id", "record", "by"), required=("id", "record", "by")),
     # A brief was sized: the stage, the one slice or verification it is for, the file,
     # its digest and the result.
     EventType("brief.sized", ("stage", "slice", "verify", "brief", "sha256", "result")),
@@ -197,10 +206,13 @@ TYPES = _types(
     # A thread of design verification was closed or its risk accepted.
     EventType("thread.decided", ("thread", "decision", "record")),
     # A record was derived again: what (`base`, the base of the open build of
-    # `stage`, or `report`, the record of the verdict on line `verdict`), each
-    # field's old and new value, and what was read to derive it: git's answer, or
-    # the report's file and digest.
-    EventType("repair", ("what", "stage", "verdict", "fields", "read"),
+    # `stage`; `report`, the record of the verdict on line `verdict`; or `digest`, the
+    # digest of the design's version `version`, re-stamped from its frozen copy), each
+    # field's old and new value, and what was read to derive it: git's answer, the
+    # report's file and digest, or the frozen copy's path. A re-stamp also holds
+    # `record`, the pointer to where the lead named what edited the design.
+    EventType("repair", ("what", "stage", "verdict", "version", "fields", "read",
+                         "record"),
               required=("what", "fields")),
     # The round ended, with its numbers.
     EventType("round.closed", ("numbers",)),

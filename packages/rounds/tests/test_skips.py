@@ -161,13 +161,13 @@ def test_the_lightest_flow_takes_a_skip_of_the_steps_it_has_and_of_the_questions
     assert skips.is_skipped(folded(light), *parts(item))
 
 
-def test_a_skip_without_his_pointer_is_refused(path):
+def test_a_skip_without_the_operators_pointer_is_refused(path):
     before = path.read_bytes()
 
-    with pytest.raises(Refused, match="needs a pointer to where he said it"):
+    with pytest.raises(Refused, match="needs a pointer to where the operator said it"):
         rule("skip:retro", record=None)
     with pytest.raises(Refused, match="is no pointer|not a pointer|pointer"):
-        rule("skip:retro", record="he said so")
+        rule("skip:retro", record="the operator said so")
 
     assert path.read_bytes() == before
 
@@ -340,7 +340,7 @@ def test_a_listed_question_narrowed_off_the_stage_and_widened_back_holds_it_agai
     found = folded(path)
     assert (found.rulings[0].covers, found.rulings[0].let_go) == (("Q1",), ("Q1",))
     assert [(one.covers, one.let_go) for one in skips.live(found)] == [((), ("Q1",))]
-    # His skip still stands, so the stage is let past the question only by a new one
+    # The operator's skip still stands, so the stage is let past the question only by a new one
     # that replaces it.
     rule("skip:docket:B2", record="comms:14", supersedes="C1")
     assert held(path)["B2"] == []

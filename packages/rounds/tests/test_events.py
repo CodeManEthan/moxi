@@ -18,7 +18,7 @@ def test_the_types_are_the_ones_a_log_holds():
         "finding.marked", "wait.marked", "brief.sized", "finish.action", "finish.done",
         "queue.join", "queue.left", "queue.batch", "queue.landed", "queue.ejected",
         "lock.cleared", "build.dropped", "round.dropped", "thread.decided", "repair",
-        "round.closed"])
+        "round.closed", "decision.settled", "decision.raised"])
 
 
 @pytest.mark.parametrize("name", sorted(events.TYPES))

@@ -16,15 +16,25 @@ with a `retro` step or not.
   waits on a question, a build's check and its verification) each get it. The last
   stretch runs to the event that ends the round. A step whose state git says is read
   from what the log holds of the build instead (`logged`), so it settles when the log
-  shows it did, with no read of git.
+  shows it did, with no read of git. The times overlap, and are shown so labelled.
+- `round_time_s`: the round's own time, from the log's first event to the event that
+  ends it (to now in the retrospective's numbers of an open round).
+- `longest_gap`: the longest stretch with no event in the log, the stretch to the end
+  of the round included, as `{"since", "until", "due"}`: when it began and ended, and
+  the steps due across it, read as `step_time_s` reads them; the earliest of equal
+  ones. It shows a build that sat idle, which the finish step's time, counted from
+  the commission, hides. `with_clocks` computes these two for a round that ended
+  before its ending held them, from its log up to the ending event.
 - `findings`: the findings of every build of the round by severity, as the newest
   report listing each left it; `rechecks` and `drift_rechecks`: the reports of those
   passes; `checks_failed`: check runs that did not exit 0, one ended at its time limit
   included.
 - `questions`: the round's questions by the shape of the pointer they came from
   (`comms`, `session`, `url`, `file`, `build`, or `other`).
-- `decisions`: the decisions ruled `accept` and ruled `reject`, as the rulings that
-  stand leave them.
+- `decisions`: the decisions the operator ruled `accept` and ruled `reject`, as the
+  rulings that stand leave them; `settled`: the minor ones the lead settled `accept`
+  and `reject`, as the settlements that stand leave them. Numbers written before
+  `settled` was counted read it as zero.
 - `skips`: skips of a step or of a finish action; `step_ups`: the lead's moves to a
   later flow; `repairs`; `corrections`: rulings that replace or take back another;
   `drops`: builds dropped; `cleared_locks`: finish locks of a dead holder cleared;
@@ -153,28 +163,100 @@ def step_time_s(events: Iterable[dict], *, ended_at: str | None = None,
     time. Left out, the setting reads as not read, and the step is due while a major
     decision is unruled. A stretch whose ends don't both read as times,
     or that runs backwards, as two machines' clocks can make it, counts nothing."""
-    spent: dict[str, int] = {}
+    return _timed(events, ended_at=ended_at, ratify=ratify).spent
+
+
+class _Timed:
+    """What one walk of a log's events gives: the time each step was `spent` due, the
+    round's `round_time_s`, and its `longest_gap`."""
+
+    def __init__(self) -> None:
+        self.spent: dict[str, int] = {}
+        self.round_time_s: int | None = None
+        self.longest_gap: dict | None = None
+
+
+def _timed(events: Iterable[dict], *, ended_at: str | None = None,
+           until: str | None = None, ratify: str | None = None) -> _Timed:
+    """The walk `step_time_s` makes of `events`, `ended_at` and `ratify` as it takes
+    them, which also gives the round's time, from the first event to `until` (else
+    `ended_at`, else the last event), and the longest stretch with no event, the one
+    from the last event to that time included."""
+    timed = _Timed()
+    spent = timed.spent
     due: list[str] = []
     since: int | None = None
+    since_at: str | None = None
+    first: int | None = None
+    longest = 0
 
-    def add(until: int | None) -> None:
-        if since is None or until is None or until <= since:
+    def gap(to: int | None, to_at: str) -> None:
+        nonlocal longest
+        if since is None or to is None or to - since <= longest:
+            return
+        longest = to - since
+        timed.longest_gap = {"since": since_at, "until": to_at, "due": list(due)}
+
+    def add(to: int | None) -> None:
+        if since is None or to is None or to <= since:
             return
         for key in due:
-            spent[key] = spent.get(key, 0) + until - since
+            spent[key] = spent.get(key, 0) + to - since
 
     settings_read = {} if ratify is None else {None: steps.Seen(ratify=ratify)}
     for folded in states.folding(events):
-        now = _seconds(folded.history[-1]["at"])
+        at = folded.history[-1]["at"]
+        now = _seconds(at)
         add(now)
+        gap(now, at)
+        first = now if first is None and len(folded.history) == 1 else first
         due = [] if folded.status != states.OPEN else [
             _key(one) for one in steps.of(folded, on_closed=_never,
                                           seen={**logged(folded), **settings_read})
             if one.state in _DUE]
-        since = now
+        since, since_at = now, at
     if ended_at is not None:
         add(_seconds(ended_at))
-    return spent
+    end_at = until or ended_at
+    end = since if end_at is None else _seconds(end_at)
+    if end_at is not None:
+        gap(end, end_at)
+    if first is not None and end is not None and end >= first:
+        timed.round_time_s = end - first
+    return timed
+
+
+def _ending_at(history: list[dict]) -> int | None:
+    """Where the latest event that ended the round is in `history`; None for none."""
+    found = None
+    for place, event in enumerate(history):
+        if event.get("type") in _ENDINGS:
+            found = place
+    return found
+
+
+#: The events that end a round.
+_ENDINGS = ("round.closed", "round.dropped")
+
+
+def with_clocks(state: states.State, numbers: Mapping, *,
+                ratify: str | None = None) -> dict:
+    """The numbers `numbers` the ending of the round `state` holds, with
+    `round_time_s` and `longest_gap` computed from its log where they lack them, as
+    the ending of a round that ended before they were kept does: up to the event that
+    ended it, so nothing logged after (a re-stamp) changes either, with the steps due
+    read under `ratify`, the project's setting now. Writes nothing."""
+    found = dict(numbers)
+    if "round_time_s" in found and "longest_gap" in found:
+        return found
+    history = list(state.history)
+    place = _ending_at(history)
+    if place is None:
+        return found
+    timed = _timed(history[:place], ended_at=history[place].get("at"), ratify=ratify)
+    found.setdefault("round_time_s", timed.round_time_s)
+    found.setdefault("longest_gap", timed.longest_gap)
+    return found
 
 
 def lead_decisions(events: Iterable[dict]) -> int:
@@ -192,12 +274,14 @@ def lead_decisions(events: Iterable[dict]) -> int:
 
 
 def of(state: states.State, *, ended_at: str | None = None,
-       ratify: str | None = None) -> dict:
+       ratify: str | None = None, now: str | None = None) -> dict:
     """The numbers of the round `state` is of, as data. `ended_at` is the time of the
-    event that ends the round, which the last stretch of `step_time_s` runs to; left
-    out, the time stops at the log's last event. `ratify` is the project's setting, as
-    `step_time_s` takes it."""
+    event that ends the round, which the last stretch of `step_time_s`, `round_time_s`
+    and `longest_gap` run to; left out, the step times stop at the log's last event,
+    and the other two run to `now` (a time as `log.stamp` writes one), or stop there
+    too without it. `ratify` is the project's setting, as `step_time_s` takes it."""
     history = list(state.history)
+    timed = _timed(history, ended_at=ended_at, until=ended_at or now, ratify=ratify)
     verdicts = [one for one in states.with_rereads(state)
                 if one.get("type") == "verdict.recorded"]
     rulings = [one for one in history if one.get("type") == "ruling.recorded"]
@@ -207,6 +291,8 @@ def of(state: states.State, *, ended_at: str | None = None,
     origins = Counter(pointers.shape(one.origin) or OTHER for one in state.questions)
     ruled = Counter(one.chose for one in decisions.of_round(state)
                     if one.state == decisions.RULED)
+    settled = Counter(one.chose for one in decisions.of_round(state)
+                      if one.state == decisions.SETTLED)
     flagged = Counter(flag for one in verdicts for flag in one.get("flags") or ())
     return {
         "design_passes": sum(one.get("kind") == report_block.DESIGN for one in verdicts),
@@ -215,7 +301,9 @@ def of(state: states.State, *, ended_at: str | None = None,
         "folds": len(frozen),
         "records_only_folds": sum(bool(one.get("records_only")) for one in frozen),
         "lead_decisions": lead_decisions(history),
-        "step_time_s": step_time_s(history, ended_at=ended_at, ratify=ratify),
+        "step_time_s": timed.spent,
+        "round_time_s": timed.round_time_s,
+        "longest_gap": timed.longest_gap,
         "findings": {name: severity[name] for name in report_block.SEVERITIES},
         "rechecks": sum(one.get("pass") == report_block.RECHECK for one in verdicts),
         "drift_rechecks": sum(one.get("pass") == report_block.DRIFT for one in verdicts),
@@ -223,6 +311,8 @@ def of(state: states.State, *, ended_at: str | None = None,
                              for one in history),
         "questions": dict(sorted(origins.items())),
         "decisions": {name: ruled[name] for name in (decisions.ACCEPT, decisions.REJECT)},
+        "settled": {name: settled[name]
+                    for name in (decisions.ACCEPT, decisions.REJECT)},
         "skips": sum(_rules(one).startswith((corrections.SKIP, corrections.SKIP_ACTION))
                      for one in rulings),
         "step_ups": sum(one.get("type") == "flow.changed" and one.get("by") == stepping.LEAD
@@ -262,8 +352,8 @@ def _duration(seconds: object) -> str:
 
 #: The keys `lines` gives a line of their own to; any other is given as it is.
 _SAID = ("design_passes", "fold_first", "folds", "records_only_folds", "lead_decisions",
-         "step_time_s", "findings", "rechecks", "drift_rechecks", "checks_failed",
-         "questions", "decisions", "skips", "step_ups", "repairs", "corrections", "drops",
+         "step_time_s", "round_time_s", "longest_gap", "findings", "rechecks", "drift_rechecks", "checks_failed",
+         "questions", "decisions", "settled", "skips", "step_ups", "repairs", "corrections", "drops",
          "cleared_locks", "flags")
 
 
@@ -275,20 +365,26 @@ def lines(numbers: Mapping) -> list[str]:
              if isinstance(spent, Mapping) and spent else "none")
     decided = numbers.get("decisions")
     decided = decided if isinstance(decided, Mapping) else {}
+    settled = numbers.get("settled")
+    settled = settled if isinstance(settled, Mapping) else {}
     found = [
         f"design: passes {_count(numbers, 'design_passes')}, folds "
         f"{_count(numbers, 'folds')} (records only "
         f"{_count(numbers, 'records_only_folds')}), lead decisions "
         f"{_count(numbers, 'lead_decisions')}",
         f"reports sent back (fold-first, of any kind): {_count(numbers, 'fold_first')}",
-        f"time in steps: {times}",
+        f"time in steps, overlapping (steps due side by side each count the same "
+        f"time): {times}",
+        *_clock_lines(numbers),
         f"findings: {_counts(numbers.get('findings'))}; re-checks "
         f"{_count(numbers, 'rechecks')}, drift re-checks "
         f"{_count(numbers, 'drift_rechecks')}; check runs failed "
         f"{_count(numbers, 'checks_failed')}",
         f"questions by origin: {_counts(numbers.get('questions'))}",
         f"decisions: accepted {_count(decided, decisions.ACCEPT)}, rejected "
-        f"{_count(decided, decisions.REJECT)}",
+        f"{_count(decided, decisions.REJECT)}; settled by the lead: accepted "
+        f"{_count(settled, decisions.ACCEPT)}, rejected "
+        f"{_count(settled, decisions.REJECT)}",
         f"skips {_count(numbers, 'skips')}, step-ups {_count(numbers, 'step_ups')}, "
         f"repairs {_count(numbers, 'repairs')}, corrections "
         f"{_count(numbers, 'corrections')}, dropped builds {_count(numbers, 'drops')}, "
@@ -298,13 +394,40 @@ def lines(numbers: Mapping) -> list[str]:
     return found
 
 
+def _clock_lines(numbers: Mapping) -> list[str]:
+    """The round's own time and its longest stretch with nothing logged, each in a line,
+    for numbers that hold them."""
+    found = []
+    if "round_time_s" in numbers:
+        found.append(f"time open: {_duration(numbers['round_time_s'])}, open to close "
+                     "(to now while the round is open)")
+    gap = numbers.get("longest_gap")
+    if isinstance(gap, Mapping):
+        length = None
+        since, until = _seconds(gap.get("since")), _seconds(gap.get("until"))
+        if since is not None and until is not None:
+            length = until - since
+        due = [str(one) for one in gap.get("due") or ()]
+        while_ = ("while no step was due" if not due else
+                  f"while {due[0]} was due" if len(due) == 1 else
+                  f"while {', '.join(due)} were due")
+        found.append(f"longest stretch with nothing logged: {_duration(length)}, since "
+                     f"{gap.get('since')}, {while_}")
+    return found
+
+
+#: The keys `summed` leaves out: a stretch of one round does not add across rounds.
+_NOT_SUMMED = ("longest_gap",)
+
+
 def summed(each: Iterable[Mapping]) -> dict:
     """The numbers of several rounds added together key by key: a count to the same
     count, and a group (findings by severity, time by step) name by name. A value of
-    another kind, which no version writes, is passed over."""
+    another kind, which no version writes, is passed over, and so is `longest_gap`."""
     total: dict = {}
     for numbers in each:
-        _add(total, numbers)
+        _add(total, {key: value for key, value in numbers.items()
+                     if key not in _NOT_SUMMED})
     return total
 
 
@@ -322,5 +445,5 @@ def _add(total: dict, numbers: Mapping) -> None:
             _add(had, value)
 
 
-__all__ = ["FLAGS", "OTHER", "logged", "step_time_s", "lead_decisions", "of", "lines",
-           "summed"]
+__all__ = ["FLAGS", "OTHER", "logged", "step_time_s", "with_clocks", "lead_decisions",
+           "of", "lines", "summed"]

@@ -145,8 +145,8 @@ class Ruling:
     replaced_by: str | None = None
     revoked_by: str | None = None
     #: The pointer to where the operator was shown it, from the first mark that named
-    #: it, or None while no mark has. His read-back of the project's list also makes a
-    #: ruling shown, and is a ruling of the project's log: `shown.is_shown` reads both.
+    #: it, or None while no mark has. The operator's read-back of the project's list
+    #: also makes a ruling shown, and is a ruling of the project's log: `shown.is_shown` reads both.
     shown: str | None = None
 
 
@@ -200,7 +200,7 @@ class Question:
     #: Who asked it, and when.
     by: str
     at: str
-    #: The operator's pointer, when the question is his own.
+    #: The operator's pointer, when the question is the operator's own.
     record: str | None = None
     #: What a parked question waits for, or None.
     until: str | None = None
@@ -298,6 +298,9 @@ class Version:
     at: str
     #: The number of its event in the log, which places it among the verdicts.
     event: int | None = None
+    #: The digest its frozen copy was re-stamped with (a `digest` repair), None while
+    #: it holds the one recorded at its freeze. `digest` stays as frozen.
+    restamped: str | None = None
 
 
 @dataclass(frozen=True)
@@ -498,10 +501,12 @@ def _ruling_recorded(state: State, event: dict) -> None:
     # it, so a verb stopped after this event has left the question ruled.
     if event.get("question") is not None:
         _change(state, event, question_id=event["question"], ruling=event.get("id"))
-    # His ruling of the flow is the whole of the move, as the lead's event is of his.
+    # The operator's ruling of the flow is the whole of the move, as the lead's event is
+    # of the lead's.
     if (event.get("rules") or "").startswith(_FLOW):
         _flow_changed(state, event)
-    # His ruling that a stage waits for one stage fewer is the whole of that change.
+    # The operator's ruling that a stage waits for one stage fewer is the whole of that
+    # change.
     if (event.get("rules") or "").startswith(_UNAFTER):
         stage_id, _equals, waited = event["rules"][len(_UNAFTER):].partition("=")
         _waits(state, stage_id, gone=(waited,))
@@ -858,17 +863,34 @@ def _thread_decided(state: State, event: dict) -> None:
         actor=event["actor"], at=event["at"]))
 
 
-#: What a repair re-derives: the base of an open build, or the record of a verdict.
+#: What a repair re-derives: the base of an open build, the record of a verdict, or
+#: the digest of the design's current version.
 BASE = "base"
 REPORT = "report"
+DIGEST = "digest"
 #: The lists of a verdict's event a reread may add to.
 REREAD_LISTS = ("findings", "waits", "decisions")
+
+
+def _restamp(state: State, event: dict) -> None:
+    fields = event.get("fields")
+    change = fields.get(DIGEST) if isinstance(fields, dict) else None
+    now = change.get("now") if isinstance(change, dict) else None
+    if not isinstance(now, str):
+        return
+    for place, version in enumerate(state.versions):
+        if version.n == event.get("version"):
+            state.versions[place] = replace(version, restamped=now)
 
 
 def _repair(state: State, event: dict) -> None:
     """A reread adds to the lists of the verdict it names the entries the record
     lacked, an id the list holds already being kept as it is. A repair of a base is
-    read where builds are (`builds.builds`)."""
+    read where builds are (`builds.builds`). A re-stamp gives the version it names
+    its new digest beside the one recorded at its freeze."""
+    if event.get("what") == DIGEST:
+        _restamp(state, event)
+        return
     if event.get("what") != REPORT:
         return
     n = event.get("verdict")
@@ -930,6 +952,8 @@ _HANDLERS: dict[str, Callable[[State, dict], None]] = {
     "ci.read": _kept,
     "finding.marked": _kept,
     "wait.marked": _kept,
+    "decision.settled": _kept,
+    "decision.raised": _kept,
     "brief.sized": _kept,
     "finish.action": _kept,
     "finish.done": _kept,
@@ -949,4 +973,4 @@ _HANDLERS: dict[str, Callable[[State, dict], None]] = {
 __all__ = ["OPEN", "DROPPED", "CLOSED", "FROZEN_FILE", "QUESTION", "STAGE", "AFTER", "BLOCKS",
            "Ended", "Ruling", "Change", "Question", "Stage", "Pending", "Version",
            "Decided", "Verdict", "State", "fold", "folding", "without", "BASE", "REPORT",
-           "REREAD_LISTS", "with_rereads"]
+           "DIGEST", "REREAD_LISTS", "with_rereads"]

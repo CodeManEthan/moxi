@@ -483,6 +483,23 @@ refusal's words show on the row until the next value. A launch whose session id 
 has not learned has nothing to open. Without launcher none of this is drawn and the list
 starts with `Active recently`.
 
+**Live state.** With turns installed too, each running row says what turns says of its
+session, paired by session id as turns' Live sessions panel pairs them: `working` while a
+turn is open, and no state word while it is idle, since its time says since when; then
+what is busy (`1 subagent busy`, `2 teammates busy`, `3 shells running`, Codex's background
+terminals among the shells). After a heavy `waiting on 2 subagents`, which counts
+subagents and teammates, neither is counted again; shells still are. A session turns
+can't read says so on a dim third line in turns' words (`Moxi can't read its live state:
+…`), and so does every launch with a session id when turns' list can't be read. An opened running row adds turns' `Now` (`working on turn 9
+since 18:34`), `Agents` (each subagent, teammate and shell with its state) and `Prompt
+box` lines. A launch turns has no session for says nothing of it. Without turns, and
+through the phone gateway, none of this is drawn and turns is not read. With sessions
+installed, turns' `Live sessions` leaves the band of pages, and the list links it instead:
+`Live sessions`, worded with turns' page title, at the right of the filter line before the
+count, or alone at the right of its own line wherever no filter line is drawn. It is there
+in every state of the page and opens `/m/turns/`. It is drawn only with turns installed,
+and not through the phone gateway.
+
 A row opens in place, by its `Open` or by a click, Enter or Space on its line, and several
 can be open at once. The session is read when its row is opened. Opened, a row shows the
 newest message a person typed (`You`) and the model's newest message after it (`Reply`),
@@ -607,7 +624,8 @@ request. With launcher installed the page also reads three of launcher's routes 
 push topic: `/api/running` (the launches running now) with each read of the list; the topic
 `running` at the desk, which brings each new value as launcher has it; `/api/keep-warm` on a
 `Keep warm` press; and `/api/state?session=<id>` once when a Claude Code session's transcript
-opens. Of a message they send at most 64 KiB, saying when it was cut; of the newest
+opens. With turns installed, at the desk, it reads turns' `/api/sessions` with each read of
+the list and follows turns' topic `sessions`. Of a message they send at most 64 KiB, saying when it was cut; of the newest
 thing said on a row and of a subagent's last message, 300 bytes. The server keeps what
 the list read in memory for as long as it runs, and keeps no more of a message than it
 sends.
@@ -630,9 +648,8 @@ zero and no greyed control stands in for it. What is left out, and what each nee
 - The template a running session was started from, the effort on the `Session` line, and
   `Resume` that starts the session from the page: they need more of launcher's read of
   what it launched than `/api/running` gives.
-- A running session's state (working, how many subagents and shells are busy, a line for
-  trouble, the turn that is open) and a session that waits for an answer: they need
-  turns to say them by session.
+- A session that waits for an answer: it needs turns to say when a session asks you
+  something.
 - A Project filter in place of Folder, and the project beside a row's name: the
   `projects` extra answers many folders' projects in one read, and the list doesn't use
   it yet.

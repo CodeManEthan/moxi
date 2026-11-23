@@ -121,7 +121,9 @@ def test_verdict_prints_each_decision_with_the_ruling_that_settles_it(built, cap
 
     out = capsys.readouterr().out
     assert f"decision B1.M1: major, open: {RETRIED}\n" in out
-    assert f"his to rule: moxi rounds rule {ROUND} B1.M1=accept|reject --record PTR" in out
+    # B1 is not finished yet, so its decision is not yet put to the operator.
+    assert ("  not yet put to the operator (stage B1 is not finished): "
+            f"moxi rounds rule {ROUND} B1.M1=accept|reject --record PTR\n") in out
 
 
 def test_a_decision_listed_again_with_another_sentence_is_refused(built):
@@ -171,7 +173,7 @@ def test_a_decision_holds_no_stage_and_no_question_s_place(built):
 
 # -- ruled --------------------------------------------------------------------------------
 
-def test_his_ruling_of_a_decision_is_one_event_of_substance_on_no_stage(built, capsys):
+def test_the_operators_ruling_of_a_decision_is_one_event_of_substance_on_no_stage(built, capsys):
     round_dir, tree = built
     verify(round_dir, tree.rev(), decision())
 
@@ -270,14 +272,14 @@ def test_list_waiting_and_the_project_export_hold_each_unruled_major(built, caps
     project = export.questions_of("proj-a")
     docket = export.questions_of(ROUND)
 
-    assert f"major decisions not yet ruled:\n  {ROUND} B1.M1: {RETRIED}\n" in out
+    assert f"decisions not yet ruled:\n  {ROUND} B1.M1: {RETRIED}\n" in out
     assert [row["id"] for row in rows] == ["B1.M1"]
     assert {key: rows[0][key] for key in ("holder", "blocks", "state", "stage",
                                           "weight", "forecloses")} == {
         "holder": ROUND, "blocks": "none", "state": "open", "stage": "B1",
         "weight": "major", "forecloses": False}
     assert [entry.data() for entry in project.decisions] == rows
-    assert "## Major decisions not yet ruled" in export.as_markdown(project)
+    assert "## Decisions not yet ruled" in export.as_markdown(project)
     assert docket.entries == ()
     assert api.waiting()["decisions"] == rows
 

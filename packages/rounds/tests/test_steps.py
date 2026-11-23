@@ -411,7 +411,7 @@ def test_a_skip_of_the_questions_step_lets_its_stage_past_for_everything_that_as
     if flow == "full":
         assert steps.one(found, "docket", "B1").state == steps.SKIPPED
         assert steps.one(found, "docket", "B2").questions == ("Q1",)
-        # The question is still his to answer: it holds the other stage.
+        # The question is still the operator's to answer: it holds the other stage.
         assert steps.one(found, "docket").state == steps.READY
 
 
