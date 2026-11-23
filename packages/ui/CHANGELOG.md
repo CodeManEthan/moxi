@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- While reads that decide a page's layout are out, `client.js` marks the page root (the
+  shell's `#moxi-panel`) with `data-reading="<n>"`, their count, and takes the mark away
+  at none: each `api` read until its answer has been drawn, each `subscribe` until its
+  first value (at most 5 s), each `place` until its element is placed. A user sees no
+  change. For module authors, `moxi_ui.testing` gains the `ui_press` fixture
+  (`moxi_ui.testing.browser.press`), a click that waits for the mark to go first, and
+  `settled(page)`: press through it and a late answer can't move a control under the
+  click. A page that never settles fails the press with the mark's count.
 - Settings compares a `path` key's value with its default as paths: a default under the
   home folder is joined with the platform's separator, and both sides are normalised
   (and case-folded on Windows) before the comparison. On Windows a path key left at its

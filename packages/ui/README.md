@@ -330,6 +330,13 @@ components. The browser fixtures need the `testing` extra and a browser:
 `pip install 'moxi-ui[testing]'`, then `playwright install chromium`. The plugin's
 docstring lists every fixture.
 
+A test presses a control through `ui_press(locator)`. While reads that decide a page's
+layout are out, `client.js` marks the page root (the shell's `#moxi-panel`) with
+`data-reading="<n>"`, their count: each `api` read until its answer has been drawn, each
+`subscribe` until its first value (at most 5 s), each `place` until its element is placed.
+The press waits until the mark is gone, then clicks, so a late answer never moves a
+control under the click. A page that never settles fails the press with the mark's count.
+
 The shell's pages allow no eval, so a `page.wait_for_function` predicate is a function,
 `"() => window.done"`, never a bare expression, `"window.done"`. Playwright evaluates a
 function's text once, in a call the policy lets through, but a bare expression on every

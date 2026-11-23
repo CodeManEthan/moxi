@@ -15820,6 +15820,7 @@ ui	packages/ui/src/moxi_ui/testing/browser.py	check_component	name	err	exc
 ui	packages/ui/src/moxi_ui/testing/browser.py	held: set[str] = set()	keep	set	set
 ui	packages/ui/src/moxi_ui/testing/browser.py	if any(parts.path.startswith(f"/m/{module}/") for module in modules):	keep	any	any
 ui	packages/ui/src/moxi_ui/testing/browser.py	if not held_read and any(urlsplit(url).path == PUSH_PATH for url in strays):	keep	any	any
+ui	packages/ui/src/moxi_ui/testing/browser.py	locator.wait_for(state="visible", timeout=wait_ms)	keep	timeout	timeout
 ui	packages/ui/src/moxi_ui/testing/browser.py	page.wait_for_function(_JS_RENDERED, arg=mark, timeout=RENDER_MS)	keep	timeout	timeout
 ui	packages/ui/src/moxi_ui/testing/browser.py	return set(), False	keep	set	set
 ui	packages/ui/src/moxi_ui/testing/phone.py	PhoneBridge	name	_guarded	_on_guarded

@@ -68,6 +68,12 @@ A module whose `ui` is an optional extra uses these fixtures by name and never i
     `check(page, *, module=None, name="page", attrs=None, route="", width=360)`: the
     document has no horizontal scroll at 360 CSS px, with the module's panel open or its
     component placed (see `moxi_ui.testing.browser.check_width`).
+`ui_press`
+    `press(locator, *, wait_ms=WAIT_MS, **click_args)`: clicks `locator` once it is
+    visible and no read that decides its page's layout is out, which `client.js` marks
+    on the page root as `data-reading="<n>"` (see `moxi_ui.testing.browser.press`). A
+    test presses through it, so a late answer never moves a control under the click. A
+    page that doesn't settle within `wait_ms` fails the press with the mark's count.
 
 A module's browser test, for example:
 
@@ -429,6 +435,14 @@ def ui_component_check() -> Callable[..., Any]:
     from .browser import check_component
 
     return check_component
+
+
+@pytest.fixture
+def ui_press() -> Callable[..., Any]:
+    """The click that waits for the page to settle first (`browser.press`)."""
+    from .browser import press
+
+    return press
 
 
 @pytest.fixture
