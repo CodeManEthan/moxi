@@ -20,12 +20,14 @@
   call counts as the runner's own, judged by no guard, only when it carries no `agentId`;
   every call of a fork the runner started is judged by the guards at the call step and
   the ask step, and gets no after-tool ask. The runner holds a fork's id until the fork's
-  own turn.complete for its open round, or the session's end. A round its bound ends
+  own turn.complete for its open round; a /clear, a compaction or a resume lets go of
+  nothing, and only the end of the Claude Code process drops it. A round its bound ends
   reads `lost` `gone` at once, but the fork may still be running, so its id stays held
   until that late turn.complete, which lets it go and reports nothing; its calls
   meanwhile are still the fork's, and a `fork.continue` for it is refused. A call with
-  an id the runner does not hold is judged and asked after as any agent's. The runner speaks leg 5 and is version 0.3.0, so `moxi install turns`
-  updates an install at user scope.
+  an id the runner does not hold is judged and asked after as any agent's. The runner
+  speaks leg 5 and is version 0.3.0, so `moxi install turns` updates an install at user
+  scope.
 - A new request, `fork.continue {delivery, text, ref?}` (the client's
   `fork_continue(delivery, text, ref=)`): give a fork that has answered its next round, a
   new delivery whose `ended` carries the round's answer. It reads `lost` `gone` when the

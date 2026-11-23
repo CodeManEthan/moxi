@@ -10,7 +10,7 @@
 import { describe, expect, test } from 'claude-code/testing'
 import { world } from './world'
 import type { World } from './world'
-import { WARM_UP, forgetForks, heldFork, noteForkEnd, ownCall, roundWaitMs, runFork, runRound } from '../hooks/register'
+import { WARM_UP, heldFork, noteForkEnd, ownCall, roundWaitMs, runFork, runRound } from '../hooks/register'
 import type { Fork, ForkEngine } from '../hooks/register'
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -375,17 +375,6 @@ describe('a round its bound ended', () => {
     ])
     expect(heldFork(s.forks, 'f1')).toBe(false)
   })
-
-  test('the session\'s end lets go of every fork, a lapsed one and an open one', async () => {
-    const s = await lapsed()
-    s.spawnAnswer = { model: 'm', agentId: 'f2' }
-    void s.fork('d2', 'two')
-    await s.settle()
-    expect(heldFork(s.forks, 'f1')).toBe(true)
-    expect(heldFork(s.forks, 'f2')).toBe(true)
-    forgetForks(s.forks)
-    expect(s.forks.size).toBe(0)
-  })
 })
 
 describe('the fork line through the runner', () => {
@@ -415,12 +404,27 @@ describe('the fork line through the runner', () => {
     expect(w.sends).toEqual([])
   })
 
-  test('the session\'s end passes on through the runner', async ($: E, on) => {
+  test('a /clear while a round is open leaves the fork\'s calls the fork\'s until its turn.complete', async ($: E, on) => {
+    // The kit's spawn names no agent and its hooks keep their own module state, so the
+    // fork runs on a stand-in engine while the /clear goes through the runner's hooks;
+    // the runner has no hook that lets go of a held fork at a session's end.
     const w = world(on)
     await start($)
     await w.hello()
+    const s = stand()
+    const done = s.fork('d1', 'recall', 5_000)
+    await s.settle()
+    await s.end('f1', 'READY')
     expect(await $.session.end({ reason: 'clear', sessionId: 's1' })).toEqual({ sessionId: 's1' })
-    expect(w.kinds()).not.toContain('fork.lost')
+    expect(heldFork(s.forks, 'f1')).toBe(true)
+    // Past its bound too, the round lost and the fork still held.
+    await s.advance(5_000)
+    await done
+    expect(s.reports.at(-1)).toEqual({ kind: 'fork.lost', delivery: 'd1', reason: 'gone: the fork did not answer within 5 s' })
+    expect(heldFork(s.forks, 'f1')).toBe(true)
+    expect(w.kinds().filter(k => k.startsWith('fork.'))).toEqual([])
+    await s.end('f1', 'a late answer')
+    expect(heldFork(s.forks, 'f1')).toBe(false)
   })
 
   test('an agent\'s turn.complete is never reported as the main loop\'s', async ($: E, on) => {

@@ -124,8 +124,9 @@ Then, in any order:
         `fork.lost` `gone: …`.
 
         The runner holds a fork's agent id from its spawn, and from a further round's
-        line, until the fork's own `turn.complete` for that round, or the session's end
-        (`session.end`). A warm-up or round past its bound reports `fork.lost` `gone: …`
+        line, until the fork's own `turn.complete` for that round; a /clear, a
+        compaction or a resume lets go of nothing, and only the end of the process that
+        holds it drops it. A warm-up or round past its bound reports `fork.lost` `gone: …`
         at once, but the fork may still be running, so the id stays held until that late
         `turn.complete`, which lets it go and reports nothing; a `fork.continue` line for
         it meanwhile reports `fork.lost` `denied: …`. A warm-up that ends other than

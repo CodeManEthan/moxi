@@ -294,7 +294,9 @@
 // `task-notification`) as the engine sends it.
 //
 // Held forks: the runner holds a fork's agent id from its spawn, and from a further
-// round's line, until the fork's own turn.complete for that round, or the session's end.
+// round's line, until the fork's own turn.complete for that round; only the end of the
+// process that holds the map lets go of it otherwise. A /clear, a compaction or a resume
+// lets go of nothing, so a fork still running after one keeps its calls the fork's.
 // A warm-up or round its bound ends reports `fork.lost` `gone: ...` at once, but the fork
 // may still be running, so its id stays held until that late turn.complete, which lets
 // the id go and reports nothing; a `fork.continue` line for it meanwhile is refused as
@@ -464,7 +466,8 @@ let floors: Record<string, number> = {}
 /** The main loop's context in tokens, from the last reading since the last SessionStart. */
 let contextTokens: number | null = null
 /** The forks the runner holds, by agent id, each until its round's turn.complete (its
- *  delivery's end, or after a round its bound ended) or the session's end. */
+ *  delivery's end, or after a round its bound ended). Nothing else empties it: a /clear,
+ *  a compaction or a resume keeps every entry. */
 const held = new Map<string, Fork>()
 
 const log = ($: Dollar, text: string): void => {
@@ -796,7 +799,7 @@ export function roundWaitMs(value: unknown): number {
 
 /** The `fork` line: spawn with the warm-up, then give the task as the first resumed round,
  *  waiting `roundMs` for its answer. `forks` holds the fork's id from the spawn until its
- *  own turn.complete for the round, or the session's end. */
+ *  own turn.complete for the round. */
 export async function runFork(engine: ForkEngine, forks: Map<string, Fork>, delivery: string, text: string, roundMs = ROUND_WAIT_MS): Promise<void> {
   const lostBefore = (reason: string) => engine.report('fork.lost', { delivery, reason })
   let agentId: string | undefined
@@ -837,8 +840,8 @@ function forkLost(engine: ForkEngine, forks: Map<string, Fork>, agentId: string,
 }
 
 /** A bound ended the fork's turn: its delivery settles lost, gone, at once, but the fork
- *  may still be running, so the runner holds its id until the fork's own turn.complete
- *  (or the session's end), which reports nothing further. */
+ *  may still be running, so the runner holds its id until the fork's own turn.complete,
+ *  which reports nothing further. */
 function lapse(engine: ForkEngine, f: Fork, why: string): void {
   f.lapsed = true
   engine.report('fork.lost', { delivery: f.delivery, reason: `gone: ${why}` })
@@ -878,11 +881,6 @@ function forkEngine($: Dollar): ForkEngine {
 export function ownCall(originPlugin: unknown, agentId: unknown, tool: unknown, taskId: unknown, stoppingNow: ReadonlySet<string>): boolean {
   if (!isMain(agentId)) return false
   return originPlugin === PLUGIN || (tool === 'TaskStop' && stoppingNow.has(String(taskId)))
-}
-
-/** The session ended: the runner holds no fork past it. */
-export function forgetForks(forks: Map<string, Fork>): void {
-  forks.clear()
 }
 
 /** Is this tool call a fork's the runner holds? */
@@ -1832,12 +1830,6 @@ export const register: Register = on => {
 
   // The engine's measure of the session: the context's tokens for the floors, and the
   // reading for the endpoint when the context or a rate limit moved.
-  // The session's end (exit, /clear, resume) lets go of every fork it held.
-  on('session.end', async ($, e, next) => {
-    forgetForks(held)
-    return next(e)
-  })
-
   on('session.measure', async ($, e, next) => {
     const hook = watch()
     try {
