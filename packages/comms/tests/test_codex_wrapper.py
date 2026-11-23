@@ -591,6 +591,9 @@ def test_the_host_holds_the_lifeline_and_ends_when_the_adapter_dies(
         assert brief.read_text() == "go" and brief.stat().st_mode & 0o777 == 0o600
         os.kill(adapter_pid, signal.SIGKILL)
         assert wait_until(lambda: host_said(headless_host, "lifeline-closed"), PROC_WAIT_S)
+        # The wrapper exits a moment after its host wrote that line: its exit is what the
+        # test asserts, so wait for it here, before the `finally` may kill it.
+        proc.wait(PROC_WAIT_S)
     finally:
         if proc.poll() is None:
             proc.kill()

@@ -33,7 +33,7 @@ import { css, html, LitElement, noChange, nothing } from "lit";
 import { Directive, directive, PartType } from "lit/directive.js";
 import type { ElementPart, PartInfo } from "lit/directive.js";
 import { repeat } from "lit/directives/repeat.js";
-import { api, navigate, WaitClock } from "/m/ui/client.js";
+import { api, navigate, readLater, WaitClock } from "/m/ui/client.js";
 
 import {
   actRequest, addRows, answerView, confirmView, folderLine, planFailWords, planPath, refreshCommand, rowAddTitle, transportView,
@@ -329,7 +329,8 @@ export class RepoPage extends LitElement {
   #waited = new WaitClock(READING_AFTER_MS);
   #refreshTimer: ReturnType<typeof setInterval> | undefined;
   #copyTimer: ReturnType<typeof setTimeout> | undefined;
-  #folderTimer: ReturnType<typeof setTimeout> | undefined;
+  /** Cancels the typed folder's plan read waiting to be sent. */
+  #cancelFolder = (): void => {};
 
   #shown = (): void => {
     if (document.visibilityState === "visible") void this.#feed?.refresh();
@@ -354,7 +355,7 @@ export class RepoPage extends LitElement {
     this.#waited.stop();
     clearInterval(this.#refreshTimer);
     clearTimeout(this.#copyTimer);
-    clearTimeout(this.#folderTimer);
+    this.#cancelFolder();
     document.removeEventListener("visibilitychange", this.#shown);
   }
 
@@ -449,7 +450,7 @@ export class RepoPage extends LitElement {
     this.#adding = false;
     this.#folder = "";
     this.#addPicked = [];
-    clearTimeout(this.#folderTimer);
+    this.#cancelFolder();
     this.#piecesShown = false;
   }
 
@@ -618,12 +619,13 @@ export class RepoPage extends LitElement {
   }
 
   /** The folder typed: its plan is read once typing stops for a while. Until then no plan
-   * is drawn, so the button never sends a plan for a folder the field no longer names. */
+   * is drawn, so the button never sends a plan for a folder the field no longer names. The
+   * page root counts the plan's read as out from the keystroke. */
   #typed(text: string): void {
     this.#folder = text;
     if (this.#acting?.at === "add") this.#acting = null;
-    clearTimeout(this.#folderTimer);
-    this.#folderTimer = setTimeout(() => this.#planFolder(), FOLDER_MS);
+    this.#cancelFolder();
+    this.#cancelFolder = readLater(() => this.#planFolder(), FOLDER_MS);
     this.requestUpdate();
   }
 
@@ -633,7 +635,7 @@ export class RepoPage extends LitElement {
     if (picked.has(id)) picked.delete(id);
     else picked.add(id);
     this.#addPicked = order.filter((one) => picked.has(one));
-    clearTimeout(this.#folderTimer);
+    this.#cancelFolder();
     this.#planFolder();
   }
 

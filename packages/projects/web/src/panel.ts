@@ -33,7 +33,7 @@
 
 import { css, html, LitElement, nothing } from "lit";
 import { live } from "lit/directives/live.js";
-import { api } from "/m/ui/client.js";
+import { api, readLater } from "/m/ui/client.js";
 
 import { CHANGED, parseAdded, parseOne, parseWhere, parseWritten } from "./feed.ts";
 import type { Kinds, Listing, Project } from "./feed.ts";
@@ -134,7 +134,8 @@ export class ProjectsPanel extends LitElement {
   #asked: Asked | null = null;
   /** The folder field's value whose read is waited for, or null. */
   #waiting: string | null = null;
-  #timer: ReturnType<typeof setTimeout> | null = null;
+  /** Cancels the folder's read waiting to be sent. */
+  #cancelFolder = (): void => {};
   #note: string | null = null;
   #sending = false;
   #said: PanelSaid | null = null;
@@ -154,8 +155,7 @@ export class ProjectsPanel extends LitElement {
   disconnectedCallback(): void {
     super.disconnectedCallback();
     this.#connected += 1;
-    if (this.#timer !== null) clearTimeout(this.#timer);
-    this.#timer = null;
+    this.#cancelFolder();
   }
 
   protected firstUpdated(): void {
@@ -200,19 +200,16 @@ export class ProjectsPanel extends LitElement {
     this.requestUpdate();
   }
 
-  /** Reads what is at `typed` after the wait, unless the field moves on first. */
+  /** Reads what is at `typed` after the wait, unless the field moves on first. The page
+   * root counts the read as out from now, so a press waits for what it fills in. */
   #readFolder(typed: string, waitMs = 0): void {
-    if (this.#timer !== null) clearTimeout(this.#timer);
-    this.#timer = null;
+    this.#cancelFolder();
     if (typed.trim() === "") {
       this.#waiting = null;
       return;
     }
     this.#waiting = typed;
-    this.#timer = setTimeout(() => {
-      this.#timer = null;
-      void this.#askFolder(typed);
-    }, waitMs);
+    this.#cancelFolder = readLater(() => this.#askFolder(typed), waitMs);
   }
 
   async #askFolder(typed: string): Promise<void> {

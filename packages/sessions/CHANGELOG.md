@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- The list's find reads the list again through moxi-ui's `readLater`, so the page root's
+  `data-reading` mark counts that read from the keystroke until the list it brings is
+  drawn, and a test's press waits for it. A user sees no change. The `ui` extra asks for
+  moxi-ui 0.2.8 or later.
 - With turns installed, a running row on the page says its live state, in the words turns'
   Live sessions panel uses: `working` while a turn is open, what is busy (`1 subagent
   busy`, `2 shells running`), and a dim line when turns can't read the session. An opened

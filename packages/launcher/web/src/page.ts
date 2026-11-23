@@ -14,7 +14,9 @@
 // - Sessions: the launcher's `sessions` block, placed as any host places it: each running
 //   launched session's recycle and keep-warm state, and whether it needs a look.
 // - Launches: the launch log's newest rows from the topic `launches`, with a `state`
-//   component placed beside each live one (the topic `sessions` says which are live).
+//   component placed beside each live one (the topic `sessions` says which are live). A
+//   topic value that leaves out a row shown now is read again from `/api/launches`
+//   instead of drawn, so a snapshot older than the read never takes a launch away.
 // - Past sessions: `/api/sessions`, read again when either topic moves. A slot session
 //   resumes through `/api/resume` (202, then followed by its status path); a terminal one
 //   is answered with the `moxi launcher resume` command to copy. Each resumable row takes
@@ -24,14 +26,14 @@
 import { css, html, LitElement, nothing } from "lit";
 import { keyed } from "lit/directives/keyed.js";
 import { repeat } from "lit/directives/repeat.js";
-import { api, place, subscribe } from "/m/ui/client.js";
+import { api, place, readLater, subscribe } from "/m/ui/client.js";
 import type { FieldDescriptor, FormElement, FormSubmit, FormValue } from "/m/ui/client.js";
 
 import { Feed, parseLaunches, parseStates } from "./feed.ts";
 import type { Launches, Refusal, States } from "./feed.ts";
 import { when } from "./views.ts";
 import {
-  choiceKey, choiceOf, chosenPreset, commandLine, emptyGroups, fieldsFor, filledFields, FOLLOW_FOR_MS, FOLLOW_MS,
+  choiceKey, choiceOf, dropsShown, chosenPreset, commandLine, emptyGroups, fieldsFor, filledFields, FOLLOW_FOR_MS, FOLLOW_MS,
   followedOf, formPath, HARNESS, keepLabel, launchBody, launchesView, NO_PRESET, olderPath, outcomeOf,
   parseCatalog, parseForm, parsePasts, parsePresets, parsePreview, pastView, presetLines, presetProblems,
   presetsOf, refusalLine, requestOf, resumeBody,
@@ -142,7 +144,8 @@ export class LauncherPage extends LitElement {
   #older: Past[] = [];
   #olderBusy = false;
   #stops: (() => void)[] = [];
-  #pastTimer: ReturnType<typeof setTimeout> | undefined;
+  /** Cancels the past sessions' read waiting to be sent. */
+  #pastCancel = (): void => {};
   #followTimer: ReturnType<typeof setInterval> | undefined;
 
   // The form: the preset chosen, the `/api/form` answer it is filled from, the harness it
@@ -207,7 +210,8 @@ export class LauncherPage extends LitElement {
     void launches.refresh().then(() => {
       if (this.#launches !== launches) return;
       this.#stops.push(subscribe("launcher", "launches", (data) => {
-        launches.topic(data);
+        if (dropsShown(launches.value, parseLaunches(data))) void launches.refresh();
+        else launches.topic(data);
         this.#pastsLater();
       }));
     });
@@ -231,7 +235,7 @@ export class LauncherPage extends LitElement {
     this.#states = null;
     for (const stop of this.#stops) stop();
     this.#stops = [];
-    clearTimeout(this.#pastTimer);
+    this.#pastCancel();
     clearInterval(this.#followTimer);
     this.#followTimer = undefined;
     document.removeEventListener("visibilitychange", this.#shown);
@@ -299,9 +303,11 @@ export class LauncherPage extends LitElement {
     this.requestUpdate();
   }
 
+  /** Reads the past sessions again once a burst of topic values has passed. The page root
+   * counts that read as out from now, so a press waits for the list it draws. */
   #pastsLater(): void {
-    clearTimeout(this.#pastTimer);
-    this.#pastTimer = setTimeout(() => { void this.#pasts?.refresh(); }, PAST_DELAY_MS);
+    this.#pastCancel();
+    this.#pastCancel = readLater(() => this.#pasts?.refresh(), PAST_DELAY_MS);
   }
 
   #form(): FormElement | null {

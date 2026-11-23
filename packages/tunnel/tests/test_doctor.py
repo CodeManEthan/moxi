@@ -28,9 +28,15 @@ def states(rows) -> dict[str, str]:
     return {r.name: r.state for r in rows}
 
 
+#: The wait a test that hangs a read gives that read: 0.2 s, not the doctor's 2 s.
+HUNG_READ_S = 0.2
+
+
 def quick(**kw):
-    """One run with short waits: a hung read costs 0.2 s, not 2 s."""
-    return doctor.rows(**{"budget": 3.0, "read_wait": 0.2, "connect_wait": 0.05, **kw})
+    """One run with the doctor's own waits, which a read that answers never comes near.
+    Only a test that hangs a read cuts the wait, with `read_wait=HUNG_READ_S`, so the
+    hung read costs 0.2 s, not 2 s."""
+    return doctor.rows(**kw)
 
 
 @pytest.fixture
@@ -232,7 +238,7 @@ def _quick_with_tailscale_hung(alpha, tailscale, yes) -> float:
     acts.add("alpha/connector", ask=yes)
     tailscale.edit(lambda s: s.update(hang=["version"], calls=[]))
     start = time.monotonic()
-    rows = quick()
+    rows = quick(read_wait=HUNG_READ_S)
     took = time.monotonic() - start
     got = by_name(rows)
     assert got["tailscale CLI"].state == "fail"
@@ -267,7 +273,7 @@ def test_a_hung_serve_status_fails_the_first_entry_and_skips_the_prefs(alpha, ta
     acts.add("alpha/gateway", ask=yes)
     acts.add("alpha/connector", ask=yes)
     tailscale.edit(lambda s: s.update(hang=["serve-status"], calls=[]))
-    got = by_name(quick())
+    got = by_name(quick(read_wait=HUNG_READ_S))
     assert (got["logged in"].state, got["tailscale CLI"].state) == ("ok", "ok")
     assert got["alpha/connector"].state == "fail"
     assert got["alpha/connector"].detail == "tailscale did not answer in 0.2 s"
@@ -398,7 +404,7 @@ def test_a_unit_state_that_does_not_come_back_leaves_its_row_not_checked(alpha, 
 
     monkeypatch.setattr(units, "status", hung)
     try:
-        got = by_name(quick())
+        got = by_name(quick(read_wait=HUNG_READ_S))
     finally:
         release.set()
     row = got["cloudflare in step"]

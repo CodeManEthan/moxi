@@ -33,7 +33,7 @@ projects = ["moxi-projects>=0.1,<0.2"]
 # The tmux slot target, and the startup screens answered there.
 slots = ["moxi-slots>=0.1.1,<0.2"]
 # The browser UI shell: with it, the launcher's page shows there.
-ui = ["moxi-ui>=0.2.3,<0.3"]
+ui = ["moxi-ui>=0.2.8,<0.3"]
 # notes' handoff folder, which a launch's handoff pointer and a relaunch's handoff use.
 notes = ["moxi-notes>=0.1,<0.2"]
 # cache's timer, for keep-warm and recycle on expiry.

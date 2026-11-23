@@ -672,6 +672,16 @@ export interface LaunchesView {
   detail: string | null;
 }
 
+/** Whether a `launches` topic value leaves out a launch the page shows now. The log only
+ * gains launches, and the topic is a snapshot the shell may have kept from before the last
+ * read, so such a value is read again from the route rather than drawn: drawing it would
+ * take a row away under the reader's press and put it back at the next snapshot. */
+export function dropsShown(shown: Launches | null, next: Launches | null): boolean {
+  if (shown === null || next === null || shown.state !== "up" || next.state !== "up") return false;
+  const kept = new Set(next.launches.map((row) => row.request_id));
+  return shown.launches.some((row) => !kept.has(row.request_id));
+}
+
 /** The launch log's newest rows, each live one marked so from the live launches' states. */
 export function launchesView(launches: FeedState<Launches>, states: FeedState<States> | null,
                              mine: ReadonlySet<string> = new Set()): LaunchesView {
