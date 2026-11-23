@@ -45,7 +45,7 @@ def test_find_by_session_id_and_by_pid(make_endpoint):
     assert s is not None and s.harness == "fake" and s.pid == os.getpid()
     assert s.capabilities == frozenset({"deliver", "only-if-idle", "steer", "stop-handler",
                                         "clear", "exit", "compact", "agents",
-                                            "stop-shells"})
+                                        "stop-shells", "keep"})
     assert s.endpoint_pid == os.getpid() and s.address == ep.address
     assert turns.find(pid=os.getpid()).dir == ep.dir
     assert turns.find(session_id="nobody") is None

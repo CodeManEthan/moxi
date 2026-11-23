@@ -156,7 +156,7 @@ unit = "hours"
 [projects]
 type = "table"
 default = {}
-doc = "Per-project tables, [projects.<key>]: any key of defaults, and the project's own dir, into, land, check, ci, finish, shared_paths, keep_branch, lock_ref and brief."
+doc = "Per-project tables, [projects.<key>]: any key of defaults, and the project's own dir, into, land, check, ci, finish, shared_paths, keep_branch, lock_ref, brief and private_files."
 read = "use"
 label = "Each project's own settings"
-line = "[projects.<key>] tables: any key of defaults, and the project's own dir, into, land, check, finish and more."
+line = "[projects.<key>] tables: any key of defaults, and the project's own dir, into, land, check, finish, private_files and more."

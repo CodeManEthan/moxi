@@ -86,7 +86,7 @@ def test_the_first_line_and_no_hello_before_the_session_id(claude):
     assert s.capabilities == frozenset({"deliver", "only-if-idle", "steer", "stop-handler",
                                         "clear", "exit", "compact", "agents",
                                         "stop-shells", "guards", "after-tool", "usage",
-                                        "environ"})
+                                        "environ", "fork", "keep"})
     assert s.info["mod_version"] == "0.1.0"
 
 
@@ -544,6 +544,115 @@ def test_exit_reads_ran_only_once_the_harness_process_is_gone(claude, monkeypatc
     finally:
         harness_proc.kill()
         harness_proc.wait()
+
+
+def test_a_fork_goes_on_a_line_and_its_reports_start_and_end_it(claude):
+    ep, runner = claude()
+    s = turns.find(session_id="s-1")
+    d = s.fork("recall what we said", by="memory", ref="r-1")
+    assert runner.next_line() == {"op": "fork", "delivery": d.id,
+                                  "text": "recall what we said"}
+    runner.report(leg.R_FORK_STARTED, delivery=d.id, agent_id="agent-7")
+    started = d.wait_started(2)
+    assert isinstance(started, turns.Started) and started.agent_id == "agent-7"
+    assert started.turn_id is None
+    runner.report(leg.R_FORK_DONE, delivery=d.id, answer="two points", reason="answer",
+                  is_aborted=False)
+    ended = d.wait_ended(2)
+    assert isinstance(ended, turns.Ended)
+    assert (ended.turn_id, ended.outcome, ended.answer) == (None, "answer", "two points")
+
+
+def test_a_further_round_goes_on_a_fork_continue_line_naming_the_agent(claude):
+    ep, runner = claude()
+    s = turns.find(session_id="s-1")
+    d = s.fork("recall", by="memory")
+    runner.next_line()
+    runner.report(leg.R_FORK_STARTED, delivery=d.id, agent_id="agent-7")
+    runner.report(leg.R_FORK_DONE, delivery=d.id, answer="one", reason="answer",
+                  is_aborted=False)
+    d.wait_ended(2)
+    r = s.fork_continue(d.id, "go on")
+    assert runner.next_line() == {"op": "fork.continue", "delivery": r.id,
+                                  "agent_id": "agent-7", "text": "go on"}
+    runner.report(leg.R_FORK_STARTED, delivery=r.id, agent_id="agent-7")
+    runner.report(leg.R_FORK_DONE, delivery=r.id, answer="two", reason="answer",
+                  is_aborted=False)
+    assert r.wait_ended(2).answer == "two"
+
+
+def test_the_askers_round_bound_rides_on_the_fork_and_fork_continue_lines(claude):
+    ep, runner = claude()
+    s = turns.find(session_id="s-1")
+    d = s.fork("recall", by="memory", round_timeout_s=1800)
+    assert runner.next_line() == {"op": "fork", "delivery": d.id, "text": "recall",
+                                  "round_timeout_ms": 1_800_000}
+    runner.report(leg.R_FORK_STARTED, delivery=d.id, agent_id="agent-7")
+    runner.report(leg.R_FORK_DONE, delivery=d.id, answer="one", reason="answer",
+                  is_aborted=False)
+    d.wait_ended(2)
+    r = s.fork_continue(d.id, "go on", round_timeout_s=2.5)
+    assert runner.next_line() == {"op": "fork.continue", "delivery": r.id,
+                                  "agent_id": "agent-7", "text": "go on",
+                                  "round_timeout_ms": 2500}
+
+
+def test_a_fork_round_that_ended_in_an_error_or_with_no_text_reads_so(claude):
+    ep, runner = claude()
+    s = turns.find(session_id="s-1")
+    d = s.fork("recall", by="memory")
+    runner.next_line()
+    runner.report(leg.R_FORK_STARTED, delivery=d.id, agent_id="agent-7")
+    runner.report(leg.R_FORK_DONE, delivery=d.id, answer="", reason="error",
+                  is_aborted=False)
+    ended = d.wait_ended(2)
+    assert (ended.outcome, ended.answer) == ("error", None)
+
+
+@pytest.mark.parametrize("reason, read", [
+    ("denied: too many agents", "denied: too many agents"),
+    ("gone: the warm-up did not complete within 30 s",
+     "gone: the warm-up did not complete within 30 s"),
+    ("something else", "gone: something else"),
+])
+def test_a_lost_fork_reads_lost_denied_or_gone(claude, reason, read):
+    ep, runner = claude()
+    s = turns.find(session_id="s-1")
+    d = s.fork("recall", by="memory")
+    runner.next_line()
+    runner.report(leg.R_FORK_LOST, delivery=d.id, reason=reason)
+    assert bare(d.wait_started(2)) == turns.Lost(read)
+    assert bare(d.wait_ended(2)) == turns.Lost(read)
+
+
+def test_a_fork_report_for_no_open_fork_changes_nothing(claude):
+    ep, runner = claude()
+    s = turns.find(session_id="s-1")
+    other = s.deliver("hello")
+    runner.next_line()
+    # A fork report naming a delivery that is no fork is logged and changes nothing.
+    runner.report(leg.R_FORK_LOST, delivery=other.id, reason="gone: no")
+    runner.report(leg.R_FORK_DONE, delivery="nobody", answer="x", reason="answer")
+    with pytest.raises(TimeoutError):
+        other.wait_started(0.2)
+    d = s.fork("recall", by="memory")
+    runner.next_line()
+    runner.report(leg.R_FORK_DONE, delivery=d.id, answer="first", reason="answer",
+                  is_aborted=False)
+    assert d.wait_ended(2).answer == "first"
+    # A second end for a settled fork changes nothing.
+    runner.report(leg.R_FORK_LOST, delivery=d.id, reason="gone: late")
+    assert d.wait_ended(2).answer == "first"
+
+
+def test_a_fork_started_with_no_agent_id_is_a_bad_report(claude):
+    ep, runner = claude()
+    s = turns.find(session_id="s-1")
+    d = s.fork("recall", by="memory")
+    runner.next_line()
+    status, body = post(runner.mod_sock, leg.PATH_REPORT,
+                        {"seq": 99, "kind": leg.R_FORK_STARTED, "delivery": d.id})
+    assert status == 400 and "agent_id" in body["error"]
 
 
 def test_steer_appends_and_a_failed_append_refuses_idle(claude):

@@ -1,4 +1,4 @@
-"""What `finish` of a stage waits for: its ten gates, read at the tip `T` being finished.
+"""What `finish` of a stage waits for: its eleven gates, read at the tip `T` being finished.
 
 `unmet(state, stage, seen=...)` gives every gate that does not hold, in order, each with
 its number, what is not met and the command that meets it. Nothing here reads git, a
@@ -33,8 +33,11 @@ answer.
     held while the outer reads merged, until the outer's finish records the landing;
     the outer one is held, unless it reads merged, until the inner's work is on the
     target.
+11. **Private files.** No commit reachable from `T` and not from the target's head holds
+    a private file of the repo: a `path` the build's event records `brought`, or an
+    entry of the repo's `private_files` now (`private_files.held`, read into `Seen`).
 
-Gates 9 and 10 are not steps, so no skip meets them, and nothing here reads a skip of
+Gates 9, 10 and 11 are not steps, so no skip meets them, and nothing here reads a skip of
 `finish`: the operator can't skip it.
 """
 
@@ -43,7 +46,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from dataclasses import dataclass
 
-from . import builds, checking, findings, flows, report_block, skips
+from . import builds, checking, findings, flows, private_files, report_block, skips
 from .settings import LAND_QUEUE
 from . import state as states
 from .errors import Unmet
@@ -58,11 +61,12 @@ WORKTREE = 7
 USER_STEPS = 8
 WORK = 9
 SHARING = 10
+PRIVATE = 11
 #: The gates, by number, each with a word for it.
 GATES = {VERIFIED: "verification", FINDINGS: "findings", CHECKED: "check",
          QUESTIONS: "questions", DRIFT: "drift", TARGET: "target",
          WORKTREE: "worktree", USER_STEPS: "user steps", WORK: "work",
-         SHARING: "sharing"}
+         SHARING: "sharing", PRIVATE: "private files"}
 
 #: `check_on`: the check passed on the tip merged with the target, or on the tip alone.
 MERGED = "merged"
@@ -76,7 +80,7 @@ ELSEWHERE = "elsewhere"
 
 @dataclass(frozen=True)
 class Gate:
-    """One gate of `finish` that does not hold: its `number` (1 to 10) and what is not
+    """One gate of `finish` that does not hold: its `number` (1 to 11) and what is not
     met, with the command that meets it."""
 
     number: int
@@ -228,6 +232,11 @@ def unmet(state: states.State, stage: str, *, seen, tip: str | None = None,
         else:
             continue
         add(SHARING, said, f"finish that build first: moxi rounds next {other}")
+
+    if seen.private:
+        reason, fix = private_files.words(seen.private, repo=build.repo,
+                                          target=build.target, round_name=name)
+        add(PRIVATE, reason, fix)
     return tuple(found)
 
 
@@ -247,5 +256,5 @@ def _drifts(state: states.State, stage: str, seen):
 
 
 __all__ = ["VERIFIED", "FINDINGS", "CHECKED", "QUESTIONS", "DRIFT", "TARGET",
-           "WORKTREE", "USER_STEPS", "WORK", "SHARING", "GATES", "MERGED", "TIP",
+           "WORKTREE", "USER_STEPS", "WORK", "SHARING", "PRIVATE", "GATES", "MERGED", "TIP",
            "CLEAN", "CHANGED", "ELSEWHERE", "Gate", "unmet"]

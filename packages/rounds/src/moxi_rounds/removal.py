@@ -35,8 +35,12 @@ repo's `disposable` globs name. What can't be read counts as work. For a worktre
   overridden (`B1_CONFIG`); the status read is `B1_STATUS`.
 - B2. `git ls-files -v` marks no path skip-worktree or assume-unchanged.
 - B3. The read prints no tracked change, conflict, changed submodule or untracked path,
-  and every ignored path has a part a `disposable` glob matches. The rest are work, and
-  the account lists them.
+  and every ignored path has a part a `disposable` glob matches or is a private file
+  `commission` copied in that nobody changed: a regular file whose bytes hash to the
+  `sha256` its event recorded or equal its source's bytes now
+  (`private_files.is_unchanged`). An ignored folder goes when a walk of it that follows
+  no link finds only such files, paths a glob names, and folders. The rest are work,
+  and the account lists them.
 - B4. The worktree's `HEAD` and each ref of its own (`refs/worktree/`, `refs/bisect/`,
   `refs/rewritten/`) name commits a branch, tag or remote ref of the repo contains, less
   a branch the same act deletes.
@@ -73,7 +77,7 @@ from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass, replace
 from pathlib import Path
 
-from . import folders, paths, places
+from . import folders, paths, places, private_files
 from . import settings as own
 from .errors import RoundsError, UnfencedTest
 from .gitreads import Git, GitError
@@ -123,7 +127,8 @@ class Kept:
 class Proven:
     """A folder both halves allow to go: its `kind`, its `place` below the real root,
     the repo `root` it is a worktree of (None for a scratch folder), the `disposable`
-    globs read for it, the branch the same act deletes, and the record's `build` id."""
+    globs read for it, the branch the same act deletes, the record's `build` id, and
+    the private files its event records `brought` into the worktree."""
 
     kind: str
     place: Path
@@ -131,6 +136,7 @@ class Proven:
     disposable: tuple[str, ...]
     deletes: str | None
     build: str
+    brought: tuple = ()
 
 
 @dataclass(frozen=True)
@@ -156,8 +162,10 @@ def judge(name: str, commissioned: Mapping, kind: str, *, settings, env=None,
     place, root = owned
     disposable = tuple(own.build_setting(settings, str(commissioned["repo"]),
                                          "disposable"))
+    brought = commissioned.get("brought")
     proven = Proven(kind=kind, place=place, root=root, disposable=disposable,
-                    deletes=deletes, build=str(commissioned["build"]))
+                    deletes=deletes, build=str(commissioned["build"]),
+                    brought=tuple(brought) if isinstance(brought, list) else ())
     return _no_lost_work(proven) or proven
 
 
@@ -406,7 +414,7 @@ def _worktree_work(proven: Proven) -> Kept | None:
     for code, path in _status(here):
         if code != "!!":
             work.append(path)
-        elif not _disposable(path, proven.disposable):
+        elif not _may_lose(place, path, proven):
             work.append(path)
     if work:
         return Kept(place, "B3", "it holds work that is not committed: a change, an "
@@ -440,6 +448,36 @@ def _status(git: Git) -> list[tuple[str, str]]:
         skip = code[0] in "RC"
         found.append((code, path))
     return found
+
+
+def _may_lose(place: Path, path: str, proven: Proven) -> bool:
+    """Whether the ignored `path` of the worktree at `place` is disposable: a part of
+    it matches a glob, it is a brought file nobody changed, or it is a folder whose
+    walk, following no link, finds only such files and folders."""
+    if _disposable(path, proven.disposable):
+        return True
+    if not path.endswith("/"):
+        return private_files.is_unchanged(place, path, list(proven.brought))
+    if not proven.brought:
+        return False
+    dirs_left = [path.rstrip("/")]
+    while dirs_left:
+        walked = dirs_left.pop()
+        try:
+            with os.scandir(place / walked) as entries:
+                listed = [(entry.name, entry.is_dir(follow_symlinks=False))
+                          for entry in entries]
+        except OSError:
+            return False
+        for name, is_dir in listed:
+            inner = f"{walked}/{name}"
+            if _disposable(inner, proven.disposable):
+                continue
+            if is_dir:
+                dirs_left.append(inner)
+            elif not private_files.is_unchanged(place, inner, list(proven.brought)):
+                return False
+    return True
 
 
 def _disposable(path: str, globs: tuple[str, ...]) -> bool:

@@ -32,7 +32,9 @@ and to append:
 1. Under the lock: the build of the stage is open; its repo declares a check, or the
    round's flow has the command step named; its worktree was made on this machine and is there, has the build's branch checked out
    and holds nothing uncommitted; its scratch folder is there; the build has work (it
-   reads `building` or `merged`). The tip `T` is read then, with the merge-base of `T`
+   reads `building` or `merged`); no commit from the tip not on the target's head holds
+   a private file of the repo (finish's gate 11, `private_files.held`). The tip `T` is
+   read then, with the merge-base of `T`
    and the target's head. Any of these that does not hold refuses the verb, having run
    nothing.
 2. With the round's lock released, the machine's check lock is taken (below), and the
@@ -346,6 +348,7 @@ def seen_of(state: states.State, name: str, *, settings,
             reported = {step: _since_verdict(state, build, now.status, Git(root),
                                              head=head, settings=settings, step=step)
                         for step in report_steps(state)}
+            private = _private_held(settings, build, commissioned, Git(root), head)
         except RoundsError as exc:
             found[build.stage] = steps.Seen(problem=Unmet(
                 f"{build.stage} can't be read from git: {exc.reason}",
@@ -367,8 +370,21 @@ def seen_of(state: states.State, name: str, *, settings,
             check_on=own.build_setting(settings, build.repo, "check_on"),
             land=own.build_setting(settings, build.repo, "land"),
             actions=tuple(own.build_setting(settings, build.repo, "finish")),
-            shares=tuple(now.shares), ratify=ratify)
+            shares=tuple(now.shares), ratify=ratify, private=private)
     return found
+
+
+def _private_held(settings, build: builds.Build, commissioned: Mapping, git: Git,
+                  tip: str | None) -> tuple:
+    """Each private file of the build some commit from `tip` not on its target's head
+    holds (`private_files.held`); none where the tip or the target can't be read."""
+    from . import private_files
+
+    paths = private_files.private_paths(settings, build.repo, commissioned.get("brought"))
+    target_head = git.branch(build.target)
+    if not paths or tip is None or target_head is None:
+        return ()
+    return tuple(private_files.held(git, paths, tip, target_head))
 
 
 def _tree(commissioned: Mapping, worktree: Path, *, here: bool) -> str | None:
@@ -925,7 +941,8 @@ def _look(view, *, name: str, stage: str, step: str | None, settings, again: str
         found.unmet.append(Unmet(exc.reason, exc.fix or "moxi projects list"))
         return found
     try:
-        found.unmet += _read_git(found, Git(root), worktree, build, name=name, stage=stage,
+        found.unmet += _read_git(found, Git(root), worktree, build, commissioned,
+                                 name=name, stage=stage,
                                  settings=settings)
     except GitError as exc:
         found.unmet.append(Unmet(exc.reason, exc.fix or again))
@@ -1001,8 +1018,8 @@ def _by_ci_look(found: _Look, state: states.State, settings, *,
                                  argv=found.local_argv)
 
 
-def _read_git(found: _Look, git: Git, worktree: Path, build: builds.Build, *, name: str,
-              stage: str, settings) -> list[Unmet]:
+def _read_git(found: _Look, git: Git, worktree: Path, build: builds.Build,
+              commissioned: Mapping, *, name: str, stage: str, settings) -> list[Unmet]:
     unmet = []
     here = Git(worktree)
     checked = here.checked_out()
@@ -1032,6 +1049,13 @@ def _read_git(found: _Look, git: Git, worktree: Path, build: builds.Build, *, na
             f"({read.status.why})",
             f"commit the work on {build.branch}, then run the check"))
     target_head = git.branch(build.target)
+    held = _private_held(settings, build, commissioned, git, tip)
+    if held:
+        from . import private_files
+
+        reason, fix = private_files.words(held, repo=build.repo, target=build.target,
+                                          round_name=name)
+        unmet.append(Unmet(reason, fix))
     bases = () if target_head is None else git.merge_bases(tip, target_head)
     found.tip = tip
     found.merge_base = bases[0] if len(bases) == 1 else None
