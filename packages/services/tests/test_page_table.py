@@ -17,12 +17,16 @@ from page_kit import LB
 
 # -- the table ------------------------------------------------------------------------------
 
-READS = {"/api/rows", "/api/row", "/api/projects", page.STATUS_ROUTE, "/api/events"}
+READS = {"/api/rows", "/api/row", "/api/unit", "/api/ends", "/api/projects",
+         page.STATUS_ROUTE, "/api/events"}
 CONFIRMED = {"/api/start", "/api/stop", "/api/restart", "/api/run", "/api/enable",
-             "/api/disable", "/api/remove"}
-#: The routes the phone reaches: the reads but the project list, the stream, the status
-#: route and every confirmed act on a row but remove.
-GATEWAY = (READS - {"/api/projects"}) | (CONFIRMED - {"/api/remove"})
+             "/api/disable"}
+#: The routes the phone reaches: four reads (the rows, one row, the status and the
+#: stream), the read of what a stop of slots' server ends, and the six confirmed acts on
+#: a row: never remove, the desk's plain act, add, the unit read or the project list.
+GATEWAY = {"/api/rows", "/api/row", page.STATUS_ROUTE, "/api/events", "/api/ends",
+           "/api/start", "/api/stop", "/api/restart", "/api/run", "/api/enable",
+           "/api/disable"}
 
 
 def routes() -> dict[str, dict]:
@@ -33,22 +37,27 @@ def test_the_gate_matrix_passes():
     assert LB.gate_matrix(page.PAGE)
 
 
-def test_the_page_declares_its_reads_its_confirmed_acts_and_add():
+def test_the_page_declares_its_reads_its_confirmed_acts_the_plain_act_and_add():
     found = routes()
     assert {p for p, r in found.items() if r["kind"] == "read"} == READS
-    assert {p for p, r in found.items() if r["kind"] == "act"} == CONFIRMED | {"/api/add"}
+    assert {p for p, r in found.items() if r["kind"] == "act"} == CONFIRMED | {
+        "/api/act", "/api/add"}
     assert {p for p, r in found.items() if r["confirmed"]} == CONFIRMED
     assert {p for p, r in found.items() if r["stream"]} == {"/api/events"}
     for path in CONFIRMED:
         assert found[path]["status"] == page.STATUS_ROUTE, path
     assert found["/api/add"]["status"] is None
+    assert found["/api/act"]["status"] is None
 
 
-def test_the_gateway_reaches_the_reads_the_stream_the_status_and_six_acts():
+def test_the_gateway_reaches_four_reads_the_slots_read_and_the_six_confirmed_acts():
     found = routes()
     assert {p for p, r in found.items() if r["gateway"]} == GATEWAY
-    for path in ("/api/add", "/api/remove", "/api/projects"):
+    assert GATEWAY == (READS - {"/api/projects", "/api/unit"}) | CONFIRMED
+    for path in ("/api/act", "/api/add", "/api/projects", "/api/unit"):
         assert found[path]["gateway"] is False, path
+    # Remove is the desk's plain act alone: no route of its own.
+    assert "/api/remove" not in found
 
 
 def test_the_stream_has_one_topic_carrying_what_the_rows_read_answers():
@@ -86,7 +95,8 @@ def every_leaf() -> dict[str, str | None]:
 #: Within one row: the string leaves that are a name, an id, a time or a word of a fixed
 #: set, and so carry no mark.
 ROW_PLAIN = {"id", "module", "name", "form", "kind", "project", "switch", "verdict.state",
-             "verdict.cause", "state", "since", "last_run.at", "checked.state", "unit", "schedule",
+             "verdict.cause", "state", "since", "last_run.at", "checked.state", "checked.at",
+             "streak.since", "timing.every", "timing.at[]", "timing.days[]", "unit", "schedule",
              "stopped", "platform"}
 ROW_REDACT = {"doc", "verdict.reason", "verdict.fix", "detail", "last_run.text",
               "checked.line", "argv[]", "health[]"}
@@ -97,9 +107,11 @@ def test_every_string_leaf_is_plain_only_for_a_name_an_id_a_time_or_a_word():
              for where, row in (("/api/rows", "rows[]"), ("/api/events", "rows.rows[]"),
                                 ("/api/row", "row"))
              for leaf in ROW_PLAIN}
-    plain |= {"/api/rows state", "/api/rows problems[].module",
-              "/api/events rows.state", "/api/events rows.problems[].module",
+    plain |= {"/api/rows state", "/api/rows at", "/api/rows problems[].module",
+              "/api/events rows.state", "/api/events rows.at",
+              "/api/events rows.problems[].module",
               "/api/row runs[].at", "/api/row runs[].result",
+              "/api/row unit", "/api/row units[]", "/api/unit kind",
               "/api/projects projects[].key",
               "/api/status job", "/api/status act", "/api/status id", "/api/status state"}
     found = every_leaf()
@@ -113,7 +125,8 @@ def test_commands_are_redact_a_working_dir_path_and_every_sentence_redact():
               for leaf in ROW_REDACT}
     redact |= {"/api/rows detail", "/api/rows problems[].reason",
                "/api/events rows.detail", "/api/events rows.problems[].reason",
-               "/api/row log", "/api/projects reason",
+               "/api/row log", "/api/unit refused", "/api/projects reason",
+               "/api/ends why", "/api/ends sessions[].label",
                "/api/status lines[]", "/api/status fix"}
     path = {f"{where} {row}.cwd"
             for where, row in (("/api/rows", "rows[]"), ("/api/events", "rows.rows[]"),
@@ -141,7 +154,7 @@ def test_the_announcement_offers_the_page_and_imports_none_of_it():
     from moxi_services import module
 
     assert module.PAGE == "moxi_services.page:PAGE"
-    assert "ui" in module.OPTIONAL
+    assert sorted(module.OPTIONAL) == ["projects", "slots", "ui"]
     assert not hasattr(module, "BUDGETS")
     probe = ("import sys, moxi_services.module, moxi_services.cli, moxi_services.doctor, "
              "moxi_services.projects_link\n"

@@ -40,9 +40,9 @@ def _block(css: str, selector: str) -> dict[str, str]:
     return dict(re.findall(r"^  --moxi-([a-z0-9-]+): (.*);$", block, re.M))
 
 
-def test_tokens_become_theme_css_41_tokens_on_the_root_and_a_block_per_other_theme():
+def test_tokens_become_theme_css_45_tokens_on_the_root_and_a_block_per_other_theme():
     names = [name for name in TOKENS if not name.startswith("$")]
-    assert len(names) == 41
+    assert len(names) == 45
     themes = TOKENS["$themes"]
     assert themes == {"plain": {"light": "plain-day", "dark": "plain-night"},
                       "midnight-neon": {"light": "calm-workbench", "dark": "midnight-neon"}}
@@ -52,7 +52,7 @@ def test_tokens_become_theme_css_41_tokens_on_the_root_and_a_block_per_other_the
         "calm-workbench": "light", "midnight-neon": "dark"}
     css = _built("theme.css")
     colours = [name for name in names if TOKENS[name]["$type"] == "color"]
-    assert len(colours) == 34
+    assert len(colours) == 38
 
     def pair(name: str, theme: str) -> str:
         values = TOKENS[name]["$extensions"]["moxi"]["sets"]
@@ -199,6 +199,11 @@ def test_client_js_is_the_contract_and_imports_nothing():
     # So is the row of a list.
     assert "export interface RowElement " in decl and '"moxi-ui-row": RowElement;' in decl
     assert '"moxi-ui-row"' in text and '"moxi-row-toggle"' in text
+    # And the rail of steps, with its marks and its event.
+    for name in ("RailElement", "MarkElement", "RailMark"):
+        assert f"export interface {name} " in decl
+    assert '"moxi-ui-rail": RailElement;' in decl and '"moxi-ui-mark": MarkElement;' in decl
+    assert '"moxi-ui-rail"' in text and '"moxi-ui-mark"' in text and '"moxi-rail-mark"' in text
     # client.js holds no Lit; each component bundles its own.
     assert "lit-html" not in text and "LitElement" not in text
 

@@ -103,9 +103,10 @@ index keeps the step the log alone gives, and marks it so (`at`).
   (`finish_actions.blocked`); it is ready once none is left. It is read from what
   `Asked.seen` says of the stage's build.
 
-- `ratify`, of the round: ready while a major decision that reached the target is not
-  ruled (`decisions.unruled_majors`), each named with the command that rules it; done
-  once none is left and every stage of the plan is finished, and not due before then.
+- `ratify`, of the round: ready while a decision that is the operator's is not ruled
+  (`decisions.to_rule`: of a finished build, its weight named by the project's `ratify`
+  setting), each named with the command that rules it; done once none is left and
+  every stage of the plan is finished, and not due before then.
   The project's `ratify` setting of `off` makes it done where it would be ready. The
   setting is read from what `Asked.seen` holds under no stage, the round's own; where
   that is not given and a decision would make the step ready, it waits on a read of
@@ -186,8 +187,8 @@ class Seen:
     when that could not be read; `tree`, the worktree as `finish` reads it: None where
     it no longer exists, else `clean`, `changed` (a tracked change or an untracked path)
     or `elsewhere` (made on another machine); `check_on`, the repo's setting of that
-    name; `actions`, the repo's finish actions, each with its `id`; `shares`, the
-    `(round, stage)` of each build it shares commits with; `ratify`, the project's
+    name; `actions`, the repo's finish actions, each with its `id`; `shares`, a
+    `builds.Share` for each build it shares commits with; `ratify`, the project's
     setting of that name; `design`, what `commission` refuses on while `design.md`
     holds other bytes than its current version was frozen from (`versions.unchanged`),
     None when it holds the same or that was not read;
@@ -211,7 +212,7 @@ class Seen:
     tree: str | None = None
     check_on: str = "merged"
     actions: tuple[Mapping, ...] = ()
-    shares: tuple[tuple[str, str], ...] = ()
+    shares: tuple[builds.Share, ...] = ()
     ratify: str = "majors"
     design: Unmet | None = None
     problem: Unmet | None = None
@@ -543,23 +544,28 @@ RATIFY_OFF = "off"
 
 
 def _ratify(state: states.State, about: Asked) -> Step:
-    unruled = decisions.unruled_majors(state)
-    if not unruled:
-        planned = stages.in_plan(state)
-        finished = questions.finished_stages(state)
-        done = bool(planned) and all(stage.id in finished for stage in planned)
-        return Step(RATIFY, DONE if done else NOT_DUE)
+    # The decisions that may be the operator's: open, of a finished build. Which are is
+    # read under the project's setting (`decisions.to_rule`).
+    candidates = tuple(one for one in decisions.reached(state)
+                       if one.state == decisions.OPEN)
     seen = (about.seen or {}).get(None)
-    if seen is None:
+    if candidates and seen is None:
         return Step(RATIFY, WAITING, unread=True, waits=(Unmet(
             "whether the project's ratify setting puts these decisions to the operator "
             "is read from the settings, which were not read here",
             f"moxi rounds next {about.name}"),))
-    if seen.ratify == RATIFY_OFF:
+    if seen is not None and seen.ratify == RATIFY_OFF and any(
+            one.major for one in candidates):
         return Step(RATIFY, DONE)
+    to_rule = () if not candidates else decisions.to_rule(state, seen.ratify)
+    if not to_rule:
+        planned = stages.in_plan(state)
+        finished = questions.finished_stages(state)
+        done = bool(planned) and all(stage.id in finished for stage in planned)
+        return Step(RATIFY, DONE if done else NOT_DUE)
     return Step(RATIFY, READY, waits=tuple(
-        Unmet(f"decision {one.key}, major and not yet ruled: {one.text}",
-              decisions.rule_line(about.name, one.key)) for one in unruled))
+        Unmet(f"decision {one.key}, {one.weight} and not yet ruled: {one.text}",
+              decisions.rule_line(about.name, one.key)) for one in to_rule))
 
 RETRO = "retro"
 
@@ -680,8 +686,8 @@ def row_of(step: str, entry: Mapping | None) -> Row | None:
 
 def answer(name: str, question: states.Question) -> str:
     """The command that records the operator's answer to `question` of the round
-    `name`: he chooses a key where the question offers options, and says a sentence
-    where it offers none. Everything that prints the command for a question asks
+    `name`: the operator chooses a key where the question offers options, and says a
+    sentence where it offers none. Everything that prints the command for a question asks
     here, so the line is one that runs once its placeholders are filled."""
     how = "--chose K" if question.options else "--text TEXT"
     return f"moxi rounds rule {name} {question.id} {how} --record PTR"

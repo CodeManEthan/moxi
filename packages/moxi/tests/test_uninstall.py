@@ -435,7 +435,8 @@ def test_a_second_uninstall_waits_for_a_running_install(fake, capsys):
     finally:
         holder.wait(10)
     assert code == 0, err
-    assert f"waiting for another install or uninstall (pid {pid}) to finish" in err
+    assert f"waiting for the core lock, which pid {pid} holds (an install or uninstall, " \
+           "or a module reading or changing its units)" in err
 
 
 def test_the_config_file_is_kept(fake, capsys):

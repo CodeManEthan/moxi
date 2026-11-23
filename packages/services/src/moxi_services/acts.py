@@ -8,7 +8,8 @@ the store or the core lock stayed busy), the lines to print and the fix. It neve
 What each act calls, by the row's form (services builds no supervisor command; the core's
 writer, `moxi.units`, does the rest):
 
-- a module row M/N: `units.<act>(M, [N])` to start, stop or restart it;
+- a module row M/N: `units.<act>(M, [N])` to start, stop or restart it (a daemon's
+  stop recorded in the store's `module_stops`, cleared by start, restart and enable);
   `moxi.config.set_value(M, <its switch>, ...)` to enable or disable it (refused without a
   switch); add and remove are refused, since it comes and goes with its module.
 - a written row N: `units.<act>("services", [N])`; enable and disable set the store's
@@ -27,7 +28,9 @@ Every act on a row terminates in every state. The rules that make it so:
   moxi.paths.core_lock(), nested=True)`, so the core's own calls inside it yield to it),
   and holds it around the write and the supervisor call that goes with it. Past its
   timeout nothing is written and the act exits 75. No store transaction is held across a
-  supervisor call: each write is one short transaction.
+  supervisor call: each write is one short transaction. A reader that takes the same lock
+  (`between_acts`) around its store read and its supervisor read never sees an act's
+  write without the supervisor call that goes with it.
 - `add` deletes its own row whenever the core will not write the unit, so no row
   outlives a refused add. `remove` deletes the row whenever no unit or drop-in of it
   remains, or none can exist here (a row of another system, no supervisor, an editable
@@ -201,6 +204,23 @@ def _locked() -> Iterator[None]:
         yield
 
 
+@contextmanager
+def between_acts(timeout_s: float) -> Iterator[None]:
+    """The core lock, for a read of the store and the supervisor together, so no act's
+    write and supervisor call fall between them; waited for `timeout_s` seconds, then
+    `Busy`."""
+    stack = ExitStack()
+    try:
+        stack.enter_context(moxi.files.lock(moxi.paths.core_lock(), timeout_s=timeout_s,
+                                            nested=True))
+    except moxi.files.LockTimeout as exc:
+        who = f"pid {exc.holder}" if exc.holder else "another process"
+        raise Busy(f"the rows weren't read: the core lock stayed held by {who} (an "
+                   f"install, or an act) past {timeout_s:g} s", str(exc.path)) from None
+    with stack:
+        yield
+
+
 # --- reading again after an act ---------------------------------------------------------
 
 def _unknown(st: units.UnitState | None) -> str | None:
@@ -307,7 +327,7 @@ def start(ident: str, *, by: str = BY) -> Outcome:
 
 def stop(ident: str, *, by: str = BY) -> Outcome:
     """Stop a row: a daemon until the next login or start, a timer's run in progress. No
-    flag changes; a user daemon's stop is recorded."""
+    flag changes; a daemon's stop is recorded."""
     return _run("stop", ident, by=by)
 
 
@@ -324,7 +344,12 @@ def _run_body(ident: str, act: str, *, by: str, lines: list[str]):
     row = resolve(ident)
     _refuse_unless_actable(row)
     call = getattr(units, act)
-    if isinstance(row, ModuleRow):
+    if isinstance(row, ModuleRow) and row.kind == "daemon":
+        with _locked():
+            # A stop by hand is recorded; start and restart clear it.
+            _record_module_stop([row.id], store.now() if act == "stop" else None, by=by)
+            ok = _acted(call(row.module, [row.name]), lines)
+    elif isinstance(row, ModuleRow):
         ok = _acted(call(row.module, [row.name]), lines)
     else:
         with _locked():
@@ -345,6 +370,21 @@ def _run_body(ident: str, act: str, *, by: str, lines: list[str]):
     if act != "stop":
         _note_gate_off(row, lines)
     return moxi.exit.OK, None
+
+
+def _record_module_stop(idents: Sequence[str], when: str | None, *, by: str) -> None:
+    """Record a module daemon's stop by hand at `when`, or clear the records of `idents`
+    with None; a clear with nothing recorded writes nothing. The caller holds the core
+    lock."""
+    if when is None:
+        idents = [i for i in idents if i in store.read_module_stops()]
+        if not idents:
+            return
+
+    def change(conn):
+        for ident in idents:
+            store.set_module_stop(conn, ident, when, by=by)
+    store.write(change)
 
 
 def _note_gate_off(row: Row, lines: list[str]) -> None:
@@ -394,7 +434,14 @@ def _switch_module(row: ModuleRow, *, enabled: bool, by: str, lines: list[str]):
         raise Refused(f"{row.id} declares no switch, so it has no on and off of its own",
                       f"stop it with `moxi services stop {row.id}`, or remove its module "
                       f"with `moxi uninstall {row.module}`")
-    applied = moxi.config.set_value(row.module, row.switch, enabled, by=by)
+    with _locked():
+        if enabled:
+            # Turning the switch on starts every daemon it covers, so their stops by
+            # hand no longer hold.
+            found, _ = rows.module_rows([row.module])
+            _record_module_stop([r.id for r in found if r.switch == row.switch
+                                 and r.kind == "daemon"], None, by=by)
+        applied = moxi.config.set_value(row.module, row.switch, enabled, by=by)
     lines.append(f"{row.module} {row.switch} set to {str(enabled).lower()}")
     # `moxi.config.set` prints the lines of a daemon switch's units as it applies them.
     if not _applied(applied, lines.said):
@@ -881,4 +928,4 @@ def _remove_wrapped(row: UserRow, by: str, lines: list[str]):
 
 __all__ = [
     "BY", "LOCK_TIMEOUT", "Outcome", "resolve", "start", "stop", "restart", "enable",
-    "disable", "add_written", "add_adopted", "remove"]
+    "disable", "add_written", "add_adopted", "remove", "between_acts"]

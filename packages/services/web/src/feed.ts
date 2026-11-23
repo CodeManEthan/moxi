@@ -10,14 +10,16 @@
 
 import type { ApiResult } from "/m/ui/client.js";
 
+import type { Ends } from "./acts-model.ts";
+import type { One, Run } from "./opened-model.ts";
+
 /** A verdict's states, best first. */
 export const VERDICTS = ["ok", "warn", "fail", "off"] as const;
 export type VerdictState = (typeof VERDICTS)[number];
 
 /** A row's verdict. `unknown` is true for a `warn` given because a value couldn't be
- * read. `cause` is one word for the case that gave it (`not-running`, `stopped`,
- * `last-run`), or null; services may add words, so a reader treats one it doesn't know
- * as null. */
+ * read. `cause` is one word for the case that gave it (services' README lists them), or
+ * null; services may add words, so a reader treats one it doesn't name as null. */
 export interface Verdict {
   state: VerdictState;
   reason: string | null;
@@ -26,17 +28,37 @@ export interface Verdict {
   cause: string | null;
 }
 
-/** A timer's last run: a few words (`ok`, `exit 1`, ...) and when. */
+/** A timer's last run: a few words (`ok`, `exit 1`, ...), when, and the exit code its
+ * gate line gives (null when the supervisor gave the result). */
 export interface LastRun {
   failed: boolean;
   text: string | null;
   at: string | null;
+  exit: number | null;
 }
 
-/** A running daemon's last health check: its state and its first line. */
+/** A running daemon's last health check: its state, its first line, and when the check
+ * ran (UTC, null when not known). */
 export interface Checked {
   state: string;
   line: string | null;
+  at: string | null;
+}
+
+/** A timer whose last run failed: how many of its newest runs failed in a row, when the
+ * oldest of them ran, and whether they all exited with one code. */
+export interface Streak {
+  count: number;
+  since: string | null;
+  same_exit: boolean;
+}
+
+/** A timer's schedule as declared: `every` (`5m`, `1h`), or `at` (`HH:MM` times) on
+ * `days` (`mon` ... `sun`); each null when not declared. */
+export interface Timing {
+  every: string | null;
+  at: string[] | null;
+  days: string[] | null;
 }
 
 /** One row, as `/api/rows` gives it. */
@@ -66,6 +88,15 @@ export interface Row {
   detail: string | null;
   last_run: LastRun | null;
   checked: Checked | null;
+  /** On a timer whose last run failed: its run of failed runs. */
+  streak: Streak | null;
+  /** A written or module timer's schedule as declared; null for a daemon and an adopted
+   * timer. */
+  timing: Timing | null;
+  /** True on slots' server only: its stop and restart end what runs in the slots. */
+  ends_slots: boolean;
+  /** True for a module row whose module has settings. */
+  has_settings: boolean;
   argv: (string | null)[] | null;
   cwd: string | null;
   unit: string | null;
@@ -75,6 +106,9 @@ export interface Row {
   stopped: string | null;
   removing: boolean;
   platform: string | null;
+  /** True for an adopted Linux timer: services' small file (its drop-in) sits beside its
+   * service, and Remove takes it away. */
+  wrapped: boolean;
 }
 
 /** A module whose run-time declarations failed. */
@@ -88,6 +122,8 @@ export interface Rows {
   /** `up`, or `error` when the store can't be read; `detail` says why. */
   state: "up" | "error";
   detail: string | null;
+  /** When this read asked the supervisor, UTC; null on an error. */
+  at: string | null;
   rows: Row[];
   problems: Problem[];
 }
@@ -161,14 +197,32 @@ function verdictOf(value: unknown): Verdict | null {
 
 function lastRunOf(value: unknown): LastRun | null | undefined {
   if (value === null) return null;
-  if (!isObj(value) || !isBool(value.failed) || !isStrOrNull(value.text) || !isStrOrNull(value.at)) return undefined;
-  return { failed: value.failed, text: value.text, at: value.at };
+  if (!isObj(value) || !isBool(value.failed) || !isStrOrNull(value.text) || !isStrOrNull(value.at)
+      || !isIntOrNull(value.exit)) return undefined;
+  return { failed: value.failed, text: value.text, at: value.at, exit: value.exit };
 }
 
 function checkedOf(value: unknown): Checked | null | undefined {
   if (value === null) return null;
-  if (!isObj(value) || !isStr(value.state) || !isStrOrNull(value.line)) return undefined;
-  return { state: value.state, line: value.line };
+  if (!isObj(value) || !isStr(value.state) || !isStrOrNull(value.line) || !isStrOrNull(value.at)) return undefined;
+  return { state: value.state, line: value.line, at: value.at };
+}
+
+function streakOf(value: unknown): Streak | null | undefined {
+  if (value === null) return null;
+  if (!isObj(value) || !Number.isInteger(value.count) || !isStrOrNull(value.since)
+      || !isBool(value.same_exit)) return undefined;
+  return { count: value.count as number, since: value.since, same_exit: value.same_exit };
+}
+
+const isTexts = (value: unknown): value is string[] | null =>
+  value === null || (Array.isArray(value) && value.every(isStr));
+
+function timingOf(value: unknown): Timing | null | undefined {
+  if (value === null) return null;
+  if (!isObj(value) || !isStrOrNull(value.every) || !isTexts(value.at) || !isTexts(value.days)) return undefined;
+  return { every: value.every, at: value.at === null ? null : [...value.at],
+           days: value.days === null ? null : [...value.days] };
 }
 
 /** One row, or null when it isn't one. */
@@ -178,22 +232,26 @@ export function parseRow(value: unknown): Row | null {
   const verdict = verdictOf(v.verdict);
   const last = lastRunOf(v.last_run);
   const checked = checkedOf(v.checked);
+  const streak = streakOf(v.streak);
+  const timing = timingOf(v.timing);
   if (!isStr(v.id) || !isStr(v.module) || !isStr(v.name) || !isStr(v.form) || !FORMS.has(v.form)
       || !isStr(v.kind) || !KINDS.has(v.kind) || !isStrOrNull(v.doc) || !isStrOrNull(v.project)
       || !isBool(v.launches_session) || !isBoolOrNull(v.flag) || !isStrOrNull(v.switch)
       || !isBool(v.has_switch) || verdict === null || !isStrOrNull(v.state) || !isBoolOrNull(v.enabled)
       || !isIntOrNull(v.pid) || !isStrOrNull(v.since) || !isStrOrNull(v.detail) || last === undefined
-      || checked === undefined || !isWords(v.argv) || !isStrOrNull(v.cwd) || !isStrOrNull(v.unit)
+      || checked === undefined || streak === undefined || timing === undefined
+      || !isBool(v.ends_slots) || !isBool(v.has_settings) || !isWords(v.argv) || !isStrOrNull(v.cwd) || !isStrOrNull(v.unit)
       || !isStrOrNull(v.schedule) || !isWords(v.health) || !isStrOrNull(v.stopped)
-      || !isBool(v.removing) || !isStrOrNull(v.platform)) return null;
+      || !isBool(v.removing) || !isStrOrNull(v.platform) || !isBool(v.wrapped)) return null;
   return {
     id: v.id, module: v.module, name: v.name, form: v.form as Row["form"], kind: v.kind as Row["kind"],
     doc: v.doc, project: v.project, launches_session: v.launches_session, flag: v.flag,
     switch: v.switch, has_switch: v.has_switch, verdict, state: v.state, enabled: v.enabled,
-    pid: v.pid, since: v.since, detail: v.detail, last_run: last, checked,
+    pid: v.pid, since: v.since, detail: v.detail, last_run: last, checked, streak, timing,
+    ends_slots: v.ends_slots, has_settings: v.has_settings,
     argv: v.argv === null ? null : [...v.argv], cwd: v.cwd, unit: v.unit, schedule: v.schedule,
     health: v.health === null ? null : [...v.health], stopped: v.stopped, removing: v.removing,
-    platform: v.platform,
+    platform: v.platform, wrapped: v.wrapped,
   };
 }
 
@@ -201,7 +259,7 @@ export function parseRow(value: unknown): Row | null {
  * be read makes the whole value unreadable, so no row is ever left out unseen. */
 export function parseRows(data: unknown): Rows | null {
   if (!isObj(data) || (data.state !== "up" && data.state !== "error") || !isStrOrNull(data.detail)
-      || !Array.isArray(data.rows) || !Array.isArray(data.problems)) return null;
+      || !isStrOrNull(data.at) || !Array.isArray(data.rows) || !Array.isArray(data.problems)) return null;
   const rows: Row[] = [];
   for (const item of data.rows) {
     const row = parseRow(item);
@@ -213,7 +271,7 @@ export function parseRows(data: unknown): Rows | null {
     if (!isObj(item) || !isStr(item.module) || !isStrOrNull(item.reason)) return null;
     problems.push({ module: item.module, reason: item.reason });
   }
-  return { state: data.state, detail: data.detail, rows, problems };
+  return { state: data.state, detail: data.detail, at: data.at, rows, problems };
 }
 
 /** `/api/projects`' value, or null when it isn't one. */
@@ -234,6 +292,47 @@ export function parseStatus(data: unknown): Status | null {
       || !Array.isArray(data.lines) || !data.lines.every(isStrOrNull) || !isStrOrNull(data.fix)) return null;
   return { job: data.job, act: data.act, id: data.id, state: data.state as JobState, code: data.code,
            lines: [...data.lines], fix: data.fix };
+}
+
+const isNum = (value: unknown): value is number => typeof value === "number" && Number.isFinite(value);
+
+function runOf(value: unknown): Run | null {
+  if (!isObj(value) || !isStrOrNull(value.at) || !isStrOrNull(value.result) || !isIntOrNull(value.exit)
+      || !(value.seconds === null || isNum(value.seconds))) return null;
+  return { at: value.at, result: value.result, exit: value.exit, seconds: value.seconds };
+}
+
+/** `/api/row`'s value less its row, which the list already has, or null when it isn't
+ * one. */
+export function parseOne(data: unknown): One | null {
+  if (!isObj(data) || parseRow(data.row) === null || !Array.isArray(data.runs) || !isStrOrNull(data.log)
+      || !isStrOrNull(data.unit) || !Array.isArray(data.units) || !data.units.every(isStr)) return null;
+  const runs: Run[] = [];
+  for (const item of data.runs) {
+    const run = runOf(item);
+    if (run === null) return null;
+    runs.push(run);
+  }
+  const t = data.today;
+  if (t !== null && (!isObj(t) || !Number.isInteger(t.runs) || !Number.isInteger(t.failed) || !isBool(t.more))) return null;
+  const today = t === null ? null : { runs: t.runs as number, failed: t.failed as number, more: t.more as boolean };
+  return { runs, log: data.log, unit: data.unit, units: [...data.units], today };
+}
+
+/** `/api/ends`' value, or null when it isn't one. Unread counts stay null, never 0. */
+export function parseEnds(data: unknown): Ends | null {
+  if (!isObj(data) || !isBool(data.read) || !isStrOrNull(data.why) || !isIntOrNull(data.open)
+      || !isIntOrNull(data.jobs)) return null;
+  let sessions: Ends["sessions"] = null;
+  if (data.sessions !== null) {
+    if (!Array.isArray(data.sessions)) return null;
+    sessions = [];
+    for (const item of data.sessions) {
+      if (!isObj(item) || !Number.isInteger(item.slot) || !isStrOrNull(item.label)) return null;
+      sessions.push({ slot: item.slot as number, label: item.label });
+    }
+  }
+  return { read: data.read, why: data.why, sessions, open: data.open, jobs: data.jobs };
 }
 
 /** The text an answer gives: its `refused`, `conflict` or `error`. */
@@ -278,6 +377,8 @@ const sleep: Wait = (ms) => new Promise((done) => setTimeout(done, ms));
  *   route's refusal, and `said` holds its reason and fix.
  * - A topic event replaces the value at once while the last read succeeded; otherwise,
  *   or when the event can't be read, it reads the route again.
+ * - `listener()` reads the route again for a subscription's first value, the one the
+ *   server held, and passes each later one to `topic()`.
  */
 export class Feed<V> {
   /** The last value read, or null before the first. */
@@ -332,6 +433,22 @@ export class Feed<V> {
       }
     })();
     return this.#running;
+  }
+
+  /** The function to give `subscribe` after the first read. A subscription's first value
+   * is the one the server held when its stream opened, which can be older than that read
+   * (an act's change waits for the server's next poll), so it reads the route again; each
+   * later value goes to `topic()`. */
+  listener(): (data: unknown) => void {
+    let first = true;
+    return (data) => {
+      if (!first) {
+        this.topic(data);
+        return;
+      }
+      first = false;
+      if (!this.#closed) void this.refresh();
+    };
   }
 
   /** One topic event. */

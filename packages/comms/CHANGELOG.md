@@ -5,6 +5,17 @@
 - The notes, refusals, docstrings and docs name the operator neutrally, never "he" or
   "him": the `--held` and `--interrupt` notes for the operator end "so it went as an
   ordinary message".
+
+## 0.3.1 (2026-11-21)
+
+- Every digest comms hands turns, on Claude Code and on Codex, by `deliver` or `steer`,
+  carries `by="comms"` and `senders`, the qualified name of each message's sender, once
+  each in the digest's order; the `deliver` a refused steer falls back to carries the
+  same. A session's `prompt` listeners read them as the prompt's `delivery_by` and
+  `delivery_senders`. A headless Codex launch's brief carries neither.
+- comms and its `codex` extra need moxi-turns 0.2.5 or later, the first whose `deliver`
+  and `steer` take `by` and `senders`. With an older turns every hand-in fails and no
+  mail reaches the session.
 - The comms daemon replaces a Claude Code session's adapter that died while the session
   runs at once, with no prompt: it sees the adapter's connection drop, waits up to 10 s
   for its claim socket to stop answering, and starts a new adapter with the environment
@@ -48,6 +59,12 @@
   note of their send, and `send_and_wait` returns a `notes` field. The connector's refusals
   name only its own tools and parameters (`sending.CURES_CONNECTOR`). Agent sessions'
   tools and `moxi comms send` keep the refusal and its text.
+- A connector `send` or `send_and_wait` to a name whose session has no turns endpoint now
+  says in chat `NOTE: <name>'s session can't be reached right now, so the message is held
+  until it is reachable.`, in its text and its `notes` field. It no longer names `moxi
+  comms doctor`, which the person in the chat can't run. `moxi comms send` and agent
+  sessions' tools keep their note, with how long the session has had no endpoint and where
+  to look.
 - With turns installed, comms' page reads turns' `/api/sessions` while a send box is
   open, with each check and every 30 s, and joins each session whose turn is open to its
   address by session id. A message the dry run would deliver to that session now reads

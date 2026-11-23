@@ -98,11 +98,13 @@ def test_nothing_outside_the_block_is_read(write):
     assert datablock.find(path, WHAT).data == {"title": "inside"}
 
 
-@pytest.mark.parametrize("fence", ["~~~toml rounds", "````toml rounds", "```  toml   rounds  "])
-def test_a_fence_of_tildes_or_more_marks_or_spaced_words_opens_a_block(write, fence):
-    marks = re.match(r"[`~]+", fence)[0]
+# The opening line is not named `fence`: that is the test kit's fixture, which a
+# parameter of the same name would replace.
+@pytest.mark.parametrize("opening", ["~~~toml rounds", "````toml rounds", "```  toml   rounds  "])
+def test_a_fence_of_tildes_or_more_marks_or_spaced_words_opens_a_block(write, opening):
+    marks = re.match(r"[`~]+", opening)[0]
     path = write(f"""
-        {fence}
+        {opening}
         title = "inside"
         {marks}
     """)

@@ -18,8 +18,8 @@ from conftest import wait_for_queue
 
 from moxi_comms.adapters import shim_roster
 from moxi_comms.context import CONTEXT_BLOCK, MOXI_COMMS_PATH_LINE
-from moxi_comms.adapters.claude_shim import (digest_header, frame_line, humanize_age,
-                                             parse_timestamp, render_digest)
+from moxi_comms.adapters.claude_shim import (digest_header, digest_senders, frame_line,
+                                             humanize_age, parse_timestamp, render_digest)
 from moxi_comms.paths import daemon_socket
 
 HOUR = 3600.0
@@ -296,6 +296,23 @@ def test_an_unparsable_or_missing_timestamp_costs_the_age_and_nothing_else():
 
 def test_an_empty_batch_has_no_header():
     assert digest_header([], clock=at(0)) is None
+
+
+def test_a_digests_senders_name_every_messages_sender_once_in_its_order():
+    """turns gets these as the delivery's `senders`: a digest whose every sender is one
+    name says so, and one with any other sender in it names that sender too."""
+    batch = [payload(message_id="101", author=author("subconscious")),
+             payload(message_id="102", author=author("planner@proj-a")),
+             payload(message_id="103", author=author("subconscious")),
+             payload(message_id="104", author=author("unknown", tier="unknown",
+                                                     attribution="labeled"))]
+    assert digest_senders(batch) == ("subconscious", "planner@proj-a", "unknown")
+    assert digest_senders(batch[:1] + batch[2:3]) == ("subconscious",)
+
+
+def test_a_payload_with_no_author_name_adds_no_sender():
+    assert digest_senders([payload(author={}), payload(author={"name": ""})]) == ()
+    assert digest_senders([]) == ()
 
 
 # ------------------------------------------- replay attribution: a BATCH property

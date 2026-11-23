@@ -22,13 +22,28 @@ status route gives its state, lines and fix.
 - A confirmed act's job id is its idempotency key. Within one server's life loopback
   answers a repeat of the key itself. A repeat it has dropped (it keeps the last 1,024)
   finds the job here, for the same act on the same row, and gets the same link, acting
-  nothing; for another act or row it is a 422. After a restart, a key is new: stop,
-  disable and remove end where the first did (a removed row's id is refused here), and a
-  start, run or restart runs again.
+  nothing; for another act or row it is a 422. After a restart, a key is new: stop
+  and disable end where the first did, a remove of a removed row's id is refused here,
+  and a start, run or restart runs again.
 - Before the 202, a handler checks only what needs no lock and no supervisor: the row
   exists (an unknown id is a 422 with the fix), a timer's start and restart go through
   `/api/run` and a daemon's never do (422), and an add's fields are in shape. Everything
   else is the act's own refusal, in the job's record.
+- `/api/act` is the desk's one plain act: the page mints its job id per press, and a
+  repeat of it is answered as a confirmed act's key is. The confirmed routes stay for
+  the phone. Every route refuses what the verb refuses, and also an enable or disable
+  of a Moxi row (`ON_OFF_IN_SETTINGS`): the page never turns one on or off; its on and
+  off is in Settings.
+- A stop or restart of slots' server (`slots/server`, by id: no other module declares
+  what its daemon's stop ends) is guarded: before the 202 the handler reads through
+  slots' API what the stop would end, and goes ahead only when nothing is in use, or
+  when the request's `ends`, the count the person was shown, covers what is in use now,
+  or the read did not answer and the request's `ends_unread` confirms that warning. Else
+  it is a 422,
+  `SLOTS_IN_USE`, or `SLOTS_UNREAD` for any other press the read couldn't answer: a
+  count Moxi couldn't read means the stop may end sessions, never that nothing is in
+  use, and a count confirmed before is no longer the one in use.
+  `/api/ends` answers the same read for the page's warning, its counts null when unread.
 - `add` is a plain act: no key, so its handler mints the job id. A repeated add POST is a
   second job, which the thread refuses as the name being taken. A command's first word
   must be a full path, since this server's PATH is the service manager's, not the user's
@@ -52,7 +67,16 @@ bound keeps the server's open files within its budget however many rows have a c
 each running check holds its pipes. A gather runs in a thread
 of its own, never on the base's threads, and only one runs at a time: a tick that finds
 the last one still running is skipped, and a skipped health pass runs at the next tick
-that gathers. The topic is published only when its value changed. The poller is not a
+that gathers. The topic is published only when its value changed.
+
+**One consistent read.** A gather, and one row's read, read the store and then the
+supervisor under the core lock (`acts.between_acts`), which every act holds around its
+write to the store (a stop by hand, or its clear) and the supervisor call that goes with
+it. So no row is judged from a store read older than the supervisor read it pairs with,
+and a stop or a start never reads as `not-running` on the way. The lock is waited for
+`ROWS_WAIT_S` seconds at most, the health pass runs after it is let go, and while an
+install or a slow act holds it, a gather answers the last value it read here (its `at`
+says when), or, with none, the error that the rows weren't read. The poller is not a
 request, a stream or a busy hold, so it never delays the server's idle exit, and it
 survives every exception, logged once per class.
 
@@ -74,6 +98,7 @@ import time
 from collections.abc import Callable, Mapping
 from typing import Any
 
+import moxi.paths
 from moxi import modules
 
 from . import acts, jobs, rows, state, store, verdict
@@ -102,8 +127,19 @@ PERIOD = 5.0
 HEALTH_PERIOD = 30.0
 #: The most health checks the poller runs at once.
 HEALTH_AT_ONCE = 8
+#: Seconds after which the poller publishes the topic again though nothing but its
+#: `at` changed, so a page's `read <time>` is never older than this.
+REPUBLISH_S = 60.0
+#: The most run lines a failing timer's streak counts back through.
+STREAK_LINES = 50
+#: The most run lines one row's read takes for its count of today's runs.
+TODAY_LINES = 500
+#: The newest runs one row's read shows.
+RUNS_SHOWN = 5
 #: Seconds a page read, or the poller, waits for the supervisor.
 STATUS_SECONDS = 10.0
+#: Seconds a gather, or one row's read, waits for the core lock while an act holds it.
+ROWS_WAIT_S = 5.0
 #: Who a change from the page is recorded as made by.
 BY = "services page"
 #: What a status read says of a job this server holds no record of.
@@ -119,6 +155,29 @@ STORE_UNREADABLE = ("services' store can't be read; fix: `moxi services list` on
                     "machine names the file and how to fix it")
 STORE_TOO_NEW = ("services' store was written by a newer moxi-services; fix: upgrade it "
                  "with `moxi install services`")
+#: The one row whose stop and restart end what runs in the slots: slots' server, by its
+#: id. No other module declares what its daemon's stop ends.
+SLOTS_SERVER = "slots/server"
+#: What a Stop or Restart of slots' server is told when more runs in its slots than the
+#: person was shown.
+SLOTS_IN_USE = "Something is running in its slots now."
+#: What a plain stop or restart of slots' server is told when its slots couldn't be read.
+SLOTS_UNREAD = "Moxi can't read the slots, so stopping it may end sessions in them."
+#: What `/api/ends` is told of any row but slots' server.
+ENDS_SLOTS_ONLY = "only slots' server ends what runs in the slots"
+#: What an act is told when its `ends` is below 0.
+ENDS_NEGATIVE = "ends is how many the person was shown in use: 0 or more"
+#: What an act is told when it carries both `ends` and `ends_unread`.
+ENDS_ONE_CONFIRM = ("a press confirms either the count shown (ends) or that the slots "
+                    "couldn't be read (ends_unread), not both")
+#: What an enable or disable of a Moxi row is told: the page never turns one on or off.
+ON_OFF_IN_SETTINGS = "Its on and off is in Settings › {module}."
+#: What `/api/act` is told of a job id that isn't 32 hex characters.
+JOB_SHAPE = "job is 32 hex characters the page mints for each press"
+#: What `/api/act` is told of a `restart`, an `ends` or an `ends_unread` its act doesn't
+#: take.
+RESTART_RUN_ONLY = "restart goes with run only"
+ENDS_STOP_ONLY = "ends and ends_unread go with stop and restart only"
 
 log = logging.getLogger("moxi.services.page")
 
@@ -184,8 +243,42 @@ def _list(value) -> list[str] | None:
     return None if value is None else list(value)
 
 
-def row_value(view: verdict.View) -> dict[str, Any]:
-    """One `page.ROW`."""
+def _timing(row) -> dict[str, Any] | None:
+    """A timer's schedule as declared: a written row's from the store, a module timer's
+    from its declaration. None for a daemon and an adopted timer."""
+    if row.kind != "timer" or (isinstance(row, UserRow) and row.form != "written"):
+        return None
+    return {"every": row.every, "at": _list(row.at), "days": _list(row.days)}
+
+
+def ends_slots(row) -> bool:
+    """True for slots' server, whose stop and restart end what runs in the slots."""
+    return isinstance(row, ModuleRow) and row.id == SLOTS_SERVER and row.kind == "daemon"
+
+
+def with_settings(found: list) -> frozenset[str]:
+    """The modules among `found`'s module rows that have settings, so a row's
+    `Settings` link leads somewhere. A module whose schema can't be read has none."""
+    import moxi.config
+
+    names = {r.module for r in found if isinstance(r, ModuleRow)}
+    out = set()
+    for name in names:
+        loaded = modules.load(name)
+        try:
+            if loaded.ok and moxi.config.schema_for(loaded) is not None:
+                out.add(name)
+        except Exception as exc:  # noqa: BLE001 - an unreadable schema is no link
+            _log_once(exc, f"{name}'s settings schema couldn't be read")
+    return frozenset(out)
+
+
+def row_value(view: verdict.View, *, settings: frozenset[str] = frozenset(),
+              checked_at: str | None = None,
+              streak: dict[str, Any] | None = None) -> dict[str, Any]:
+    """One `page.ROW`. `settings` holds the modules that have settings; `checked_at` is
+    when the health pass that gave the row's health result began; `streak` a failing
+    timer's streak (`count_streak`)."""
     row, st = view.row, view.st
     user = row if isinstance(row, UserRow) else None
     last = verdict.last_run(st) if row.kind == "timer" else None
@@ -203,35 +296,109 @@ def row_value(view: verdict.View) -> dict[str, Any]:
         "since": None if st is None else _iso(st.since),
         "detail": (st.detail or None) if st is not None else None,
         "last_run": None if last is None else {"failed": last.failed, "text": last.text,
-                                               "at": last.at},
+                                               "at": last.at, "exit": last.exit},
         "checked": None if view.health is None else {"state": view.health[0],
-                                                     "line": view.health[1]},
+                                                     "line": view.health[1],
+                                                     "at": checked_at},
+        "streak": streak,
+        "timing": _timing(row),
+        "ends_slots": ends_slots(row),
+        "has_settings": user is None and row.module in settings,
         "argv": _list(user.argv) if user else None,
         "cwd": user.cwd if user else None,
         "unit": user.unit if user else None,
         "schedule": _schedule(user) if user else None,
         "health": _list(user.health) if user else None,
-        "stopped": user.stopped if user else None,
+        "stopped": view.stopped,
         "removing": bool(user and user.removing),
         "platform": user.platform if user else None,
+        "wrapped": state.is_wrapped(row),
     }
+
+
+# -- a failing timer's streak -----------------------------------------------------------
+
+#: Each failing timer's streak, by row id, with the `at` of the newest run line it was
+#: counted from: the runs file is read again only when a newer line arrives.
+_streaks: dict[str, tuple[str | None, dict[str, Any] | None]] = {}
+_streaks_lock = threading.Lock()
+
+
+def count_streak(lines: list[dict]) -> dict[str, Any] | None:
+    """How many of `lines`' newest runs failed in a row (lines oldest first), when the
+    oldest of them ran, and whether they share one exit code; None when the newest run
+    did not fail."""
+    failed = []
+    for line in reversed(lines):
+        if not verdict.run_of(line).failed:
+            break
+        failed.append(line)
+    if not failed:
+        return None
+    exits = {line.get("exit") for line in failed}
+    return {"count": len(failed), "since": failed[-1].get("at"),
+            "same_exit": len(exits) == 1}
+
+
+def _streak(view: verdict.View, kept: dict[str, tuple[str | None, dict | None]]
+            ) -> dict[str, Any] | None:
+    """A timer's streak when its verdict is a failed last run, else None. Counted from
+    its newest `STREAK_LINES` run lines once per newest line, then taken from `kept`,
+    which this call updates."""
+    if view.verdict.cause != "last-run":
+        return None
+    last = verdict.last_run(view.st)
+    newest = None if last is None else last.at
+    held = kept.get(view.row.id)
+    if held is not None and held[0] == newest:
+        return held[1]
+    found = count_streak(state.last_runs(view.row, STREAK_LINES))
+    kept[view.row.id] = (newest, found)
+    return found
+
+
+def _streaks_of(seen: list[verdict.View], *, is_every_row: bool
+                ) -> dict[str, dict[str, Any] | None]:
+    """Each of `seen`'s streaks, by id. With `is_every_row`, the kept streaks of rows no
+    longer failing, or gone, are dropped."""
+    with _streaks_lock:
+        kept = dict(_streaks)
+    out = {v.row.id: _streak(v, kept) for v in seen}
+    with _streaks_lock:
+        if is_every_row:
+            _streaks.clear()
+        _streaks.update({i: kept[i] for i in out if out[i] is not None})
+    return out
 
 
 # -- the health results the poller last read -----------------------------------------
 
-_known: dict[str, tuple[str, str]] = {}
+#: Each row's last health result, by id, with when the pass that ran it began.
+_known: dict[str, tuple[str, str, str]] = {}
 _known_lock = threading.Lock()
 
 
-def _remember(seen: list[verdict.View]) -> None:
+def _remember(seen: list[verdict.View], at: str) -> None:
     with _known_lock:
         _known.clear()
-        _known.update({v.row.id: v.health for v in seen if v.health is not None})
+        _known.update({v.row.id: (*v.health, at) for v in seen if v.health is not None})
 
 
 def _known_health() -> dict[str, tuple[str, str]]:
     with _known_lock:
-        return dict(_known)
+        return {ident: (said, line) for ident, (said, line, _) in _known.items()}
+
+
+def _checked_at(view: verdict.View, at: str | None = None) -> str | None:
+    """When the pass that gave `view` its health result began: `at` for this gather's own
+    pass, else the kept pass's."""
+    if view.health is None:
+        return None
+    if at is not None:
+        return at
+    with _known_lock:
+        kept = _known.get(view.row.id)
+    return None if kept is None else kept[2]
 
 
 # -- the reads -------------------------------------------------------------------------
@@ -244,27 +411,61 @@ def every_row() -> tuple[list, list[tuple[str, str]]]:
     return [*user, *found], problems
 
 
+#: The last value a gather read under the lock, by the core lock's path.
+_gathered: dict[str, dict[str, Any]] = {}
+_gathered_lock = threading.Lock()
+
+
+def _read_steady(read: Callable[[], Any]) -> Any:
+    """`read()`, under the core lock, waited for `ROWS_WAIT_S`; `Busy` past it."""
+    with acts.between_acts(ROWS_WAIT_S):
+        return read()
+
+
 def gather(*, check_health: bool = False) -> dict[str, Any]:
     """The `rows` topic's value and `/api/rows`' answer. With `check_health`, every running
     daemon's check runs and its result is kept for the reads after. Never raises."""
     try:
-        found, problems = every_row()
+        where = str(moxi.paths.core_lock())
+
+        def read() -> tuple[list, list, str, verdict.Reading]:
+            found, problems = every_row()
+            at = _iso(time.time())
+            return found, problems, at, verdict.read(found, status_seconds=STATUS_SECONDS)
+        try:
+            found, problems, read_at, reading = _read_steady(read)
+        except Busy:
+            with _gathered_lock:
+                last = _gathered.get(where)
+            if last is not None:
+                return last
+            raise
+        pass_at = None
         if check_health:
-            seen = verdict.views(found, check_health=True, status_seconds=STATUS_SECONDS,
+            pass_at = _iso(time.time())
+            seen = verdict.views(found, check_health=True, reading=reading,
                                  health_seconds=state.HEALTH_SECONDS,
                                  health_at_once=HEALTH_AT_ONCE)
-            _remember(seen)
+            _remember(seen, pass_at)
         else:
-            seen = verdict.views(found, status_seconds=STATUS_SECONDS,
-                                 known_health=_known_health())
-        listed = [row_value(v) for v in seen]
+            seen = verdict.views(found, reading=reading, known_health=_known_health())
+        settings = with_settings(found)
+        streaks = _streaks_of(seen, is_every_row=True)
+        listed = [row_value(v, settings=settings, checked_at=_checked_at(v, pass_at),
+                            streak=streaks[v.row.id])
+                  for v in seen]
     except ServicesError as exc:
-        return {"state": "error", "detail": _text(exc), "rows": [], "problems": []}
+        return {"state": "error", "detail": _text(exc), "at": None, "rows": [],
+                "problems": []}
     except Exception as unexpected_exc:  # noqa: BLE001 - the page says so, never a 500
         _log_once(unexpected_exc, "listing the rows failed")
-        return {"state": "error", "detail": _unexpected(unexpected_exc), "rows": [], "problems": []}
-    return {"state": "up", "detail": None, "rows": listed,
-            "problems": [{"module": m, "reason": r} for m, r in problems]}
+        return {"state": "error", "detail": _unexpected(unexpected_exc), "at": None,
+                "rows": [], "problems": []}
+    value = {"state": "up", "detail": None, "at": read_at, "rows": listed,
+             "problems": [{"module": m, "reason": r} for m, r in problems]}
+    with _gathered_lock:
+        _gathered[where] = value
+    return value
 
 
 def listing(call: Any) -> dict[str, Any]:
@@ -272,20 +473,172 @@ def listing(call: Any) -> dict[str, Any]:
     return gather()
 
 
+def _local_day(utc: Any) -> tuple[int, int, int] | None:
+    seconds = verdict.utc_seconds(utc) if isinstance(utc, str) else None
+    return None if seconds is None else time.localtime(seconds)[:3]
+
+
+def count_today(lines: list[dict], *, limit: int = TODAY_LINES) -> dict[str, Any]:
+    """`lines`' runs on this machine's local day, of the newest `limit` read: how many,
+    how many failed, and `more` when every line read is today's, so there may be more."""
+    today = time.localtime()[:3]
+    ran = [line for line in lines if _local_day(line.get("at")) == today]
+    return {"runs": len(ran), "failed": sum(verdict.run_of(line).failed for line in ran),
+            "more": len(lines) >= limit and len(ran) == len(lines)}
+
+
 def row(call: Any) -> dict[str, Any]:
-    """`GET /api/row?id=ID`: one row, with a timer's newest runs and its log hint; 422
-    for an id that names no row."""
+    """`GET /api/row?id=ID`: one row, with a timer's newest runs, the count of its runs
+    today, the units the supervisor knows it by and its log hint; 422 for an id that
+    names no row."""
     try:
-        found = acts.resolve(call.query["id"])
-        view = verdict.views([found], status_seconds=STATUS_SECONDS,
-                             known_health=_known_health())[0]
-        runs = state.last_runs(found, 5) if found.kind == "timer" else []
+        def read() -> tuple[Any, verdict.Reading]:
+            one = acts.resolve(call.query["id"])
+            return one, verdict.read([one], status_seconds=STATUS_SECONDS)
+        found, reading = _read_steady(read)
+        view = verdict.views([found], reading=reading, known_health=_known_health())[0]
+        lines = state.last_runs(found, TODAY_LINES) if found.kind == "timer" else []
+        ids = list(state.unit_ids(found))
     except ServicesError as exc:
         raise _answer(exc) from None
-    return {"row": row_value(view),
+    runs = lines[-RUNS_SHOWN:]
+    return {"row": row_value(view, settings=with_settings([found]),
+                             checked_at=_checked_at(view),
+                             streak=_streaks_of([view], is_every_row=False)[found.id]),
             "runs": [{"at": r.get("at"), "result": r.get("result"), "exit": r.get("exit"),
                       "seconds": r.get("seconds")} for r in runs],
-            "log": None if view.st is None else view.st.log}
+            "log": None if view.st is None else view.st.log,
+            "unit": state.unit_of(found),
+            "units": ids,
+            "today": count_today(lines) if state.keeps_runs(found) else None}
+
+
+def unit(call: Any) -> dict[str, Any]:
+    """`GET /api/unit?ref=REF&kind=KIND`: what the supervisor says of a unit not yet
+    adopted, for the adopt panel. `kind` is the person's choice where the supervisor
+    can't tell a unit's kind (launchd, Task Scheduler); on systemd the suffix decides
+    and a `kind` that disagrees is refused. A refusal is in `refused`, never a 422."""
+    ref, asked = call.query["ref"], call.query.get("kind")
+    backend = state.units.backend()
+    answer: dict[str, Any] = {"found": None, "kind": asked, "asks_kind": False,
+                              "enabled": None, "active": None, "wraps": False,
+                              "refused": None}
+    try:
+        # On systemd the suffix decides; a kind that disagrees gets the page's sentence
+        # below, never the command line's words about `--timer`.
+        kind = rows.check_ref(ref, backend, is_timer=asked == "timer" and backend != "systemd")
+    except ServicesError as exc:
+        answer["refused"] = _text(exc)
+        return answer
+    answer.update(kind=kind, asks_kind=backend != "systemd")
+    if asked is not None and kind != asked:
+        answer["refused"] = f"{ref} is a {_KIND_WORDS[kind]}, not a {_KIND_WORDS[asked]}"
+        return answer
+    done, st = verdict.within(lambda: state.read_foreign(ref, kind), STATUS_SECONDS)
+    if not done or st is None or st.state in ("unknown", "nobackend"):
+        return answer
+    answer["found"] = st.state != "missing"
+    if answer["found"]:
+        answer.update(enabled=st.enabled, active=st.state == "active",
+                      wraps=backend == "systemd" and kind == "timer")
+    return answer
+
+
+_KIND_WORDS = {"daemon": "service", "timer": "timer"}
+
+
+# -- what a stop of slots' server ends -------------------------------------------------
+
+def _unread(why: str) -> dict[str, Any]:
+    """A read that didn't answer: its counts are null, never 0, since what is in use is
+    not known."""
+    return {"read": False, "why": why, "sessions": None, "open": None, "jobs": None}
+
+
+def _count_ends(api: Any) -> dict[str, Any]:
+    listing = api.list_slots()
+    if not listing.ok:
+        return _unread(f"slots couldn't be read: {listing.why}")
+    try:
+        running = sum(1 for found in api.jobs() if found.running)
+    except Exception as exc:  # noqa: BLE001 - an unread count is said, never raised
+        return _unread(f"slots' jobs couldn't be read ({type(exc).__name__})")
+    sessions, open_slots = [], 0
+    for found in (*listing.slots, *listing.unregistered):
+        if found.state == "missing":
+            continue
+        if found.state == "occupied":
+            sessions.append({"slot": found.number, "label": found.label or None})
+        elif not found.idle:
+            open_slots += 1
+    return {"read": True, "why": None, "sessions": sessions, "open": open_slots,
+            "jobs": running}
+
+
+def read_ends() -> dict[str, Any]:
+    """What a stop of slots' server would end now, from slots' own API, counted as slots'
+    uninstall check counts it: each occupied slot a session, with its number and label;
+    each other slot not missing and not idle an open slot; each running job. `read` is
+    False, with `why` and null counts, when slots' API does not load, its listing could
+    not be read, its jobs could not be read, or it did not answer within
+    `STATUS_SECONDS`."""
+    found = modules.load("slots", interface=1)
+    if not found.ok:
+        return _unread(f"slots' API couldn't be loaded: {found.reason}")
+    try:
+        done, value = verdict.within(lambda: _count_ends(found.api), STATUS_SECONDS)
+    except Exception as exc:  # noqa: BLE001 - an unread count is said, never raised
+        _log_once(exc, "reading slots' listing failed")
+        return _unread(f"slots couldn't be read ({type(exc).__name__})")
+    if not done:
+        return _unread(f"slots did not answer within {STATUS_SECONDS:g} s")
+    return value
+
+
+def in_use(read: Mapping[str, Any]) -> int | None:
+    """How many things `read_ends` found in use: sessions, open slots and jobs; None when
+    it couldn't read them, which may be any number."""
+    if not read["read"]:
+        return None
+    return len(read["sessions"]) + read["open"] + read["jobs"]
+
+
+def guard_slots(found, ends: int | None, *, ends_unread: bool = False) -> None:
+    """Refuse a stop or restart of slots' server unless what it ends now is no more than
+    the person was shown. `ends` is the count the warning showed, None for none;
+    `ends_unread` True when the warning said the slots couldn't be read. A plain press
+    sends neither, and `ends` 0 means nothing was in use as read. A read that didn't
+    answer counts as "may end sessions", never as a number: only `ends_unread` goes past
+    it. A plain press, or one confirmed against a count, is told the slots couldn't be
+    read, so the page asks again with that warning. It goes ahead when the read finds
+    nothing in use, or finds at most `ends`, or did not answer and `ends_unread` is
+    True. Any other row passes."""
+    if not ends_slots(found):
+        return
+    if ends is not None and ends < 0:
+        raise lb.Refused(ENDS_NEGATIVE)
+    if ends is not None and ends_unread:
+        raise lb.Refused(ENDS_ONE_CONFIRM)
+    count = in_use(read_ends())
+    if count is None:
+        if not ends_unread:
+            raise lb.Refused(SLOTS_UNREAD)
+        return
+    if count == 0 or (ends is not None and count <= ends):
+        return
+    raise lb.Refused(SLOTS_IN_USE)
+
+
+def ends(call: Any) -> dict[str, Any]:
+    """`GET /api/ends?id=ID`: what a stop or restart of slots' server would end now (see
+    `read_ends`); 422 for any other row."""
+    try:
+        found = acts.resolve(call.query["id"])
+    except ServicesError as exc:
+        raise _answer(exc) from None
+    if not ends_slots(found):
+        raise lb.Refused(ENDS_SLOTS_ONLY)
+    return read_ends()
 
 
 def projects(call: Any) -> dict[str, Any]:
@@ -333,9 +686,18 @@ def _canonical(ident: str) -> str:
 
 def _confirmed(call: Any, act: str, run: Callable[[str], acts.Outcome], *,
                is_timer: bool | None = None) -> Any:
-    """A confirmed act on one row, queued: `is_timer` True for an act only a timer takes,
-    False for one a timer takes through `/api/run`, None for either."""
-    job, ident = call.key, call.body["id"]
+    """A confirmed act on one row, queued under its idempotency key (`_queue`)."""
+    return _queue(call.key, act, call.body["id"], run, is_timer=is_timer,
+                  ends=call.body.get("ends"), ends_unread=bool(call.body.get("ends_unread")))
+
+
+def _queue(job: str, act: str, ident: str, run: Callable[[str], acts.Outcome], *,
+           is_timer: bool | None = None, ends: int | None = None,
+           ends_unread: bool = False) -> Any:
+    """An act on one row, queued as `job`: `is_timer` True for an act only a timer takes,
+    False for one a timer takes through `/api/run`, None for either. An enable or
+    disable of a Moxi row is refused, and a stop or restart of slots' server goes only
+    as `guard_slots` lets it, with `ends` and `ends_unread`."""
     held = JOBS.get(job)
     if held is not None:
         if held.act == act and held.id == _canonical(ident):
@@ -349,6 +711,10 @@ def _confirmed(call: Any, act: str, run: Callable[[str], acts.Outcome], *,
         raise lb.Refused(TIMER_RUNS)
     if is_timer is True and found.kind != "timer":
         raise lb.Refused(DAEMON_STARTS)
+    if act in ("enable", "disable") and isinstance(found, ModuleRow):
+        raise lb.Refused(ON_OFF_IN_SETTINGS.format(module=found.module))
+    if act in ("stop", "restart"):
+        guard_slots(found, ends, ends_unread=ends_unread)
     record, _ = JOBS.submit(job, act, found.id, lambda: run(found.id))
     if record.act != act or record.id != found.id:
         raise lb.Refused(KEY_REUSED)
@@ -361,12 +727,14 @@ def start(call: Any) -> Any:
 
 
 def stop(call: Any) -> Any:
-    """`POST /api/stop`, confirmed: `moxi services stop ID`, a daemon or a timer's run."""
+    """`POST /api/stop`, confirmed: `moxi services stop ID`, a daemon or a timer's run;
+    slots' server's under the guard, with `ends`."""
     return _confirmed(call, "stop", lambda i: acts.stop(i, by=BY))
 
 
 def restart(call: Any) -> Any:
-    """`POST /api/restart`, confirmed: `moxi services restart ID`, a daemon."""
+    """`POST /api/restart`, confirmed: `moxi services restart ID`, a daemon; slots'
+    server's under the guard, with `ends`."""
     return _confirmed(call, "restart", lambda i: acts.restart(i, by=BY), is_timer=False)
 
 
@@ -378,18 +746,55 @@ def run(call: Any) -> Any:
 
 
 def enable(call: Any) -> Any:
-    """`POST /api/enable`, confirmed: `moxi services enable ID`."""
+    """`POST /api/enable`, confirmed: `moxi services enable ID`; a Moxi row's is
+    refused, its on and off being in Settings."""
     return _confirmed(call, "enable", lambda i: acts.enable(i, by=BY))
 
 
 def disable(call: Any) -> Any:
-    """`POST /api/disable`, confirmed: `moxi services disable ID`."""
+    """`POST /api/disable`, confirmed: `moxi services disable ID`; a Moxi row's is
+    refused, as enable's."""
     return _confirmed(call, "disable", lambda i: acts.disable(i, by=BY))
 
 
-def remove(call: Any) -> Any:
-    """`POST /api/remove`, confirmed and desk-only: `moxi services remove ID`."""
-    return _confirmed(call, "remove", lambda i: acts.remove(i, by=BY))
+def _run_act(i: str, *, restart: bool) -> acts.Outcome:
+    return (acts.restart if restart else acts.start)(i, by=BY)
+
+
+#: Each act `/api/act` takes: what it runs (given the row's id and the body), and
+#: `is_timer` as `_queue` reads it.
+_ACTS: dict[str, tuple[Callable[[str, Mapping[str, Any]], acts.Outcome], bool | None]] = {
+    "start": (lambda i, body: acts.start(i, by=BY), False),
+    "stop": (lambda i, body: acts.stop(i, by=BY), None),
+    "restart": (lambda i, body: acts.restart(i, by=BY), False),
+    "run": (lambda i, body: _run_act(i, restart=bool(body.get("restart"))), True),
+    "enable": (lambda i, body: acts.enable(i, by=BY), None),
+    "disable": (lambda i, body: acts.disable(i, by=BY), None),
+    "remove": (lambda i, body: acts.remove(i, by=BY), None),
+}
+
+
+def act(call: Any) -> Any:
+    """`POST /api/act`, the desk's one plain act: `act` on the row `id`, queued as `job`,
+    32 hex characters the page mints per press. A repeat of a `job` for the same act and
+    row gets the same link; for another, it is refused. `restart` goes with `run` only,
+    `ends` and `ends_unread` with `stop` and `restart` only. Each act refuses what its
+    confirmed route refuses."""
+    body = call.body
+    job, name = body["job"], body["act"]
+    if not _is_job(job):
+        raise lb.Refused(JOB_SHAPE)
+    if "restart" in body and name != "run":
+        raise lb.Refused(RESTART_RUN_ONLY)
+    if ("ends" in body or "ends_unread" in body) and name not in ("stop", "restart"):
+        raise lb.Refused(ENDS_STOP_ONLY)
+    work, is_timer = _ACTS[name]
+    return _queue(job, name, body["id"], lambda i: work(i, body), is_timer=is_timer,
+                  ends=body.get("ends"), ends_unread=bool(body.get("ends_unread")))
+
+
+def _is_job(job: str) -> bool:
+    return len(job) == 32 and all(c in "0123456789abcdefABCDEF" for c in job)
 
 
 def _absolute(path: str) -> bool:
@@ -462,7 +867,10 @@ async def events(call: Any) -> Any:
 
 
 def _digest(value: Mapping[str, Any]) -> str:
-    return hashlib.sha256(json.dumps(value, sort_keys=True, separators=(",", ":"),
+    """The topic's value's digest, its `at` left out: a read that changed nothing else
+    is not a change."""
+    rest = {k: v for k, v in value.items() if k != "at"}
+    return hashlib.sha256(json.dumps(rest, sort_keys=True, separators=(",", ":"),
                                      allow_nan=False).encode("utf-8")).hexdigest()
 
 
@@ -476,6 +884,7 @@ class _Feed:
         self.skipped = 0
         self._health_at: float | None = None
         self._last: str | None = None
+        self._published_at: float | None = None
         self.task = loop.create_task(self._poll(), name="services rows poller")
 
     async def _poll(self) -> None:
@@ -505,9 +914,12 @@ class _Feed:
         try:
             value = gather(check_health=check_health)
             digest = _digest(value)
-            if digest != self._last:
+            now = time.monotonic()
+            stale = (self._published_at is None
+                     or now - self._published_at >= REPUBLISH_S)
+            if digest != self._last or stale:
                 self.topics.publish(TOPIC, value)
-                self._last = digest
+                self._last, self._published_at = digest, now
         except Exception as exc:  # noqa: BLE001 - the next tick gathers again
             _log_once(exc, "the rows poller's gather failed")
 
@@ -525,7 +937,11 @@ def _feed() -> _Feed:
     return _current
 
 
-__all__ = ["BY", "DAEMON_STARTS", "HEALTH_PERIOD", "JOBS", "KEY_REUSED", "PERIOD",
-           "STATUS_SECONDS", "TIMER_RUNS", "UNKNOWN", "add", "disable", "enable",
-           "events", "every_row", "gather", "listing", "not_a_full_path", "projects",
-           "remove", "restart", "row", "row_value", "run", "start", "status", "stop"]
+__all__ = ["BY", "DAEMON_STARTS", "ENDS_NEGATIVE", "ENDS_ONE_CONFIRM", "ENDS_SLOTS_ONLY", "ENDS_STOP_ONLY",
+           "HEALTH_PERIOD", "JOBS", "JOB_SHAPE", "KEY_REUSED", "ON_OFF_IN_SETTINGS",
+           "PERIOD", "REPUBLISH_S", "RESTART_RUN_ONLY", "ROWS_WAIT_S", "RUNS_SHOWN", "SLOTS_IN_USE",
+           "SLOTS_SERVER", "SLOTS_UNREAD", "STATUS_SECONDS", "STREAK_LINES", "TIMER_RUNS",
+           "TODAY_LINES", "UNKNOWN", "act", "add", "count_streak", "count_today", "disable", "enable",
+           "ends", "ends_slots", "events", "every_row", "gather", "guard_slots", "in_use",
+           "listing", "not_a_full_path", "projects", "read_ends", "restart",
+           "row", "row_value", "run", "start", "status", "stop", "unit", "with_settings"]
