@@ -1028,14 +1028,19 @@ def test_a_stray_warns_with_both_commands(d, monkeypatch):
     assert row.fix == "moxi install demo, then: uv tool uninstall moxi-demo"
 
 
+#: A `SETUP` that does nothing, for a module whose setup version the doctor reads.
+SETUP = {"setup.py": "def run():\n    return None\n"}
+WITH_SETUP = dict(settings=None, files_=SETUP, SETUP="'moxi_demo.setup:run'")
+
+
 @pytest.mark.parametrize("held", [{"demo": "0.0.9"}, {"demo": {"version": "0.0.9"}}])
 def test_a_setup_version_that_differs_warns(d, held):
-    d.module(settings=None)
+    d.module(**WITH_SETUP)
     path = moxi.paths.core().state_dir() / "setup.json"
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(held))
     row = d.rows("demo")[("demo", "setup version")]
-    assert (row.state, row.fix) == ("warn", "moxi install demo")
+    assert (row.state, row.fix) == ("warn", "moxi install demo --setup-only")
     path.write_text(json.dumps({"demo": "0.1.0"}))
     assert ("demo", "setup version") not in d.rows("demo")
 
@@ -1043,7 +1048,7 @@ def test_a_setup_version_that_differs_warns(d, held):
 def test_the_doctor_reads_the_setup_version_the_settle_step_writes(d, monkeypatch):
     from moxi import _settle
 
-    d.module(settings=None)
+    d.module(**WITH_SETUP)
     _settle.record_setup("demo", "0.0.9")
     assert d.rows("demo")[("demo", "setup version")].state == "warn"
     moved = d.tmp / "elsewhere" / "setup.json"
@@ -1052,6 +1057,27 @@ def test_the_doctor_reads_the_setup_version_the_settle_step_writes(d, monkeypatc
     assert ("demo", "setup version") not in d.rows("demo")
     _settle.record_setup("demo", "0.0.8")
     assert "0.0.8" in d.rows("demo")[("demo", "setup version")].detail
+
+
+def test_the_setup_only_fix_quiets_the_setup_version_row(d, capsys):
+    """The row's fix, run as it says, records the installed version, and the row goes."""
+    from moxi import _settle
+
+    d.module(**WITH_SETUP)
+    _settle.record_setup("demo", "0.0.9")
+    assert d.rows("demo")[("demo", "setup version")].fix == _settle.setup_command("demo")
+    assert _settle.setup_only("demo") == 0, capsys.readouterr()
+    assert ("demo", "setup version") not in d.rows("demo")
+
+
+def test_a_module_that_declares_no_setup_has_no_setup_version_row(d):
+    """Its setup can't be run again, so a version an earlier install recorded for it
+    never warns."""
+    from moxi import _settle
+
+    d.module(settings=None)
+    _settle.record_setup("demo", "0.0.9")
+    assert ("demo", "setup version") not in d.rows("demo")
 
 
 def test_records_are_fail_rows_until_cleared(d):

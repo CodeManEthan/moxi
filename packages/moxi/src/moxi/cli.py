@@ -4,6 +4,8 @@
     moxi modules [--json]        what this environment holds
     moxi modules --available     the first-party modules `moxi install` knows by name
     moxi install <module> ...    installs a module, sets it up, offers its extras
+    moxi install <module> --setup-only
+                                 runs an installed module's setup again, installing nothing
     moxi uninstall <module>      runs its teardown, removes its units, skills and package
     moxi shortcut [<module>]     the opt-in bare command for a module
     moxi config <module> ...     a module's settings and its config file
@@ -47,6 +49,8 @@ commands:
   modules [--json]                   list the Moxi modules this environment holds
   modules --available [--refresh]    list the first-party modules, installed or not
   install <module> [options]         install a module and offer its optional extras
+  install <module> --setup-only      run an installed module's setup again, installing
+                                     nothing
   uninstall <module> [--purge [--yes]] [--skip-teardown]
                                      uninstall a module; its config is kept, and its
                                      stores too unless --purge is given
