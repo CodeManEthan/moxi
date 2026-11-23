@@ -72,6 +72,8 @@ lower-case letters, digits and `-`.
 |---|---|
 | `moxi rounds open ROUND --description TEXT [--flow NAME] [--record PTR] [--inherits S<n>[,...]] [--lead NAME]` | open a round: make its folder and record what it is for and its flow; `--record` points to where the operator gave the go, `--inherits` names the standing rulings it starts from, and `--lead` the agent who leads it (see A round's lead) |
 | `moxi rounds next [ROUND] [--json]` | what is done next: the step the round is at, then the first step not done of each other stage and each other step of the round's own that is ready, each with who does it, what they read, the command that completes it and what it waits for; with no round, in a build's worktree, the round of the open build on the branch checked out there |
+| `moxi rounds queue [--repo KEY] [--resume]` | show each queue project's queue, its lander, a pause, the running batch and the members in the order they are taken; start a lander where a member waits and none runs; with `--resume`, lift a pause |
+| `moxi rounds land --repo KEY` | run a queue project's lander; `finish`, `next` and `queue` start it, and it exits at once when another holds the repo's lock |
 | `moxi rounds next --schema design\|build\|step\|majors\|retro` | the empty data block of a report of that kind, a comment on each key |
 | `moxi rounds fold ROUND [--records-only --record PTR]` | freeze `design.md` as the next version and record what its data block declares |
 | `moxi rounds verdict ROUND REPORT.md` | record the verdict of a report on the design, on a build or on a build for a report step of your own, or a majors or retro report, run by whoever wrote the report |
@@ -837,6 +839,135 @@ wrong and what to change, with the block from `next --schema retro` (`kind`, `by
 record. A retro report is refused in a flow with no `retro` step, which gets the
 numbers only, and the operator's `skip:retro` lets the round close without one.
 
+## The merge queue
+
+A project whose table sets `land = "queue"` lands its builds through one queue per
+repo instead of each by its own finish. A builder's last step is still `moxi rounds
+finish`, which now joins the queue and returns; the repo's lander merges the queued
+builds onto the target together and runs CI once on the result.
+
+**The check.** In a queue project `moxi rounds check` runs the check's `scoped` command
+in the build's worktree, `{base}` filled in with the merge-base of the tip and the
+target: the check of the packages the build touched and their dependents. It pushes
+nothing and reads no CI, and `--full` is refused, since a queued build's full run is its
+candidate's CI. The merge-base of the tip and the target does not change as the target
+moves forward, so the record stays good while the build waits.
+
+**Joining.** `finish` reads the gates of finish at the branch's tip as a direct finish
+does, but for gate 6, the target, which is off: the lander's candidate holds the target
+by construction. Gate 3 is met by the scoped check at the tip, and gate 5 (drift) is
+read against the target's head now, once. A repo whose finish actions are anything but
+one merge is refused, since the lander only merges. When the gates hold, finish appends
+`join` to the repo's queue file and `queue.join` (the tip, the target's head, whether it
+is urgent) to the round's log, prints the build's position, and returns. A build already
+queued at its tip joins nothing new; one queued at an older tip leaves as moved and
+joins again at the back. `finish --urgent` joins ahead of every member that is not
+urgent; urgent members are batched only with each other, and even while the queue is
+paused. `finish --leave` takes the build out at once, and says so when it was inside a
+running batch, which the lander builds again without it. A direct finish in a queue
+project is refused: `land is queue: finish enqueues`.
+
+**The queue file** is `queue/<repo>/queue.jsonl` in rounds' state directory, one event a
+line, appended under its lock. The queue's state is read from it and nowhere else. Each
+event about a member is mirrored into the member's round log (`queue.join`,
+`queue.batch`, `queue.landed`, `queue.ejected`, `queue.left`, and `queue.requeued` when
+its batch ends without it), which `next` and the gates read: while the build is queued at its tip, its finish step waits on the lander,
+and `next` gives its position, its batch and a pause; once it was ejected or left, the
+reason is owed beside the step.
+
+**The lander** is `moxi rounds land --repo KEY`, one per repo: it holds a lock on
+`lander.lock` in the repo's queue folder, so a second one exits at once, and the system
+frees the lock when a lander dies. `finish` starts one each time a build joins; `moxi
+rounds next` and `moxi rounds queue` start one when a member waits and none runs, and
+say so, and record nothing for it; they start one too while a message is still being
+tried. The doctor starts none: it warns of a member waiting
+with no lander, and of a paused queue, read from the pid in the lock file without
+taking the lock. A lander is started in a transient user unit (`systemd-run --user
+--collect`), else in a session of its own, so it outlives the session that started it.
+Either way it runs the interpreter of its starter in the repo's root, with its starter's
+`PATH`, `HOME`, `SSH_AUTH_SOCK`, `GH_TOKEN`, `GITHUB_TOKEN`, `GH_CONFIG_DIR`, the XDG
+roots and every `MOXI_` variable, and appends its output to `lander.log` beside the
+lock. It exits once nothing keeps it (no member waits, no message is still being
+tried, the target's head's full run read): it releases the lock, reads the queue again, and
+goes on if a member joined meanwhile and no other lander took the lock.
+
+**A batch.** Each minute the lander takes the members that wait (the urgent ones alone
+when there are any) and merges each one's joined tip, in turn and with `--no-ff`, onto
+the target's head on a branch `queue-<M12>-<n>` in its own worktree, `<worktree_dir>/
+<repo>/.queue`. A member that conflicts is ejected with the member before it that it
+conflicts with, one a commit hook refuses with the hook's output, and one whose branch
+moved or whose build ended leaves. It pushes the candidate to its own ref (the `ci.ref`
+template filled with that branch), runs `ci.local` at it, and reads its CI each minute.
+A push refusal that names a member's tip or path ejects it; one that names none is tried
+again once, then pauses the queue. A cancelled run is rerun once and an absent one
+pushed again once under the next number; a second of either pauses the queue, as do
+five failed reads in a row. A repo with no `ci` setting pauses its queue. When the run is
+green and `ci.local` passed, the lander takes the repo's finish lock and reads again:
+the target still at the candidate's base, the checkout that has it clean, and each
+member still in the batch at its tip with every finish gate but the check, drift and
+target. A target that moved rebuilds the batch on it; a member that fails leaves with
+the gate, and the rest are rebuilt; a checkout not clean is waited on. Then it
+fast-forwards that checkout to the candidate (`git merge --ff-only`), writes each
+member's `ci.read` and `check.local` records at its joined tip naming the candidate,
+which meet the check gate, and finishes each one with its own merge found as its
+landing. A lander that dies after the fast-forward is finished by the next one from the
+queue file and git.
+
+**A red candidate.** A red run's failed jobs are rerun once (`gh run rerun --failed`),
+and a failed `ci.local` is run again; green then lands. Still red, the lander lists its
+failures: each test a failed job's log names in pytest's `FAILED` lines, or the job
+alone. It compares them with the target's own at the candidate's base: that commit's
+full run, read once it has ended and, when red, after one rerun of its failed jobs, and
+`ci.local` run there once when `local` failed. A test counts as the target's own when
+that run fails it in any job, or fails its job naming no test; a job named alone, when
+that run fails a job of that name. Until the target's run is known the batch waits; if
+the target moves meanwhile, the batch is rebuilt on it. With no failure the target
+lacks, the candidate lands, each member's `ci.read` and `queue.landed` naming the
+failures as `excused`. A new failure with one member ejects it with the failures. With
+two or more, the batch splits in two by join order, each half built on the target's
+head and run side by side by the same rule; the earlier half lands first, and a later
+half whose target moved is rebuilt on it. Members that join meanwhile wait until the
+split is done.
+
+**Main afterwards.** The target's head always gets a full run, and the queue cancels
+none. Each pass the lander reads the full run at the head; a head whose candidate's run
+already covers it needs nothing more. A head with no run is pushed, forced, to the
+target's own `ci` ref (`ci/main` for moxi), but not while a run pushed there earlier is
+still going: when that ends it is read, and then the newest head is pushed. A push that
+shows no run after ten minutes is made once more; after a second the head is given up,
+the director told, and `queue` says so. A red run's failed jobs are rerun once before
+main counts as red, and the lander records `red` or `green` at the head, with the
+landings since the run read before (`covers`), which a red candidate's comparison reads
+too. A red run after green (or after none) starts a red spell: main's owner is the lead
+of the earliest covered landing whose round has a lead, every covered lead is told, and
+a spell no landing with a lead covers goes to the director. Before each message to the
+owner the lander reads comms' `identity_state`: a name a live session holds gets it;
+any other state (or a read that raises) still gets it, kept by comms, and the director
+gets a notice of what happened, who owns it, and how to bring that lead back (`moxi
+launcher sessions`, `moxi launcher resume SESSION_ID --brief-file FILE`). Red after red
+keeps the owner and tells it only when the failures differ; a member that lands past
+main's own failures is told to the owner; green ends the spell and tells the owner. The
+lander does not exit while the head's full run has not ended and been read. `queue`,
+and `next` for each queued member, say the spell and its owner, or that neither the
+owner nor the director has a running session and the notice waits.
+
+**Telling.** With comms installed, the lander sends its news under the send-only name
+`rounds`, which rounds reserves, and only to names something records: a member's end
+(landed, ejected, left) to its builder, the name its commission recorded, and to its
+round's lead (the round's own, else the project's); a member ejected for a conflict, once
+the member it conflicts with lands, is ejected or leaves, with what to do now; a pause or
+a wait on the target's checkout to the project's `director`. Each message is recorded in
+the queue file as `told`, with what comms did with it. One comms could not take (its
+daemon down) is tried again each minute for an hour, and the lander does not exit while
+one is; a refusal (a name comms has never seen bound) or an error is recorded and not
+tried again. Where no director is set, or a round has no lead, that is recorded and
+said. Without comms nothing is sent, and `next` and `queue` are where the news shows.
+
+`moxi rounds queue [--repo KEY]` shows each queue project's queue: whether a lander
+runs, a pause and its reason, each running batch and its CI reading, the members still in
+the queue in the order they are taken, the target's last full run, and the messages that
+reached nobody. `--resume` lifts a pause.
+
 ## Dropping a round
 
 `drop --by operator` ends any round, with a pointer to where the operator said so. `drop
@@ -1035,7 +1166,11 @@ that went out unrecorded goes too. A ref is kept while it is the one `ref` gives
 branch of a build of the repo that has not ended, in any round, or one such a build
 recorded pushing, or the one `ref` gives a target: the project's (its `into`, else the
 branch checked out at the repo's root, as a new build would take) or such a build's.
-Every ref is kept while any round's log, or the project's target, can't be read. A
+Every ref is kept while any round's log, or the project's target, can't be read. In a
+queue project the ref of a candidate the queue shows running is kept too, since removing
+it would cancel its run, and every candidate's ref is kept while the queue file can't be
+read; the lander removes a candidate's ref when its batch ends, and the sweep removes one
+a stopped lander left. The lander's own worktree, `<repo>/.queue`, is never swept. A
 removal that fails leaves the finish or drop standing and names the ref; `moxi rounds
 drop --leftovers --refs` lists the branches under `ref`'s prefix on each project's
 remote that the same rule does not keep, and with `--remove`, once the sweep is armed,
@@ -1099,6 +1234,17 @@ and nothing in this version reads them. The `[sweep]` table is this machine's an
 (false: every sweep of leftover folders is a dry run), `at_start` (false) and
 `grace_hours` (2, at least 1). A project's `shared_paths` lists globs of paths every build of its repo shares,
 beside the common lockfiles: a change to one on the target owes a build a re-check.
+
+A project's table may set `land`: `"finish"` (the default), where each build lands by
+its own finish, or `"queue"`, where a finish joins the repo's merge queue and a lander
+merges the queued builds (see The merge queue). A queue project's `check` also names
+`scoped`, the command line `moxi rounds check` runs for a build, with `{base}` filled in
+as the merge-base of the build's tip and its target, as in `scoped = "uv run moxi-dev
+check --base {base}"`; `land = "queue"` with no `scoped` is refused. `defaults.director`
+(and a project's `director`) is a comms name told about a queue project's queue as a
+whole and about a red main whose owner has no running session. The module ships it
+empty, naming nobody, and `moxi config rounds check` refuses a value that is not a
+name: letters, digits, `.`, `_` and `-`, with at most one `@scope`.
 
 `models` maps each tier a step names to a model per harness. The order the tiers are
 written in is their order, strongest first. `next` prints beside a tier every
@@ -1243,7 +1389,7 @@ moxi install rounds
 
 The first line installs `moxi`, Moxi's core, which provides the `moxi` command; the
 second adds rounds beside it, with the projects module it needs, offers its optional
-extras, `notes`, `turns` and `ui`, and offers to place its skill. The repository's README, at
+extras, `notes`, `turns`, `ui` and `comms`, and offers to place its skill. The repository's README, at
 [CodeManEthan/moxi](https://github.com/CodeManEthan/moxi), covers the `moxi` command and
 lists the other modules.
 

@@ -16,8 +16,8 @@ from pathlib import Path
 import pytest
 from moxi import files
 
-from moxi_rounds import (builds, checking, cli, commissioning, doctor, log, opening, places,
-                         removal, sweeping)
+from moxi_rounds import (batching, builds, checking, cli, commissioning, doctor, log, opening,
+                         places, removal, sweeping)
 from moxi_rounds import settings as own
 from moxi_rounds import state as states
 
@@ -146,6 +146,20 @@ def test_a_dir_no_record_names_is_never_a_candidate(ended, write_config):
     assert {one.place for one in swept.leftovers} == {Path(event["worktree"]),
                                                       Path(event["scratch"])}
     assert (stray / ".rounds-build").is_file()
+
+
+def test_the_lander_s_queue_worktree_is_never_a_candidate(ended, repo, write_config):
+    _path, _tree, event = ended
+    write_config(ARMED)
+    place = batching.place_of(own.load(), "proj-a")
+    assert place.parent == Path(event["worktree"]).parent
+    repo.git("worktree", "add", "--quiet", "--detach", str(place))
+
+    swept = sweeping.run(remove=True)
+
+    assert place not in {one.place for one in swept.leftovers}
+    assert fates(swept) == {"worktree": ("removed", None), "scratch": ("removed", None)}
+    assert (place / ".git").is_file()
 
 
 def test_a_dir_already_gone_is_not_in_the_account(ended):
