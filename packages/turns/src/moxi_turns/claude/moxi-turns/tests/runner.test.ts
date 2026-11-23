@@ -1236,6 +1236,24 @@ describe('a held steer\'s submit', () => {
     expect(closes(w)).toMatchObject([{ delivery: 'd1', end: 'carried' }])
   })
 
+  test('a note a /clear or compaction dropped: its text is the prompt, once', async ($: E, on) => {
+    const w = world(on)
+    await attached($, w)
+    w.messages = [ask('a summary of the conversation so far')]
+    await w.line(heldLine('d1', 'the word is MANGO'))
+    expect(w.submits).toEqual([`moxi-turns-window: ${N1}\nthe word is MANGO`])
+    expect(closes(w)).toMatchObject([{ delivery: 'd1', end: 'resolve' }])
+    expect(w.logs).toContain('moxi-turns: held steer d1\'s note is gone from the messages; its text is the prompt')
+  })
+
+  test('messages that cannot be read: the note\'s text is the prompt, so it is never lost', async ($: E, on) => {
+    const w = world(on)
+    await attached($, w)
+    w.messages = null
+    await w.line(heldLine('d1', 'the word is LIME'))
+    expect(w.submits).toEqual([`moxi-turns-window: ${N1}\nthe word is LIME`])
+  })
+
   test('a submit with no note reads no messages', async ($: E, on) => {
     const w = world(on)
     await attached($, w)
@@ -1255,9 +1273,11 @@ describe('noteStands', () => {
     expect(noteStands([user('NOTE'), bot, user('NOTE')], 'NOTE', false)).toBe('held')
     expect(noteStands([bot, user('NOTE')], 'NOTE', true)).toBe('carried')
     expect(noteStands([user('NOTE'), bot], 'NOTE', true)).toBe('carried')
-    // Only text blocks of user messages count.
-    expect(noteStands([{ role: 'assistant', content: [{ type: 'text', text: 'NOTE' }] }], 'NOTE', false)).toBe('held')
-    expect(noteStands({ deny: 'no' }, 'NOTE', false)).toBe('held')
+    // Only text blocks of user messages count: a note in none is gone.
+    expect(noteStands([{ role: 'assistant', content: [{ type: 'text', text: 'NOTE' }] }], 'NOTE', false)).toBe('gone')
+    expect(noteStands([user('a'), bot], 'NOTE', false)).toBe('gone')
+    expect(noteStands([], 'NOTE', true)).toBe('gone')
+    expect(noteStands({ deny: 'no' }, 'NOTE', false)).toBe('gone')
   })
 })
 

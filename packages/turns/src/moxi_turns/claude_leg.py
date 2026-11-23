@@ -75,7 +75,10 @@ Then, in any order:
         points at it. The runner first reads `$.session.messages({as: "api"})`. When a
         request has carried the note already (it sits in a user message before the last
         assistant message), or a main-loop turn is open whose requests carry it, the
-        runner submits nothing and reports `submit.close` with `end` `carried`.
+        runner submits nothing and reports `submit.close` with `end` `carried`. When no
+        user message holds the note (a /clear or a compaction dropped it), or the
+        messages cannot be read, it submits `note` in place of `text`, so the steer's
+        text still reaches the model.
     {"op": "append", "delivery": id, "text": "…"}
         `$.session.append` a user-role row into the running turn (a steer). The runner
         reports `append.done` when the call resolves without a deny while a main-loop

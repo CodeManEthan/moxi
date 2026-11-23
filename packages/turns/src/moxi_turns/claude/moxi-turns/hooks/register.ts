@@ -336,8 +336,11 @@
 // another request since (the person's prompt went first, or a delivery the endpoint handed
 // before the held report). A note in a user message before the last assistant message, or
 // any note while a main turn is open (that turn's requests carry it), was carried: the
-// runner submits nothing and reports `submit.close` with end `carried`. Otherwise it
-// submits the line's `text`, the prompt that points at the note.
+// runner submits nothing and reports `submit.close` with end `carried`. A note in no
+// user message is gone (a /clear or a compaction dropped it), and so is one whose messages
+// cannot be read: the runner submits the note's text itself as the prompt, so the message
+// still reaches the model. Otherwise the note is still held, and the runner submits the
+// line's `text`, the prompt that points at it, so the model reads the note once.
 
 import type { EngineInterface, Register } from 'claude-code'
 
@@ -435,6 +438,9 @@ type Win = {
   bounded: boolean
   timer: { cancel: () => void } | null
 }
+
+/** Where a held steer's note stands as its own submit comes (`noteStands`). */
+export type NoteStands = 'held' | 'carried' | 'gone'
 
 /** A steer appended into the open main turn: its delivery and its text. */
 export type Steer = { delivery: string; text: string }
@@ -811,11 +817,12 @@ export function unsent(messages: unknown, of: readonly Steer[]): string[] {
 
 /** Where a held steer's note stands when its own submit comes, read from `messages`, the
  *  messages the next request is built from (`$.session.messages({as: 'api'})`), and
- *  `turnIsOpen`, whether a main turn is open: `carried` when a user message before the
- *  last assistant message holds it, or when it is anywhere while a main turn is open (that
- *  turn's requests carry it); else `held`. */
-export function noteStands(messages: unknown, note: string, turnIsOpen: boolean): 'held' | 'carried' {
-  if (!Array.isArray(messages)) return 'held'
+ *  `turnIsOpen`, whether a main turn is open: `gone` when no user message holds it (or
+ *  `messages` is no list); `carried` when a user message before the last assistant
+ *  message holds it, or when it is anywhere while a main turn is open (that turn's
+ *  requests carry it); else `held`. */
+export function noteStands(messages: unknown, note: string, turnIsOpen: boolean): NoteStands {
+  if (!Array.isArray(messages)) return 'gone'
   const last = messages.findLastIndex(m => (m as { role?: unknown } | null)?.role === 'assistant')
   let carried = false
   let trailing = false
@@ -829,18 +836,19 @@ export function noteStands(messages: unknown, note: string, turnIsOpen: boolean)
       else carried = true
     }
   })
-  if (turnIsOpen && (carried || trailing)) return 'carried'
+  if (!carried && !trailing) return 'gone'
+  if (turnIsOpen) return 'carried'
   return carried && !trailing ? 'carried' : 'held'
 }
 
-/** Where the note of the held steer `delivery` stands as its submit comes; `held` when the
- *  messages cannot be read. */
-async function heldNote($: Dollar, delivery: string, note: string): Promise<'held' | 'carried'> {
+/** Where the note of the held steer `delivery` stands as its submit comes; `gone` when the
+ *  messages cannot be read, so the note's text goes in itself and is never lost. */
+async function heldNote($: Dollar, delivery: string, note: string): Promise<NoteStands> {
   try {
     return noteStands(await $.session.messages({ as: 'api' }), note, turnOpen !== null)
   } catch (err) {
     log($, `the messages were not read at held steer ${delivery}'s submit: ${String(err)}`)
-    return 'held'
+    return 'gone'
   }
 }
 
@@ -1184,7 +1192,8 @@ async function onLine($: Dollar, line: string): Promise<void> {
       void report($, 'submit.close', { delivery, end: 'fail', reason: 'the submit line carries no window nonce' })
     } else {
       const note = str(m.note)
-      if (note !== undefined && (await heldNote($, delivery, note)) === 'carried') {
+      const stands = note === undefined ? undefined : await heldNote($, delivery, note)
+      if (stands === 'carried') {
         // A new submit means the endpoint closed the last window, as at openWindow.
         if (win !== null) {
           stopTimer(win)
@@ -1192,6 +1201,9 @@ async function onLine($: Dollar, line: string): Promise<void> {
         }
         log($, `held steer ${delivery} needs no turn of its own: another request carried its note`)
         void report($, 'submit.close', { delivery, end: 'carried', reason: null })
+      } else if (stands === 'gone') {
+        log($, `held steer ${delivery}'s note is gone from the messages; its text is the prompt`)
+        await openWindow($, delivery, note ?? '', nonce)
       } else {
         await openWindow($, delivery, str(m.text) ?? '', nonce)
       }

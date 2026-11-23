@@ -89,7 +89,8 @@ of its text, since Claude Code sends the held note beside that prompt, so the mo
 the note once; the core hands the prompt listeners the steer's text as the prompt's. The
 line carries the steer's text as `note`, and the runner reads where the note stands before
 it submits: when another request carried it first, it submits nothing and closes the window
-`carried`.
+`carried`; when the note is gone (a /clear or a compaction dropped it), it submits the
+steer's text in place of `HELD_PROMPT`.
 
 A fork goes to the runner on a `fork` line, and a fork's further round
 (`fork.continue`) on a `fork.continue` line naming the fork's agent id; neither holds a

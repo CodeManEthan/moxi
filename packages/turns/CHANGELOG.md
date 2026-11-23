@@ -13,7 +13,9 @@
   turn's `turn.started` and `turn.ended` name it as the delivery that opened it, and its
   `ended` is that turn's end. When another turn's request carried the held note first
   (the person's prompt, or a delivery that went ahead), the steer opens no turn: it joins
-  that turn as a steer while it runs, or ends with it once it has ended. A steer a
+  that turn as a steer while it runs, or ends with it once it has ended. When a /clear
+  or a compaction dropped the held note before the steer's turn, the steer's own text is
+  that turn's prompt, so the message is not lost. A steer a
   request carried ends with its turn as before. The runner is version 0.3.1, so
   `moxi install turns` updates an install at user scope.
 - A new request, `fork {text, by, ref?}` (the client's `fork(text, by=, ref=)`), and a new
