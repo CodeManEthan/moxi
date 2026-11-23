@@ -355,7 +355,7 @@ export interface Refreshed {
  * read from their start checks their first row. Rows opened in place stay open, and an
  * opened program line stays open.
  *
- * A list asked with another query, or asked to `restart` (a query he changed, even back
+ * A list asked with another query, or asked to `restart` (a query the user changed, even back
  * to the kept one's), keeps nothing but the opened rows' keys.
  */
 export function refresh(kept: ListState | null, answer: ListAnswer, query: Query,
@@ -841,7 +841,7 @@ function runningKey(entry: RunningEntry): string {
  * One running launch as its row is drawn, as Home's running rows word it: the launch's
  * name, where it runs, its cache fact and, when it goes cold uncovered, `waiting on n
  * agents` leading line two. Then the time of its latest message (else of its launch) and
- * that message, `You:` before one he typed, or `launched` when none was read. A launch
+ * that message, `You:` before one the user typed, or `launched` when none was read. A launch
  * whose session id is known opens in place as the list's rows do; one without has no act.
  *
  * With turns' part (`turnsPart`), its words lead line two, after launcher's heavy lead where

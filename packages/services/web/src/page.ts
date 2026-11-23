@@ -20,8 +20,8 @@
 //   isn't answering, a first row saying so and when the rows were last read, over those
 //   rows, dim and with no acts; a store that can't be read, its sentence (the desk) and
 //   nothing else; every row `unknown` for one reason, `Can't read the supervisor` and the
-//   reason, the rows dim in their groups; no row of his, `You have added no services yet.`
-//   and, under `Yours`, what a service is with `Add a service`.
+//   reason, the rows dim in their groups; no row of the user's, `You have added no services
+//   yet.` and, under `Yours`, what a service is with `Add a service`.
 // - A row opened draws its labelled lines (`opened-model.ts`) from its own read,
 //   `/api/row`, and slots' server's `/api/ends`; then its foot's acts and a Moxi row's
 //   links.
@@ -30,7 +30,7 @@
 //   `/api/act` with a job key minted for it; while its job runs the row's fact says what
 //   is being done and every act is off; an act that didn't hold keeps the row open and
 //   says so in `State`, with its lines and the act again. The acts that can hurt or spend
-//   ask once, in place, under the opened row's foot: Remove of his row (what goes, what
+//   ask once, in place, under the opened row's foot: Remove of the user's row (what goes, what
 //   stays, and the command that adds a written row again), a run of a row whose runs
 //   launch a session, and a Stop or Restart of slots' server while its slots hold
 //   something or can't be read, read from `/api/ends` on the press and sent with what it
@@ -634,7 +634,7 @@ export class ServicesPage extends LitElement {
       this.#sending = false;
       this.requestUpdate();
     }
-    // The guard refused it: what runs in the slots changed since he was shown it.
+    // The guard refused it: what runs in the slots changed since the user was shown it.
     if (refused !== null) await this.#slotsAsk(row, a, refused);
   }
 
@@ -819,7 +819,8 @@ export class ServicesPage extends LitElement {
     const all = state.rows && value !== null ? value.rows : null;
     const projects = installed("projects");
     const filter = all !== null && this.#filter !== null ? filtered(all, this.#filter) : null;
-    // A key no row of his carries keeps the filter, with its own line in place of the list.
+    // A key no row of the user's carries keeps the filter, with its own line in place of the
+    // list.
     const none = filter !== null && filter.rows.length === 0;
     const shape = all !== null && !none
       ? listShape(filter?.rows ?? all, value!.at, projects, when, { quiet: state.state === "unread" }) : null;
@@ -839,8 +840,8 @@ export class ServicesPage extends LitElement {
       ${this.#panelPart(state.acts)}`;
   }
 
-  /** `Project <key> ▾`, its menu of the projects his rows name, `<n> of <m> services` and
-   * `Show all`. */
+  /** `Project <key> ▾`, its menu of the projects the user's rows name, `<n> of <m> services`
+   * and `Show all`. */
   #filterLine(rows: readonly Row[], shown: string, acts: boolean) {
     const key = this.#filter!;
     return html`<div class="filt" data-part="filter"><span class="pick"><span class="k">${PROJECT}</span><button
@@ -878,12 +879,12 @@ export class ServicesPage extends LitElement {
             ${shape.read !== null ? html`<span class="read" data-line="read">${shape.read}</span>` : nothing}</div>` : nothing}
           ${shape.counts !== null ? html`<div class="counts" data-line="counts">${shape.counts}</div>` : nothing}`}
         </div></section>
-      ${!shape.his && this.#filter === null ? html`<section class="grp" data-part="group" data-group="his" data-project="">
+      ${!shape.his && this.#filter === null ? html`<section class="grp" data-part="group" data-group="yours" data-project="">
         <div class="gk" data-line="group">${YOURS}</div><div class="gl"><div class="yours"><span data-line="what">${
           WHAT_A_SERVICE_IS}</span>${add ? html`<button type="button" data-action="add" @click=${() => this.#toAdd()}>${
           ADD_A_SERVICE}</button>` : nothing}</div></div></section>` : nothing}
-      ${repeat(shape.groups, ({ group }) => `${group.moxi ? "moxi" : "his"}:${group.project ?? group.label}`, ({ group, rows }) => html`
-        <section class="grp" data-part="group" data-group=${group.moxi ? "moxi" : group.project !== null ? "project" : "his"}
+      ${repeat(shape.groups, ({ group }) => `${group.moxi ? "moxi" : "yours"}:${group.project ?? group.label}`, ({ group, rows }) => html`
+        <section class="grp" data-part="group" data-group=${group.moxi ? "moxi" : group.project !== null ? "project" : "yours"}
           data-project=${group.project ?? ""}><div class="gk" data-line="group">${group.label}</div>
           <div class="gl">${repeat(rows, (item) => item.row.id, row)}</div></section>`)}
     </div>`;
@@ -985,7 +986,8 @@ export class ServicesPage extends LitElement {
     </div>`;
   }
 
-  /** The opened row's foot: its acts, his daemon's word beside Stop, and the tucked acts. */
+  /** The opened row's foot: its acts, the word for the user's daemon beside Stop, and the
+   * tucked acts. */
   #foot(row: Row) {
     const foot = this.#actsOf(row).foot;
     if (!foot.length) return nothing;

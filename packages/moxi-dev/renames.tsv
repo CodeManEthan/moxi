@@ -7559,7 +7559,7 @@ moxi-dev	packages/moxi-dev/src/moxi_dev/check.py	check	name	environ	env
 moxi-dev	packages/moxi-dev/src/moxi_dev/check.py	f"{round(summary.slowest_share * 100)}%")	keep	round	round
 moxi-dev	packages/moxi-dev/src/moxi_dev/check.py	help="check every package, whatever changed, and run every "	keep	help	help
 moxi-dev	packages/moxi-dev/src/moxi_dev/check.py	help="count the changes since HEAD left REV, and compare the "	keep	help	help
-moxi-dev	packages/moxi-dev/src/moxi_dev/check.py	help="run only the tag, comment-reference, naming, Ruff, renames "	keep	help	help
+moxi-dev	packages/moxi-dev/src/moxi_dev/check.py	help="run only the tag, comment-reference, naming, Ruff, renames, "	keep	help	help
 moxi-dev	packages/moxi-dev/src/moxi_dev/check.py	help="run only the tests marked with this finding; may be given "	keep	help	help
 moxi-dev	packages/moxi-dev/src/moxi_dev/check.py	help="run only this whole-tree code check")	keep	help	help
 moxi-dev	packages/moxi-dev/src/moxi_dev/check.py	help="with --only, print findings only under these paths")	keep	help	help
@@ -7672,6 +7672,11 @@ moxi-dev	packages/moxi-dev/src/moxi_dev/new.py	parser.add_argument("module", hel
 moxi-dev	packages/moxi-dev/src/moxi_dev/new.py	path.parent.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
 moxi-dev	packages/moxi-dev/src/moxi_dev/new.py	position = text.find("\n", end)	keep	find	find
 moxi-dev	packages/moxi-dev/src/moxi_dev/new.py	start = text.find("\n", found.end())	keep	find	find
+moxi-dev	packages/moxi-dev/src/moxi_dev/pronouns.py	end = text.find("\n", at)	keep	find	find
+moxi-dev	packages/moxi-dev/src/moxi_dev/pronouns.py	end = text.find("*/", at + 2)	keep	find	find
+moxi-dev	packages/moxi-dev/src/moxi_dev/pronouns.py	marked, bare = set(), set()	keep	set	set
+moxi-dev	packages/moxi-dev/src/moxi_dev/pronouns.py	hits, used = [], set()	keep	set	set
+moxi-dev	packages/moxi-dev/src/moxi_dev/pronouns.py	__all__ = ["CODE", "FIX", "Hit", "MARK", "WORD", "check_text", "doc_words", "kind",	keep	MARK	MARK
 moxi-dev	packages/moxi-dev/src/moxi_dev/refs.py	#: For a `.refs-allow` line (`stale`): "unused", "malformed" or "duplicate".	keep	stale	stale
 moxi-dev	packages/moxi-dev/src/moxi_dev/refs.py	exists = (unchecked or any(p == clean or p.endswith("/" + clean) for p in paths)	keep	any	any
 moxi-dev	packages/moxi-dev/src/moxi_dev/refs.py	flags: set[str] = set()	keep	set	set
@@ -7885,6 +7890,7 @@ moxi-dev	packages/moxi-dev/tests/test_naming.py	assert {hit.message.split("'")[1
 moxi-dev	packages/moxi-dev/tests/test_naming.py	hits = [hit for hit in naming.scan(root) if hit.part == "directory"]	keep	directory	directory
 moxi-dev	packages/moxi-dev/tests/test_naming.py	path.parent.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
 moxi-dev	packages/moxi-dev/tests/test_new.py	target.parent.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
+moxi-dev	packages/moxi-dev/tests/test_pronouns.py	path.parent.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
 moxi-dev	packages/moxi-dev/tests/test_refs.py	assert len(found) == 1 and found[0].stale and found[0].text == "GoneName"	keep	stale	stale
 moxi-dev	packages/moxi-dev/tests/test_refs.py	path.parent.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
 moxi-dev	packages/moxi-dev/tests/test_release.py	member	name	directory	member_dir

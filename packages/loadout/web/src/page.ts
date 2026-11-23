@@ -2,9 +2,9 @@
 // bottom, each group with its label in the left column:
 //
 // - `This page`, only while the harness homes' note is set: the page's acts are off, and
-//   each act shows as the command he would type, with `Copy`.
+//   each act shows as the command the user would type, with `Copy`.
 // - `Placed`: the verdict, then each problem in three lines (what, where, the fix and its
-//   act), then the counts per harness; with nothing needing him, the counts sit at the
+//   act), then the counts per harness; with nothing needing the user, the counts sit at the
 //   verdict's right.
 // - `Folder`: the loadout folder, its files git hasn't committed, and `Settings › loadout`.
 // - `Your items`, a group per module whose skills it took over, then each project
@@ -123,7 +123,7 @@ interface Sent {
 
 /** The foot line for an address whose thing is gone, and the address the page wrote in its
  * place. The shell may place the page again for that address, as a new element; the line
- * stays on it until he opens something or an act ends. */
+ * stays on it until the user opens something or an act ends. */
 let goneHeld: { at: Address; line: string } | null = null;
 
 /** A fresh job id for one press. */
@@ -614,7 +614,7 @@ export class LoadoutPage extends LitElement {
       @click=${() => void this.#copy(what, text)}>${this.#copied === what ? COPIED : COPY}</button>`;
   }
 
-  /** An act as he would type it, with `Copy`, while the note is set. */
+  /** An act as the user would type it, with `Copy`, while the note is set. */
   #typed(argv: readonly string[], key: string) {
     const command = commandOf(argv);
     return html`<div class="cmd"><code data-line="command">${command}</code>${this.#copyButton(key, command)}</div>`;

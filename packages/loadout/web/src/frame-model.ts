@@ -1,7 +1,7 @@
 // The page's frame as it draws it, from `/api/view` and `/api/folder`: which state the page
 // is in, the Folder line, the empty state's sentences, the `This page` group while the
-// harness homes' note is set, the dim foot lines, and each act as he would type it. No
-// DOM, so the Node tests read it.
+// harness homes' note is set, the dim foot lines, and each act as the user would type it.
+// No DOM, so the Node tests read it.
 
 import type { SourceDir, View } from "./feed.ts";
 import { FINE } from "./feed.ts";
@@ -148,7 +148,7 @@ export function footLines(view: View | null, dir: SourceDir | null): string[] {
   return out;
 }
 
-/** A problem's act as he would type it, with the note set. */
+/** A problem's act as the user would type it, with the note set. */
 export function actCommand(act: ProblemAct): string {
   return commandOf(actArgv(act));
 }

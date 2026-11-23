@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- `moxi-dev check` has a pronoun step, the last of the static steps, so `--static` runs
+  it too: it refuses he, his, him and himself, as whole words in any case, in each
+  package's Python string literals and docstrings, its web sources' strings and comments,
+  and its README, docs and bundled skills, and prints each as `path:line: word` with the
+  fix. A genuine use stands with `noqa: MX5 -- <why>` on its line. The summary line says
+  `pronouns pass`, `fail` or `not run`, and `--only pronouns` runs it alone.
 - `moxi-dev check` picks fewer packages. Closing over dependents leaves out edges to
   `moxi-dev`, which every package lists in its dev group, so a change to a package
   `moxi-dev` requires no longer picks them all; other dev-group edges still count (a ui
