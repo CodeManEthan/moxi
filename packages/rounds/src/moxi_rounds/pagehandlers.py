@@ -49,6 +49,11 @@ group do.
 Free text is cut to `TEXT_MAX_CHARS`, and a question's passage to `PASSAGE_MAX_CHARS`,
 before a value leaves a handler, so one huge question can't break an answer.
 
+**The acts** (`answers`) run `pageacts` off the server's event loop, with the one store
+of receipts this server process keeps (`RECEIPTS`) and comms' API as `comms_api` gives
+it: an act posted twice with one act id runs once while the process lives, and the
+round's log guards it after a restart.
+
 Like `page`, this module reaches loopback only through `moxi.modules.load`.
 """
 
@@ -69,7 +74,7 @@ from typing import Any
 from moxi import aio, modules
 
 from . import board, builds, checking, export, folders, index, listing, log, open_builds
-from . import paths, questions, showing
+from . import pageacts, paths, questions, showing
 from . import settings as own
 from . import state as states
 from .errors import RoundsError, UnfencedTest
@@ -651,6 +656,33 @@ def record(call: Any) -> dict:
     found = BOARD.record(what, name, column=query.get("column"),
                          stage=query.get("stage") or None, item_id=query.get("id"))
     return {"gone": found is None, "record": found}
+
+
+#: The receipts of this server's acts, by act id, kept for the life of the process.
+RECEIPTS = pageacts.Receipts()
+
+
+def comms_api() -> Any | None:
+    """comms' API, None when comms is not installed."""
+    return pageacts.comms_loaded()
+
+
+def _drafts(body: Mapping) -> list[pageacts.Draft]:
+    try:
+        return pageacts.drafts_of(body)
+    except ValueError as exc:
+        raise lb.BadRequest(str(exc), "a draft's value can't be read") from None
+
+
+async def answers(call: Any) -> dict:
+    """`POST /api/answers`: the tray's drafts sent to `to` (`each`, or one agent's
+    name): the page's kinds recorded, then one message per recipient; a receipt per
+    draft, in the order posted."""
+    drafts = _drafts(call.body)
+    to = call.body.get("to") or pageacts.EACH
+    comms = comms_api()
+    return await aio.offload(lambda: pageacts.send(drafts, to, receipts=RECEIPTS,
+                                                   comms=comms))
 
 
 async def events(call: Any) -> Any:

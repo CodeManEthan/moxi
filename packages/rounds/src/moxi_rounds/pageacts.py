@@ -129,7 +129,11 @@ class Receipts:
             return self._kept.get(key)
 
     def keep(self, key: str, receipt: Mapping) -> None:
-        """Keep `receipt` under `key` when the act did something."""
+        """Keep `receipt` under `key` when the act did something. A draft sent again
+        whose message was refused again did nothing, so it is not kept and its next
+        try runs."""
+        if receipt.get("state") == NOT_TOLD and receipt.get("tell"):
+            return
         if receipt.get("state") in _KEPT_ANSWERS:
             with self._lock:
                 self._kept[key] = dict(receipt)
