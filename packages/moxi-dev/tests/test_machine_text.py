@@ -74,6 +74,18 @@ def no_names(monkeypatch):
     ("/Users/Publicity", "/Users/Publicity"),
     ("/home/Linuxbrew", "/home/Linuxbrew"),
     ("route('/home/settings')", "/home/settings"),
+    # A shared folder is the whole segment; run on into a longer name, it is a user's.
+    ("/Users/Public.x", "/Users/Public.x"),
+    ("/home/Guest-ann/x", "/home/Guest-ann"),
+    ("/Users/Shared_1", "/Users/Shared_1"),
+    ("/Users/Shared_", "/Users/Shared_"),
+    ("/home/linuxbrew2/x", "/home/linuxbrew2"),
+    ("/home/linuxbrew.bot", "/home/linuxbrew.bot"),
+    ("C:\\Users\\public.x\\y", "C:\\Users\\public.x"),
+    ("c:/users/DEFAULT-2", "c:/users/DEFAULT-2"),
+    ("/mnt/c/Users/All Users2", "/mnt/c/Users/All"),
+    ("/mnt/c/users/guest_ann", "/mnt/c/users/guest_ann"),
+    ("/Users/Public..x", "/Users/Public..x"),
 ])
 def test_a_user_dir_hits(line, found):
     assert user_dirs(line) == [found]
@@ -90,6 +102,8 @@ def test_a_user_dir_hits(line, found):
     "C:\\USERS\\DEFAULT\\x", "c:/users/all users/x", "/mnt/c/Users/Public",
     "/mnt/c/users/default/x", "/mnt/c/Users/<you>", "/mnt/c/Users/you",
     "/home/_x", "x/mnt/c/Users/ann", "/mnt/cd/Users/ann",
+    "files in /Users/Shared.", "see /Users/Public, then", "C:\\Users\\PUBLIC-", "/Users/Guest's",
+    "/home/linuxbrew/.linuxbrew", "(/Users/Shared)", "c:\\users\\all users.",
 ])
 def test_a_near_miss_is_no_user_dir(line):
     assert user_dirs(line) == []
@@ -153,6 +167,17 @@ def test_each_user_dir_on_a_line_is_found():
     (cmd("- dnf| install x"), cmd("dnf| install")),
     (cmd('"brew| install tmux (or port| install tmux)"'), cmd("brew| install")),
     (cmd('("host", "apt-get"|, "install")'), cmd("apt-get| install")),
+    # Options are passed over to the verb, with their values.
+    (cmd("apt-get| -o K=V install x"), cmd("apt-get| install")),
+    (cmd("apt-get| -o Dpkg::Options::=--force-confnew -y install x"), cmd("apt-get| install")),
+    (cmd("apt-get| -o=K=V install x"), cmd("apt-get| install")),
+    (cmd("apt-get| --option K=V install x"), cmd("apt-get| install")),
+    (cmd("apt| -t bookworm-backports install x"), cmd("apt| install")),
+    (cmd("apt-get| -c ./apt.conf update"), cmd("apt-get| update")),
+    (cmd("dnf| --setopt=install_weak_deps=False install x"), cmd("dnf| install")),
+    (cmd("dnf| --setopt keepcache=1 install x"), cmd("dnf| install")),
+    (cmd('["apt-get"|, "-o", "K=V", "install"]'), cmd("apt-get| install")),
+    (cmd('["dnf"|, "--setopt=x=1", "-y", "install"]'), cmd("dnf| install")),
 ])
 def test_a_package_manager_command_hits(line, command):
     assert manager_commands(line) == [command]
@@ -166,6 +191,17 @@ WORD_COMMANDS = [cmd(text).split() for text in ("port| install", "snap| install"
 @pytest.mark.parametrize("shape", [
     "{m} {v} tmux", "sudo {m} {v} tmux", "sudo -E {m} {v} tmux", "x && {m} {v} tmux",
     "run `{m} {v} tmux`", "then sudo {m} {v} tmux", "$ {m} {v} tmux", '["{m}", "{v}", "x"]',
+    # A backtick that opens inline code, a double one too, after closed code on the line.
+    "``{m} {v} tmux``", "`a` and `{m} {v} tmux`", "`a` `{m} {v} x`",
+    # sudo's options and their values.
+    "sudo -u root {m} {v} tmux", "sudo -uroot {m} {v} tmux", "sudo --user=root {m} {v} x",
+    "sudo --user root {m} {v} x", "sudo -E -u root -H {m} {v} x", "sudo -g wheel {m} {v} x",
+    "x && sudo -u root {m} {v} x", "sudo -u {m} {m} {v} x",
+    # A Dockerfile's RUN, its flags and assignments after it.
+    "RUN {m} {v} tmux", "RUN --mount=type=cache,target=/var/cache {m} {v} x",
+    "  RUN DEBIAN_FRONTEND=noninteractive {m} {v} x", "# RUN {m} {v} x",
+    # Options between the manager and the verb, with their values.
+    "{m} --no-cache=1 {v} x", "{m} -o K=V {v} x",
 ])
 def test_a_manager_that_is_a_word_hits_where_a_command_starts(manager, verb, shape):
     line = shape.format(m=manager, v=verb)
@@ -176,6 +212,11 @@ def test_a_manager_that_is_a_word_hits_where_a_command_starts(manager, verb, sha
 @pytest.mark.parametrize("shape", [
     "Run {m} {v} tmux.", '"or {m} {v} tmux"', "- {m} {v} tmux", "each {m} {v} is logged",
     '("host", "{m}", "{v}")',
+    # A backtick that closes inline code, or opens none, is no command start.
+    "the `host` {m} {v} is logged", "`x` {m} {v} is slow", "``a`` {m} {v} x",
+    "`a` and `b` {m} {v} x", "run `{m} {v} tmux", "a ` {m} {v} x",
+    # RUN is a Dockerfile's only at a line's start and in capitals.
+    "RUNNING {m} {v} x", "Run it: RUN {m} {v} x", "run {m} {v} x",
 ])
 def test_a_manager_that_is_a_word_passes_elsewhere(manager, verb, shape):
     assert manager_commands(shape.format(m=manager, v=verb)) == []
@@ -251,6 +292,10 @@ def test_a_path_segment_holding_a_private_name_prints_hidden(names, path, shown)
     for hit in hits:
         assert hit.path == path
         assert str(hit).split(":")[0] == shown
+
+
+def test_the_module_says_what_a_hidden_segment_prints_as():
+    assert f"prints as `{machine_text.HIDDEN}`" in machine_text.__doc__
 
 
 @pytest.mark.parametrize("path", ["packages/a/docs/annual.md", "packages/acme/x.md",

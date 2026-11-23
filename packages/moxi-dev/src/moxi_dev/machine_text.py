@@ -11,7 +11,8 @@ machine only:
   `username` or `name`, in any case, with or without trailing digits) or a folder that
   is no one person's: a shared folder every machine of a platform ships (Windows'
   `Public`, `Default` and `All Users`, macOS' `Shared` and `Guest`, and `linuxbrew`, the
-  account Homebrew on Linux installs into), in any case under a Windows root. A user
+  account Homebrew on Linux installs into), as the whole segment, in any case under a
+  Windows root; `Public.x` or `Guest-ann` is a user's name. A user
   starts with a letter or a digit in any script. A word, a dot, a tilde or a hyphen just
   before the root means it isn't one, so a relative path passes. A path from the
   reader's own home (`~/...`) is not this rule's. Tests pass this rule: a test's made-up
@@ -20,19 +21,21 @@ machine only:
   `moxi_secrets` keeps in its config, outside every repository. No line the check prints
   names it: the private-name line names no text, on a line that holds one the
   home-folder line names the root alone, and a segment of a file's path that holds one
-  prints as `HIDDEN`. A list secrets can't read raises `moxi_secrets.SetUnavailable`; an
+  prints as `<private name>`. A list secrets can't read raises `moxi_secrets.SetUnavailable`; an
   empty one finds nothing.
 - a package-manager command: one of `MANAGERS`, called by its name or from a folder
-  (`/usr/bin/apt-get`, `C:\\...\\choco.exe`), followed by one of `VERBS` (flags allowed
-  between), or pacman with its operation flag, anywhere on a line: in a sentence, a
+  (`/usr/bin/apt-get`, `C:\\...\\choco.exe`), followed by one of `VERBS` (options allowed
+  between, with their values: `-o K=V`, `-t <release>`, `--setopt=x`), or pacman with its operation flag, anywhere on a line: in a sentence, a
   string or a comment. The same as an argv list of quoted words counts too.
   Case-sensitive, since commands are lower case. A sentence that only names a manager
   passes; service managers are not managers here. The managers whose name is also an
   ordinary word (`WORD_MANAGERS`: port, snap, apk) count only where a command starts: at
   the line's start (past a comment's opening, a shell prompt such as `$ `, `% ` or
-  `PS C:\\> `, and any `NAME=value` assignments), or after `sudo`, `&&`, `||`, `;`,
-  `&`, `|` or a backtick that opens inline code; as an argv list, when the quoted manager
-  comes first. So "each port update is logged" and `("host", "port", "update")` pass.
+  `PS C:\\> `, a Dockerfile's `RUN ` and any `NAME=value` assignments), or after `sudo`
+  and its options (`sudo -u root `), `&&`, `||`, `;`, `&`, `|` or a backtick that opens
+  inline code, never one that closes it; as an argv list, when the quoted manager comes
+  first. So "each port update is logged", "the `host` port update is logged" and
+  `("host", "port", "update")` pass.
 
 The check reads every tracked and untracked-but-not-ignored file that reads as UTF-8,
 every line of it, comments included, lines numbered as git numbers them (a newline alone
@@ -68,7 +71,7 @@ from moxi_secrets import scan as secrets_scan
 
 from .contract import CORE
 from .contract import VENDORED as _CORE_VENDORED
-from .marks import marked_lines
+from .marks import CODE_SPAN, marked_lines
 
 #: The code an exception mark names to let a home folder or a package manager stand.
 CODE = "MX6"
@@ -98,8 +101,13 @@ USER = re.compile(r"[^\W_][\w.-]*")
 EXAMPLE_USER = re.compile(r"(?:you|me|user|username|name)\d*", re.I)
 #: The folders under a home root that are no one person's: Windows' shared and template
 #: profiles, macOS' shared folder and guest account, and the account Linuxbrew installs
-#: into. Under a Windows root they pass in any case, as Windows reads them.
+#: into. Each is the whole segment; under a Windows root they pass in any case, as Windows
+#: reads them.
 SHARED_USERS = ("Public", "Default", "All Users", "Shared", "Guest", "linuxbrew")
+#: What, after a shared folder's name, makes the segment a longer name (`Public.x`,
+#: `Guest-ann`, `Shared_1`): more of a name's characters ending in a letter, digit or `_`.
+#: A `.` or `-` alone after it ends a sentence or a phrase.
+_LONGER_NAME = re.compile(r"[\w.-]*\w")
 
 # -- the package-manager rule ----------------------------------------------------------------
 
@@ -116,20 +124,31 @@ VERBS = ("install", "reinstall", "remove", "uninstall", "erase", "purge", "autor
 #: No word, path or flag runs on into a manager's name.
 _ALONE = r"(?<![\w./-])"
 #: Where a command starts: the line's start, past a comment's opening (`#`, `//`, `/*`,
-#: `*`, `<!--`), a shell prompt (`$ `, `% `, `# `, `> `, `PS C:\> `) and any variable
-#: assignments (`NAME=value `); after `&&`, `||`, `;`, `&`, `|` or a backtick that opens
-#: inline code; or after `sudo` and its flags.
+#: `*`, `<!--`), a shell prompt (`$ `, `% `, `# `, `> `, `PS C:\> `), a Dockerfile's
+#: `RUN ` and its flags, and any variable assignments (`NAME=value `); after `&&`, `||`,
+#: `;`, `&` or `|`; after a backtick, which `manager_commands` keeps only where it opens
+#: inline code (the `code` group); or after `sudo` and its options, with their values.
 _COMMENT = r"(?:(?://|/\*+|\*|<!--|#)\s*)?"
 _PROMPT = r"(?:(?:PS\s+)?[^\s$%#>]*[$%#>]\s+)?"
-_START = (r"(?:^\s*" + _COMMENT + _PROMPT + r"(?:\w+=\S*\s+)*|(?<=[;&|`])\s*|" + _ALONE
-          + r"sudo(?:\s+-[\w-]+)*\s+)")
+_RUN = r"(?:RUN(?:\s+--[\w-]+(?:=\S*)?)*\s+)?"
+#: sudo's options that take a value: `-u root`, `-uroot`, `--user=root`, `--user root`.
+_SUDO_VALUED = (r"-[CDghpRrTtUu]\s*\S+|--(?:chdir|chroot|close-from|command-timeout|group|"
+                r"host|other-user|prompt|role|type|user)(?:=|\s+)\S+")
+_SUDO = _ALONE + r"sudo(?:\s+(?:" + _SUDO_VALUED + r"|-[\w-]+))*\s+"
+_START = (r"(?:^\s*" + _COMMENT + _PROMPT + _RUN + r"(?:\w+=\S*\s+)*|(?<=[;&|])\s*|"
+          r"(?<=`)(?P<code>)\s*|" + _SUDO + ")")
 #: The folder a manager is called from: an absolute path (`/usr/bin/`), one from the home
 #: folder (`~/`) or from a drive (`C:\...\`).
 _CALLED_FROM = r"(?:(?:~|[A-Za-z]:)?(?:" + _SLASH + r"[\w.-]+)*" + _SLASH + ")?"
-_FLAGS = r"\s+(?:--?[\w-]+\s+)*"
+#: The options between a manager and its verb, with their values: `--yes`, `--setopt=x`,
+#: `-o K=V`, `--option K=V`, and apt-get's `-t <release>`, `-c <file>`, `-a <arch>`.
+_OPTION = r"(?:-[acot]\s+\S+|--?[\w-]+(?:=\S*)?(?:\s+[^\s=-][^\s=]*=\S*)?)"
+_FLAGS = r"\s+(?:" + _OPTION + r"\s+)*"
 _VERB = "(?P<verb>" + "|".join(map(re.escape, VERBS)) + ")"
 _QUOTE = r"[\"']"
-_ARGV_FLAGS = r"\s*,\s*(?:" + _QUOTE + r"-[\w-]+" + _QUOTE + r"\s*,\s*)*"
+_ARGV_VALUE = r"(?:" + _QUOTE + r"[^\s\"'=-][^\s\"'=]*=[^\"']*" + _QUOTE + r"\s*,\s*)?"
+_ARGV_FLAGS = (r"\s*,\s*(?:" + _QUOTE + r"-[\w-]+(?:=[^\"']*)?" + _QUOTE + r"\s*,\s*"
+               + _ARGV_VALUE + ")*")
 
 
 def _manager(names: tuple[str, ...]) -> str:
@@ -244,12 +263,12 @@ def is_test(path: str) -> bool:
 
 
 def _is_shared(rest: str, *, windows: bool) -> bool:
-    """Whether `rest`, the text after a home root, starts with a whole `SHARED_USERS`
-    segment, in any case under a Windows root."""
+    """Whether `rest`, the text after a home root, starts with a `SHARED_USERS` folder as
+    the whole segment, in any case under a Windows root."""
     for shared in SHARED_USERS:
         head = rest[:len(shared)]
         same = head.casefold() == shared.casefold() if windows else head == shared
-        if same and not USER.match(rest[len(shared):]):
+        if same and not _LONGER_NAME.match(rest[len(shared):]):
             return True
     return False
 
@@ -272,8 +291,10 @@ def user_dirs(line: str) -> list[str]:
 def manager_commands(line: str) -> list[str]:
     """Each package-manager command `line` holds, as the manager and its verb, in the
     order they stand."""
+    opened = {span.end(1) for span in CODE_SPAN.finditer(line)}
     matches = [match for pattern in (COMMAND, PLACED_COMMAND, ARGV, PLACED_ARGV)
-               for match in pattern.finditer(line)]
+               for match in pattern.finditer(line)
+               if match.groupdict().get("code") is None or match.start("code") in opened]
     found = []
     for match in sorted(matches, key=lambda match: match.start()):
         if match.groupdict().get("pacman"):

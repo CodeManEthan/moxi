@@ -114,9 +114,10 @@ A file under a package is a test when a directory below the package is named `te
   an example user (`you`, `me`, `user`, `username` or `name`, in any case, with or
   without digits) and a folder that is no one person's pass: Windows' `Public`,
   `Default` and `All Users` (in any case, as Windows reads them), macOS' `Shared` and
-  `Guest`, and `linuxbrew`, the account Homebrew on Linux installs into. So does a path
-  from the reader's own home (`~/...`). Tests pass this rule: a test's made-up home is
-  data no machine resolves.
+  `Guest`, and `linuxbrew`, the account Homebrew on Linux installs into, each as the
+  whole segment (`Public.x` is a user's name). So does a path from the reader's own
+  home (`~/...`). Tests pass this rule: a test's made-up home is data no machine
+  resolves.
 - a name from your own private-names list, the one secrets keeps in its config, in any
   file. No line the step prints names it: on a line that holds one, the home-folder
   line prints the root alone (`home folder /home/`), and a segment of a file's path
@@ -126,15 +127,17 @@ A file under a package is a test when a directory below the package is named `te
 - a package-manager command in any file: apt-get, apt, aptitude, dnf, yum, zypper,
   pacman, apk, brew, port, snap, flatpak, choco, winget or scoop, by its name or called
   from a folder (`/usr/bin/apt-get`), followed by a verb such as install, remove,
-  update or dist-upgrade (flags allowed), or pacman with its operation flag, or the same
-  as an argv list. It counts anywhere on a line, in a sentence or a string as much as in
-  a shell line. port, snap and apk are ordinary words too, so they count only where a
-  command starts: at the start of a line (past a comment's opening, a shell prompt such
-  as `$ ` or `PS C:\> `, and any `NAME=value` assignments), or after `sudo`, `&&`, `||`,
-  `;`, `&`, `|` or a backtick that opens inline code; as an argv list, when the quoted
-  manager comes first. "each port update is logged" passes. A sentence that only names
-  a manager passes, and service managers (systemctl, launchctl and the like) are not in
-  the rule.
+  update or dist-upgrade (options allowed, with their values, as in `-o K=V`), or
+  pacman with its operation flag, or the same as an argv list. It counts anywhere on a
+  line, in a sentence or a string as much as in a shell line. port, snap and apk are
+  ordinary words too, so they count only where a command starts: at the start of a line
+  (past a comment's opening, a shell prompt such as `$ ` or `PS C:\> `, a Dockerfile's
+  `RUN `, and any `NAME=value` assignments), or after `sudo` and its options
+  (`sudo -u root `), `&&`, `||`, `;`, `&`, `|` or a backtick that opens inline code, not
+  one that closes it; as an argv list, when the quoted manager comes first. "each port
+  update is logged" and "the `host` port update is logged" pass. A sentence that only
+  names a manager passes, and service managers (systemctl, launchctl and the like) are
+  not in the rule.
 
 Each hit prints as `path:line: machine text: ...` with the fix. A genuine use, a line
 written for one platform or naming a place every machine of a kind has, carries
