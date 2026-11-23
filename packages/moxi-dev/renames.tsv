@@ -7674,15 +7674,13 @@ moxi-dev	packages/moxi-dev/src/moxi_dev/new.py	path.parent.mkdir(parents=True, e
 moxi-dev	packages/moxi-dev/src/moxi_dev/new.py	position = text.find("\n", end)	keep	find	find
 moxi-dev	packages/moxi-dev/src/moxi_dev/new.py	start = text.find("\n", found.end())	keep	find	find
 moxi-dev	packages/moxi-dev/src/moxi_dev/machine_text.py	return (any(part in TEST_DIRS for part in parts[2:-1]) or name == "conftest.py"	keep	any	any
-moxi-dev	packages/moxi-dev/src/moxi_dev/machine_text.py	if user is None or any(rest.startswith(shared) and not USER.match(	keep	any	any
+moxi-dev	packages/moxi-dev/src/moxi_dev/machine_text.py	hidden = any(first < end and last > start for first, last in spans)	keep	any	any
 moxi-dev	packages/moxi-dev/src/moxi_dev/machine_text.py	hits, used = [], set()	keep	set	set
-moxi-dev	packages/moxi-dev/src/moxi_dev/machine_text.py	"MANAGER_FIX", "MARK", "NAME_FIX", "SetUnavailable", "VERBS", "check_text",	keep	MARK	MARK
-moxi-dev	packages/moxi-dev/src/moxi_dev/machine_text.py	marked, bare = set(), set()	keep	set	set
+moxi-dev	packages/moxi-dev/src/moxi_dev/machine_text.py	marked, bare = marked_lines(text, CODE) if takes_marks else (set(), set())	keep	set	set
+moxi-dev	packages/moxi-dev/src/moxi_dev/marks.py	marked, bare = set(), set()	keep	set	set
 moxi-dev	packages/moxi-dev/src/moxi_dev/pronouns.py	end = text.find("\n", at)	keep	find	find
 moxi-dev	packages/moxi-dev/src/moxi_dev/pronouns.py	end = text.find("*/", at + 2)	keep	find	find
-moxi-dev	packages/moxi-dev/src/moxi_dev/pronouns.py	marked, bare = set(), set()	keep	set	set
 moxi-dev	packages/moxi-dev/src/moxi_dev/pronouns.py	hits, used = [], set()	keep	set	set
-moxi-dev	packages/moxi-dev/src/moxi_dev/pronouns.py	__all__ = ["CODE", "FIX", "Hit", "MARK", "WORD", "check_text", "doc_words", "kind",	keep	MARK	MARK
 moxi-dev	packages/moxi-dev/src/moxi_dev/refs.py	#: For a `.refs-allow` line (`stale`): "unused", "malformed" or "duplicate".	keep	stale	stale
 moxi-dev	packages/moxi-dev/src/moxi_dev/refs.py	exists = (unchecked or any(p == clean or p.endswith("/" + clean) for p in paths)	keep	any	any
 moxi-dev	packages/moxi-dev/src/moxi_dev/refs.py	flags: set[str] = set()	keep	set	set
@@ -7896,8 +7894,6 @@ moxi-dev	packages/moxi-dev/tests/test_naming.py	assert {hit.message.split("'")[1
 moxi-dev	packages/moxi-dev/tests/test_naming.py	hits = [hit for hit in naming.scan(root) if hit.part == "directory"]	keep	directory	directory
 moxi-dev	packages/moxi-dev/tests/test_naming.py	path.parent.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
 moxi-dev	packages/moxi-dev/tests/test_new.py	target.parent.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
-moxi-dev	packages/moxi-dev/tests/test_machine_text.py	found = set()	keep	set	set
-moxi-dev	packages/moxi-dev/tests/test_machine_text.py	monkeypatch.setattr(machine_text, "private_lines", lambda text, path: set())	keep	set	set
 moxi-dev	packages/moxi-dev/tests/test_machine_text.py	config.parent.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
 moxi-dev	packages/moxi-dev/tests/test_machine_text.py	path.parent.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
 moxi-dev	packages/moxi-dev/tests/test_pronouns.py	path.parent.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok

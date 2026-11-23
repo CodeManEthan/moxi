@@ -33,7 +33,8 @@ machine only:
   logged"), passes; service managers are not managers here.
 
 The check reads every tracked and untracked-but-not-ignored file that reads as UTF-8,
-every line of it, comments included, but those `read` leaves out: `.github/`, the core's
+every line of it, comments included, lines numbered as git numbers them (a newline alone
+ends one), but those `is_scanned` leaves out: `.github/`, the core's
 vendored libraries, each package's built page folder (`src/<module>/web/`, written from
 its `web/`), the lock files, the rename table, the allow and path lists, and LICENSE
 files. A file under a package is a test when a directory below the package is named
@@ -196,7 +197,7 @@ def _files(root: Path) -> list[str]:
     return sorted({p for p in done.stdout.decode("utf-8", "surrogateescape").split("\0") if p})
 
 
-def read(path: str) -> bool:
+def is_scanned(path: str) -> bool:
     """Whether the check reads the file at `path`, relative to the root with `/`."""
     parts = path.split("/")
     name = parts[-1]
@@ -220,7 +221,7 @@ def is_test(path: str) -> bool:
             or name.startswith("test_") or ".test." in name)
 
 
-def _shared(rest: str, *, windows: bool) -> bool:
+def _is_shared(rest: str, *, windows: bool) -> bool:
     """Whether `rest`, the text after a home root, starts with a whole `SHARED_USERS`
     segment, in any case under a Windows root."""
     for shared in SHARED_USERS:
@@ -231,14 +232,14 @@ def _shared(rest: str, *, windows: bool) -> bool:
     return False
 
 
-def home_paths(line: str) -> list[str]:
+def user_dirs(line: str) -> list[str]:
     """Each home folder `line` names that isn't a placeholder, an example user or a shared
     folder, as its root and user."""
     found = []
     for root in HOME_ROOT.finditer(line):
         rest = line[root.end():]
         user = USER.match(rest)
-        if user is None or _shared(rest, windows=root.group("windows") is not None):
+        if user is None or _is_shared(rest, windows=root.group("windows") is not None):
             continue
         if EXAMPLE_USER.fullmatch(user.group(0)):
             continue
@@ -295,10 +296,10 @@ def check_text(path: str, text: str) -> list[Hit]:
     hits, used = [], set()
     marked, bare = marked_lines(text, CODE) if takes_marks else (set(), set())
     for number, line in enumerate(text.split("\n"), 1):
-        homes = home_paths(line) if shipped else []
+        found_dirs = user_dirs(line) if shipped else []
         if number in named:
-            homes = [HOME_ROOT.match(home).group(0) for home in homes]
-        found = [Hit(path, number, "home", home) for home in homes][:1]
+            found_dirs = [HOME_ROOT.match(found_dir).group(0) for found_dir in found_dirs]
+        found = [Hit(path, number, "home", found_dir) for found_dir in found_dirs][:1]
         found += [Hit(path, number, "manager", command)
                   for command in manager_commands(line)][:1]
         if found and number in marked:
@@ -319,10 +320,11 @@ def scan(root: Path | str) -> list[Hit]:
     root = Path(root)
     hits = []
     for path in _files(root):
-        if not read(path) or not (root / path).is_file():
+        if not is_scanned(path) or not (root / path).is_file():
             continue
         try:
-            text = (root / path).read_text(encoding="utf-8")
+            # Bytes, so no newline is translated and lines number as git numbers them.
+            text = (root / path).read_bytes().decode("utf-8")
         except (OSError, UnicodeDecodeError):
             continue
         hits += check_text(path, text)
@@ -331,5 +333,5 @@ def scan(root: Path | str) -> list[Hit]:
 
 __all__ = ["ARGV", "CODE", "COMMAND", "HIDDEN", "HOME_FIX", "HOME_ROOT", "Hit", "MANAGERS",
            "MANAGER_FIX", "NAME_FIX", "SetUnavailable", "VERBS", "check_text",
-           "home_paths", "is_test", "manager_commands", "private_lines", "private_spans",
-           "read", "scan", "shown_path", "unreadable"]
+           "is_scanned", "is_test", "manager_commands", "private_lines", "private_spans",
+           "scan", "shown_path", "unreadable", "user_dirs"]

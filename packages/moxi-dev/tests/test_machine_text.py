@@ -14,8 +14,8 @@ from pathlib import Path
 import pytest
 
 from moxi_dev import check, machine_text
-from moxi_dev.machine_text import (CODE, Hit, SetUnavailable, check_text, home_paths, is_test,
-                                   manager_commands, read, scan)
+from moxi_dev.machine_text import (CODE, Hit, SetUnavailable, check_text, is_scanned, is_test,
+                                   manager_commands, scan, user_dirs)
 
 
 def cmd(text: str) -> str:
@@ -50,7 +50,7 @@ def no_names(monkeypatch):
 
 # --- the home-folder rule ----------------------------------------------------------------
 
-@pytest.mark.parametrize("line, home", [
+@pytest.mark.parametrize("line, found", [
     ("/home/ann/src/app", "/home/ann"),
     ("/Users/ana/Library", "/Users/ana"),
     ("C:\\Users\\Jane\\AppData", "C:\\Users\\Jane"),
@@ -75,8 +75,8 @@ def no_names(monkeypatch):
     ("/home/Linuxbrew", "/home/Linuxbrew"),
     ("route('/home/settings')", "/home/settings"),
 ])
-def test_a_home_path_hits(line, home):
-    assert home_paths(line) == [home]
+def test_a_user_dir_hits(line, found):
+    assert user_dirs(line) == [found]
 
 
 @pytest.mark.parametrize("line", [
@@ -91,12 +91,12 @@ def test_a_home_path_hits(line, home):
     "/mnt/c/users/default/x", "/mnt/c/Users/<you>", "/mnt/c/Users/you",
     "/home/_x", "x/mnt/c/Users/ann", "/mnt/cd/Users/ann",
 ])
-def test_a_near_miss_is_no_home_path(line):
-    assert home_paths(line) == []
+def test_a_near_miss_is_no_user_dir(line):
+    assert user_dirs(line) == []
 
 
-def test_each_home_path_on_a_line_is_found():
-    assert home_paths("/home/ann and /Users/bo") == ["/home/ann", "/Users/bo"]
+def test_each_user_dir_on_a_line_is_found():
+    assert user_dirs("/home/ann and /Users/bo") == ["/home/ann", "/Users/bo"]
 
 
 # --- the package-manager rule -------------------------------------------------------------
@@ -178,14 +178,14 @@ def test_a_private_name_hits_any_read_file_and_prints_no_name(names):
     ("/var/home/ann/.config", "/var/home/"),
     ("C:\\Users\\ann\\AppData", "C:\\Users\\"),
 ])
-def test_a_home_path_whose_user_is_a_private_name_prints_no_name(names, line, root):
+def test_a_user_dir_whose_user_is_a_private_name_prints_no_name(names, line, root):
     hits = check_text("a.md", line + "\n")
     assert hits == [Hit("a.md", 1, "home", root), Hit("a.md", 1, "name")]
     for hit in hits:
         assert "ann" not in str(hit)
 
 
-def test_a_home_path_on_a_line_with_a_private_name_prints_the_root_alone(names):
+def test_a_user_dir_on_a_line_with_a_private_name_prints_the_root_alone(names):
     hits = check_text("a.md", "ask ann about /home/bob/x\n")
     assert hits == [Hit("a.md", 1, "home", "/home/"), Hit("a.md", 1, "name")]
     for hit in hits:
@@ -193,7 +193,7 @@ def test_a_home_path_on_a_line_with_a_private_name_prints_the_root_alone(names):
         assert "bob" not in str(hit)
 
 
-def test_a_home_path_on_a_line_with_no_private_name_prints_root_and_user(names):
+def test_a_user_dir_on_a_line_with_no_private_name_prints_root_and_user(names):
     assert check_text("a.md", "ask ann\ncd /home/bob/x\n") == [
         Hit("a.md", 1, "name"), Hit("a.md", 2, "home", "/home/bob")]
 
@@ -288,7 +288,7 @@ def test_anything_else_is_shipped_text(path):
     "packages/a/src/moxi_a/data/LICENSE-lib",
 ])
 def test_the_files_the_check_leaves_alone(path):
-    assert not read(path)
+    assert not is_scanned(path)
 
 
 @pytest.mark.parametrize("path", [
@@ -299,12 +299,12 @@ def test_the_files_the_check_leaves_alone(path):
     "packages/a/scripts/x.sh",
 ])
 def test_the_files_the_check_reads(path):
-    assert read(path)
+    assert is_scanned(path)
 
 
 # --- the mark -----------------------------------------------------------------------------
 
-def test_a_marked_line_lets_its_home_path_and_command_stand(no_names):
+def test_a_marked_line_lets_its_user_dir_and_command_stand(no_names):
     source = (f"a = '/home/bob'  # noqa: {CODE} -- one user's sample\n"
               + cmd(f"b = ['brew'|, 'install', 'x']  # noqa: {CODE} -- macOS\n")
               + "c = '/home/bob'\n")
@@ -355,7 +355,7 @@ def test_a_mark_on_a_line_with_nothing_refused_is_unused(no_names):
         Hit("a.py", 1, "unused")]
 
 
-def test_a_test_s_home_path_leaves_its_mark_unused(no_names):
+def test_a_test_s_user_dir_leaves_its_mark_unused(no_names):
     path = "packages/a/tests/test_x.py"
     assert check_text(path, f"x = '/home/bob'  # noqa: {CODE} -- a sample\n") == [
         Hit(path, 1, "unused")]
@@ -442,15 +442,15 @@ def repo(tmp_path):
 
 
 def test_scan_reads_the_tree_and_leaves_the_skipped_files(repo, names):
-    home = "/home/bob\n"
+    user_dir = "/home/bob\n"
     for rel in (".github/workflows/ci.yml", "packages/moxi/src/moxi/_vendor/lib.py",
                 "packages/a/src/moxi_a/web/page.js", "uv.lock", "package-lock.json",
                 "packages/moxi-dev/renames.tsv", ".residue-allow", ".refs-allow",
                 ".secrets-allow", ".public-paths", "LICENSE", "ignored/README.md"):
-        write(repo, rel, home + "ann\n")
-    write(repo, "packages/a/CHANGELOG.md", home)
-    write(repo, "packages/a/web/src/page.ts", "// " + home)
-    write(repo, "packages/a/tests/test_x.py", home + "x = 'ann'\n")
+        write(repo, rel, user_dir + "ann\n")
+    write(repo, "packages/a/CHANGELOG.md", user_dir)
+    write(repo, "packages/a/web/src/page.ts", "// " + user_dir)
+    write(repo, "packages/a/tests/test_x.py", user_dir + "x = 'ann'\n")
     write(repo, "tools/x.mjs", cmd("// brew| install x\n"))
     (repo / "packages/a/icon.png").write_bytes(b"\xff\xfe /home/bob \x00")
     git(repo, "add", "packages/a/CHANGELOG.md")
@@ -460,6 +460,15 @@ def test_scan_reads_the_tree_and_leaves_the_skipped_files(repo, names):
         Hit("packages/a/web/src/page.ts", 1, "home", "/home/bob"),
         Hit("tools/x.mjs", 1, "manager", cmd("brew| install")),
     ]
+
+
+def test_scan_numbers_lines_as_git_does(repo, no_names):
+    write(repo, "a.md", "")
+    (repo / "a.md").write_bytes(b"one\rtwo\x0c\xc2\x85\n/home/bob\r\nthree\r\n/Users/ann\n")
+    (repo / "b.md").write_bytes(b"\r\n\r\n/home/bob\r\n")
+    assert scan(repo) == [Hit("a.md", 2, "home", "/home/bob"),
+                          Hit("a.md", 4, "home", "/Users/ann"),
+                          Hit("b.md", 3, "home", "/home/bob")]
 
 
 # --- in the check -------------------------------------------------------------------------
