@@ -30,6 +30,16 @@ class Unit:
     #: the unit a foreign systemd timer's Triggers names; None means the service of its
     #: own name, as systemd reads a timer that names no unit.
     triggers: str | None = None
+    #: a running daemon's process id, read only while it is active.
+    pid: int | None = None
+    #: when it entered its active state (seconds since the epoch); the state read carries
+    #: it only while the unit is active, as the core sets `since`.
+    since: float | None = None
+    #: a daemon that is not active reads `failed` rather than `inactive`.
+    failed: bool = False
+    #: the gate's run lines for a timer, oldest first; the newest is its `last` when
+    #: `last` is not given.
+    runs: list = field(default_factory=list)
 
 
 @dataclass
@@ -71,11 +81,32 @@ class FakeUnits:
     locked: list = field(default_factory=list)
     #: the `kinds` each status read and act was given, by call, in order: (call, kinds).
     kinds: list = field(default_factory=list)
+    #: on systemd, the further socket units a daemon has, by (module, name): a count.
+    sockets: dict = field(default_factory=dict)
 
     # -- the calls services makes ------------------------------------------------------
 
     def backend(self):
         return self.supervisor
+
+    def ids(self, module, name, kind="daemon"):
+        """As the core names a unit here: on systemd a daemon's first socket unit
+        (whether or not it has one), each further socket, then its service; a timer's
+        timer then its service; a launchd label; a Task Scheduler path."""
+        if kind not in ("daemon", "timer"):
+            raise ValueError(f"kind is {kind!r}, not daemon or timer")
+        stem = f"moxi-{module}-{name}"
+        if self.supervisor == "systemd":
+            if kind == "timer":
+                return (f"{stem}.timer", f"{stem}.service")
+            more = self.sockets.get((module, name), 0)
+            return (f"{stem}.socket", *(f"{stem}-{k}.socket" for k in range(1, more + 1)),
+                    f"{stem}.service")
+        if self.supervisor == "launchd":
+            return (f"moxi.{module}.{name}",)
+        if self.supervisor == "schtasks":
+            return (f"\\Moxi\\{module}\\{name}",)
+        return ()
 
     def plan(self, module, *, only=None):
         self.calls.append(("plan", module, tuple(only or ())))
@@ -229,17 +260,26 @@ class FakeUnits:
         if unit.kind == "timer":
             st = "active" if unit.enabled else "inactive"
         else:
-            st = "active" if unit.active else "inactive"
+            st = "active" if unit.active else ("failed" if unit.failed else "inactive")
         triggers = None
         if self.supervisor == "systemd" and unit.kind == "timer" and foreign:
             triggers = unit.triggers or name.removesuffix(".timer") + ".service"
-        return UnitState(module, name, unit.kind, self.supervisor, st, last=unit.last,
+        last = unit.last
+        if last is None and unit.runs:
+            last = dict(unit.runs[-1])
+        running = st == "active"
+        return UnitState(module, name, unit.kind, self.supervisor, st, last=last,
                          detail=unit.detail, enabled=unit.enabled, wrapped=wrapped,
-                         log=f"journalctl --user -u {name}", triggers=triggers)
+                         log=f"journalctl --user -u {name}", triggers=triggers,
+                         pid=unit.pid if running and unit.kind == "daemon" else None,
+                         since=unit.since if running else None)
 
     def last_runs(self, module, timer, n=1):
+        """The newest `n` run lines of a written or module timer, oldest first."""
         self.calls.append(("last_runs", module, timer, n))
-        return []
+        table, key = self._table(module, foreign=False)
+        unit = table.get(key(timer))
+        return [] if unit is None or n == 0 else [dict(r) for r in unit.runs[-n:]]
 
     def wrap(self, ref, *, module, key, name, runner=None):
         self.calls.append(("wrap", ref, module, key, name))

@@ -5713,7 +5713,7 @@ loadout	packages/loadout/tests/test_page.py	assert body["folder"] == str(lo)	kee
 loadout	packages/loadout/tests/test_page.py	kit.claude().mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
 loadout	packages/loadout/tests/test_pagejob.py	"exit": 3, "outcome": None, "lines": ["refused"]}	keep	refused	refused
 loadout	packages/loadout/tests/test_pagejob.py	"lines": ["refused"]}))	keep	refused	refused
-loadout	packages/loadout/tests/test_pagejob.py	assert any("waiting for an install or uninstall" in line	keep	any	any
+loadout	packages/loadout/tests/test_pagejob.py	assert any("waiting for the core lock, which pid " in line	keep	any	any
 loadout	packages/loadout/tests/test_pagejob.py	assert not {"homes", "git"} & set(ledger.read())	keep	set	set
 loadout	packages/loadout/tests/test_pagejob.py	child.wait(timeout=30)	keep	timeout	timeout
 loadout	packages/loadout/tests/test_pagejob.py	holder.wait(timeout=30)	keep	timeout	timeout
@@ -12274,6 +12274,17 @@ services	packages/services/src/moxi_services/page.py	_MAYBE_PATH = lb.Out("strin
 services	packages/services/src/moxi_services/page.py	_MAYBE_SAYS = lb.Out("string", mark="redact", nullable=True)	keep	nullable=	nullable=
 services	packages/services/src/moxi_services/page.py	_MAYBE_TEXT = lb.Field("string", required=False, max=NAME_MAX)	keep	required	required
 services	packages/services/src/moxi_services/page.py	lb.Route("/api/events", "read", _target("events"), stream=True,	keep	stream=	stream=
+services	packages/services/src/moxi_services/page.py	_MAYBE_WORDS = lb.Out("list", items=_TEXT, nullable=True)	keep	nullable=	nullable=
+services	packages/services/src/moxi_services/page.py	TIMING = lb.Out("table", nullable=True, items={	keep	nullable=	nullable=
+services	packages/services/src/moxi_services/page.py	STREAK = lb.Out("table", nullable=True, items={	keep	nullable=	nullable=
+services	packages/services/src/moxi_services/page.py	#: `wraps` True for a systemd timer, which adopting wraps behind a switch; `refused` why	keep	refused	refused
+services	packages/services/src/moxi_services/page.py	"refused": _MAYBE_SAYS,	keep	refused	refused
+services	packages/services/src/moxi_services/page.py	required=False)},	keep	required=	required=
+services	packages/services/src/moxi_services/page.py	TODAY = lb.Out("table", nullable=True, items={	keep	nullable=	nullable=
+services	packages/services/src/moxi_services/page.py	STOP_BODY = {"id": _ID, "ends": lb.Field("int", required=False, max=ENDS_MAX)}	keep	required	required
+services	packages/services/src/moxi_services/page.py	"ends": lb.Field("int", required=False, max=ENDS_MAX),	keep	required	required
+services	packages/services/src/moxi_services/page.py	"sessions": lb.Out("list", items=SESSION, nullable=True),	keep	nullable=	nullable=
+services	packages/services/src/moxi_services/page.py	STOP_BODY = {"id": _ID, "ends": lb.Field("int", required=False, max=ENDS_MAX),	keep	required	required
 services	packages/services/src/moxi_services/pagehandlers.py	_Feed._gather	kwonly	health	health
 services	packages/services/src/moxi_services/pagehandlers.py	_Feed._gather	name	err	exc
 services	packages/services/src/moxi_services/pagehandlers.py	_Feed._gather	name	health	check_health
@@ -12289,6 +12300,12 @@ services	packages/services/src/moxi_services/pagehandlers.py	projects	name	err	e
 services	packages/services/src/moxi_services/pagehandlers.py	self.thread = threading.Thread(target=self._gather, args=(health,), daemon=True,	use	args=(health,)	kwargs={"health": health}
 services	packages/services/src/moxi_services/pagehandlers.py	self.thread = threading.Thread(target=self._gather, kwargs={"health": check_health}, daemon=True,	use	kwargs={"health": check_health}	kwargs={"check_health": check_health}
 services	packages/services/src/moxi_services/pagehandlers.py	self.thread = threading.Thread(target=self._gather, kwargs={"health": health}, daemon=True,	use	kwargs={"health": health}	kwargs={"check_health": check_health}
+services	packages/services/src/moxi_services/pagehandlers.py	out = set()	keep	set	set
+services	packages/services/src/moxi_services/pagehandlers.py	answer["refused"] = f"{ref} is a {_KIND_WORDS[kind]}, not a {_KIND_WORDS[asked]}"	keep	refused	refused
+services	packages/services/src/moxi_services/pagehandlers.py	answer.update(enabled=st.enabled, active=st.state == "active",	keep	enabled=	enabled=
+services	packages/services/src/moxi_services/pagehandlers.py	and a `kind` that disagrees is refused. A refusal is in `refused`, never a 422."""	keep	refused	refused
+services	packages/services/src/moxi_services/pagehandlers.py	"refused": None}	keep	refused	refused
+services	packages/services/src/moxi_services/pagehandlers.py	answer["refused"] = _text(exc)	keep	refused	refused
 services	packages/services/src/moxi_services/rows.py	"created", "changed", "changed_by")	keep	changed	changed
 services	packages/services/src/moxi_services/rows.py	-	name	_OWN_FOLDER	_OWN_SCHEDULER_DIR
 services	packages/services/src/moxi_services/rows.py	`launches_session` are bools; `stopped`, `created` and `changed` are UTC times	keep	changed	changed
@@ -12317,6 +12334,7 @@ services	packages/services/src/moxi_services/verdict.py	on/off and its health in
 services	packages/services/src/moxi_services/verdict.py	over.set()	keep	set	set
 services	packages/services/src/moxi_services/verdict.py	started: set[str] = set()	keep	set	set
 services	packages/services/src/moxi_services/verdict.py	views	name	health	check_health
+services	packages/services/src/moxi_services/verdict.py	if any(isinstance(r, ModuleRow) and r.kind == "daemon" for r in rows)	keep	any	any
 services	packages/services/tests/browser_kit.py	cwd=shell.env["HOME"], stdin=subprocess.DEVNULL,	keep	HOME	HOME
 services	packages/services/tests/browser_kit.py	platform=sys.platform, enabled=True)	keep	enabled	enabled
 services	packages/services/tests/conftest.py	path.parent.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
@@ -12345,12 +12363,22 @@ services	packages/services/tests/test_acts.py	put_key	name	on	enabled
 services	packages/services/tests/test_browser_page.py	assert any(url.endswith("/m/services/api/rows") for url in check.requests), check.requests	keep	any	any
 services	packages/services/tests/test_browser_page.py	assert any(url.endswith(link) for url in statuses), statuses	keep	any	any
 services	packages/services/tests/test_browser_page.py	root = Path(ui_shell.env["HOME"]) / "work" / "alpha"	keep	HOME	HOME
+services	packages/services/tests/test_browser_page.py	assert {"services/queue-worker", "services/sync-down", "services/dep-audit"} <= set(want), want	keep	set	set
+services	packages/services/tests/test_browser_page.py	risen = set(ids(panel.locator('section[data-part="first"] .item')))	keep	set	set
+services	packages/services/tests/test_browser_page.py	@pytest.mark.parametrize(("route", "opened", "path"), [	keep	opened	opened
+services	packages/services/tests/test_browser_page.py	expect(closed("services/sync-down")).to_have_text(["Start"])	keep	closed	closed
+services	packages/services/tests/test_browser_page.py	expect(closed("services/dep-audit")).to_have_text(["Run now"])	keep	closed	closed
+services	packages/services/tests/test_browser_page.py	expect(closed("services/web")).to_have_count(0)	keep	closed	closed
+services	packages/services/tests/test_browser_page.py	expect(closed("services/backup")).to_have_count(0)	keep	closed	closed
+services	packages/services/tests/test_browser_page.py	json=status_of(posts[-1].post_data_json, "refused", ["web: not now"])))	keep	refused	refused
+services	packages/services/tests/test_browser_page.py	assert len(set(colours)) == 1, colours	keep	set	set
 services	packages/services/tests/test_browser_project_facts.py	if check(last):	keep	ok	ok
 services	packages/services/tests/test_browser_project_facts.py	report = _reported(page, lambda r: "sections" in r["projects"]["atlas-api"], "opened")	keep	opened	opened
 services	packages/services/tests/test_cli.py	assert code == 0 and set(found[0]) == ROW_KEYS	keep	set	set
 services	packages/services/tests/test_cli.py	assert set(found) == ROW_KEYS | {"row", "detail", "log", "wrapped", "process", "runs"}	keep	set	set
 services	packages/services/tests/test_cli.py	assert set(found["verdict"]) == VERDICT_KEYS and found["verdict"]["cause"] is None	keep	set	set
 services	packages/services/tests/test_cli.py	assert set(found[0]["verdict"]) == VERDICT_KEYS	keep	set	set
+services	packages/services/tests/test_cli.py	assert set(found["verdict"]) == VERDICT_KEYS and found["verdict"]["cause"] == "off"	keep	set	set
 services	packages/services/tests/test_cli.py	assert set(process) == {"pid", "uptime_s", "rss_bytes", "cpu_s"}	keep	set	set
 services	packages/services/tests/test_cli.py	code, _, err = run(capsys, "show", "nope")	keep	show	show
 services	packages/services/tests/test_cli.py	code, out, _ = run(capsys, "show", "agent")	keep	show	show
@@ -12401,10 +12429,20 @@ services	packages/services/tests/test_page.py	monkeypatch.setattr(pagehandlers, 
 services	packages/services/tests/test_page.py	release.set()	keep	set	set
 services	packages/services/tests/test_page.py	return body["refused"]	keep	refused	refused
 services	packages/services/tests/test_page.py	store_path.parent.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
+services	packages/services/tests/test_page.py	assert not any(r["has_settings"] for r in by_id().values())	keep	any	any
+services	packages/services/tests/test_page.py	"active": True, "wraps": True, "refused": None}	keep	refused	refused
+services	packages/services/tests/test_page.py	"active": False, "wraps": False, "refused": None}	keep	refused	refused
+services	packages/services/tests/test_page.py	assert (found["found"], found["enabled"], found["active"], found["refused"]) == (	keep	refused	refused
+services	packages/services/tests/test_page.py	assert says in found["refused"] and found["found"] is None	keep	refused	refused
+services	packages/services/tests/test_page.py	assert "no supervisor here" in unit_read("ref=backup.timer")["refused"]	keep	refused	refused
+services	packages/services/tests/test_page.py	assert (found["found"], found["enabled"], found["refused"]) == (None, None, None)	keep	refused	refused
+services	packages/services/tests/test_page.py	assert unit_read(query)["refused"] == says	keep	refused	refused
 services	packages/services/tests/test_page_feed.py	"""A gather in place of the page's: each call recorded with its `health`, blocking	use	health	check_health
 services	packages/services/tests/test_page_feed.py	Gathers.__call__	name	health	check_health
 services	packages/services/tests/test_page_feed.py	assert seen == {"health": True, "status_seconds": pagehandlers.STATUS_SECONDS,	use	"health"	"check_health"
 services	packages/services/tests/test_page_feed.py	gathers.gate.set()	keep	set	set
+services	packages/services/tests/test_page_feed.py	held.set()	keep	set	set
+services	packages/services/tests/test_page_feed.py	let_go.set()	keep	set	set
 services	packages/services/tests/test_page_feed.py	monkeypatch.setattr(pagehandlers, "_logged", set())	keep	set	set
 services	packages/services/tests/test_page_feed.py	return real(health=check_health)	use	health=	check_health=
 services	packages/services/tests/test_page_feed.py	self.gate.set()	keep	set	set
@@ -12424,6 +12462,32 @@ services	packages/services/tests/test_store.py	test_a_store_held_locked_past_the
 services	packages/services/tests/test_verdict.py	assert len(found) == 12 and set(found.values()) == {("ok", "fine")}	keep	set	set
 services	packages/services/tests/test_verdict.py	gate_.set()	keep	set	set
 services	packages/services/tests/test_verdict.py	rest = {"services/svc0", "services/svc1", "services/svc2"} - set(ran)	keep	set	set
+services	packages/services/tests/test_verdict.py	assert given == set(verdict.CAUSES)	keep	set	set
+services	packages/services/tests/test_verdict.py	assert len(verdict.CAUSES) == len(set(verdict.CAUSES))	keep	set	set
+services	packages/services/tests/test_verdict.py	assert {"not-running", "stopped", "last-run"} <= set(verdict.CAUSES)	keep	set	set
+services	packages/services/tests/test_verdict.py	assert set(found) == {"services/web", "notes/sync", "notes/other"}	keep	set	set
+services	packages/services/tests/test_page_slots.py	monkeypatch.setattr(pagehandlers, "_logged", set())	keep	set	set
+services	packages/services/tests/test_page_slots.py	slots.hold.set()	keep	set	set
+services	packages/services/tests/test_page_slots.py	assert status == 422 and "no daemon or timer of an installed module" in body["refused"]	keep	refused	refused
+services	packages/services/tests/test_page_slots.py	422, {"refused": pagehandlers.ENDS_SLOTS_ONLY})	keep	refused	refused
+services	packages/services/tests/test_page_slots.py	assert post(route, {"id": SERVER}) == (422, {"refused": pagehandlers.SLOTS_IN_USE})	keep	refused	refused
+services	packages/services/tests/test_page_slots.py	422, {"refused": pagehandlers.SLOTS_IN_USE})	keep	refused	refused
+services	packages/services/tests/test_page_slots.py	422, {"refused": pagehandlers.ENDS_NEGATIVE})	keep	refused	refused
+services	packages/services/tests/test_page_slots.py	422, {"refused": pagehandlers.SLOTS_UNREAD})	keep	refused	refused
+services	packages/services/tests/test_page_slots.py	422, {"refused": pagehandlers.ENDS_ONE_CONFIRM})	keep	refused	refused
+services	packages/services/tests/test_page_act.py	monkeypatch.setattr(pagehandlers, "_logged", set())	keep	set	set
+services	packages/services/tests/test_page_act.py	return body["refused"]	keep	refused	refused
+services	packages/services/tests/test_page_act.py	assert (found["state"], found["code"]) == ("refused", 3)	keep	refused	refused
+services	packages/services/tests/test_browser_add.py	root = Path(ui_shell.env["HOME"]) / "work" / "alpha"	keep	HOME	HOME
+services	packages/services/tests/test_browser_add.py	assert box is not None and round(box["x"] + box["width"]) == WIDE["width"], box	keep	round	round
+services	packages/services/tests/test_browser_add.py	assert round(box["width"]) == PANEL_PX, box	keep	round	round
+services	packages/services/tests/test_browser_add.py	assert any(url.endswith(link) for url in statuses), statuses	keep	any	any
+services	packages/services/tests/test_browser_add.py	"wraps": False, "refused": None})	keep	refused	refused
+services	packages/services/tests/test_browser_add.py	status=422, json={"refused": "the stand-in takes no add"}))	keep	refused	refused
+services	packages/services/tests/test_browser_phone.py	assert set(seen) <= REACHED, seen	keep	set	set
+services	packages/services/tests/test_browser_phone.py	assert "/api/ends" in seen and set(seen) <= REACHED, seen	keep	set	set
+services	packages/services/tests/test_browser_phone.py	route.fulfill(status=202, json={"act": act, "outcome": "refused", "code": answer.status,	keep	refused	refused
+services	packages/services/tests/test_browser_phone.py	"text": (data or {}).get("refused") or f"answered {answer.status}"})	keep	refused	refused
 sessions	packages/sessions/src/moxi_sessions/api.py	"Listed", "SubagentListing", "Subagent"), "find"),	keep	find	find
 sessions	packages/sessions/src/moxi_sessions/api.py	"sessions_folders", "session_opened", "session_facts"), "lists"),	use	sessions_folders	session_dirs
 sessions	packages/sessions/src/moxi_sessions/api.py	* `read_back(path, *, block, limit, head=False)`: a record read backwards, its lines	use	head=False	read_head=False

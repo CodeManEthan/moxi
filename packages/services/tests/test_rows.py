@@ -179,7 +179,24 @@ def test_module_rows_list_each_modules_daemons_and_timers(site):
         "timer", "snapshot.enabled", "commit a snapshot", None)
     assert (sync.kind, sync.switch, sync.platforms) == ("daemon", None, ("linux",))
     assert sync.form == "module"
+    assert (snapshot.every, snapshot.at, snapshot.days) == ("5m", None, None)
+    assert (sync.every, sync.at, sync.days) == (None, None, None)
     assert sync.as_dict()["id"] == "jotter/sync"
+
+
+def test_a_module_timer_keeps_its_declared_times_and_days(site):
+    site.module("weekly", 'SUMMARY = "weekly"\nTIMERS = {"report": {"command": '
+                '"moxi-weekly-report", "at": ["04:30"], "days": ["mon"], '
+                '"switch": "report.enabled"}}\n')
+    (report,), _ = rows.module_rows()
+    assert (report.every, report.at, report.days) == (None, ("04:30",), ("mon",))
+    assert report.as_dict()["at"] == ["04:30"]
+
+
+def test_a_module_row_made_without_a_schedule_has_none():
+    row = rows.ModuleRow(module="notes", name="sync", kind="daemon", switch=None, doc="",
+                         platforms=None)
+    assert (row.every, row.at, row.days) == (None, None, None)
 
 
 def test_module_rows_include_run_time_entries_and_leave_out_rejected_ones(site):
