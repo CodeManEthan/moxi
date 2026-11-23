@@ -59,7 +59,7 @@ from . import questions as asked
 from . import closing, folders, leads, log, readback, ruling, showing, write
 from . import numbers as counted
 from . import state as states
-from .errors import Locked, NoLog, RoundsError, Unreadable
+from .errors import Locked, NoLog, RoundsError, UnfencedTest, Unreadable
 
 #: The names of the four files.
 NOTE_FILE = "round-note.md"
@@ -135,6 +135,8 @@ def on_append(written) -> None:
     for step in work:
         try:
             step()
+        except UnfencedTest:
+            raise
         except Exception as exc:
             failed.append(exc)
     if failed:
