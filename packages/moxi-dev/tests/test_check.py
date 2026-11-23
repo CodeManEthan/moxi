@@ -242,6 +242,13 @@ def test_with_every_dev_group_naming_the_check_its_change_picks_every_package(de
     assert picked(dev_repo) == list(DEV_LAYOUT)
 
 
+@pytest.mark.parametrize("path", [".github/workflows/publishing.yml",
+                                  ".github/workflows/release.yml"])
+def test_a_workflow_publishings_tests_read_picks_publishing(dev_repo, path):
+    commit_file(dev_repo, path)
+    assert picked(dev_repo) == ["publishing", "moxi-dev"]
+
+
 def test_the_rename_table_picks_the_check_alone(dev_repo):
     commit_file(dev_repo, "packages/moxi-dev/renames.tsv", "a\tb\n")
     assert picked(dev_repo) == ["moxi-dev"]
@@ -329,6 +336,10 @@ def test_the_real_workspace_picks_by_the_same_rule():
         return [p.dir for p in check.pick(packages, [path])]
 
     assert {"moxi", "sessions", "turns", "cache", "comms", "moxi-dev"} <= set(dirs)
+    # A root path a package's tests read picks that package; the rest of .github none.
+    assert "memory" in of("README.md") and "publishing" not in of("README.md")
+    assert "publishing" in of(".github/workflows/release.yml")
+    assert of(".github/workflows/ci.yml") == []
     # cache depends on sessions, comms on cache through an extra, the launcher on comms,
     # and usage and memory on sessions directly.
     assert set(of("packages/sessions/src/moxi_sessions/__init__.py")) == {
