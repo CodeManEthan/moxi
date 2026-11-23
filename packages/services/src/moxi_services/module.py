@@ -15,6 +15,9 @@ SUMMARY = "Moxi's services: one list of every daemon and timer on the machine, w
 OPTIONAL = {
     "projects": "Project keys on services, and projects' remove check: a project is not "
                 "removed while a service still names it.",
+    "slots": "What a stop or restart of slots' server would end: the services page "
+             "reads the sessions, open slots and jobs in its slots, warns with the "
+             "count, and refuses the act while more runs there than was shown.",
     "ui": "The services page in the browser UI shell: every row with its verdict, start, "
           "stop, restart, run, enable, disable, add and remove, and a count of the rows "
           "by verdict on the shell's home.",

@@ -284,7 +284,7 @@ def test_the_listener_adopts_while_a_cli_install_waits_and_neither_times_out(dem
         try:
             deadline = time.monotonic() + 30
             waiting = child.stderr.readline()
-            assert "waiting for an install or uninstall" in waiting, waiting
+            assert "waiting for the core lock, which pid " in waiting, waiting
             assert time.monotonic() < deadline
             listener.on_install("demo", found(), say=lambda line: None)
             assert kit.owner_of(kit.claude() / "moxi-demo") == "loadout"

@@ -393,7 +393,8 @@ def _core_lock(files, paths, say: Callable[[str], object]):
                 stack.enter_context(files.lock(paths.core_lock(), nested=True, timeout_s=0))
             except files.LockTimeout as exc:
                 who = f"pid {exc.holder}" if exc.holder else "another process"
-                say(f"loadout: waiting for an install or uninstall ({who}) to finish")
+                say(f"loadout: waiting for the core lock, which {who} holds (an install or "
+                    "uninstall, or a module reading or changing its units)")
                 stack.enter_context(files.lock(paths.core_lock(), nested=True,
                                                timeout_s=CORE_WAIT))
             yield
