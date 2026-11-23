@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
-  BROKEN, capped, clip, epochOf, factsReport, GATHERS, LABEL, lineOf, ORDER, PARTS_MAX, parseGiven, partOf,
+  BROKEN, capped, clip, epochOf, factsReport, GATHERS, LABEL, linesOf, ORDER, PARTS_MAX, parseGiven, partOf,
   quietOf, TEXT_MAX_CHARS, VERSION, whenWord,
 } from "../src/facts.ts";
 import { moduleRow, row, rows, timer } from "./fixtures.mjs";
@@ -47,7 +47,10 @@ test("sections go to the open project only", () => {
   const open = report(list, "kestrel-web");
   assert.equal(open.projects["atlas-api"].sections, undefined);
   assert.equal(open.projects["kestrel-web"].sections[0].label, LABEL);
-  assert.deepEqual(open.projects["kestrel-web"].sections[0].link, { text: "Services", module: "services", route: "" });
+  assert.deepEqual(open.projects["kestrel-web"].sections[0].link,
+                   { text: "Services", module: "services", route: "project/kestrel-web" });
+  const odd = factsReport(rows([daemon("site", { project: "a b/c" })]), [{ ...GIVEN[0], key: "a b/c" }], "a b/c", WHEN);
+  assert.equal(odd.projects["a b/c"].sections[0].link.route, "project/a%20b%2Fc");
 });
 
 // -- the judgment table, row by row ---------------------------------------------------------
@@ -58,7 +61,7 @@ test("a socket-activated idle daemon is quiet: no part, its name and reason on t
   const facts = atlas([idle], "atlas-api");
   assert.equal(facts.parts, undefined);
   assert.deepEqual(facts.sections, [{ label: "Services", lines: [{ parts: [{ text: "sync idle, socket listening" }] }],
-                                      link: { text: "Services", module: "services", route: "" } }]);
+                                      link: { text: "Services", module: "services", route: "project/atlas-api" } }]);
 });
 
 test("no supervisor, nobackend and a unit not for this system are off: `<name> off` on the last line only", () => {
@@ -79,28 +82,26 @@ test("an unknown warn says nothing: services can't say", () => {
   }
 });
 
-test("a daemon not running though its stop is from before the last boot fails heavy with its time", () => {
+test("a daemon not running though its stop is from before the last boot is `<name> down`, heavy, its reason under it", () => {
   const down = daemon("docs", { state: "inactive", pid: null, since: "2026-11-16T18:00:00Z",
                                 stopped: "2026-11-01T09:00:00Z",
                                 verdict: verdict("fail", { cause: "not-running", reason: "not running" }) });
   const facts = atlas([down], "atlas-api");
-  assert.deepEqual(facts.parts, [{ text: "docs failed at 18:00", heavy: true, rank: BROKEN }]);
-  assert.deepEqual(facts.sections[0].lines, [{ parts: [{ text: "docs failed at 18:00", heavy: true, rank: 30 },
-                                                       { text: "not running" }] }]);
+  assert.deepEqual(facts.parts, [{ text: "docs down", heavy: true, rank: BROKEN }]);
+  assert.deepEqual(facts.sections[0].lines, [{ parts: [{ text: "docs down", heavy: true, rank: 30 }] },
+                                             { parts: [{ text: "not running" }] }]);
   assert.equal(facts.sections[0].rank, 30);
 });
 
-test("a down daemon's time is left out unless its state is failed or inactive and `since` parses", () => {
+test("a down daemon says no time: `since` is when its state last changed, not when it went down", () => {
   const down = (fields) => partOf(daemon("docs", { verdict: verdict("fail", { cause: "not-running" }), ...fields }),
                                   WHEN).text;
-  assert.equal(down({ state: "failed", since: "2026-11-15T07:05:00Z" }), "docs failed at yesterday 07:05");
-  assert.equal(down({ state: "inactive", since: null }), "docs failed");
-  assert.equal(down({ state: "inactive", since: "2026-11-16 18:00" }), "docs failed");
-  assert.equal(down({ state: "activating", since: "2026-11-16T18:00:00Z" }), "docs failed");
-  assert.equal(down({ state: null, since: "2026-11-16T18:00:00Z" }), "docs failed");
+  assert.equal(down({ state: "failed", since: "2026-11-15T07:05:00Z" }), "docs down");
+  assert.equal(down({ state: "inactive", since: null }), "docs down");
+  assert.equal(down({ state: null, since: "2026-11-16T18:00:00Z" }), "docs down");
 });
 
-test("a stale stop on a running daemon warned `won't start at login` is an opened warn line, not `is stopped`", () => {
+test("a stale stop on a running daemon warned `won't start at login` is an opened warn line, not `stopped by hand`", () => {
   const stale = daemon("docs", { state: "active", stopped: "2026-11-01T09:00:00Z",
                                  verdict: verdict("warn", { reason: "won't start at login" }) });
   const facts = atlas([stale], "atlas-api");
@@ -109,13 +110,16 @@ test("a stale stop on a running daemon warned `won't start at login` is an opene
   assert.equal(facts.sections[0].rank, undefined);
 });
 
-test("a stop that holds is `<name> is stopped`, a warning", () => {
-  const stopped = daemon("docs-preview", { state: "inactive", stopped: "2026-11-16T17:00:00Z",
-                                           verdict: verdict("warn", { cause: "stopped",
-                                                                      reason: "stopped by hand at 2026-11-16T17:00:00Z" }) });
-  const facts = atlas([stopped], "atlas-api");
-  assert.deepEqual(facts.parts, [{ text: "docs-preview is stopped", warn: true }]);
-  assert.deepEqual(facts.sections[0].lines, [{ parts: [{ text: "docs-preview is stopped", warn: true }] }]);
+test("a stop that holds is `<name> stopped by hand at <time>`, a warning, the time left out when it doesn't parse", () => {
+  const stopped = (at) => daemon("docs-preview", { state: "inactive", stopped: at,
+                                                   verdict: verdict("warn", { cause: "stopped",
+                                                                              reason: `stopped by hand at ${at}` }) });
+  const facts = atlas([stopped("2026-11-16T17:00:00Z")], "atlas-api");
+  assert.deepEqual(facts.parts, [{ text: "docs-preview stopped by hand at 17:00", warn: true }]);
+  assert.deepEqual(facts.sections[0].lines, [{ parts: [{ text: "docs-preview stopped by hand at 17:00", warn: true }] }]);
+  assert.equal(partOf(stopped("2026-11-15T09:30:00Z"), WHEN).text, "docs-preview stopped by hand at yesterday 09:30");
+  assert.equal(partOf(stopped(null), WHEN).text, "docs-preview stopped by hand");
+  assert.equal(partOf(stopped("not a time"), WHEN).text, "docs-preview stopped by hand");
 });
 
 test("a missing unit fails as `<name> failed` with no time while on, and is an opened warn line while off", () => {
@@ -123,7 +127,7 @@ test("a missing unit fails as `<name> failed` with no time while on, and is an o
                              verdict: verdict("fail", { reason: "its unit is missing" }) });
   const facts = atlas([on], "atlas-api");
   assert.deepEqual(facts.parts, [{ text: "web failed", heavy: true, rank: 30 }]);
-  assert.deepEqual(facts.sections[0].lines[0].parts[1], { text: "its unit is missing" });
+  assert.deepEqual(facts.sections[0].lines[1], { parts: [{ text: "its unit is missing" }] });
   const off = daemon("web", { state: "missing", flag: false, verdict: verdict("warn", { reason: "its unit is missing" }) });
   const quiet = atlas([off], "atlas-api");
   assert.equal(quiet.parts, undefined);
@@ -148,7 +152,7 @@ test("an unarmed schedule and a failed health check are `<name> failed`, with se
   assert.deepEqual(facts.parts, [{ text: "nightly failed", heavy: true, rank: 30 },
                                  { text: "web failed", heavy: true, rank: 30 }]);
   assert.deepEqual(facts.sections[0].lines.map((line) => line.parts.map((part) => part.text)),
-                   [["nightly failed", "schedule not armed"], ["web failed", "health check failed: refused"]]);
+                   [["nightly failed"], ["schedule not armed"], ["web failed"], ["health check failed: refused"]]);
 });
 
 test("a cause the table doesn't name takes the null row's words, and an unnamed fail the other fail's", () => {
@@ -177,14 +181,14 @@ test("ok rows on the quiet last line: a running daemon since, a timer's schedule
                                            verdict: verdict("ok", { reason: "armed, no run yet" }) }), WHEN),
                    { text: "backup armed, no run yet" });
   assert.equal(quietOf(daemon("web", { verdict: verdict("fail") }), WHEN), null);
-  assert.equal(lineOf(web, WHEN), null);
+  assert.deepEqual(linesOf(web, WHEN), []);
 });
 
 test("a reason the phone's gateway left out is no part", () => {
   const down = daemon("web", { verdict: verdict("fail", { reason: null }) });
-  assert.deepEqual(lineOf(down, WHEN), { parts: [{ text: "web failed", heavy: true, rank: 30 }] });
+  assert.deepEqual(linesOf(down, WHEN), [{ parts: [{ text: "web failed", heavy: true, rank: 30 }] }]);
   const warned = daemon("web", { verdict: verdict("warn", { reason: null }) });
-  assert.deepEqual(lineOf(warned, WHEN), { parts: [{ text: "web", warn: true }] });
+  assert.deepEqual(linesOf(warned, WHEN), [{ parts: [{ text: "web", warn: true }] }]);
 });
 
 // -- order and caps -------------------------------------------------------------------------
@@ -195,25 +199,41 @@ test("failed rows' parts come first, then the warnings; lines likewise, then the
                 daemon("c", { verdict: verdict("off") }),
                 daemon("d", { verdict: verdict("fail") })];
   const facts = atlas(list, "atlas-api");
-  assert.deepEqual(facts.parts.map((part) => part.text), ["d failed", "b is stopped"]);
+  assert.deepEqual(facts.parts.map((part) => part.text), ["d failed", "b stopped by hand"]);
   assert.deepEqual(facts.sections[0].lines.map((line) => line.parts.map((part) => part.text)),
-                   [["d failed", "x"], ["b is stopped"], ["a running", "c off"]]);
+                   [["d failed"], ["x"], ["b stopped by hand"], ["a running", "c off"]]);
 });
 
-test("past five failed and warned lines, the rest lead the last line keeping their weight; past seven parts, `<n> more`", () => {
+test("every warned line follows a line that doesn't lead with heavy words, so the Projects page draws them alike", () => {
+  const list = [daemon("d", { verdict: verdict("fail", { cause: "not-running", reason: "not running" }) }),
+                daemon("b", { verdict: verdict("warn", { cause: "stopped" }) }),
+                daemon("w", { verdict: verdict("warn", { cause: "no-login", reason: "won't start at login" }) }),
+                job("j", { last_run: { failed: true, text: "exit 1", at: null },
+                           verdict: verdict("warn", { cause: "last-run" }) })];
+  const lines = atlas(list, "atlas-api").sections[0].lines;
+  const warned = lines.flatMap((line, i) => (line.parts[0].warn ? [i] : []));
+  assert.deepEqual(warned, [2, 3, 4]);
+  for (const i of warned) assert.notEqual(lines[i - 1].parts[0].heavy, true, lines[i - 1]);
+});
+
+test("past five lines, the rows left lead the last line keeping their weight; past seven parts, `<n> more`", () => {
   const list = [];
   for (let i = 1; i <= 9; i += 1) list.push(daemon(`f${i}`, { verdict: verdict("fail") }));
   list.push(daemon("w", { verdict: verdict("warn") }));
   for (let i = 1; i <= 8; i += 1) list.push(daemon(`o${i}`, { verdict: verdict("off") }));
   const facts = atlas(list, "atlas-api");
   const lines = facts.sections[0].lines;
-  assert.equal(lines.length, 6);
-  assert.deepEqual(lines.slice(0, 5).map((line) => line.parts[0].text), ["f1 failed", "f2 failed", "f3 failed",
-                                                                          "f4 failed", "f5 failed"]);
+  assert.equal(lines.length, 5);
+  assert.deepEqual(lines.slice(0, 4).map((line) => line.parts[0].text), ["f1 failed", "x", "f2 failed", "x"]);
   const heavy = (text) => ({ text, heavy: true, rank: 30 });
-  assert.deepEqual(lines[5].parts, [heavy("f6 failed"), heavy("f7 failed"), heavy("f8 failed"), heavy("f9 failed"),
-                                    { text: "w", warn: true }, { text: "o1 off" }, { text: "o2 off" },
-                                    { text: "6 more" }]);
+  assert.deepEqual(lines[4].parts, [heavy("f3 failed"), heavy("f4 failed"), heavy("f5 failed"), heavy("f6 failed"),
+                                    heavy("f7 failed"), heavy("f8 failed"), heavy("f9 failed"), { text: "9 more", warn: true }]);
+  const short = atlas([...list.slice(0, 2), daemon("w2", { verdict: verdict("warn", { cause: "stopped" }) })],
+                      "atlas-api").sections[0].lines;
+  assert.deepEqual(short.map((line) => line.parts[0].text), ["f1 failed", "x", "f2 failed", "x", "w2 stopped by hand"]);
+  const spilled = atlas([...list.slice(0, 2), daemon("f3", { verdict: verdict("fail") }),
+                         daemon("w3", { verdict: verdict("warn", { cause: "stopped" }) })], "atlas-api").sections[0].lines;
+  assert.deepEqual(spilled.at(-1).parts.map((part) => part.text), ["f3 failed", "w3 stopped by hand"]);
   assert.equal(facts.parts.length, PARTS_MAX);
   assert.deepEqual(facts.parts.at(-1), heavy("2 more"));
   assert.equal(facts.sections[0].rank, 30);
@@ -227,8 +247,8 @@ test("caps: eight parts stay whole, a ninth folds into `<n> more` with the stron
   const long = "x".repeat(TEXT_MAX_CHARS + 20);
   assert.equal(Array.from(clip(long)).length, TEXT_MAX_CHARS);
   assert.ok(clip(long).endsWith("…"));
-  const reasoned = lineOf(daemon("web", { verdict: verdict("fail", { reason: long }) }), WHEN);
-  assert.equal(Array.from(reasoned.parts[1].text).length, TEXT_MAX_CHARS);
+  const reasoned = linesOf(daemon("web", { verdict: verdict("fail", { reason: long }) }), WHEN);
+  assert.equal(Array.from(reasoned[1].parts[0].text).length, TEXT_MAX_CHARS);
 });
 
 // -- words and inputs -----------------------------------------------------------------------
