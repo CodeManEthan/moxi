@@ -90,8 +90,18 @@ leftover and any row the script refuses, and prints the first ten with their sta
 table of about 16,400 rows, and reads the whole tree whatever the change picks. A tree
 with no `packages/moxi-dev/renames.tsv` counts as `none`.
 
-`moxi-dev check --static` runs the tag, comment-reference, naming, Ruff, renames and
-release steps alone, over the whole repository, with the lines, summary line and exit
+The pronoun step reads what each package shows or ships: the string literals and
+docstrings of its Python under `src/` (by token, so names and comments are not read), the
+string literals, template text and comments of its web sources under `web/src/`, and its
+`README.md`, `docs/*.md` and bundled `SKILL.md` files. It refuses he, his, him and himself <!-- noqa: MX5 -- names the words the step refuses -->
+as whole words in any case; a word joined by a dot to the name before it is code and
+passes. Tests, CHANGELOGs, built bundles and the core's vendored code are not read. Each
+hit prints as `path:line: word` with the fix. A genuine use carries `noqa: MX5 -- <why>`
+on the same line, in the file's comment syntax (`#`, `//` or `<!-- -->`); the step
+refuses a mark with no reason and a mark on a line it would not refuse.
+
+`moxi-dev check --static` runs the tag, comment-reference, naming, Ruff, renames,
+release and pronoun steps alone, over the whole repository, with the lines, summary line and exit
 codes they give in a full check, and nothing else: no lock check, no package picking, no
 stamps, web compare, sync, lint or tests, and nothing that needs the network. It takes
 about 80 to 140 s on this repository, the renames step about 60 s of it, so it suits a
@@ -99,7 +109,8 @@ gate run before a push.
 
 Run one step without the lock, release, package, lint or test steps with
 `moxi-dev check --only refs [PATH...]`, `moxi-dev check --only names [PATH...]`,
-`moxi-dev check --only ruff [PATH...]` or `moxi-dev check --only renames [PATH...]`.
+`moxi-dev check --only ruff [PATH...]`, `moxi-dev check --only renames [PATH...]` or
+`moxi-dev check --only pronouns [PATH...]`.
 Each step still reads the whole tree, but paths limit the findings it prints.
 
 `moxi-dev rename [--table PATH] [--dry-run] [--main REF] [ROOT]` reads tab-separated

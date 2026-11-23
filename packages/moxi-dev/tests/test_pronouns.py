@@ -216,6 +216,17 @@ def test_a_mark_for_another_code_lets_nothing_stand():
     assert check_text("a.py", source, "python") == [Hit("a.py", 1, "he")]
 
 
+def test_a_mark_quoted_as_inline_code_is_an_example_not_a_mark():
+    doc = "A genuine use carries `noqa: MX5 -- <why>` on its line.\n"
+    assert check_text("a.md", doc, "doc") == []
+    assert check_text("a.md", "he `# noqa: MX5 -- a sample`\n", "doc") == [Hit("a.md", 1, "he")]
+
+
+def test_a_mark_whose_reason_cites_code_in_backticks_still_counts():
+    source = "x = 'he'  # noqa: MX5 -- quotes `Row.label`\n"
+    assert check_text("a.py", source, "python") == []
+
+
 def test_a_mark_on_a_line_with_nothing_refused_is_unused():
     source = "him = 1  # noqa: MX5 -- the name is no word the check reads\n"
     assert check_text("a.py", source, "python") == [Hit("a.py", 1, "", "unused")]
