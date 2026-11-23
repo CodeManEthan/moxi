@@ -15,9 +15,10 @@ machine only:
   data no machine resolves.
 - a private name: a name from the running contributor's own private-names list, the one
   `moxi_secrets` keeps in its config, outside every repository. No line the check prints
-  names it: the private-name line names no text, and on a line that holds one, the
-  home-folder line names the root alone. A list secrets can't read raises
-  `moxi_secrets.SetUnavailable`; an empty one finds nothing.
+  names it: the private-name line names no text, on a line that holds one the
+  home-folder line names the root alone, and a segment of a file's path that holds one
+  prints as `HIDDEN`. A list secrets can't read raises `moxi_secrets.SetUnavailable`; an
+  empty one finds nothing.
 - a package-manager command: one of `MANAGERS` followed by one of `VERBS` (with `sudo`
   and flags allowed between), pacman with its operation flag, or the same as an argv
   list of quoted words. Case-sensitive, since commands are lower case. A sentence that
@@ -48,7 +49,7 @@ from __future__ import annotations
 
 import re
 import subprocess
-from dataclasses import dataclass
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 
 from moxi_secrets import SetUnavailable
@@ -62,6 +63,10 @@ from .marks import marked_lines
 CODE = "MX6"
 #: secrets' set of the contributor's own private names.
 NAMES_SET = "private-names"
+#: The path a file's path is scanned at for private names, as publishing scans a path.
+NAME_PATH = "@path"
+#: What a segment of a file's path that holds a private name prints as.
+HIDDEN = "<private name>"
 
 # -- the home-folder rule ------------------------------------------------------------------
 
@@ -131,9 +136,12 @@ class Hit:
     #: holding a private name, since the user may be the name), or the manager and its
     #: verb. Empty for a private name, which is never printed, and for a mark's fault.
     text: str = ""
+    #: The path as the line prints it, a segment holding a private name hidden; the path
+    #: itself when empty.
+    shown_path: str = field(default="", compare=False)
 
     def __str__(self) -> str:
-        where = f"{self.path}:{self.line}: machine text: "
+        where = f"{self.shown_path or self.path}:{self.line}: machine text: "
         if self.rule == "home":
             return f"{where}home folder {self.text} — fix: {HOME_FIX}"
         if self.rule == "manager":
@@ -210,10 +218,30 @@ def manager_commands(line: str) -> list[str]:
     return found
 
 
+def private_spans(text: str, path: str) -> list[tuple[int, int]]:
+    """Where `text`, at `path`, holds a name from the contributor's private-names list, as
+    start and end offsets. Tests replace it with a made-up list."""
+    return [(hit.start, hit.end) for hit in secrets_scan(text, (NAMES_SET,), path=path)]
+
+
 def private_lines(text: str, path: str) -> set[int]:
-    """The lines of `text` that hold a name from the contributor's private-names list.
-    Tests replace it with a made-up list."""
-    return {hit.line for hit in secrets_scan(text, (NAMES_SET,), path=path)}
+    """The lines of `text` that hold a private name, numbered by newline alone."""
+    return {text.count("\n", 0, start) + 1 for start, _ in private_spans(text, path)}
+
+
+def shown_path(path: str) -> str:
+    """`path` as the check prints it: each `/`-separated segment that holds a private name,
+    or part of one, as `HIDDEN`."""
+    spans = private_spans(path, NAME_PATH)
+    if not spans:
+        return path
+    shown, start = [], 0
+    for segment in path.split("/"):
+        end = start + len(segment)
+        hidden = any(first < end and last > start for first, last in spans)
+        shown.append(HIDDEN if hidden else segment)
+        start = end + 1
+    return "/".join(shown)
 
 
 def check_text(path: str, text: str) -> list[Hit]:
@@ -239,6 +267,8 @@ def check_text(path: str, text: str) -> list[Hit]:
     hits += [Hit(path, number, "name") for number in named]
     hits += [Hit(path, number, "reason") for number in bare]
     hits += [Hit(path, number, "unused") for number in marked - used]
+    if hits and (shown := shown_path(path)) != path:
+        hits = [replace(hit, shown_path=shown) for hit in hits]
     return sorted(hits)
 
 
@@ -258,7 +288,7 @@ def scan(root: Path | str) -> list[Hit]:
     return sorted(hits)
 
 
-__all__ = ["ARGV", "CODE", "COMMAND", "HOME_FIX", "HOME_ROOT", "Hit", "MANAGERS",
+__all__ = ["ARGV", "CODE", "COMMAND", "HIDDEN", "HOME_FIX", "HOME_ROOT", "Hit", "MANAGERS",
            "MANAGER_FIX", "NAME_FIX", "SetUnavailable", "VERBS", "check_text",
-           "home_paths", "is_test", "manager_commands", "private_lines", "read", "scan",
-           "unreadable"]
+           "home_paths", "is_test", "manager_commands", "private_lines", "private_spans",
+           "read", "scan", "shown_path", "unreadable"]

@@ -23,30 +23,29 @@ def cmd(text: str) -> str:
     return text.replace("|", "")
 
 
-#: A made-up private-names list: one word and one entry matched anywhere.
-NAMES = ("ann", "~/vault")
+#: A made-up private-names list: one word and two entries matched anywhere.
+NAMES = ("ann", "~/vault", "work/acme")
 
 
-def made_up_lines(text: str, path: str) -> set[int]:
-    """The lines of `text` holding a `NAMES` entry, no letter or digit at either end."""
-    found = set()
+def made_up_spans(text: str, path: str) -> list[tuple[int, int]]:
+    """Where `text` holds a `NAMES` entry, no letter or digit at either end."""
+    found = []
     for entry in NAMES:
         pattern = re.compile(r"(?<![A-Za-z0-9])" + re.escape(entry) + r"(?![A-Za-z0-9])",
                              re.I)
-        for match in pattern.finditer(text):
-            found.add(text.count("\n", 0, match.start()) + 1)
-    return found
+        found += [match.span() for match in pattern.finditer(text)]
+    return sorted(found)
 
 
 @pytest.fixture
 def names(monkeypatch):
     """The private-name rule reads `NAMES`, never the contributor's own list."""
-    monkeypatch.setattr(machine_text, "private_lines", made_up_lines)
+    monkeypatch.setattr(machine_text, "private_spans", made_up_spans)
 
 
 @pytest.fixture
 def no_names(monkeypatch):
-    monkeypatch.setattr(machine_text, "private_lines", lambda text, path: set())
+    monkeypatch.setattr(machine_text, "private_spans", lambda text, path: [])
 
 
 # --- the home-folder rule ----------------------------------------------------------------
@@ -147,6 +146,28 @@ def test_a_home_path_on_a_line_with_no_private_name_prints_root_and_user(names):
         Hit("a.md", 1, "name"), Hit("a.md", 2, "home", "/home/bob")]
 
 
+@pytest.mark.parametrize("path, shown", [
+    ("packages/a/docs/ann-setup.md", "packages/a/docs/<private name>"),
+    ("packages/ann/README.md", "packages/<private name>/README.md"),
+    ("packages/a/docs/ANN_x/x.ts", "packages/a/docs/<private name>/x.ts"),
+    ("packages/work/acme/x.md", "packages/<private name>/<private name>/x.md"),
+    ("packages/a/tests/test_ann.py", "packages/a/tests/<private name>"),
+    ("annual/ann.txt", "annual/<private name>"),
+])
+def test_a_path_segment_holding_a_private_name_prints_hidden(names, path, shown):
+    hits = check_text(path, "/home/bob\n" + cmd("brew| install x\n"))
+    assert hits
+    for hit in hits:
+        assert hit.path == path
+        assert str(hit).split(":")[0] == shown
+
+
+@pytest.mark.parametrize("path", ["packages/a/docs/annual.md", "packages/acme/x.md",
+                                  "packages/work/x.md", "README.md"])
+def test_a_path_with_no_private_name_prints_as_it_is(names, path):
+    assert str(check_text(path, cmd("brew| install x\n"))[0]).startswith(f"{path}:1:")
+
+
 def test_an_empty_list_finds_nothing(no_names):
     assert check_text("a.md", "ask ann\n") == []
 
@@ -161,6 +182,8 @@ def test_the_list_is_the_contributor_s_own_secrets_config():
                       encoding="utf-8")
     text = "ask ann\nannual\nann_x\nsee ~/vault/rounds\n"
     assert [hit.line for hit in check_text("a.md", text)] == [1, 3, 4]
+    hits = check_text("docs/ann-setup.md", "ask ann\n/home/bob\n")
+    assert [str(hit).split(":")[0] for hit in hits] == ["docs/<private name>"] * 2
     config.write_text("[private_names\n", encoding="utf-8")
     with pytest.raises(SetUnavailable):
         check_text("a.md", text)
@@ -427,7 +450,15 @@ def unreadable_list(monkeypatch):
     def unreadable(text, path):
         raise SetUnavailable("private_names.words: not a list")
 
-    monkeypatch.setattr(machine_text, "private_lines", unreadable)
+    monkeypatch.setattr(machine_text, "private_spans", unreadable)
+
+
+def test_only_machine_filters_by_the_real_path_and_prints_it_hidden(repo, names, capsys):
+    write(repo, "packages/ann/README.md", "/home/bob\n")
+    assert check.only(repo, "machine", ["packages/ann"]) == 1
+    out = capsys.readouterr().out
+    assert out.startswith("packages/<private name>/README.md:1: machine text: home folder")
+    assert check.only(repo, "machine", ["packages/b"]) == 0
 
 
 def test_a_list_secrets_can_t_read_exits_2_from_the_check(repo, monkeypatch, capsys):

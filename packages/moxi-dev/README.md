@@ -116,7 +116,8 @@ A file under a package is a test when a directory below the package is named `te
   made-up home is data no machine resolves.
 - a name from your own private-names list, the one secrets keeps in its config, in any
   file. No line the step prints names it: on a line that holds one, the home-folder
-  line prints the root alone (`home folder /home/`). An empty list finds nothing; a
+  line prints the root alone (`home folder /home/`), and a segment of a file's path
+  that holds one prints as `<private name>`. An empty list finds nothing; a
   list secrets can't read stops the check with exit 2 (`moxi config secrets check`
   says why).
 - a package-manager command in any file: apt-get, apt, aptitude, dnf, yum, zypper,
