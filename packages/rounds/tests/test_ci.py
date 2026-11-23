@@ -322,7 +322,7 @@ def printing(data) -> list[str]:
 def test_a_candidate_is_read_by_its_workflows_and_a_full_run_by_the_rest(monkeypatch):
     full = ci.Workflow(OTHER, ("linux",))
     queue = ci.Workflow(FLOW, ("pick", "scoped"), ("browser (*)",), "pick",
-                        reads_candidates=True)
+                        reads_candidates=True, stands_for=(("scoped", "linux"),))
     jobs = [{**job("pick"), "databaseId": 5}, job("scoped"), job("linux"),
             job("browser (rounds, chromium)")]
     found = ci.Declared(
@@ -343,6 +343,7 @@ def test_a_candidate_is_read_by_its_workflows_and_a_full_run_by_the_rest(monkeyp
 
     assert [one["path"] for one in candidate.workflows] == [FLOW]
     assert candidate.workflows[0]["picked"] == ["rounds"]
+    assert candidate.workflows[0]["stands_for"] == {"scoped": "linux"}
     assert [one["path"] for one in whole.workflows] == [OTHER]
     assert ci.now_of(found, {}).workflows == (full,)
     # With no workflow marked, a candidate is read as a full run is.
@@ -355,13 +356,13 @@ def test_the_setting_reads_a_scoped_entry(write_config):
         '[projects.proj-a]\ncheck = { command = "make" }\nci = { workflows = ['
         '".github/workflows/ci.yml", { path = ".github/workflows/queue.yml", '
         'jobs = ["pick", "scoped"], matrix = ["browser (*)"], pick = "pick", '
-        'reads_candidates = true }, { path = "b.yml", matrix = ["x (*)"] }], '
-        'local = "none" }\n')
+        'reads_candidates = true, stands_for = { scoped = "linux" } }, '
+        '{ path = "b.yml", matrix = ["x (*)"] }], local = "none" }\n')
     declared = ci.declared(settings.load(), "proj-a")
 
     assert declared.candidate_workflows == (ci.Workflow(
         ".github/workflows/queue.yml", ("pick", "scoped"), ("browser (*)",), "pick",
-        reads_candidates=True),)
+        reads_candidates=True, stands_for=(("scoped", "linux"),)),)
     assert declared.full_workflows == (ci.Workflow(".github/workflows/ci.yml"),
                                        ci.Workflow("b.yml", (), ("x (*)",)))
 
@@ -376,6 +377,12 @@ def test_the_setting_reads_a_scoped_entry(write_config):
     ('{ path = "q.yml", matrix = ["x", "x"] }', "ci.workflows.matrix", "names a job twice"),
     ('{ path = "q.yml", jobs = ["a"], reads_candidates = "yes" }',
      "ci.workflows.reads_candidates", "not true or false"),
+    ('{ path = "q.yml", jobs = ["a"], stands_for = "linux" }',
+     "ci.workflows.stands_for", "not a table of job names"),
+    ('{ path = "q.yml", jobs = ["a"], stands_for = { a = 1 } }',
+     "ci.workflows.stands_for", "not a table of job names"),
+    ('{ path = "q.yml", jobs = ["a"], stands_for = { a = "" } }',
+     "ci.workflows.stands_for", "not a table of job names"),
 ])
 def test_the_config_check_refuses_a_scoped_entry_it_can_t_read(entry, key, said):
     with pytest.raises(ConfigError) as caught:

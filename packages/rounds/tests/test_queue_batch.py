@@ -715,6 +715,35 @@ def test_a_failure_mains_run_at_m_has_blames_no_member_and_lands_excused(
     assert events(tmp_path, ROUND, finishing.DONE)
 
 
+#: A whole-tree failure (no test named) in the candidate's scoped job, which stands for
+#: main's linux job.
+SCOPED_WHOLE = {"job": "scoped", "test": None, "stands_for": "linux"}
+
+
+@pytest.mark.parametrize("mains, lands", [
+    ([{"job": "linux", "test": None}], True),
+    ([IN_LINUX], False),
+    ([{"job": "scoped", "test": None}], False),
+], ids=["linux-no-test", "linux-test-only", "own-name-only"])
+def test_a_whole_tree_failure_in_scoped_is_excused_only_by_a_no_test_failure_in_linux(
+        repo, ready, fake, lander_pass, tmp_path, mains, lands):
+    main_head = repo.rev("main")
+    ready()
+    fake.word, fake.failed = ci.RED, [SCOPED_WHOLE]
+    fake.words[main_head], fake.failed_at[main_head] = ci.RED, mains
+    lander_pass(0.0)
+    lander_pass(0.0)
+    lander_pass(0.0)
+    lander_pass(batching.ABSENT_S)
+    member = queue().member(ROUND, "B1")
+    if lands:
+        assert member.state == queue_file.LANDED
+        assert events(tmp_path, ROUND, "queue.landed")[-1]["excused"] == [SCOPED_WHOLE]
+    else:
+        assert member.state == queue_file.EJECTED
+        assert events(tmp_path, ROUND, "queue.ejected")[-1]["failures"] == [SCOPED_WHOLE]
+
+
 def test_a_new_failure_with_one_member_ejects_it_with_the_failures(
         repo, ready, fake, lander_pass, tmp_path):
     ready()

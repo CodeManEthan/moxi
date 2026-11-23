@@ -425,7 +425,7 @@ def _check_command_line(file, where, command) -> None:
 _CI_KEYS = ("workflows", "local", "remote", "ref", "full_ref", "status", "ids", "jobs",
             "status_timeout_s")
 #: The keys of a `ci.workflows` entry written as a table.
-_WORKFLOW_KEYS = ("path", "jobs", "matrix", "pick", "reads_candidates")
+_WORKFLOW_KEYS = ("path", "jobs", "matrix", "pick", "reads_candidates", "stands_for")
 
 
 def _check_ci(file, where, value) -> None:
@@ -495,8 +495,9 @@ def _names_problem(value) -> str | None:
 def _check_workflow(file, where, entry) -> None:
     """One `ci.workflows` entry: a path inside the repo, or a table of the `path`, the
     `jobs` read of its run by name, the `matrix` patterns of the jobs read by pattern
-    (one of the two at least), the `pick` job among `jobs`, and `reads_candidates`, true
-    for the workflow a queue's candidate is read by."""
+    (one of the two at least), the `pick` job among `jobs`, `reads_candidates`, true
+    for the workflow a queue's candidate is read by, and `stands_for`, a table of job
+    names: each job of its run to the job of the target's full run it stands for."""
     from pathlib import PurePosixPath
 
     path = entry
@@ -533,6 +534,15 @@ def _check_workflow(file, where, entry) -> None:
                               f"is {reads!r}, not true or false",
                               "write reads_candidates = true on the workflow a queue's "
                               "candidate is read by")
+        stands_for = entry.get("stands_for")
+        if stands_for is not None and (
+                not isinstance(stands_for, dict)
+                or not all(isinstance(one, str) and one.strip()
+                           for pair in stands_for.items() for one in pair)):
+            raise ConfigError(file, f"{where}.stands_for",
+                              f"is {stands_for!r}, not a table of job names",
+                              "map each job of this run to the job of the target's full "
+                              'run it stands for: stands_for = { scoped = "linux" }')
     parts = PurePosixPath(path).parts if isinstance(path, str) else ()
     if (not isinstance(path, str) or not path.strip() or path.startswith(("/", "\\"))
             or ".." in parts or ":" in path.split("/")[0]):

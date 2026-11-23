@@ -5,9 +5,11 @@ and whether CI's form of the check gate is met at a tip.
 named by its file's path in the repo and read whole, or by the jobs of its run the entry
 names (`Workflow`): by name, and by name pattern (`matrix`, each `*` standing for any
 text), so a matrix's jobs need not be listed one by one. An entry may name its run's
-`pick` job, the job that picks which of the others run; and an entry marked
+`pick` job, the job that picks which of the others run; an entry marked
 `reads_candidates` reads a merge queue's candidate (`candidate_workflows`), where the
-others read a full run (`full_workflows`), a build's or the target's; `local`, the short local run of what CI can't do, or the word `none`
+others read a full run (`full_workflows`), a build's or the target's; and an entry's
+`stands_for` names, for a job of its run, the job of the target's full run its failures
+are compared with (`failures.is_own`); `local`, the short local run of what CI can't do, or the word `none`
 where CI does all of it; `remote`, where `check` pushes the branch before it reads;
 `ref`, a template of the branch name it pushes to, one fixed prefix ending in `/` and
 then `{branch}` (`ref_problem`), where the ref is CI's own; `full_ref`, a second
@@ -127,13 +129,16 @@ _PICKED = re.compile(r"picked(?: for (.+?))?: (\[.*\])\s*$")
 class Workflow:
     """One workflow the setting names: its file's `path` in the repo, the `jobs` read of
     its run by name (None where the whole run is read), the name patterns of the jobs
-    read by `matrix`, the `pick` job, and whether it `reads_candidates` of a queue."""
+    read by `matrix`, the `pick` job, whether it `reads_candidates` of a queue, and
+    `stands_for`, each job of its run paired with the job of the target's full run it
+    stands for."""
 
     path: str
     jobs: tuple[str, ...] | None = None
     matrix: tuple[str, ...] = ()
     pick: str | None = None
     reads_candidates: bool = False
+    stands_for: tuple[tuple[str, str], ...] = ()
 
     @property
     def named(self) -> tuple:
@@ -187,7 +192,10 @@ def _workflow(entry) -> Workflow:
     if isinstance(entry, Mapping):
         return Workflow(str(entry.get("path")), tuple(entry.get("jobs") or ()),
                         tuple(entry.get("matrix") or ()), entry.get("pick"),
-                        reads_candidates=bool(entry.get("reads_candidates")))
+                        reads_candidates=bool(entry.get("reads_candidates")),
+                        stands_for=tuple((str(job), str(stood))
+                                         for job, stood in
+                                         (entry.get("stands_for") or {}).items()))
     return Workflow(str(entry))
 
 
@@ -411,9 +419,9 @@ def reading(workflows: Sequence[str | Workflow], ids: Mapping[str, object],
     `ids` by path and the `runs` at `tip`, and the whole reading. A workflow read by its
     jobs also holds `jobs`, each as `{"name", "reading", "url"}`, read from what
     `jobs_of` gives for its run, or each `absent` where it has no run at `tip`; with
-    `matrix` patterns or a `pick` job it names them too (`matrix`, `pick`), and the
-    packages its green pick job picked, which `picked_of` reads from that job in
-    `picks_in`'s form, as `picked`."""
+    `matrix` patterns, a `pick` job or `stands_for` it names them too (`matrix`, `pick`,
+    `stands_for`), and the packages its green pick job picked, which `picked_of` reads
+    from that job in `picks_in`'s form, as `picked`."""
     each = []
     for flow in workflows:
         flow = flow if isinstance(flow, Workflow) else Workflow(flow)
@@ -433,6 +441,8 @@ def reading(workflows: Sequence[str | Workflow], ids: Mapping[str, object],
             one["matrix"] = list(flow.matrix)
         if flow.pick is not None:
             one["pick"] = flow.pick
+        if flow.stands_for:
+            one["stands_for"] = dict(flow.stands_for)
         if flow.jobs is not None and newest is None:
             one["jobs"] = [{"name": name, "reading": ABSENT, "url": None}
                            for name in flow.jobs] + [

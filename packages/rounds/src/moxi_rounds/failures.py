@@ -2,17 +2,22 @@
 
 A failure is `{"job": <name>, "test": <id or None>}`: one for each test a failed job's
 log names in pytest's `FAILED <id>` lines (`FAILED_LINE`), or the job alone when its log
-names none (`of_run`). A job failed when it completed with a conclusion of
+names none (`of_run`); a job that stands for another job of the target's full run (a
+`ci.workflows` entry's `stands_for`) also holds that job's name as `stands_for`. A job
+failed when it completed with a conclusion of
 `FAILED_CONCLUSIONS`; a job cancelled beside a failing one is not counted.
 
 `tests_of_log` reads those lines from the text `gh run view --log-failed` prints, each
 line `<job>\\t<step>\\t<line>`, colour codes left out.
 
-**The target's own** (`new` gives the rest). A candidate's failed test is the target's
-own when the target's run has that test failing in any job, or has the job it failed in
-failing with no test named; tests are compared by id across jobs, so a candidate's
-scoped job is compared test by test with the target's full one. A job whose log names no
-test is the target's own when the target's run has a job of that name failing.
+**The target's own** (`new` gives the rest). A candidate's failure is compared with the
+job of the target's run it stands for, its `stands_for`, else the job of its own name.
+A failed test is the target's own when the target's run has that test failing in any
+job, or has that job failing with no test named; tests are compared by id across jobs,
+so a candidate's scoped job is compared test by test with the target's full one. A
+failure whose log names no test (a whole-tree step, a setup step, a timeout) is the
+target's own only when the target's run has that job failing with no test named either,
+so a red target never excuses a candidate's whole-tree failure for a test it fails.
 
 `halves` splits a batch's members in two by join order, the first half the larger.
 """
@@ -51,24 +56,29 @@ def failed_jobs(jobs: Iterable[Mapping], names: Sequence[str] | None = None) -> 
             and (names is None or one.get("name") in names)]
 
 
-def of_run(jobs: Sequence[str], tests: Mapping[str, Sequence[str]]) -> list[dict]:
-    """A run's failures from its failed `jobs` and the `tests` their logs name."""
+def of_run(jobs: Sequence[str], tests: Mapping[str, Sequence[str]],
+           stands_for: Mapping[str, str] | None = None) -> list[dict]:
+    """A run's failures from its failed `jobs` and the `tests` their logs name, each of
+    a job `stands_for` maps holding the job it stands for."""
     found = []
     for job in jobs:
         named = tests.get(job) or ()
-        found.extend({"job": job, "test": test} for test in named)
-        if not named:
-            found.append({"job": job, "test": None})
+        each = [{"job": job, "test": test} for test in named] or [{"job": job,
+                                                                   "test": None}]
+        if stands_for and job in stands_for:
+            for one in each:
+                one["stands_for"] = stands_for[job]
+        found.extend(each)
     return found
 
 
 def is_own(failure: Mapping, target: Sequence[Mapping]) -> bool:
-    """Whether the target's failures `target` have `failure`."""
+    """Whether the target's failures `target` have `failure`, compared with the job it
+    stands for."""
+    job = failure.get("stands_for") or failure.get("job")
     test = failure.get("test")
-    if test is None:
-        return any(one.get("job") == failure.get("job") for one in target)
-    return any(one.get("test") == test
-               or (one.get("test") is None and one.get("job") == failure.get("job"))
+    return any((test is not None and one.get("test") == test)
+               or (one.get("test") is None and one.get("job") == job)
                for one in target)
 
 

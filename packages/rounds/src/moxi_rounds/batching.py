@@ -61,7 +61,8 @@ landed from its member finishes on, with no re-read.
 **Red** (`red`): a candidate whose CI reads red, or whose `ci.local` failed, has its
 failed jobs rerun once (`ci.local` run again for `local`); green then lands. Still red,
 its failures are listed (`failures.of_run`, the local job as `local`) and compared with
-the target's own at `M` (`target_failures`): the target's full run at `M`, read once it
+the target's own at `M` (`target_failures`), each with the job of the target's run it
+stands for (`failures.is_own`): the target's full run at `M`, read once it
 has ended and, when red, after one rerun of its failed jobs, recorded `green` or `red`
 with its failures; and, when the candidate's `local` failed, `ci.local` run once at `M`.
 Until both are known the batch waits, recorded `waiting`; a target that moved off `M`

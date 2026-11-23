@@ -21,7 +21,9 @@ takes any object with the same methods, so a test gives it a stand-in.
 - `failures(place, commit, read)` lists the failures of a red read's runs at `commit`
   (`failures.of_run`): each run's failed jobs by the setting's `jobs` command, of the
   jobs the setting names where every workflow is read by its jobs, and the tests their
-  logs name (`LOG_FAILED`). Raises `ci.ReadFailed` when either command fails.
+  logs name (`LOG_FAILED`), each failure of a job the read's workflows give a
+  `stands_for` holding the job it stands for. Raises `ci.ReadFailed` when either
+  command fails.
 
 The two `gh` commands the setting does not give, the rerun and `LOG_FAILED`, take the
 repository the setting's own commands name (`ci.gh_repo`: the first `--repo` or `-R`
@@ -156,6 +158,8 @@ class QueueCi:
         names = None
         if read.workflows and all("jobs" in one for one in read.workflows):
             names = [str(job.get("name")) for one in read.workflows for job in one["jobs"]]
+        stands_for = {str(job): str(stood) for one in read.workflows
+                      for job, stood in (one.get("stands_for") or {}).items()}
         found: list[dict] = []
         for run in read.runs:
             _argv, jobs = ci.run_jobs(self.found, run, values={"tip": commit}, cwd=place)
@@ -167,7 +171,8 @@ class QueueCi:
             log = _said(argv, cwd=place, timeout_s=PUSH_TIMEOUT_S)
             if log.code != 0:
                 raise ci.ReadFailed(argv, f"exited {log.code}")
-            found.extend(failing.of_run(failed, failing.tests_of_log(log.said)))
+            found.extend(failing.of_run(failed, failing.tests_of_log(log.said),
+                                        stands_for))
         return found
 
     def rerun(self, place: Path, runs: Sequence[str], *, failed: bool) -> Said:
