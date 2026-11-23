@@ -76,3 +76,33 @@ def test_queue_ci_reads_failures_from_the_jobs_and_the_failed_log(tmp_path, monk
     got = queue_ci.QueueCi(found, local_log=tmp_path / "local.log").failures(
         tmp_path, "a" * 40, read)
     assert got == [SCOPED_ONE]
+
+
+def test_queue_ci_gives_the_rerun_and_the_failed_log_the_settings_repo(tmp_path,
+                                                                        monkeypatch):
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    calls = tmp_path / "calls.jsonl"
+    jobs = [{"name": "linux", "status": "completed", "conclusion": "failure"}]
+    gh = bin_dir / "gh"
+    gh.write_text(f"#!{sys.executable}\nimport json, sys\n"
+                  f"open({str(calls)!r}, 'a').write(json.dumps(sys.argv[1:]) + '\\n')\n"
+                  f"if '--log-failed' in sys.argv: print('')\n"
+                  f"elif 'rerun' not in sys.argv: print({json.dumps(json.dumps(jobs))})\n",
+                  encoding="utf-8")
+    gh.chmod(0o755)
+    monkeypatch.setenv("PATH", f"{bin_dir}:{Path(sys.executable).parent}")
+    found = ci.Declared(workflows=(ci.Workflow("ci.yml"),), local=None,
+                        local_timeout_s=None, remote="origin",
+                        status=(*ci.STATUS, "--repo", "owner/name"), ids=ci.IDS,
+                        status_timeout_s=10)
+    queue = queue_ci.QueueCi(found, local_log=tmp_path / "local.log")
+    assert queue.rerun(tmp_path, ["7"], failed=True).code == 0
+    queue.failures(tmp_path, "a" * 40,
+                   queue_ci.Read(ci.RED, ("7",), ({"path": "ci.yml", "reading": ci.RED},)))
+    ran = [json.loads(line) for line in calls.read_text().splitlines()]
+    rerun = next(one for one in ran if "rerun" in one)
+    failed_log = next(one for one in ran if "--log-failed" in one)
+    for argv in (rerun, failed_log):
+        assert argv[-2:] == ["--repo", "owner/name"], argv
+    assert queue_ci.gh_repo(found) == ("--repo", "owner/name")
