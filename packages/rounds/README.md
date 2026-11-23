@@ -1148,6 +1148,26 @@ not used at all: every verb on it refuses and names the file, the line and the w
 When a log's earlier lines changed outside this machine, it is read as it stands and
 `show` says since when.
 
+### Under a test
+
+While a test runs (`PYTEST_CURRENT_TEST` or `PYTEST_VERSION` is set, or pytest is
+imported), rounds won't use a directory of its own that no Moxi variable places:
+`MOXI_ROUNDS_<KIND>_HOME` (`MOXI_ROUNDS_RUNTIME_DIR`), `MOXI_ROUNDS_HOME` or `MOXI_HOME`.
+Without one, the directory is the real one, wherever `HOME` or the XDG and Windows
+folders point. Nor will it take a project's folders from a projects registry that no
+Moxi variable places (`MOXI_PROJECTS_DATA_HOME`, `MOXI_PROJECTS_HOME` or `MOXI_HOME`).
+Either way it raises `UnfencedTest` before anything is written, naming the directory,
+what shows a test is running and the fix; a command prints it and exits 1. moxi-dev's
+test fence sets both homes, so rounds' own tests pass. Only the process that shows a
+test is running, and the processes it starts, are refused: another process writing the
+same notes folder is not. There is no switch to turn it off; a test that means to use
+real folders sets the variables to them.
+
+Every fixture of rounds' `tests/conftest.py` that a test file elsewhere can borrow
+checks at setup that the fence's homes are in the test's own tmp, so a borrowed fixture
+fails before it writes: put a test in `packages/rounds/tests` and run pytest from
+`packages/rounds`.
+
 ## Config
 
 `moxi config rounds` shows every key, and `moxi config rounds init` writes the file,

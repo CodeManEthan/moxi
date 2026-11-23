@@ -289,7 +289,7 @@ from collections.abc import Callable, Sequence
 from moxi import exit as codes
 from moxi.config import ConfigError
 
-from .errors import BadArgument, Refused, RoundsError, Unmet
+from .errors import BadArgument, Refused, RoundsError, UnfencedTest, Unmet
 
 
 # -- what every writing verb shares ------------------------------------------------------
@@ -2150,5 +2150,8 @@ def main(argv: Sequence[str] | None = None, *, prog: str = "moxi rounds") -> int
             print(f"  fix: {exc.fix}", file=sys.stderr)
         return exc.exit_code
     except ConfigError as exc:
+        print(f"{prog} {args.verb}: {exc}", file=sys.stderr)
+        return exc.exit_code
+    except UnfencedTest as exc:
         print(f"{prog} {args.verb}: {exc}", file=sys.stderr)
         return exc.exit_code
