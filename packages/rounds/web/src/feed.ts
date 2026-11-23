@@ -106,6 +106,8 @@ export interface Shown {
   text: string | null;
   rules?: string | null;
   record?: string | null;
+  /** The ruling this one replaces, when it rules the same thing again. */
+  supersedes?: string | null;
   at?: string | null;
 }
 

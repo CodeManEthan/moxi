@@ -26,8 +26,11 @@
 //
 // It reads `/api/rounds`, then follows the topic `rounds`, and reads the route again when
 // its tab is shown again. A record is read from `/api/record` when it opens, and again
-// when its round's `rev` changes while it is open. With turns installed it reads turns'
-// sessions, so a builder whose worktree is one live session's folder links to its row.
+// when its round's `rev` changes while it is open; a sent own-words answer's question is
+// read again when its round's `rev` changes, and a sent correction finds the ruling that
+// supersedes the one it corrects among the rulings waiting to be read back. With turns
+// installed it reads turns' sessions, so a builder whose worktree is one live session's
+// folder links to its row.
 // It reads `/api/agents` once, and again when the To picker opens: the agents comms
 // knows, and whether the page server sends through comms at all.
 
@@ -54,8 +57,8 @@ import {
 } from "./model.ts";
 import type { Address, Context, DropFacts, Filter, GroupView, Held, Item, ItemKind, ItemView, Piece, Section } from "./model.ts";
 import {
-  bodyOf, chipOf, draftOf, EACH, isPageKind, kindWords, mintId, readBackOf, receiptLines, RULE_LINE, RULE_LINE_ALONE,
-  sendable, sendWords, Tray, trayKey,
+  bodyOf, chipOf, correctionFound, draftOf, EACH, isPageKind, kindWords, mintId, readBackOf, receiptLines, RULE_LINE,
+  RULE_LINE_ALONE, sendable, sendWords, Tray, trayKey,
 } from "./tray.ts";
 import type { Draft, Kind, Reach, Receipt, ReceiptLine, Store } from "./tray.ts";
 
@@ -418,6 +421,7 @@ export class RoundsPage extends LitElement {
         void this.#readRecord(this.#address!);
       }
       void this.#readFound(value);
+      this.#takeCorrections(value);
     }
     this.requestUpdate();
   }
@@ -433,6 +437,20 @@ export class RoundsPage extends LitElement {
                                                                      id: draft.item })!));
       if (read.kind === "record") this.#takeFound(draft.holder, draft.item, read.record);
     }
+  }
+
+  /** Puts on each sent correction the ruling that supersedes the one it corrects, once
+   * the rulings waiting to be read back list it. One found stays after it is read back. */
+  #takeCorrections(value: Board): void {
+    let changed = false;
+    for (const draft of this.#tray.sent.filter((one) => one.kind === "correct" && one.receipt?.message?.id)) {
+      const found = correctionFound(draft, value.waiting);
+      if (found && draft.found?.id !== found.id) {
+        this.#tray.setFound(draft.act, found);
+        changed = true;
+      }
+    }
+    if (changed) this.requestUpdate();
   }
 
   /** Puts the ruling a question's record holds on its sent own-words drafts. */

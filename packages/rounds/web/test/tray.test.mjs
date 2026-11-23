@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
-  ACT_ID, bodyOf, chipOf, draftOf, EACH, kindWords, mintId, noLeadWords, readBackOf, receiptLines, RULE_LINE,
+  ACT_ID, bodyOf, chipOf, correctionFound, draftOf, EACH, kindWords, mintId, noLeadWords, readBackOf, receiptLines, RULE_LINE,
   RULE_LINE_ALONE, sendable, sendWords, Tray, trayKey,
 } from "../src/tray.ts";
 
@@ -224,6 +224,31 @@ test("a sent own-words draft reads recorded once a ruling with the message's poi
   assert.equal(readBackOf(ruled), "C7");
   const other = { ...sent, found: { ...ruled.found, record: "comms:m9" } };
   assert.deepEqual(lines(other).slice(2), ["Ruled as C7 from comms:m9, not from this message"]);
+});
+
+test("a sent correction reads recorded once a ruling that supersedes the corrected one appears", () => {
+  const sent = { ...draft("correct", { text: "the first, not the second" }, "kestrel/billing-export", "C3"), receipt: {
+    act: "x", holder: "kestrel/billing-export", item: "C3", kind: "correct", state: "sent",
+    command: "moxi rounds rule kestrel/billing-export Q1 --supersedes C3 --record comms:m2",
+    message: { to: "atlas", at: AT, id: "m2", delivery: "delivered" } } };
+  const lines = (one) => receiptLines(one, { today: TODAY, clock: UTC }).map((line) => line.text);
+  const waiting = (rows) => ({ questions: [], decisions: [], waits: [], parked: 0,
+                               not_shown: [{ project: "kestrel", through: null, rows }] });
+  const row = (more) => ({ holder: "kestrel/billing-export", id: "C4", text: "a, the first", record: "comms:m2",
+                           supersedes: "C3", at: AT, ...more });
+  assert.equal(correctionFound(sent, waiting([row({ supersedes: null }), row({ holder: "kestrel/ledger" })])), null);
+  assert.deepEqual(lines(sent).slice(2), ["With atlas, not recorded yet",
+    "moxi rounds rule kestrel/billing-export Q1 --supersedes C3 --record comms:m2"]);
+  assert.equal(readBackOf(sent), null);
+  const found = correctionFound(sent, waiting([row({ id: "C4", at: "2026-11-21T11:41:00Z" }),
+                                               row({ id: "C5", at: "2026-11-21T11:42:00Z" })]));
+  assert.equal(found.id, "C5");
+  const ruled = { ...sent, found };
+  assert.deepEqual(lines(ruled).slice(2), ["Recorded as C5: a, the first"]);
+  assert.equal(readBackOf(ruled), "C5");
+  const other = { ...sent, found: correctionFound(sent, waiting([row({ record: "comms:m9" })])) };
+  assert.deepEqual(lines(other).slice(2), ["Ruled as C4 from comms:m9, not from this message"]);
+  assert.equal(correctionFound(draft("words"), waiting([row({})])), null);
 });
 
 test("an explain request's receipt says the question stays open", () => {

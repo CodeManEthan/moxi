@@ -11,6 +11,7 @@
 
 import { timeWord } from "./model.ts";
 import type { Clock } from "./model.ts";
+import type { Waiting } from "./feed.ts";
 
 /** The kinds of draft, as the answers route takes them. */
 export type Kind = "pick" | "accept" | "reject" | "read-back" | "done" | "park" | "unpark"
@@ -449,6 +450,22 @@ export function receiptLines(draft: Draft, { today, clock }: { today: string; cl
 /** The ruling a receipt's read-back marks: the ruling recorded, or the one the agent
  * recorded; null for none. */
 export function readBackOf(draft: Draft): string | null {
-  if (draft.kind === "words") return draft.found?.id ?? null;
+  if (draft.kind === "words" || draft.kind === "correct") return draft.found?.id ?? null;
   return draft.receipt?.ruling?.id ?? null;
+}
+
+/** For a sent correction, the ruling that supersedes the one it corrects, as the rulings
+ * waiting to be read back list it; the newest when there are several, null for none yet. */
+export function correctionFound(draft: Draft, waiting: Waiting): RulingOf | null {
+  if (draft.kind !== "correct") return null;
+  let found: RulingOf | null = null;
+  for (const back of waiting.not_shown) {
+    for (const row of back.rows) {
+      if (row.holder !== draft.holder || row.supersedes !== draft.item) continue;
+      if (found !== null && (row.at ?? "") < (found.at ?? "")) continue;
+      found = { id: row.id, text: row.text ?? row.rules ?? null, record: row.record ?? null, actor: null,
+                at: row.at ?? null, shown: false };
+    }
+  }
+  return found;
 }
