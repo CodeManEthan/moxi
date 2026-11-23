@@ -107,8 +107,8 @@ def refused_root(layout: Layout, kind: str, env: Mapping[str, str],
     fix = placers[-2] if len(placers) > 1 else MOXI_HOME_ENV
     return (f"{layout.module} refused its {kind} directory {where}: a test is running "
             f"({signal}) and no Moxi variable ({', '.join(placers)}) places it, so it "
-            "would be the real one. Run the test inside moxi-dev's fence "
-            f"({layout.module}'s tests folder, run from packages/{layout.module}), or set "
+            "would be the real one. Run the test inside moxi-dev's fence (in "
+            f"packages/{layout.module}/tests, run from packages/{layout.module}), or set "
             f"{fix} to a folder of the test's own.")
 
 

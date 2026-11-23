@@ -6,6 +6,8 @@ from __future__ import annotations
 
 import ast
 import importlib.util
+import os
+import re
 import shutil
 import subprocess
 import sys
@@ -141,3 +143,112 @@ def test_every_fixture_a_test_can_borrow_takes_the_fenced_one():
                 if name not in ("fenced", "_git_template") and not reaches(name)]
     assert unfenced == []
     assert fixtures["fenced"][0] == "fence"
+
+
+# -- the escape: a test file elsewhere that borrows these fixtures -----------------------
+
+#: A test file outside this folder that borrows rounds' fixtures, as the escaped one did:
+#: `write_config` from this folder's conftest.py (by `-p conftest`, or imported) and
+#: `configure` from `test_queue_batch`, which takes it.
+BORROWS_BY_PLUGIN = '''
+from test_queue_batch import configure  # noqa: F401
+
+
+def test_borrows_configure(configure):
+    pass
+
+
+def test_borrows_write_config(write_config):
+    write_config("x = 1\\n")
+'''
+
+BORROWS_BY_IMPORT = '''
+from conftest import write_config  # noqa: F401
+from test_queue_batch import configure  # noqa: F401
+
+
+def test_borrows_configure(configure):
+    pass
+
+
+def test_borrows_write_config(write_config):
+    write_config("x = 1\\n")
+'''
+
+#: A test file elsewhere with no conftest at all, whose own fixture writes rounds' config
+#: and opens its index.
+WRITES_ON_ITS_OWN = '''
+import pytest
+
+from moxi_rounds import index, paths
+
+
+@pytest.fixture
+def written():
+    config = paths.LAYOUT.config_file()
+    config.parent.mkdir(parents=True, exist_ok=True)
+    config.write_text("x = 1\\n", encoding="utf-8")
+    index.rebuild([])
+
+
+def test_writes(written):
+    pass
+'''
+
+
+def _stand_in_env(fence) -> dict[str, str]:
+    """The fence's own environment, where the home, every XDG folder and the Windows
+    folders are the test's stand-in for the real home, with no Moxi variable that places
+    a module's files: a child run in it finds the stand-in's defaults as the real ones."""
+    env = {key: value for key, value in fence.env.items()
+           if not (key.startswith("MOXI_") and key.endswith("_HOME")
+                   and key != "MOXI_ANCHOR_HOME")}
+    env["PYTHONDONTWRITEBYTECODE"] = "1"
+    return env
+
+
+def _files_under(env) -> list[Path]:
+    """Every file under rounds' five directories as the defaults place them in `env`."""
+    from moxi.paths import Layout
+
+    plain = Layout("rounds")
+    found = []
+    for kind in ("data", "state", "cache", "config", "runtime"):
+        module_dir = getattr(plain, f"{kind}_root")(env) / "rounds"
+        found += [path for path in module_dir.rglob("*") if path.is_file()]
+    return sorted(set(found))
+
+
+def test_a_borrowed_or_unfenced_test_elsewhere_writes_nothing_of_rounds(fence, tmp_path):
+    from moxi.paths import Layout
+
+    env = _stand_in_env(fence)
+    real_config = Layout("rounds").config_file(env)
+    assert os.path.realpath(real_config).startswith(os.path.realpath(fence.home) + os.sep)
+    real_config.parent.mkdir(parents=True)
+    real_config.write_bytes(b"# the real config\n")
+    away = tmp_path / "away"
+    away.mkdir()
+
+    def run(name: str, text: str, *options: str, pythonpath: bool = True) -> str:
+        (away / name).write_text(text, encoding="utf-8")
+        child_env = {**env, "PYTHONPATH": str(HERE)} if pythonpath else env
+        done = subprocess.run(
+            [sys.executable, "-m", "pytest", "-q", "-rE", "-p", "no:cacheprovider",
+             "--basetemp", str(tmp_path / f"basetemp-{name[:-3]}"), *options,
+             str(away / name)],
+            cwd=away, env=child_env, capture_output=True, text=True, timeout=120,
+            check=False)
+        out = done.stdout + done.stderr
+        assert done.returncode != 0, out
+        assert "passed" not in out, out
+        return out
+
+    by_plugin = run("test_by_plugin.py", BORROWS_BY_PLUGIN, "-p", "conftest")
+    assert "fixture 'fence' not found" in by_plugin
+    by_import = run("test_by_import.py", BORROWS_BY_IMPORT)
+    assert re.search(r"fixture '(fence|fenced|config_file)' not found", by_import), by_import
+    on_its_own = run("test_on_its_own.py", WRITES_ON_ITS_OWN, pythonpath=False)
+    assert "UnfencedTest" in on_its_own and "a test is running" in on_its_own
+    assert real_config.read_bytes() == b"# the real config\n"
+    assert _files_under(env) == [real_config]
