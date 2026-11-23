@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.2.6 (2026-11-22)
 
 - `client.js` gains `WaitClock`, the wait a page shows a line after (`Reading…` once its
   first read has been out 400 ms). It measures on the monotonic clock, and once its
