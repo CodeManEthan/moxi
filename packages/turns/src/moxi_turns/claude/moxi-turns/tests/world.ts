@@ -146,6 +146,7 @@ export function world(on: On, options: { surfaces?: string[]; endpointJson?: str
     return { value: w.usage as never }
   })
   on('session.measure', async ($, e) => ({ changed: e.changed }))
+  on('session.end', async ($, e) => ({ sessionId: e.sessionId }))
   on('ui.log', async ($, e) => {
     w.logs.push(e.text)
     return { value: undefined } as never

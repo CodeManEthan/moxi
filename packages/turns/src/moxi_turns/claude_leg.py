@@ -124,9 +124,14 @@ Then, in any order:
         `fork.lost` `gone: …`.
 
         The runner holds a fork's agent id from its spawn, and from a further round's
-        line, until that delivery has settled (`fork.done` or `fork.lost` reported). While it holds the id, each tool
-        call carrying it is the fork's: the guards judge it as any call, at the call
-        step and the ask step, and the runner makes no after-tool ask for it. A call
+        line, until the fork's own `turn.complete` for that round, or the session's end
+        (`session.end`). A warm-up or round past its bound reports `fork.lost` `gone: …`
+        at once, but the fork may still be running, so the id stays held until that late
+        `turn.complete`, which lets it go and reports nothing; a `fork.continue` line for
+        it meanwhile reports `fork.lost` `denied: …`. A warm-up that ends other than
+        `answer` and a send that fails let the id go at once. While it holds the id,
+        each tool call carrying it is the fork's: the guards judge it as any call, at
+        the call step and the ask step, and the runner makes no after-tool ask for it. A call
         counts as the runner's own, judged by no guard, only when it carries no
         `agentId` at all; a call with an id the runner does not hold is judged and asked
         after as any other. The runner leaves the engine's notice of a finished round as

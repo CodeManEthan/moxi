@@ -310,7 +310,11 @@ adds `unanswered` for a command it wrote and got no answer to, and `not-exited` 
   deliver, and a round with no end within its bound (the asker's `round_timeout_ms`, or
   120 s when it set none) read `lost` `gone`. `fork.continue` sends
   its text to the fork the same way. The runner holds the fork's agent id from the spawn
-  (or the round's send) until that delivery has settled. While it holds it, the fork's
+  (or the round's send) until the fork's own `turn.complete` for that round, or the
+  session's end. A warm-up or round past its bound reads `lost` `gone` at once, but the
+  fork may still be running, so its id stays held until that late `turn.complete`, which
+  lets it go and settles nothing further; a `fork.continue` the runner gets for it
+  meanwhile reads `lost` `denied`. While it holds it, the fork's
   tool calls are judged by the guards at the call and ask steps and get no after-tool
   ask; a call with an agent id the runner does not hold is judged and asked after as any
   agent's, and only a call from the runner's plugin with no agent id is the runner's own.

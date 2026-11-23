@@ -10,7 +10,7 @@
 import { describe, expect, test } from 'claude-code/testing'
 import { world } from './world'
 import type { World } from './world'
-import { WARM_UP, heldFork, noteForkEnd, ownCall, roundWaitMs, runFork, runRound } from '../hooks/register'
+import { WARM_UP, forgetForks, heldFork, noteForkEnd, ownCall, roundWaitMs, runFork, runRound } from '../hooks/register'
 import type { Fork, ForkEngine } from '../hooks/register'
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -131,7 +131,7 @@ describe('the fork', () => {
     }
   })
 
-  test('a warm-up that never completes is lost, gone, at 30 s, never a hang, and its id is let go', async () => {
+  test('a warm-up that never completes is lost, gone, at 30 s, never a hang; its late end lets the id go', async () => {
     const s = stand()
     const done = s.fork()
     await s.settle()
@@ -141,11 +141,13 @@ describe('the fork', () => {
     await done
     expect(s.reports.at(-1)).toEqual({ kind: 'fork.lost', delivery: 'd1', reason: 'gone: the warm-up did not complete within 30 s' })
     expect(s.sends).toEqual([])
-    expect(heldFork(s.forks, 'f1')).toBe(false)
-    // A late end changes nothing.
+    // The fork may still be running its warm-up: its id stays held.
+    expect(heldFork(s.forks, 'f1')).toBe(true)
+    // Its late end sends nothing, reports nothing, and lets the id go.
     await s.end('f1', 'READY')
     expect(s.sends).toEqual([])
     expect(s.reports.length).toBe(2)
+    expect(heldFork(s.forks, 'f1')).toBe(false)
   })
 
   test('a warm-up that ends in an error or aborted is lost, gone, and the task is never sent', async () => {
@@ -312,7 +314,7 @@ describe('a further round', () => {
     await s.advance(2_000)
     await done
     expect(s.reports.at(-1)).toEqual({ kind: 'fork.lost', delivery: 'd2', reason: 'gone: the fork did not answer within 2 s' })
-    expect(heldFork(s.forks, 'f1')).toBe(false)
+    expect(heldFork(s.forks, 'f1')).toBe(true)
   })
 
   test('a round with no end in 120 s is lost, gone', async () => {
@@ -322,7 +324,67 @@ describe('a further round', () => {
     await s.advance(120_000)
     await done
     expect(s.reports.at(-1)).toEqual({ kind: 'fork.lost', delivery: 'd2', reason: 'gone: the fork did not answer within 120 s' })
+    expect(heldFork(s.forks, 'f1')).toBe(true)
+  })
+})
+
+describe('a round its bound ended', () => {
+  /** A fork `f1` whose task round was lost at a 5 s bound. */
+  async function lapsed() {
+    const s = stand()
+    const done = s.fork('d1', 'recall', 5_000)
+    await s.settle()
+    await s.end('f1', 'READY')
+    await s.advance(5_000)
+    await done
+    expect(s.reports.at(-1)).toEqual({ kind: 'fork.lost', delivery: 'd1', reason: 'gone: the fork did not answer within 5 s' })
+    s.reports.length = 0
+    s.sends.length = 0
+    return s
+  }
+
+  test('the fork\'s id stays held, so its calls are still the fork\'s, until its own turn.complete', async () => {
+    const s = await lapsed()
+    await s.advance(3_600_000)
+    expect(heldFork(s.forks, 'f1')).toBe(true)
+    await s.end('f1', 'a late answer')
     expect(heldFork(s.forks, 'f1')).toBe(false)
+    // The late end settles nothing further for the lost delivery.
+    expect(s.reports).toEqual([])
+  })
+
+  test('a further round asked before that turn.complete is lost, denied, and sends nothing', async () => {
+    const s = await lapsed()
+    await s.round('d2', 'f1', 'go on')
+    expect(s.reports).toEqual([{ kind: 'fork.lost', delivery: 'd2', reason: 'denied: a round of the fork is still open' }])
+    expect(s.sends).toEqual([])
+    expect(heldFork(s.forks, 'f1')).toBe(true)
+  })
+
+  test('after its turn.complete the id is free: a further round is sent and answered', async () => {
+    const s = await lapsed()
+    await s.end('f1', 'a late answer')
+    const done = s.round('d2', 'f1', 'go on')
+    await s.settle()
+    expect(s.sends).toEqual([{ to: { agentId: 'f1' }, text: 'go on' }])
+    await s.end('f1', 'second answer')
+    await done
+    expect(s.reports).toEqual([
+      { kind: 'fork.started', delivery: 'd2', agent_id: 'f1' },
+      { kind: 'fork.done', delivery: 'd2', answer: 'second answer', reason: 'answer', is_aborted: false },
+    ])
+    expect(heldFork(s.forks, 'f1')).toBe(false)
+  })
+
+  test('the session\'s end lets go of every fork, a lapsed one and an open one', async () => {
+    const s = await lapsed()
+    s.spawnAnswer = { model: 'm', agentId: 'f2' }
+    void s.fork('d2', 'two')
+    await s.settle()
+    expect(heldFork(s.forks, 'f1')).toBe(true)
+    expect(heldFork(s.forks, 'f2')).toBe(true)
+    forgetForks(s.forks)
+    expect(s.forks.size).toBe(0)
   })
 })
 
@@ -351,6 +413,14 @@ describe('the fork line through the runner', () => {
     await w.line({ op: 'fork', delivery: 'd1', text: 'recall' })
     expect(forkReports(w)).toEqual([{ kind: 'fork.lost', delivery: 'd1', reason: 'denied: the spawn named no agent' }])
     expect(w.sends).toEqual([])
+  })
+
+  test('the session\'s end passes on through the runner', async ($: E, on) => {
+    const w = world(on)
+    await start($)
+    await w.hello()
+    expect(await $.session.end({ reason: 'clear', sessionId: 's1' })).toEqual({ sessionId: 's1' })
+    expect(w.kinds()).not.toContain('fork.lost')
   })
 
   test('an agent\'s turn.complete is never reported as the main loop\'s', async ($: E, on) => {

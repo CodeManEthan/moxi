@@ -294,9 +294,14 @@
 // `task-notification`) as the engine sends it.
 //
 // Held forks: the runner holds a fork's agent id from its spawn, and from a further
-// round's line, until it reports that delivery's `fork.done` or `fork.lost`. A tool call carrying a held id is the fork's: the
-// guards judge it at the call step and the ask step as any call, and the runner makes
-// no after-tool ask for it. A fork's calls reach this hook with this plugin as
+// round's line, until the fork's own turn.complete for that round, or the session's end.
+// A warm-up or round its bound ends reports `fork.lost` `gone: ...` at once, but the fork
+// may still be running, so its id stays held until that late turn.complete, which lets
+// the id go and reports nothing; a `fork.continue` line for it meanwhile is refused as
+// for any open round. A warm-up that ends other than `answer` and a send that fails let
+// the id go when they report `fork.lost`, since no turn of the fork is running then. A
+// tool call carrying a held id is the fork's: the guards judge it at the call step and
+// the ask step as any call, and the runner makes no after-tool ask for it. A fork's calls reach this hook with this plugin as
 // `next.origin.plugin`, as the runner's own do, so origin alone tells nothing: a call is
 // the runner's own, judged by no guard, only when it carries no `agentId` at all and
 // comes from this plugin (or is a TaskStop of a task the runner is stopping now). A call
@@ -407,8 +412,9 @@ type Win = {
 
 /** A turn.complete of a held fork. */
 type ForkEnd = { reason: unknown; isAborted: boolean; answer: unknown }
-/** A fork the runner holds: its delivery, the ends it has not taken yet, and its waiter. */
-export type Fork = { delivery: string; ends: ForkEnd[]; wake: (() => void) | null }
+/** A fork the runner holds: its delivery, the ends it has not taken yet, and its waiter.
+ *  `lapsed`: its round's bound ended it, and the fork's own turn.complete lets it go. */
+export type Fork = { delivery: string; ends: ForkEnd[]; wake: (() => void) | null; lapsed?: boolean }
 
 /** What a SessionStart's ready ask carries from its hook input. */
 type ReadyFacts = { source: unknown; session_id: unknown; transcript_path: unknown }
@@ -457,7 +463,8 @@ let ownSubmits = 0
 let floors: Record<string, number> = {}
 /** The main loop's context in tokens, from the last reading since the last SessionStart. */
 let contextTokens: number | null = null
-/** The forks the runner holds, by agent id, each until its delivery has settled. */
+/** The forks the runner holds, by agent id, each until its round's turn.complete (its
+ *  delivery's end, or after a round its bound ended) or the session's end. */
 const held = new Map<string, Fork>()
 
 const log = ($: Dollar, text: string): void => {
@@ -768,10 +775,15 @@ async function forkEnd(engine: ForkEngine, f: Fork, ms: number): Promise<ForkEnd
   return f.ends.shift()
 }
 
-/** A turn.complete in an agent's loop: a held fork's waiter takes it. */
-export function noteForkEnd(forks: ReadonlyMap<string, Fork>, agentId: unknown, e: { reason: unknown; isAborted: unknown; answer: unknown }): void {
+/** A turn.complete in an agent's loop: a held fork's waiter takes it. One that ends a
+ *  round its bound already ended lets the fork's id go, and nothing more. */
+export function noteForkEnd(forks: Map<string, Fork>, agentId: unknown, e: { reason: unknown; isAborted: unknown; answer: unknown }): void {
   const f = typeof agentId === 'string' ? forks.get(agentId) : undefined
   if (f === undefined) return
+  if (f.lapsed === true) {
+    forks.delete(agentId as string)
+    return
+  }
   f.ends.push({ reason: e.reason, isAborted: e.isAborted === true, answer: e.answer })
   f.wake?.()
 }
@@ -784,7 +796,7 @@ export function roundWaitMs(value: unknown): number {
 
 /** The `fork` line: spawn with the warm-up, then give the task as the first resumed round,
  *  waiting `roundMs` for its answer. `forks` holds the fork's id from the spawn until its
- *  delivery settles. */
+ *  own turn.complete for the round, or the session's end. */
 export async function runFork(engine: ForkEngine, forks: Map<string, Fork>, delivery: string, text: string, roundMs = ROUND_WAIT_MS): Promise<void> {
   const lostBefore = (reason: string) => engine.report('fork.lost', { delivery, reason })
   let agentId: string | undefined
@@ -800,7 +812,7 @@ export async function runFork(engine: ForkEngine, forks: Map<string, Fork>, deli
   forks.set(agentId, f)
   engine.report('fork.started', { delivery, agent_id: agentId })
   const warm = await forkEnd(engine, f, WARM_UP_WAIT_MS)
-  if (warm === undefined) return forkLost(engine, forks, agentId, f, `the warm-up did not complete within ${WARM_UP_WAIT_MS / 1000} s`)
+  if (warm === undefined) return lapse(engine, f, `the warm-up did not complete within ${WARM_UP_WAIT_MS / 1000} s`)
   if (warm.reason !== 'answer' || warm.isAborted) return forkLost(engine, forks, agentId, f, `the warm-up ended ${warm.isAborted ? 'aborted' : String(warm.reason)}`)
   await round(engine, forks, agentId, f, text, false, roundMs)
 }
@@ -817,9 +829,18 @@ export async function runRound(engine: ForkEngine, forks: Map<string, Fork>, del
   await round(engine, forks, agentId, f, text, true, roundMs)
 }
 
-/** The fork's delivery settles lost, gone: the runner lets go of its id. */
+/** The fork's delivery settles lost, gone, with no turn of it running: the runner lets go
+ *  of its id. */
 function forkLost(engine: ForkEngine, forks: Map<string, Fork>, agentId: string, f: Fork, why: string): void {
   if (forks.get(agentId) === f) forks.delete(agentId)
+  engine.report('fork.lost', { delivery: f.delivery, reason: `gone: ${why}` })
+}
+
+/** A bound ended the fork's turn: its delivery settles lost, gone, at once, but the fork
+ *  may still be running, so the runner holds its id until the fork's own turn.complete
+ *  (or the session's end), which reports nothing further. */
+function lapse(engine: ForkEngine, f: Fork, why: string): void {
+  f.lapsed = true
   engine.report('fork.lost', { delivery: f.delivery, reason: `gone: ${why}` })
 }
 
@@ -836,7 +857,7 @@ async function round(engine: ForkEngine, forks: Map<string, Fork>, agentId: stri
   if (!sent.isDelivered) return forkLost(engine, forks, agentId, f, `the task was not delivered: ${sent.reason ?? 'no reason given'}`)
   if (started) engine.report('fork.started', { delivery: f.delivery, agent_id: agentId })
   const end = await forkEnd(engine, f, ms)
-  if (end === undefined) return forkLost(engine, forks, agentId, f, `the fork did not answer within ${ms / 1000} s`)
+  if (end === undefined) return lapse(engine, f, `the fork did not answer within ${ms / 1000} s`)
   if (forks.get(agentId) === f) forks.delete(agentId)
   engine.report('fork.done', { delivery: f.delivery, answer: typeof end.answer === 'string' ? end.answer : null, reason: end.reason, is_aborted: end.isAborted })
 }
@@ -857,6 +878,11 @@ function forkEngine($: Dollar): ForkEngine {
 export function ownCall(originPlugin: unknown, agentId: unknown, tool: unknown, taskId: unknown, stoppingNow: ReadonlySet<string>): boolean {
   if (!isMain(agentId)) return false
   return originPlugin === PLUGIN || (tool === 'TaskStop' && stoppingNow.has(String(taskId)))
+}
+
+/** The session ended: the runner holds no fork past it. */
+export function forgetForks(forks: Map<string, Fork>): void {
+  forks.clear()
 }
 
 /** Is this tool call a fork's the runner holds? */
@@ -1806,6 +1832,12 @@ export const register: Register = on => {
 
   // The engine's measure of the session: the context's tokens for the floors, and the
   // reading for the endpoint when the context or a rate limit moved.
+  // The session's end (exit, /clear, resume) lets go of every fork it held.
+  on('session.end', async ($, e, next) => {
+    forgetForks(held)
+    return next(e)
+  })
+
   on('session.measure', async ($, e, next) => {
     const hook = watch()
     try {
