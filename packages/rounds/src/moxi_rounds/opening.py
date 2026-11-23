@@ -15,6 +15,12 @@ that says what is built and that stands when the round is opened: one that was r
 or taken back, one that only changed a record, and an id the project's list does not
 hold are refused. The ids are kept in the event, and the round's design owes each a row.
 
+A round whose flow has no design step marks the checklist items that apply at its
+opening (`checklist`), since it has no design block to mark them in: a bare id for an
+item of the home project, `<key>:<id>` for any other project's, or none. Its home
+project's checklist not empty, an opening that says nothing is refused, as is a mark of
+no item and a mark on a round whose flow has a design step, whose block marks them.
+
 A round is opened once. A folder that already holds a log is refused, as are a flow the
 config does not have and a go pointer of no known shape; a project the projects list
 does not hold and a rounds folder that can't be worked out are refused before anything
@@ -36,10 +42,12 @@ from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from pathlib import Path
 
+from . import checklist as marks
 from . import corrections, dropping, flows, folders, leads, log, pointers, ruling, write
 from .rendering import NOTE_FILE
 from . import settings as own
 from .errors import BadArgument, RoundsError, Unmet
+from .freezing import DESIGN
 
 
 @dataclass(frozen=True)
@@ -63,7 +71,8 @@ class Opened:
 
 def open_round(name: str, *, description: str, by: str, flow: str | None = None,
                record: str | None = None, inherits: Iterable[str] | None = None,
-               lead: str | None = None, settings=None, wait_s: float = write.WAIT_S,
+               lead: str | None = None, checklist: Iterable[str] | None = None,
+               settings=None, wait_s: float = write.WAIT_S,
                at: str | None = None) -> Opened:
     """Open the round `name`, `<project>/<slug>`, and return it as opened.
 
@@ -77,6 +86,8 @@ def open_round(name: str, *, description: str, by: str, flow: str | None = None,
     - `lead`: the agent who leads the round, checked for a lead's name's shape before
       anything is locked or made (`leads.check`); when left out the round reads its
       project's lead until one is marked.
+    - `checklist`: for a flow with no design step, the checklist marks that apply,
+      empty for none; one named twice is kept once. None says nothing.
     - `settings`: rounds' settings as `settings.load()` gives them, read now when left
       out.
     - `wait_s`: how long to wait for the round's lock; `at`: the event's time.
@@ -85,8 +96,10 @@ def open_round(name: str, *, description: str, by: str, flow: str | None = None,
     used, `UnknownProject` or `NoFolder` for a project with no rounds folder to open it
     in, and `Refused` when the folder already holds a log, or another tool's note of a
     round and no log, the flow is not one the config has, the pointer has no shape a
-    pointer has, or an inherited id is not a standing ruling of the project that says
-    what is built and still stands.
+    pointer has, an inherited id is not a standing ruling of the project that says
+    what is built and still stands, or the checklist marks are wrong: a mark of no
+    item, marks on a flow with a design step, or none said where the home project has
+    a checklist and the flow no design step.
     A refusal leaves no folder and no event behind.
     """
     project, slug = folders.split(name)
@@ -137,6 +150,28 @@ def open_round(name: str, *, description: str, by: str, flow: str | None = None,
                          f"moxi rounds open {name} --flow NAME --description TEXT")
         return None
 
+    marked = None if checklist is None else tuple(dict.fromkeys(checklist))
+    again_marked = f"moxi rounds open {name} --description TEXT --checklist LIST|none"
+
+    def marks_what_applies(view):
+        if steps is None:
+            return None
+        if flows.has(steps, DESIGN):
+            if marked is None:
+                return None
+            return Unmet(f"the flow {flow} has a {DESIGN} step, and its design's data "
+                         "block marks the checklist items that apply",
+                         "mark them in the design's data block, checklist = [...]")
+        if marked is None:
+            if not marks.items(settings, home.project):
+                return None
+            return Unmet(f"{home.project} has a checklist, and a round whose flow has no "
+                         f"{DESIGN} step says at its opening which items apply",
+                         f"moxi rounds open {name} --description TEXT --checklist "
+                         "LIST|none")
+        return [Unmet(f"--checklist {problem}", f"{fix}: {again_marked}")
+                for problem, fix in marks.problems(marked, home.project, settings)]
+
     def make_round_dir(view):
         try:
             round_dir.mkdir(parents=True, exist_ok=True)
@@ -168,11 +203,14 @@ def open_round(name: str, *, description: str, by: str, flow: str | None = None,
             fields["record"] = record
         if lead is not None:
             fields["lead"] = lead
+        if marked is not None:
+            fields["marked"] = list(marked)
         return write.Entry("round.opened", fields)
 
     written = write.record(write.Where(home.project, home.rounds_dir, slug), by=by,
                            gates=[not_yet_opened, not_another_tools, flow_exists,
-                                  go_is_a_pointer, inherits_what_stands],
+                                  go_is_a_pointer, inherits_what_stands,
+                                  marks_what_applies],
                            act=make_round_dir,
                            event=opened, opens=True, wait_s=wait_s, at=at)
     return Opened(name=name, round_dir=round_dir, flow=flow, steps=tuple(steps),

@@ -85,6 +85,7 @@ from moxi import files
 
 from . import (brake, corrections, design_block, ending, folders, options, pointers,
                preparing, questions, stages, stepping, tracing, versions, write)
+from . import checklist
 from . import settings as own
 from . import state as states
 from .errors import BadArgument, BadBlock, NoLog, NoRound, Problem, RoundsError, Unmet
@@ -212,7 +213,28 @@ def _declared(block: design_block.DesignBlock) -> dict:
     committed = [{"id": one.id, "text": one.text, "where": one.where}
                  for one in block.commitments]
     return {"question": asked, "stage": planned, "trace": traced,
-            "commitment": committed}
+            "commitment": committed, checklist.KEY: list(block.checklist or ())}
+
+
+def mark_problems(block: design_block.DesignBlock, home: str, settings) -> list[Problem]:
+    """What is wrong with the checklist marks of `block`, for a round whose home is
+    `home`, against the checklists of the home project and of each repo its stages name:
+    a mark of no item, of another project, or given twice, and a block that says nothing
+    while one of those checklists is not empty."""
+    projects = checklist.weighed(home, (stage.repo for stage in block.stages))
+    if block.checklist is None:
+        if any(checklist.items(settings, project) for project in projects):
+            return [Problem(block.line, "the block has no `checklist` key, and the "
+                            "checklist of " + " or ".join(
+                                project for project in projects
+                                if checklist.items(settings, project))
+                            + " is not empty, so the design says which items apply",
+                            "mark the items that apply: checklist = [...], or "
+                            "checklist = [] when none apply")]
+        return []
+    return [Problem(block.checklist_line, f"`checklist` {problem}", fix)
+            for problem, fix in checklist.problems(block.checklist, home, settings,
+                                                   projects=projects)]
 
 
 def _same(one, other) -> bool:
@@ -582,8 +604,9 @@ def freeze(name: str, *, by: str, records_only: bool = False,
             raise view.facts.error
         block = view.facts.block
         found = planned(view)
-        if found.problems:
-            raise BadBlock(block.file, design_block.WHAT, found.problems)
+        wrong = [*found.problems, *mark_problems(block, home.project, settings)]
+        if wrong:
+            raise BadBlock(block.file, design_block.WHAT, wrong)
         number = len(view.state.versions) + 1
         target = versions.file(round_dir, number)
         try:
@@ -642,4 +665,5 @@ def freeze(name: str, *, by: str, records_only: bool = False,
                   slice_minutes=limit)
 
 
-__all__ = ["DESIGN", "CHECKS", "KeptOff", "Plan", "Frozen", "oversized", "plan", "freeze"]
+__all__ = ["DESIGN", "CHECKS", "KeptOff", "Plan", "Frozen", "oversized", "plan",
+           "mark_problems", "freeze"]

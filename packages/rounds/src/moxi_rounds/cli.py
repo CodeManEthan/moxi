@@ -373,6 +373,13 @@ def _declare_open(verbs) -> None:
                         help="the agent who leads the round: letters, digits, . _ -, "
                              "and at most one @scope (default: none of its own, so the "
                              "round reads its project's lead)")
+    parser.add_argument("--checklist", metavar="LIST|none",
+                        help="for a flow with no design step, the checklist items that "
+                             "apply, as public-surface,proj-b:core-code: a bare id for "
+                             "an item of the round's project, <key>:<id> for an item of "
+                             "another, such as the project the round will build in; "
+                             "none for no item. Required when the round's project has a "
+                             "checklist")
     _writes(parser)
 
 
@@ -381,7 +388,8 @@ def _open(args, out) -> int:
 
     opened = opening.open_round(args.round, description=args.description,
                                 by=_actor(args), flow=args.flow, record=args.record,
-                                inherits=_listed(args.inherits), lead=args.lead)
+                                inherits=_listed(args.inherits), lead=args.lead,
+                                checklist=_marked(args.checklist))
     steps = ", ".join(step["step"] for step in opened.steps) or "no steps"
     print(f"opened {opened.name}   flow {opened.flow} ({steps})", file=out)
     print(f"folder: {opened.round_dir}", file=out)
@@ -389,10 +397,26 @@ def _open(args, out) -> int:
         print(f"lead: {args.lead}", file=out)
     if opened.inherits:
         print(f"inherits: {', '.join(opened.inherits)}", file=out)
+    if "marked" in opened.event:
+        print(f"checklist: {', '.join(opened.event['marked']) or 'none marked'}", file=out)
     for line in _left(opened):
         print(line, file=out)
     _warn_of(opened.failed, args.prog, args.verb)
     return codes.OK
+
+
+def _marked(text: str | None) -> tuple[str, ...] | None:
+    """The marks `--checklist` gives: () for none; None when it was not given."""
+    from . import checklist
+    from .errors import BadArgument
+
+    if text is None:
+        return None
+    marks = checklist.parse(text)
+    if marks is None:
+        raise BadArgument("--checklist names no item",
+                          "give the marks, as --checklist public-surface, or none")
+    return marks
 
 
 def _listed(text: str | None) -> list[str] | None:
