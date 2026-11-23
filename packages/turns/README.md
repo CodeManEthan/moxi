@@ -73,13 +73,6 @@ A guard refuses an agent's tool call before it runs, and the agent reads why. tu
 three, each off until you turn it on. `moxi install turns` asks about each; afterwards set
 its switch, for example `moxi config set turns guards.removal true`:
 
-Which calls a guard judges on Claude Code: every agent's, a fork's that turns started
-among them. Only the runner's own calls skip the guards, and a call counts as the runner's
-only when it comes from turns' plugin and carries no agent id. The runner holds a fork's
-agent id from the fork's start until the fork's delivery (or its round's) has settled;
-while it holds it, that fork's calls get no after-tool ask. A call from an agent id the
-runner does not hold is judged and asked after as any agent's.
-
 - **The removal guard** (`turns.removal`, switch `guards.removal`): refuses a Claude Code
   shell command that Claude Code's own dangerous-removal check would stop for your
   approval even in bypass mode, where an unattended agent would sit blocked. Its one
@@ -99,6 +92,13 @@ runner does not hold is judged and asked after as any agent's.
   gets a one-line reminder of this. Until the session's endpoint has sent its guards,
   Claude Code's runner can't tell whether question mode is on, so it refuses every
   `AskUserQuestion` call and tells the agent to ask in prose.
+
+Which calls a guard judges on Claude Code: every agent's, a fork's that turns started
+among them. Only the runner's own calls skip the guards, and a call counts as the runner's
+only when it comes from turns' plugin and carries no agent id. The runner holds a fork's
+agent id from the fork's start until the fork's delivery (or its round's) has settled;
+while it holds it, that fork's calls get no after-tool ask. A call from an agent id the
+runner does not hold is judged and asked after as any agent's.
 
 Other modules ship guards too (sessions' `sessions.transcript-read`, usage's
 `usage.ceiling`), and a guard can also be a file of your own. `guards.run` lists the
