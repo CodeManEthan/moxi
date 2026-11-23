@@ -75,6 +75,11 @@ WAITING_NOTE = ("NOTE: {name} is bound, but its session has had no turns endpoin
                 "that does not load turns' Claude plugin never gets one; `moxi comms "
                 "doctor` lists the sessions waiting.")
 
+#: The same, in the connector's chat: the person there runs no command, so it says only
+#: that the message is held.
+WAITING_NOTE_CONNECTOR = ("NOTE: {name}'s session can't be reached right now, so the "
+                          "message is held until it is reachable.")
+
 #: `--held` to a bound `agent-N`: only its current session releases it.
 HELD_NOTE_SESSION_ONLY = ("NOTE: {name} reads this after its own next turn in this session "
                           "(when the operator types into it, or its first turn after a "
@@ -1182,13 +1187,16 @@ def _say_notes(ctx: Context, plan) -> None:
     if not plan.flagged:
         for qualified in dict.fromkeys(plan.resolved):
             if qualified in plan.waiting and qualified not in held:
-                ctx.note(_waiting_note(qualified, plan.waiting[qualified]))
+                ctx.note(_waiting_note(qualified, plan.waiting[qualified], ctx))
     for note in plan.notes + plan.ask_notes:
         ctx.note(note)
 
 
-def _waiting_note(qualified: str, seconds) -> str:
-    """The NOTE for a bound recipient with no endpoint, with how long it has had none."""
+def _waiting_note(qualified: str, seconds, ctx) -> str:
+    """The NOTE for a bound recipient with no endpoint: in the connector's words, that
+    the message is held; else with how long it has had none."""
+    if _connector(ctx):
+        return WAITING_NOTE_CONNECTOR.format(name=qualified)
     age = (cache.spoken_span(seconds) if isinstance(seconds, (int, float))
            else "a while")
     return WAITING_NOTE.format(name=qualified, age=age)
@@ -2442,7 +2450,7 @@ def run_reserved(ctx: Context, args, *, module: str | None, name: str,
             code = _REFUSED
     finally:
         ctx.capture = outer
-    result = _result(code, capture, check=bool(getattr(args, "check", False)))
+    result = _result(code, capture, ctx, check=bool(getattr(args, "check", False)))
     from . import reserved
     reserved.trace_send(module, name, sent=result.outcome == OUTCOME_SENT,
                         credential=(result.refusal is not None
@@ -2480,7 +2488,7 @@ def run(ctx: Context, args, *, tags=None, sender=None) -> SendResult:
             code = _REFUSED
     finally:
         ctx.capture = outer
-    return _result(code, capture, check=bool(getattr(args, "check", False)))
+    return _result(code, capture, ctx, check=bool(getattr(args, "check", False)))
 
 
 def _bound(sender) -> Sender | None:
@@ -2494,14 +2502,14 @@ def _bound(sender) -> Sender | None:
     return sender
 
 
-def _result(code: int, capture: _Capture, *, check: bool) -> SendResult:
+def _result(code: int, capture: _Capture, ctx, *, check: bool) -> SendResult:
     said, notes = tuple(capture.said), tuple(capture.notes)
     if code != _OK:
         outcome, exit_code = _ENDS.get(code, (OUTCOME_FAILED, moxi_exit.ERROR))
         refusal = capture.refusal or Refusal(outcome, "\n".join(map(str, said)))
         return SendResult(outcome=outcome, refusal=refusal, notes=notes, said=said,
                           code=exit_code)
-    recipients = (_recipients(capture.plan) if capture.plan is not None else ())
+    recipients = (_recipients(capture.plan, ctx) if capture.plan is not None else ())
     if check:
         return SendResult(outcome=OUTCOME_WOULD_SEND, recipients=recipients, notes=notes,
                           said=said)
@@ -2510,7 +2518,7 @@ def _result(code: int, capture: _Capture, *, check: bool) -> SendResult:
                       notes=notes, said=said)
 
 
-def _recipients(plan) -> tuple:
+def _recipients(plan, ctx) -> tuple:
     """One `Recipient` per resolved name, in line zero's order, from the plan the checks
     made: the plan is what the post printed its lines from, so the data and the text say
     the same.
@@ -2538,8 +2546,8 @@ def _recipients(plan) -> tuple:
         elif qualified in held:
             delivery, reason = DELIVERY_HELD_COLD, cache.hold_line(held[qualified])
         elif qualified in plan.waiting:
-            delivery, reason = DELIVERY_WAITING, _waiting_note(qualified,
-                                                               plan.waiting[qualified])
+            delivery, reason = DELIVERY_WAITING, _waiting_note(
+                qualified, plan.waiting[qualified], ctx)
         else:
             delivery, reason = DELIVERY_LIVE, None
         at = cold_at.get(qualified)
