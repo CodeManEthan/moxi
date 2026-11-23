@@ -42,9 +42,9 @@ outside comms.
 * Names: `GLOBAL`, `qualify`, `split_tag`, `NAME_RE`.
 * Directors: `policy_directors()`, the names the box's `[policy] directors` sets that
   hold a standing row now, qualified (empty when comms' config or its directory can't be
-  read), and `effective(declared, config, *, own, use_policy)`, the one merge of a
-  launch's own directors with the box's policy directors, for an adapter kind built
-  outside comms: it returns the whole list and the part only the policy gave, which the
+  read), and `effective(declared, *, own, use_policy)`, the one merge of a launch's own
+  directors with the box's policy directors, for an adapter kind built outside comms
+  (it loads the box's comms config; a comms caller may pass its own second): it returns the whole list and the part only the policy gave, which the
   adapter's holder writes into its claim as `directors` and `policy_directors`.
   `Agent`, `Owner` and `RosterRow` carry both lists, read from the claim files.
 * `CODEX_RESUME`: True when the Codex wrapper, `moxi comms codex --name N`, takes
@@ -424,10 +424,17 @@ def policy_directors() -> tuple:
     return tuple(name for name in names if name in held) if held else ()
 
 
-def effective(declared, config, *, own: str, use_policy: bool) -> tuple[list, list]:
+def effective(declared, config=None, *, own: str, use_policy: bool) -> tuple[list, list]:
     """A launch's directors and the part of them only the box's policy gave
-    (`directors.effective`): `declared` then `config.policy.directors` not already there,
-    when `use_policy`, without `own`, the launching session's qualified identity."""
+    (`directors.effective`): `declared` then the policy directors not already there, when
+    `use_policy`, without `own`, the launching session's qualified identity.
+
+    `config` is left out by a caller outside comms: the box's comms config is then
+    loaded when `use_policy`, as comms' own wrappers load it. A comms caller holding one already passes it.
+    Raises `moxi.config.ConfigError` when that config can't be read, and `ValueError`
+    for a declared name that is not a name."""
+    if config is None and use_policy:
+        config = _config.load()
     return _directors.effective(declared, config, own=own, use_policy=use_policy)
 
 

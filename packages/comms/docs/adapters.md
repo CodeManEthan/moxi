@@ -47,7 +47,8 @@ kind; a declaration that does not hold is left out and logged
 (`moxi_comms/kinds.py`). An adapter built outside comms uses `moxi_comms.adapter`: the
 daemon client, the backoff, the digest and frame line, the attribution tiers
 and the machine line's parse. It gets the box's policy directors (`[policy] directors`)
-only if its launch calls `moxi_comms.api.effective` and its holder writes both lists into
+only if its launch calls `moxi_comms.api.effective`, which reads the box's comms config
+itself, and its holder writes both lists into
 the claim, as `directors` and `policy_directors`, and passes the second to the frame line
 as `policy=`. The connector can be named a policy director but can't be directed (it
 renders no standing); voice binds the operator's own name, whose messages are always

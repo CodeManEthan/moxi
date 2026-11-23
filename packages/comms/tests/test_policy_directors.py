@@ -473,6 +473,21 @@ def test_the_api_names_the_provisioned_policy_directors_only():
         ["lead", "fleet-lead"], ["fleet-lead"])
 
 
+def test_the_api_merge_loads_the_boxs_config_when_given_none():
+    from moxi import config as moxi_config
+
+    from moxi_comms import api
+
+    assert api.effective(["lead"], own="w", use_policy=True) == (
+        ["lead", "fleet-lead"], ["fleet-lead"])
+    write_config(None, '[policy]\ndirectors = ["ops"]\n')
+    assert api.effective(["lead"], own="w", use_policy=True) == (["lead", "ops"], ["ops"])
+    write_config(None, "[policy]\ndirectors = 3\n")
+    with pytest.raises(moxi_config.ConfigError):
+        api.effective(["lead"], own="w", use_policy=True)
+    assert api.effective(["lead"], own="w", use_policy=False) == (["lead"], [])
+
+
 def test_the_page_row_carries_the_policy_list():
     from moxi_comms import api, pagehandlers
 
