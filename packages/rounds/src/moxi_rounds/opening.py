@@ -43,7 +43,8 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from . import checklist as marks
-from . import corrections, dropping, flows, folders, leads, log, pointers, ruling, write
+from . import (corrections, dropping, flows, folders, leads, log, pointers, ruling,
+               stepping, write)
 from .rendering import NOTE_FILE
 from . import settings as own
 from .errors import BadArgument, RoundsError, Unmet
@@ -55,7 +56,10 @@ class Opened:
     """A round as it was opened: its name with the project's key as the projects list
     stores it, its folder, its flow's name and steps, and the event written. `left`
     are the questions on the project's list that came from a round since dropped, for
-    whoever opens this round to adopt the ones whose work it takes up. `failed` pairs
+    whoever opens this round to adopt the ones whose work it takes up. `stepped` is
+    the `flow.changed` event written with the opening when its checklist marks
+    stepped the round up (`flow` and `steps` stay the flow it was opened with), else
+    None. `failed` pairs
     each after-append callback that raised with what it raised. `inherits` are the
     standing rulings of the project it starts from, by id."""
 
@@ -67,6 +71,7 @@ class Opened:
     inherits: tuple[str, ...] = ()
     left: tuple[dropping.Left, ...] = ()
     failed: tuple[tuple[Callable, Exception], ...] = ()
+    stepped: dict | None = None
 
 
 def open_round(name: str, *, description: str, by: str, flow: str | None = None,
@@ -87,7 +92,10 @@ def open_round(name: str, *, description: str, by: str, flow: str | None = None,
       anything is locked or made (`leads.check`); when left out the round reads its
       project's lead until one is marked.
     - `checklist`: for a flow with no design step, the checklist marks that apply,
-      empty for none; one named twice is kept once. None says nothing.
+      empty for none; one named twice is kept once. None says nothing. Any mark steps
+      the round up to the flow `stepping.FULL` at its opening: the same append writes
+      `round.opened`, then `flow.changed` by `stepping.LEAD` with the marks as
+      `marked`.
     - `settings`: rounds' settings as `settings.load()` gives them, read now when left
       out.
     - `wait_s`: how long to wait for the round's lock; `at`: the event's time.
@@ -98,8 +106,9 @@ def open_round(name: str, *, description: str, by: str, flow: str | None = None,
     round and no log, the flow is not one the config has, the pointer has no shape a
     pointer has, an inherited id is not a standing ruling of the project that says
     what is built and still stands, or the checklist marks are wrong: a mark of no
-    item, marks on a flow with a design step, or none said where the home project has
-    a checklist and the flow no design step.
+    item, marks on a flow with a design step, none said where the home project has a
+    checklist and the flow no design step, or marks whose step up to `stepping.FULL`
+    is no step up (`stepping.judge_from`).
     A refusal leaves no folder and no event behind.
     """
     project, slug = folders.split(name)
@@ -172,6 +181,21 @@ def open_round(name: str, *, description: str, by: str, flow: str | None = None,
         return [Unmet(f"--checklist {problem}", f"{fix}: {again_marked}")
                 for problem, fix in marks.problems(marked, home.project, settings)]
 
+    def steps_up(view):
+        if steps is None or flows.has(steps, DESIGN) or not marked:
+            return None
+        move = stepping.judge_from(flow, flows.recorded(steps), stepping.FULL, settings)
+        if move.up:
+            return None
+        why = (f"the config has no flow {stepping.FULL}" if move.steps is None
+               else move.why or f"{flow} is {stepping.FULL} already")
+        return Unmet(f"--checklist marks {', '.join(marked)}, which steps a round whose "
+                     f"flow has no {DESIGN} step up to {stepping.FULL}, and {why} is no "
+                     "step up",
+                     f"open it with --flow NAME, a flow with a {DESIGN} step, and mark "
+                     f"the items in its design's block: moxi rounds open {name} "
+                     "--description TEXT --flow NAME")
+
     def make_round_dir(view):
         try:
             round_dir.mkdir(parents=True, exist_ok=True)
@@ -205,16 +229,24 @@ def open_round(name: str, *, description: str, by: str, flow: str | None = None,
             fields["lead"] = lead
         if marked is not None:
             fields["marked"] = list(marked)
-        return write.Entry("round.opened", fields)
+        entries = [write.Entry("round.opened", fields)]
+        if marked and not flows.has(steps, DESIGN):
+            move = stepping.judge_from(flow, flows.recorded(steps), stepping.FULL,
+                                       settings)
+            entries.append(write.Entry("flow.changed", {
+                "was": flow, "flow": move.flow, "steps": flows.recorded(move.steps),
+                "by": stepping.LEAD, "marked": list(marked)}))
+        return entries
 
     written = write.record(write.Where(home.project, home.rounds_dir, slug), by=by,
                            gates=[not_yet_opened, not_another_tools, flow_exists,
                                   go_is_a_pointer, inherits_what_stands,
-                                  marks_what_applies],
+                                  marks_what_applies, steps_up],
                            act=make_round_dir,
                            event=opened, opens=True, wait_s=wait_s, at=at)
     return Opened(name=name, round_dir=round_dir, flow=flow, steps=tuple(steps),
                   event=written.events[0], failed=written.failed, inherits=inherited,
+                  stepped=written.events[1] if len(written.events) > 1 else None,
                   left=dropping.left_behind(written.view.project_state, home,
                                             settings=settings))
 

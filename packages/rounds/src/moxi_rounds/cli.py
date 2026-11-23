@@ -399,6 +399,10 @@ def _open(args, out) -> int:
         print(f"inherits: {', '.join(opened.inherits)}", file=out)
     if "marked" in opened.event:
         print(f"checklist: {', '.join(opened.event['marked']) or 'none marked'}", file=out)
+    if opened.stepped is not None:
+        steps = ", ".join(step["step"] for step in opened.stepped["steps"]) or "no steps"
+        print(f"stepped up to {opened.stepped['flow']} ({steps}): the checklist marks "
+              f"{', '.join(opened.stepped['marked'])}", file=out)
     for line in _left(opened):
         print(line, file=out)
     _warn_of(opened.failed, args.prog, args.verb)

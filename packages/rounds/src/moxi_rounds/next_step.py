@@ -38,6 +38,8 @@ What is read is one dict (`read`), printed as lines (`as_text`) or as JSON
   verification, a build's, a report step of the user's own) each `verifier_brief` line
   of its projects (`checklist.verifier_lines`). That group is the verifier's brief, as
   the commission block is a builder's: the lead puts it first.
+- `stepped`: in the design group of a round its opening stepped up for its checklist
+  marks, the flow it was opened with (`was`) and the marks (`marked`).
 - `numbers`: in the `retro` group, the round's numbers as they stand now, counted from
   its log as its ending will count them, for the retrospective to read.
 - `close`: for an open round, `waits`, what its close waits for (`closing.waits`). It
@@ -169,11 +171,24 @@ def _checklist_of(found: showing.Shown, step: steps.Step, kind: str, *,
     return said
 
 
+def _stepped(state) -> dict | None:
+    """The step up the round's opening made for its checklist marks: the flow it was
+    opened with (`was`) and the marks (`marked`); None when it made none."""
+    event = next((one for one in state.history if one["type"] == "flow.changed"
+                  and isinstance(one.get("marked"), list)), None)
+    return None if event is None else {"was": event.get("was"),
+                                       "marked": list(event["marked"])}
+
+
 def _design(found: showing.Shown, step: steps.Step) -> dict:
-    return {"reads": _named(step),
+    said = {"reads": _named(step),
             "write": f"{versions.DESIGN_FILE} in {found.round_dir}",
             "then": [f"moxi rounds fold {found.name}"],
             **_checklist_of(found, step, checklist.DRAFTING)}
+    stepped = _stepped(found.state)
+    if stepped is not None:
+        said["stepped"] = stepped
+    return said
 
 
 def _verify_design(found: showing.Shown, step: steps.Step) -> dict:
@@ -595,6 +610,9 @@ _CHECKLIST_KIND = {steps.DESIGN: checklist.DRAFTING, steps.VERIFIES: checklist.C
 
 def _group_lines(said: dict, group: dict) -> list[str]:
     lines = [_head(said, group)]
+    if group.get("stepped") is not None:
+        lines.append(f"stepped up: from {group['stepped']['was']} at its opening, by the "
+                     f"checklist marks {', '.join(group['stepped']['marked'])}")
     lines += [commission_block.line(one) for one in group.get("changed", ())]
     if group["built"]:
         if "pass" in group:
