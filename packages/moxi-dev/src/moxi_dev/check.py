@@ -1,7 +1,8 @@
 """`moxi-dev check`: the checks a change must pass before it merges.
 
 Run from the repository's root as
-`uv run --locked moxi-dev check [--full] [--base REV] [--finding L<n>]`.
+`uv run --locked moxi-dev check [--full] [--base REV] [--finding L<n>]`, or as
+`uv run --locked moxi-dev check --static` for step 2 alone (see the end).
 It first reads the workspace, the worker count and the changed paths; a bad workspace,
 worker count or base stops it there, before any step runs. Then, in order:
 
@@ -24,14 +25,24 @@ worker count or base stops it there, before any step runs. Then, in order:
    requirement one member places on another admits that member's version, and each
    member has the metadata, the CHANGELOG entry and the README links PyPI needs. Each
    problem's line names the member, the field and the fix.
+   Then the pronoun step (`moxi_dev.pronouns`): the text each package shows or ships
+   (its Python string literals and docstrings, its web sources' strings and comments,
+   its README, docs and bundled skills) names the operator neutrally. Each refused word
+   is printed as `path:line: word`, with the fix: reword it, or mark a genuine use.
 3. Pick the packages. The changed paths are the commits since the branch left `main`
    (`git merge-base main HEAD`, or `--base REV` in place of `main`) plus the working
-   tree's staged, unstaged and untracked files. A path under `packages/<p>/` picks `p`;
-   any other path (the root files, the lock, the workflow) picks every package. Then
-   every package that depends on a picked one, by its declared dependencies, optional
-   dependencies or dependency groups, is picked too, and so on until nothing is added:
-   a plain path filter would skip a dependent's tests and its contract check. `--full`
-   picks every package.
+   tree's staged, unstaged and untracked files. A path under `packages/<p>/` picks `p`,
+   and one under `packages/moxi-dev/`, the check itself, picks every package; its
+   rename table, which the renames step above reads whatever the pick, picks only
+   `moxi-dev`. A root path a package's tests read picks that package (`READ_BY`):
+   `README.md` picks `memory`, and publishing's two workflow files pick `publishing`.
+   The other workflows (`.github/`), `docs/` and `CONTRIBUTING.md` pick nothing; any
+   other path (the lock, the root `pyproject.toml`, the other root files) picks every
+   package. Then every package that depends on a picked one, by its declared
+   dependencies, optional dependencies or dependency groups, is picked too, and so on
+   until nothing is added: a plain path filter would skip a dependent's tests and its
+   contract check. An edge to `moxi-dev` is left out of that, since every package lists
+   it in its dev group. `--full` picks every package.
 4. Check the build stamps of the picked packages that have a web page
    (`moxi-dev stamp`, on the working tree): built files that lag their sources fail here,
    with no Node.
@@ -89,7 +100,7 @@ worker count or base stops it there, before any step runs. Then, in order:
 8. Read each suite's durations (the kit writes them), keep the commit's record and find
    the newest record on `main` to compare with (`moxi_dev.durations`).
 9. Print one summary line, the last line of the output: the commit, the packages, the
-   lock, tag, reference, name, Ruff, renames, release, stamp, web, sync and lint
+   lock, tag, reference, name, Ruff, renames, release, pronoun, stamp, web, sync and lint
    results, each package's tests and seconds (and `without its browser tests` where
    Chromium couldn't start), `timed held <n>` with the number of timed tests the suites
    held back (`timed none` when they held none, `timed not run` when the suites never
@@ -99,13 +110,21 @@ worker count or base stops it there, before any step runs. Then, in order:
    root on disk was kept; and how many suites kept it in memory after all, read from
    their durations, with why), the total and the exit code.
 
-The tags, references, names, Ruff, renames and release steps, each package's lint and each
-package's tests all run even when one before them failed, so one run shows every failure.
+The tags, references, names, Ruff, renames, release and pronoun steps, each package's lint
+and each package's tests all run even when one before them failed, so one run shows every
+failure.
 
 The exit code is 0 only when every step passed, 1 when one failed, and 2 when the check
 could not start or a step could not be run (not in a workspace, a member with no readable
 `pyproject.toml` or no project name, no merge base, a bad `MOXI_TEST_WORKERS`,
 `MOXI_TEST_TEMP` or `--finding`, `uv` not on PATH). The summary line is printed in every case.
+
+`--static` reads the workspace and runs step 2 alone, over the whole repository: the
+tag, comment-reference, naming, Ruff, renames, release and pronoun steps, with the same
+printed lines, the same summary line (every other step `not run`, `packages: none`,
+`temp not run`) and the same exit codes. It reads no changed paths and no worker count,
+and runs no lock check, so no step needs the network. It starts no test, so it reads no
+`MOXI_TEST_TEMP`, chooses no temp root and sweeps nothing.
 """
 
 from __future__ import annotations
@@ -122,7 +141,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable, Mapping, Sequence
 
-from . import durations, lint, naming, refs, release, rename, ruff_check, stamp, tags, temp
+from . import (durations, lint, naming, pronouns, refs, release, rename, ruff_check,
+               stamp, tags, temp)
 from .testing import (CHANGED_ENV, DURATIONS_ENV, FINDING_ENV, FINDING_NAME,
                       LEAVE_OUT_ENV, TIERS_ENV, TIMED_ENV)
 
@@ -249,21 +269,52 @@ def load_workspace(root: Path) -> list[Package]:
             for path, dist, requires, browser in loaded]
 
 
+# The check's own distribution. Every package lists it in its dev group, so picking
+# ignores edges to it; a change to it picks every package, but for its rename table,
+# which only the renames step reads, and that runs whatever the pick.
+CHECK_DIST = "moxi-dev"
+CHECK_TABLE = "packages/moxi-dev/renames.tsv"
+
+# Root paths that hold no package's code, tests or declarations: a change to one picks
+# no package (the whole-tree steps still read it), unless `READ_BY` names it. Any other
+# path outside a package, the lock and the root pyproject.toml among them, picks every
+# package.
+PICKS_NOTHING = frozenset({".github", "docs", "CONTRIBUTING.md", "README.md"})
+
+# Root paths a package's tests read, each with that package's folder in `packages/`: a
+# change to one picks the package. memory's contract test reads the package table in the
+# root README; publishing's tests hold its workflow files equal to its templates.
+READ_BY = {"README.md": "memory",
+           ".github/workflows/publishing.yml": "publishing",
+           ".github/workflows/release.yml": "publishing"}
+
+
 def pick(packages: Sequence[Package], paths: Sequence[str]) -> list[Package]:
-    """The packages the changed paths pick, with every package that depends on them."""
+    """The packages the changed paths pick, with every package that depends on them.
+
+    A dependent is found through every edge a package declares but one to `CHECK_DIST`;
+    a path in `CHECK_DIST` itself picks every package (`CHECK_TABLE` picks it alone),
+    a root path in `READ_BY` picks the package whose tests read it, and any other root
+    path in `PICKS_NOTHING` picks none."""
     by_dir = {package.dir: package for package in packages}
     picked: set[str] = set()
     for path in paths:
         parts = path.split("/")
         if len(parts) >= 3 and parts[0] == "packages" and parts[1] in by_dir:
-            picked.add(by_dir[parts[1]].dist)
-        else:
+            dist = by_dir[parts[1]].dist
+            if dist == CHECK_DIST and path != CHECK_TABLE:
+                return list(packages)
+            picked.add(dist)
+        elif path in READ_BY:
+            if READ_BY[path] in by_dir:
+                picked.add(by_dir[READ_BY[path]].dist)
+        elif parts[0] not in PICKS_NOTHING:
             return list(packages)
     grew = True
     while grew:
         grew = False
         for package in packages:
-            if package.dist not in picked and package.requires & picked:
+            if package.dist not in picked and (package.requires - {CHECK_DIST}) & picked:
                 picked.add(package.dist)
                 grew = True
     return [package for package in packages if package.dist in picked]
@@ -392,6 +443,7 @@ class Result:
     ruff: str = "not run"
     renames: str = "not run"
     release: str = "not run"
+    pronouns: str = "not run"
     stamps: str = "not run"
     web: str = "not run"
     sync: str = "not run"
@@ -411,6 +463,8 @@ class Result:
     temp_why: str | None = None
     #: Whether the suites keep their temp where the caller's PYTEST_DEBUG_TEMPROOT says.
     is_temproot_given: bool = False
+    #: Whether the check chose its tests' temp; False under --static, which runs none.
+    is_temp_chosen: bool = True
     #: (package, root, why) for each suite whose temp was in memory after all.
     temp_in_memory: list[tuple[str, str, str | None]] = field(default_factory=list)
     seconds: float = 0.0
@@ -418,6 +472,8 @@ class Result:
 
     def temp_text(self) -> str:
         """The summary's temp field."""
+        if not self.is_temp_chosen:
+            return "temp not run"
         notes = [self.temp_why] if self.temp_why else []
         if self.temp_in_memory:
             count = len(self.temp_in_memory)
@@ -460,7 +516,7 @@ class Result:
         return (f"moxi-dev check: commit {self.commit} | packages: {names} | "
                 f"lock {self.lock} | tags {self.tags} | refs {self.refs} | "
                 f"names {self.names} | ruff {self.ruff} | renames {self.renames} | "
-                f"release {self.release} | "
+                f"release {self.release} | pronouns {self.pronouns} | "
                 f"stamps {self.stamps} | "
                 f"web {self.web} | sync {self.sync} | "
                 f"lint {linted} | {suites} | timed {timed} | {self.timing()} | "
@@ -508,23 +564,33 @@ def temp_env(env: Mapping[str, str]) -> tuple[dict[str, str], str | None, bool]:
 
 
 def check(root: Path, *, full: bool = False, base: str | None = None,
-          finding: Sequence[str] = (), env: Mapping[str, str] | None = None,
-          run: Run | None = None, plan: Plan | None = None,
-          probe: Probe | None = None, sweep: Sweep | None = None) -> Result:
-    """Run the check's steps on the workspace at `root`; the result holds the exit code."""
+          finding: Sequence[str] = (), static: bool = False,
+          env: Mapping[str, str] | None = None, run: Run | None = None,
+          plan: Plan | None = None, probe: Probe | None = None,
+          sweep: Sweep | None = None) -> Result:
+    """Run the check's steps on the workspace at `root`; the result holds the exit code.
+    With `static`, run only the whole-tree static steps (`_Steps.static`), which start no
+    test, so it chooses no temp and sweeps nothing."""
     env = os.environ if env is None else env
     run = run or _run
     plan = plan or lint.plan
     probe = probe or chromium_probe
     sweep = sweep or _sweep
     started = time.monotonic()
-    result = Result()
+    result = Result(is_temp_chosen=not static)
     try:
-        env, result.temp_why, result.is_temproot_given = temp_env(env)
-        _swept(sweep)
+        if not static:
+            env, result.temp_why, result.is_temproot_given = temp_env(env)
+            _swept(sweep)
         findings = check_findings(finding)
         result.commit = _commit(root)
         packages = load_workspace(root)
+        if static:
+            result.packages = []
+            steps = _Steps(root, packages, (), env, run, plan, result, probe=probe)
+            result.code = 0 if steps.static() else 1
+            result.seconds = time.monotonic() - started
+            return result
         workers = worker_args(env)
         changed = None if full else changed_paths(root, base or "main")
         chosen = list(packages) if changed is None else pick(packages, changed)
@@ -537,7 +603,8 @@ def check(root: Path, *, full: bool = False, base: str | None = None,
         print(f"moxi-dev check: {exc}", file=sys.stderr, flush=True)
         result.code = 2
     finally:
-        _swept(sweep)
+        if not static:
+            _swept(sweep)
     result.seconds = time.monotonic() - started
     return result
 
@@ -566,12 +633,7 @@ class _Steps:
         result.lock = "pass" if ok else "fail"
         if not ok:
             return False
-        ok = self.tags()
-        ok = self.references() and ok
-        ok = self.names() and ok
-        ok = self.ruff() and ok
-        ok = self.renames() and ok
-        ok = self.release() and ok
+        ok = self.static()
         if not chosen:
             result.stamps = result.web = result.sync = "skipped"
             return ok
@@ -593,6 +655,17 @@ class _Steps:
         for package in chosen:
             ok = self.lint(package, venv, suite_env) and ok
         return self.suites(chosen, venv, suite_env) and ok
+
+    def static(self) -> bool:
+        """The tag, comment-reference, naming, Ruff, renames, release and pronoun steps over
+        the whole tree, each run even when one before it failed; True when all passed."""
+        ok = self.tags()
+        ok = self.references() and ok
+        ok = self.names() and ok
+        ok = self.ruff() and ok
+        ok = self.renames() and ok
+        ok = self.release() and ok
+        return self.pronouns() and ok
 
     def selection_env(self, work: Path) -> dict[str, str]:
         """The kit's variables for what the suites run besides the plain run."""
@@ -723,6 +796,16 @@ class _Steps:
             print(f"moxi-dev check: {problem}", flush=True)
         self.result.release = "fail" if problems else "pass"
         return not problems
+
+    def pronouns(self) -> bool:
+        try:
+            hits = pronouns.scan(self.root)
+        except (OSError, subprocess.SubprocessError) as exc:
+            raise CheckError(f"the pronoun check could not list the files ({exc})") from exc
+        for hit in hits:
+            print(f"moxi-dev check: {hit}", flush=True)
+        self.result.pronouns = "fail" if hits else "pass"
+        return not hits
 
     def references(self) -> bool:
         try:
@@ -860,8 +943,8 @@ def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="moxi-dev check",
         description="Run the checks a change must pass before it merges: the lock, the "
-                    "tag, comment-reference, naming and Ruff checks, the renames step "
-                    "and the release step, "
+                    "tag, comment-reference, naming and Ruff checks, the renames step, "
+                    "the release step and the pronoun step, "
                     "then the import rules and the tests "
                     "of every package the change touches and of every package that "
                     "depends on one, in an environment of the check's own. Run it from "
@@ -875,7 +958,10 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--finding", metavar="L<n>", action="append", default=[],
                         help="run only the tests marked with this finding; may be given "
                              "more than once")
-    parser.add_argument("--only", choices=("refs", "names", "ruff", "renames"),
+    parser.add_argument("--static", action="store_true",
+                        help="run only the tag, comment-reference, naming, Ruff, renames, "
+                             "release and pronoun steps, over the whole repository")
+    parser.add_argument("--only", choices=("refs", "names", "ruff", "renames", "pronouns"),
                         help="run only this whole-tree code check")
     parser.add_argument("paths", nargs="*", metavar="PATH",
                         help="with --only, print findings only under these paths")
@@ -894,7 +980,7 @@ def _shown(path: str, selected: Sequence[str]) -> bool:
 def only(root: Path, step: str, paths: Sequence[str] = ()) -> int:
     """Run one whole-tree code check and print its selected findings."""
     scanner = {"refs": refs.scan, "names": naming.scan, "ruff": ruff_check.scan,
-               "renames": _renames_scan}[step]
+               "renames": _renames_scan, "pronouns": pronouns.scan}[step]
     try:
         hits = scanner(root)
     except (rename.RenameError, OSError, subprocess.SubprocessError) as exc:
@@ -912,6 +998,9 @@ def main(argv: list[str]) -> int:
         _parser().error("PATH may be given only with --only")
     if args.only and (args.full or args.base or args.finding):
         _parser().error("--only cannot be combined with --full, --base or --finding")
+    if args.static and (args.only or args.full or args.base or args.finding):
+        _parser().error("--static cannot be combined with --only, --full, --base or "
+                        "--finding")
     try:
         root = Path(_git(Path.cwd(), "rev-parse", "--show-toplevel").strip())
     except CheckError as exc:
@@ -921,6 +1010,7 @@ def main(argv: list[str]) -> int:
         return result.code
     if args.only:
         return only(root, args.only, args.paths)
-    result = check(root, full=args.full, base=args.base, finding=args.finding)
+    result = check(root, full=args.full, base=args.base, finding=args.finding,
+                   static=args.static)
     print(result.line(), flush=True)
     return result.code

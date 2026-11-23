@@ -19,8 +19,8 @@ the order the flows list them, `verify-build`, `finish`), then `ratify`, `retro`
 **Cells** take the first state of `STATES` that fits:
 
 - `yours`: the docket with open questions or rulings of the round not shown; `ratify`
-  with major decisions not ruled; `close` with open jobs for the operator. `count`
-  says how many.
+  with decisions not ruled that are put to the operator; `close` with open jobs for
+  the operator. `count` says how many.
 - `none`: the step is skipped, or it is the docket of a round that never had a
   question.
 - `done`: the step is done.
@@ -97,7 +97,7 @@ STUCK, WRAPPING, MOVING = "stuck", "wrapping", "moving"
 #: The groups, in the order a round takes the first that fits and the board shows them.
 GROUPS = (YOURS, STUCK, WRAPPING, MOVING)
 
-#: The phrase's weights: his items, what went wrong, what waits, what moves.
+#: The phrase's weights: the operator's items, what went wrong, what waits, what moves.
 BAD, WAITS, MOVES, QUIET = "bad", "waits", "moves", "quiet"
 
 #: How many acts the strip holds.
@@ -183,13 +183,13 @@ def part(found: showing.Shown, seen: Mapping, *, models: Mapping | None = None) 
     return Part(found, seen, every, tuple(made), models)
 
 
-# -- his items ---------------------------------------------------------------------------
+# -- the operator's items ----------------------------------------------------------------
 
 @dataclass(frozen=True)
 class Items:
-    """What of the operator's a round holds, as what waits on him gives it: open
-    `questions`, rulings `not_shown`, major `decisions` not ruled and open `jobs`, each
-    a tuple of ids."""
+    """What of the operator's a round holds, as what waits on the operator gives it:
+    open `questions`, rulings `not_shown`, `decisions` not ruled that are put to the
+    operator, and open `jobs`, each a tuple of ids."""
 
     questions: tuple[str, ...] = ()
     not_shown: tuple[str, ...] = ()
@@ -210,14 +210,16 @@ def is_job(item_id: str) -> bool:
 
 
 def items_of(waiting: Mapping, name: str) -> Items:
-    """The round `name`'s items in `waiting`, the board's value of what waits on him."""
+    """The round `name`'s items in `waiting`, the board's value of what waits on the
+    operator. A decision row that says why it is not put to the operator (`not_put`)
+    is not the operator's, so it is left out."""
     return Items(
         questions=tuple(one["id"] for one in waiting.get("questions", ())
                         if one.get("holder") == name),
         not_shown=tuple(row["id"] for back in waiting.get("not_shown", ())
                         for row in back.get("rows", ()) if row.get("holder") == name),
         decisions=tuple(one["id"] for one in waiting.get("decisions", ())
-                        if one.get("holder") == name),
+                        if one.get("holder") == name and one.get("not_put") is None),
         jobs=tuple(one["id"] for one in waiting.get("waits", ())
                    if one.get("round") == name and is_job(one["id"])))
 
@@ -576,9 +578,9 @@ def _ci_red_name(part_: Part, stage: str) -> str:
 
 def phrase(part_: Part, found: Mapping, items: Items, *,
            stage: str | None = None) -> list[dict]:
-    """The "where it is" words, as parts in order, each with its weight: his items,
-    what went wrong, what waits, what moves; `nothing owed` with none. With `stage`,
-    made from that stage alone."""
+    """The "where it is" words, as parts in order, each with its weight: the operator's
+    items, what went wrong, what waits, what moves; `nothing owed` with none. With
+    `stage`, made from that stage alone."""
     made: list[dict] = []
     if stage is None:
         for count, word, many in ((len(items.questions), "question", None),
@@ -683,8 +685,8 @@ def round_value(part_: Part, columns_: Sequence[Mapping], items: Items, *,
 
 
 def ordered(values: Iterable[Mapping]) -> list[Mapping]:
-    """The rounds in board order: by group; within `yours` by his items, most first,
-    then oldest event first; within the others oldest event first."""
+    """The rounds in board order: by group; within `yours` by the operator's items, most
+    first, then oldest event first; within the others oldest event first."""
     def key(one: Mapping):
         mine = -one["mine"] if one["group"] == YOURS else 0
         return (GROUPS.index(one["group"]), mine, one["last_at"] or "", one["name"])
@@ -739,7 +741,11 @@ ACT_WORDS: dict[str, str] = {
     "finish.done": "landed", "lock.cleared": "finish lock cleared",
     "build.dropped": "dropped", "round.dropped": "round dropped",
     "thread.decided": "thread decided", "repair": "record repaired",
-    "round.closed": "round closed", "lead.changed": "lead changed"}
+    "round.closed": "round closed", "lead.changed": "lead changed",
+    "queue.join": "joined the queue", "queue.left": "left the queue",
+    "queue.batch": "batched", "queue.landed": "landed by the queue",
+    "queue.ejected": "ejected from the queue", "queue.requeued": "back in the queue",
+    "decision.settled": "decision settled", "decision.raised": "decision made major"}
 
 
 def act_words(event: Mapping) -> str:
@@ -828,7 +834,11 @@ EVENT_STEPS: dict[str, str | None] = {
     "wait.marked": CLOSE, "finish.action": steps.FINISH, "finish.done": steps.FINISH,
     "lock.cleared": steps.FINISH, "repair": None, "round.closed": CLOSE,
     "round.dropped": CLOSE, "verdict.recorded": None, "ruling.recorded": None,
-    "check.ran": None, "brief.sized": None, "lead.changed": None}
+    "check.ran": None, "brief.sized": None, "lead.changed": None,
+    "queue.join": steps.FINISH, "queue.left": steps.FINISH, "queue.batch": steps.FINISH,
+    "queue.landed": steps.FINISH, "queue.ejected": steps.FINISH,
+    "queue.requeued": steps.FINISH,
+    "decision.settled": steps.RATIFY, "decision.raised": steps.RATIFY}
 
 
 def event_step(event: Mapping) -> tuple[str | None, str | None]:
@@ -860,7 +870,8 @@ def event_step(event: Mapping) -> tuple[str | None, str | None]:
             and not is_job(event["id"]):
         return CLOSE, None
     made = EVENT_STEPS.get(str(kind))
-    if made in (CLOSE, steps.DESIGN, steps.VERIFIES, steps.QUESTIONS, None):
+    if made in (CLOSE, steps.DESIGN, steps.VERIFIES, steps.QUESTIONS, steps.RATIFY,
+                None):
         return made, None
     return made, stage
 
@@ -1117,8 +1128,8 @@ def answer_line(what: str, name: str, entry: Mapping) -> str:
 
 def item_record(what: str, entry: Mapping, *, round_dir: Path | None,
                 max_chars: int) -> dict:
-    """The record of one waiting item: the item as what waits on him has it, the
-    command that records an answer, and for a question its passage."""
+    """The record of one waiting item: the item as what waits on the operator has it,
+    the command that records an answer, and for a question its passage."""
     holder = entry.get("holder") or entry.get("round")
     made = {"what": what, "item": dict(entry), "answer": answer_line(what, holder, entry),
             "passage": None}

@@ -16,7 +16,8 @@ A test reaches it three ways:
 
 - a browser: `sign_in(page)` takes a Playwright page through a one-use ticket to the
   shell's document at `/m/ui/`;
-- a signed-in session with no browser: `session()`, for routes and streams;
+- a signed-in session with no browser: `session()`, for routes and streams, one sign-in
+  that every call reuses while the shell still honours it;
 - the token routes the shell gives only the runtime file's holder: `call()`,
   `servers()`, `server()`, `wait_server()` and `kill()`.
 
@@ -62,6 +63,9 @@ READ_S = 30.0
 STOP_TIMEOUT = 15.0
 #: Lines of the shell process's stderr kept for a failure's message.
 STDERR_LINES = 200
+#: The route `TestShell.session` reads to see that its kept sign-in is still honoured:
+#: the shell's own modules view, which reaches no page server.
+SESSION_CHECK = "/m/ui/api/modules"
 
 #: The variables passed on from this process, when set. `MOXI_ANCHOR_HOME` is the test
 #: kit's stand-in for the account's folder, so the shell reads the test's record.
@@ -196,6 +200,8 @@ class TestShell:
         self.info: Any = None
         self._process: subprocess.Popen | None = None
         self._stderr: collections.deque[str] = collections.deque(maxlen=STDERR_LINES)
+        self._signed_in: Session | None = None
+        self._signing_in = threading.Lock()
 
     # -- the process ----------------------------------------------------------------------
 
@@ -298,6 +304,7 @@ class TestShell:
         """Stop the shell, and so every page server it started: close its lifeline and
         wait, then kill it after `STOP_TIMEOUT` seconds. Returns its exit code."""
         process, self._process = self._process, None
+        self._signed_in = None
         if process is None:
             return None
         try:
@@ -314,6 +321,7 @@ class TestShell:
 
     def _kill(self) -> None:
         process, self._process = self._process, None
+        self._signed_in = None
         if process is not None:
             process.kill()
             process.wait(STOP_TIMEOUT)
@@ -382,11 +390,25 @@ class TestShell:
         return page
 
     def session(self, *, timeout: float = READ_S) -> Session:
-        """A signed-in session with no browser: the cookie and the key a sign-in gives,
-        sent the way the shell's document sends them."""
+        """The shell's signed-in session with no browser: the cookie and the key a sign-in
+        gives, sent the way the shell's document sends them, each request waiting up to
+        `timeout` seconds.
+
+        Every call reuses one sign-in. It reads `SESSION_CHECK` with it first, and signs in
+        again only when the shell no longer honours it (a test that opened more browsers
+        than the shell keeps sessions for pushed it out). The shell keeps a limited number
+        of sessions and drops the least recently used one first, so a sign-in per call would
+        push out a test's idle browser instead."""
         if self.port is None:
             raise ShellError("the test shell is not running")
-        return Session.sign_in(self.port, self.ticket(), timeout=timeout)
+        with self._signing_in:
+            held = self._signed_in
+            if held is not None and held.port == self.port:
+                reused = Session(held.port, held.cookie, held.key, timeout=timeout)
+                if reused.get(SESSION_CHECK)[0] == 200:
+                    return reused
+            self._signed_in = Session.sign_in(self.port, self.ticket(), timeout=timeout)
+            return self._signed_in
 
     # -- the token routes -----------------------------------------------------------------
 

@@ -14,7 +14,7 @@
 // The restore. An address with a depth is a target: the list reads toward it one
 // `/api/more` read at a time, with the calls `Show` makes, and while it holds its target
 // the writer writes no address. It lets the target go when the list has read to it, when
-// its 40th read has answered or failed, or at an act of his (a `Show`, a program line's
+// its 40th read has answered or failed, or at a user's act (a `Show`, a program line's
 // `Show` or `Hide`, a query change).
 
 import { Feed, sleep } from "./feed.ts";
@@ -137,7 +137,8 @@ export function writeOf(view: WriterView): Address | null {
 }
 
 /** The write guard: the writer writes only while the list is placed and the document is
- * at the list's own path, so a read landing after he moved on rewrites no other address. */
+ * at the list's own path, so a read landing after the user moved on rewrites no other
+ * address. */
 export const mayWrite = (pathname: string, placed: boolean): boolean => placed && pathname === LIST_PATH;
 
 // -- the scroll ----------------------------------------------------------------------------
@@ -152,7 +153,7 @@ export interface Act {
 
 const MODIFIERS = new Set(["Alt", "AltGraph", "Control", "Meta", "Shift", "CapsLock", "Fn", "OS", "Super", "Hyper"]);
 
-/** Whether `event` is an act of his that drops the saved scroll: a wheel, a touch, a
+/** Whether `event` is a user's act that drops the saved scroll: a wheel, a touch, a
  * pointer pressed, or a key that is not a modifier alone and is not held with Alt or Meta
  * (`Alt+Left` is Back). A `scroll` event never is: the browser scrolls on its own. */
 export function isAct(event: Act): boolean {
@@ -164,7 +165,7 @@ export function isAct(event: Act): boolean {
 }
 
 /**
- * The saved scroll, from placing to the one moment it is used. An act of his first drops
+ * The saved scroll, from placing to the one moment it is used. A user's act first drops
  * it. At the restore's first stop, once the opened rows then shown are read, `land` gives
  * where to scroll once, cut to the page's height, or null when it was dropped or there is
  * none. Until it has landed or been dropped, the list writes no `y`, so the browser's own
@@ -188,7 +189,7 @@ export class SavedScroll {
     return this.#y;
   }
 
-  /** Takes an event; an act of his drops the scroll. Returns whether it was an act. */
+  /** Takes an event; a user's act drops the scroll. Returns whether it was an act. */
   take(event: Act): boolean {
     const act = isAct(event);
     if (act && !this.#settled) {
@@ -239,7 +240,7 @@ export interface ReaderOptions {
 
 /**
  * The list's reads, under the rule above. `place` starts it from an address; `readList`
- * asks `/api/list` (its tab shown, the tick); the acts are his.
+ * asks `/api/list` (its tab shown, the tick); the acts are the user's.
  */
 export class ListReader {
   filters: Filters;
@@ -323,9 +324,9 @@ export class ListReader {
     if (!this.#closed) void this.list.refresh();
   }
 
-  // -- his acts ----------------------------------------------------------------------------
+  // -- the user's acts ---------------------------------------------------------------------
 
-  /** Takes the filters as he left them. A change of the query in the address's words is
+  /** Takes the filters as the user left them. A change of the query in the address's words is
    * a new state, read from the top: a held target is let go, the old query's reads change
    * nothing, and no depth is written until a list of the new query is read. A pick that
    * makes the same query changes nothing. */

@@ -103,9 +103,10 @@ index keeps the step the log alone gives, and marks it so (`at`).
   (`finish_actions.blocked`); it is ready once none is left. It is read from what
   `Asked.seen` says of the stage's build.
 
-- `ratify`, of the round: ready while a major decision that reached the target is not
-  ruled (`decisions.unruled_majors`), each named with the command that rules it; done
-  once none is left and every stage of the plan is finished, and not due before then.
+- `ratify`, of the round: ready while a decision that is the operator's is not ruled
+  (`decisions.to_rule`: of a finished build, its weight named by the project's `ratify`
+  setting), each named with the command that rules it; done once none is left and
+  every stage of the plan is finished, and not due before then.
   The project's `ratify` setting of `off` makes it done where it would be ready. The
   setting is read from what `Asked.seen` holds under no stage, the round's own; where
   that is not given and a decision would make the step ready, it waits on a read of
@@ -134,8 +135,9 @@ from collections.abc import Callable, Collection, Iterator, Mapping, Sequence
 from dataclasses import dataclass
 
 from . import (brake, builds, checking, decisions, findings, finish_actions, finish_gates,
-               flows, holds, questions, skips, stages, tracing, versions)
+               flows, holds, queue_log, questions, skips, stages, tracing, versions)
 from . import ci as ci_reads
+from . import settings as own
 from . import state as states
 from .errors import Unmet
 
@@ -185,9 +187,9 @@ class Seen:
     build is off it); `holds_target`, whether `P` is the tip or an ancestor of it, None
     when that could not be read; `tree`, the worktree as `finish` reads it: None where
     it no longer exists, else `clean`, `changed` (a tracked change or an untracked path)
-    or `elsewhere` (made on another machine); `check_on`, the repo's setting of that
-    name; `actions`, the repo's finish actions, each with its `id`; `shares`, the
-    `(round, stage)` of each build it shares commits with; `ratify`, the project's
+    or `elsewhere` (made on another machine); `check_on` and `land`, the repo's settings
+    of those names; `actions`, the repo's finish actions, each with its `id`; `shares`, a
+    `builds.Share` for each build it shares commits with; `ratify`, the project's
     setting of that name; `design`, what `commission` refuses on while `design.md`
     holds other bytes than its current version was frozen from (`versions.unchanged`),
     None when it holds the same or that was not read;
@@ -210,8 +212,9 @@ class Seen:
     holds_target: bool | None = None
     tree: str | None = None
     check_on: str = "merged"
+    land: str = "finish"
     actions: tuple[Mapping, ...] = ()
-    shares: tuple[tuple[str, str], ...] = ()
+    shares: tuple[builds.Share, ...] = ()
     ratify: str = "majors"
     design: Unmet | None = None
     problem: Unmet | None = None
@@ -445,6 +448,12 @@ def _check(state: states.State, about: Asked) -> Step:
     if seen.head is not None and seen.check is not None and checking.passes(
             state, stage, CHECK, tip=seen.head, argv=seen.check):
         return Step(CHECK, DONE, stage=stage)
+    # A queue member the lander landed is met by its candidate's records at the tip.
+    if (seen.land == own.LAND_QUEUE and seen.head is not None
+            and ci_reads.candidate_why_not(
+                state, stage, tip=seen.head,
+                has_local=seen.ci is not None and seen.ci.local is not None) is None):
+        return Step(CHECK, DONE, stage=stage)
     owes: tuple[str, ...] = ()
     if seen.ci is not None and seen.head is not None and seen.check is not None:
         by_ci = ci_reads.why_not(state, stage, tip=seen.head, now=seen.ci)
@@ -528,12 +537,36 @@ def _finish(state: states.State, about: Asked) -> Step:
     waits = [one.unmet for one in found]
     build = builds.current(state, stage)
     tip = seen.tip or seen.head
+    if seen.land == own.LAND_QUEUE and build is not None:
+        return _queued_finish(stage, build, seen, found, waits, about.name,
+                              queue_log.standing(state, stage))
     if build is not None and tip is not None:
         # The verb refuses these before it runs anything, so the row waits for them.
         waits += finish_actions.blocked(state, build, tip, seen.actions,
                                         name=about.name, worktree_gone=seen.tree is None)
     return Step(FINISH, WAITING if waits else READY, stage=stage, waits=tuple(waits),
                 gates=tuple(one.number for one in found))
+
+
+def _queued_finish(stage: str, build, seen, found, waits: list, name: str,
+                   standing) -> Step:
+    """The finish of a build in a queue project: it waits on the lander while the build
+    is queued at its branch's tip; else it is the step that joins the queue, and what
+    became of an earlier join is owed in words."""
+    gates = tuple(one.number for one in found)
+    tip = seen.tip or seen.head
+    if standing is not None and standing.queued and standing.tip == tip:
+        return Step(FINISH, WAITING, stage=stage, gates=gates, waits=(Unmet(
+            f"{standing.line()}; {build.repo}'s lander merges it",
+            f"moxi rounds queue --repo {build.repo}"),))
+    owes: tuple[str, ...] = ()
+    if standing is not None and standing.queued:
+        owes = (f"{standing.line()}, and the branch moved to {str(tip)[:12]} since: the "
+                "lander leaves it out; check and finish again to join at the tip",)
+    elif standing is not None and standing.last != queue_log.LANDED:
+        owes = (standing.line(),)
+    return Step(FINISH, WAITING if waits else READY, stage=stage, waits=tuple(waits),
+                gates=gates, owes=owes)
 
 
 
@@ -543,23 +576,28 @@ RATIFY_OFF = "off"
 
 
 def _ratify(state: states.State, about: Asked) -> Step:
-    unruled = decisions.unruled_majors(state)
-    if not unruled:
-        planned = stages.in_plan(state)
-        finished = questions.finished_stages(state)
-        done = bool(planned) and all(stage.id in finished for stage in planned)
-        return Step(RATIFY, DONE if done else NOT_DUE)
+    # The decisions that may be the operator's: open, of a finished build. Which are is
+    # read under the project's setting (`decisions.to_rule`).
+    candidates = tuple(one for one in decisions.reached(state)
+                       if one.state == decisions.OPEN)
     seen = (about.seen or {}).get(None)
-    if seen is None:
+    if candidates and seen is None:
         return Step(RATIFY, WAITING, unread=True, waits=(Unmet(
             "whether the project's ratify setting puts these decisions to the operator "
             "is read from the settings, which were not read here",
             f"moxi rounds next {about.name}"),))
-    if seen.ratify == RATIFY_OFF:
+    if seen is not None and seen.ratify == RATIFY_OFF and any(
+            one.major for one in candidates):
         return Step(RATIFY, DONE)
+    to_rule = () if not candidates else decisions.to_rule(state, seen.ratify)
+    if not to_rule:
+        planned = stages.in_plan(state)
+        finished = questions.finished_stages(state)
+        done = bool(planned) and all(stage.id in finished for stage in planned)
+        return Step(RATIFY, DONE if done else NOT_DUE)
     return Step(RATIFY, READY, waits=tuple(
-        Unmet(f"decision {one.key}, major and not yet ruled: {one.text}",
-              decisions.rule_line(about.name, one.key)) for one in unruled))
+        Unmet(f"decision {one.key}, {one.weight} and not yet ruled: {one.text}",
+              decisions.rule_line(about.name, one.key)) for one in to_rule))
 
 RETRO = "retro"
 
@@ -680,8 +718,8 @@ def row_of(step: str, entry: Mapping | None) -> Row | None:
 
 def answer(name: str, question: states.Question) -> str:
     """The command that records the operator's answer to `question` of the round
-    `name`: he chooses a key where the question offers options, and says a sentence
-    where it offers none. Everything that prints the command for a question asks
+    `name`: the operator chooses a key where the question offers options, and says a
+    sentence where it offers none. Everything that prints the command for a question asks
     here, so the line is one that runs once its placeholders are filled."""
     how = "--chose K" if question.options else "--text TEXT"
     return f"moxi rounds rule {name} {question.id} {how} --record PTR"

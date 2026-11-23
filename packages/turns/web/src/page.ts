@@ -30,7 +30,7 @@ import type { TemplateResult } from "lit";
 import { Directive, directive, PartType } from "lit/directive.js";
 import type { ElementPart, PartInfo } from "lit/directive.js";
 import { repeat } from "lit/directives/repeat.js";
-import { api, gateway, installed, navigate, setAddress, subscribe } from "/m/ui/client.js";
+import { api, gateway, installed, navigate, setAddress, subscribe, WaitClock } from "/m/ui/client.js";
 
 import { Feed, parseList } from "./feed.ts";
 import type { Session, SessionList } from "./feed.ts";
@@ -159,11 +159,11 @@ export class TurnsPage extends LitElement {
   #runningAgain = false;
   /** The address: the route as given, then each row opened or closed here. */
   #address: Address = { key: null, unknown: false };
-  #openedAt = 0;
+  /** The first read's wait, for its `Reading…`. */
+  #waited = new WaitClock(READING_AFTER_MS);
   /** Which copy act reads `Copied`. */
   #copied: string | null = null;
   #copyTimer: ReturnType<typeof setTimeout> | undefined;
-  #readingTimer: ReturnType<typeof setTimeout> | undefined;
   #redrawTimer: ReturnType<typeof setInterval> | undefined;
   #shown = (): void => {
     if (document.visibilityState !== "visible") return;
@@ -173,7 +173,7 @@ export class TurnsPage extends LitElement {
 
   connectedCallback(): void {
     super.connectedCallback();
-    this.#openedAt = Date.now();
+    this.#waited.start(() => this.requestUpdate());
     const feed = new Feed<SessionList>(() => api("turns", "api/sessions"), parseList,
                                        () => this.requestUpdate());
     this.#feed = feed;
@@ -191,7 +191,6 @@ export class TurnsPage extends LitElement {
       });
     }
     document.addEventListener("visibilitychange", this.#shown);
-    this.#readingTimer = setTimeout(() => this.requestUpdate(), READING_AFTER_MS);
     this.#redrawTimer = setInterval(() => this.requestUpdate(), REDRAW_MS);
   }
 
@@ -205,7 +204,7 @@ export class TurnsPage extends LitElement {
     this.#stopRunning = null;
     this.#running = null;
     document.removeEventListener("visibilitychange", this.#shown);
-    clearTimeout(this.#readingTimer);
+    this.#waited.stop();
     clearTimeout(this.#copyTimer);
     clearInterval(this.#redrawTimer);
   }
@@ -306,7 +305,7 @@ export class TurnsPage extends LitElement {
   render() {
     const frame = this.frame();
     if (frame === null || frame.state === "gone") return nothing;
-    const reading = readingLine(frame, Date.now() - this.#openedAt);
+    const reading = readingLine(frame, this.#waited.waitedMs());
     const today = LOCAL.day(Date.now() / 1000);
     const failed = frame.state === "failed";
     const home = this.#feed?.value?.home ?? null;

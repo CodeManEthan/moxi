@@ -62,8 +62,9 @@ function actsOn(row: Row, target: { id: ParsedId; section: string | null }, view
   return row.name === id.name || (covers ?? []).includes(id.name);
 }
 
-/** What still needs him after an act that did its own work: `the agent code-reviewer`, `the
- * section atlas-api`, past three `and <n> more`, with the verb that agrees. */
+/** What still needs the user after an act that did its own work: `the agent
+ * code-reviewer`, `the section atlas-api`, past three `and <n> more`, with the verb that
+ * agrees. */
 function stillNeeds(rows: readonly Row[]): string {
   const names = [...new Set(rows.map((row) => (row.kind === "section" ? `the section ${row.name}`
     : `the ${kindWord(row.kind ?? "")} ${row.name}`)))];
@@ -72,7 +73,7 @@ function stillNeeds(rows: readonly Row[]): string {
 
 /** The dim line under the act once its job is read. An act that names one item (Replace,
  * Turn off, Turn on) and whose own rows ended fine reads `done`, naming what else in its
- * run still needs him; it reads `refused` only when its own rows were refused. */
+ * run still needs the user; it reads `refused` only when its own rows were refused. */
 export function jobLine(job: Job, view: View | null): JobLine {
   const command = commandOf((job.argv ?? []).filter((word) => word !== "--json"));
   const rows = notFine(job);

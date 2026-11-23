@@ -13,7 +13,12 @@ where a test once undid its own redirect and wrote into the real state tree:
 * every test must end with usage's roots still inside its own tmp, so a test that undoes
   the redirect fails even when it wrote nothing;
 * at the end of the run, a real usage directory whose files changed fails the run, which
-  catches a subprocess a test started with the redirect gone.
+  catches a subprocess a test started with the redirect gone. It leaves out the stores
+  usage declares in its state directory (`STORES` in `moxi_usage.module`: the readings,
+  the index, the marks, the ceiling records, the restart point) and SQLite's files beside
+  them. usage's running parts on this machine write those while a run goes on (a reading
+  every interval, a mark or a ceiling record as a session crosses one), and a change to
+  them says nothing about the suite. The audit hook still fails a test that writes one.
 """
 
 from __future__ import annotations
@@ -25,8 +30,11 @@ from pathlib import Path
 import pytest
 
 from moxi.paths import Layout
+from moxi_usage.module import STORES
 
 MODULE = "usage"
+#: The files SQLite keeps beside a database while it is written.
+_SQLITE_SIDECARS = ("-wal", "-shm", "-journal")
 
 
 def _real_roots() -> list[Path]:
@@ -36,7 +44,22 @@ def _real_roots() -> list[Path]:
     return sorted({Path(os.path.realpath(root)) for root in roots})
 
 
+def _live_stores() -> list[Path]:
+    """The real paths of the stores usage declares under its state directory, which its
+    running parts write whatever the suite does, with SQLite's files beside a database."""
+    state = Path(os.path.realpath(Layout(MODULE).state_root() / MODULE))
+    found = []
+    for store in STORES.values():
+        if store["root"] != "state":
+            continue
+        found.append(state / store["path"])
+        if store["kind"] == "sqlite":
+            found.extend(state / (store["path"] + end) for end in _SQLITE_SIDECARS)
+    return found
+
+
 GUARDED: list[Path] = _real_roots()
+LIVE: list[Path] = _live_stores()
 VIOLATIONS: list[str] = []
 _PATH_EVENTS = {"os.rename", "os.replace", "os.mkdir", "os.remove", "os.rmdir",
                 "os.symlink", "os.link", "os.chmod", "os.truncate", "shutil.copyfile",
@@ -72,12 +95,20 @@ def _audit(event, args):
 sys.addaudithook(_audit)
 
 
+def _live(path: str) -> bool:
+    """True when `path` is one of `LIVE` or under one."""
+    full = Path(path)
+    return any(full == store or store in full.parents for store in LIVE)
+
+
 def _listing() -> dict[str, int]:
     found: dict[str, int] = {}
     for root in GUARDED:
         for dirpath, _dirs, files in os.walk(root):
             for name in files:
                 path = os.path.join(dirpath, name)
+                if _live(path):
+                    continue
                 try:
                     found[path] = os.stat(path).st_mtime_ns
                 except OSError:

@@ -1,7 +1,33 @@
 # Changelog
 
-## Unreleased
+## 0.2.7 (2026-11-22)
 
+- Past its 20 sessions, the shell's sign-in store now evicts the least recently used
+  session, not the oldest made, and never one that holds an open push stream or proxied
+  request. Twenty sign-ins (CLI tickets, a phone) no longer sign out a desktop tab in use
+  and end its live updates. When every session holds a stream, a sign-in still succeeds
+  and the store keeps more than 20 until a stream closes. A session's last use is the
+  last request it made, or the end of a stream it held. The gateway's phone sessions (4
+  per device, 16 in all) are evicted least recently used first too.
+- Settings compares a `path` key's value with its default as paths: a default under the
+  home folder is joined with the platform's separator, and both sides are normalised
+  (and case-folded on Windows) before the comparison. On Windows a path key left at its
+  default no longer counts as changed in the list's counts and the changed view.
+
+## 0.2.6 (2026-11-22)
+
+- `client.js` gains `WaitClock`, the wait a page shows a line after (`Reading…` once its
+  first read has been out 400 ms). It measures on the monotonic clock, and once its
+  timer has fired it reads as due, so the render that timer asks for draws the line in
+  every browser. A page that compared `Date.now()` with its start could miss it in
+  Firefox, which coarsens that clock and can fire the timer a millisecond early by it.
+
+## 0.2.5 (2026-11-22)
+
+- A page may announce `band_unless`, a list of module names: while any of them is
+  installed, the page has no entry in the band of pages, and its address still opens it.
+  `/m/ui/api/modules` and `ComponentInfo` carry it on a page (`[]` when it names none) and
+  null on any other component. A value that is not a list of module names reads as none.
 - `<moxi-ui-rail>` sizes its small and vertical forms with custom element states, so it
   draws as designed from Chrome 125, Firefox 126 and Safari 17.4. Below that a mark no
   longer throws: an engine with no custom states, or one that takes only names starting

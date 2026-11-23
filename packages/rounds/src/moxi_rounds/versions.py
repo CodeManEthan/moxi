@@ -6,7 +6,8 @@ block declared, and what the block took away. The functions here read those reco
 from a round's folded state:
 
 - `current(state)`, `find(state, n)`: the newest version, and the one numbered `n`;
-- `digest(state, n=None)`: a version's digest, the current one's when no number is given;
+- `digest(state, n=None)`: a version's digest, the current one's when no number is given,
+  and `held(version)` the one a later freeze and `unchanged` compare with;
 - `declarations(state, n=None)`: what a version's block declared;
 - `pending_removals(state, n)`: what version `n` took away, `outstanding(state, n)`
   what of that would still change the record, and `said(pending)` one of those in a
@@ -15,6 +16,16 @@ from a round's folded state:
   version, and `verified(state)` the newest version a pass read;
 - `unchanged(state, folder, name)`: the condition that `design.md` is as it was when the
   current version was frozen, for a gate that needs the design verified.
+
+**A re-stamp.** When an edit outside the round's records rewrote both `design.md` and
+the frozen copy of the current version alike, the lead re-stamps the version
+(`repairs.restamp`): it keeps the digest recorded at its freeze and gains the copy's
+digest beside it (`Version.restamped`). A re-stamp changes no version's standing, no
+`sent_back` run, no `rewritten` and no brake answer. Every comparison of a version with
+the one before it reads the earlier version's digest as it stood when the later one was
+frozen: a re-stamp is only of the current version, so it reaches only versions frozen
+after it, and those compare with the re-stamped digest (`held`). So the same text frozen
+again after a re-stamp reads as the same text, and keeps its standing.
 
 What a block takes away (a question, a stage, a stage another waited for, a stage a
 question held up) changes nothing when it is frozen. It is kept with the version that
@@ -86,10 +97,16 @@ def _one(state: states.State, n: int | None) -> states.Version | None:
 
 
 def digest(state: states.State, n: int | None = None) -> str | None:
-    """The SHA-256 of the frozen file of version `n`, the current version when `n` is
-    left out; None when there is no such version."""
+    """The SHA-256 of the frozen file of version `n` as recorded at its freeze, the
+    current version when `n` is left out; None when there is no such version."""
     version = _one(state, n)
     return None if version is None else version.digest
+
+
+def held(version: states.Version) -> str | None:
+    """The digest the text of `version` is compared with: its re-stamped digest where
+    it has one, else the one recorded at its freeze."""
+    return version.restamped or version.digest
 
 
 def declarations(state: states.State, n: int | None = None) -> dict:
@@ -268,7 +285,8 @@ def _walk(state: states.State) -> _Walk:
             else:
                 stands[one.n] = Standing(NONE, one.n)
             only[one.n] = one.records_only
-            digests[one.n] = one.digest
+            # A later version is frozen after every re-stamp of this one.
+            digests[one.n] = held(one)
             if same[one.n] and before in sent:
                 sent.add(one.n)
             walk.newest = one.n
@@ -355,11 +373,11 @@ def rewritten(state: states.State) -> bool:
 def text_unchanged_since(state: states.State, n: int) -> bool:
     """Whether the current version has the text of version `n`: each version frozen
     after `n` has the digest of the one before it."""
-    held = None
+    before = None
     for version in state.versions:
-        if version.n > n and (version.digest is None or version.digest != held):
+        if version.n > n and (version.digest is None or version.digest != before):
             return False
-        held = version.digest
+        before = held(version)
     return find(state, n) is not None
 
 
@@ -438,21 +456,34 @@ def waiting(state: states.State):
 def unchanged(state: states.State, round_dir: Path | str, name: str) -> Unmet | None:
     """The unmet condition of a design that is not the one frozen last, or None when
     `design.md` in `round_dir`, the folder of the round `name`, has the bytes the current
-    version was frozen from."""
+    version was frozen from (its re-stamped digest where it has one). When `design.md`
+    and the version's frozen copy hold the same bytes and neither holds that digest,
+    both were edited after the freeze, and the fix is a re-stamp, not a fold."""
     again = f"moxi rounds fold {name}"
     version = current(state)
     if version is None:
         return Unmet(f"the design of {name} was never frozen", again)
     try:
-        now = hashlib.sha256((Path(round_dir) / DESIGN_FILE).read_bytes()).hexdigest()
+        text = (Path(round_dir) / DESIGN_FILE).read_bytes()
     except OSError:
-        now = None
-    if now == version.digest:
+        text = None
+    if text is not None and hashlib.sha256(text).hexdigest() == held(version):
         return None
+    try:
+        copy = file(round_dir, version.n).read_bytes()
+    except OSError:
+        copy = None
+    if text is not None and copy == text:
+        frozen = states.FROZEN_FILE.format(n=version.n)
+        return Unmet(f"the frozen copy {frozen} was edited after v{version.n} was "
+                     f"frozen, as {DESIGN_FILE} was: the two match each other and "
+                     f"neither is what v{version.n} was frozen from",
+                     f"moxi rounds mark {name} --restamp --record PTR, once you know "
+                     "what edited them")
     return Unmet(f"{DESIGN_FILE} changed since v{version.n} was frozen", again)
 
 
-__all__ = ["DESIGN_FILE", "file", "current", "find", "digest", "declarations",
+__all__ = ["DESIGN_FILE", "file", "current", "find", "digest", "held", "declarations",
            "pending_removals", "outstanding", "said", "DESIGN_REPORT", "NONE",
            "sent_back", "rewritten", "lead_decided", "text_unchanged_since",
            "LEAD_DECISION", "VERIFIED", "Standing", "design_verdicts", "verified",

@@ -149,6 +149,7 @@ def direct(work: Path, *, rid: str = "r1", relaunch_of: str | None = None,
 # -- a screen the launcher won't answer -----------------------------------------------------
 
 
+@pytest.mark.slot_target
 @pytest.mark.parametrize("name, setting", [
     ("CLAUDE_TRUST_DIR", "startup.trust_dialog"),
     ("CLAUDE_DEV_CHANNELS", "startup.dev_channels_dialog"),
@@ -173,6 +174,7 @@ def test_a_screen_whose_setting_is_off_fails_a_fresh_launch_at_once(work, harnes
     assert targets.exit_of(row()) == exits.ERROR
 
 
+@pytest.mark.slot_target
 def test_the_bypass_warnings_hint_names_the_terminal_answer(work, harness, rig):
     settings_file()
     rig.plan(frames=[{"screen": "CLAUDE_BYPASS_WARNING"}])
@@ -180,6 +182,7 @@ def test_the_bypass_warnings_hint_names_the_terminal_answer(work, harness, rig):
     assert "in a terminal" in got.line and "~/.claude/settings.json" in got.line
 
 
+@pytest.mark.slot_target
 def test_the_bypass_warning_is_answered_only_with_its_setting_on(work, harness, rig):
     settings_file(bypass_warning=True)
     rig.plan(frames=[{"screen": "CLAUDE_BYPASS_WARNING"}, {"screen": None}],
@@ -195,6 +198,7 @@ def test_the_bypass_warning_is_answered_only_with_its_setting_on(work, harness, 
     assert seen.detail["file"].endswith("settings.json")
 
 
+@pytest.mark.slot_target
 def test_a_screen_whose_setting_is_on_is_answered_and_the_others_stay_unanswered(
         work, harness, rig):
     settings_file(trust_dialog=True)
@@ -205,6 +209,7 @@ def test_a_screen_whose_setting_is_on_is_answered_and_the_others_stay_unanswered
     assert "CLAUDE_DEV_CHANNELS" in got.line
 
 
+@pytest.mark.slot_target
 def test_the_watch_runs_with_every_setting_off(work, harness, rig):
     settings_file()
     got = api.launch(request(work))
@@ -260,6 +265,7 @@ def test_the_hints_of_the_three_screens():
     assert startup.HINTS["CLAUDE_CHROME_DIALOG"] == CHROME_HINT
 
 
+@pytest.mark.slot_target
 @pytest.mark.parametrize("mode", ["default", "manual", "acceptEdits", "plan", "dontAsk",
                                   "auto", "bypassPermissions"])
 @pytest.mark.parametrize("name", list(NEVER_ANSWERED))
@@ -301,6 +307,7 @@ def test_a_relaunch_held_on_the_chrome_dialog_is_flagged(work, rig, turns):
 # -- the ready read ---------------------------------------------------------------------------
 
 
+@pytest.mark.slot_target
 def test_a_fresh_launch_owing_no_first_turn_that_never_gets_ready_fails_no_ready(
         work, harness, rig, turns):
     settings_file()
@@ -329,6 +336,7 @@ def test_a_resume_that_never_gets_ready_fails_no_ready(work, rig, turns):
     assert now.state == "failed" and no_key_sent(rig)
 
 
+@pytest.mark.slot_target
 def test_a_launch_owing_no_first_turn_that_gets_ready_ends_started(work, harness, rig,
                                                                   turns):
     settings_file()
@@ -337,6 +345,7 @@ def test_a_launch_owing_no_first_turn_that_gets_ready_ends_started(work, harness
     assert turns.calls("wait_ready") and turns.calls("deliver") == []
 
 
+@pytest.mark.slot_target
 def test_without_turns_a_launch_ends_started_ready_unknown(work, harness, rig):
     settings_file()
     got = api.launch(request(work))
@@ -410,7 +419,8 @@ def test_a_relaunch_that_gets_ready_sends_its_first_turn_unflagged(work, rig, tu
 
 @pytest.mark.parametrize("mode", ["default", "manual", "acceptEdits", "plan", "dontAsk",
                                   "auto", "bypassPermissions"])
-@pytest.mark.parametrize("target", ["slot", "terminal"])
+@pytest.mark.parametrize("target", [pytest.param("slot", marks=pytest.mark.slot_target),
+                                    "terminal"])
 def test_no_claude_mode_is_refused(work, harness, rig, mode, target):
     asked = LaunchRequest(typed={"target": target, "permission_mode": mode},
                           cwd=str(work), request_id="r1", session_id=SID, actor="ann",
@@ -420,7 +430,8 @@ def test_no_claude_mode_is_refused(work, harness, rig, mode, target):
 
 
 @pytest.mark.parametrize("approval", ["on-request", "never"])
-@pytest.mark.parametrize("target", ["slot", "terminal"])
+@pytest.mark.parametrize("target", [pytest.param("slot", marks=pytest.mark.slot_target),
+                                    "terminal"])
 def test_no_codex_approval_is_refused(work, harness, rig, approval, target):
     asked = LaunchRequest(typed={"harness": "codex", "target": target,
                                  "approval": approval},

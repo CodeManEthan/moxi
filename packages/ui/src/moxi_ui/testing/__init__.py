@@ -50,6 +50,13 @@ A module whose `ui` is an optional extra uses these fixtures by name and never i
     Each context closes when the test ends.
 `ui_context`, `ui_page`
     One `ui_contexts()` context, and its first page, signed in on `ui_shell`.
+`ui_days` (module scope)
+    A `moxi_ui.testing.days.Days`: dates `days_ago` days before one today, the module's
+    anchor, read the first time it is asked and past midnight when that was less than two
+    minutes away. `ui_days.noon(2)` seeds a fixture's data and `ui_days.key(2)` names the
+    day the page groups it under, and the two agree even when the run crosses midnight.
+    `ui_days.wait_out_midnight()` waits out a midnight less than two minutes away, for
+    steps of a test that must fall on one date.
 `ui_component_check`
     `check(page, module, name, attrs=None, *, tokens=("accent",), allow=(), keep=False,
     token_ms=TOKEN_MS)`: the contract check on one component (see
@@ -80,7 +87,8 @@ A test that reads back what its page copied readies its context with
 the page passed to `navigator.clipboard.writeText`, since Firefox refuses a
 `clipboard-read` grant and WebKit a `clipboard-write` one.
 
-Without a browser, `ui_shell.session()` is a signed-in session over plain HTTP, and
+Without a browser, `ui_shell.session()` is a signed-in session over plain HTTP (one
+sign-in, reused by every call while the shell honours it), and
 `ui_shell.servers()` and `ui_shell.kill(module)` reach the page servers the shell runs.
 """
 
@@ -405,6 +413,14 @@ def ui_context(ui_contexts: Callable[..., Any]) -> Any:
 def ui_page(ui_context: Any) -> Any:
     """`ui_context`'s first page, on the shell's document at `/m/ui/`."""
     return ui_context.pages[0]
+
+
+@pytest.fixture(scope="module")
+def ui_days() -> Any:
+    """The module's `Days`, one anchored today (`moxi_ui.testing.days`)."""
+    from .days import Days
+
+    return Days()
 
 
 @pytest.fixture

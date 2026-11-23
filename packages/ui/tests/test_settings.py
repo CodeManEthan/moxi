@@ -5,8 +5,11 @@ through the functions and through a real shell."""
 from __future__ import annotations
 
 import json
+import ntpath
+import posixpath
 import socket
 import subprocess
+from pathlib import PureWindowsPath
 
 import pytest
 from moxi_ui.loopback.api import Conflict, Refused
@@ -166,6 +169,37 @@ def test_each_key_carries_its_value_as_json_and_whether_it_is_not_the_default():
         "default_json"]) == rows
     # A value JSON can't hold reads null.
     assert settings.descriptor("demo", _key("ratio", "float", float("nan"), 1.0))["json"] == "null"
+
+
+def test_a_path_default_compares_as_a_path_with_windows_separators_and_case(monkeypatch):
+    # The value `config show` prints on Windows, against a default under the home folder.
+    monkeypatch.setattr(settings, "_paths", ntpath)
+    monkeypatch.setattr(settings, "home", lambda env: PureWindowsPath(r"C:\Users\u\ui-shell16"))
+
+    def changed(value, default):
+        return settings.is_changed({"type": "path", "value": value, "default": default})
+
+    assert not changed(r"C:\Users\u\ui-shell16\notes", "~/notes")
+    assert not changed(r"C:\Users\u\ui-shell16\notes\a", "~/notes/a")
+    assert not changed("c:\\users\\U\\ui-shell16\\Notes\\", "~/notes")
+    assert not changed(r"C:\Users\u\ui-shell16", "~")
+    assert not changed("C:/Users/u/ui-shell16/notes", "~/notes")
+    assert changed(r"C:\Users\u\ui-shell16\notes2", "~/notes")
+    assert changed(r"D:\Users\u\ui-shell16\notes", "~/notes")
+    assert not changed(None, "")
+    assert changed(r"C:\x", "")
+
+
+def test_a_path_default_compares_as_a_path_on_posix(monkeypatch):
+    monkeypatch.setattr(settings, "_paths", posixpath)
+    env = {"HOME": "/h"}
+
+    def changed(value, default):
+        return settings.is_changed({"type": "path", "value": value, "default": default}, env=env)
+
+    assert not changed("/h/x", "~/x") and not changed("/h/x/", "~/x") and not changed("/h", "~")
+    # A POSIX path's case is its own.
+    assert changed("/h/X", "~/x")
 
 
 def test_a_switch_table_is_changed_when_any_entry_is_on():

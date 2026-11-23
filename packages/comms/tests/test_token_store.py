@@ -11,6 +11,7 @@ import stat
 import tomllib
 
 import pytest
+from conftest import POSIX_MODES
 
 from moxi_comms.paths import tokens_dir
 from moxi_comms.tokens import (NOT_A_MAP, OPERATOR_SECRET_ID, TOKEN_STORE_ENV, TokenStore,
@@ -39,19 +40,19 @@ def test_the_explicit_override_beats_the_default_state_path(tmp_path):
     assert not tokens_dir().exists()
 
 
-def test_the_holder_file_names(tmp_path):
-    store = TokenStore(tmp_path)
-    assert store.path_for(owner_for_role("daemon")) == tmp_path / "daemon"
-    assert store.path_for(owner_for_role("reader")) == tmp_path / "daemon"   # one holder
-    assert store.path_for(owner_for_role("operator")) == tmp_path / "operator"
+def test_the_holder_file_names(profile):
+    store = TokenStore(profile)
+    assert store.path_for(owner_for_role("daemon")) == profile / "daemon"
+    assert store.path_for(owner_for_role("reader")) == profile / "daemon"   # one holder
+    assert store.path_for(owner_for_role("operator")) == profile / "operator"
 
 
-def test_a_role_that_is_still_unknown_has_no_store_path_at_all(tmp_path):
+def test_a_role_that_is_still_unknown_has_no_store_path_at_all(profile):
     """The role set is closed by construction, not by a list somewhere: an unknown role
     gets an owner with no PARTS, and the refusal happens where the path is computed. The
     message is the generic no-owner one -- there is no role-specific error to extend, and
     a box adding a role names it in `[credentials] roles` (test_roles.py)."""
-    store = TokenStore(tmp_path)
+    store = TokenStore(profile)
     unknown = owner_for_role("stenographer")
     assert unknown.parts == () and unknown.role == "stenographer"
     with pytest.raises(TokenStoreError) as e:
@@ -67,18 +68,20 @@ def test_the_stores_door_is_the_declared_pair():
 
 # --------------------------------------------------------------------- permissions
 
-def test_the_store_is_written_0600_in_a_0700_dir(tmp_path):
-    store = TokenStore(tmp_path / "tokens")
+@POSIX_MODES
+def test_the_store_is_written_0600_in_a_0700_dir(profile):
+    store = TokenStore(profile / "tokens")
     path = store.write_secret(owner_for_role("operator"), POSTING_KEY, "OPERATOR-TOKEN")
     assert stat.S_IMODE(path.stat().st_mode) == 0o600
     assert stat.S_IMODE(path.parent.stat().st_mode) == 0o700
     assert stat.S_IMODE(store.root.stat().st_mode) == 0o700
 
 
-def test_a_loose_file_is_refused_not_warned_about(tmp_path):
+@POSIX_MODES
+def test_a_loose_file_is_refused_not_warned_about(profile):
     """Decided here: 0600 is the whole mechanism. A store that reads a
     world-readable credential anyway has a comment where its rule was."""
-    store = TokenStore(tmp_path)
+    store = TokenStore(profile)
     owner = owner_for_role("operator")
     path = store.write_secret(owner, POSTING_KEY, "OPERATOR-TOKEN")
     os.chmod(path, 0o644)
@@ -88,8 +91,9 @@ def test_a_loose_file_is_refused_not_warned_about(tmp_path):
     assert str(path) not in str(e.value)      # the path goes to the log, not to an agent
 
 
-def test_a_loose_store_dir_is_refused_too(tmp_path):
-    store = TokenStore(tmp_path / "tokens")
+@POSIX_MODES
+def test_a_loose_store_dir_is_refused_too(profile):
+    store = TokenStore(profile / "tokens")
     owner = owner_for_role("operator")
     store.write_secret(owner, POSTING_KEY, "OPERATOR-TOKEN")
     os.chmod(store.root, 0o755)
@@ -128,9 +132,10 @@ def test_the_provisioner_is_refused_by_the_declared_read_too(empty_root):
 # The holder file is a flat TOML map, and every value goes in and out through
 # `read_secret` / `write_secret`.
 
-def test_read_secret_and_write_secret_round_trip_at_0600_in_0700(tmp_path):
+@POSIX_MODES
+def test_read_secret_and_write_secret_round_trip_at_0600_in_0700(profile):
     """The declared pair, both halves, with the 0600/0700 modes."""
-    store = TokenStore(tmp_path / "tokens")
+    store = TokenStore(profile / "tokens")
     owner = owner_for_role("operator")
     path = store.write_secret(owner, POSTING_KEY, "POSTING-TOKEN-0001")
     assert stat.S_IMODE(path.stat().st_mode) == 0o600
@@ -142,8 +147,8 @@ def test_read_secret_and_write_secret_round_trip_at_0600_in_0700(tmp_path):
     assert store.read_secret(owner, "comms/operator/other") is None
 
 
-def test_one_key_is_written_without_disturbing_the_others(tmp_path):
-    store = TokenStore(tmp_path)
+def test_one_key_is_written_without_disturbing_the_others(profile):
+    store = TokenStore(profile)
     owner = owner_for_role("operator")
     store.write_secret(owner, "ANTHROPIC_API_KEY", "ROLE-CREDENTIAL")
     store.write_secret(owner, POSTING_KEY, "NAMES-TOKEN")
@@ -153,11 +158,11 @@ def test_one_key_is_written_without_disturbing_the_others(tmp_path):
     assert store.secret_ids(owner) == ["ANTHROPIC_API_KEY", POSTING_KEY]
 
 
-def test_the_emitter_escapes_a_value_that_looks_like_toml(tmp_path):
+def test_the_emitter_escapes_a_value_that_looks_like_toml(profile):
     """The stdlib reads TOML and does not write it, so the emitter is ours: a value with
     a quote, a backslash, an `=` and a newline in it comes back byte for byte."""
     nasty = 'a"b\\c=d\ne\tf'
-    store = TokenStore(tmp_path)
+    store = TokenStore(profile)
     owner = owner_for_role("operator")
     store.write_secret(owner, 'weird"key\\here', nasty)
     assert store.read_secret(owner, 'weird"key\\here') == nasty.strip()
@@ -176,10 +181,11 @@ def test_the_declared_pair_refuses_an_empty_value_and_an_unprintable_key(empty_r
     assert not any(empty_root.rglob("*"))
 
 
-def test_a_loose_file_is_refused_by_every_half_of_the_boundary(tmp_path):
+@POSIX_MODES
+def test_a_loose_file_is_refused_by_every_half_of_the_boundary(profile):
     """0600 is the whole mechanism, so the pair and the key-level question refuse
     alike."""
-    store = TokenStore(tmp_path)
+    store = TokenStore(profile)
     owner = owner_for_role("operator")
     path = store.write_secret(owner, POSTING_KEY, "POSTING-TOKEN-0001")
     os.chmod(path, 0o644)
@@ -195,17 +201,17 @@ def test_a_loose_file_is_refused_by_every_half_of_the_boundary(tmp_path):
 @pytest.mark.parametrize("bare", ["0.credential.machine:token", "0.abc=.def:ghi",
                                   "aGVsbG8=", "a=b", "x = 3"])
 def test_a_file_that_is_not_a_flat_table_of_strings_holds_no_key_and_is_left_alone(
-        tmp_path, bare):
+        profile, bare):
     """A bare token (what an older install's paste verb wrote) or any other shape is not
     the map this store writes: it holds no comms key, so a read misses; a write
     refuses it with `NOT_A_MAP`, naming no path, and never overwrites
     it."""
-    store = TokenStore(tmp_path)
+    store = TokenStore(profile)
     owner = owner_for_role("operator")
-    path = tmp_path / "operator"
+    path = profile / "operator"
     path.write_text(bare + "\n")
     os.chmod(path, 0o600)
-    os.chmod(tmp_path, 0o700)
+    os.chmod(profile, 0o700)
     assert store.read_secret(owner, POSTING_KEY) is None
     assert store.secret_ids(owner) == []
     with pytest.raises(TokenStoreError) as e:

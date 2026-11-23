@@ -1303,6 +1303,9 @@ dependencies = [
 ]
 
 [package.optional-dependencies]
+comms = [
+    { name = "moxi-comms" },
+]
 notes = [
     { name = "moxi-notes" },
 ]
@@ -1324,13 +1327,14 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "moxi", editable = "packages/moxi" },
+    { name = "moxi-comms", marker = "extra == 'comms'", editable = "packages/comms" },
     { name = "moxi-notes", marker = "extra == 'notes'", editable = "packages/notes" },
     { name = "moxi-projects", editable = "packages/projects" },
     { name = "moxi-turns", marker = "extra == 'turns'", editable = "packages/turns" },
     { name = "moxi-ui", marker = "extra == 'ui'", editable = "packages/ui" },
     { name = "psutil", specifier = ">=5.9" },
 ]
-provides-extras = ["notes", "turns", "ui"]
+provides-extras = ["notes", "turns", "comms", "ui"]
 
 [package.metadata.requires-dev]
 dev = [
@@ -1393,6 +1397,9 @@ dependencies = [
 projects = [
     { name = "moxi-projects" },
 ]
+slots = [
+    { name = "moxi-slots" },
+]
 ui = [
     { name = "moxi-ui" },
 ]
@@ -1410,10 +1417,11 @@ dev = [
 requires-dist = [
     { name = "moxi", editable = "packages/moxi" },
     { name = "moxi-projects", marker = "extra == 'projects'", editable = "packages/projects" },
+    { name = "moxi-slots", marker = "extra == 'slots'", editable = "packages/slots" },
     { name = "moxi-ui", marker = "extra == 'ui'", editable = "packages/ui" },
     { name = "psutil", specifier = ">=5.9" },
 ]
-provides-extras = ["projects", "ui"]
+provides-extras = ["projects", "slots", "ui"]
 
 [package.metadata.requires-dev]
 dev = [
@@ -1606,7 +1614,7 @@ dev = [
 
 [[package]]
 name = "moxi-ui"
-version = "0.2.4"
+version = "0.2.7"
 source = { editable = "packages/ui" }
 dependencies = [
     { name = "h11" },
@@ -1669,6 +1677,7 @@ source = { editable = "packages/usage" }
 dependencies = [
     { name = "moxi" },
     { name = "moxi-sessions" },
+    { name = "tzdata", marker = "sys_platform == 'win32'" },
 ]
 
 [package.optional-dependencies]
@@ -1697,6 +1706,7 @@ requires-dist = [
     { name = "moxi-sessions", editable = "packages/sessions" },
     { name = "moxi-turns", marker = "extra == 'turns'", editable = "packages/turns" },
     { name = "moxi-ui", marker = "extra == 'ui'", editable = "packages/ui" },
+    { name = "tzdata", marker = "sys_platform == 'win32'", specifier = ">=2025.2" },
 ]
 provides-extras = ["turns", "projects", "ui"]
 
@@ -2428,6 +2438,15 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/a3/26/b09b8010994eccc3c09092e6b34058f36a460eea2d4c3e8b910c695975a0/typing_inspection-0.4.4.tar.gz", hash = "sha256:547274fa6b0a561ccf549cc9524b999a578e737d015d8709d021f9d0d13bea47", size = 76928, upload-time = "2026-08-12T12:37:25.997Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/67/81/4add07e5172b7ac40d8ed5ff580409a7801a4fe26d529bdd915401dabfbe/typing_inspection-0.4.4-py3-none-any.whl", hash = "sha256:65b8397ba37ccbce054456aaccddfc91e6e3083c92824df348d96ca832f3f147", size = 14750, upload-time = "2026-08-12T12:37:24.648Z" },
+]
+
+[[package]]
+name = "tzdata"
+version = "2026.6"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/7a/29/6a1391d31cd00ff9e927215a224a880e1e84e826b64ba80a499e51c074d8/tzdata-2026.6.tar.gz", hash = "sha256:85d2cd9c09f81f0bb29db27759fc83af4f1e620efb814f8c5bf8b4cc4feece6d", size = 201017, upload-time = "2026-10-28T09:57:09.137Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/0a/66/9a06c2227fedfd4919f0eaaa8b94377d9730882a7e4f95823c9a331ab5e1/tzdata-2026.6-py2.py3-none-any.whl", hash = "sha256:0a10eec6e13ef16b627fabed9a5f2ba61a62b1c67f327305f4e7e412a70b4aec", size = 348210, upload-time = "2026-10-28T09:57:07.276Z" },
 ]
 
 [[package]]

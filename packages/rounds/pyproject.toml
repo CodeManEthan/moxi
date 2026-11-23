@@ -28,6 +28,9 @@ notes = ["moxi-notes>=0.1,<0.2"]
 # turns: with it, a session's start runs the sweep of leftover folders when
 # sweep.at_start is on.
 turns = ["moxi-turns>=0.2,<0.3"]
+# comms: with it, the merge queue's lander sends its news to builders, leads and the
+# project's director.
+comms = ["moxi-comms>=0.3,<0.4"]
 # ui: with it, the rounds page shows in the browser UI shell.
 ui = ["moxi-ui>=0.2.4,<0.3"]
 

@@ -2086,6 +2086,7 @@ comms	packages/comms/tests/test_connector_tools.py	tools.record = GetFails()	kee
 comms	packages/comms/tests/test_connector_tools.py	for tool in set(mcp_tools.INPUTS) - set(tools_mod.NAMES):	keep	set	set
 comms	packages/comms/tests/test_connector_tools.py	assert set(NOT_SHOWN) <= set(texts)	keep	set	set
 comms	packages/comms/tests/test_connector_tools.py	pairs = [(rig.record.get_message(i), SimpleNamespace(qualified="planner@proj-a"))	keep	record	record
+comms	packages/comms/tests/test_connector_tools.py	shim = rig.shim(name="reviewer", scope="proj-a", start=False)	keep	start	start
 comms	packages/comms/tests/test_console_identity.py	assert not any(CONSOLE in a["open"] for a in console.daemon.asks.values())	keep	any	any
 comms	packages/comms/tests/test_console_identity.py	c.send(RELAY, "any", machine_line.compose([PLANNER], "x"))	keep	fail	fail
 comms	packages/comms/tests/test_console_identity.py	msg = console.record.get_message(mid)	keep	record	record
@@ -2218,6 +2219,7 @@ comms	packages/comms/tests/test_hygiene.py	== set(sub.choices)) \	keep	set	set
 comms	packages/comms/tests/test_hygiene.py	_shipped_text	name	f	fh
 comms	packages/comms/tests/test_hygiene.py	assert len(set(ADAPTER_KINDS)) == 5	keep	set	set
 comms	packages/comms/tests/test_hygiene.py	assert set(sub.choices) == {"send", "reply", "agents", "history", "help", "whois",	keep	set	set
+comms	packages/comms/tests/test_hygiene.py	wait_until(lambda: any(message_id in r.getMessage() for r in list(caplog.records)))	keep	any	any
 comms	packages/comms/tests/test_kinds.py	assert set(kinds.BUILT_IN) <= names	keep	set	set
 comms	packages/comms/tests/test_launcher_reads.py	-	name	test_a_socket_outside_the_runtime_directory_is_none	test_a_socket_outside_the_runtime_dir_is_none
 comms	packages/comms/tests/test_launcher_reads.py	runtime_root().mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
@@ -5713,7 +5715,7 @@ loadout	packages/loadout/tests/test_page.py	assert body["folder"] == str(lo)	kee
 loadout	packages/loadout/tests/test_page.py	kit.claude().mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
 loadout	packages/loadout/tests/test_pagejob.py	"exit": 3, "outcome": None, "lines": ["refused"]}	keep	refused	refused
 loadout	packages/loadout/tests/test_pagejob.py	"lines": ["refused"]}))	keep	refused	refused
-loadout	packages/loadout/tests/test_pagejob.py	assert any("waiting for an install or uninstall" in line	keep	any	any
+loadout	packages/loadout/tests/test_pagejob.py	assert any("waiting for the core lock, which pid " in line	keep	any	any
 loadout	packages/loadout/tests/test_pagejob.py	assert not {"homes", "git"} & set(ledger.read())	keep	set	set
 loadout	packages/loadout/tests/test_pagejob.py	child.wait(timeout=30)	keep	timeout	timeout
 loadout	packages/loadout/tests/test_pagejob.py	holder.wait(timeout=30)	keep	timeout	timeout
@@ -6256,6 +6258,7 @@ moxi	packages/moxi/src/moxi/install.py	help="install moxi-<module> from the inde
 moxi	packages/moxi/src/moxi/install.py	help="move a unit file or a placed skill moxi did not write out "	keep	help	help
 moxi	packages/moxi/src/moxi/install.py	help="place each module's skills without asking")	keep	help	help
 moxi	packages/moxi/src/moxi/install.py	help="place no module's skills, without asking")	keep	help	help
+moxi	packages/moxi/src/moxi/install.py	help="run the installed module's setup again and record it, "	keep	help	help
 moxi	packages/moxi/src/moxi/install.py	help="set how skills are placed (the core's skills.form) "	keep	help	help
 moxi	packages/moxi/src/moxi/install.py	if any(normalize(req.name) == own for req in self.froms):	keep	any	any
 moxi	packages/moxi/src/moxi/install.py	if any(r.url for r in reqs) or self.froms:	keep	any	any
@@ -7557,6 +7560,7 @@ moxi-dev	packages/moxi-dev/src/moxi_dev/check.py	check	name	environ	env
 moxi-dev	packages/moxi-dev/src/moxi_dev/check.py	f"{round(summary.slowest_share * 100)}%")	keep	round	round
 moxi-dev	packages/moxi-dev/src/moxi_dev/check.py	help="check every package, whatever changed, and run every "	keep	help	help
 moxi-dev	packages/moxi-dev/src/moxi_dev/check.py	help="count the changes since HEAD left REV, and compare the "	keep	help	help
+moxi-dev	packages/moxi-dev/src/moxi_dev/check.py	help="run only the tag, comment-reference, naming, Ruff, renames, "	keep	help	help
 moxi-dev	packages/moxi-dev/src/moxi_dev/check.py	help="run only the tests marked with this finding; may be given "	keep	help	help
 moxi-dev	packages/moxi-dev/src/moxi_dev/check.py	help="run only this whole-tree code check")	keep	help	help
 moxi-dev	packages/moxi-dev/src/moxi_dev/check.py	help="with --only, print findings only under these paths")	keep	help	help
@@ -7669,6 +7673,11 @@ moxi-dev	packages/moxi-dev/src/moxi_dev/new.py	parser.add_argument("module", hel
 moxi-dev	packages/moxi-dev/src/moxi_dev/new.py	path.parent.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
 moxi-dev	packages/moxi-dev/src/moxi_dev/new.py	position = text.find("\n", end)	keep	find	find
 moxi-dev	packages/moxi-dev/src/moxi_dev/new.py	start = text.find("\n", found.end())	keep	find	find
+moxi-dev	packages/moxi-dev/src/moxi_dev/pronouns.py	end = text.find("\n", at)	keep	find	find
+moxi-dev	packages/moxi-dev/src/moxi_dev/pronouns.py	end = text.find("*/", at + 2)	keep	find	find
+moxi-dev	packages/moxi-dev/src/moxi_dev/pronouns.py	marked, bare = set(), set()	keep	set	set
+moxi-dev	packages/moxi-dev/src/moxi_dev/pronouns.py	hits, used = [], set()	keep	set	set
+moxi-dev	packages/moxi-dev/src/moxi_dev/pronouns.py	__all__ = ["CODE", "FIX", "Hit", "MARK", "WORD", "check_text", "doc_words", "kind",	keep	MARK	MARK
 moxi-dev	packages/moxi-dev/src/moxi_dev/refs.py	#: For a `.refs-allow` line (`stale`): "unused", "malformed" or "duplicate".	keep	stale	stale
 moxi-dev	packages/moxi-dev/src/moxi_dev/refs.py	exists = (unchecked or any(p == clean or p.endswith("/" + clean) for p in paths)	keep	any	any
 moxi-dev	packages/moxi-dev/src/moxi_dev/refs.py	flags: set[str] = set()	keep	set	set
@@ -7882,6 +7891,7 @@ moxi-dev	packages/moxi-dev/tests/test_naming.py	assert {hit.message.split("'")[1
 moxi-dev	packages/moxi-dev/tests/test_naming.py	hits = [hit for hit in naming.scan(root) if hit.part == "directory"]	keep	directory	directory
 moxi-dev	packages/moxi-dev/tests/test_naming.py	path.parent.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
 moxi-dev	packages/moxi-dev/tests/test_new.py	target.parent.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
+moxi-dev	packages/moxi-dev/tests/test_pronouns.py	path.parent.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
 moxi-dev	packages/moxi-dev/tests/test_refs.py	assert len(found) == 1 and found[0].stale and found[0].text == "GoneName"	keep	stale	stale
 moxi-dev	packages/moxi-dev/tests/test_refs.py	path.parent.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
 moxi-dev	packages/moxi-dev/tests/test_release.py	member	name	directory	member_dir
@@ -9151,16 +9161,39 @@ rounds	packages/rounds/src/moxi_rounds/api.py	`folder`, `notice`, `status`, `end
 rounds	packages/rounds/src/moxi_rounds/api.py	`own_commits` is true for an `empty` build that holds commits of its own. `idle`	use	`own_commits`	`has_own_commits`
 rounds	packages/rounds/src/moxi_rounds/api.py	and `no_folder` each project whose rounds folder can't be worked out.	keep	no_folder	no_folder
 rounds	packages/rounds/src/moxi_rounds/api.py	read, and `no_folder` each project whose rounds folder can't be worked out.	keep	no_folder	no_folder
-rounds	packages/rounds/src/moxi_rounds/asking.py	- `record`: the pointer to where the operator asked it, for a question that is his	keep	record	record
+rounds	packages/rounds/src/moxi_rounds/asking.py	- `record`: the pointer to where the operator asked it, for a question that is the	keep	record	record
 rounds	packages/rounds/src/moxi_rounds/asking.py	_in_build	name	error	exc
 rounds	packages/rounds/src/moxi_rounds/asking.py	`ask("<project>/<slug>", "one sentence", origin=..., actor=...)` appends one	use	actor=	by=
 rounds	packages/rounds/src/moxi_rounds/asking.py	ask	name	actor	by
 rounds	packages/rounds/src/moxi_rounds/asking.py	fields["record"] = record	keep	record	record
-rounds	packages/rounds/src/moxi_rounds/asking.py	is given with `record`, the pointer to where he asked it, and that pointer is its origin.	keep	record	record
+rounds	packages/rounds/src/moxi_rounds/asking.py	is given with `record`, the pointer to where the operator asked it, and that pointer is	keep	record	record
 rounds	packages/rounds/src/moxi_rounds/asking.py	written = write.record(write.Where(home.project, home.folder, slug), actor=actor,	keep	folder	folder
 rounds	packages/rounds/src/moxi_rounds/asking.py	written = write.record(write.Where(home.project, home.folder, slug), actor=by,	use	actor=	by=
 rounds	packages/rounds/src/moxi_rounds/asking.py	written = write.record(write.Where(home.project, home.folder, slug), actor=by,	use	home.folder	home.rounds_dir
 rounds	packages/rounds/src/moxi_rounds/asking.py	written = write.record(write.Where(home.project, home.folder, slug), by=by,	use	home.folder	home.rounds_dir
+rounds	packages/rounds/src/moxi_rounds/batching.py	"members": [{"round": one.name, "stage": one.stage, "tip": one.tip}	keep	round	round
+rounds	packages/rounds/src/moxi_rounds/batching.py	recorded = {(one.get("round"), one.get("stage"), one.get("tip"))	keep	round	round
+rounds	packages/rounds/src/moxi_rounds/batching.py	QueueGit(self.root).run_git("branch", "-D", "--quiet", branch, ok=(0, 1))	keep	ok	ok
+rounds	packages/rounds/src/moxi_rounds/batching.py	_builder, lead = self.people(str(one["round"]), str(one["stage"]))	keep	round	round
+rounds	packages/rounds/src/moxi_rounds/batching.py	elif any(one.get("kind") == PUSH_FAILED for one in batch.runs):	keep	any	any
+rounds	packages/rounds/src/moxi_rounds/batching.py	f"{one['round']} {one['stage']} at {str(one['landing'])[:12]} (lead "	keep	round	round
+rounds	packages/rounds/src/moxi_rounds/batching.py	f"{said} It covers your landing of {one['round']} "	keep	round	round
+rounds	packages/rounds/src/moxi_rounds/batching.py	f"{self.people(str(one['round']), str(one['stage']))[1] or 'none'})"	keep	round	round
+rounds	packages/rounds/src/moxi_rounds/batching.py	found.append({"round": event.get("round"), "stage": event.get("stage"),	keep	round	round
+rounds	packages/rounds/src/moxi_rounds/batching.py	if any(one.get("kind") == READ and one.get("reading") == ci.PENDING	keep	any	any
+rounds	packages/rounds/src/moxi_rounds/batching.py	if any(one.get("kind") == RERUN and one.get("why") == CANCELLED_WHY	keep	any	any
+rounds	packages/rounds/src/moxi_rounds/batching.py	if not any(one.get("kind") == PUSHED for one in batch.runs):	keep	any	any
+rounds	packages/rounds/src/moxi_rounds/batching.py	n = max((one.n for one in queue.batches), default=0) + 1	keep	default	default
+rounds	packages/rounds/src/moxi_rounds/batching.py	queue_file.append(self.repo, {"event": kind, "round": member.name,	keep	round	round
+rounds	packages/rounds/src/moxi_rounds/batching.py	return any(one.n < batch.n	keep	any	any
+rounds	packages/rounds/src/moxi_rounds/batching.py	return any(path in said	keep	any	any
+rounds	packages/rounds/src/moxi_rounds/batching.py	return lead, [one["round"], one["stage"]]	keep	round	round
+rounds	packages/rounds/src/moxi_rounds/batching.py	return not any(one.get("kind") == GAVE_UP and one.get("head") == head	keep	any	any
+rounds	packages/rounds/src/moxi_rounds/batching.py	return self._run(*args, ok=ok)	keep	ok	ok
+rounds	packages/rounds/src/moxi_rounds/batching.py	self.drop_branch(batch.branch, ref if any(	keep	any	any
+rounds	packages/rounds/src/moxi_rounds/batching.py	self.place.parent.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
+rounds	packages/rounds/src/moxi_rounds/batching.py	str(batch.candidate), ok=(0, 1, 128))	keep	ok	ok
+rounds	packages/rounds/src/moxi_rounds/batching.py	values = {"round": f"queue/{self.repo}", "stage": batch.id, "repo": self.repo,	keep	round	round
 rounds	packages/rounds/src/moxi_rounds/board.py	"closed": one.state.status != states.OPEN,	keep	closed	closed
 rounds	packages/rounds/src/moxi_rounds/board.py	"opened": opened.get("at"), "standing": str(versions.standing(state)),	keep	opened	opened
 rounds	packages/rounds/src/moxi_rounds/board.py	"strip", "tenth_act", "EVENT_STEPS", "event_step", "events_of", "record",	keep	record	record
@@ -9205,6 +9238,8 @@ rounds	packages/rounds/src/moxi_rounds/builds.py	have = set(git.present(commit f
 rounds	packages/rounds/src/moxi_rounds/builds.py	head=head, merge_base=base, own_commits=own)	use	own_commits=	has_own_commits=
 rounds	packages/rounds/src/moxi_rounds/builds.py	if status.state == GONE or (status.state == EMPTY and not status.own_commits):	use	status.own_commits	status.has_own_commits
 rounds	packages/rounds/src/moxi_rounds/builds.py	taken_back: set[str] = set()	keep	set	set
+rounds	packages/rounds/src/moxi_rounds/builds.py	"""One other open build a build shares commits with: the `round` and `stage` that	keep	round	round
+rounds	packages/rounds/src/moxi_rounds/builds.py	REFUSED = "refused"	keep	refused	refused
 rounds	packages/rounds/src/moxi_rounds/by_branch.py	"""The open build a worktree holds: the `round` it is in, its `stage`, and the	keep	round	round
 rounds	packages/rounds/src/moxi_rounds/by_branch.py	__all__ = ["Found", "find", "open_on"]	keep	find	find
 rounds	packages/rounds/src/moxi_rounds/by_branch.py	for summary in index.rounds(home.project, home.folder):	use	home.folder	home.rounds_dir
@@ -9258,7 +9293,7 @@ rounds	packages/rounds/src/moxi_rounds/cli.py	frozen = freezing.freeze(args.roun
 rounds	packages/rounds/src/moxi_rounds/cli.py	frozen = freezing.freeze(args.round, by=_actor(args),	keep	round	round
 rounds	packages/rounds/src/moxi_rounds/cli.py	given = [flag for flag, value in (("ROUND", args.round), ("--by", args.by),	keep	round	round
 rounds	packages/rounds/src/moxi_rounds/cli.py	help="a pointer to where the operator gave the go")	keep	help	help
-rounds	packages/rounds/src/moxi_rounds/cli.py	help="a pointer to where the operator gave the go, when he did")	keep	help	help
+rounds	packages/rounds/src/moxi_rounds/cli.py	help="a pointer to where the operator gave the go, if the operator did")	keep	help	help
 rounds	packages/rounds/src/moxi_rounds/cli.py	help="a pointer to where the operator said it, one token: "	keep	help	help
 rounds	packages/rounds/src/moxi_rounds/cli.py	help="a pointer to where the question came from, one token: "	keep	help	help
 rounds	packages/rounds/src/moxi_rounds/cli.py	help="a project's key, to keep the listing to that project; "	keep	help	help
@@ -9268,8 +9303,11 @@ rounds	packages/rounds/src/moxi_rounds/cli.py	help="build on the stage's branch 
 rounds	packages/rounds/src/moxi_rounds/cli.py	help="end the run's whole process tree after N seconds, in place "	keep	help	help
 rounds	packages/rounds/src/moxi_rounds/cli.py	help="how many minutes the --slice before it is given")	keep	help	help
 rounds	packages/rounds/src/moxi_rounds/cli.py	help="in a repo that declares ci, run the repo's declared check in "	keep	help	help
+rounds	packages/rounds/src/moxi_rounds/cli.py	help="in a repo that lands through its queue, join as an urgent "	keep	help	help
+rounds	packages/rounds/src/moxi_rounds/cli.py	help="in a repo that lands through its queue, take the build "	keep	help	help
 rounds	packages/rounds/src/moxi_rounds/cli.py	help="in place of --from, for a question that came up in the "	keep	help	help
 rounds	packages/rounds/src/moxi_rounds/cli.py	help="in place of --from, for a question that is the "	keep	help	help
+rounds	packages/rounds/src/moxi_rounds/cli.py	help="lift the repo's pause, once what paused it is dealt with")	keep	help	help
 rounds	packages/rounds/src/moxi_rounds/cli.py	help="list the questions of the round or the project")	keep	help	help
 rounds	packages/rounds/src/moxi_rounds/cli.py	help="list the rounds that have ended, not the open ones")	keep	help	help
 rounds	packages/rounds/src/moxi_rounds/cli.py	help="list what waits on the operator")	keep	help	help
@@ -9298,6 +9336,8 @@ rounds	packages/rounds/src/moxi_rounds/cli.py	help="the lead's decision that wha
 rounds	packages/rounds/src/moxi_rounds/cli.py	help="the lead's mark that a minor or note finding of a build "	keep	help	help
 rounds	packages/rounds/src/moxi_rounds/cli.py	help="the new round's name, <project>/<slug>: a project's key "	keep	help	help
 rounds	packages/rounds/src/moxi_rounds/cli.py	help="the question, one sentence on one line; or the id of a "	keep	help	help
+rounds	packages/rounds/src/moxi_rounds/cli.py	help="the queue project whose lander this is")	keep	help	help
+rounds	packages/rounds/src/moxi_rounds/cli.py	help="the queue project; left out, every project whose land is "	keep	help	help
 rounds	packages/rounds/src/moxi_rounds/cli.py	help="the report's file, with its data block")	keep	help	help
 rounds	packages/rounds/src/moxi_rounds/cli.py	help="the repos and paths a standing ruling applies to: KEY or "	keep	help	help
 rounds	packages/rounds/src/moxi_rounds/cli.py	help="the round the question is asked in, <project>/<slug>, or "	keep	help	help
@@ -9320,7 +9360,7 @@ rounds	packages/rounds/src/moxi_rounds/cli.py	help="what is marked: a question, 
 rounds	packages/rounds/src/moxi_rounds/cli.py	help="what is ruled, when it is a question: Q<n> (P<n> on a "	keep	help	help
 rounds	packages/rounds/src/moxi_rounds/cli.py	help="who builds it")	keep	help	help
 rounds	packages/rounds/src/moxi_rounds/cli.py	help="whose drop it is: the operator's, of any round or "	keep	help	help
-rounds	packages/rounds/src/moxi_rounds/cli.py	help="with --by operator, a pointer to where he dropped it; "	keep	help	help
+rounds	packages/rounds/src/moxi_rounds/cli.py	help="with --by operator, a pointer to where the operator dropped it; "	keep	help	help
 rounds	packages/rounds/src/moxi_rounds/cli.py	help="with --close or --accept-risk, a pointer to where the "	keep	help	help
 rounds	packages/rounds/src/moxi_rounds/cli.py	help="with --done, a pointer to the report, commit or "	keep	help	help
 rounds	packages/rounds/src/moxi_rounds/cli.py	help="with --fixed, a commit of the fix, on the build's "	keep	help	help
@@ -9331,7 +9371,7 @@ rounds	packages/rounds/src/moxi_rounds/cli.py	help="with --questions, for a roun
 rounds	packages/rounds/src/moxi_rounds/cli.py	help="with --questions, write both forms into this folder, as "	keep	help	help
 rounds	packages/rounds/src/moxi_rounds/cli.py	help="with --records-only, a pointer to the record of the "	keep	help	help
 rounds	packages/rounds/src/moxi_rounds/cli.py	help="with --shown, a pointer to where he was shown them, one "	keep	help	help
-rounds	packages/rounds/src/moxi_rounds/cli.py	help="with Q<n>, the key of the option he chose, one the "	keep	help	help
+rounds	packages/rounds/src/moxi_rounds/cli.py	help="with Q<n>, the key of the option the operator chose, one the "	keep	help	help
 rounds	packages/rounds/src/moxi_rounds/cli.py	help="with an ID, take the option under this key out; to "	keep	help	help
 rounds	packages/rounds/src/moxi_rounds/cli.py	help="with no stage: one worker's piece of it, its id and "	keep	help	help
 rounds	packages/rounds/src/moxi_rounds/cli.py	help="with no stage: the project whose repo the stage is "	keep	help	help
@@ -9353,7 +9393,7 @@ rounds	packages/rounds/src/moxi_rounds/cli.py	name = args.round	keep	round	round
 rounds	packages/rounds/src/moxi_rounds/cli.py	name = by_branch.find(os.getcwd(), verb="next").round	keep	round	round
 rounds	packages/rounds/src/moxi_rounds/cli.py	name, stage = args.round, args.stage	keep	round	round
 rounds	packages/rounds/src/moxi_rounds/cli.py	name, stage = found.round, found.stage	keep	round	round
-rounds	packages/rounds/src/moxi_rounds/cli.py	one named, and `--json` gives it as data. `show` and `list` record nothing. A verb	keep	show	show
+rounds	packages/rounds/src/moxi_rounds/cli.py	project, or of the one named, and `--json` gives it as data. `show` and `list` record	keep	show	show
 rounds	packages/rounds/src/moxi_rounds/cli.py	opened = opening.open_round(args.round, description=args.description,	keep	round	round
 rounds	packages/rounds/src/moxi_rounds/cli.py	parser = verbs.add_parser("ask", help=said, description=said)	keep	help	help
 rounds	packages/rounds/src/moxi_rounds/cli.py	parser = verbs.add_parser("check", help=said, description=said)	keep	help	help
@@ -9361,10 +9401,12 @@ rounds	packages/rounds/src/moxi_rounds/cli.py	parser = verbs.add_parser("commiss
 rounds	packages/rounds/src/moxi_rounds/cli.py	parser = verbs.add_parser("drop", help=said, description=said)	keep	help	help
 rounds	packages/rounds/src/moxi_rounds/cli.py	parser = verbs.add_parser("finish", help=said, description=said)	keep	help	help
 rounds	packages/rounds/src/moxi_rounds/cli.py	parser = verbs.add_parser("fold", help=said, description=said)	keep	help	help
+rounds	packages/rounds/src/moxi_rounds/cli.py	parser = verbs.add_parser("land", help=said, description=said)	keep	help	help
 rounds	packages/rounds/src/moxi_rounds/cli.py	parser = verbs.add_parser("list", help=said, description=said)	keep	help	help
 rounds	packages/rounds/src/moxi_rounds/cli.py	parser = verbs.add_parser("mark", help=said, description=said)	keep	help	help
 rounds	packages/rounds/src/moxi_rounds/cli.py	parser = verbs.add_parser("next", help=said, description=said)	keep	help	help
 rounds	packages/rounds/src/moxi_rounds/cli.py	parser = verbs.add_parser("open", help=said, description=said)	keep	help	help
+rounds	packages/rounds/src/moxi_rounds/cli.py	parser = verbs.add_parser("queue", help=said, description=said)	keep	help	help
 rounds	packages/rounds/src/moxi_rounds/cli.py	parser = verbs.add_parser("rule", help=said, description=said)	keep	help	help
 rounds	packages/rounds/src/moxi_rounds/cli.py	parser = verbs.add_parser("show", help=said, description=said)	keep	help	help
 rounds	packages/rounds/src/moxi_rounds/cli.py	parser = verbs.add_parser("verdict", help=said, description=said)	keep	help	help
@@ -9378,6 +9420,7 @@ rounds	packages/rounds/src/moxi_rounds/cli.py	parser.add_argument("--description
 rounds	packages/rounds/src/moxi_rounds/cli.py	parser.add_argument("--flow", metavar="NAME",	keep	NAME	NAME
 rounds	packages/rounds/src/moxi_rounds/cli.py	parser.add_argument("--minutes", metavar="N", action="append", default=[],	keep	default	default
 rounds	packages/rounds/src/moxi_rounds/cli.py	parser.add_argument("--reason", metavar="TEXT", help="why, in short")	keep	help	help
+rounds	packages/rounds/src/moxi_rounds/cli.py	parser.add_argument("--repo", metavar="KEY", required=True,	keep	required	required
 rounds	packages/rounds/src/moxi_rounds/cli.py	parser.add_argument("--retire", metavar="K", action="append", default=[],	keep	default	default
 rounds	packages/rounds/src/moxi_rounds/cli.py	parser.add_argument("--slice", metavar="ID=TEXT", action="append", default=[],	keep	default	default
 rounds	packages/rounds/src/moxi_rounds/cli.py	parser.add_argument("--timeout-s", metavar="N", type=float, dest="timeout_s",	keep	type	type
@@ -9447,6 +9490,7 @@ rounds	packages/rounds/src/moxi_rounds/commissioning.py	statuses = {(one.round, 
 rounds	packages/rounds/src/moxi_rounds/commissioning.py	statuses = {(one.round, one.build.stage): one.status for one in opened().builds	keep	round	round
 rounds	packages/rounds/src/moxi_rounds/commissioning.py	write.Where(home.project, home.folder, slug), actor=by,	use	actor=	by=
 rounds	packages/rounds/src/moxi_rounds/commissioning.py	write.Where(home.project, home.folder, slug), actor=by,	use	home.folder	home.rounds_dir
+rounds	packages/rounds/src/moxi_rounds/commissioning.py	f"{by.round} {by.landing.stage}, at {by.landing.landing[:12]}: a build "	keep	round	round
 rounds	packages/rounds/src/moxi_rounds/corrections.py	"""How the round `state` is of ended, `closed` or `dropped`, or None while it has	keep	closed	closed
 rounds	packages/rounds/src/moxi_rounds/corrections.py	"KINDS", "kind_of", "item_of", "stands", "live", "find", "standing", "put_by",	keep	find	find
 rounds	packages/rounds/src/moxi_rounds/corrections.py	f"moxi rounds rule {name} {FLOW}{moved.get('was') or 'NAME'} --record PTR")	keep	NAME	NAME
@@ -9498,8 +9542,9 @@ rounds	packages/rounds/src/moxi_rounds/dropping.py	"by": by, "record": record,	k
 rounds	packages/rounds/src/moxi_rounds/dropping.py	"record": record, "tips": [_tip(build)]})	keep	record	record
 rounds	packages/rounds/src/moxi_rounds/dropping.py	**Whose act.** `by` is `OPERATOR` or `LEAD`. The operator drops any round, and `record`	keep	record	record
 rounds	packages/rounds/src/moxi_rounds/dropping.py	-	name	_remove_folders	_remove_dirs
-rounds	packages/rounds/src/moxi_rounds/dropping.py	- `record`: the operator's pointer to where he dropped it; for the lead's drop, a	keep	record	record
-rounds	packages/rounds/src/moxi_rounds/dropping.py	`by` is `OPERATOR` or `LEAD`; `record` the operator's pointer to where he dropped	keep	record	record
+rounds	packages/rounds/src/moxi_rounds/dropping.py	-	name	his_acts	operator_acts
+rounds	packages/rounds/src/moxi_rounds/dropping.py	- `record`: the operator's pointer to where the operator dropped it; for the lead's	keep	record	record
+rounds	packages/rounds/src/moxi_rounds/dropping.py	`by` is `OPERATOR` or `LEAD`; `record` the operator's pointer to where the operator	keep	record	record
 rounds	packages/rounds/src/moxi_rounds/dropping.py	`drop("<project>/<slug>", by=..., record=..., actor=...)` withdraws a round. From then	use	actor=	run_by=
 rounds	packages/rounds/src/moxi_rounds/dropping.py	and the `record` given, the `event` written, and the build's folders the removal	keep	record	record
 rounds	packages/rounds/src/moxi_rounds/dropping.py	drop	name	actor	run_by
@@ -9510,12 +9555,12 @@ rounds	packages/rounds/src/moxi_rounds/dropping.py	finished[0] = any(one.entry i
 rounds	packages/rounds/src/moxi_rounds/dropping.py	found = index.read(home.project, home.folder, slug, env=env)	keep	folder	folder
 rounds	packages/rounds/src/moxi_rounds/dropping.py	found = index.read(home.project, home.folder, slug, env=env)	use	home.folder	home.rounds_dir
 rounds	packages/rounds/src/moxi_rounds/dropping.py	found = moving.arrivals(view.state, view.project_state, name, closed=on_closed)	use	closed=	on_closed=
-rounds	packages/rounds/src/moxi_rounds/dropping.py	held.append(f"its opening, on his go ({event['record']})")	keep	record	record
+rounds	packages/rounds/src/moxi_rounds/dropping.py	held.append(f"its opening, on the operator's go ({event['record']})")	keep	record	record
 rounds	packages/rounds/src/moxi_rounds/dropping.py	if event["type"] == "round.opened" and event.get("record") is not None:	keep	record	record
 rounds	packages/rounds/src/moxi_rounds/dropping.py	if found.status.own_commits:	use	found.status.own_commits	found.status.has_own_commits
 rounds	packages/rounds/src/moxi_rounds/dropping.py	if question.record is not None]	keep	record	record
 rounds	packages/rounds/src/moxi_rounds/dropping.py	moving.arrivals(view.state, view.project_state, name, closed=on_closed)	use	closed=	on_closed=
-rounds	packages/rounds/src/moxi_rounds/dropping.py	operator's acts, and `record` points to why. What counts as his (`his_acts`): a ruling,	keep	record	record
+rounds	packages/rounds/src/moxi_rounds/dropping.py	none of the operator's acts, and `record` points to why. What counts as the operator's	keep	record	record
 rounds	packages/rounds/src/moxi_rounds/dropping.py	write.Where(home.project, home.folder, slug), actor=actor,	keep	folder	folder
 rounds	packages/rounds/src/moxi_rounds/dropping.py	write.Where(home.project, home.folder, slug), actor=run_by,	use	actor=	by=
 rounds	packages/rounds/src/moxi_rounds/dropping.py	write.Where(home.project, home.folder, slug), actor=run_by,	use	home.folder	home.rounds_dir
@@ -9553,6 +9598,8 @@ rounds	packages/rounds/src/moxi_rounds/events.py	EventType("stage.declared", ("i
 rounds	packages/rounds/src/moxi_rounds/events.py	EventType("thread.decided", ("thread", "decision", "record")),	keep	record	record
 rounds	packages/rounds/src/moxi_rounds/events.py	EventType("wait.marked", ("id", "state", "commits", "record")),	keep	record	record
 rounds	packages/rounds/src/moxi_rounds/events.py	required=("id", "record", "kind")),	keep	record	record
+rounds	packages/rounds/src/moxi_rounds/events.py	# `record`, the pointer to where the lead named what edited the design.	keep	record	record
+rounds	packages/rounds/src/moxi_rounds/events.py	"record"),	keep	record	record
 rounds	packages/rounds/src/moxi_rounds/export.py	"""One export: `name` is the round or the project it is of, `round` the round's name	keep	round	round
 rounds	packages/rounds/src/moxi_rounds/export.py	"""What `folder` is to rounds, once every link on the way is followed: the rounds	keep	folder	folder
 rounds	packages/rounds/src/moxi_rounds/export.py	"""What `folder` is to rounds, once every link on the way is followed: the rounds	use	`folder`	`export_dir`
@@ -9591,12 +9638,17 @@ rounds	packages/rounds/src/moxi_rounds/export.py	summary = index.read(home.proje
 rounds	packages/rounds/src/moxi_rounds/export.py	waiting	name	closed	on_closed
 rounds	packages/rounds/src/moxi_rounds/export.py	write	name	error	exc
 rounds	packages/rounds/src/moxi_rounds/export.py	write	name	folder	export_dir
+rounds	packages/rounds/src/moxi_rounds/failures.py	return any(one.get("job") == failure.get("job") for one in target)	keep	any	any
+rounds	packages/rounds/src/moxi_rounds/failures.py	return any(one.get("test") == test	keep	any	any
 rounds	packages/rounds/src/moxi_rounds/findings.py	until = min(ends, default=None)	keep	default	default
 rounds	packages/rounds/src/moxi_rounds/findings.py	used = set()	keep	set	set
 rounds	packages/rounds/src/moxi_rounds/finish_gates.py	CHANGED = "changed"	keep	changed	changed
 rounds	packages/rounds/src/moxi_rounds/finish_gates.py	every = {"name": name, "closed": on_closed, "register": register,	use	"closed"	"on_closed"
 rounds	packages/rounds/src/moxi_rounds/finish_gates.py	for one in steps.held_by(state, stage, name=name, closed=on_closed):	use	closed=	on_closed=
 rounds	packages/rounds/src/moxi_rounds/finish_gates.py	unmet	name	closed	on_closed
+rounds	packages/rounds/src/moxi_rounds/finish_gates.py	said = ", ".join(f"{one.round} {one.stage}" for one in overlapping)	keep	round	round
+rounds	packages/rounds/src/moxi_rounds/finish_gates.py	f"other build first: moxi rounds show {overlapping[0].round}")	keep	round	round
+rounds	packages/rounds/src/moxi_rounds/finish_gates.py	other = f"{one.round} {one.stage}"	keep	round	round
 rounds	packages/rounds/src/moxi_rounds/finish_lock.py	"stale"]	keep	stale	stale
 rounds	packages/rounds/src/moxi_rounds/finish_lock.py	- `found` reads what holds the ref now, and `stale` each lock in this format older than	keep	stale	stale
 rounds	packages/rounds/src/moxi_rounds/finish_lock.py	_, out = self._run("for-each-ref", "--format=%(objectname) %(refname)", *wanted)	keep	refusing	refusing
@@ -9607,7 +9659,6 @@ rounds	packages/rounds/src/moxi_rounds/finish_lock.py	code, out = self._run("rev
 rounds	packages/rounds/src/moxi_rounds/finish_lock.py	found["round"], found["stage"])	keep	round	round
 rounds	packages/rounds/src/moxi_rounds/finish_lock.py	holder	name	actor	by
 rounds	packages/rounds/src/moxi_rounds/finish_lock.py	take	name	actor	by
-rounds	packages/rounds/src/moxi_rounds/finishing.py	_MergeGit.merge	name	error	exc
 rounds	packages/rounds/src/moxi_rounds/finishing.py	_clean_up	name	error	exc
 rounds	packages/rounds/src/moxi_rounds/finishing.py	_command	name	error	exc
 rounds	packages/rounds/src/moxi_rounds/finishing.py	_push	name	error	exc
@@ -9718,6 +9769,12 @@ rounds	packages/rounds/src/moxi_rounds/index.py	return {"how": end.how, "by": en
 rounds	packages/rounds/src/moxi_rounds/index.py	return {"how": end.how, "by": end.by, "record": end.record, "at": end.at}	keep	record	record
 rounds	packages/rounds/src/moxi_rounds/index.py	rounds	name	folder	rounds_dir
 rounds	packages/rounds/src/moxi_rounds/index.py	seen = set()	keep	set	set
+rounds	packages/rounds/src/moxi_rounds/joining.py	add({"event": queue_file.JOIN, "round": name, "stage": stage, "tip": tip,	keep	round	round
+rounds	packages/rounds/src/moxi_rounds/joining.py	add({"event": queue_file.LEFT, "round": name, "stage": stage,	keep	round	round
+rounds	packages/rounds/src/moxi_rounds/lander.py	ENV_KEPT = ("PATH", "HOME", "USER", "LANG", "SSH_AUTH_SOCK", "GH_TOKEN", "GITHUB_TOKEN",	keep	HOME	HOME
+rounds	packages/rounds/src/moxi_rounds/lander.py	land --repo KEY`, in the repo's root, with the starter's `PATH`, `HOME`, git's and gh's	keep	HOME	HOME
+rounds	packages/rounds/src/moxi_rounds/lander.py	log.parent.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
+rounds	packages/rounds/src/moxi_rounds/lander.py	path.parent.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
 rounds	packages/rounds/src/moxi_rounds/listing.py	"""An open waiting item of an open round, as the index keeps it: the `round` that	keep	round	round
 rounds	packages/rounds/src/moxi_rounds/listing.py	"no_folder": list(self.unplaced)}	keep	no_folder	no_folder
 rounds	packages/rounds/src/moxi_rounds/listing.py	"unreadable": list(self.unreadable), "no_folder": list(self.unplaced)}	keep	no_folder	no_folder
@@ -9761,6 +9818,7 @@ rounds	packages/rounds/src/moxi_rounds/listing.py	unreadable=tuple(dict.fromkeys
 rounds	packages/rounds/src/moxi_rounds/listing.py	waiting	name	no_folder	unplaced
 rounds	packages/rounds/src/moxi_rounds/listing.py	which is read then with the open builds `opened` gives, or with `seen` where the	keep	opened	opened
 rounds	packages/rounds/src/moxi_rounds/listing.py	which is read then with the open builds `opened` gives; and where a question of	keep	opened	opened
+rounds	packages/rounds/src/moxi_rounds/listing.py	((other.round, other.stage, other.relation) for other in one.shares),	keep	round	round
 rounds	packages/rounds/src/moxi_rounds/log.py	"""The log of the project whose rounds folder is `folder`."""	keep	folder	folder
 rounds	packages/rounds/src/moxi_rounds/log.py	"""The log of the project whose rounds folder is `folder`."""	use	`folder`	`rounds_dir`
 rounds	packages/rounds/src/moxi_rounds/log.py	"""The log of the round whose folder is `folder`."""	keep	folder	folder
@@ -9832,6 +9890,7 @@ rounds	packages/rounds/src/moxi_rounds/open_builds.py	for summary in index.round
 rounds	packages/rounds/src/moxi_rounds/open_builds.py	found = {"round": self.round, "stage": one.stage, "repo": one.repo,	keep	round	round
 rounds	packages/rounds/src/moxi_rounds/open_builds.py	found.update({one.build.stage: one for one in listed.builds if one.round == name})	keep	round	round
 rounds	packages/rounds/src/moxi_rounds/open_builds.py	return {name: OpenBuild(found.round, found.build, problem=exc)	keep	round	round
+rounds	packages/rounds/src/moxi_rounds/open_builds.py	"shares": [{"round": one.round, "stage": one.stage, "relation": one.relation}	keep	round	round
 rounds	packages/rounds/src/moxi_rounds/opening.py	- `record`: the pointer to where the operator gave the go, kept as given once its	keep	record	record
 rounds	packages/rounds/src/moxi_rounds/opening.py	Opened	name	folder	round_dir
 rounds	packages/rounds/src/moxi_rounds/opening.py	`open_round("<project>/<slug>", description=..., actor=...)` makes the round's folder in	use	actor=	by=
@@ -9923,6 +9982,16 @@ rounds	packages/rounds/src/moxi_rounds/questions.py	reached	name	closed	on_close
 rounds	packages/rounds/src/moxi_rounds/questions.py	return any(event["type"] == "round.closed" for event in events)	keep	any	any
 rounds	packages/rounds/src/moxi_rounds/questions.py	return f"{letter}{max(numbers, default=0) + 1}"	keep	default	default
 rounds	packages/rounds/src/moxi_rounds/questions.py	return set(old) <= set(new)	keep	set	set
+rounds	packages/rounds/src/moxi_rounds/queue_ci.py	if any(run.get("conclusion") == CANCELLED for run in runs):	keep	any	any
+rounds	packages/rounds/src/moxi_rounds/queue_ci.py	return Local(argv, code, round(time.monotonic() - began, 1), str(self.local_log))	keep	round	round
+rounds	packages/rounds/src/moxi_rounds/queue_file.py	for index, one in enumerate(self.queued(), start=1):	keep	start	start
+rounds	packages/rounds/src/moxi_rounds/queue_file.py	for line, event in enumerate(events, start=1):	keep	start	start
+rounds	packages/rounds/src/moxi_rounds/queue_file.py	key = (event.get("round"), event.get("stage"))	keep	round	round
+rounds	packages/rounds/src/moxi_rounds/queue_file.py	members=tuple((str(one["round"]), str(one["stage"]), str(one["tip"]))	keep	round	round
+rounds	packages/rounds/src/moxi_rounds/queue_file.py	name=str(event.get("round")), stage=str(event.get("stage")),	keep	round	round
+rounds	packages/rounds/src/moxi_rounds/queue_file.py	path.parent.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
+rounds	packages/rounds/src/moxi_rounds/queue_log.py	without another member) writes `queue.requeued` for it, so the gates, `next` and `show`	keep	show	show
+rounds	packages/rounds/src/moxi_rounds/queue_view.py	for position, member in enumerate(members, start=1):	keep	start	start
 rounds	packages/rounds/src/moxi_rounds/readback.py	"record": ruling.record, "supersedes": ruling.supersedes,	keep	record	record
 rounds	packages/rounds/src/moxi_rounds/readback.py	if time is not None), default=None)	keep	default	default
 rounds	packages/rounds/src/moxi_rounds/removal.py	-	name	_real_folders	_real_dirs
@@ -9973,6 +10042,9 @@ rounds	packages/rounds/src/moxi_rounds/repairs.py	resync.repaired	name	error	exc
 rounds	packages/rounds/src/moxi_rounds/repairs.py	round_dir = home.round_folder(slug)	use	home.round_folder	home.round_dir
 rounds	packages/rounds/src/moxi_rounds/repairs.py	written = write.record(write.Where(home.project, home.folder, slug), actor=by,	use	actor=	by=
 rounds	packages/rounds/src/moxi_rounds/repairs.py	written = write.record(write.Where(home.project, home.folder, slug), actor=by,	use	home.folder	home.rounds_dir
+rounds	packages/rounds/src/moxi_rounds/repairs.py	a pointer, `record`, to where the lead named what edited the two: nothing it reads	keep	record	record
+rounds	packages/rounds/src/moxi_rounds/repairs.py	`record` is the pointer to where the lead named what edited the design and its	keep	record	record
+rounds	packages/rounds/src/moxi_rounds/repairs.py	"what": DIGEST, "version": version.n, "record": record,	keep	record	record
 rounds	packages/rounds/src/moxi_rounds/report_block.py	problem = Problem(found.line_of("kind"), f"`kind` {says.check(kind)}",	keep	ok	ok
 rounds	packages/rounds/src/moxi_rounds/ruling.py	"record": record, "kind": form.kind}	keep	record	record
 rounds	packages/rounds/src/moxi_rounds/ruling.py	- `record`: the pointer to where the operator said it.	keep	record	record
@@ -10055,13 +10127,19 @@ rounds	packages/rounds/src/moxi_rounds/showing.py	state = states.fold(log.read_r
 rounds	packages/rounds/src/moxi_rounds/showing.py	state = states.fold(log.read_round(log.round_log(home.round_folder(slug))))	use	home.round_folder	home.round_dir
 rounds	packages/rounds/src/moxi_rounds/showing.py	state, on_closed=found.closed,	use	found.closed	found.on_closed
 rounds	packages/rounds/src/moxi_rounds/showing.py	what = (f"the round {one['round']}" if one["round"] is not None else	keep	round	round
+rounds	packages/rounds/src/moxi_rounds/showing.py	"record": event.get("record")}	keep	record	record
+rounds	packages/rounds/src/moxi_rounds/showing.py	f"{str(change.get('now'))[:12]}, record {one.get('record')}")	keep	record	record
+rounds	packages/rounds/src/moxi_rounds/showing.py	((other["round"], other["stage"], other.get("relation", builds.OVERLAPS))	keep	round	round
+rounds	packages/rounds/src/moxi_rounds/showing.py	if any(one.state == decisions.OPEN for one in held):	keep	any	any
+rounds	packages/rounds/src/moxi_rounds/showing.py	if isinstance(held, Mapping) and not {"round_time_s", "longest_gap"} <= set(held):	keep	set	set
+rounds	packages/rounds/src/moxi_rounds/showing.py	if any(one.state == decisions.OPEN for one in decisions.reached(state)):	keep	any	any
 rounds	packages/rounds/src/moxi_rounds/shown.py	_logs	name	error	exc
-rounds	packages/rounds/src/moxi_rounds/shown.py	`S4,S5`. `record` points to where he was shown them: the message, the moment in a	keep	record	record
+rounds	packages/rounds/src/moxi_rounds/shown.py	`S4,S5`. `record` points to where the operator was shown them: the message, the	keep	record	record
 rounds	packages/rounds/src/moxi_rounds/shown.py	and pointers.number(record) < pointers.number(ruling.record)):	keep	record	record
 rounds	packages/rounds/src/moxi_rounds/shown.py	and pointers.shape(ruling.record) == pointers.COMMS	keep	record	record
 rounds	packages/rounds/src/moxi_rounds/shown.py	events = log.read_round(log.round_log(home.round_folder(slug)))	use	.round_folder	.round_dir
 rounds	packages/rounds/src/moxi_rounds/shown.py	events = log.read_round(log.round_log(home.round_folder(slug)))	use	home.round_folder	home.round_dir
-rounds	packages/rounds/src/moxi_rounds/shown.py	f"{record} came before {ruling.record}, where he said "	keep	record	record
+rounds	packages/rounds/src/moxi_rounds/shown.py	f"{record} came before {ruling.record}, where the operator said "	keep	record	record
 rounds	packages/rounds/src/moxi_rounds/shown.py	for slug in folders.slugs(home.folder):	keep	folder	folder
 rounds	packages/rounds/src/moxi_rounds/shown.py	for slug in folders.slugs(home.folder):	use	home.folder	home.rounds_dir
 rounds	packages/rounds/src/moxi_rounds/shown.py	for summary in (register, *index.rounds(home.project, home.folder, env=env)):	keep	folder	folder
@@ -10187,6 +10265,9 @@ rounds	packages/rounds/src/moxi_rounds/sweeping.py	return [part for value in pro
 rounds	packages/rounds/src/moxi_rounds/sweeping.py	return {"round": name, "stage": str(commissioned.get("stage")),	keep	round	round
 rounds	packages/rounds/src/moxi_rounds/sweeping.py	run	name	stop	exc
 rounds	packages/rounds/src/moxi_rounds/sweeping.py	where.parent.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
+rounds	packages/rounds/src/moxi_rounds/telling.py	- `refused`: comms refused it (`why` holds its code and words, `never-bound` for a name	keep	refused	refused
+rounds	packages/rounds/src/moxi_rounds/telling.py	REFUSED = "refused"	keep	refused	refused
+rounds	packages/rounds/src/moxi_rounds/telling.py	if any(one.get("key") == key for one in queue.told):	keep	any	any
 rounds	packages/rounds/src/moxi_rounds/tracing.py	"stale", "stale_data", "recorded", "passes", "is_asked", "applies_to",	keep	stale	stale
 rounds	packages/rounds/src/moxi_rounds/tracing.py	"stale": [stale_data(one) for one in self.stale]}	keep	stale	stale
 rounds	packages/rounds/src/moxi_rounds/tracing.py	- `closed`: answers whether a round, by name, is closed, for a question parked	use	`closed`	`on_closed`
@@ -10229,6 +10310,7 @@ rounds	packages/rounds/src/moxi_rounds/versions.py	file	name	folder	round_dir
 rounds	packages/rounds/src/moxi_rounds/versions.py	firm: set[int] = set()	keep	set	set
 rounds	packages/rounds/src/moxi_rounds/versions.py	sent: set[int] = set()	keep	set	set
 rounds	packages/rounds/src/moxi_rounds/versions.py	unchanged	name	folder	round_dir
+rounds	packages/rounds/src/moxi_rounds/versions.py	__all__ = ["DESIGN_FILE", "file", "current", "find", "digest", "held", "declarations",	keep	find	find
 rounds	packages/rounds/src/moxi_rounds/waits.py	"at": self.at, "raised": self.raised, "record": self.record,	keep	record	record
 rounds	packages/rounds/src/moxi_rounds/waits.py	(`record`), who marked it (`done_by`), when (`done_at`) and its line	keep	record	record
 rounds	packages/rounds/src/moxi_rounds/waits.py	**{**owed.__dict__, "state": DONE, "record": mark.get("record"),	keep	record	record
@@ -10623,6 +10705,10 @@ rounds	packages/rounds/tests/test_closing.py	test_what_a_close_waits_for_is_read
 rounds	packages/rounds/tests/test_closing.py	types	name	folder	round_dir
 rounds	packages/rounds/tests/test_closing.py	verdict	name	folder	round_dir
 rounds	packages/rounds/tests/test_closing.py	waits	name	folder	round_dir
+rounds	packages/rounds/tests/test_closing.py	shown = run(capsys, "show", ROUND).splitlines()	keep	show	show
+rounds	packages/rounds/tests/test_closing.py	data = {one["id"]: one for one in json.loads(run(capsys, "show", ROUND,	keep	show	show
+rounds	packages/rounds/tests/test_closing.py	log.append(path, "build.dropped", {"stage": "B1", "by": "lead", "record": PTR},	keep	record	record
+rounds	packages/rounds/tests/test_closing.py	ended = json.loads(run(capsys, "show", ROUND, "--json"))["ended"]	keep	show	show
 rounds	packages/rounds/tests/test_commission.py	"asked_at": "2026-01-02T03:04:05Z"}, actor="planner")	use	actor=	by=
 rounds	packages/rounds/tests/test_commission.py	"build": "0123456789abcdef", "round": ROUND, "stage": "B1", "repo": "proj-a",	keep	round	round
 rounds	packages/rounds/tests/test_commission.py	"builder", "record", "host")} == {	keep	record	record
@@ -10677,7 +10763,7 @@ rounds	packages/rounds/tests/test_corrections.py	"revokes": "C1", "record": "com
 rounds	packages/rounds/tests/test_corrections.py	"rules": "hold:B2"}, actor="planner")	use	actor=	by=
 rounds	packages/rounds/tests/test_corrections.py	"state": "open", "revokes": "C1", "record": "comms:13", "kind": "process",	keep	record	record
 rounds	packages/rounds/tests/test_corrections.py	"state": "open", "revokes": "S2", "record": "comms:13", "kind": "process",	keep	record	record
-rounds	packages/rounds/tests/test_corrections.py	"text": "He took it back.", "revokes": "C1", "record": "comms:13",	keep	record	record
+rounds	packages/rounds/tests/test_corrections.py	"text": "The operator took it back.", "revokes": "C1", "record": "comms:13",	keep	record	record
 rounds	packages/rounds/tests/test_corrections.py	@pytest.mark.parametrize("how", ["closed", "dropped"])	keep	closed	closed
 rounds	packages/rounds/tests/test_corrections.py	{"id": "C1", "record": "comms:12", "kind": "process",	keep	record	record
 rounds	packages/rounds/tests/test_credit.py	"after": []}, actor="planner")	use	actor=	by=
@@ -11096,6 +11182,13 @@ rounds	packages/rounds/tests/test_index.py	other.folder.mkdir()	use	other.folder
 rounds	packages/rounds/tests/test_index.py	paths.index_file().parent.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
 rounds	packages/rounds/tests/test_index.py	test_an_unreadable_log_is_shown_as_unreadable_and_not_as_an_empty_round	name	file	fh
 rounds	packages/rounds/tests/test_index.py	write.record(at, actor="planner", at=AT, event=lambda view, result: write.Entry(	use	actor=	by=
+rounds	packages/rounds/tests/test_lander.py	"members": [{"round": ROUND, "stage": "B1", "tip": "a" * 40}]})	keep	round	round
+rounds	packages/rounds/tests/test_lander.py	assert any("joined as it exited" in line for line in said), said	keep	any	any
+rounds	packages/rounds/tests/test_lander.py	env = {"PATH": "/bin", "HOME": "/home/u", "SSH_AUTH_SOCK": "/run/agent",	keep	HOME	HOME
+rounds	packages/rounds/tests/test_lander.py	lander.lock_file(REPO).parent.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
+rounds	packages/rounds/tests/test_lander.py	one.wait(timeout=30)	keep	timeout	timeout
+rounds	packages/rounds/tests/test_lander.py	queue_file.append(REPO, {"event": kind, "round": name, "stage": stage,	keep	round	round
+rounds	packages/rounds/tests/test_lander.py	queue_file.append(REPO, {"event": queue_file.JOIN, "round": name, "stage": stage,	keep	round	round
 rounds	packages/rounds/tests/test_list.py	"folder": str(rounds.parent.parent / "notes-b" / "rounds" / "c-round"),	keep	folder	folder
 rounds	packages/rounds/tests/test_list.py	"how": "dropped", "by": "lead", "record": "comms:30", "at": T6,	keep	record	record
 rounds	packages/rounds/tests/test_list.py	"how": "dropped", "by": "lead", "record": "comms:30", "at": T6}	keep	record	record
@@ -11146,6 +11239,7 @@ rounds	packages/rounds/tests/test_log.py	{"id": f"C{number + 1}", "text": "x" * 
 rounds	packages/rounds/tests/test_mark.py	rounds	name	folder	rounds_dir
 rounds	packages/rounds/tests/test_module.py	assert any(one.startswith("psutil>=") for one in project["dependencies"])	keep	any	any
 rounds	packages/rounds/tests/test_module.py	assert defined <= set(modules.KNOWN)	keep	set	set
+rounds	packages/rounds/tests/test_module.py	assert set(found.optional) == {"notes", "turns", "comms"}	keep	set	set
 rounds	packages/rounds/tests/test_module.py	assert set(found.stores) == {"index", "sweeps"}	keep	set	set
 rounds	packages/rounds/tests/test_module.py	assert set(found.stores) == {"index"}	keep	set	set
 rounds	packages/rounds/tests/test_moving.py	"record": "comms:20", "kind": "process", "rules": "move:Q1", "question": "Q1",	keep	record	record
@@ -11224,6 +11318,7 @@ rounds	packages/rounds/tests/test_numbers.py	{"stage": "B1", "by": "operator", "
 rounds	packages/rounds/tests/test_numbers.py	{"thread": "T1", "decision": "lead-decision", "record": PTR})	keep	record	record
 rounds	packages/rounds/tests/test_numbers.py	{"version": 2, "digest": "b" * 64, "records_only": True, "record": PTR})	keep	record	record
 rounds	packages/rounds/tests/test_numbers.py	{"version": 3, "digest": "c" * 64, "records_only": True, "record": PTR})	keep	record	record
+rounds	packages/rounds/tests/test_numbers.py	append(built, "round.dropped", {"by": "operator", "record": PTR, "numbers": {}})	keep	record	record
 rounds	packages/rounds/tests/test_open.py	-	name	test_a_flow_the_config_does_not_have_is_refused_and_no_folder_is_made	test_a_flow_the_config_does_not_have_is_refused_and_no_dir_is_made
 rounds	packages/rounds/tests/test_open.py	-	name	test_a_folder_that_already_holds_a_log_is_refused_and_left_as_it_was	test_a_dir_that_already_holds_a_log_is_refused_and_left_as_it_was
 rounds	packages/rounds/tests/test_open.py	-	name	test_a_folder_that_is_there_and_empty_is_opened_into	test_a_dir_that_is_there_and_empty_is_opened_into
@@ -11267,6 +11362,8 @@ rounds	packages/rounds/tests/test_open_builds.py	log.append(path, type_, fields,
 rounds	packages/rounds/tests/test_open_builds.py	opening.open_round(name, description="a placeholder round", actor="planner",	use	actor=	by=
 rounds	packages/rounds/tests/test_open_builds.py	return [(one["round"], one["stage"], one["state"]) for one in found["builds"]]	keep	round	round
 rounds	packages/rounds/tests/test_open_builds.py	with logs[B].open("ab") as file:	use	file	fh
+rounds	packages/rounds/tests/test_open_builds.py	(A, "building", [{"round": B, "stage": "B1", "relation": "overlaps"}]),	keep	round	round
+rounds	packages/rounds/tests/test_open_builds.py	(B, "building", [{"round": A, "stage": "B1", "relation": "overlaps"}])]	keep	round	round
 rounds	packages/rounds/tests/test_options.py	rounds	name	folder	rounds_dir
 rounds	packages/rounds/tests/test_page.py	"round": "k/" + "x" * page.QUERY_MAX}))	keep	round	round
 rounds	packages/rounds/tests/test_page.py	("/api/record", {"what": "card", "round": SHUT}))	keep	round	round
@@ -11339,11 +11436,31 @@ rounds	packages/rounds/tests/test_project_settings.py	-	name	test_two_relative_d
 rounds	packages/rounds/tests/test_project_settings.py	-	name	test_two_tables_whose_dirs_reach_one_folder_are_refused	test_two_tables_whose_dirs_reach_one_dir_are_refused
 rounds	packages/rounds/tests/test_project_settings.py	-	name	test_two_tables_with_a_folder_each_pass_the_check	test_two_tables_with_a_dir_each_pass_the_check
 rounds	packages/rounds/tests/test_project_settings.py	assert not set(settings.ROUND_KEYS) & set(settings.BUILD_KEYS)	keep	set	set
+rounds	packages/rounds/tests/test_project_settings.py	assert set(settings.ROUND_KEYS) | {"check_on", "disposable", "director"} >= {	keep	set	set
 rounds	packages/rounds/tests/test_project_settings.py	assert set(settings.ROUND_KEYS) | {"check_on", "disposable"} >= {	keep	set	set
 rounds	packages/rounds/tests/test_project_settings.py	assert set(settings.ROUND_KEYS) | {"check_on"} >= {	keep	set	set
 rounds	packages/rounds/tests/test_project_settings.py	settings.build_setting(settings.load(), "proj-b", "brief").append("changed")	keep	changed	changed
 rounds	packages/rounds/tests/test_project_settings.py	settings.build_setting(settings.load(), "proj-b", "finish")[0]["id"] = "changed"	keep	changed	changed
 rounds	packages/rounds/tests/test_questions.py	test_a_question_parked_until_a_round_reads_open_once_that_round_is_closed	name	closed	on_closed
+rounds	packages/rounds/tests/test_queue_batch.py	assert cli.main(["projects", "set", "proj-a", "--notes-root",	keep	set	set
+rounds	packages/rounds/tests/test_queue_batch.py	candidate = any(pushed == commit and "queue-" in ref for pushed, ref in self.pushes)	keep	any	any
+rounds	packages/rounds/tests/test_queue_batch.py	hook.parent.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
+rounds	packages/rounds/tests/test_queue_batch.py	return {"event": queue_file.JOIN, "round": name, "stage": "B1", "tip": "a" * 40,	keep	round	round
+rounds	packages/rounds/tests/test_queue_batch.py	queue_file.append("proj-a", {"event": queue_file.LEFT, "round": OTHER, "stage": "B1",	keep	round	round
+rounds	packages/rounds/tests/test_queue_batch.py	for event in ({"event": queue_file.LEFT, "round": ROUND, "stage": "B1", "tip": old,	keep	round	round
+rounds	packages/rounds/tests/test_queue_batch.py	{"event": queue_file.JOIN, "round": ROUND, "stage": "B1", "tip": new,	keep	round	round
+rounds	packages/rounds/tests/test_queue_join.py	"members": [{"round": ROUND, "stage": "B1", "tip": tree.rev()}]})	keep	round	round
+rounds	packages/rounds/tests/test_queue_join.py	assert any("check of B1 has not passed" in one.reason for one in caught.value.unmet)	keep	any	any
+rounds	packages/rounds/tests/test_queue_join.py	assert cli.main(["projects", "set", "proj-a", "--notes-root",	keep	set	set
+rounds	packages/rounds/tests/test_queue_main.py	assert [one["round"] for one in red["covers"]] == [ROUND, OTHER]	keep	round	round
+rounds	packages/rounds/tests/test_queue_main.py	assert [one["round"] for one in red["covers"]] == [ROUND]	keep	round	round
+rounds	packages/rounds/tests/test_queue_main.py	assert any("never started" in line for line in queue_view.lines(queue(),	keep	any	any
+rounds	packages/rounds/tests/test_queue_main.py	assert any("past failures main has too" in text for text in comms.to("lead-a"))	keep	any	any
+rounds	packages/rounds/tests/test_queue_main.py	assert not any("red" in text for text in comms.to("lead-a"))	keep	any	any
+rounds	packages/rounds/tests/test_queue_telling.py	assert any("ejected from proj-a's queue: conflict with" in text	keep	any	any
+rounds	packages/rounds/tests/test_queue_telling.py	assert cli.main(["projects", "set", "proj-a", "--lead", "proj-lead"]) == 0	keep	set	set
+rounds	packages/rounds/tests/test_queue_telling.py	assert not any("director" in line for line in queue_view.told_lines(queue()))	keep	any	any
+rounds	packages/rounds/tests/test_queue_telling.py	return SimpleNamespace(outcome="refused", message_id=None, recipients=(),	keep	refused	refused
 rounds	packages/rounds/tests/test_ratify_step.py	"after": []}, actor="planner")	use	actor=	by=
 rounds	packages/rounds/tests/test_ratify_step.py	"build": "0123456789abcdef"}, actor="planner")	use	actor=	by=
 rounds	packages/rounds/tests/test_ratify_step.py	-	name	folder	round_dir
@@ -11436,6 +11553,8 @@ rounds	packages/rounds/tests/test_repairs.py	test_with_no_merge_base_nothing_mov
 rounds	packages/rounds/tests/test_repairs.py	unchanged	name	folder	round_dir
 rounds	packages/rounds/tests/test_repairs.py	{"stage": "B1", "by": "lead", "record": "comms:1234567", "tips": {}},	keep	record	record
 rounds	packages/rounds/tests/test_report_block.py	@pytest.mark.parametrize(("body", "old", "bad", "says"), WRONG_VALUES)	keep	bad	bad
+rounds	packages/rounds/tests/test_restamp.py	assert {key: done.event[key] for key in ("type", "what", "version", "record",	keep	record	record
+rounds	packages/rounds/tests/test_restamp.py	"type": "repair", "what": "digest", "version": 1, "record": POINTER,	keep	record	record
 rounds	packages/rounds/tests/test_retro_step.py	"after": []}, actor="planner")	use	actor=	by=
 rounds	packages/rounds/tests/test_retro_step.py	"build": "0123456789abcdef"}, actor="planner")	use	actor=	by=
 rounds	packages/rounds/tests/test_retro_step.py	-	name	folder	round_dir
@@ -11469,7 +11588,7 @@ rounds	packages/rounds/tests/test_rule.py	"record": "comms:12", "kind": "substan
 rounds	packages/rounds/tests/test_rule.py	"state": "parked", "record": "comms:12", "kind": "process", "rules": "park:Q1"}	keep	record	record
 rounds	packages/rounds/tests/test_rule.py	"state": "withdrawn", "record": "comms:12", "kind": "process",	keep	record	record
 rounds	packages/rounds/tests/test_rule.py	-	name	test_a_project_with_no_rounds_folder_yet_gets_its_register	test_a_project_with_no_rounds_dir_yet_gets_its_register
-rounds	packages/rounds/tests/test_rule.py	@pytest.mark.parametrize("record", [None, "he said so"])	keep	record	record
+rounds	packages/rounds/tests/test_rule.py	@pytest.mark.parametrize("record", [None, "the operator said so"])	keep	record	record
 rounds	packages/rounds/tests/test_rule.py	assert (made["rules"], made["chose"], made["record"]) == ("Q1", "b", pointer)	keep	record	record
 rounds	packages/rounds/tests/test_rule.py	assert [(change.state, change.ruling, change.record) for change in found.changes] == [	keep	record	record
 rounds	packages/rounds/tests/test_rule.py	assert [event["record"] for event in rulings(round_log(rounds))] == ["comms:13"]	keep	record	record
@@ -11495,6 +11614,7 @@ rounds	packages/rounds/tests/test_sharing.py	return log.append(self.path, type_,
 rounds	packages/rounds/tests/test_sharing.py	round_dir.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
 rounds	packages/rounds/tests/test_sharing.py	second.add("finish.action", stage="B2", tip=other_tip, id="merge", kind="merge",	keep	id	id
 rounds	packages/rounds/tests/test_sharing.py	second.check("B2", other_tip, base)	keep	ok	ok
+rounds	packages/rounds/tests/test_sharing.py	(set(), {"b"}, None),	keep	set	set
 rounds	packages/rounds/tests/test_show.py	"folder": str(rounds / "b-round"), "notice": None, "status": "open",	keep	folder	folder
 rounds	packages/rounds/tests/test_show.py	"id": "C1", "text": RULED, "record": "comms:12",	keep	record	record
 rounds	packages/rounds/tests/test_show.py	ask	name	actor	by
@@ -11515,6 +11635,7 @@ rounds	packages/rounds/tests/test_show.py	assert set(found) == {"name", "project
 rounds	packages/rounds/tests/test_show.py	dropping.drop(A, by="operator", record="comms:30", actor="planner")	use	actor=	run_by=
 rounds	packages/rounds/tests/test_show.py	test_a_round_that_cant_be_read_is_shown_as_unreadable_with_file_and_line	name	written	fh
 rounds	packages/rounds/tests/test_show.py	test_with_the_projects_log_unreadable_a_ruling_is_not_said_to_be_unshown	name	written	fh
+rounds	packages/rounds/tests/test_show.py	log.append(path, "round.dropped", {"by": "operator", "record": "comms:30",	keep	record	record
 rounds	packages/rounds/tests/test_shown.py	"ids": ["C1", "C3"], "record": "comms:20"}	keep	record	record
 rounds	packages/rounds/tests/test_shown.py	"record": "https://example.com/page", "kind": "process",	keep	record	record
 rounds	packages/rounds/tests/test_shown.py	"record": "https://example.com/page"}	keep	record	record
@@ -11542,6 +11663,14 @@ rounds	packages/rounds/tests/test_skips.py	return ruling.rule(ROUND, item=item, 
 rounds	packages/rounds/tests/test_skips.py	ruling.rule(target, item=item, record="comms:12", actor="planner", **more)	use	actor=	by=
 rounds	packages/rounds/tests/test_skips.py	{"id": "C1", "step": "docket", "stage": "B2", "record": "comms:12",	keep	record	record
 rounds	packages/rounds/tests/test_skips.py	{"id": "C2", "step": "check", "stage": "B3", "record": "comms:13"}]	keep	record	record
+rounds	packages/rounds/tests/test_stacked_finish.py	assert cli.main(["projects", "set", "proj-a", "--notes-root",	keep	set	set
+rounds	packages/rounds/tests/test_stacked_finish.py	(found,) = [one for one in api.builds()["builds"] if one["round"] == name]	keep	round	round
+rounds	packages/rounds/tests/test_stacked_finish.py	{"round": OUTER, "stage": "B1", "relation": "inside"}]	keep	round	round
+rounds	packages/rounds/tests/test_stacked_finish.py	{"round": INNER, "stage": "B1", "relation": "contains"}]	keep	round	round
+rounds	packages/rounds/tests/test_stacked_finish.py	assert repo.git("show", "main:outer.txt") == "the outer work"	keep	show	show
+rounds	packages/rounds/tests/test_stacked_finish.py	assert main(["show", INNER]) == 0	keep	show	show
+rounds	packages/rounds/tests/test_stacked_finish.py	assert main(["show", OUTER]) == 0	keep	show	show
+rounds	packages/rounds/tests/test_stacked_finish.py	assert any(f"it reads {builds.EMPTY}" in reason for reason in refused(INNER))	keep	any	any
 rounds	packages/rounds/tests/test_stages.py	"applied": list(taken)}, actor="critic")	use	actor=	by=
 rounds	packages/rounds/tests/test_stages.py	"branch": f"branch-{stage_id.lower()}"}, actor="coder")	use	actor=	by=
 rounds	packages/rounds/tests/test_stages.py	"id": ruled.id, "record": "comms:1234567",	keep	record	record
@@ -12234,6 +12363,17 @@ services	packages/services/src/moxi_services/page.py	_MAYBE_PATH = lb.Out("strin
 services	packages/services/src/moxi_services/page.py	_MAYBE_SAYS = lb.Out("string", mark="redact", nullable=True)	keep	nullable=	nullable=
 services	packages/services/src/moxi_services/page.py	_MAYBE_TEXT = lb.Field("string", required=False, max=NAME_MAX)	keep	required	required
 services	packages/services/src/moxi_services/page.py	lb.Route("/api/events", "read", _target("events"), stream=True,	keep	stream=	stream=
+services	packages/services/src/moxi_services/page.py	_MAYBE_WORDS = lb.Out("list", items=_TEXT, nullable=True)	keep	nullable=	nullable=
+services	packages/services/src/moxi_services/page.py	TIMING = lb.Out("table", nullable=True, items={	keep	nullable=	nullable=
+services	packages/services/src/moxi_services/page.py	STREAK = lb.Out("table", nullable=True, items={	keep	nullable=	nullable=
+services	packages/services/src/moxi_services/page.py	#: `wraps` True for a systemd timer, which adopting wraps behind a switch; `refused` why	keep	refused	refused
+services	packages/services/src/moxi_services/page.py	"refused": _MAYBE_SAYS,	keep	refused	refused
+services	packages/services/src/moxi_services/page.py	required=False)},	keep	required=	required=
+services	packages/services/src/moxi_services/page.py	TODAY = lb.Out("table", nullable=True, items={	keep	nullable=	nullable=
+services	packages/services/src/moxi_services/page.py	STOP_BODY = {"id": _ID, "ends": lb.Field("int", required=False, max=ENDS_MAX)}	keep	required	required
+services	packages/services/src/moxi_services/page.py	"ends": lb.Field("int", required=False, max=ENDS_MAX),	keep	required	required
+services	packages/services/src/moxi_services/page.py	"sessions": lb.Out("list", items=SESSION, nullable=True),	keep	nullable=	nullable=
+services	packages/services/src/moxi_services/page.py	STOP_BODY = {"id": _ID, "ends": lb.Field("int", required=False, max=ENDS_MAX),	keep	required	required
 services	packages/services/src/moxi_services/pagehandlers.py	_Feed._gather	kwonly	health	health
 services	packages/services/src/moxi_services/pagehandlers.py	_Feed._gather	name	err	exc
 services	packages/services/src/moxi_services/pagehandlers.py	_Feed._gather	name	health	check_health
@@ -12249,6 +12389,12 @@ services	packages/services/src/moxi_services/pagehandlers.py	projects	name	err	e
 services	packages/services/src/moxi_services/pagehandlers.py	self.thread = threading.Thread(target=self._gather, args=(health,), daemon=True,	use	args=(health,)	kwargs={"health": health}
 services	packages/services/src/moxi_services/pagehandlers.py	self.thread = threading.Thread(target=self._gather, kwargs={"health": check_health}, daemon=True,	use	kwargs={"health": check_health}	kwargs={"check_health": check_health}
 services	packages/services/src/moxi_services/pagehandlers.py	self.thread = threading.Thread(target=self._gather, kwargs={"health": health}, daemon=True,	use	kwargs={"health": health}	kwargs={"check_health": check_health}
+services	packages/services/src/moxi_services/pagehandlers.py	out = set()	keep	set	set
+services	packages/services/src/moxi_services/pagehandlers.py	answer["refused"] = f"{ref} is a {_KIND_WORDS[kind]}, not a {_KIND_WORDS[asked]}"	keep	refused	refused
+services	packages/services/src/moxi_services/pagehandlers.py	answer.update(enabled=st.enabled, active=st.state == "active",	keep	enabled=	enabled=
+services	packages/services/src/moxi_services/pagehandlers.py	and a `kind` that disagrees is refused. A refusal is in `refused`, never a 422."""	keep	refused	refused
+services	packages/services/src/moxi_services/pagehandlers.py	"refused": None}	keep	refused	refused
+services	packages/services/src/moxi_services/pagehandlers.py	answer["refused"] = _text(exc)	keep	refused	refused
 services	packages/services/src/moxi_services/rows.py	"created", "changed", "changed_by")	keep	changed	changed
 services	packages/services/src/moxi_services/rows.py	-	name	_OWN_FOLDER	_OWN_SCHEDULER_DIR
 services	packages/services/src/moxi_services/rows.py	`launches_session` are bools; `stopped`, `created` and `changed` are UTC times	keep	changed	changed
@@ -12277,6 +12423,7 @@ services	packages/services/src/moxi_services/verdict.py	on/off and its health in
 services	packages/services/src/moxi_services/verdict.py	over.set()	keep	set	set
 services	packages/services/src/moxi_services/verdict.py	started: set[str] = set()	keep	set	set
 services	packages/services/src/moxi_services/verdict.py	views	name	health	check_health
+services	packages/services/src/moxi_services/verdict.py	if any(isinstance(r, ModuleRow) and r.kind == "daemon" for r in rows)	keep	any	any
 services	packages/services/tests/browser_kit.py	cwd=shell.env["HOME"], stdin=subprocess.DEVNULL,	keep	HOME	HOME
 services	packages/services/tests/browser_kit.py	platform=sys.platform, enabled=True)	keep	enabled	enabled
 services	packages/services/tests/conftest.py	path.parent.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
@@ -12305,12 +12452,22 @@ services	packages/services/tests/test_acts.py	put_key	name	on	enabled
 services	packages/services/tests/test_browser_page.py	assert any(url.endswith("/m/services/api/rows") for url in check.requests), check.requests	keep	any	any
 services	packages/services/tests/test_browser_page.py	assert any(url.endswith(link) for url in statuses), statuses	keep	any	any
 services	packages/services/tests/test_browser_page.py	root = Path(ui_shell.env["HOME"]) / "work" / "alpha"	keep	HOME	HOME
+services	packages/services/tests/test_browser_page.py	assert {"services/queue-worker", "services/sync-down", "services/dep-audit"} <= set(want), want	keep	set	set
+services	packages/services/tests/test_browser_page.py	risen = set(ids(panel.locator('section[data-part="first"] .item')))	keep	set	set
+services	packages/services/tests/test_browser_page.py	@pytest.mark.parametrize(("route", "opened", "path"), [	keep	opened	opened
+services	packages/services/tests/test_browser_page.py	expect(closed("services/sync-down")).to_have_text(["Start"])	keep	closed	closed
+services	packages/services/tests/test_browser_page.py	expect(closed("services/dep-audit")).to_have_text(["Run now"])	keep	closed	closed
+services	packages/services/tests/test_browser_page.py	expect(closed("services/web")).to_have_count(0)	keep	closed	closed
+services	packages/services/tests/test_browser_page.py	expect(closed("services/backup")).to_have_count(0)	keep	closed	closed
+services	packages/services/tests/test_browser_page.py	json=status_of(posts[-1].post_data_json, "refused", ["web: not now"])))	keep	refused	refused
+services	packages/services/tests/test_browser_page.py	assert len(set(colours)) == 1, colours	keep	set	set
 services	packages/services/tests/test_browser_project_facts.py	if check(last):	keep	ok	ok
 services	packages/services/tests/test_browser_project_facts.py	report = _reported(page, lambda r: "sections" in r["projects"]["atlas-api"], "opened")	keep	opened	opened
 services	packages/services/tests/test_cli.py	assert code == 0 and set(found[0]) == ROW_KEYS	keep	set	set
 services	packages/services/tests/test_cli.py	assert set(found) == ROW_KEYS | {"row", "detail", "log", "wrapped", "process", "runs"}	keep	set	set
 services	packages/services/tests/test_cli.py	assert set(found["verdict"]) == VERDICT_KEYS and found["verdict"]["cause"] is None	keep	set	set
 services	packages/services/tests/test_cli.py	assert set(found[0]["verdict"]) == VERDICT_KEYS	keep	set	set
+services	packages/services/tests/test_cli.py	assert set(found["verdict"]) == VERDICT_KEYS and found["verdict"]["cause"] == "off"	keep	set	set
 services	packages/services/tests/test_cli.py	assert set(process) == {"pid", "uptime_s", "rss_bytes", "cpu_s"}	keep	set	set
 services	packages/services/tests/test_cli.py	code, _, err = run(capsys, "show", "nope")	keep	show	show
 services	packages/services/tests/test_cli.py	code, out, _ = run(capsys, "show", "agent")	keep	show	show
@@ -12361,10 +12518,20 @@ services	packages/services/tests/test_page.py	monkeypatch.setattr(pagehandlers, 
 services	packages/services/tests/test_page.py	release.set()	keep	set	set
 services	packages/services/tests/test_page.py	return body["refused"]	keep	refused	refused
 services	packages/services/tests/test_page.py	store_path.parent.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
+services	packages/services/tests/test_page.py	assert not any(r["has_settings"] for r in by_id().values())	keep	any	any
+services	packages/services/tests/test_page.py	"active": True, "wraps": True, "refused": None}	keep	refused	refused
+services	packages/services/tests/test_page.py	"active": False, "wraps": False, "refused": None}	keep	refused	refused
+services	packages/services/tests/test_page.py	assert (found["found"], found["enabled"], found["active"], found["refused"]) == (	keep	refused	refused
+services	packages/services/tests/test_page.py	assert says in found["refused"] and found["found"] is None	keep	refused	refused
+services	packages/services/tests/test_page.py	assert "no supervisor here" in unit_read("ref=backup.timer")["refused"]	keep	refused	refused
+services	packages/services/tests/test_page.py	assert (found["found"], found["enabled"], found["refused"]) == (None, None, None)	keep	refused	refused
+services	packages/services/tests/test_page.py	assert unit_read(query)["refused"] == says	keep	refused	refused
 services	packages/services/tests/test_page_feed.py	"""A gather in place of the page's: each call recorded with its `health`, blocking	use	health	check_health
 services	packages/services/tests/test_page_feed.py	Gathers.__call__	name	health	check_health
 services	packages/services/tests/test_page_feed.py	assert seen == {"health": True, "status_seconds": pagehandlers.STATUS_SECONDS,	use	"health"	"check_health"
 services	packages/services/tests/test_page_feed.py	gathers.gate.set()	keep	set	set
+services	packages/services/tests/test_page_feed.py	held.set()	keep	set	set
+services	packages/services/tests/test_page_feed.py	let_go.set()	keep	set	set
 services	packages/services/tests/test_page_feed.py	monkeypatch.setattr(pagehandlers, "_logged", set())	keep	set	set
 services	packages/services/tests/test_page_feed.py	return real(health=check_health)	use	health=	check_health=
 services	packages/services/tests/test_page_feed.py	self.gate.set()	keep	set	set
@@ -12384,6 +12551,32 @@ services	packages/services/tests/test_store.py	test_a_store_held_locked_past_the
 services	packages/services/tests/test_verdict.py	assert len(found) == 12 and set(found.values()) == {("ok", "fine")}	keep	set	set
 services	packages/services/tests/test_verdict.py	gate_.set()	keep	set	set
 services	packages/services/tests/test_verdict.py	rest = {"services/svc0", "services/svc1", "services/svc2"} - set(ran)	keep	set	set
+services	packages/services/tests/test_verdict.py	assert given == set(verdict.CAUSES)	keep	set	set
+services	packages/services/tests/test_verdict.py	assert len(verdict.CAUSES) == len(set(verdict.CAUSES))	keep	set	set
+services	packages/services/tests/test_verdict.py	assert {"not-running", "stopped", "last-run"} <= set(verdict.CAUSES)	keep	set	set
+services	packages/services/tests/test_verdict.py	assert set(found) == {"services/web", "notes/sync", "notes/other"}	keep	set	set
+services	packages/services/tests/test_page_slots.py	monkeypatch.setattr(pagehandlers, "_logged", set())	keep	set	set
+services	packages/services/tests/test_page_slots.py	slots.hold.set()	keep	set	set
+services	packages/services/tests/test_page_slots.py	assert status == 422 and "no daemon or timer of an installed module" in body["refused"]	keep	refused	refused
+services	packages/services/tests/test_page_slots.py	422, {"refused": pagehandlers.ENDS_SLOTS_ONLY})	keep	refused	refused
+services	packages/services/tests/test_page_slots.py	assert post(route, {"id": SERVER}) == (422, {"refused": pagehandlers.SLOTS_IN_USE})	keep	refused	refused
+services	packages/services/tests/test_page_slots.py	422, {"refused": pagehandlers.SLOTS_IN_USE})	keep	refused	refused
+services	packages/services/tests/test_page_slots.py	422, {"refused": pagehandlers.ENDS_NEGATIVE})	keep	refused	refused
+services	packages/services/tests/test_page_slots.py	422, {"refused": pagehandlers.SLOTS_UNREAD})	keep	refused	refused
+services	packages/services/tests/test_page_slots.py	422, {"refused": pagehandlers.ENDS_ONE_CONFIRM})	keep	refused	refused
+services	packages/services/tests/test_page_act.py	monkeypatch.setattr(pagehandlers, "_logged", set())	keep	set	set
+services	packages/services/tests/test_page_act.py	return body["refused"]	keep	refused	refused
+services	packages/services/tests/test_page_act.py	assert (found["state"], found["code"]) == ("refused", 3)	keep	refused	refused
+services	packages/services/tests/test_browser_add.py	root = Path(ui_shell.env["HOME"]) / "work" / "alpha"	keep	HOME	HOME
+services	packages/services/tests/test_browser_add.py	assert box is not None and round(box["x"] + box["width"]) == WIDE["width"], box	keep	round	round
+services	packages/services/tests/test_browser_add.py	assert round(box["width"]) == PANEL_PX, box	keep	round	round
+services	packages/services/tests/test_browser_add.py	assert any(url.endswith(link) for url in statuses), statuses	keep	any	any
+services	packages/services/tests/test_browser_add.py	"wraps": False, "refused": None})	keep	refused	refused
+services	packages/services/tests/test_browser_add.py	status=422, json={"refused": "the stand-in takes no add"}))	keep	refused	refused
+services	packages/services/tests/test_browser_phone.py	assert set(seen) <= REACHED, seen	keep	set	set
+services	packages/services/tests/test_browser_phone.py	assert "/api/ends" in seen and set(seen) <= REACHED, seen	keep	set	set
+services	packages/services/tests/test_browser_phone.py	route.fulfill(status=202, json={"act": act, "outcome": "refused", "code": answer.status,	keep	refused	refused
+services	packages/services/tests/test_browser_phone.py	"text": (data or {}).get("refused") or f"answered {answer.status}"})	keep	refused	refused
 sessions	packages/sessions/src/moxi_sessions/api.py	"Listed", "SubagentListing", "Subagent"), "find"),	keep	find	find
 sessions	packages/sessions/src/moxi_sessions/api.py	"sessions_folders", "session_opened", "session_facts"), "lists"),	use	sessions_folders	session_dirs
 sessions	packages/sessions/src/moxi_sessions/api.py	* `read_back(path, *, block, limit, head=False)`: a record read backwards, its lines	use	head=False	read_head=False
@@ -12942,6 +13135,7 @@ sessions	packages/sessions/tests/test_browser_list.py	expect(button).not_to_have
 sessions	packages/sessions/tests/test_browser_list.py	expect(button).to_have_class("set")	keep	set	set
 sessions	packages/sessions/tests/test_browser_list.py	for key in ("folder", "harness", "when"):	keep	folder	folder
 sessions	packages/sessions/tests/test_browser_list.py	if key == "folder":	keep	folder	folder
+sessions	packages/sessions/tests/test_browser_live.py	"turn_started_at": now - 300 if turn_open else None, "agents": 0, "draft": False, "stale": False,	keep	stale	stale
 sessions	packages/sessions/tests/test_browser_opened.py	db.session(title="a title the harness made", directory="/work/proj-c", at=noon(5).timestamp())	use	directory=	work_dir=
 sessions	packages/sessions/tests/test_browser_page.py	check = ui_component_check(ui_page, "sessions", "page", keep=True)	keep	sessions	sessions
 sessions	packages/sessions/tests/test_browser_page.py	expect(panel.locator('section[data-part="subagents"]')).to_have_attribute("data-state", "refused")	keep	refused	refused
@@ -15473,11 +15667,13 @@ ui	packages/ui/src/moxi_ui/session.py	if any(isinstance(t, bool) or not isinstan
 ui	packages/ui/src/moxi_ui/session.py	if any(key.lower() in _BROWSER_HEADERS or key.lower().startswith(b"sec-fetch-")	keep	any	any
 ui	packages/ui/src/moxi_ui/session.py	if now - r.created >= self.max_age or now - r.used >= self.idle]	keep	used	used
 ui	packages/ui/src/moxi_ui/session.py	key, created, used = item.get("key"), item.get("created"), item.get("used")	keep	used	used
+ui	packages/ui/src/moxi_ui/session.py	key=lambda h: self._sessions[h].used)	keep	used	used
 ui	packages/ui/src/moxi_ui/session.py	names = os.listdir(self.directory)	keep	directory	directory
 ui	packages/ui/src/moxi_ui/session.py	names = os.listdir(self.directory)	use	self.directory	self.tickets_dir
 ui	packages/ui/src/moxi_ui/session.py	path = self.directory / name	keep	directory	directory
 ui	packages/ui/src/moxi_ui/session.py	path = self.directory / name	use	self.directory	self.tickets_dir
 ui	packages/ui/src/moxi_ui/session.py	record.saved_used = record.used	keep	used	used
+ui	packages/ui/src/moxi_ui/session.py	record.used = max(record.used, self.clock())	keep	used	used
 ui	packages/ui/src/moxi_ui/session.py	record.used = now	keep	used	used
 ui	packages/ui/src/moxi_ui/session.py	return any(value.strip().lower() == b"script"	keep	any	any
 ui	packages/ui/src/moxi_ui/session.py	return self.directory / _hash(ticket)[:32]	keep	directory	directory
@@ -16220,6 +16416,17 @@ ui	packages/ui/tests/test_settings.py	assert keys["idle_s"]["changed"] and keys[
 ui	packages/ui/tests/test_settings.py	assert keys["port"]["label"] == "Port" and not keys["port"]["changed"]	keep	changed	changed
 ui	packages/ui/tests/test_settings.py	assert status == 422 and data["refused"].endswith("moxi ui gateway enable")	keep	refused	refused
 ui	packages/ui/tests/test_settings.py	@pytest.mark.parametrize("module", ["nosuch", "Not A Module", "changed"])	keep	changed	changed
+ui	packages/ui/tests/test_settings.py	assert not changed(r"C:\Users\u\ui-shell16\notes", "~/notes")	keep	changed	changed
+ui	packages/ui/tests/test_settings.py	assert not changed(r"C:\Users\u\ui-shell16\notes\a", "~/notes/a")	keep	changed	changed
+ui	packages/ui/tests/test_settings.py	assert not changed("c:\\users\\U\\ui-shell16\\Notes\\", "~/notes")	keep	changed	changed
+ui	packages/ui/tests/test_settings.py	assert not changed(r"C:\Users\u\ui-shell16", "~")	keep	changed	changed
+ui	packages/ui/tests/test_settings.py	assert not changed("C:/Users/u/ui-shell16/notes", "~/notes")	keep	changed	changed
+ui	packages/ui/tests/test_settings.py	assert changed(r"C:\Users\u\ui-shell16\notes2", "~/notes")	keep	changed	changed
+ui	packages/ui/tests/test_settings.py	assert changed(r"D:\Users\u\ui-shell16\notes", "~/notes")	keep	changed	changed
+ui	packages/ui/tests/test_settings.py	assert not changed(None, "")	keep	changed	changed
+ui	packages/ui/tests/test_settings.py	assert changed(r"C:\x", "")	keep	changed	changed
+ui	packages/ui/tests/test_settings.py	assert not changed("/h/x", "~/x") and not changed("/h/x/", "~/x") and not changed("/h", "~")	keep	changed	changed
+ui	packages/ui/tests/test_settings.py	assert changed("/h/X", "~/x")	keep	changed	changed
 ui	packages/ui/tests/test_settings_save.py	run = run or Run(stdout=json.dumps({"changed": True, "problem": None, "fix": None,	keep	changed	changed
 ui	packages/ui/tests/test_settings_save.py	assert argv[5:] == ["set", "--by", "ui", "--json", "--", "demo", name, spelled]	keep	set	set
 ui	packages/ui/tests/test_settings_save.py	assert result["outcome"] == "refused" and run.writes == []	keep	refused	refused
@@ -16251,6 +16458,7 @@ ui	packages/ui/tests/test_snapshot.py	assert set(value["modules"][0]) == set(MOD
 ui	packages/ui/tests/test_snapshot.py	assert status == 200 and listed["sntwo"]["mounted"] and listed["ui"]["page"]	keep	mounted	mounted
 ui	packages/ui/tests/test_snapshot.py	assert usage["mounted"] and usage["budget"] == {"rss": "120M", "fds": 64}	keep	mounted	mounted
 ui	packages/ui/tests/test_snapshot.py	assert {"home_as", "group", "order"} <= set(_COMPONENT.items)	keep	set	set
+ui	packages/ui/tests/test_snapshot.py	assert {"home_as", "group", "order", "band_unless"} <= set(_COMPONENT.items)	keep	set	set
 ui	packages/ui/tests/test_snapshot.py	session_id, key = shell.sessions.store.mint()	keep	sessions	sessions
 ui	packages/ui/tests/test_starter.py	-	name	test_every_child_runs_as_python_P_m_from_the_shells_runtime_dir	test_every_child_runs_as_python_p_m_from_the_shells_runtime_dir
 ui	packages/ui/tests/test_starter.py	_module	name	page	has_page
@@ -16301,6 +16509,7 @@ ui	packages/ui/tests/test_terminal.py	record.parent.mkdir(parents=True, exist_ok
 ui	packages/ui/tests/test_terminal.py	tool	name	folder	bin_dir
 ui	packages/ui/tests/test_terminal.py	write_record({**os.environ, "HOME": ""})	keep	HOME	HOME
 ui	packages/ui/tests/test_terminal.py	write_record({**os.environ, "HOME": "ada"})	keep	HOME	HOME
+ui	packages/ui/tests/test_testing.py	again = ui_shell.session(timeout=10)	keep	timeout	timeout
 ui	packages/ui/tests/test_testing.py	assert [r["name"] for r in modules["fixture"]["refused"]] == ["later"]	keep	refused	refused
 ui	packages/ui/tests/test_testing.py	assert any("elsewhere.held" in url and "fixture.count" in url for url in check.requests)	keep	any	any
 ui	packages/ui/tests/test_testing.py	assert any(url.endswith("/m/fixture/tag.js") for url in tag.requests)	keep	any	any
@@ -16433,7 +16642,6 @@ usage	packages/usage/src/moxi_usage/limits.py	a time it was already read at, nor
 usage	packages/usage/src/moxi_usage/limits.py	got = fn(timeout=PULL_TIMEOUT)	use	timeout=	timeout_s=
 usage	packages/usage/src/moxi_usage/limits.py	return any(word.lower() in ("dollar", "dollars", "usd") for word in _WORDS.split(key))	keep	any	any
 usage	packages/usage/src/moxi_usage/limits.py	there is none; `fit` counts the readings it fitted. `opened` is when the window	keep	opened	opened
-usage	packages/usage/src/moxi_usage/limits.py	"project", "period", "opened", "label", "model_family", "dollars", "harness_rows",	keep	opened	opened
 usage	packages/usage/src/moxi_usage/mark.py	-	name	CROSSING_AT	CROSSING_AT_ENV
 usage	packages/usage/src/moxi_usage/mark.py	-	name	WARN_AT	WARN_AT_ENV
 usage	packages/usage/src/moxi_usage/mark.py	_said: set[str] = set()	keep	set	set
@@ -16503,8 +16711,6 @@ usage	packages/usage/src/moxi_usage/page.py	query={"top": lb.Field("int", requir
 usage	packages/usage/src/moxi_usage/page.py	query={"top": lb.Field("int", required=False, max=TOP_MAX), **FILTERS},	keep	required	required
 usage	packages/usage/src/moxi_usage/page.py	ref=lb.Out("table", nullable=True, items=SESSION_REF))	keep	nullable	nullable
 usage	packages/usage/src/moxi_usage/page.py	values=("project", "folder")), **FILTERS},	keep	folder	folder
-usage	packages/usage/src/moxi_usage/page.py	#: names none. `used` is this machine's sessions of the harness with requests since the	keep	used	used
-usage	packages/usage/src/moxi_usage/page.py	#: models, with a null `opened`, and when there is no index to read.	keep	opened	opened
 usage	packages/usage/src/moxi_usage/page.py	`folder` each take one key or several, one to a line, and keep the files any of them	keep	folder	folder
 usage	packages/usage/src/moxi_usage/page.py	_PLACES = lb.Field("string", required=False, max=16384)	keep	required	required
 usage	packages/usage/src/moxi_usage/page.py	"folder": _PLACES,	keep	folder	folder
@@ -16543,9 +16749,6 @@ usage	packages/usage/src/moxi_usage/pagehandlers.py	origins = _origins(sorted(go
 usage	packages/usage/src/moxi_usage/pagehandlers.py	used = _used(harness, row.opened) if main and row.opened is not None else None	keep	opened	opened
 usage	packages/usage/src/moxi_usage/pagehandlers.py	with a known `opened`, else null. The sessions module is asked once, for the	keep	opened	opened
 usage	packages/usage/src/moxi_usage/pagehandlers.py	work_dir = item["folder"]	keep	folder	folder
-usage	packages/usage/src/moxi_usage/pagehandlers.py	names one. `used` is the sessions of the harness since the window opened, with a	keep	used	used
-usage	packages/usage/src/moxi_usage/pagehandlers.py	known `opened`, for the harness's main limit and for a limit with a `model_family`,	keep	opened	opened
-usage	packages/usage/src/moxi_usage/pagehandlers.py	used = _used(harness, row.opened, family) if counted and row.opened is not None else None	keep	opened	opened
 usage	packages/usage/src/moxi_usage/pagehandlers.py	# A `project` or `folder` the page sends: one key, or several on lines of their own.	keep	folder	folder
 usage	packages/usage/src/moxi_usage/pagehandlers.py	"work_dir": _places(query.get("folder")), "model": query.get("model"),	keep	folder	folder
 usage	packages/usage/src/moxi_usage/prices.py	"""Fetch, convert, compare and (unless `dry_run`) write the snapshot layer.	keep	dry_run	dry_run
@@ -16649,6 +16852,7 @@ usage	packages/usage/tests/conftest.py	changed = sorted(path for path in set(now
 usage	packages/usage/tests/conftest.py	if not any(real == base or base in real.parents for base in allowed):	keep	any	any
 usage	packages/usage/tests/conftest.py	path.parent.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
 usage	packages/usage/tests/conftest.py	return any(full == root or root in full.parents for root in GUARDED)	keep	any	any
+usage	packages/usage/tests/conftest.py	return any(full == store or store in full.parents for store in LIVE)	keep	any	any
 usage	packages/usage/tests/conftest.py	writing = ((isinstance(mode, str) and any(c in mode for c in "wax+"))	keep	any	any
 usage	packages/usage/tests/test_allowlist.py	"HOME": home,	keep	HOME	HOME
 usage	packages/usage/tests/test_allowlist.py	"rebase main", "push", "push origin main", "pull", "fetch", "stash", "show", "show HEAD",	keep	show	show
@@ -17105,6 +17309,7 @@ usage	packages/usage/tests/test_page.py	assert count("/api/terms", by="agent", s
 usage	packages/usage/tests/test_page.py	assert get("/api/projects", by="folder")["home"] == "/home/alice"	keep	folder	folder
 usage	packages/usage/tests/test_page.py	assert get("/api/window", **asked)["used"] == {	keep	used	used
 usage	packages/usage/tests/test_page.py	assert get("/api/window", **asked)["used"] is None	keep	used	used
+usage	packages/usage/tests/test_page.py	assert main["used"] is not None	keep	used	used
 usage	packages/usage/tests/test_page.py	assert marked(path, "path") == set(), path	keep	set	set
 usage	packages/usage/tests/test_page.py	assert not any("title" in row for row in body["rows"])	keep	any	any
 usage	packages/usage/tests/test_page.py	assert not any(route["confirmed"] for route in routes.values())	keep	any	any
@@ -17185,18 +17390,14 @@ usage	packages/usage/tests/test_page.py	source(conn, "/p/s3.jsonl", [request("v1
 usage	packages/usage/tests/test_page.py	source(conn, "/p/typed.jsonl", [request("n1", T0, input=9000)],	use	input=	input_tokens=
 usage	packages/usage/tests/test_page.py	source(conn, f"/p/s{n:03d}.jsonl", [request(f"r{n}", T0 + n, input=1000 + n)],	use	input=	input_tokens=
 usage	packages/usage/tests/test_page.py	used = get("/api/window", harness="codex", limit_id="codex", minutes=300)["used"]	keep	used	used
-usage	packages/usage/tests/test_page.py	assert body["opened"] == limits.iso(opened) and body["model_family"] == "opus"	keep	opened	opened
-usage	packages/usage/tests/test_page.py	used = body["used"]	keep	used	used
-usage	packages/usage/tests/test_page.py	assert (week["used"]["count"], week["used"]["requests"]) == (2, 4)	keep	used	used
 usage	packages/usage/tests/test_page.py	assert body["opened"] is not None	keep	opened	opened
-usage	packages/usage/tests/test_page.py	assert (body["model_family"], body["used"]) == (None, None)	keep	used	used
-usage	packages/usage/tests/test_page.py	assert main["model_family"] is None and main["used"] is not None	keep	used	used
 usage	packages/usage/tests/test_page.py	assert count(folder="/w/tool") == 3 and count(folder="/w/loose-a") == 1	keep	folder	folder
 usage	packages/usage/tests/test_page.py	assert count(folder="/w/tool\n/w/loose-a") == 4	keep	folder	folder
 usage	packages/usage/tests/test_page.py	assert count(folder="\n") == count() == 8	keep	folder	folder
 usage	packages/usage/tests/test_page.py	assert body["filters"] == [{"name": "folder", "value": "/w/tool, /w/app"}]	keep	folder	folder
 usage	packages/usage/tests/test_prices_index.py	touched: set[int] = set()	keep	set	set
 usage	packages/usage/tests/test_readings.py	rollout = builders.CodexRollout(tmp_path / "sessions", start=NOW - 600)	keep	sessions	sessions
+usage	packages/usage/tests/test_real_root_guard.py	assert not any(root == store or root in store.parents for store in conftest.LIVE)	keep	any	any
 usage	packages/usage/tests/test_reports.py	"""The `session` report's total equals its `sessions` row under the same filters."""	keep	sessions	sessions
 usage	packages/usage/tests/test_reports.py	"folder": "/w/app"}	keep	folder	folder
 usage	packages/usage/tests/test_reports.py	# a `compacted` line, then a `context_compacted` event for the same compaction	keep	compacted	compacted
@@ -17338,18 +17539,39 @@ moxi-dev	packages/moxi-dev/tests/test_timed_schedule.py	record.parent.mkdir(pare
 moxi-dev	packages/moxi-dev/tests/test_timed_schedule.py	assert fakes.active() == set()	keep	set	set
 moxi-dev	packages/moxi-dev/src/moxi_dev/schedule.py	return any(Path(line.removeprefix("worktree ")).resolve() == want	keep	any	any
 moxi-dev	packages/moxi-dev/tests/test_timed_schedule.py	stale = tmp_path / "stale"	keep	stale	stale
+rounds	packages/rounds/src/moxi_rounds/ci.py	and not any(one.get("job") == LOCAL_JOB for one in found.get("excused") or ())):	keep	any	any
 rounds	packages/rounds/src/moxi_rounds/ci.py	return any(one.jobs is not None for one in self.workflows)	keep	any	any
 rounds	packages/rounds/src/moxi_rounds/ci.py	or any(part.startswith(".") or part.endswith(".lock")	keep	any	any
 rounds	packages/rounds/src/moxi_rounds/cli.py	help="with --leftovers, also give the account of CI's own refs "	keep	help	help
 rounds	packages/rounds/src/moxi_rounds/cli.py	help="refuse at once when another check on this machine holds "	keep	help	help
 rounds	packages/rounds/src/moxi_rounds/cli.py	parser.add_argument("--lead", metavar="NAME",	keep	NAME	NAME
+rounds	packages/rounds/src/moxi_rounds/cli.py	if written.closed is None:	keep	closed	closed
+rounds	packages/rounds/src/moxi_rounds/cli.py	help="re-stamp the design's current version: when design.md "	keep	help	help
+rounds	packages/rounds/src/moxi_rounds/cli.py	done = repairs.restamp(args.target, record=args.record, by=_actor(args))	keep	record	record
+rounds	packages/rounds/src/moxi_rounds/cli.py	help="the lead's settlement of a minor decision that is not the "	keep	help	help
+rounds	packages/rounds/src/moxi_rounds/cli.py	help="the lead's raise of a decision to major, as a later "	keep	help	help
+rounds	packages/rounds/src/moxi_rounds/cli.py	done = settling.make_major(args.target, args.id, record=args.record,	keep	record	record
+rounds	packages/rounds/src/moxi_rounds/decisions.py	record=event.get("record"), ruled=event["n"],	keep	record	record
+rounds	packages/rounds/src/moxi_rounds/decisions.py	chose, record = ((one.chose, one.record) if isinstance(one, Decision)	keep	record	record
+rounds	packages/rounds/src/moxi_rounds/decisions.py	else (one.get("chose"), one.get("record")))	keep	record	record
 rounds	packages/rounds/src/moxi_rounds/dropping.py	and the `record` given, the `event` written, the build's folders the removal	keep	record	record
+rounds	packages/rounds/src/moxi_rounds/dropping.py	((one.round, one.stage, one.relation) for one in found.shares),	keep	round	round
+rounds	packages/rounds/src/moxi_rounds/events.py	EventType("decision.settled", ("id", "chose", "record", "by"),	keep	record	record
+rounds	packages/rounds/src/moxi_rounds/events.py	required=("id", "chose", "record", "by")),	keep	record	record
+rounds	packages/rounds/src/moxi_rounds/events.py	EventType("decision.raised", ("id", "record", "by"), required=("id", "record", "by")),	keep	record	record
 rounds	packages/rounds/src/moxi_rounds/leads.py	ROUND = "round"	keep	round	round
 rounds	packages/rounds/src/moxi_rounds/leads.py	__all__ = ["NAME", "ROUND", "PROJECT", "CHANGED", "is_name", "check", "of", "chosen",	keep	NAME	NAME
 rounds	packages/rounds/src/moxi_rounds/settings.py	if len(set(jobs)) != len(jobs):	keep	set	set
+rounds	packages/rounds/src/moxi_rounds/settling.py	`reject`, `record` the pointer to where the lead wrote why.	keep	record	record
+rounds	packages/rounds/src/moxi_rounds/settling.py	f"{found.record}", f"moxi rounds show {name}")	keep	record	record
+rounds	packages/rounds/src/moxi_rounds/settling.py	"id": key, "chose": chose, "record": record,	keep	record	record
+rounds	packages/rounds/src/moxi_rounds/settling.py	"""Make the decision `key` of the round `target` major, `record` the pointer to	keep	record	record
+rounds	packages/rounds/src/moxi_rounds/settling.py	"id": key, "record": record, "by": decisions.LEAD}),	keep	record	record
+rounds	packages/rounds/src/moxi_rounds/steps.py	if seen is not None and seen.ratify == RATIFY_OFF and any(	keep	any	any
 rounds	packages/rounds/tests/test_ci.py	hooks.mkdir(exist_ok=True)	keep	exist_ok	exist_ok
 rounds	packages/rounds/tests/test_ci_refs.py	assert cli.main(["projects", "set", "proj-a", "--notes-root",	keep	set	set
 rounds	packages/rounds/tests/test_ci_refs.py	hooks.mkdir(exist_ok=True)	keep	exist_ok	exist_ok
+rounds	packages/rounds/tests/test_ci_refs.py	path.parent.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
 slots	packages/slots/src/moxi_slots/errors.py	"name-taken", "job-running", "unsupported", "changed")	keep	changed	changed
 slots	packages/slots/tests/test_live_runs.py	places.module_lock().parent.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
 slots	packages/slots/tests/test_live_runs.py	holder.wait(timeout=10)	keep	timeout	timeout
@@ -17384,6 +17606,27 @@ rounds	packages/rounds/tests/test_page_acts.py	assert cli.main(["projects", "set
 rounds	packages/rounds/tests/test_page_acts.py	exclude.parent.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
 rounds	packages/rounds/tests/test_page_acts.py	if one["type"] == "build.dropped" and one["record"] == pointer] == ["B1"]	keep	record	record
 rounds	packages/rounds/tests/test_page_acts.py	return [one for one in folded(round_dir).rulings if one.record == pointer]	keep	record	record
+rounds	packages/rounds/tests/test_settling.py	if not any(one["type"] == "stage.declared" for one in log.read(path)):	keep	any	any
+rounds	packages/rounds/tests/test_settling.py	shown = run(capsys, "show", ROUND).splitlines()	keep	show	show
+rounds	packages/rounds/tests/test_settling.py	[data] = [one for one in json.loads(run(capsys, "show", ROUND, "--json"))["decisions"]	keep	show	show
+rounds	packages/rounds/tests/test_settling.py	assert {key: event[key] for key in ("id", "chose", "record", "by", "actor")} == {	keep	record	record
+rounds	packages/rounds/tests/test_settling.py	"id": "B1.M1", "chose": chose, "record": PTR, "by": "lead", "actor": "lead-agent"}	keep	record	record
+rounds	packages/rounds/tests/test_settling.py	assert (now.state, now.chose, now.record, now.ruling) == ("settled", chose, PTR, None)	keep	record	record
+rounds	packages/rounds/tests/test_settling.py	assert folded(round_dir).status == "closed"	keep	closed	closed
+rounds	packages/rounds/tests/test_settling.py	assert any(one.startswith(said) for one in reasons(caught)), reasons(caught)	keep	any	any
+rounds	packages/rounds/tests/test_settling.py	{"by": "lead", "record": PTR}, by="planner")	keep	record	record
+rounds	packages/rounds/tests/test_settling.py	{"id": "C1", "record": PTR, "kind": "process", "rules": "skip:ratify"},	keep	record	record
+rounds	packages/rounds/tests/test_settling.py	{"stage": "B1", "by": "lead", "record": PTR}, by="planner")	keep	record	record
+rounds	packages/rounds/tests/test_settling.py	assert {key: done.event[key] for key in ("type", "id", "record", "by", "actor")} == {	keep	record	record
+rounds	packages/rounds/tests/test_settling.py	"type": "decision.raised", "id": "B1.M1", "record": WHY, "by": "lead",	keep	record	record
+rounds	packages/rounds/tests/test_settling.py	data = json.loads(run(capsys, "show", ROUND, "--json"))["decisions"][0]	keep	show	show
+rounds	packages/rounds/tests/test_settling.py	assert (data["state"], data["chose"], data["record"]) == ("settled", "accept", PTR)	keep	record	record
+rounds	packages/rounds/tests/test_settling.py	{"id": "B1.M1", "chose": "accept", "record": PTR, "by": "lead"})	keep	record	record
+rounds	packages/rounds/tests/test_settling.py	events.check("decision.raised", {"id": "B1.M1", "record": PTR, "by": "lead"})	keep	record	record
+rounds	packages/rounds/tests/test_settling.py	("decision.settled", {"id": "B1.M1", "chose": "accept", "record": PTR,	keep	record	record
+rounds	packages/rounds/tests/test_settling.py	("decision.raised", {"id": "B1.M1", "record": PTR}),	keep	record	record
+rounds	packages/rounds/tests/test_settling.py	("decision.raised", {"id": "B1.M1", "record": PTR, "by": "lead",	keep	record	record
+rounds	packages/rounds/tests/test_settling.py	shown = run(capsys, "show", ROUND)	keep	show	show
 turns	packages/turns/tests/panel_kit.py	"identity": None, "where": {"target": target, "slot": slot, "project_key": project, "folder": segment},	keep	folder	folder
 turns	packages/turns/tests/panel_kit.py	shell = ui_shells(home=home, env=env, leave_out=others() if small else [])	keep	env	env
 turns	packages/turns/tests/panel_kit.py	target.parent.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok

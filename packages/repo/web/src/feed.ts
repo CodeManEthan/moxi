@@ -153,7 +153,7 @@ export interface Repos {
 /** One item an act would write. `place` is `config` (a git config key of repo's, its
  * value before and after; `to` null on a removed key or a `seed` drawn as it is written),
  * `hooks` (`key` `shim`, `hook` or `launcher`: a file placed, moved or taken away),
- * `chain` (a line he adds to another tool's hook: `from` the hook, `to` the line) or
+ * `chain` (a line the user adds to another tool's hook: `from` the hook, `to` the line) or
  * `index` (the repo joins repo's list: `to` its root, `from` its root there before). */
 export interface WriteItem {
   place: string;

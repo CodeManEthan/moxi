@@ -1,8 +1,8 @@
 // <moxi-rounds-page route="...">: rounds' page, every open round as one line of its steps
 // in columns aligned across rounds. Top to bottom:
 //
-// - The waiting line: what waits on him, counted, and `Go through in order`, which walks
-//   every item in the board's order.
+// - The waiting line: what waits on the operator, counted, and `Go through in order`,
+//   which walks every item in the board's order.
 // - `Last acted on`: the ten builds with the newest recorded act, each a card that opens
 //   its build's current step under it, with its stage's steps as tabs.
 // - The board: filter chips and a project picker, the column labels, then the groups,
@@ -11,8 +11,8 @@
 // - The foot: when it was read, the parked questions, and what an address named that is
 //   no longer open.
 //
-// A marker opens its step's record in a popover; one that waits on him opens his items
-// there. One thing is open at a time and the page writes it into its address, in place of
+// A marker opens its step's record in a popover; one that waits on the operator opens
+// the operator's items there. One thing is open at a time and the page writes it into its address, in place of
 // the entry it is on, so Back leaves the page. It only reads: nothing on it acts on a
 // round. Every word and every rule of what to draw comes from `model.ts`, and goes into
 // the page as text. At 720 px and under it is the phone layout: rounds as buttons, each
