@@ -216,7 +216,7 @@ def _files_under(env) -> list[Path]:
     for kind in ("data", "state", "cache", "config", "runtime"):
         module_dir = getattr(plain, f"{kind}_root")(env) / "rounds"
         found += [path for path in module_dir.rglob("*") if path.is_file()]
-    return sorted(set(found))
+    return sorted(dict.fromkeys(found))
 
 
 def test_a_borrowed_or_unfenced_test_elsewhere_writes_nothing_of_rounds(fence, tmp_path):
