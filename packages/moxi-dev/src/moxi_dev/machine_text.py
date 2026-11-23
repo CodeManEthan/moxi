@@ -21,12 +21,13 @@ machine only:
   `moxi_secrets` keeps in its config, outside every repository. No line the check prints
   names it: the private-name line names no text, on a line that holds one the
   home-folder line names the root alone, and a segment of a file's path that holds one
-  prints as `<private name>`. A list secrets can't read raises `moxi_secrets.SetUnavailable`; an
-  empty one finds nothing.
+  prints as `<private name>`. A list secrets can't read raises
+  `moxi_secrets.SetUnavailable`; an empty one finds nothing.
 - a package-manager command: one of `MANAGERS`, called by its name or from a folder
   (`/usr/bin/apt-get`, `C:\\...\\choco.exe`), followed by one of `VERBS` (options allowed
-  between, with their values: `-o K=V`, `-t <release>`, `--setopt=x`), or pacman with its operation flag, anywhere on a line: in a sentence, a
-  string or a comment. The same as an argv list of quoted words counts too.
+  between, with their values: `-o K=V`, `-t <release>`, `--setopt=x`), or pacman with
+  its operation flag, anywhere on a line: in a sentence, a string or a comment. The same
+  as an argv list of quoted words counts too.
   Case-sensitive, since commands are lower case. A sentence that only names a manager
   passes; service managers are not managers here. The managers whose name is also an
   ordinary word (`WORD_MANAGERS`: port, snap, apk) count only where a command starts: at
@@ -34,8 +35,10 @@ machine only:
   `PS C:\\> `, a Dockerfile's `RUN ` and any `NAME=value` assignments), or after `sudo`
   and its options (`sudo -u root `), `&&`, `||`, `;`, `&`, `|` or a backtick that opens
   inline code, never one that closes it; as an argv list, when the quoted manager comes
-  first. So "each port update is logged", "the `host` port update is logged" and
-  `("host", "port", "update")` pass.
+  first. A backtick opens inline code where the next run of as many closes it on the
+  line, and when it is the line's last run that nothing pairs, as a span wrapped onto
+  the next line leaves. So "each port update is logged", "the `host` port update is
+  logged" and `("host", "port", "update")` pass.
 
 The check reads every tracked and untracked-but-not-ignored file that reads as UTF-8,
 every line of it, comments included, lines numbered as git numbers them (a newline alone
@@ -121,28 +124,38 @@ WORD_MANAGERS = ("apk", "port", "snap")
 VERBS = ("install", "reinstall", "remove", "uninstall", "erase", "purge", "autoremove",
          "upgrade", "update", "search", "info", "add", "del", "dist-upgrade", "full-upgrade",
          "groupinstall", "groupremove")
-#: No word, path or flag runs on into a manager's name.
-_ALONE = r"(?<![\w./-])"
+#: No word, path (either slash) or flag runs on into a manager's name or its folder.
+_ALONE = r"(?<![\w./\\-])"
 #: Where a command starts: the line's start, past a comment's opening (`#`, `//`, `/*`,
 #: `*`, `<!--`), a shell prompt (`$ `, `% `, `# `, `> `, `PS C:\> `), a Dockerfile's
 #: `RUN ` and its flags, and any variable assignments (`NAME=value `); after `&&`, `||`,
 #: `;`, `&` or `|`; after a backtick, which `manager_commands` keeps only where it opens
-#: inline code (the `code` group); or after `sudo` and its options, with their values.
+#: inline code (the `code` group, read by `_openings`); or after `sudo` and its options,
+#: with their values.
 _COMMENT = r"(?:(?://|/\*+|\*|<!--|#)\s*)?"
 _PROMPT = r"(?:(?:PS\s+)?[^\s$%#>]*[$%#>]\s+)?"
 _RUN = r"(?:RUN(?:\s+--[\w-]+(?:=\S*)?)*\s+)?"
-#: sudo's options that take a value: `-u root`, `-uroot`, `--user=root`, `--user root`.
-_SUDO_VALUED = (r"-[CDghpRrTtUu]\s*\S+|--(?:chdir|chroot|close-from|command-timeout|group|"
-                r"host|other-user|prompt|role|type|user)(?:=|\s+)\S+")
-_SUDO = _ALONE + r"sudo(?:\s+(?:" + _SUDO_VALUED + r"|-[\w-]+))*\s+"
+#: sudo's options that take a value: `-u root`, `-uroot`, `--user=root`, `--user root`. A
+#: value never starts with `-`, and a flag is never one of these with its value joined on,
+#: so no two readings of sudo's options take the same words.
+_SUDO_VALUED = (r"-[CDghpRrTtUu]\s*[^\s-]\S*|--(?:chdir|chroot|close-from|command-timeout|"
+                r"group|host|other-user|prompt|role|type|user)(?:=\S+|\s+[^\s-]\S*)")
+_SUDO_FLAG = r"(?!-[CDghpRrTtUu]\S)-[\w-]+"
+_SUDO = _ALONE + r"sudo(?:\s+(?:" + _SUDO_VALUED + "|" + _SUDO_FLAG + r"))*\s+"
+#: A run of backticks.
+_TICKS = re.compile(r"`+")
 _START = (r"(?:^\s*" + _COMMENT + _PROMPT + _RUN + r"(?:\w+=\S*\s+)*|(?<=[;&|])\s*|"
           r"(?<=`)(?P<code>)\s*|" + _SUDO + ")")
 #: The folder a manager is called from: an absolute path (`/usr/bin/`), one from the home
 #: folder (`~/`) or from a drive (`C:\...\`).
 _CALLED_FROM = r"(?:(?:~|[A-Za-z]:)?(?:" + _SLASH + r"[\w.-]+)*" + _SLASH + ")?"
 #: The options between a manager and its verb, with their values: `--yes`, `--setopt=x`,
-#: `-o K=V`, `--option K=V`, and apt-get's `-t <release>`, `-c <file>`, `-a <arch>`.
-_OPTION = r"(?:-[acot]\s+\S+|--?[\w-]+(?:=\S*)?(?:\s+[^\s=-][^\s=]*=\S*)?)"
+#: `-o K=V`, `--option K=V`, and apt-get's `-t <release>`, `-c <file>`, `-a <arch>`. An
+#: option is one or two dashes and a letter or digit, a value never starts with `-`, and
+#: apt-get's four are read by the first alternative alone, so no two readings take the
+#: same words and a long run of options with no verb fails in time linear in the line.
+_OPTION = (r"(?:-[acot](?:\s+[^\s-]\S*)?|(?!-[acot](?!\S))-{1,2}[A-Za-z0-9][\w-]*(?:=\S*)?"
+           r"(?:\s+[^\s=-][^\s=]*=\S*)?)")
 _FLAGS = r"\s+(?:" + _OPTION + r"\s+)*"
 _VERB = "(?P<verb>" + "|".join(map(re.escape, VERBS)) + ")"
 _QUOTE = r"[\"']"
@@ -288,10 +301,20 @@ def user_dirs(line: str) -> list[str]:
     return found
 
 
+def _openings(line: str) -> set[int]:
+    """Where inline code opens on `line`, as the offset just past its backticks: each run
+    `CODE_SPAN` pairs as opening, and the line's last unpaired run, which a span wrapped
+    onto the next line or left unclosed opens. A run that closes a span opens none."""
+    spans = list(CODE_SPAN.finditer(line))
+    paired = {run for span in spans for run in (span.start(1), span.end() - len(span.group(1)))}
+    unpaired = [run.end() for run in _TICKS.finditer(line) if run.start() not in paired]
+    return {span.end(1) for span in spans} | {*unpaired[-1:]}
+
+
 def manager_commands(line: str) -> list[str]:
     """Each package-manager command `line` holds, as the manager and its verb, in the
     order they stand."""
-    opened = {span.end(1) for span in CODE_SPAN.finditer(line)}
+    opened = _openings(line)
     matches = [match for pattern in (COMMAND, PLACED_COMMAND, ARGV, PLACED_ARGV)
                for match in pattern.finditer(line)
                if match.groupdict().get("code") is None or match.start("code") in opened]

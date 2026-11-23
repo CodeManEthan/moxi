@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import re
 import subprocess
+import time
 from pathlib import Path
 
 import pytest
@@ -193,6 +194,10 @@ WORD_COMMANDS = [cmd(text).split() for text in ("port| install", "snap| install"
     "run `{m} {v} tmux`", "then sudo {m} {v} tmux", "$ {m} {v} tmux", '["{m}", "{v}", "x"]',
     # A backtick that opens inline code, a double one too, after closed code on the line.
     "``{m} {v} tmux``", "`a` and `{m} {v} tmux`", "`a` `{m} {v} x`",
+    # The line's last backtick nothing pairs: a span wrapped onto the next line, or one
+    # left unclosed, after closed code too.
+    "run `{m} {v} tmux", "a ` {m} {v} x", "Install it with `{m} {v} some-long-package",
+    "`a` then `{m} {v} x", "`a` b ``{m} {v} x", "`` a `{m} {v} x",
     # sudo's options and their values.
     "sudo -u root {m} {v} tmux", "sudo -uroot {m} {v} tmux", "sudo --user=root {m} {v} x",
     "sudo --user root {m} {v} x", "sudo -E -u root -H {m} {v} x", "sudo -g wheel {m} {v} x",
@@ -214,12 +219,19 @@ def test_a_manager_that_is_a_word_hits_where_a_command_starts(manager, verb, sha
     '("host", "{m}", "{v}")',
     # A backtick that closes inline code, or opens none, is no command start.
     "the `host` {m} {v} is logged", "`x` {m} {v} is slow", "``a`` {m} {v} x",
-    "`a` and `b` {m} {v} x", "run `{m} {v} tmux", "a ` {m} {v} x",
+    "`a` and `b` {m} {v} x", "the ``host`` {m} {v} is logged", "`a` ``b`` {m} {v} x",
+    # A backtick nothing pairs opens no code when a later one is the line's last unpaired.
+    "``{m} {v} x ` y", "`{m} {v} x `` y",
     # RUN is a Dockerfile's only at a line's start and in capitals.
     "RUNNING {m} {v} x", "Run it: RUN {m} {v} x", "run {m} {v} x",
 ])
 def test_a_manager_that_is_a_word_passes_elsewhere(manager, verb, shape):
     assert manager_commands(shape.format(m=manager, v=verb)) == []
+
+
+def test_a_code_span_wrapped_over_two_lines_hits_on_its_first():
+    text = cmd("Install it with `snap| install some-long-package\n--classic` first.\n")
+    assert check_text("a.md", text) == [Hit("a.md", 1, "manager", cmd("snap| install"))]
 
 
 def test_each_command_on_a_line_is_found_in_order():
@@ -239,9 +251,46 @@ def test_each_command_on_a_line_is_found_in_order():
     cmd("bin/brew| install x"), cmd("x/usr/bin/apt-get| install"),
     cmd("Run port| install tmux."), cmd("(or port| install tmux)"), cmd("- snap| install x"),
     cmd("apt-get| dist-upgrader"), cmd("dnf| group install"),
+    # A path with either slash runs on into the manager; `--` alone is no option.
+    cmd("bin\\brew| install x"), cmd("x\\choco| install x"), cmd("apt| -- install x"),
 ])
 def test_a_near_miss_is_no_command(line):
     assert manager_commands(line) == []
+
+
+#: Lines of 400 options, or long runs of spaces or paths, that reach no verb or reason,
+#: each read in time linear in the line: no two readings take the same words.
+LONG = 400
+LONG_LINES = [
+    "apt " + "--yes " * LONG + "x", "apt " + "--x=y " * LONG + "x",
+    "apt " + "-o a=b " * LONG + "x", "sudo " + "-uroot " * LONG + "x",
+    "sudo " + "-h " * LONG + "x", "apt " + "-o -o " * LONG + "x",
+    "apt " + "--option a=b " * LONG + "x", "apt " + "-t x " * LONG + "y",
+    "apt " + "-- " * LONG + "x", "sudo " + "--user --user " * LONG + "x",
+    "sudo " + "-u root " * LONG + "snap x", "sudo snap " + "--yes " * LONG + "x",
+    "`snap " + "--x=y " * LONG + "x", "RUN " + "--a=b " * LONG + "x",
+    '["apt", ' + '"-o", "a=b", ' * LONG + '"x"]', "\\\\a" * LONG * 10 + " x",
+    f"x  # noqa: {CODE}" + " " * LONG * 25 + "x", "x  # noqa:" + " " * LONG * 25 + "x",
+    f"x  # noqa: {CODE} --" + " " * LONG * 25 + "-->",
+]
+
+
+@pytest.mark.timeout(10)
+@pytest.mark.parametrize("line", LONG_LINES, ids=range(len(LONG_LINES)))
+def test_a_long_line_with_no_verb_is_read_in_linear_time(line):
+    start = time.perf_counter()
+    check_text("a.py", line)
+    assert time.perf_counter() - start < 0.25
+
+
+@pytest.mark.parametrize("line, command", [
+    (cmd("apt| ") + "--yes " * LONG + "install x", cmd("apt| install")),
+    (cmd("apt| ") + "-o a=b " * LONG + "install x", cmd("apt| install")),
+    (cmd("sudo snap| ") + "-t x " * LONG + "install x", cmd("snap| install")),
+    ("sudo " + "-uroot -h " * LONG + cmd("snap| install x"), cmd("snap| install")),
+])
+def test_a_long_line_of_options_still_reaches_its_verb(line, command):
+    assert manager_commands(line) == [command]
 
 
 # --- the private-name rule ----------------------------------------------------------------

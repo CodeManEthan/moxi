@@ -27,8 +27,10 @@ _COMMENT_END = r"(?:-->|\*/)"
 def mark_patterns(code: str) -> tuple[re.Pattern[str], re.Pattern[str]]:
     """The mark that names `code` among its codes and gives a reason, and any mark that
     names `code`, with or without one."""
-    named = r"\bnoqa:\s*[A-Z0-9, ]*?\b" + re.escape(code) + r"\b"
-    reason = r"[A-Z0-9, ]*?\s+--\s+(?:(?!" + _COMMENT_END + r").)*?\w"
+    # Each space reads one way, so a long run of them after `noqa:` costs time linear in
+    # the line: the codes before and after `code` neither start nor end with one.
+    named = (r"\bnoqa:\s*(?:[A-Z0-9,](?:[A-Z0-9, ]*[, ])?)?\b" + re.escape(code) + r"\b")
+    reason = r"(?:[A-Z0-9, ]*[A-Z0-9,])?\s+--\s(?:(?!" + _COMMENT_END + r").)*?\w"
     return re.compile(named + reason), re.compile(named)
 
 
