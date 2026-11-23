@@ -81,6 +81,19 @@ def test_a_second_lander_exits_on_the_lock(holder):
     assert ran == []
 
 
+def test_a_batch_whose_members_all_left_keeps_the_lander_until_it_ends():
+    join()
+    queue_file.append(REPO, {"event": queue_file.BATCH, "state": queue_file.BUILT,
+                             "id": "bbb-1", "n": 1, "main": "b" * 40, "branch": "q",
+                             "members": [{"round": ROUND, "stage": "B1", "tip": "a" * 40}]})
+    end(kind=queue_file.LEFT)
+    assert not queue_file.read(REPO).queued()
+    assert not lander.settled(REPO, queue_file.read(REPO))
+    queue_file.append(REPO, {"event": queue_file.BATCH, "state": queue_file.ENDED,
+                             "id": "bbb-1", "why": "rebuilt without it"})
+    assert lander.settled(REPO, queue_file.read(REPO))
+
+
 def test_the_lander_works_until_nothing_waits():
     join()
     steps, slept, said = [], [], []

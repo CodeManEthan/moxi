@@ -191,12 +191,13 @@ def queue_repos(settings=None) -> list[str]:
 # -- the run -----------------------------------------------------------------------------
 
 def settled(repo: str, queue: queue_file.Queue, *, env=None) -> bool:
-    """Whether nothing keeps the lander: no member waits, no message comms could not
-    take is still being tried (`telling.trying`, bounded by `telling.UNSENT_S`), and the
+    """Whether nothing keeps the lander: no member waits, no batch runs (one whose
+    members all left runs until the lander ends it), no message comms could not take is
+    still being tried (`telling.trying`, bounded by `telling.UNSENT_S`), and the
     target's head has a full run that has ended and been read, or one given up on
     (`batching.main_owed`)."""
-    return (not queue.queued() and not telling.trying(queue)
-            and not batching.main_owed(repo, queue))
+    return (not queue.queued() and not queue.running_batches()
+            and not telling.trying(queue) and not batching.main_owed(repo, queue))
 
 
 def run(repo: str, *, say: Callable[[str], None] = print,
