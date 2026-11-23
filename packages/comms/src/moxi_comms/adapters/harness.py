@@ -86,14 +86,18 @@ def launch_stamp() -> str:
 def plan_head(agent, roster, say, *, record: str) -> None:
     """The head of a wrapper's plan: the identity, roster, cwd, `record` (the
     harness's own line for the thread or session it keeps), and the agent's directors
-    when it declares any."""
+    when it has any, each policy director marked (`session.directors_line`), or that it
+    opted out of them."""
+    from .session import directors_line
+
     say(f"identity   {agent.qualified}")
     say(f"  roster     {roster.source}")
     say(f"  cwd        {agent.cwd}")
     say(record)
-    if agent.directors:
-        say(f"  directors  {', '.join(agent.directors)} "
-            "(verified messages from these render as directives)")
+    said = directors_line(agent.directors, getattr(agent, "policy_directors", ()),
+                          opted_out=not getattr(agent, "takes_policy_directors", True))
+    if said:
+        say(f"  directors  {said}")
 
 
 def plan_comms(comms_path, say) -> None:
@@ -204,7 +208,8 @@ class HarnessAdapter:
 
     def __init__(self, agent, *, socket_path=None, autoreconnect: bool = True,
                  backoff=None, status_sink=None, clock=time.time, exit_hook=None):
-        # Reads `agent.directors` (at render) and nothing else of the agent here.
+        # Reads `agent.directors` and `agent.policy_directors` (at render) and nothing
+        # else of the agent here.
         self.agent = agent
         self.clock = clock                 # only the catch-up header reads it
         self.socket_path = socket_path     # the DAEMON socket
@@ -278,6 +283,11 @@ class HarnessAdapter:
         self.exit_hook = exit_hook or (lambda: os.kill(os.getpid(), signal.SIGTERM))
         self._make_holder()
 
+    def _policy_directors(self) -> tuple:
+        """The part of `agent.directors` only the box's `[policy] directors` gave, read at
+        render as `agent.directors` is."""
+        return tuple(getattr(self.agent, "policy_directors", None) or ())
+
     # ------------------------------------------------------------------ the claim
     def _make_holder(self) -> None:
         """This adapter is its session's top process and its claim holder. Its claim
@@ -298,7 +308,8 @@ class HarnessAdapter:
         claim = {"name": name, "scope": scope, "global": scope == "global",
                  "qualified": getattr(agent, "qualified", None),
                  "tier": None,
-                 "directors": list(getattr(agent, "directors", []) or [])}
+                 "directors": list(getattr(agent, "directors", []) or []),
+                 "policy_directors": list(getattr(agent, "policy_directors", []) or [])}
         self._launch_claim = claim
         # Held in memory from construction; the file is written at `start`.
         self.claims.claim = dict(claim)
@@ -816,7 +827,8 @@ class HarnessAdapter:
         ids = tuple(str(p["message_id"]) for p in batch)
         high = max(int(mid) for mid in ids)
         try:
-            text = render_digest(batch, notice, self.agent.directors, clock=self.clock)
+            text = render_digest(batch, notice, self.agent.directors, clock=self.clock,
+                                 policy=self._policy_directors())
             mark = self.marks[str(high)] = self.claims.hold_mark()
             self._digests[str(high)] = ids
             self._batches[str(high)] = batch
@@ -854,7 +866,8 @@ class HarnessAdapter:
             directors = tuple(getattr(self.agent, "directors", None) or ())
             session_id = self.mirror_session()
             for p in batch:
-                self.reply_ledger.open(p, directors, session_id, now)
+                self.reply_ledger.open(p, directors, session_id, now,
+                                       policy=self._policy_directors())
         self.on_delivered(text, high, identity, len(batch), receipt)
         if not self.HOLDS_UNTIL_TURN_ENDS:
             self.release_held(ids)         # the digest's turn ended inside `deliver`

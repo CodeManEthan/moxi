@@ -42,6 +42,7 @@ from moxi_connector.app import Front, Host, build_app
 from moxi_connector.calllog import MemoryLog
 from moxi_connector.codes import mint_method
 from moxi_connector.oauth import OAuth
+from moxi_dev.testing import PROC_WAIT_S
 
 COMMS_TESTS = Path(__file__).resolve().parents[2] / "comms" / "tests"
 
@@ -422,7 +423,7 @@ def test_a_failed_write_leaves_comms_messages_unread(door, registry, rig):
         await request(d.front, "POST", "/mcp", call("check_messages"), headers=access,
                       send_fails=True)
         assert unread(rig) == set(ids)
-        deadline = time.monotonic() + 5
+        deadline = time.monotonic() + PROC_WAIT_S
         while pending() != ids:
             assert time.monotonic() < deadline, pending()
             await asyncio.sleep(0.01)
@@ -463,7 +464,7 @@ def test_a_caller_that_hangs_up_mid_wait_frees_the_slot_and_the_late_reply_stays
                                                "wait_s": 60}, rid=8),
                 token=access, until=lambda: tools.waiting == 1 and sent_by_me(rig))
         cut = time.monotonic()
-        wait_for(lambda: tools.waiting == 0, within=10)
+        wait_for(lambda: tools.waiting == 0, within=PROC_WAIT_S)
         assert time.monotonic() - cut < 5               # well before the 60 s asked
         wait_for(lambda: tool_rows(d, "send_and_wait"))
         mid = sent_by_me(rig)
@@ -565,7 +566,7 @@ def test_an_error_answer_after_comms_opened_the_digest_leaves_its_messages_unrea
             result["content"][0]["text"]
         monkeypatch.setattr(link, "read", real)
         assert unread(rig) == set(ids)
-        deadline = time.monotonic() + 5
+        deadline = time.monotonic() + PROC_WAIT_S
         while pending() != ids:
             assert time.monotonic() < deadline, pending()
             await asyncio.sleep(0.01)

@@ -47,7 +47,7 @@ from moxi.units import _systemd
 from moxi.units._fence import Fence
 from moxi.units._systemd import SystemdBackend, command_line, quote
 from moxi.units._types import Wrapped
-from moxi_dev.testing import REAL_SUPERVISOR_ENV
+from moxi_dev.testing import PROC_WAIT_S, REAL_SUPERVISOR_ENV
 
 from conftest import drop_modules
 
@@ -389,7 +389,7 @@ class SocketModule:
     def show(self, unit: str, *props: str) -> dict[str, str]:
         return _show(self.fence, unit, *props)
 
-    def wait(self, unit: str, state: str, seconds: float = 15) -> str:
+    def wait(self, unit: str, state: str, seconds: float = PROC_WAIT_S) -> str:
         """Wait for `unit`'s `ActiveState` to read `state`; the last one read."""
         deadline = time.monotonic() + seconds
         while True:
@@ -893,7 +893,7 @@ def login_run(tmp_path_factory):
                     seen["entered"] = {u: int(row.show(u, "ActiveEnterTimestampMonotonic")[
                         "ActiveEnterTimestampMonotonic"]) for u in (*held, service)}
                     report.append(f"active from (monotonic us): {seen['entered']}")
-                    deadline = time.monotonic() + 15
+                    deadline = time.monotonic() + PROC_WAIT_S
                     while len(_records(record)) == count and time.monotonic() < deadline:
                         time.sleep(0.1)
                     seen["handed"] = _records(record)[count:]

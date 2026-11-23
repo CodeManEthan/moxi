@@ -91,7 +91,8 @@ ROUND_KEYS = ("flow", "dir", "ratify", "trace", "idle_days", "dormant_days",
               "slice_minutes", "sitting_at")
 #: The keys read for a build, from the build's repo.
 BUILD_KEYS = ("into", "land", "check", "ci", "finish", "check_on", "shared_paths",
-              "keep_branch", "lock_ref", "brief", "disposable", "director")
+              "keep_branch", "lock_ref", "brief", "disposable", "director",
+              "private_files")
 
 #: How a repo's builds land (`land`): each by its own finish, or through the repo's
 #: queue, where a finish joins the queue and the lander merges.
@@ -112,7 +113,8 @@ DEFAULT_FINISH = ({"do": MERGE},)
 #: project's table leaves it out. No `into` means the branch checked out at the repo's
 #: root, and no `lock_ref` rounds' own name for the lock.
 _PROJECT_ONLY = {"into": None, "land": LAND_FINISH, "check": None, "ci": None, "finish": DEFAULT_FINISH,
-                 "shared_paths": (), "keep_branch": False, "lock_ref": None, "brief": ()}
+                 "shared_paths": (), "keep_branch": False, "lock_ref": None, "brief": (),
+                 "private_files": ()}
 
 
 def round_setting(settings, project: str, key: str):
@@ -379,6 +381,47 @@ def _check_strings(file, where, value) -> None:
                           "give each item as a string")
 
 
+def _check_private_files(file, where, value) -> None:
+    """Refuse a `private_files` value that is not a list of literal paths, each relative
+    to the project's root, written with `/`, and named once. Whether a file is there,
+    tracked or ignored is the repo's state, read by `commission` and the doctor."""
+    _check_strings(file, where, value)
+    seen = set()
+    for entry in value:
+        problem = _private_file_problem(entry)
+        if problem:
+            raise ConfigError(file, where, f"holds {entry!r}, {problem}",
+                              "give each private file as a path relative to the "
+                              "project's root, with / between its parts, such as "
+                              "AGENTS.md or notes/local.md")
+        if entry in seen:
+            raise ConfigError(file, where, f"holds {entry!r} twice",
+                              "give each private file once")
+        seen.add(entry)
+
+
+def _private_file_problem(entry: str) -> str:
+    """What makes `entry` no literal relative path to a file, or "" when nothing does."""
+    if not entry:
+        return "which is empty"
+    if any(ord(char) < 32 or ord(char) == 127 for char in entry):
+        return "which holds a control character"
+    if "\\" in entry:
+        return "which holds a \\; write / between the parts"
+    if entry.startswith(("/", "~")) or (len(entry) > 1 and entry[1] == ":"):
+        return "which is not relative to the project's root"
+    if any(char in entry for char in "*?["):
+        return "which holds *, ? or [; each entry is a literal path, not a glob"
+    if entry.startswith(":"):
+        return "which starts with :, which git reads as pathspec magic"
+    parts = entry.split("/")
+    if any(part in ("", ".", "..") for part in parts):
+        return "which has an empty, . or .. part"
+    if any(part.casefold() == ".git" for part in parts):
+        return "which has a .git part"
+    return ""
+
+
 def _check_check(file, where, value, *, keys=("command", "timeout_s")) -> None:
     """The repo's check: a command line that splits into a command, and its time limit.
     The project's own check also takes `scoped`, the command line a queue project's
@@ -425,7 +468,7 @@ def _check_command_line(file, where, command) -> None:
 _CI_KEYS = ("workflows", "local", "remote", "ref", "full_ref", "status", "ids", "jobs",
             "status_timeout_s")
 #: The keys of a `ci.workflows` entry written as a table.
-_WORKFLOW_KEYS = ("path", "jobs")
+_WORKFLOW_KEYS = ("path", "jobs", "matrix", "pick", "reads_candidates", "stands_for")
 
 
 def _check_ci(file, where, value) -> None:
@@ -448,6 +491,11 @@ def _check_ci(file, where, value) -> None:
                           'workflows = [".github/workflows/ci.yml"]')
     for entry in workflows:
         _check_workflow(file, f"{where}.workflows", entry)
+    if all(isinstance(entry, dict) and entry.get("reads_candidates") is True
+           for entry in workflows):
+        raise ConfigError(file, f"{where}.workflows",
+                          "marks every workflow reads_candidates, so none reads a full run",
+                          "name the full run's workflow too, with no reads_candidates key")
     local = value.get("local")
     if local is None:
         raise ConfigError(file, f"{where}.local", "is missing",
@@ -477,9 +525,22 @@ def _check_ci(file, where, value) -> None:
     flows.check_timeout(file, f"{where}.status_timeout_s", value.get("status_timeout_s"))
 
 
+def _names_problem(value) -> str | None:
+    """Why `value` is not a list of names, each once; None when it is."""
+    if (not isinstance(value, list) or not value
+            or not all(isinstance(one, str) and one.strip() for one in value)):
+        return "is not a list of job names"
+    if len(set(value)) != len(value):
+        return "names a job twice"
+    return None
+
+
 def _check_workflow(file, where, entry) -> None:
-    """One `ci.workflows` entry: a path inside the repo, or a table of the `path` and
-    the `jobs` read of its run."""
+    """One `ci.workflows` entry: a path inside the repo, or a table of the `path`, the
+    `jobs` read of its run by name, the `matrix` patterns of the jobs read by pattern
+    (one of the two at least), the `pick` job among `jobs`, `reads_candidates`, true
+    for the workflow a queue's candidate is read by, and `stands_for`, a table of job
+    names: each job of its run to the job of the target's full run it stands for."""
     from pathlib import PurePosixPath
 
     path = entry
@@ -490,16 +551,41 @@ def _check_workflow(file, where, entry) -> None:
                                   "is not a key of a workflow entry",
                                   "remove it; an entry takes " + ", ".join(_WORKFLOW_KEYS))
         path = entry.get("path")
-        jobs = entry.get("jobs")
-        if (not isinstance(jobs, list) or not jobs
-                or not all(isinstance(one, str) and one.strip() for one in jobs)):
-            raise ConfigError(file, f"{where}.jobs",
-                              "is missing" if jobs is None else "is not a list of job names",
-                              'name each job read as its run names it: jobs = ["linux"], '
-                              "or give the entry as its path alone to read the whole run")
-        if len(set(jobs)) != len(jobs):
-            raise ConfigError(file, f"{where}.jobs", "names a job twice",
-                              "name each job once")
+        jobs, matrix = entry.get("jobs"), entry.get("matrix")
+        if jobs is not None or matrix is None:
+            why = "is missing" if jobs is None else _names_problem(jobs)
+            if why is not None:
+                raise ConfigError(file, f"{where}.jobs", why,
+                                  'name each job read once, as its run names it: '
+                                  'jobs = ["linux"], or give the entry as its path '
+                                  "alone to read the whole run")
+        if matrix is not None:
+            why = _names_problem(matrix)
+            if why is not None:
+                raise ConfigError(file, f"{where}.matrix", why.replace("job names",
+                                                                       "name patterns"),
+                                  "give each pattern once, * for any text in a name: "
+                                  'matrix = ["browser (*)"]')
+        pick = entry.get("pick")
+        if pick is not None and (not isinstance(pick, str) or pick not in (jobs or ())):
+            raise ConfigError(file, f"{where}.pick", f"is {pick!r}, which jobs does not name",
+                              'name the job that picks the others, and list it in jobs: '
+                              'pick = "pick", jobs = ["pick", ...]')
+        reads = entry.get("reads_candidates")
+        if reads is not None and not isinstance(reads, bool):
+            raise ConfigError(file, f"{where}.reads_candidates",
+                              f"is {reads!r}, not true or false",
+                              "write reads_candidates = true on the workflow a queue's "
+                              "candidate is read by")
+        stands_for = entry.get("stands_for")
+        if stands_for is not None and (
+                not isinstance(stands_for, dict)
+                or not all(isinstance(one, str) and one.strip()
+                           for pair in stands_for.items() for one in pair)):
+            raise ConfigError(file, f"{where}.stands_for",
+                              f"is {stands_for!r}, not a table of job names",
+                              "map each job of this run to the job of the target's full "
+                              'run it stands for: stands_for = { scoped = "linux" }')
     parts = PurePosixPath(path).parts if isinstance(path, str) else ()
     if (not isinstance(path, str) or not path.strip() or path.startswith(("/", "\\"))
             or ".." in parts or ":" in path.split("/")[0]):
@@ -592,7 +678,7 @@ _PROJECT_CHECKS = {
     "land": _check_land, "check": _check_project_check, "ci": _check_ci, "finish": _check_finish,
     "shared_paths": _check_strings, "keep_branch": _check_bool,
     "lock_ref": lambda file, where, value: _check_string(file, where, value, "a git ref"),
-    "brief": _check_strings}
+    "brief": _check_strings, "private_files": _check_private_files}
 
 _KIND_WORDS = {"string": "a string", "bool": "a boolean", "int": "an int"}
 

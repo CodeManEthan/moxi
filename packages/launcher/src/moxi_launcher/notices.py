@@ -25,9 +25,13 @@ run was ended before the note, so the session can arm again at once); the note's
 an event of the run.
 
 **A notice** goes through comms under the launcher's reserved send-only name, `console`,
-to the directors the launch named (`values_json["director"]`). Refused, or with no
-director, it goes once more to `relaunch.fallback` when that names someone. comms' daemon
-offline: one more try after `OFFLINE_RETRY_S`, then it stays recorded.
+to the directors the launch named (`values_json["director"]`) and the box's policy
+directors (`policy_directors`), each once. The policy names are comms'
+`policy_directors()` read at the notice, so only names provisioned now; they go to a
+launch with a comms identity that didn't opt out (`takes_policy_directors = false`).
+Refused, or with no director, it goes once more to `relaunch.fallback` when that names
+someone. comms' daemon offline: one more try after `OFFLINE_RETRY_S`, then it stays
+recorded.
 
 **A notice is sent only from a process outside every session; a refusal that can clear is
 retried within a bound; a notice never sent stays in the run's events.** comms refuses a
@@ -48,6 +52,7 @@ from collections.abc import Callable, Mapping, Sequence
 from typing import Any
 
 from . import store
+from .catalog import TAKES_POLICY
 
 log = logging.getLogger("moxi.launcher.notices")
 
@@ -214,12 +219,55 @@ def directors(row: store.LaunchRow | None) -> list[str]:
     return [str(name).strip() for name in named if str(name).strip()]
 
 
+def policy_directors(row: store.LaunchRow | None, comms: Any | None) -> list[str]:
+    """The box's policy directors that direct the launch now: comms'
+    `policy_directors()`, read at this call, so the names provisioned as standing
+    identities now, qualified as comms qualifies them (a bare name is the global
+    identity). Empty for a launch without a comms identity, one whose stored values carry
+    `takes_policy_directors = false`, a comms older than the call, or a read that fails."""
+    if row is None or comms is None or not row.identity:
+        return []
+    if row.values.get(TAKES_POLICY) is False:
+        return []
+    read = getattr(comms, "policy_directors", None)
+    if read is None:
+        return []
+    try:
+        names = read()
+    except Exception as exc:  # noqa: BLE001  (an unread setting adds no director)
+        log.warning("comms' policy directors could not be read: %s", exc)
+        return []
+    return [str(name).strip() for name in names or () if str(name).strip()]
+
+
+def recipients(comms: Any, named: Sequence[str], policy: Sequence[str]) -> list[str]:
+    """The launch's own directors, then the policy names, each once: a policy name the
+    launch also named (as comms reads a bare name, the global identity) is not added."""
+    out = list(dict.fromkeys(named))
+    seen = {_as_comms_reads(comms, name) for name in out}
+    for name in policy:
+        if _as_comms_reads(comms, name) not in seen:
+            seen.add(_as_comms_reads(comms, name))
+            out.append(name)
+    return out
+
+
+def _as_comms_reads(comms: Any, name: str) -> str:
+    """`name` as comms qualifies a recipient: a bare name is the global identity."""
+    try:
+        bare, scope = comms.split_tag(name)
+        return comms.qualify(bare, scope or comms.GLOBAL)
+    except Exception:  # noqa: BLE001  (comms' own form unknown: the name as given)
+        return name
+
+
 def notify(conn: sqlite3.Connection, run: store.Run, row: store.LaunchRow | None,
            outcome: str, *, comms: Any | None, fallback: str = "",
            retry_s: float = 30.0, repairable: bool = False,
            clock: Callable[[], float] = time.monotonic,
            sleep: Callable[[float], None] = time.sleep) -> str:
-    """Tell the directors, then the fallback, that `run` ended `outcome`, and return what
+    """Tell the directors, the launch's own and the box's policy directors
+    (`recipients`), then the fallback, that `run` ended `outcome`, and return what
     became of it: `sent`, `refused`, `offline`, `unsent` or `recorded` (no comms). Every
     try is a run event."""
     body = text(run, row, outcome, repairable=repairable)
@@ -228,7 +276,7 @@ def notify(conn: sqlite3.Connection, run: store.Run, row: store.LaunchRow | None
                             {"verdict": "recorded", "why": "comms is not installed",
                              "text": body})
         return "recorded"
-    to = directors(row)
+    to = recipients(comms, directors(row), policy_directors(row, comms))
     fallback = fallback.strip()
     verdict = "unsent"
     if to:
@@ -240,7 +288,7 @@ def notify(conn: sqlite3.Connection, run: store.Run, row: store.LaunchRow | None
                      fallback=True)
     if not to:
         store.add_run_event(conn, run.run_id, "notice",
-                            {"verdict": "unsent", "why": "the launch named no director "
+                            {"verdict": "unsent", "why": "the launch has no director "
                                                          "and relaunch.fallback is empty",
                              "text": body})
     return verdict
@@ -303,5 +351,6 @@ def settings_of(current: Mapping[str, Any]) -> dict[str, Any]:
 
 __all__ = ["LEFT_IN_PLACE", "MODULE", "NAME_RESERVED", "NOTE", "NOTES", "NOTE_NOT_TAKEN",
            "NOTE_OUTCOMES", "NOTICE_OUTCOMES", "OFFLINE_RETRY_S", "RELAUNCHED",
-           "RESERVED_RETRY_S", "SENDER", "directors", "is_flagged", "note", "note_text",
-           "notify", "owes_note", "settings_of", "text"]
+           "RESERVED_RETRY_S", "SENDER", "directors", "is_flagged", "note",
+           "note_text", "notify", "owes_note", "policy_directors", "recipients",
+           "settings_of", "text"]

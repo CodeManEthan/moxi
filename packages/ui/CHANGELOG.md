@@ -1,5 +1,23 @@
 # Changelog
 
+## 0.2.8 (2026-11-23)
+
+- On the modules view, each block's card says `Reading…` until its block first takes up
+  height, rather than showing an empty card while the block's script and first read
+  are out.
+- While reads that decide a page's layout are out, `client.js` marks the page root (the
+  shell's `#moxi-panel`) with `data-reading="<n>"`, their count, and takes the mark away
+  at none: each `api` read until its answer has been drawn, each `subscribe` until its
+  first value (at most 5 s), each `place` until its element is placed. A user sees no
+  change. For module authors, `moxi_ui.testing` gains the `ui_press` fixture
+  (`moxi_ui.testing.browser.press`), a click that waits for the mark to go first, and
+  `settled(page)`: press through it and a late answer can't move a control under the
+  click. A page that never settles fails the press with the mark's count.
+- `client.js` gains `readLater(read, ms)`, for a read a page decides on but sends after a
+  wait (a list read again after a topic value, a field read once typing stops): the
+  page root's `data-reading` mark counts it from the moment it is scheduled until its
+  answer has been drawn, and the function it gives cancels it. A user sees no change.
+
 ## 0.2.7 (2026-11-22)
 
 - Past its 20 sessions, the shell's sign-in store now evicts the least recently used

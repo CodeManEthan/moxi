@@ -788,6 +788,32 @@ def test_a_headless_launch_without_an_identity_keeps_its_mode(monkeypatch):
                    available=only("comms", "turns")).mode == "exec"
 
 
+def test_the_defaults_refuse_the_policy_opt_out_by_name_with_comms_installed():
+    # One line there would opt every seat out; a seat opts out on its own.
+    found = errors('[defaults]\ntakes_policy_directors = true\n', available=only("comms"))
+    assert [(p.where, p.key, p.code) for p in found] == [
+        ("defaults", "takes_policy_directors", "per-seat")]
+    assert "every seat" in found[0].problem
+    assert errors('[seat.s]\nidentity = "s"\ntakes_policy_directors = false\n',
+                  available=only("comms")) == []
+    with pytest.raises(presets.BadPreset) as raised:
+        resolve('[defaults]\ntakes_policy_directors = false\n', available=only("comms"))
+    assert raised.value.found.code == "per-seat"
+
+
+def test_a_seat_opted_out_resolves_and_records_false():
+    got = resolve('[seat.s]\nidentity = "s"\ntakes_policy_directors = false\n',
+                  available=only("comms"), seat="s")
+    assert got.values["takes_policy_directors"] is False
+    assert resolve("", available=only("comms")).values["takes_policy_directors"] is True
+
+
+def test_comms_has_policy_probes_for_the_call():
+    assert presets.comms_has_policy(SimpleNamespace(policy_directors=lambda: ())) is True
+    assert presets.comms_has_policy(SimpleNamespace()) is False
+    assert presets.comms_has_policy(None) is False
+
+
 @pytest.mark.parametrize("value, want", [
     (None, frozenset()), ("codex", frozenset()), (3, frozenset()),
     (["codex"], frozenset({"codex"})), (frozenset({"claude", "codex"}),
@@ -1014,6 +1040,10 @@ def test_a_good_file_checks_clean(tmp_path):
     ('[seat.s]\nsession_id = "x"\n', "seat.s", "session_id", "owned"),
     ('[seat.s]\nslot = "1"\n', "seat.s", "slot", "needs-module"),
     ('[seat.s]\ndirector = ["a"]\n', "seat.s", "director", "needs-module"),
+    ('[seat.s]\ntakes_policy_directors = false\n', "seat.s", "takes_policy_directors",
+     "needs-module"),
+    ('[defaults]\ntakes_policy_directors = false\n', "defaults",
+     "takes_policy_directors", "per-seat"),
     ('[seat.s]\ninstructions_file = "rel/x.md"\n', "seat.s", "instructions_file",
      "bad-value"),
     ('[seat.s]\ninstructions = "a"\ninstructions_file = "/x.md"\n', "seat.s",

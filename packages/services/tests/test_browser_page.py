@@ -25,7 +25,7 @@ from playwright.sync_api import expect
 from browser_kit import fake_site, get, moxi, seed, slots_said, stored, written
 
 _copying = pytest.importorskip("moxi_ui.testing.browser", reason="ui is not installed")
-copied, ready_copying = _copying.copied, _copying.ready_copying
+copied, press, ready_copying = _copying.copied, _copying.press, _copying.ready_copying
 
 pytestmark = [pytest.mark.browser, pytest.mark.timeout(180),
               pytest.mark.skipif(not sys.platform.startswith("linux"),
@@ -206,7 +206,7 @@ def test_the_blocks_link_on_the_modules_view_opens_the_page_which_it_then_marks(
     ui_page.goto("/m/ui/modules")
     link = ui_page.locator("#moxi-panel > moxi-ui-page #home moxi-services-summary h2 a")
     expect(link).to_have_text("Services")
-    link.click()
+    press(link)
     expect(ui_page.locator('#moxi-panel > moxi-services-page section[data-part="list"]')).to_have_attribute(
         "data-state", "up")
     assert ui_page.evaluate("location.pathname") == "/m/services/"
@@ -323,7 +323,7 @@ def test_a_running_daemon_says_since_when(seeded, ui_page):
 def opened(panel, ident: str, name: str):
     """Opens the row `ident` by its `Open` and gives its opened part."""
     item = row(panel, ident)
-    item.get_by_role("button", name=f"Open {name}", exact=True).click()
+    press(item.get_by_role("button", name=f"Open {name}", exact=True))
     part = item.locator('[data-part="opened"]')
     expect(part).to_be_visible()
     return part
@@ -955,7 +955,7 @@ def test_the_slots_servers_restart_with_nothing_in_use_goes_plain(seeded, units_
     part = opened(panel, SLOTS, name)
     expect(label(part, "Needs it").locator('[data-line="text"]')).to_have_text("Nothing is running in its slots.")
     with ui_page.expect_request("**/m/services/api/ends?id=*"):
-        status = done_after(ui_page, lambda: part.get_by_role("button", name=f"Restart {name}", exact=True).click())
+        status = done_after(ui_page, lambda: press(part.get_by_role("button", name=f"Restart {name}", exact=True)))
     assert status["state"] == "done", status
     expect(confirm_of(part)).to_have_count(0)
     body = posts[0].post_data_json

@@ -1,5 +1,58 @@
 # Changelog
 
+## 0.2.7 (unreleased)
+
+- A new request, `fork {text, by, ref?}` (the client's `fork(text, by=, ref=)`), and a new
+  capability, `fork`: start a fork of the session's main loop with `text` as its task. It
+  runs beside the main loop's turns and holds no slot. Its `started` value carries the
+  fork's `agent_id` (a new field of `started`, null for every other delivery), its
+  `ended` the fork's answer, and a fork the harness refused or that went away reads
+  `lost` with a reason starting `denied` or `gone`.
+- Claude Code sessions offer `fork`. The runner spawns a background fork of the main
+  loop with a one-word warm-up, then sends the task as the fork's first resumed round,
+  whose answer Claude Code announces to the main loop as it announces any finished
+  subagent; the runner leaves that notice as Claude Code sends it. The delivery's answer
+  is that round's. A refused spawn reads `lost` `denied`; a warm-up that does not
+  complete within 30 s or ends other than with an answer, a task Claude Code does not
+  deliver, and a round with no end within its bound (120 s when the asker sets none) read
+  `lost` `gone`.
+- The Claude runner tells a fork's tool calls from its own by the call's `agentId`. A
+  call counts as the runner's own, judged by no guard, only when it carries no `agentId`;
+  every call of a fork the runner started is judged by the guards at the call step and
+  the ask step, and gets no after-tool ask. The runner holds a fork's id until the fork's
+  own turn.complete for its open round; a /clear, a compaction or a resume lets go of
+  nothing, and only the end of the Claude Code process drops it. A round its bound ends
+  reads `lost` `gone` at once, but the fork may still be running, so its id stays held
+  until that late turn.complete, which lets it go and reports nothing; its calls
+  meanwhile are still the fork's, and a `fork.continue` for it is refused. A call with
+  an id the runner does not hold is judged and asked after as any agent's. The runner
+  speaks leg 5 and is version 0.3.0, so `moxi install turns` updates an install at user
+  scope.
+- A new request, `fork.continue {delivery, text, ref?}` (the client's
+  `fork_continue(delivery, text, ref=)`): give a fork that has answered its next round, a
+  new delivery whose `ended` carries the round's answer. It reads `lost` `gone` when the
+  endpoint knows no such fork, the fork never started or its round was lost, and `denied`
+  while a round of the fork is still open. On Claude Code the runner sends the text to the
+  finished fork, which answers again in its own conversation.
+- `fork` and `fork.continue` take `round_timeout_ms` (the client's `round_timeout_s=`): how
+  long the harness's half waits for the round's answer before the delivery reads `lost`
+  `gone`. With none, Claude Code's runner waits 120 s. An endpoint of an older turns
+  ignores it and waits its default.
+- A new option, `keep` (with a `ref`), on `deliver`, `fork` and `fork.continue`, a new
+  request, `ack {ref}`, and a new capability, `keep`, which every session of this version
+  offers. A kept delivery's end is written to turns' state folder when it settles, the
+  endpoint's own end included, and stays out of the settled deliveries the endpoint drops
+  for space, so `wait` reads the same end at every read, after the endpoint has ended too
+  (the client reads the state folder then, and a later endpoint of the session answers a
+  `wait` by that `ref` from it). `ack` removes it; an ack of a `ref` with no kept end does
+  nothing. Nothing removes a kept end by age: `moxi doctor turns` lists each one older than
+  a day with its `ref` and asker. The client gains `keep=`, `Session.ack(ref)`, and
+  `turns.wait_ref(ref, session_id=)` and `turns.ack(ref, session_id=)` for a caller that
+  holds no `Delivery`. An endpoint of an older turns does not offer `keep`, and the client
+  refuses to send `keep` to it. One `ref` holds one kept end: a `keep` under a `ref` whose
+  kept end in the session is not acked yet is answered invalid params, so no kept end
+  replaces another.
+
 ## 0.2.6 (unreleased)
 
 - The Codex host takes `--fork THREAD_ID` (`codex.launch(fork=...)`), beside and never

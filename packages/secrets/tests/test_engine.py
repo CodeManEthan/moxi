@@ -14,6 +14,7 @@ import warnings
 import corpus
 import pytest
 
+from moxi_dev.testing import PROC_WAIT_S
 from moxi_secrets import engine, fallback, scan
 
 scan_mod = importlib.import_module("moxi_secrets.scan")
@@ -307,4 +308,4 @@ def test_the_child_cancels_its_timer_when_a_text_is_done():
         assert json.loads(proc.stdout.readline()) == {"hits": {"credentials": []}}
     finally:
         proc.stdin.close()
-        proc.wait(timeout=10)
+        proc.wait(timeout=PROC_WAIT_S)

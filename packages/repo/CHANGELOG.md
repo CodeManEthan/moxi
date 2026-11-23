@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- `Add a repo` reads the typed folder's plan through moxi-ui's `readLater`, so the page
+  root's `data-reading` mark counts that read from the keystroke until the plan is drawn,
+  and a test's press waits for it. A user sees no change. The `ui` extra asks for moxi-ui
+  0.2.8 or later.
 - The page's `Reading…` line, while its first read is out, shows once that read has
   been out 400 ms in every browser. In Firefox it could stay blank until something
   else redrew the page, since the page checked the wait against `Date.now()`, which

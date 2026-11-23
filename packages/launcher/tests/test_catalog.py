@@ -31,6 +31,7 @@ CLAUDE_ROWS = {"model", "effort", "agent", "tools", "allowed_tools", "disallowed
 CODEX_ROWS = {"model", "sandbox", "approval", "profile", "search", "add_dir", "config",
               "cwd", "update_check", "skip_git_check", "trust_cwd"}
 LAUNCHER_ROWS = {"harness", "cwd", "project", "scratch", "identity", "scope", "director",
+                 "takes_policy_directors",
                  "instructions", "instructions_file", "brief", "brief_file", "handoff",
                  "posture", "target", "slot", "extra_flags", "name", "notes_dir", "warn_at",
                  "keep_warm", "recycle_on_expiry", "recycle_at_limit", "limit_at",
@@ -46,9 +47,9 @@ def test_each_shipped_catalog_holds_exactly_its_rows():
 #: What a fork does with each shipped row: the rows that shape the request are copied,
 #: the rows about who the session is, its first turn and its life are dropped, and the
 #: rows the launcher composes for each launch are its own.
-FORK_DROPPED = {"identity", "scope", "director", "posture", "instructions",
-                "instructions_file", "brief", "brief_file", "handoff", "keep_warm",
-                "recycle_on_expiry", "recycle_at_limit", "limit_at", "warn_at",
+FORK_DROPPED = {"identity", "scope", "director", "takes_policy_directors", "posture",
+                "instructions", "instructions_file", "brief", "brief_file", "handoff",
+                "keep_warm", "recycle_on_expiry", "recycle_at_limit", "limit_at", "warn_at",
                 "headless_exit", "name", "native_name", "remote_control", "notes_dir"}
 FORK_OWN = {("launcher", "target"), ("launcher", "slot"), ("claude", "session_id"),
             ("claude", "resume"), ("claude", "plugin_dir"),
@@ -120,7 +121,9 @@ def test_the_appended_prompt_file_is_hidden():
     assert catalog.load("claude")["append_system_prompt_file"].hidden
 
 
-@pytest.mark.parametrize(("name", "requires"), [("director", "comms"), ("slot", "slots"),
+@pytest.mark.parametrize(("name", "requires"), [("director", "comms"),
+                                                ("takes_policy_directors", "comms"),
+                                                ("slot", "slots"),
                                                 ("notes_dir", "notes"),
                                                 ("warn_at", "usage")])
 def test_the_launcher_rows_that_need_a_module(name, requires):

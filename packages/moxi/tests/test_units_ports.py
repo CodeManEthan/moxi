@@ -21,7 +21,7 @@ from moxi.units import _backend, _plan
 from moxi.units._backend import Socket, Spec
 from moxi.units._launchd import LaunchdBackend
 from moxi.units._systemd import SystemdBackend
-from moxi_dev.testing import console_script
+from moxi_dev.testing import PROC_WAIT_S, console_script
 
 from fake_backend import FakeBackend, FakeSupervisor
 
@@ -127,7 +127,7 @@ def other_process():
         yield proc.pid, int(proc.stdout.readline())
     finally:
         proc.kill()
-        proc.wait(10)
+        proc.wait(PROC_WAIT_S)
         proc.stdout.close()
 
 

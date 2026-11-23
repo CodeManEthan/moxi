@@ -8,6 +8,7 @@ import os
 
 import pytest
 from moxi import proc
+from moxi_dev.testing import PROC_WAIT_S
 from test_page import _send, get, loopback, served
 from test_page_state import Stream, quick
 
@@ -197,11 +198,11 @@ def test_the_stream_sends_the_running_topic_and_each_change(conn, monkeypatch):
     async def go():
         stream = Stream(served(), b"topics=running")
         try:
-            name, data = await stream.next(3)
+            name, data = await stream.next(PROC_WAIT_S)
             assert name == "running"
             assert data["count"] == 1 and data["sessions"][0]["request_id"] == "r1"
             launched(conn, "r2", at="2026-03-01T10:00:00.000000Z")
-            data = await stream.until("running", lambda d: d["count"] == 2, 3)
+            data = await stream.until("running", lambda d: d["count"] == 2, PROC_WAIT_S)
             assert [e["request_id"] for e in data["sessions"]] == ["r2", "r1"]
         finally:
             await stream.close()

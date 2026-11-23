@@ -749,6 +749,100 @@ def test_a_self_runs_note_reads_the_real_settings(conn, checks):
     assert "note-not-taken (the run ended refused: no-cwd)" in comms.sent[0][3]
 
 
+class PolicyComms(FakeComms):
+    """comms with policy directors: `policy` is what its `policy_directors()` answers
+    (the names provisioned now), or an exception it raises."""
+
+    GLOBAL = "global"
+
+    def __init__(self, policy=("fleet-lead",), never_bound=(), **kw):
+        super().__init__(**kw)
+        self.policy, self.never_bound = policy, set(never_bound)
+
+    def policy_directors(self):
+        if isinstance(self.policy, Exception):
+            raise self.policy
+        return tuple(self.policy)
+
+    def qualify(self, name, scope):
+        return name if scope == self.GLOBAL else f"{name}@{scope}"
+
+    def split_tag(self, tag):
+        name, sep, scope = tag.partition("@")
+        return name, scope if sep else None
+
+    def send_as(self, module, name, to, text):
+        # comms refuses the whole send when one recipient was never bound.
+        if self.never_bound & set(to):
+            self.sent.append((module, name, list(to), text))
+            return SimpleNamespace(outcome="refused", message_id=None,
+                                   refusal=SimpleNamespace(code="never-bound",
+                                                           text="never-bound"))
+        return super().send_as(module, name, to, text)
+
+
+FAILED = launched_result(state="failed", outcome=None, reason="spawn-failed")
+
+
+def told(conn, comms, **row):
+    """Whom a failed director's run of a launch shaped as `row` notices, as `notify` sends."""
+    row = SimpleNamespace(**{"identity": "planner", "scope": None, "values": {}, **row})
+    notices.notify(conn, arm(conn, mode="director"), row, "relaunch-failed", comms=comms,
+                   retry_s=0)
+    return [sent[2] for sent in comms.sent]
+
+
+def test_a_failed_relaunch_notices_the_policy_directors_after_the_launchs_own(conn):
+    comms = PolicyComms()
+    go(conn, arm(conn, mode="director"), comms=comms, launch=FAILED)
+    assert [s[2] for s in comms.sent] == [["boss", "fleet-lead"]]
+
+
+@pytest.mark.parametrize("named", [["fleet-lead"], ["fleet-lead@global"]])
+def test_a_policy_director_the_launch_also_named_is_told_once(conn, named):
+    assert told(conn, PolicyComms(), values={"director": named}) == [named]
+
+
+@pytest.mark.parametrize("row, policy", [
+    ({"values": {"director": ["boss"], "takes_policy_directors": False}}, ("fleet-lead",)),
+    ({"identity": None, "values": {"director": ["boss"]}}, ("fleet-lead",)),
+    ({"values": {"director": ["boss"]}}, OSError("config unreadable")),
+    # Not provisioned: comms' policy_directors() leaves the name out.
+    ({"values": {"director": ["boss"]}}, ()),
+], ids=["opted-out", "no-comms-identity", "unreadable", "unprovisioned"])
+def test_only_a_launch_with_an_identity_that_did_not_opt_out_notices_the_policy(
+        conn, row, policy):
+    assert told(conn, PolicyComms(policy=policy), **row) == [["boss"]]
+
+
+@pytest.mark.parametrize("policy, sent", [(("fleet-lead",), [["fleet-lead"]]), ((), [])])
+def test_the_policy_names_reach_a_launch_with_no_director_of_its_own(conn, policy, sent):
+    assert told(conn, PolicyComms(policy=policy), values={}) == sent
+
+
+def test_a_comms_without_policy_directors_adds_none(conn):
+    assert told(conn, FakeComms(), values={"director": ["boss"]}) == [["boss"]]
+
+
+def test_a_scoped_launch_notices_the_global_policy_name_as_comms_spells_it(conn):
+    got = told(conn, PolicyComms(), scope="work", values={"director": ["boss"]})
+    assert got == [["boss", "fleet-lead"]]
+
+
+def test_the_notice_reaches_the_seats_director_where_fleet_lead_was_never_bound(conn):
+    # On a box that never ran a fleet lead, comms' own policy_directors() reads the
+    # shipped setting and leaves the unprovisioned name out, so the send names only the
+    # seat's director and comms' never-bound refusal can't drop it.
+    comms_api = pytest.importorskip("moxi_comms.api", reason="comms is not installed")
+    comms = PolicyComms(never_bound={"fleet-lead"})
+    comms.policy = comms_api.policy_directors()
+    assert comms.policy == ()
+    got = go(conn, arm(conn, mode="director"), comms=comms, launch=FAILED)
+    assert [s[2] for s in comms.sent] == [["boss"]]
+    notice = [e for e in store.run_events(conn, got.run.run_id) if e.kind == "notice"][0]
+    assert notice.detail["verdict"] == "sent"
+
+
 def test_an_offline_daemon_is_tried_once_more_then_recorded(conn):
     comms = FakeComms(outcomes=("offline",))
     got = go(conn, arm(conn, mode="director"), comms=comms,

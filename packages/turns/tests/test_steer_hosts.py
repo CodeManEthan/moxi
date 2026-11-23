@@ -17,6 +17,7 @@ import pytest
 from claude_runner import FakeRunner, pipe_pair
 from conftest import end_endpoint
 from moxi import ipc
+from moxi_dev.testing import PROC_WAIT_S
 from moxi_turns import claude_leg as leg
 from moxi_turns import codex_hooks
 from moxi_turns import codex_protocol as proto
@@ -31,7 +32,7 @@ pytestmark = pytest.mark.skipif(sys.platform == "win32",
                                 reason="moxi.ipc's named pipe server comes later")
 
 
-def until(pred, timeout=5.0):
+def until(pred, timeout=PROC_WAIT_S):
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
         if pred():

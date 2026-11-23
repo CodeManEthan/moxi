@@ -46,7 +46,13 @@ to be quiet. The armed text names the model the session comes back on.
 (never a variable it sets); the target by session id (anything shaped like a UUID,
 looked up in the launch log only), or else by a bound comms name; the caller among the
 launch's directors (`values_json`: a director named with a scope admits that qualified
-name only, a plain one the name in the target launch's own scope); with
+name only, a plain one the name in the target launch's own scope) or among the box's
+policy directors (comms' `policy_directors()`, read at the call: the names of comms'
+`[policy] directors` provisioned as standing identities now, each already qualified, a
+bare one the global identity, never read in the target's scope), for a target with a
+comms identity whose launch didn't opt out (`takes_policy_directors = false`). The
+setting is read as it is now, not as it was at the target's launch: a relaunch is what
+brings the target's comms side into line with it. With
 cache installed, a session whose cache is warm or fresh is refused `warm` (it can be
 mailed); and the quiet read must pass now, or the call ends `held` (exit 75) with nothing
 written. The call then follows the run for `relaunch.follow_s` and prints its outcome;
@@ -420,11 +426,16 @@ def _split(comms: Any, name: str) -> tuple[str, str | None]:
         return bare, scope if sep else None
 
 
-def is_director(comms: Any, caller: str, named: list[str], scope: str | None = None) -> bool:
-    """Whether the qualified identity `caller` is one of the directors `named`: a director
-    named with a scope admits that qualified name only (the global scope spelled bare, as
-    comms spells it); a plain name is read in `scope`, the target launch's own (the
-    global scope when None), and admits that qualified name only."""
+def is_director(comms: Any, caller: str, named: list[str], scope: str | None = None, *,
+                policy: Sequence[str] = ()) -> bool:
+    """Whether the qualified identity `caller` is one of the directors `named`, or one of
+    the box's policy directors `policy`: a director named with a scope admits that
+    qualified name only (the global scope spelled bare, as comms spells it); a plain name
+    is read in `scope`, the target launch's own (the global scope when None), and admits
+    that qualified name only. `policy` names are comms' own, already qualified (a bare
+    one is the global identity), and are never read in `scope`."""
+    if caller in policy:
+        return True
     for director in named:
         name, named_scope = _split(comms, director)
         if named_scope is None:
@@ -440,11 +451,15 @@ def is_director(comms: Any, caller: str, named: list[str], scope: str | None = N
 
 
 def _check_director(comms: Any, caller: str, row: store.LaunchRow) -> None:
-    """Refuse `not-director` unless the caller is one of the directors the launch named."""
-    if is_director(comms, caller, notices.directors(row), row.scope or None):
+    """Refuse `not-director` unless the caller is one of the directors the launch named,
+    or one of the box's policy directors that direct it now (`notices.policy_directors`,
+    read at this call)."""
+    if is_director(comms, caller, notices.directors(row), row.scope or None,
+                   policy=notices.policy_directors(row, comms)):
         return
     raise Refused("not-director", f"{caller} is not a director of launch {row.request_id}",
-                  "only a director the launch named may relaunch it; mail its session")
+                  "only a director the launch named, or a policy director in comms' "
+                  "config that directs it, may relaunch it; mail its session")
 
 
 def not_warm(row: store.LaunchRow, session_id: str, cache: Any) -> None:

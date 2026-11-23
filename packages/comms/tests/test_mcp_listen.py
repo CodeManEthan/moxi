@@ -21,7 +21,7 @@ import time
 from types import SimpleNamespace
 
 import pytest
-from moxi_dev.testing import timed_slack
+from moxi_dev.testing import PROC_WAIT_S, timed_slack
 from conftest import write_config
 from test_mcp_endpoint import (  # noqa: F401  (fixtures)
     INITIALIZE,
@@ -877,7 +877,7 @@ def test_a_live_session_whose_token_was_revoked_gets_its_own_warn_row(serving, s
     assert [r.name for r in listed][-1] == row.name
     # Once the session's binding ends, it isn't listed.
     lost.close()
-    deadline = time.monotonic() + 5
+    deadline = time.monotonic() + PROC_WAIT_S
     while ask_daemon("mcp_endpoint")["revoked"] and time.monotonic() < deadline:
         time.sleep(0.02)
     assert ask_daemon("mcp_endpoint")["revoked"] == []

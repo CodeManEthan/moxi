@@ -742,6 +742,29 @@ def _device_label() -> str:
 DOCTOR_DIRS = ("data", "state", "cache", "config", "runtime")
 
 
+#: The fix `moxi comms doctor` gives a policy director whose name holds no standing row.
+NOT_PROVISIONED = ("{name} is not provisioned, so it directs nobody; provision it with "
+                   "`moxi-comms-provision --standing {name}`, or check the spelling")
+
+
+def policy_rows(names, *, env=None) -> list:
+    """`moxi comms doctor`'s lines for `[policy] directors` (`names`, qualified): the
+    names, each marked by whether it holds a standing row now, then a warning with the
+    fix for each that doesn't. A policy director directs only once provisioned."""
+    from .directory import provisioned
+
+    if not names:
+        return [("directors", "policy: none ([policy] directors is empty)")]
+    held = provisioned(names, env=env)
+    if held is None:
+        return [("directors", f"policy: {', '.join(names)} (comms.db can't be read, so "
+                              "whether each is provisioned is unknown)")]
+    marked = [name if name in held else f"{name} (not provisioned)" for name in names]
+    return [("directors", f"policy: {', '.join(marked)}"),
+            *(("", "warning: " + NOT_PROVISIONED.format(name=name))
+              for name in names if name not in held)]
+
+
 def cmd_doctor(args, ctx: Context) -> int:
     """What this box's comms is and where it lives. Read-only."""
     import shutil
@@ -770,6 +793,8 @@ def cmd_doctor(args, ctx: Context) -> int:
             + ("" if tuple(cfg.credentials.chain) != tuple(secrets.default_chain())
                else " (the default)"))
         required = cfg.cache.required
+        for label, line in policy_rows(cfg.policy.directors, env=ctx.env):
+            row(label, line)
     except (config.ConfigError, RecordError) as exc:
         row("config", f"ERROR: {exc}")
         required = False

@@ -119,7 +119,7 @@ def test_interface_2_holds_its_names():
         "CODEX_RESUME",
         "ENDS_ON_BIND_TIMEOUT", "BIND_WAIT", "HEADLESS", "parse_exit", "BACKEND_ENV", "CLAIM_SOCKET_ENV",
         "COMMAND_ENV", "DIRECTORS_ENV", "GLOBAL_ENV", "MOCK_BACKEND_ENV", "NAME_ENV",
-        "OPERATOR_ENV", "PROJECT_ENV", "SCOPE_ENV", "SECRET_PREFIX_ENV",
+        "OPERATOR_ENV", "POLICY_DIRECTORS_ENV", "policy_directors", "effective", "PROJECT_ENV", "SCOPE_ENV", "SECRET_PREFIX_ENV",
         "SHELL_REACH_ENV", "SHIM_SOCKET_ENV", "TOKEN_ENV", "TOKEN_STORE_ENV", "URL_ENV"}
     for name in api.__all__:
         assert hasattr(api, name), name
@@ -178,7 +178,8 @@ def test_the_reads_and_names_are_pinned():
                          "record_dir": [], "daemon_socket": []}.items():
         assert list(inspect.signature(getattr(api, name)).parameters) == params, name
     assert list(api.Agent.__dataclass_fields__) == ["qualified", "name", "scope", "tier",
-                                                    "adapter", "directors"]
+                                                    "adapter", "directors",
+                                                    "policy_directors"]
     assert list(api.Standing.__dataclass_fields__) == ["qualified", "name", "scope",
                                                        "kind", "module", "holder"]
     assert list(api.IdentityState.__dataclass_fields__) == ["qualified", "state", "holder",
@@ -190,10 +191,12 @@ def test_the_reads_and_names_are_pinned():
     assert list(api.Roster.__dataclass_fields__) == ["bound", "standing", "waiting"]
     assert list(api.Waiting.__dataclass_fields__) == ["qualified", "count", "oldest"]
     assert list(api.Owner.__dataclass_fields__) == ["session_id", "identity", "adapter",
-                                                    "directors", "awaiting"]
+                                                    "directors", "awaiting",
+                                                    "policy_directors"]
     assert list(api.RosterRow.__dataclass_fields__) == [
         "qualified", "name", "scope", "live", "kind", "module", "tier", "adapter",
-        "directors", "session_id", "bound_at", "awaiting", "cache", "holder", "via"]
+        "directors", "session_id", "bound_at", "awaiting", "cache", "holder", "via",
+        "policy_directors"]
     assert list(api.CacheFact.__dataclass_fields__) == ["kind", "until"]
     params = inspect.signature(api.roster_rows).parameters
     assert params["timeout_s"].default == api.READ_DEADLINE
@@ -465,6 +468,22 @@ def test_attributed_and_session(rig):
     assert s["bound"] is True and s["adapter"] == "claude-shim"
     assert s["session_id"] == reviewer.session_id
     assert api.session("nobody")["bound"] is False
+
+
+def test_roster_and_owner_carry_the_policy_directors(rig):
+    reviewer = rig.shim(name="reviewer", directors=("planner@proj-a", "fleet-lead"),
+                        policy_directors=("fleet-lead",))
+    with rig.session_holding(_sender(rig, "reviewer")):
+        got = api.roster()
+        owner = api.owner(reviewer.session_id)
+        rows = api.roster_rows()
+    (agent,) = [a for a in got.bound if a.qualified == "reviewer"]
+    assert (agent.directors, agent.policy_directors) == (("planner@proj-a", "fleet-lead"),
+                                                         ("fleet-lead",))
+    assert (owner.directors, owner.policy_directors) == (("planner@proj-a", "fleet-lead"),
+                                                         ("fleet-lead",))
+    (row,) = [r for r in rows if r.qualified == "reviewer"]
+    assert row.policy_directors == ("fleet-lead",)
 
 
 def test_roster_and_owner_carry_declared_directors(rig):

@@ -28,6 +28,7 @@ from browser_kit import fake_site, seed, slots_said, written
 
 WAIT_MS = pytest.importorskip("moxi_ui.testing", reason="ui is not installed").WAIT_MS
 _phone = pytest.importorskip("moxi_ui.testing.phone", reason="ui is not installed")
+press = pytest.importorskip("moxi_ui.testing.browser", reason="ui is not installed").press
 PhoneBridge, gateway_shell, pair_page, ORIGIN = (_phone.PhoneBridge, _phone.gateway_shell,
                                                  _phone.pair_page, _phone.ORIGIN)
 
@@ -171,7 +172,7 @@ def row(panel, ident: str):
 
 def opened(panel, ident: str, name: str):
     item = row(panel, ident)
-    item.get_by_role("button", name=f"Open {name}", exact=True).click()
+    press(item.get_by_role("button", name=f"Open {name}", exact=True))
     part = item.locator('[data-part="opened"]')
     expect(part).to_be_visible()
     return part
@@ -257,7 +258,7 @@ def test_a_stopped_daemons_closed_row_offers_start_and_a_moxi_row_no_turn_on_or_
     _phone_stop(phone, panel, PAUSED, "paused")
     expect(row(panel, PAUSED).locator('button[data-action="start"]')).to_have_text("Start")
     item = row(panel, CACHE)
-    item.get_by_role("button", name=re.compile(r"^Open ")).click()
+    press(item.get_by_role("button", name=re.compile(r"^Open ")))
     part = item.locator('[data-part="opened"]')
     expect(foot(part)).to_have_text(["Restart", "Stop"])
     expect(part.locator('[data-action="enable"], [data-action="disable"], [data-action="remove"]')).to_have_count(0)
@@ -266,8 +267,8 @@ def test_a_stopped_daemons_closed_row_offers_start_and_a_moxi_row_no_turn_on_or_
 
 def _phone_stop(page, panel, ident: str, name: str) -> None:
     part = opened(panel, ident, name)
-    foot(part).filter(has_text="Stop").click()
-    sheet(page).get_by_role("button", name="Confirm").click()
+    press(foot(part).filter(has_text="Stop"))
+    press(sheet(page).get_by_role("button", name="Confirm"))
     expect(row(panel, ident)).to_have_attribute("data-cause", "stopped")
     row(panel, ident).get_by_role("button", name=f"Close {name}", exact=True).click()
 
@@ -280,10 +281,9 @@ def test_the_slots_servers_stop_says_the_count_it_ends_and_sends_it(gw, phone):
     seen = reached(phone)
     panel = services_on(phone)
     item = row(panel, SLOTS)
-    item.get_by_role("button", name=re.compile(r"^Open ")).click()
+    press(item.get_by_role("button", name=re.compile(r"^Open ")))
     part = item.locator('[data-part="opened"]')
-    stop = foot(part).filter(has_text=re.compile(r"^Stop$"))
-    stop.click()
+    press(foot(part).filter(has_text=re.compile(r"^Stop$")))
     lines = sheet(phone).locator("p")
     expect(lines.first).to_have_text("Stop the slots server and end 3 sessions?")
     expect(sheet(phone)).to_contain_text("Ends now: 3 sessions")

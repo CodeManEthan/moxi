@@ -222,7 +222,16 @@ sandbox = "workspace-write"
 
 Every key is a catalog row of the preset's harness or one of the launcher's rows. A seat's
 standing text is `instructions` or `instructions_file`, never both, and a preset names at
-most one place (`cwd`, `project`, `scratch`, or a seat's `home`). `moxi launcher presets
+most one place (`cwd`, `project`, `scratch`, or a seat's `home`).
+
+**Policy directors.** comms' config names policy directors (`[policy] directors`) that
+direct every comms session on the box, on top of the directors its launch names. A seat
+or project preset opts its sessions out with `takes_policy_directors = false` (needs comms;
+`--no-takes-policy-directors` for one launch, an unticked box on the page), and the
+launcher passes comms' wrapper `--no-policy-directors`. The seat keeps its own `director`
+lines. `[defaults]` refuses the row by name (`per-seat`): one line there would opt every
+seat out. A launch with an identity that opts out is refused (`not-yet`) when the
+installed comms is older than policy directors; upgrade `moxi-comms`. `moxi launcher presets
 check` checks the whole file: types and values, rows whose module is missing, project keys,
 that an instructions file can be read, and that an agent role a preset names is found in
 the harness's agent folders.
@@ -405,6 +414,15 @@ relaunch that came back names its identity, slot, new session, posture and model
 whether comms has bound the name, waiting up to 60 s for the bind, or that comms could
 not be read. A director named without a scope is read in the launch's own scope.
 
+The box's policy directors (comms' `[policy] directors`) count as directors too, for a
+session launched with a comms identity that didn't opt out (`takes_policy_directors =
+false`): they may make the call and they hear of a failed relaunch, once each beside the
+session's own directors. The launcher reads the setting at the call or the notice, not
+as it was at the session's launch, and takes only the names provisioned as standing
+identities now (`moxi-comms-provision --standing NAME`); an unprovisioned name gets
+neither. A policy name is comms' own spelling, a bare one the global identity, never read
+in the launch's scope.
+
     moxi launcher relaunch --status RUN
     moxi launcher relaunch --stop RUN
     moxi launcher relaunch --from-record RUN
@@ -417,7 +435,7 @@ armed run: before the exit the run ends `stopped` and a self run's session is to
 the exit on, the run ends once the relaunch has been tried. A repair's session is down
 already, so a stop of a repair is recorded and the run ends once its launch has been
 tried. A relaunch that exited the session and failed to start the new one tells the
-session's directors (or the comms identity in `relaunch.fallback`) through comms, naming
+session's directors and policy directors (or the comms identity in `relaunch.fallback`) through comms, naming
 the command that repairs it: `--from-record` starts the session again from the run's
 record, in its slot, or the lowest free one when someone outside the session's own line of
 launches has taken it. It refuses when the slot already runs the relaunched session, and

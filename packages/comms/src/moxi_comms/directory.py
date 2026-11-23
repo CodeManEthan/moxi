@@ -89,6 +89,35 @@ def standing_rows(conn):
     return conn.execute("SELECT * FROM identities WHERE status = 'active'").fetchall()
 
 
+def provisioned(names, *, path: str | Path | None = None, env=None) -> set | None:
+    """Which of the qualified `names` hold an active standing row now, read-only; an
+    empty set when there is no store yet, None when it can't be read."""
+    from .scoping import GLOBAL, split_tag
+    from .store import path as store_path
+
+    names = list(names or ())
+    if not names:
+        return set()
+    target = Path(path) if path is not None else store_path(env)
+    if not target.exists():
+        return set()
+    try:
+        conn = connect(target, read_only=True, env=env)
+    except Exception:  # noqa: BLE001 - any store that can't be opened reads as unknown
+        return None
+    try:
+        held = set()
+        for name in names:
+            bare, scope = split_tag(name)
+            if standing_row(conn, bare, scope or GLOBAL) is not None:
+                held.add(name)
+        return held
+    except sqlite3.Error:
+        return None
+    finally:
+        conn.close()
+
+
 def operator(conn, user_id: str):
     return conn.execute("SELECT * FROM operators WHERE user_id = ?", (user_id,)).fetchone()
 

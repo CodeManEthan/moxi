@@ -13,6 +13,7 @@ from types import SimpleNamespace
 import pytest
 from moxi import modules, proc
 from moxi.paths import Layout
+from moxi_dev.testing import PROC_WAIT_S
 
 from moxi_launcher import job as job_module
 from moxi_launcher import relaunch, store, target
@@ -204,8 +205,9 @@ def conn(tmp_path):
 
 
 def launched(conn, *, request_id="r1", target_name="slot", session_id=SID, scope=None,
-             directors=("boss",), relaunch_of=None, base_env=None, recycle="relaunch"):
-    values = {"model": "opus", "director": list(directors)}
+             directors=("boss",), relaunch_of=None, base_env=None, recycle="relaunch",
+             identity="planner", **more):
+    values = {"model": "opus", "director": list(directors), **more}
     if recycle is not None:
         values["recycle_at_limit"] = recycle
     store.insert(conn, request_id=request_id, by="ann", harness="claude",
@@ -213,7 +215,7 @@ def launched(conn, *, request_id="r1", target_name="slot", session_id=SID, scope
                  target=target_name, cwd="/work",
                  values=values, argv=["claude"],
                  env={}, posture="operator", session_id=session_id,
-                 slot="3" if target_name == "slot" else None, identity="planner",
+                 slot="3" if target_name == "slot" else None, identity=identity,
                  scope=scope, relaunch_of=relaunch_of)
     store.set_facts(conn, request_id, pane_id="%9")
     conn.execute("UPDATE launches SET endpoint = ? WHERE request_id = ?", (me(), request_id))
@@ -973,6 +975,84 @@ def test_only_a_director_the_launch_named_may_call(tmp_path, directors, scope, c
         conn.close()
 
 
+class PolicyComms(FakeComms):
+    """comms with policy directors: `policy` is what `policy_directors()` answers (the
+    names provisioned now, qualified), or an exception it raises."""
+
+    def __init__(self, policy=("fleet-lead",), **kw):
+        super().__init__(**kw)
+        self.policy, self.reads = policy, 0
+
+    def policy_directors(self):
+        self.reads += 1
+        if isinstance(self.policy, Exception):
+            raise self.policy
+        return tuple(self.policy)
+
+
+@pytest.mark.parametrize("named, policy, scope, caller, allowed", [
+    ((), ("fleet-lead",), None, "fleet-lead", True),
+    # A policy name is comms' qualified spelling: never read in the target's scope.
+    ((), ("fleet-lead",), "work", "fleet-lead", True),
+    ((), ("fleet-lead",), "work", "fleet-lead@work", False),
+    ((), ("lead@ops",), "work", "lead@ops", True),
+    ((), ("lead@ops",), None, "lead", False),
+    (("boss",), ("fleet-lead",), "work", "boss@work", True),
+    (("boss",), (), None, "fleet-lead", False),
+])
+def test_is_director_takes_the_policy_names_as_their_own_list(named, policy, scope, caller,
+                                                              allowed):
+    got = relaunch.is_director(FakeComms(), caller, list(named), scope, policy=policy)
+    assert got is allowed
+
+
+@pytest.mark.parametrize("scope, caller", [(None, "fleet-lead"), ("work", "fleet-lead")])
+def test_a_policy_director_may_call_a_seat_with_no_director_of_its_own(tmp_path, scope,
+                                                                        caller):
+    conn = store.connect(tmp_path / "launcher.db")
+    launched(conn, directors=(), scope=scope)
+    comms = PolicyComms(caller=caller)
+    try:
+        assert call(conn, comms=comms, slots_api=FakeSlots(),
+                    follow=False).exit_code == 0
+        assert comms.reads == 1
+    finally:
+        conn.close()
+
+
+@pytest.mark.parametrize("launch, policy", [
+    ({"takes_policy_directors": False}, ("fleet-lead",)),
+    ({"identity": None}, ("fleet-lead",)),
+    ({}, OSError("config unreadable")),
+    # Not provisioned: comms' policy_directors() leaves the name out.
+    ({}, ()),
+], ids=["opted-out", "no-comms-identity", "unreadable", "unprovisioned"])
+def test_a_policy_director_is_refused_where_the_policy_does_not_reach(tmp_path, launch,
+                                                                      policy):
+    conn = store.connect(tmp_path / "launcher.db")
+    launched(conn, directors=(), **launch)
+    slots_api = FakeSlots()
+    try:
+        with pytest.raises(relaunch.Refused) as caught:
+            call(conn, comms=PolicyComms(policy=policy, caller="fleet-lead"),
+                 slots_api=slots_api, follow=False)
+        assert caught.value.code == "not-director"
+        assert "policy director" in caught.value.hint
+        nothing_written(conn, slots_api)
+    finally:
+        conn.close()
+
+
+def test_an_opted_out_seat_keeps_its_own_director(tmp_path):
+    conn = store.connect(tmp_path / "launcher.db")
+    launched(conn, directors=("fleet-lead",), takes_policy_directors=False)
+    try:
+        assert call(conn, comms=PolicyComms(caller="fleet-lead"), slots_api=FakeSlots(),
+                    follow=False).exit_code == 0
+    finally:
+        conn.close()
+
+
 @pytest.mark.parametrize("kind", ["warm", "fresh"])
 def test_a_session_whose_cache_is_warm_is_refused_mail_it(conn, kind):
     cache, slots_api = FakeCache(kind), FakeSlots()
@@ -1250,7 +1330,7 @@ def child():
     yield process
     if process.poll() is None:
         process.kill()
-    process.wait(5)
+    process.wait(PROC_WAIT_S)
 
 
 def open_relaunch(conn, *, kind="relaunch", mode="self", job="slots:relaunch-x"):
@@ -1266,7 +1346,7 @@ def test_a_stop_sends_the_runs_job_sigterm_and_says_what_it_does(conn, child):
     assert result.lines == (f"stop sent to run {run.run_id}: it ends stopped before the "
                             "exit; from the exit on, it ends after the relaunch is tried",)
     assert result.data == {"run_id": run.run_id, "outcome": "stop-sent", "pid": child.pid}
-    assert child.wait(5) == -relaunch.STOP_SIGNAL
+    assert child.wait(PROC_WAIT_S) == -relaunch.STOP_SIGNAL
 
 
 def test_a_repair_run_is_stopped_too(conn, child):
@@ -1316,7 +1396,7 @@ def test_a_stop_whose_job_is_gone_is_refused_and_sends_nothing(conn, api, monkey
 
 def test_a_stop_whose_pid_has_ended_is_refused(conn, child):
     child.kill()
-    child.wait(5)
+    child.wait(PROC_WAIT_S)
     run = open_relaunch(conn)
     with pytest.raises(relaunch.Refused) as caught:
         relaunch.stop_run(run.run_id, conn=conn, slots_api=JobSlots(running_job(child.pid)))

@@ -179,4 +179,5 @@ def test_declared_directors_reach_the_session_stamp():
         directors = ["main", "reviewer@proj-a"]
     """)
     env = codex_roster.load().require("planner@proj-a").env({})
-    assert env["MOXI_COMMS_DIRECTORS"] == "main,reviewer@proj-a"
+    assert env["MOXI_COMMS_DIRECTORS"] == "main,reviewer@proj-a,fleet-lead"
+    assert env["MOXI_COMMS_POLICY_DIRECTORS"] == "fleet-lead"

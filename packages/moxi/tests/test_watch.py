@@ -35,6 +35,7 @@ import termios  # noqa: E402
 import psutil  # noqa: E402
 
 from moxi import _watch, paths, proc  # noqa: E402
+from moxi_dev.testing import PROC_WAIT_S
 
 PY = sys.executable
 KINDS = ["plain", "watch"]
@@ -120,7 +121,7 @@ def script(tmp_path: Path, name: str, text: str) -> str:
     return str(path)
 
 
-def wait_for(check, timeout: float = 15.0, step: float = 0.02, between=None):
+def wait_for(check, timeout: float = PROC_WAIT_S, step: float = 0.02, between=None):
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
         value = check()
@@ -215,7 +216,7 @@ class Job:
                        f"terminal: {self.screen!r}")
         return found
 
-    def until(self, check, timeout: float = 15.0) -> bool:
+    def until(self, check, timeout: float = PROC_WAIT_S) -> bool:
         return wait_for(check, timeout, between=self.drain)
 
     def foreground(self) -> int:
@@ -337,13 +338,13 @@ def test_closing_the_lifeline_ends_a_deaf_child_and_grandchild_soon_after_the_gr
     assert running(child) and running(grandchild)
     os.kill(j.parent["pid"], signal.SIGKILL)
     begun = time.monotonic()
-    assert j.until(lambda: gone(child, grandchild), timeout=10)
+    assert j.until(lambda: gone(child, grandchild), timeout=PROC_WAIT_S)
     # The watchdog waits out the grace before its SIGKILL. Around it come the EOF, the
     # scans and the freeze, each reading the process table, which a loaded machine slows
     # to past a second. Two seconds over the grace still fails a watchdog that waits a
     # second grace, or its reap, before the kill.
     assert time.monotonic() - begun < _watch.GRACE + 2.0
-    assert j.until(lambda: gone(j.parent["watchdog"]), timeout=10)
+    assert j.until(lambda: gone(j.parent["watchdog"]), timeout=PROC_WAIT_S)
 
 
 def test_a_parent_with_no_terminal_spawns_and_ends_the_child_the_same(tmp_path):
