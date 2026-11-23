@@ -16,6 +16,7 @@
     moxi rounds ask ROUND TEXT --build B<n> [--blocks LIST|none] [--option K=TEXT]...
                     [--as NAME]
     moxi rounds ask ROUND|PROJECT ID [--option K=TEXT]... [--retire K]... [--as NAME]
+    moxi rounds ask ROUND|PROJECT ID --prepared FILE [--as NAME]
     moxi rounds ask ROUND --adopt P<n> [--blocks LIST [--record PTR]] [--as NAME]
     moxi rounds ask PROJECT --move ROUND:Q<n> [--record PTR] [--as NAME]
     moxi rounds rule ROUND|PROJECT [ITEM] --record PTR [--text TEXT] [--chose K]
@@ -44,7 +45,7 @@
     moxi rounds next [ROUND] [--json]
     moxi rounds queue [--repo KEY] [--resume] [--as NAME]
     moxi rounds land --repo KEY
-    moxi rounds next --schema design|build|step|majors|retro
+    moxi rounds next --schema design|build|step|majors|retro|answer
     moxi rounds show ROUND [--json]
     moxi rounds list [PROJECT] [--closed] [--json]
     moxi rounds list [PROJECT] --waiting [--json]
@@ -226,7 +227,9 @@ A builder with a question for the operator tells its lead, and the lead asks it 
 `--build B<n>` in place of `--from`: its origin is that stage's open build at its
 branch's tip, and every listing says the lead asked it for the build's builder.
 `ID` is a question on record, `Q<n>` in a round and `P<n>` on a project: `ask` with an
-id adds options to it or retires them. `ask --adopt` brings a question of the project's
+id adds options to it or retires them, and with `--prepared FILE` records an answer
+prepared for it, from the file's `answer` block (`next --schema answer`), which no gate
+reads. `ask --adopt` brings a question of the project's
 list into a round, and `ask --move` puts a round's question on its project's list; the
 operator's pointer goes with a move that ends what the question holds up, and with a
 list of stages for a question that came from a round; a move or an adoption with
@@ -249,7 +252,8 @@ which pass is asked for, a full pass or a re-check with the two frozen files to
 compare, or what is done in place of a pass; for the questions step, the command that
 writes the questions out and the `rule` line of each open one. A step this version
 does not have is printed as not built. `next --schema KIND` prints the empty data
-block of a report of that kind, a comment on each key. Run with no round in a
+block of a report of that kind, or with `answer` of a prepared answer, a comment on
+each key. Run with no round in a
 build's worktree, `next` finds the open build on the branch checked out there and
 prints its round's next step. `next` records nothing.
 `show` shows one round: what it is for, its flow, the step it is at, what its close
@@ -576,7 +580,9 @@ def _declare_ask(verbs) -> None:
             "list. A question may offer options, two to four, a line each under a "
             "short key. With the id of a question on record in place of the sentence, "
             "add options to it or retire them: a key keeps its line, and a retired key "
-            "is never used again. With --adopt, bring a question of the project's list "
+            "is never used again; or with --prepared FILE record an answer prepared "
+            "for it, which changes nothing a gate reads. With --adopt, bring a "
+            "question of the project's list "
             "into the round; with --move, put a round's question on the project's "
             "list, where it holds up nothing.")
     parser = verbs.add_parser("ask", help=said, description=said)
@@ -616,6 +622,12 @@ def _declare_ask(verbs) -> None:
                         help="with an ID, take the option under this key out; to "
                              "correct a line, retire its key and add the right line "
                              "under a new one")
+    parser.add_argument("--prepared", metavar="FILE",
+                        help="with an ID, record the answer prepared for it in FILE, "
+                             "whose one data block is the one `next --schema answer` "
+                             "prints: the key it recommends, how sure it is, what it "
+                             "read, and each option's costs and what it forecloses; "
+                             "for a question with no options, each option's line too")
     parser.add_argument("--adopt", metavar="P<n>",
                         help="on a round, in place of a sentence: bring this question "
                              "of the project's list into the round, in the state it "
@@ -642,7 +654,11 @@ def _ask(args, out) -> int:
                           f"give the question as one sentence: {args.prog} ask "
                           f"{args.target} TEXT --from PTR")
     if choices.QUESTION_ID.fullmatch(args.text):
-        return _fill(args, out)
+        return _prepare(args, out) if args.prepared is not None else _fill(args, out)
+    if args.prepared is not None:
+        raise BadArgument("--prepared records an answer for a question on record",
+                          "name the question by its id in place of a sentence: "
+                          f"{args.prog} ask {args.target} ID --prepared FILE")
     asking.not_a_decision(args.text, args.target)
     if args.retire:
         raise BadArgument("--retire takes an option out of a question on record",
@@ -683,6 +699,26 @@ def _fill(args, out) -> int:
     return codes.OK
 
 
+def _prepare(args, out) -> int:
+    """`ask ID --prepared FILE`: record an answer prepared for a question on record."""
+    from . import preparing, questions
+
+    for flag, given in (("--from", args.origin), ("--record", args.record),
+                        ("--build", args.build), ("--blocks", args.blocks),
+                        ("--option", args.options or None),
+                        ("--retire", args.retire or None)):
+        if given is not None:
+            raise BadArgument(f"{flag} is not given with --prepared, which records an "
+                              "answer and nothing else", f"leave {flag} out")
+    recorded = preparing.prepare(args.target, args.text, args.prepared, by=_actor(args))
+    found = recorded.question
+    print(f"{found.id}: {found.text}", file=out)
+    for line in questions.prepared_lines(questions.prepared_data(found)):
+        print(line, file=out)
+    _warn_of(recorded.failed, args.prog, args.verb)
+    return codes.OK
+
+
 def _carry(args, out) -> int:
     """`ask --adopt` and `ask --move`: carry a question on record to the other log of
     its project."""
@@ -696,6 +732,7 @@ def _carry(args, out) -> int:
                          ("--build", args.build),
                          ("--option", args.options or None),
                          ("--retire", args.retire or None),
+                         ("--prepared", args.prepared),
                          ("--blocks", args.blocks if args.move is not None else None)):
         if given is not None:
             raise BadArgument(f"{flag} carries a question as it is on record, and "
@@ -1828,7 +1865,8 @@ def _declare_next(verbs) -> None:
     said = ("Say what is done next in a round: the step it is at, who does it, at "
             "which tier, what they read, the command that completes it and what it "
             "waits for, then what the lead should know. With --schema, print the "
-            "empty data block of a report of that kind. Nothing is recorded; where a "
+            "empty data block of a report of that kind, or of a prepared answer. "
+            "Nothing is recorded; where a "
             "build of the round waits in a queue that no lander runs, a lander is "
             "started and said.")
     parser = verbs.add_parser("next", help=said, description=said)
@@ -1839,8 +1877,9 @@ def _declare_next(verbs) -> None:
     parser.add_argument("--json", dest="as_json", action="store_true",
                         help="print the same as data, not as lines")
     parser.add_argument("--schema", metavar="KIND",
-                        help="print the empty data block of this kind of report: "
-                             f"{', '.join(next_step.SCHEMAS[:-1])}")
+                        help="print the empty data block of this kind of report, "
+                             f"{', '.join(next_step.SCHEMAS[:-1])}, or with "
+                             f"{next_step.ANSWER} of a prepared answer")
 
 
 def _next(args, out) -> int:

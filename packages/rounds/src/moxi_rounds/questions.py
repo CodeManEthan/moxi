@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import re
 from collections.abc import Callable, Iterator, Mapping
+from dataclasses import dataclass
 
 from . import folders, log
 from . import state as states
@@ -208,6 +209,71 @@ def current(question: states.Question, state: states.State, *,
     return OPEN if reached(question, state, on_closed=on_closed) else question.state
 
 
+@dataclass(frozen=True)
+class PreparedNow:
+    """The newest answer prepared for a question, and whether it is `current`: its
+    options are exactly the ones the question offers now, retired ones not counted.
+    One that is not current was prepared for other options and counts as none."""
+
+    prepared: states.Prepared
+    current: bool
+
+
+def prepared_now(question: states.Question) -> PreparedNow | None:
+    """The newest answer prepared for `question`, with whether it is current, or None
+    when none was prepared. No gate reads it."""
+    if not question.prepared:
+        return None
+    newest = question.prepared[-1]
+    offered = {key for key, _text in question.options}
+    return PreparedNow(newest, {one.key for one in newest.options} == offered)
+
+
+def prepared_data(question: states.Question) -> dict | None:
+    """The newest answer prepared for `question` as data, or None when none was: who
+    prepared it (`by`) with which `model`, what it `recommend`s, how `sure` it is and
+    `why`, what `flips` it, what it `read`, each of its `options` as `{"key", "costs",
+    "forecloses"}` with `text` where it gave one, who recorded it (`actor`) and when
+    (`at`), and whether it is `current`."""
+    now = prepared_now(question)
+    if now is None:
+        return None
+    one = now.prepared
+    return {"by": one.by, "model": one.model, "recommend": one.recommend,
+            "sure": one.sure, "why": one.why, "flips": one.flips, "read": list(one.read),
+            "options": [{"key": option.key,
+                         **({"text": option.text} if option.text else {}),
+                         "costs": option.costs, "forecloses": option.forecloses}
+                        for option in one.options],
+            "actor": one.actor, "at": one.at, "current": now.current}
+
+
+#: What a prepared answer that is not current is shown as.
+OTHER_OPTIONS = "prepared for other options"
+
+
+def prepared_lines(data: Mapping | None) -> list[str]:
+    """What is printed of a prepared answer given as `prepared_data` gives it: the
+    line that says who prepared it and what it recommends, then for a current one each
+    option's costs and what it forecloses, or for one that is not that it was prepared
+    for other options. Empty for None."""
+    if not data:
+        return []
+    said = (f"prepared by {data.get('by')} ({data.get('model')}, sure: "
+            f"{data.get('sure')}): recommends {data.get('recommend')}. "
+            f"{_sentence(data.get('why'))} Flips if: {_sentence(data.get('flips'))}")
+    if not data.get("current"):
+        return [said, OTHER_OPTIONS]
+    return [said, *(f"  {one.get('key')}: costs {one.get('costs')}; forecloses "
+                    f"{one.get('forecloses')}" for one in data.get("options") or ())]
+
+
+def _sentence(text) -> str:
+    """A line as a sentence: it ends with one stop."""
+    text = str(text or "").rstrip()
+    return text if text.endswith((".", "!", "?")) else f"{text}."
+
+
 def shown_as(reads: str | None, *, ended: bool) -> str | None:
     """The state a question is shown as, given the state it reads as now and whether
     its round has ended: `LEFT` for one that reads as open or parked in a round that
@@ -283,4 +349,6 @@ __all__ = ["asker",
            "PROJECT_ID", "STAGE", "UNTIL_ROUND", "UNSTAGE", "find", "next_id",
            "parse_blocks", "said", "stored", "holds_every", "recorded_stages",
            "finished_stages", "left_stages", "unrecorded", "stages_said", "is_closed",
-           "reached", "current", "shown_as", "called", "waiting", "listed"]
+           "reached", "current", "PreparedNow", "prepared_now", "prepared_data",
+           "OTHER_OPTIONS", "prepared_lines", "shown_as", "called",
+           "waiting", "listed"]
