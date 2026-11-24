@@ -316,6 +316,15 @@ def test_live_subagents_come_before_holds_and_holds_before_directed_agents():
     assert nobody.case is None and nobody.directed == ()
 
 
+def test_a_fork_of_the_main_loop_is_no_subagent_signal():
+    fork = SimpleNamespace(id="f1", kind="subagent", state="running", final=False,
+                           description="subconscious", is_fork=True)
+    signal, _ = keepwarm.signal_of(listing(fork), (), (), [])
+    assert signal.case is None
+    signal, _ = keepwarm.signal_of(listing(fork, agent("a1")), (), (), [])
+    assert [a.id for a in signal.agents] == ["a1"]
+
+
 def test_the_signal_is_sure_only_on_lists_read_whole():
     def sure(listed, directed=None):
         return keepwarm.signal_of(listed, (), (), [], directed=directed)[0].sure

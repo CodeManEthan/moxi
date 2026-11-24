@@ -25,8 +25,9 @@ stops at the first that answers:
 2. Cache's read of the session: its age must lie in `[lifetime - 900, lifetime - 360)`.
    A lifetime of 360 s or less leaves no window, and keep-warm never nudges.
 3. turns' facts: a turn is open, nothing (`busy`).
-4. The signals, in this order. The subagent case: `subagent` or `teammate` entries not
-   final, pending, running or waiting (a `shell` never counts). The director case, by an
+4. The signals, in this order. The subagent case: the session's own subagents at work
+   (`waits.live_subagents`: `subagent` or `teammate` entries not final, pending, running
+   or waiting, no fork of the main loop; a `shell` never counts). The director case, by an
    open hold of the launch chain, counted only for a launch made with `keep_warm` on; or,
    under cover, by the agents the session directs that are at work (`waits.directed`,
    made whenever no subagent is live, a hold open or not). Neither: nothing (`idle`).
@@ -120,9 +121,6 @@ COVER = "keep-warm-cover"
 #: The window before the cache's expiry in which an ask may nudge, in seconds: from
 #: `OPEN_S` before it to `SHUT_S` before it.
 OPEN_S, SHUT_S = 900.0, 360.0
-#: The agent kinds and states that are the subagent case's signal; a `shell` never is.
-SIGNAL_KINDS = ("subagent", "teammate")
-SIGNAL_STATES = ("pending", "running", "waiting")
 #: The agent state after which an agent a nudge named is dropped for the rest of the run.
 UNKNOWN = "unknown"
 #: The cases, each the settings of its texts and cap.
@@ -416,8 +414,7 @@ def signal_of(listed: Any | None, named: Iterable[str], dropped: Iterable[str],
         states = {a.id: a.state for a in entries}
         newly = tuple(sorted(i for i in named - dropped if states.get(i, missing) == UNKNOWN))
         dropped |= set(newly)
-    live = tuple(a for a in entries if a.kind in SIGNAL_KINDS and a.final is not True
-                 and a.state in SIGNAL_STATES and a.id not in dropped)
+    live = tuple(a for a in waits.live_subagents(listed) if a.id not in dropped)
     holds = tuple(holds)
     kept = tuple(sorted(dropped))
     sure = (listed is not None and getattr(listed, "complete", True) is not False
@@ -954,8 +951,7 @@ def _words(error: BaseException) -> str:
 
 __all__ = ["ASK_EVERY_S", "ASK_JOIN_BUDGET_S", "BLOCKED_REFUSALS", "CAPS", "COVER",
            "DIRECTING_TEXTS", "DIRECTOR", "FAILED_REFUSALS", "FIRST_LINE", "KIND", "MODE",
-           "NAME_CAP", "NUDGE_WAIT_S", "OPEN_S", "QUIET_REFUSALS", "SHUT_S", "SIGNAL_KINDS",
-           "SIGNAL_STATES", "SUBAGENTS", "TEXTS", "Cover", "Held", "Reading", "Signal", "ask",
+           "NAME_CAP", "NUDGE_WAIT_S", "OPEN_S", "QUIET_REFUSALS", "SHUT_S", "SUBAGENTS", "TEXTS", "Cover", "Held", "Reading", "Signal", "ask",
            "cover", "cover_off", "cover_on", "on", "asked_before_shut", "check_name", "delivered",
            "hold", "holds", "keep_warm", "no_window", "nudge_text", "open_hold", "reading", "release",
            "release_hold", "run_of_nudges", "signal_now", "signal_of", "timed", "window",

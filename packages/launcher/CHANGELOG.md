@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- Keep-warm's subagent case and the agents a session directs count the same entries
+  (`waits.live_subagents`): a `subagent` or `teammate` entry not final and pending,
+  running or waiting, and not a fork of the session's main loop. A directed Claude agent
+  whose turn is closed is at work by the subagents its own agent list holds at work, not
+  by turns' busy count, so a fork, or a subagent turns' `stale-agents` judgment lists
+  `idle`, keeps neither case going. A list turns can't read whole leaves that agent
+  unlisted, as before.
 - After a topic value the page reads its past sessions again through moxi-ui's
   `readLater`, so the page root's `data-reading` mark counts that read from the moment it
   is scheduled until its answer is drawn, and a test's press waits for the list it

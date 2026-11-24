@@ -31,10 +31,14 @@ def facts(*, turn_open=False, number=4, agents=0, draft=False, session_id=None):
 
 
 def live(sid, *, turn_open=False, entries=(), agents=0, draft=False, harness="claude"):
-    """A live session turns serves, its endpoint this test's own process."""
+    """A live session turns serves, its endpoint this test's own process. `agents` is
+    turns' busy count; with no `entries` the session lists that many subagents at work,
+    and with `agents` None its list is not whole."""
+    if not entries and isinstance(agents, int):
+        entries = [agent(f"w{index}") for index in range(agents)]
     session = FakeSession(facts_seq=[facts(turn_open=turn_open, agents=agents, draft=draft,
                                            session_id=sid)],
-                          agents=list(entries), session_id=sid)
+                          agents=list(entries), complete=agents is not None, session_id=sid)
     session.harness = harness
     return session
 
