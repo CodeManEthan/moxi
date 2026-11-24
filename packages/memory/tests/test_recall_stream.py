@@ -88,6 +88,37 @@ def test_a_stream_runs_rounds_until_end_of_recall():
     assert record["fork"] == "agent-1" and record["rounds"] == 2
 
 
+def test_a_first_answer_ending_its_recall_still_gets_a_second_round():
+    recall = a_recall()
+    route = FakeRoute([ended("Recalled ...:\n- a\nEnd of recall."),
+                       ended("- b\nEnd of recall.")])
+    assert run(recall, route) == "ended"
+    rid = recall.recall_id
+    assert [a[0] for a in route.asked] == ["fork", "continue"]
+    assert route.asked[1][2] == f"{rid}:2"
+    line = recalls.find_line(SESSION, rid)
+    assert [r["text"] for r in line["rounds"]] == ["Recalled ...:\n- a\nEnd of recall.",
+                                                   "- b\nEnd of recall."]
+
+
+def test_a_first_answer_ending_its_recall_with_no_calls_left_ends_the_stream():
+    recall = a_recall(max_tools=1)
+
+    def spend(ref):
+        records.update(SESSION, recall.recall_id, tools=1)
+
+    route = FakeRoute([ended("- a\nEnd of recall."), ended("- b")], on_ack=spend)
+    assert run(recall, route) == "ended"
+    assert len(route.asked) == 1
+
+
+def test_only_a_later_answer_ends_the_stream_by_its_end_line():
+    assert recall_stream.ends_stream("- a\nEnd of recall.", 1) is False
+    assert recall_stream.ends_stream("- a\nEnd of recall.", 2) is True
+    assert recall_stream.ends_stream("NOTHING", 1) is True
+    assert recall_stream.ends_stream("  ", 1) is True
+
+
 @pytest.mark.parametrize("answer", ["NOTHING", "", None])
 def test_nothing_ends_the_stream_after_one_round(answer):
     recall = a_recall()

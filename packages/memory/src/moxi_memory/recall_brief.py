@@ -80,9 +80,11 @@ further:
 Limits: at most {max_tools} tool calls and about {limit_s} seconds in all. Only read:
 change no file, send no message, start no agent, and run no command that waits or follows
 a file. A shell call is one command, or several joined by |, each starting with one of:
-{fork_commands}. No ;, &&, redirection, variable or cd. To read part of a file, use the
-Read tool. Calls that do more are refused, and once your time is up every call is
-refused: then answer at once from what you have.
+{fork_commands}. No ;, &&, redirection, variable or cd, and no backslash, (, ), $ or !
+anywhere, even inside quotes: for one word or another use grep -E "one|other", since a |
+inside quotes is part of the pattern, or use the Grep tool, which takes any pattern. To
+read part of a file, use the Read tool. Calls that do more are refused, and once your
+time is up every call is refused: then answer at once from what you have.
 
 Your answer is your last message, and the main agent reads it as it stands.
 {first}{stream}
@@ -104,11 +106,13 @@ START_ASKED = ("The main agent has asked for a recall on the topic below, and ke
                "working while you work.")
 NOTES_LINE = ("- Notes: the files under {notes_dirs}. Search them with grep and read the "
               "files that match.\n")
-FIRST = "Give a first answer as soon as you have something."
-STREAM = (" After each answer you are asked to keep digging: then answer again each time "
-          "you find something new, with only what is new since your last answer. End an "
-          "answer with the line End of recall. when you have what is needed or nothing "
-          "more is worth looking for, and you are not asked again.")
+FIRST = ("Give a first answer as soon as you have one useful point: when the first search "
+         "above already holds one, answer from it at once, before any tool call.")
+STREAM = (" Your first answer never ends the recall: after each answer you are asked to keep "
+          "digging while you have tool calls and time left, and you answer again each time "
+          "you find something new, with only what is new since your last answer. End a "
+          "later answer with the line End of recall. when you have what is needed or "
+          "nothing more is worth looking for, and you are not asked again.")
 WIDEN_NOTES = ("These search this project only. Run a search wider only for keywords "
                "whose search of this project's sessions and whose grep of its notes have "
                "both found nothing: then search again without --project and grep "

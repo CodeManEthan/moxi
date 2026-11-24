@@ -21,8 +21,10 @@ did not take (refused, or the call raised) leaves the mark and ends the stream a
 round: the line keeps naming the round's ref, so a taker acks it (and turns releases
 the round's kept end), and no later round's ref is ever written over a kept one.
 
-**When the stream ends.** At an answer of `NOTHING`, or with no text, or whose last line
-is `End of recall.`; after `subconscious.max_rounds` rounds; once the fork has made
+**When the stream ends.** At an answer of `NOTHING`, or with no text, or a later
+round's answer whose last line is `End of recall.` (a first answer comes as soon as the
+fork has one useful point, so its `End of recall.` ends nothing while the fork has calls
+and time left); after `subconscious.max_rounds` rounds; once the fork has made
 `subconscious.max_tools` tool calls (counted on the record); at `subconscious.limit_s`
 from the recall's start; once the record is `hurried` (read again under the session's
 lock before each round is asked); or at an ack turns did not take. Then the record ends
@@ -129,12 +131,15 @@ def round_bound_s(settings) -> float:
     return float(settings["limit_s"]) + ROUND_MARGIN_S
 
 
-def ends_stream(answer: str | None) -> bool:
-    """Whether `answer` ends the stream by what it says."""
+def ends_stream(answer: str | None, round_number: int) -> bool:
+    """Whether `answer`, round `round_number`'s, ends the stream by what it says: an
+    empty answer or `NOTHING` always; `END_LINE` as its last line only after the first
+    round, since a first answer comes as soon as the fork has one point and never ends
+    the stream while the limits leave it calls and time (`why_stop`)."""
     text = (answer or "").strip()
     if not text or text == NOTHING:
         return True
-    return text.splitlines()[-1].strip() == END_LINE
+    return round_number > 1 and text.splitlines()[-1].strip() == END_LINE
 
 
 def continue_text(record: dict, settings, *, now: float) -> str:
@@ -441,7 +446,7 @@ def run(recall, route: Route, brief: str, *, clock=time.time, send=None,
             if recall.record.get("state") == records.LOST:
                 return records.LOST
             break
-        if ends_stream(recall.line["rounds"][-1].get("text")):
+        if ends_stream(recall.line["rounds"][-1].get("text"), round_number):
             break
         current = records.read(recall.session_id, recall.recall_id) or recall.record
         recall.record = current

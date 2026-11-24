@@ -518,9 +518,11 @@ so a recall never holds the prompt. The child:
    search;
 2. writes the fork's brief with those hits, the rules below and this session's id;
 3. asks turns to fork the session with the brief. The fork answers as soon as it has
-   something, at most `subconscious.max_points` points, or `NOTHING`;
-4. asks for further rounds, each a turn of the same fork, until an answer is `NOTHING`
-   or ends `End of recall.`, `subconscious.max_rounds` rounds have run, the fork has made
+   one useful point (from the first search alone when that holds one), at most
+   `subconscious.max_points` points, or `NOTHING`;
+4. asks for further rounds, each a turn of the same fork, until an answer is `NOTHING`,
+   a later answer ends `End of recall.` (a first answer's never ends the stream while
+   calls and time are left), `subconscious.max_rounds` rounds have run, the fork has made
    `subconscious.max_tools` tool calls over all its rounds, or `subconscious.limit_s` has
    passed. Each round is bounded at `limit_s` plus 30 seconds from its own send.
 

@@ -23,6 +23,11 @@
   discard`, which refuses every line on the subagent route since the harness brings
   every answer back itself. Recall records are swept after a day unless their line is
   still kept.
+- A recall's fork gives its first answer as soon as it has one useful point, from the
+  first search alone when that holds one, and the stream goes on after it while the fork
+  has tool calls and time left: only a later answer's `End of recall.` ends it. The
+  brief says a backslash, `(`, `)`, `$` or `!` in a shell call is refused, even quoted,
+  and points to `grep -E "one|other"` or the Grep tool.
 - Two turns guards, run only in sessions with the subconscious on, hold a recall's fork
   to reads: `memory.subconscious-fork` allows Read, Grep, Glob and a foreground shell call
   that is a plain read of `subconscious.fork_commands` (alone or in a pipeline), counted

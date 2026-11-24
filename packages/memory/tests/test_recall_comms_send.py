@@ -76,9 +76,10 @@ def ended(answer):
     return Ended(turn_id=None, outcome="completed", answer=answer)
 
 
-def a_recall(**fields):
+def a_recall(settings=None, **fields):
     record = recall_start.begin(SESSION, "claude", start="prompt", text="ingest lock",
-                                senders=(), settings=recall_start.default_settings(),
+                                senders=(), settings=dict(recall_start.default_settings(),
+                                                          **(settings or {})),
                                 cwd=None, notes_dir=None, route_name=ROUTE,
                                 spawn=lambda s, r: None)
     recall = recall_child.Recall(records.read(SESSION, record["recall"]))
@@ -96,7 +97,7 @@ def run(recall, route, sender, sleeps=None, **kwargs):
 
 
 def test_an_answer_goes_on_the_line_sending_then_is_acked_then_sent():
-    recall = a_recall()
+    recall = a_recall({"max_rounds": 1})
     route, sender = Route([ended("- a\nEnd of recall.")]), Sender()
     assert run(recall, route, sender) == "ended"
     rid = recall.recall_id
@@ -109,14 +110,14 @@ def test_an_answer_goes_on_the_line_sending_then_is_acked_then_sent():
 
 
 def test_the_round_is_waited_for_its_bound_only_on_a_comms_route():
-    recall = a_recall()
+    recall = a_recall({"max_rounds": 1})
     route = Route([ended("- a\nEnd of recall.")])
     run(recall, route, Sender())
     assert route.waits == [recall_stream.round_bound_s(recall.settings)]
 
 
 def test_a_refused_send_is_tried_again_and_its_reason_kept():
-    recall = a_recall()
+    recall = a_recall({"max_rounds": 1})
     seen = []
     sender = Sender(2, on_send=lambda: seen.append(
         recalls.find_line(SESSION, recall.recall_id).get("send_reason")))

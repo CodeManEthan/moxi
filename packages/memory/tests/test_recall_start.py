@@ -6,8 +6,8 @@ import types
 
 import pytest
 
-from moxi_memory import (listener, recall_brief, recall_child, recall_start, recalls,
-                         records)
+from moxi_memory import (listener, recall_brief, recall_child, recall_guard, recall_start,
+                         recalls, records)
 
 SESSION = "0190b000-0000-7000-8000-000000000001"
 
@@ -276,6 +276,28 @@ def test_the_brief_holds_the_prompt_the_hits_and_the_limits():
     assert "End of recall." in text
     assert 'Recalled from past sessions and notes for "why did the ingest stall":' in text
     assert "{" not in text
+
+
+def test_the_brief_asks_for_a_first_answer_at_once_and_a_stream_after_it():
+    text = " ".join(brief().split())
+    assert ("Give a first answer as soon as you have one useful point: when the first "
+            "search above already holds one, answer from it at once, before any tool "
+            "call.") in text
+    assert "Your first answer never ends the recall" in text
+    assert "keep digging while you have tool calls and time left" in text
+    assert "with only what is new since your last answer" in text
+    assert "End a later answer with the line End of recall." in text
+
+
+def test_the_brief_says_a_backslash_is_refused():
+    text = " ".join(brief().split())
+    assert "no backslash, (, ), $ or ! anywhere, even inside quotes" in text
+    assert 'grep -E "one|other"' in text
+    assert "the Grep tool, which takes any pattern" in text
+    for refused in ("\\", "(", ")", "$", "!"):
+        assert refused in recall_guard.REFUSED_CHARS
+    assert recall_guard.plain_read('grep -E "one|other" notes.md', ["grep"])
+    assert not recall_guard.plain_read('grep "one\\|other" notes.md', ["grep"])
 
 
 def test_an_asked_recall_and_one_round_change_the_brief():
