@@ -9,18 +9,25 @@
   `Send` sends it, or `Send now` one row. The page records the picks, decisions,
   read-backs, done jobs, parks and unparks itself through rounds' own calls, each with a
   page pointer; own words and corrections go in the message to the agent chosen in the
-  To picker (each round's lead by default), who words and records them, and the row
-  reads recorded once the agent's ruling appears. With comms installed one message goes
-  to each recipient under rounds' send-only name; without it nothing is sent and the
-  row shows the command a lead would run. Each draft gets a receipt.
+  To picker (each round's lead by default, a project's lead marked `(the project's)`),
+  who words and records them, and the row reads recorded once the agent's ruling
+  appears. The message quotes the words as written and gives the command with
+  `--text TEXT` for the agent's wording, so no shell reads the words. With comms
+  installed one message goes to each recipient under rounds' send-only name; without it
+  nothing is sent and the row shows the command a lead would run. Each draft gets a
+  receipt, and `Sent` lists the sent drafts and the messages sent. A draft longer than
+  the answers route takes stays in the tray with its row saying so.
 - An act posted twice runs once: each act carries an act id, the page server answers a
   repeat from the receipts it keeps, and after a restart an event whose pointer holds
   the act id is that act's record, so it is not recorded again.
 - `Unpark` on a parked question takes back the parking that stands, a ruling of
-  `revoke:` that parking, whoever recorded it.
+  `revoke:` that parking, whoever recorded it. A question offers `Unpark` while parked
+  and its answer form while open, whatever its row in the tray says.
 - `Drop this build…` on a step of a stage with an open build opens a confirm that names
   what the drop ends, removes and keeps, read fresh; the drop is recorded as the
-  operator's with the page as the pointer, and the round's lead is told.
+  operator's with the page as the pointer, and with comms installed and a lead for the
+  round, the lead is told what the drop removed and kept. A drop whose post gets no
+  answer offers `Drop again` under the same act id.
 - The page reads each round's lead, a question's prepared answer (its recommended option
   marked `recommended`), a question's record in every state with the ruling that put it
   there, and the parked questions, which the foot's count opens.
