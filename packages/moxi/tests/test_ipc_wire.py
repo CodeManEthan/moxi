@@ -556,7 +556,7 @@ def test_the_windows_address_hashes_this_users_sid():
     sid = _win.user_sid()
     assert sid.startswith("S-1-")
     u = hashlib.sha256(sid.encode()).hexdigest()[:8]
-    assert ipc.address("comms", "daemon").endswith(f"-{u}")
+    assert f"-{u}-" in ipc.address("comms", "daemon")
 
 
 # -- import cost ----------------------------------------------------------------------------
