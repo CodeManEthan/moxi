@@ -125,7 +125,7 @@ def _discard(args, out, prog: str) -> int:
 
 
 def format_line(line: dict) -> str:
-    """One log line as one line of text."""
+    """One log line as one line of text; a `lost` line ends with its reason and error."""
     when = show(line.get("at") if isinstance(line.get("at"), (int, float)) else None)
     session = line.get("session") or "-"
     state = line.get("state") or "-"
@@ -139,8 +139,13 @@ def format_line(line: dict) -> str:
     flags = [name for name in ("hurried", "past_limit") if line.get(name)]
     if flags:
         parts.append(", ".join(f.replace("_", " ") for f in flags))
-    if line.get("reason"):
-        parts.append(str(line["reason"]))
+    reason = str(line.get("reason") or "")
+    error = " ".join(str(line.get("error") or "").split())
+    if error and state == recalls.LOST:
+        parts.append(error if error.split(":")[0].split()[0] == reason
+                     else f"{reason}: {error}" if reason else error)
+    elif reason:
+        parts.append(reason)
     return "  ".join(parts)
 
 

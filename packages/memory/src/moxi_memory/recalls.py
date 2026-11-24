@@ -157,7 +157,9 @@ def all_lines(session_id: str | None = None) -> list[dict]:
 
 def fork_ids() -> frozenset[tuple[str, str]]:
     """The `(harness, fork id)` of every recall fork the log names: the agent ids of
-    the subagent forks, whose transcripts memory's index leaves out."""
+    the subagent forks, whose transcripts memory's index leaves out. The log is never
+    swept, and this read is why: a sweep that dropped a fork's id would let its
+    transcript back into the index at the next full read, so a sweep must keep them."""
     return frozenset((str(line.get("harness") or ""), str(line["fork"]))
                      for line in all_lines() if line.get("fork"))
 

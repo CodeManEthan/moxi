@@ -111,7 +111,8 @@ SCHEMA = (
         since REAL NOT NULL,
         PRIMARY KEY (harness, source)
     ) WITHOUT ROWID;
-    """,    """
+    """,
+    """
     DROP INDEX sessions_by_identity;
     DROP INDEX sessions_by_label;
     CREATE INDEX sessions_by_identity ON sessions (identity, newest)

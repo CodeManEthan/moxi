@@ -5,7 +5,9 @@
 - The `subconscious` row (`off`, `automatic`, `on-demand`; needs turns and memory) turns
   memory's subconscious on for one launch, or for every launch of a preset that sets it:
   a launch with it on stamps the mode under memory's `SUBCONSCIOUS_ENV`, read from
-  memory's API. A fork drops it. memory joins the optional links, with a `memory` extra.
+  memory's API. For now a recall runs on Claude Code only: a Codex launch with the row
+  on is accepted and has the subconscious off at run time, which memory's log and doctor
+  say. A fork drops it. memory joins the optional links, with a `memory` extra.
 - With the `ui` extra, a `project-facts` component reports to the Projects page how many
   launched sessions run in each project, and for the opened project where its lead runs,
   a `Launch` row (its preset, its last launch and how it names sessions) and a `Sessions`

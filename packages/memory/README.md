@@ -45,7 +45,8 @@ moxi doctor memory
 
 Exit codes: 0 a search that ran, with or without a hit, an ingest or rebuild asked for, and a
 status with an index; 1 no index, or one that can't be read; 2 bad arguments or a setting
-memory can't use.
+memory can't use; 3 a `subconscious recall` or `subconscious discard` refused, with the
+reason.
 
 ### Search
 
@@ -530,7 +531,9 @@ only in sessions with the subconscious on. A fork may call Read, Grep and Glob, 
 shell only for a plain read: one command, or a pipeline of commands joined by `|`, each
 starting with an entry of `subconscious.fork_commands` word for word, in the foreground
 with no timeout of its own. Anything the guard can't see whole (`;`, `&`, redirection,
-substitution, quoting tricks and the like) is refused. Every permission ask a recall
+substitution, quoting tricks and the like) is refused. Only Claude Code's `Bash` tool
+counts as the shell: its `PowerShell` tool (on Windows) and `Monitor` are refused, so a
+fork with no `Bash` reads with Read, Grep and Glob alone. Every permission ask a recall
 fork raises is refused rather than shown to you; a fault in that guard refuses the ask
 too. Once the recall's tool calls or time are used up, every further call is refused
 with a line telling the fork to answer from what it has.
@@ -539,12 +542,21 @@ with a line telling the fork to answer from what it has.
 start, session, how it started, the head of its prompt or topic, its route, rounds and
 the reason of a `lost` state) and one per stretch a session's subconscious was `off`.
 `--session ID` keeps one session's lines and prints each round's answer. A line is
-`open` while its round runs, `back` once an answer came, `lost` when none did (with
-`denied`, `gone` or `config`), `discarded` or `off`. Each round's end stays with turns
+`open` while its round runs, `back` once an answer came, `lost` when none did,
+`discarded` or `off`. A `lost` line shows its reason and its error. The reason is
+`config` (the child's read of memory's config was refused), `spawn` (the child could not
+be started), `hurried` (a newer recall of the session started before this one asked its
+fork), `gone` (the fork went away with no answer, or its child died and turns kept no
+end), or otherwise the first word of turns' own reason for the round: `denied` (the
+harness refused to start the fork), `untied`, `expired`, `unanswered`, or a refusal such
+as `busy-agents`. Each round's end stays with turns
 until memory's line holds it. If a recall's child dies, the next recall child of any
 session, or a taker memory starts when that session ends, finishes its line from what
 turns kept. A recall's working record is removed after a day unless its line still
-waits on turns; the log itself is kept.
+waits on turns. The log itself is never swept: memory leaves each recall's fork out of
+its index by the fork id the log holds, so a sweep added later must keep those ids. Each
+recall child and each read of a subagent transcript reads the whole log, so that work
+grows with every session that ever ran the subconscious.
 
 `moxi memory subconscious discard RECALL_ID` ends a line whose answer memory still holds
 to send. On Claude Code's subagent route the harness brings every answer back itself,
@@ -601,7 +613,7 @@ effect at the next read.
 | `reminder.enabled` | `true` | send the reminder at each prompt |
 | `ingest.timer.enabled` | `false` | run a catch-up walk every hour, outside sessions |
 | `subconscious.trigger` | `user` | which prompts count as new work: `user`, the user's own; `user-and-comms`, those and comms deliveries. In automatic mode each starts a recall; in on-demand mode each resets the agent's count |
-| `subconscious.scope` | `project-first` | where a recall looks: `project`, `project-first` (everywhere only when the project finds nothing) or `everywhere` |
+| `subconscious.scope` | `project-first` | where a recall looks: `project`, `project-first` (everywhere only when the project finds nothing) or `everywhere`; a session with no project label (its folder unknown) searches everywhere under each |
 | `subconscious.limit_s` | `60` | how long a recall may run, all its rounds, in seconds, 1 to 3600; each round is also bounded at this plus 30 |
 | `subconscious.max_tools` | `8` | the most tool calls a recall's fork may make over all its rounds; at least 1 |
 | `subconscious.max_rounds` | `4` | how many rounds a recall may run, each answer delivered; at least 1 |
@@ -614,8 +626,9 @@ A change to `index.include_subagents`, `index.tail_chars` or `redact.sets` appli
 after it; `moxi memory reindex` applies it to everything. To turn the start line and
 lists off, take `memory` off turns' `start.order`. A recall runs on the settings memory's
 listener last read cleanly: a config file edited into error leaves running sessions on
-the last good settings, and a recall child that must read the file itself and can't
-stops with its line `lost` (`config`).
+the last good settings (on the defaults when none read cleanly yet), the listener logs
+the error as a warning, once per error, and a recall child that must read the
+file itself and can't stops with its line `lost` (`config`).
 
 memory reads one environment variable of its own, `MOXI_MEMORY_SUBCONSCIOUS`, which the
 launcher stamps on a session launched with the subconscious on. Its folders move with the core's, like

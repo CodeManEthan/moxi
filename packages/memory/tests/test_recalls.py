@@ -128,6 +128,21 @@ def test_list_json_prints_the_lines_as_stored(capsys):
     assert lines[1]["rounds"][0]["text"].endswith("- a point")
 
 
+def test_list_shows_a_lost_lines_reason_and_error(capsys):
+    with recalls.session_lock(SESSION):
+        recalls.put_line(SESSION, {"recall": "r-config", "state": recalls.LOST,
+                                   "reason": "config",
+                                   "error": "limit_s is 0:\n give 1 to 3600"}, now=10.0)
+        recalls.put_line(SESSION, {"recall": "r-denied", "state": recalls.LOST,
+                                   "reason": "denied", "error": "denied: no fork"},
+                         now=11.0)
+    code, out, _ = memory(capsys, "subconscious", "list")
+    assert code == 0
+    first, second = out.splitlines()
+    assert first.endswith("rounds 0  config: limit_s is 0: give 1 to 3600")
+    assert second.endswith("rounds 0  denied: no fork")
+
+
 def test_list_refuses_a_session_that_is_not_an_id(capsys):
     code, out, err = memory(capsys, "subconscious", "list", "--session", "../x")
     assert code == 2 and out == "" and "is not a session id" in err

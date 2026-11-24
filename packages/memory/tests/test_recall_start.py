@@ -140,6 +140,27 @@ def test_the_listener_keeps_its_last_good_settings_while_the_file_is_in_error(
     assert records.read(SESSION, recall_id)["settings"]["limit_s"] == 7
 
 
+def test_the_listener_reports_a_config_error_once_good_read_or_not(monkeypatch, caplog):
+    import logging
+
+    from moxi.config import ConfigError
+
+    from moxi_memory import settings
+
+    monkeypatch.setattr(listener, "_good_subconscious", None)
+    monkeypatch.setattr(listener, "_reported_error", None)
+
+    def refuse(env=None):
+        raise ConfigError(None, "subconscious.limit_s", "is 0, below 1", "fix it")
+
+    monkeypatch.setattr(settings, "read", refuse)
+    with caplog.at_level(logging.WARNING, logger=listener.__name__):
+        assert listener.subconscious_settings() == recall_start.default_settings()
+        listener.subconscious_settings()
+    [said] = [r.getMessage() for r in caplog.records]
+    assert "the default settings" in said and "is 0, below 1" in said
+
+
 def test_a_child_that_cannot_start_loses_the_recall(monkeypatch):
     def boom(session_id, recall_id):
         raise FileNotFoundError("no moxi-memory-subconscious")

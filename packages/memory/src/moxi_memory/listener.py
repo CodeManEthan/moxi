@@ -20,7 +20,8 @@ session whose launch turned the subconscious on (`moxi_memory.recall_start`), a 
 config `subconscious.trigger` counts starts a recall in automatic mode, once a route can
 run (else it logs the session's `off` line), and resets the agent's count of recalls in
 on-demand mode. It runs on the last good `subconscious.*` settings while memory's config
-file is in error, and passes them to the recall's child. It never raises.
+file is in error (the defaults when none read cleanly yet), logs the error once as a
+warning, and passes the settings to the recall's child. It never raises.
 
 `subconscious_gone(event)` answers a `gone` of a session whose launch turned the
 subconscious on: when a recall's line of the session is still open or kept, it starts a
@@ -144,19 +145,30 @@ def prompt(event) -> str | None:
 
 #: The last good `subconscious.*` settings this process read.
 _good_subconscious: dict | None = None
+#: The config error this process last reported, None once a read is good again.
+_reported_error: str | None = None
 
 
 def subconscious_settings() -> dict:
     """memory's `subconscious.*` settings now, keyed by their last names: the last good
-    ones while the config file is in error, and the defaults when none were ever good."""
-    global _good_subconscious
+    ones while the config file is in error, and the defaults when none were ever good.
+    A config error is reported to the process's log as a warning, once per error text,
+    whether or not a good read came before it."""
+    global _good_subconscious, _reported_error
     from moxi.config import ConfigError
 
     from . import recall_start, settings
 
     try:
         _good_subconscious = recall_start.subconscious_settings(settings.read())
-    except ConfigError:
+        _reported_error = None
+    except ConfigError as exc:
+        if str(exc) != _reported_error:
+            _reported_error = str(exc)
+            logging.getLogger(__name__).warning(
+                "memory's config is in error, so the subconscious runs on %s: %s",
+                "its last good settings" if _good_subconscious is not None
+                else "the default settings", exc)
         if _good_subconscious is None:
             return recall_start.default_settings()
     return dict(_good_subconscious)

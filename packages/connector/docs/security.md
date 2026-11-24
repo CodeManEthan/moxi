@@ -134,7 +134,7 @@ notes):
 
 | tool | module | what it reaches |
 |---|---|---|
-| `search_memory` | memory | memory's index of past agent sessions on this machine: what you typed, the models' own turns and their tool-call lines; with `results`, the stored ends of tool results; subagents' and scratch launches' rows only when asked |
+| `search_memory` | memory | memory's index of past agent sessions on this machine: what you typed, the models' own turns and their tool-call lines; with `results`, the stored ends of tool results; subagents', scratch launches' and fork launches' rows only when asked (`subagents`, `scratch`, `forks`) |
 | `list_sessions` | sessions | recent sessions of every harness sessions knows: ids, harness, times, names and folders |
 | `read_session` | sessions | a few turns of one session's transcript, or of one of its subagents |
 | `list_notes` | notes | one folder of the notes root |

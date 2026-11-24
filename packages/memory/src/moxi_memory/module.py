@@ -18,7 +18,8 @@ OPTIONAL = {
     "comms": "Each session's comms identity at start, so the start lists show an agent "
              "its own recent sessions and name the agent behind each project session.",
     "launcher": "Each session's launch kind, so scratch and fork launches stay out of "
-                "default search and out of the start lists.",
+                "default search and out of the start lists, and the launcher's "
+                "subconscious row, which turns the subconscious on for a launch.",
     "connector": "search_memory in the Claude apps, through the connector's MCP host, "
                  "each hit redacted for a chat.",
     "notes": "The notes a recall of the subconscious reads beside past sessions: the "
