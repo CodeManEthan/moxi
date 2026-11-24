@@ -12,7 +12,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
-from moxi_dev.testing import timed_slack
+from moxi_dev.testing import timed_slack, toml_string
 
 from moxi import modules
 from moxi.config import ConfigError
@@ -279,7 +279,8 @@ def test_past_the_ceiling_the_allowlist_lets_the_hand_off_through(tmp_path):
     repo = work / "build"
     for d in (notes, repo):
         d.mkdir(parents=True)
-    write_config(THRESHOLDS + f'handoff_roots = ["{notes}"]\nwork_roots = ["{work}"]\n'
+    write_config(THRESHOLDS + f'handoff_roots = [{toml_string(notes)}]\n'
+                 f'work_roots = [{toml_string(work)}]\n'
                  'allow_commands = [["make", "handoff"]]\n')
     a = started()
     a.context(20_000 + HARD)
@@ -330,7 +331,8 @@ def test_a_latched_codex_agent_can_still_write_its_hand_off_and_commit(tmp_path)
     repo = work / "build"
     for d in (notes, repo):
         d.mkdir(parents=True)
-    write_config(THRESHOLDS + f'handoff_roots = ["{notes}"]\nwork_roots = ["{work}"]\n')
+    write_config(THRESHOLDS + f'handoff_roots = [{toml_string(notes)}]\n'
+                 f'work_roots = [{toml_string(work)}]\n')
     r = CodexRollout(Path(sessions.root("codex")), thread_id=THREAD)
     r.turn()
     r.user("look into it")

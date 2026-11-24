@@ -9,6 +9,7 @@ import sys
 from pathlib import Path
 
 import pytest
+from moxi_dev.testing import toml_string
 
 import moxi.store
 from moxi import modules
@@ -197,7 +198,7 @@ def test_an_index_older_than_a_week_warns():
 def test_an_offline_archive_lane_and_its_held_rows_are_named(tmp_path):
     drive = tmp_path / "drive"
     transcript(drive / "projects", "0190b000-0000-7000-8000-0000000000d2")
-    write_config(f'[[claude.archive_roots]]\npath = "{drive}"\nid = "old"\n')
+    write_config(f'[[claude.archive_roots]]\npath = {toml_string(drive)}\nid = "old"\n')
     run_pass()
     assert row("index").state == "ok"
     shutil.rmtree(drive)                                  # the drive unplugged

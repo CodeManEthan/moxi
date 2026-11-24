@@ -11,6 +11,7 @@ import textwrap
 from pathlib import Path
 
 import pytest
+from moxi_dev.testing import toml_string
 
 import moxi.files
 from moxi_sessions import api as sessions
@@ -266,7 +267,7 @@ def test_an_archive_lane_that_lists_empty_or_goes_offline_keeps_its_rows(reading
                                                                          tmp_path):
     archive = tmp_path / "old-machine"
     transcript(archive / "projects", SESSION_A).write()
-    write_config(f'[[claude.archive_roots]]\npath = "{archive}"\nid = "old"\n')
+    write_config(f'[[claude.archive_roots]]\npath = {toml_string(archive)}\nid = "old"\n')
     result = run(readings)
     [row] = files("archive:old")
     assert row["rank"] == 3 and row["held"] is None and result.read == 1
@@ -354,7 +355,7 @@ def test_an_archive_copy_of_a_live_session_is_not_read_and_its_row_goes(readings
     archive = tmp_path / "old-machine"
     transcript(archive / "projects", SESSION_A).write()
     transcript(archive / "projects", SESSION_B).write()
-    write_config(f'[[claude.archive_roots]]\npath = "{archive}"\nid = "old"\n')
+    write_config(f'[[claude.archive_roots]]\npath = {toml_string(archive)}\nid = "old"\n')
     run(readings)
     assert len(files("archive:old")) == 2
 
@@ -373,7 +374,7 @@ def test_the_pass_that_sees_a_live_transcript_gone_reads_its_archive_copy(readin
     other.user("go")
     other.assistant("b", usage=usage(output=33), request_id="req_b", message_id="msg_b")
     other.write()
-    write_config(f'[[claude.archive_roots]]\npath = "{archive}"\nid = "old"\n')
+    write_config(f'[[claude.archive_roots]]\npath = {toml_string(archive)}\nid = "old"\n')
     run(readings)
     assert files("archive:old") == []
 
@@ -390,7 +391,7 @@ def test_a_live_row_held_on_an_empty_listing_still_keeps_its_archive_copy_unread
     archive = tmp_path / "old-machine"
     transcript(archive / "projects", SESSION_A).write()
     live = transcript(roots["claude"], SESSION_A).write()
-    write_config(f'[[claude.archive_roots]]\npath = "{archive}"\nid = "old"\n')
+    write_config(f'[[claude.archive_roots]]\npath = {toml_string(archive)}\nid = "old"\n')
     run(readings)
     os.unlink(live)
     result = run(readings)
@@ -404,13 +405,13 @@ def test_archive_ranks_follow_the_config_and_a_reorder_moves_the_claim(readings,
     one, two = tmp_path / "one", tmp_path / "two"
     for archive in (one, two):
         transcript(archive / "projects", SESSION_A).write()
-    write_config(f'[[claude.archive_roots]]\npath = "{one}"\nid = "one"\n'
-                 f'[[claude.archive_roots]]\npath = "{two}"\nid = "two"\n')
+    write_config(f'[[claude.archive_roots]]\npath = {toml_string(one)}\nid = "one"\n'
+                 f'[[claude.archive_roots]]\npath = {toml_string(two)}\nid = "two"\n')
     run(readings)
     assert {r["lane"] for r in requests() if r["won"]} == {"archive:one"}
 
-    write_config(f'[[claude.archive_roots]]\npath = "{two}"\nid = "two"\n'
-                 f'[[claude.archive_roots]]\npath = "{one}"\nid = "one"\n')
+    write_config(f'[[claude.archive_roots]]\npath = {toml_string(two)}\nid = "two"\n'
+                 f'[[claude.archive_roots]]\npath = {toml_string(one)}\nid = "one"\n')
     result = run(readings)
     assert result.read == 0 and result.reused == 2
     assert {row["lane"]: row["rank"] for row in files()} == {"archive:two": 3,
@@ -421,7 +422,7 @@ def test_archive_ranks_follow_the_config_and_a_reorder_moves_the_claim(readings,
 def test_an_archive_lane_whose_id_left_the_config_is_dropped(readings, tmp_path):
     archive = tmp_path / "old-machine"
     transcript(archive / "projects", SESSION_A).write()
-    write_config(f'[[claude.archive_roots]]\npath = "{archive}"\nid = "old"\n')
+    write_config(f'[[claude.archive_roots]]\npath = {toml_string(archive)}\nid = "old"\n')
     run(readings)
     write_config("")
     result = run(readings)
@@ -804,7 +805,7 @@ def test_a_readings_store_that_fails_does_not_stop_the_index(roots):
 
 def test_a_harness_this_machine_does_not_have_is_absent_not_offline(readings, tmp_path):
     archive = tmp_path / "unplugged"
-    write_config(f'[[claude.archive_roots]]\npath = "{archive}"\nid = "usb"\n')
+    write_config(f'[[claude.archive_roots]]\npath = {toml_string(archive)}\nid = "usb"\n')
     result = run(readings)
     assert {lane: state["state"] for lane, state in result.lanes.items()} == {
         "claude": "absent", "codex": "absent", "opencode": "absent",
@@ -853,8 +854,8 @@ def test_status_shows_each_lane_its_holds_duplicates_and_imports(readings, roots
     one, two = tmp_path / "one", tmp_path / "two"
     for archive in (one, two):
         transcript(archive / "projects", SESSION_A).write()
-    write_config(f'[[claude.archive_roots]]\npath = "{one}"\nid = "one"\n'
-                 f'[[claude.archive_roots]]\npath = "{two}"\nid = "two"\n')
+    write_config(f'[[claude.archive_roots]]\npath = {toml_string(one)}\nid = "one"\n'
+                 f'[[claude.archive_roots]]\npath = {toml_string(two)}\nid = "two"\n')
     rollout(roots["codex"], THREAD_A)
     imported = CodexRollout(roots["codex"], thread_id=THREAD_B, imported=True)
     imported.turn()
@@ -1222,7 +1223,7 @@ def test_a_held_archive_file_keeps_0_and_its_marks_are_not_known(readings, tmp_p
 
     archive = tmp_path / "old-machine"
     transcript(archive / "projects", SESSION_A).write()
-    write_config(f'[[claude.archive_roots]]\npath = "{archive}"\nid = "old"\n')
+    write_config(f'[[claude.archive_roots]]\npath = {toml_string(archive)}\nid = "old"\n')
     run(readings)
     to_version_1()
     shutil.move(archive / "projects", tmp_path / "away")
