@@ -58,7 +58,7 @@ DISCARDED = "discarded"
 OFF = "off"
 LINE_STATES = (OPEN, SENDING, BACK, LOST, DISCARDED, OFF)
 #: The states a person may discard a line in: an answer memory still holds to send.
-DISCARDABLE: tuple[str, ...] = ()
+DISCARDABLE: tuple[str, ...] = (SENDING,)
 #: How a recall started: a prompt, or the agent's own request.
 PROMPT = "prompt"
 ASKED = "asked"

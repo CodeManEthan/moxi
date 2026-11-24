@@ -441,6 +441,7 @@ SUBCONSCIOUS_SHOWN = 5
 #: its identity yet.
 UNTAKEN_GRACE_S = 30.0
 SUBCONSCIOUS_LIST = "moxi memory subconscious list"
+SUBCONSCIOUS_DISCARD = "moxi memory subconscious discard RECALL_ID"
 
 
 def _age(seconds: float) -> str:
@@ -584,7 +585,8 @@ def _subconscious(*, config_in_error: bool, now: float | None = None) -> Row:
         named = [f"{line.get('recall')} ({sending_text(line, now=now)})"
                  for line in sending[::-1]]
         parts.append(f"{_plural(len(sending), 'recall')} still sending, waiting for comms "
-                     f"to take its answer: {_shown(named)}")
+                     f"to take its answer: {_shown(named)}; one comms will never take "
+                     f"ends with {SUBCONSCIOUS_DISCARD}")
     never_ran = _never_ran(lines, now=now)
     if never_ran:
         warn = True
