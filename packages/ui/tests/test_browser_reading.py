@@ -8,8 +8,10 @@ from __future__ import annotations
 import re
 
 import pytest
+from moxi_dev.testing import wait_for
 from playwright.sync_api import expect
 
+from moxi_ui.testing import WAIT_S
 from moxi_ui.testing.browser import READING_MARK, settled
 
 pytestmark = [pytest.mark.browser, pytest.mark.timeout(60, method="thread")]
@@ -99,8 +101,10 @@ def test_the_modules_view_counts_a_block_still_being_placed(ui_page):
     panel = ui_page.locator("#moxi-panel")
     view = panel.locator("moxi-ui-page")
     expect(view.locator(".list .card[data-module='fixture']")).to_be_visible()
-    ui_page.wait_for_function("() => true")
-    assert held, "the fixture block's script was not asked for"
+    # The card shows before the block's script is asked for; the route's handler runs as
+    # Playwright's events are read, which the short waits let happen.
+    wait_for(lambda: ui_page.wait_for_timeout(20) or held, WAIT_S,
+             what="the fixture block's script to be asked for")
     expect(panel).to_have_attribute(READING_MARK, re.compile(r"^[1-9]\d*$"))
     held.pop(0).continue_()
     expect(view.locator("moxi-fixture-block")).to_be_attached()
