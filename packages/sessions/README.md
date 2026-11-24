@@ -500,13 +500,27 @@ count, or alone at the right of its own line wherever no filter line is drawn. I
 in every state of the page and opens `/m/turns/`. It is drawn only with turns installed,
 and not through the phone gateway.
 
+**Cache.** With cache installed, at the desk, the list reads cache's `/api/clocks` when it
+opens and when its tab is shown again, and follows cache's topic `clocks`. A row whose
+session cache keeps a clock record for, matched by harness and session id, ends its first
+line in a dim `warm until 19:12`, or `cold` once that time has passed on cache's clock;
+the list is drawn again at that time, so the row turns cold with no read. Opened, the row
+has a `Cache` line, `warm until 19:12` or `cold since 18:35` (with when cache last read it,
+where cache has not rewritten the record lately), and a `Cache` link to cache's page.
+Which records have a clock time and when each goes cold are cache's rules. On a running
+launch launcher's cache fact wins, as it does on Home and the Comms page: the row's fact
+and its `Cache` line are launcher's (`kept warm while 1 agent works` after a covered
+one's), and cache's record is used only where launcher gives the launch no cache. A
+record with no clock time, a session with no record and a read that fails draw nothing.
+Without cache, and through the phone gateway, none of this is drawn and cache is not read.
+
 A row opens in place, by its `Open` or by a click, Enter or Space on its line, and several
 can be open at once. The session is read when its row is opened. Opened, a row shows the
 newest message a person typed (`You`) and the model's newest message after it (`Reply`),
 each with its time and cut at 600 characters; up to eight of its subagents, the ones that
 changed last, each with what it was asked, its type, when it ran and the newest thing it
-said; the `Session` line (the harness, the model, from the start to the last change); and
-`Resume`, the harness's own command for picking the session up again, with the folder to
+said; the `Session` line (the harness, the model, from the start to the last change); the
+`Cache` line, with cache's or launcher's fact (above); and `Resume`, the harness's own command for picking the session up again, with the folder to
 run it in where the harness needs one, and `Copy`, which puts the command on the
 clipboard. A folder under your home folder is written with `~`, here and in the Folder
 menu; any other folder is written whole. A piece the record does not give is not drawn. Under them `Read the
