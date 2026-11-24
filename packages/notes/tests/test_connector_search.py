@@ -7,7 +7,7 @@ from __future__ import annotations
 import os
 
 import pytest
-from connector_kit import API, HOST, call, make_root, token, write
+from connector_kit import API, HOST, call, make_fifo, make_root, token, write
 
 if not HOST.ok:
     pytest.skip(f"the connector module is not installed: {HOST.reason}",
@@ -100,7 +100,7 @@ def test_the_walk_skips_what_a_read_would_refuse(root, tool, tmp_path):
     os.link(root / "linked.md", tmp_path / "second")
     os.symlink(root / "a.md", root / "via-link.md")
     os.symlink(root, root / "loop")
-    os.mkfifo(root / "pipe.md")
+    make_fifo(root / "pipe.md")
     result, _ = call(tool, {"words": "kiwi"})
     assert [h["path"] for h in result.structured["hits"]] == ["a.md"]
     assert result.structured["files_read"] == 1

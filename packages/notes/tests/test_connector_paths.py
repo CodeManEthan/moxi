@@ -7,7 +7,7 @@ from __future__ import annotations
 import os
 
 import pytest
-from connector_kit import HOST, make_root, token, write
+from connector_kit import FIFOS, HOST, make_fifo, make_root, token, write
 
 if not HOST.ok:
     pytest.skip(f"the connector module is not installed: {HOST.reason}",
@@ -90,6 +90,7 @@ def test_a_file_with_a_second_hard_link_is_blocked(root, tmp_path):
     assert refusal(root, "a.md") == "blocked"
 
 
+@FIFOS
 def test_a_fifo_is_not_a_file_and_the_read_doesnt_hang(root):
     os.mkfifo(root / "pipe.md")
     assert refusal(root, "pipe.md") == "not-a-file"
@@ -184,6 +185,6 @@ def test_the_walk_opens_only_files_a_read_would_read(root, tmp_path):
     os.link(root / "linked.md", tmp_path / "second")
     os.symlink(root / "a.md", root / "via-link.md")
     os.symlink(root / "sub", root / "sub-link")
-    os.mkfifo(root / "pipe.md")
+    make_fifo(root / "pipe.md")
     found = [w.rel for w in pathrules.walk(str(root), cap_bytes=1 << 20)]
     assert found == ["a.md", "sub/b.md"]

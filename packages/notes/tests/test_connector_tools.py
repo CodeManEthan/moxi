@@ -10,7 +10,8 @@ import os
 from pathlib import Path
 
 import pytest
-from connector_kit import API, HOST, call, make_root, stripe, token, write
+from connector_kit import (API, FIFOS, HOST, call, make_fifo, make_root, stripe, token,
+                           write)
 
 if not HOST.ok:
     pytest.skip(f"the connector module is not installed: {HOST.reason}",
@@ -95,14 +96,14 @@ def test_list_hides_what_a_read_would_refuse_and_counts_it(root, tools, tmp_path
     os.symlink(tmp_path / "out.md", root / "topics" / "away.md")
     os.symlink(root / "topics" / ".git", root / "topics" / "to-dot")
     os.symlink(root / "topics" / "a.md", root / "topics" / "alias.md")
-    os.mkfifo(root / "topics" / "pipe")
+    hidden = 8 + make_fifo(root / "topics" / "pipe")
     result, logged = call(tools["list_notes"], {"folder": "topics/"})
     names = [e["name"] for e in result.structured["entries"]]
     assert sorted(names) == ["a.md", "alias.md"]
-    assert result.structured["hidden"] == 9
+    assert result.structured["hidden"] == hidden
     assert result.structured["folder"] == "topics"
-    assert "9 hidden" in result.text and token() not in result.text
-    assert logged == {"entries": 2, "hidden": 9, "refusal": None}
+    assert f"{hidden} hidden" in result.text and token() not in result.text
+    assert logged == {"entries": 2, "hidden": hidden, "refusal": None}
 
 
 def test_list_pages_200_at_a_time(root, tools):
@@ -204,7 +205,7 @@ def test_a_placeholder_already_in_the_note_isnt_counted(root, tools):
     ("a\x00.md", "bad-path"), ("a\\b.md", "bad-path"), ("", "bad-path"),
     (".git/config", "blocked"), (".secrets-allow", "blocked"), ("a/.env", "blocked"),
     ("x.pem", "blocked"), ("away.md", "outside-root"), ("to-dot/config", "blocked"),
-    ("linked.md", "blocked"), ("pipe.md", "not-a-file"), ("topics", "not-a-file"),
+    ("linked.md", "blocked"), pytest.param("pipe.md", "not-a-file", marks=FIFOS), ("topics", "not-a-file"),
     ("image.png", "not-text"), ("paper.pdf", "not-text"), ("big.md", "too-large"),
     ("missing.md", "not-found")])
 def test_read_refuses_each_path_the_rules_refuse(root, tools, tmp_path, rel, code):
@@ -218,7 +219,7 @@ def test_read_refuses_each_path_the_rules_refuse(root, tools, tmp_path, rel, cod
     (tmp_path / "out.md").write_text("beta\n")
     os.symlink(tmp_path / "out.md", root / "away.md")
     os.symlink(root / ".git", root / "to-dot")
-    os.mkfifo(root / "pipe.md")
+    make_fifo(root / "pipe.md")
     result, logged = call(tools["read_note"], {"path": rel})
     assert result.is_error and result.refusal == code
     assert result.structured == {"refusal": code}

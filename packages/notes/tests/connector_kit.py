@@ -4,10 +4,12 @@ secrets built at run time, and a call context that records what a tool logs."""
 from __future__ import annotations
 
 import asyncio
+import os
 import random
 import string
 from pathlib import Path
 
+import pytest
 from moxi import modules
 from notes_kit import configure
 
@@ -21,6 +23,18 @@ def make_root(tmp_path: Path) -> Path:
     root.mkdir(parents=True, exist_ok=True)
     configure(root=str(root))
     return root
+
+
+#: Windows has no FIFOs, so a test of one runs elsewhere.
+FIFOS = pytest.mark.skipif(not hasattr(os, "mkfifo"), reason="Windows has no FIFOs")
+
+
+def make_fifo(path: Path) -> bool:
+    """A FIFO at `path` where the system has them, and whether one was made."""
+    if not hasattr(os, "mkfifo"):
+        return False
+    os.mkfifo(path)
+    return True
 
 
 def token(seed: int = 1) -> str:

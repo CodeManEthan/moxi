@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- `read_note` and `search_notes` read files on Windows. Their open asked for
+  `O_NOFOLLOW`, which Windows lacks, so every read failed there; it now takes each open
+  flag where the system has one, and the file read must still be the file judged. The
+  search's walk read each file's link count from its folder entry, which on Windows is
+  always zero, so it found nothing there; it now reads it from the file.
 - notes' tools in the Claude apps need the secrets release with `chat_redact` and the
   connector release with `Limit`. Neither is released yet; notes' floors on them rise
   when they are.

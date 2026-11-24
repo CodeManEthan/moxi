@@ -21,10 +21,12 @@ names the refusal:
 5. **Size and kind.** At most the tool's cap (`too-large`). A NUL in the first 8 KiB, or
    first bytes of `%PDF-` (a PDF), mean `not-text`: only text is read, since
    secrets can't read anything else.
-6. **The file read is the file judged.** It is opened with `O_NOFOLLOW` and `O_NONBLOCK`,
-   and `fstat` must show the device and inode judged, still a regular file with one link
-   (`changed` otherwise). This narrows a swap between the check and the read; a process
-   of the same user can read the file directly anyway.
+6. **The file read is the file judged.** It is opened with `O_NOFOLLOW` and `O_NONBLOCK`
+   where the system has them (Windows has neither, and no FIFO: there a link swapped in is
+   followed, and the check below refuses the file it leads to), and `fstat` must show the
+   device and inode judged, still a regular file with one link (`changed` otherwise). This
+   narrows a swap between the check and the read; a process of the same user can read the
+   file directly anyway.
 
 A folder (`list_notes`) is judged by rules 1 to 3, and its entries by rules 2 to 4
 (`entry`), so a list never offers a path the read would refuse. The search's walk
@@ -41,6 +43,11 @@ import os
 import stat
 from collections.abc import Iterator
 from dataclasses import dataclass
+
+#: Rule 6's open: never follow a link, never wait on a FIFO, never pass the descriptor on,
+#: bytes as they are. Each flag is taken where the system has it.
+_OPEN_FLAGS = (os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0)
+               | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_BINARY", 0))
 
 #: How many leading bytes are checked for a NUL.
 SNIFF_BYTES = 8192
@@ -239,7 +246,7 @@ def read_judged(resolved: str, st: os.stat_result, *, cap_bytes: int) -> bytes:
     """Rules 6 and 5 for a file judged as `st`: its bytes, read through a descriptor
     opened without following a link and checked against `st`."""
     try:
-        fd = os.open(resolved, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK | os.O_CLOEXEC)
+        fd = os.open(resolved, _OPEN_FLAGS)
     except OSError:
         raise Refused("changed") from None
     try:
@@ -345,7 +352,9 @@ def walk(root_dir: str, *, cap_bytes: int) -> Iterator[Walked]:
                     if item.name not in WALK_SKIPS:
                         sub_dirs.append((rel, item.path))
                     continue
-                st = item.stat(follow_symlinks=False)
+                # Not the entry's own stat: on Windows it leaves the inode, the device
+                # and the link count at zero, which rules 4 and 6 read.
+                st = os.lstat(item.path)
             except OSError:
                 continue
             if not stat.S_ISREG(st.st_mode) or st.st_nlink != 1 or st.st_size > cap_bytes:
