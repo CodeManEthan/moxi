@@ -471,21 +471,15 @@ def live_subconscious() -> list[tuple[str, str, str | None]]:
     for session in client.sessions():
         with session:
             try:
-                stamps = session.env([recall_start.SUBCONSCIOUS_ENV])
+                stamps = session.env(list(recall_start.STAMPS))
             except Exception:  # noqa: BLE001 - an endpoint that can't read it is passed by
                 continue
-            run_mode = recall_start.mode({k: v for k, v in stamps.items() if v is not None})
-            if run_mode is None or session.session_id is None:
+            env = {k: v for k, v in stamps.items() if v is not None}
+            run_mode = recall_start.mode(env)
+            if (run_mode is None or session.session_id is None
+                    or recall_start.is_fork(env)):
                 continue
-            harness = session.harness
-            if harness == "codex":
-                why = recall_start.CODEX
-            elif harness != "claude" or "fork" not in session.capabilities:
-                why = recall_start.NO_FORK
-            elif recall_start.SUBAGENT in recall_start.BY_COMMS:
-                why = recall_start.comms_why(session.session_id)
-            else:
-                why = None
+            _route, why = recall_start.route(session.harness, session.session_id, env)
             out.append((session.session_id, run_mode, why))
     return out
 

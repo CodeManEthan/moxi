@@ -194,7 +194,7 @@ def _subconscious(event) -> None:
     env = getattr(event, "env", None) or {}
     mode = recall_start.mode(env)
     session_id = getattr(event, "session_id", None)
-    if mode is None or not recalls.is_safe(session_id):
+    if mode is None or recall_start.is_fork(env) or not recalls.is_safe(session_id):
         return
     senders = [str(s) for s in getattr(event, "delivery_senders", None) or () if s]
     ours = recall_senders(event, session_id, env, senders)
@@ -207,7 +207,7 @@ def _subconscious(event) -> None:
         recall_start.reset_asked(session_id)
         return
     harness = getattr(event, "harness", None)
-    route, why = recall_start.route(harness, session_id)
+    route, why = recall_start.route(harness, session_id, env)
     if route is None:
         recalls.note_off(session_id, why, harness=harness)
         return

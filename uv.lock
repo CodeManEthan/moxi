@@ -1117,6 +1117,9 @@ notes = [
 secrets = [
     { name = "moxi-secrets", extra = ["personal-data"] },
 ]
+slots = [
+    { name = "moxi-slots" },
+]
 
 [package.dev-dependencies]
 dev = [
@@ -1134,10 +1137,11 @@ requires-dist = [
     { name = "moxi-secrets", editable = "packages/secrets" },
     { name = "moxi-secrets", extras = ["personal-data"], marker = "extra == 'secrets'", editable = "packages/secrets" },
     { name = "moxi-sessions", editable = "packages/sessions" },
+    { name = "moxi-slots", marker = "extra == 'slots'", editable = "packages/slots" },
     { name = "moxi-turns", editable = "packages/turns" },
     { name = "python-stdnum", marker = "extra == 'connector'", specifier = ">=2.2" },
 ]
-provides-extras = ["comms", "launcher", "notes", "connector", "secrets"]
+provides-extras = ["comms", "launcher", "slots", "notes", "connector", "secrets"]
 
 [package.metadata.requires-dev]
 dev = [

@@ -210,6 +210,17 @@ def session_ids() -> list[str]:
         return []
 
 
+def find(recall_id: str) -> dict | None:
+    """Recall `recall_id`'s record, in whichever session's directory holds it, or None.
+    A recall's id is unique across sessions, so the first found is the one."""
+    if not recalls.is_safe(recall_id):
+        return None
+    for session_id in session_ids():
+        if record_path(session_id, recall_id).is_file():
+            return read(session_id, recall_id)
+    return None
+
+
 def sweep_old(*, sessions: list[str] | None = None, now: float | None = None) -> list[str]:
     """Remove every record older than `SWEEP_AFTER_S` whose log line does not carry the
     kept mark, and clamp every record whose `at` is later than now, in `sessions` (every
@@ -254,4 +265,4 @@ __all__ = ["RECORDS", "STARTING", "RUNNING", "HURRIED", "BACK", "ENDED", "LOST",
            "RECORD_STATES", "DONE", "RECORD_FIELDS", "records_dir", "record_path", "read",
            "session_records", "order", "write", "update", "clamp", "hurry_running",
            "SWEEP_AFTER_S",
-           "STARTING_GRACE_S", "session_ids", "sweep_old"]
+           "STARTING_GRACE_S", "session_ids", "find", "sweep_old"]

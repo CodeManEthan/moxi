@@ -37,6 +37,9 @@ LAUNCHER = "launcher"
 LAUNCHER_INTERFACE = 1
 #: The launcher interface the slot route speaks: `fork` and `exit_session`.
 LAUNCHER_FORK_INTERFACE = 3
+#: The slots interface memory asks whether tmux slots run here: `supported`.
+SLOTS = "slots"
+SLOTS_INTERFACE = 1
 #: The notes interface memory speaks: `notes_dir`, `root` and `NOTES_DIR_ENV`.
 NOTES = "notes"
 NOTES_INTERFACE = 1
@@ -98,6 +101,11 @@ def launcher_forks() -> Link:
     return load(LAUNCHER, LAUNCHER_FORK_INTERFACE)
 
 
+def slots() -> Link:
+    """The link to slots, for whether the slot route can run here."""
+    return load(SLOTS, SLOTS_INTERFACE)
+
+
 def notes() -> Link:
     """The link to notes, for the notes a recall reads."""
     return load(NOTES, NOTES_INTERFACE)
@@ -106,4 +114,5 @@ def notes() -> Link:
 __all__ = ["READY", "NONE", "FAILING", "NO_INTERFACE", "COMMS", "COMMS_INTERFACE",
            "COMMS_SCOPED_INTERFACE", "LAUNCHER", "LAUNCHER_INTERFACE",
            "LAUNCHER_FORK_INTERFACE", "NOTES", "NOTES_INTERFACE", "Link", "load", "comms",
-           "comms_scoped", "launcher", "launcher_forks", "notes"]
+           "comms_scoped", "launcher", "launcher_forks", "SLOTS", "SLOTS_INTERFACE", "slots",
+           "notes"]

@@ -29,6 +29,13 @@ measured by `recall_holder.age`, on a clock no wall-clock step moves where the s
 has one. Only records of the subagent route await a fork here: a fork on another route
 is not a subagent of the session. Every other subagent's call is left alone.
 
+**A slot fork** is a session of its own, stamped `SUBCONSCIOUS_FORK_ENV` with the id of
+the recall it serves (`slot_fork`). Every call there is the fork's, judged against that
+recall's record, found in whichever session's directory holds it (`slot_record`), by
+the same rules and under the same lock and count as an in-process fork's; a fork whose
+record can't be found is refused every call. Its every permission ask is refused with no
+judge (`moxi_memory.guards`).
+
 **A fork's call (`judge_call`).**
 
 - Once the record is `hurried` or `lost`, the recall is `subconscious.limit_s` past its
@@ -79,7 +86,7 @@ import time
 from collections.abc import Mapping
 
 from . import recall_holder, recalls, records
-from .recall_start import SUBAGENT, mode, route_stamp
+from .recall_start import SUBAGENT, SUBCONSCIOUS_FORK_ENV, is_fork, mode, route_stamp
 
 #: The refusals.
 TIME_UP = "Answer now from what you have: this recall's time is up."
@@ -313,15 +320,48 @@ def _refusal(call, record: dict) -> str | None:
 
 def judge_call(call):
     """The call-step judge of `memory.subconscious-fork`."""
-    from moxi.files import LockTimeout
-    from moxi_turns import Deny
-
     started = time.monotonic()
     record = fork_record(call.session_id, call.agent_id,
                          wait_s=min(STARTING_WAIT_S, BUDGET_S))
     if record is None:
         return None
-    session_id, recall_id = str(call.session_id), str(record["recall"])
+    return _judge(call, str(call.session_id), record, started)
+
+
+def slot_fork(env: Mapping[str, str]) -> bool:
+    """Whether a session runs the slot guards: it is a recall's slot fork, stamped
+    `SUBCONSCIOUS_FORK_ENV`. `env` is the session's environment, read once at its
+    start."""
+    return is_fork(env)
+
+
+def slot_record(call) -> dict | None:
+    """The record of the recall a slot fork's call serves, by the recall id its
+    session's stamp names, or None when no record is found."""
+    recall_id = (call.env or {}).get(SUBCONSCIOUS_FORK_ENV)
+    return records.find(str(recall_id)) if recall_id else None
+
+
+def judge_slot_call(call):
+    """The call-step judge of `memory.subconscious-slot`: every call of a slot fork is
+    the fork's, judged against the record its stamp names. A fork whose record can't be
+    found is refused every call, as one whose time is up."""
+    from moxi_turns import Deny
+
+    started = time.monotonic()
+    record = slot_record(call)
+    if record is None or not recalls.is_safe(record.get("session")):
+        return Deny(TIME_UP)
+    return _judge(call, str(record["session"]), record, started)
+
+
+def _judge(call, session_id: str, record: dict, started: float):
+    """Judge a fork's `call` against `record`, of session `session_id`, under the
+    session's lock, counting an allowed call on the record."""
+    from moxi.files import LockTimeout
+    from moxi_turns import Deny
+
+    recall_id = str(record["recall"])
     left = max(BUDGET_S - (time.monotonic() - started), 0.0)
     try:
         with recalls.session_lock(session_id, timeout_s=left):
@@ -349,4 +389,5 @@ __all__ = ["TIME_UP", "READ_ONLY", "ASK_REFUSED", "READ_TOOLS", "SHELL", "REFUSE
            "STARTING_WAIT_S", "BUDGET_S", "guarded", "holder_wait_s", "line_child",
            "HOLDER_GONE", "PAST_WAIT", "NO_HOLDER", "holder_of", "waiting", "awaits_fork",
            "fork_record",
-           "time_up", "plain_read", "allowed", "judge_call", "judge_ask"]
+           "time_up", "plain_read", "allowed", "judge_call", "judge_ask", "slot_fork",
+           "slot_record", "judge_slot_call"]

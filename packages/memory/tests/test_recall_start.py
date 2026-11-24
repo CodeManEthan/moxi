@@ -24,7 +24,7 @@ def event(*, mode="automatic", own=True, by=None, text="why did the ingest lock 
 def started(monkeypatch):
     """The listener's route is the subagent one, and children are recorded, not run."""
     spawned = []
-    monkeypatch.setattr(recall_start, "route", lambda harness, session_id: (
+    monkeypatch.setattr(recall_start, "route", lambda harness, session_id, env=None: (
         (recall_start.SUBAGENT, None) if harness == "claude" else (None, recall_start.CODEX)))
     monkeypatch.setattr(recall_start, "spawn_child",
                         lambda session_id, recall_id: spawned.append((session_id, recall_id)))
@@ -93,7 +93,7 @@ def test_a_session_with_no_route_logs_off_once_per_reason(started):
 
 def test_the_route_is_checked_at_every_try(started, monkeypatch):
     calls = []
-    monkeypatch.setattr(recall_start, "route", lambda harness, session_id: (
+    monkeypatch.setattr(recall_start, "route", lambda harness, session_id, env=None: (
         calls.append(1) or ((None, recall_start.NO_FORK) if len(calls) == 1
                             else (recall_start.SUBAGENT, None))))
     listener.subconscious(event())
@@ -117,8 +117,77 @@ def test_a_codex_or_other_session_has_no_route():
     assert recall_start.route("opencode", SESSION) == (None, recall_start.NO_FORK)
 
 
+@pytest.fixture
+def places(monkeypatch):
+    """Where each route can run, set per test: turns' fork, the launcher's interface
+    3, tmux slots, and the way back by comms."""
+    from moxi_memory import links
+
+    here = types.SimpleNamespace(fork=True, launcher=True, slots=True, comms=None)
+    monkeypatch.setattr(recall_start, "offers_fork", lambda session_id: here.fork)
+    monkeypatch.setattr(links, "launcher_forks", lambda: links.Link(
+        links.READY if here.launcher else links.NONE))
+    monkeypatch.setattr(recall_start, "slots_here", lambda: here.slots)
+    monkeypatch.setattr(recall_start, "comms_why", lambda session_id: here.comms)
+    return here
+
+
+SLOT_STAMP = {recall_start.SUBCONSCIOUS_ROUTE_ENV: "slot"}
+
+
 def test_a_claude_session_with_no_endpoint_has_no_route():
-    assert recall_start.route("claude", SESSION) == (None, recall_start.NO_FORK)
+    assert recall_start.offers_fork(SESSION) is False
+
+
+def test_a_claude_session_runs_the_route_its_launch_picked(places):
+    assert recall_start.route("claude", SESSION) == (recall_start.SUBAGENT, None)
+    assert recall_start.route("claude", SESSION, {}) == (recall_start.SUBAGENT, None)
+    assert recall_start.route("claude", SESSION, SLOT_STAMP) == (recall_start.SLOT, None)
+
+
+def test_a_claude_session_with_no_turns_fork_falls_back_to_the_slot_route(places):
+    places.fork = False
+    assert recall_start.route("claude", SESSION) == (recall_start.SLOT, None)
+    places.slots = False
+    assert recall_start.route("claude", SESSION) == (
+        None, f"{recall_start.NO_FORK}; the slot route: {recall_start.NO_SLOTS}")
+
+
+@pytest.mark.parametrize("missing, why", [
+    ("launcher", recall_start.NO_LAUNCHER), ("slots", recall_start.NO_SLOTS),
+    ("comms", "no comms name for this session")])
+def test_the_slot_route_says_why_it_cant_run(places, missing, why):
+    if missing == "comms":
+        places.comms = why
+    else:
+        setattr(places, missing, False)
+    assert recall_start.route("claude", SESSION, SLOT_STAMP) == (None, why)
+    assert recall_start.route("codex", SESSION, SLOT_STAMP) == (None, why)
+
+
+def test_a_codex_session_runs_only_the_slot_route_its_launch_picked(places):
+    assert recall_start.route("codex", SESSION) == (None, recall_start.CODEX)
+    assert recall_start.CODEX == "Codex: off unless the launch picks the slot route"
+    assert recall_start.route("codex", SESSION, SLOT_STAMP) == (recall_start.SLOT, None)
+    assert recall_start.route("opencode", SESSION, SLOT_STAMP) == (
+        None, recall_start.NO_FORK)
+
+
+def test_a_recalls_slot_fork_has_no_route(places):
+    stamp = {recall_start.SUBCONSCIOUS_FORK_ENV: "r-1"}
+    assert recall_start.route("claude", SESSION, stamp) == (None, recall_start.IN_FORK)
+
+
+def test_no_recall_starts_in_a_recalls_slot_fork(started):
+    stamp = {recall_start.SUBCONSCIOUS_FORK_ENV: "r-1"}
+    forked = event()
+    forked.env.update(stamp)
+    listener.subconscious(forked)
+    assert started == [] and recalls.read_lines(SESSION) == []
+    with pytest.raises(recall_start.Refused, match="a recall's fork, so it starts no "
+                                                    "recall"):
+        recall_start.ask("topic", session=(SESSION, "claude", {
+            recall_start.SUBCONSCIOUS_ENV: "on-demand", **stamp}, "/work"))
 
 
 def test_the_listener_keeps_its_last_good_settings_while_the_file_is_in_error(

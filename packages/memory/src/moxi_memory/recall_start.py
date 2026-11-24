@@ -12,14 +12,20 @@ prompt with no origin and no `delivery_by` (a launch's brief, the harness's noti
 finished fork) never counts. In automatic mode a counted prompt starts a recall; in
 on-demand mode it resets the agent's count of recalls (`reset_asked`).
 
-**The route (`route`).** Every recall runs on Claude Code's subagent route, through
-turns' `fork`. It is checked at every try, not once: a Claude Code session whose turns
-endpoint offers `fork` has it; a Codex session has no route, nor does any other session
-whose endpoint offers no `fork`. A try that finds no route writes the session's `off`
-line with the reason (`recalls.note_off`), at the first such try and again only when the
-reason changes. A route whose answers come back as a comms message (`BY_COMMS`) runs
-only while the session's recall sender can send (`comms_why`,
+**The route (`route`).** A session runs the route its launch picked
+(`SUBCONSCIOUS_ROUTE_ENV`, `subagent` when unset) where that route can run here, checked
+at every try, not once. Claude Code's subagent route (`SUBAGENT`) needs a turns endpoint
+that offers `fork`; a Claude Code session whose endpoint offers none falls back to the
+slot route. The slot route (`SLOT`) forks the session into a slot through the
+launcher's interface 3 and needs that launcher, tmux slots here and a way back by comms
+(`slot_why`). A Codex session runs only the slot route, and only where its launch picked
+it (`CODEX`); any other harness has no route. A try that finds no route writes the
+session's `off` line with the reason (`recalls.note_off`), at the first such try and
+again only when the reason changes. A route whose answers come back as a comms message
+(`BY_COMMS`) runs only while the session's recall sender can send (`comms_why`,
 `moxi_memory.recall_send`); its reason otherwise names the sender when comms knows it.
+A session stamped `SUBCONSCIOUS_FORK_ENV` is a recall's slot fork: no recall starts in
+it.
 
 **A new recall (`begin`).** Under the session's subconscious lock it sets every recall of
 the session still running `hurried`, starts the detached starter (`spawn_starter`) for
@@ -41,8 +47,8 @@ listener, each under the session's lock.
 own process id through turns' client, reads the session's mode from its stamps, reads
 memory's settings itself and passes them on, checks the route, raises the agent's
 count, and begins a recall with the topic in place of a prompt (`start`: `asked`). It
-refuses a session where the subconscious is off (with the reason) or automatic, a count
-at its cap, and a config file in error (with the error; the command keeps no last good
+refuses a session where the subconscious is off (with the reason) or automatic, a
+recall's slot fork, a count at its cap, and a config file in error (with the error; the command keeps no last good
 settings). The start line (`START_LINE`) tells an on-demand session's agent the command
 exists.
 
@@ -71,13 +77,22 @@ SUBCONSCIOUS_ROUTE_ENV = "MOXI_MEMORY_SUBCONSCIOUS_ROUTE"
 #: session as a recall's fork, so no recall starts in it, its calls are judged against
 #: that recall's record, and the launcher never parks, reserves or restores it.
 SUBCONSCIOUS_FORK_ENV = "MOXI_MEMORY_SUBCONSCIOUS_FORK"
+#: The stamps a session's subconscious is read from.
+STAMPS = (SUBCONSCIOUS_ENV, SUBCONSCIOUS_ROUTE_ENV, SUBCONSCIOUS_FORK_ENV)
 #: The routes: a fork inside the session through turns (the default).
 SUBAGENT = "subagent"
+#: The route that forks the session into a slot through the launcher.
+SLOT = "slot"
+ROUTES = (SUBAGENT, SLOT)
 #: The routes whose answers come back to the session as a comms message.
-BY_COMMS: tuple[str, ...] = ()
+BY_COMMS: tuple[str, ...] = (SLOT,)
 #: Why a session's subconscious can't run.
 NO_FORK = "no turns fork in this session"
-CODEX = "Codex: no recall route runs on Codex"
+CODEX = "Codex: off unless the launch picks the slot route"
+NO_SLOTS = "no slots here"
+NO_LAUNCHER = "launcher without interface 3"
+#: Why no recall starts in a recall's own slot fork.
+IN_FORK = "this session is a recall's fork"
 #: The values of `subconscious.trigger`.
 USER = "user"
 USER_AND_COMMS = "user-and-comms"
@@ -108,29 +123,75 @@ def counts(event, trigger: str) -> bool:
     return trigger == USER_AND_COMMS and getattr(event, "delivery_by", None) == "comms"
 
 
-def route(harness: str | None, session_id: str) -> tuple[str | None, str | None]:
-    """(the route a recall of the session runs on, None), or (None, why none can run)."""
+def is_fork(env: Mapping[str, str] | None) -> bool:
+    """Whether the session is a recall's slot fork: its launch carries
+    `SUBCONSCIOUS_FORK_ENV`."""
+    return bool((env or {}).get(SUBCONSCIOUS_FORK_ENV))
+
+
+def route(harness: str | None, session_id: str,
+          env: Mapping[str, str] | None = None) -> tuple[str | None, str | None]:
+    """(the route a recall of the session runs on, None), or (None, why none can run).
+    `env` holds the session's stamps; the route stamp in it picks the route."""
+    if is_fork(env):
+        return None, IN_FORK
+    picked = route_stamp(env)
     if harness == "codex":
-        return None, CODEX
+        if picked != SLOT:
+            return None, CODEX
+        why = slot_why(session_id)
+        return (SLOT, None) if why is None else (None, why)
     if harness != "claude":
         return None, NO_FORK
-    try:
-        import moxi_turns as client
-
-        found = client.find(session_id=session_id)
-        if found is None:
-            return None, NO_FORK
-        with found:
-            offered = found.capabilities
-    except Exception:  # noqa: BLE001 - an endpoint that can't be asked offers no fork
-        return None, NO_FORK
-    if "fork" not in offered:
-        return None, NO_FORK
+    if picked == SLOT or not offers_fork(session_id):
+        why = slot_why(session_id)
+        if why is None:
+            return SLOT, None
+        return None, why if picked == SLOT else f"{NO_FORK}; the slot route: {why}"
     if SUBAGENT in BY_COMMS:
         why = comms_why(session_id)
         if why is not None:
             return None, why
     return SUBAGENT, None
+
+
+def offers_fork(session_id: str) -> bool:
+    """Whether the session's turns endpoint offers `fork`."""
+    try:
+        import moxi_turns as client
+
+        found = client.find(session_id=session_id)
+        if found is None:
+            return False
+        with found:
+            return "fork" in found.capabilities
+    except Exception:  # noqa: BLE001 - an endpoint that can't be asked offers no fork
+        return False
+
+
+def slot_why(session_id: str) -> str | None:
+    """Why the slot route can't run for the session now, or None when it can: a
+    launcher with interface 3, tmux slots here, and a way back by comms."""
+    from . import links
+
+    if not links.launcher_forks().ready:
+        return NO_LAUNCHER
+    if not slots_here():
+        return NO_SLOTS
+    return comms_why(session_id)
+
+
+def slots_here() -> bool:
+    """Whether tmux slots run here: slots is installed and says so."""
+    from . import links
+
+    link = links.slots()
+    if not link.ready:
+        return False
+    try:
+        return bool(link.api.supported().ok)
+    except Exception:  # noqa: BLE001 - slots that can't say runs nothing here
+        return False
 
 
 def comms_why(session_id: str) -> str | None:
@@ -259,8 +320,8 @@ class Refused(Exception):
 
 def this_session():
     """The session the calling process runs in, found by its own process id through
-    turns' client: (session id, harness, the session's environment stamps, its launch
-    directory), or None when no turns endpoint serves it."""
+    turns' client: (session id, harness, the session's environment stamps (`STAMPS`),
+    its launch directory), or None when no turns endpoint serves it."""
     import moxi_turns as client
 
     found = client.find(pid=os.getpid())
@@ -268,10 +329,12 @@ def this_session():
         return None
     with found:
         try:
-            env = {k: v for k, v in found.env([SUBCONSCIOUS_ENV]).items() if v is not None}
+            env = {k: v for k, v in found.env(list(STAMPS)).items() if v is not None}
         except Exception:  # noqa: BLE001 - an endpoint that can't read it: the caller's own
-            value = os.environ.get(SUBCONSCIOUS_ENV)
-            env = {SUBCONSCIOUS_ENV: value} if value is not None else {}
+            env = {SUBCONSCIOUS_ENV: os.environ.get(SUBCONSCIOUS_ENV),
+                   SUBCONSCIOUS_ROUTE_ENV: os.environ.get(SUBCONSCIOUS_ROUTE_ENV),
+                   SUBCONSCIOUS_FORK_ENV: os.environ.get(SUBCONSCIOUS_FORK_ENV)}
+            env = {k: v for k, v in env.items() if v is not None}
         return found.session_id, found.harness, env, found.info.get("cwd")
 
 
@@ -291,6 +354,8 @@ def ask(topic: str, *, session=None, spawn=None) -> dict:
     if found is None or not recalls.is_safe(found[0]):
         raise Refused("this shell runs in no session turns serves, so no recall can start")
     session_id, harness, env, cwd = found
+    if is_fork(env):
+        raise Refused(f"{IN_FORK}, so it starts no recall: answer from what you have")
     run_mode = mode(env)
     if run_mode is None:
         raise Refused("the subconscious is off in this session")
@@ -302,7 +367,7 @@ def ask(topic: str, *, session=None, spawn=None) -> dict:
     except ConfigError as exc:
         raise Refused(f"memory's config file is in error, so no recall starts: {exc}") \
             from None
-    route_name, why = route(harness, session_id)
+    route_name, why = route(harness, session_id, env)
     if route_name is None:
         recalls.note_off(session_id, why, harness=harness)
         raise Refused(f"the subconscious is off in this session: {why}")
@@ -355,8 +420,10 @@ def reset_asked(session_id: str) -> None:
 
 
 __all__ = ["SUBCONSCIOUS_ENV", "SUBCONSCIOUS_ROUTE_ENV", "SUBCONSCIOUS_FORK_ENV",
-           "route_stamp", "AUTOMATIC", "ON_DEMAND", "MODES", "SUBAGENT", "BY_COMMS",
-           "NO_FORK", "CODEX", "USER", "USER_AND_COMMS", "SCRIPT", "ASKED", "SPAWN", "mode",
+           "STAMPS", "route_stamp", "AUTOMATIC", "ON_DEMAND", "MODES", "SUBAGENT", "SLOT",
+           "ROUTES", "BY_COMMS", "NO_FORK", "CODEX", "NO_SLOTS", "NO_LAUNCHER", "IN_FORK",
+           "is_fork", "offers_fork", "slot_why", "slots_here", "USER", "USER_AND_COMMS",
+           "SCRIPT", "ASKED", "SPAWN", "mode",
            "counts", "route", "comms_why", "subconscious_settings", "settings_keys",
            "default_settings", "new_id", "begin", "lose_spawn", "DETACH", "spawn_starter",
            "spawn_child", "STARTED", "START_LINE",

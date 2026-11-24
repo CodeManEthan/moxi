@@ -151,7 +151,7 @@ def test_the_day_sweep_removes_old_records_but_not_one_whose_line_is_kept():
 def spawned(monkeypatch):
     started = []
     monkeypatch.setattr(recall_start, "route",
-                        lambda harness, session_id: (recall_start.SUBAGENT, None))
+                        lambda harness, session_id, env=None: (recall_start.SUBAGENT, None))
     monkeypatch.setattr(recall_start, "spawn_child",
                         lambda session_id, recall_id: started.append(recall_id))
     return started
@@ -203,7 +203,7 @@ def test_on_demand_refuses_outside_a_session(spawned, monkeypatch):
 
 def test_on_demand_with_no_route_logs_off_and_says_why(monkeypatch):
     monkeypatch.setattr(recall_start, "route",
-                        lambda harness, session_id: (None, recall_start.NO_FORK))
+                        lambda harness, session_id, env=None: (None, recall_start.NO_FORK))
     with pytest.raises(recall_start.Refused, match=recall_start.NO_FORK):
         recall_start.ask("topic", session=here())
     assert recalls.read_lines(SESSION)[-1]["state"] == "off"

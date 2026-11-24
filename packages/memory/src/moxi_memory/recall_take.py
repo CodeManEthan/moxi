@@ -138,6 +138,12 @@ def _read_end(session_id: str, until: str = "ended") -> Callable[[str], object]:
     return read
 
 
+def _turns_session(route, session_id: str) -> str:
+    """The session `route` delivers its rounds to, where a round's end is read by its
+    ref: the main session, or a slot fork's own."""
+    return getattr(route, "turns_session", None) or session_id
+
+
 def _note_fork(recall, ref: str, read_start: Callable[[str], object]) -> None:
     """Write the fork's id on a line that names none, read from the round's start
     before its end is acked (turns drops the kept start with the end). A start that
@@ -228,7 +234,7 @@ def take(session_id: str, recall_id: str, *, identity: dict | None = None,
         if (line.get("past_bound") and line.get("kept") is True
                 and recall_stream.by_comms(line.get("route"))):
             try:
-                end = (read_end or _read_end(session_id))(str(ref))
+                end = (read_end or _read_end(_turns_session(route, session_id)))(str(ref))
             except Exception:  # noqa: BLE001 - no end yet: left for the next taker
                 return LEFT
             recall_stream.settle_late(recall, round_number(ref) or 1, _as_gone(end), route,
@@ -243,10 +249,11 @@ def take(session_id: str, recall_id: str, *, identity: dict | None = None,
         return SETTLED
     number = round_number(ref)
     try:
-        end = (read_end or _read_end(session_id))(str(ref))
+        end = (read_end or _read_end(_turns_session(route, session_id)))(str(ref))
     except Exception:  # noqa: BLE001 - no end yet, or turns can't be asked: left for later
         return LEFT
-    _note_fork(recall, str(ref), read_start or _read_end(session_id, "started"))
+    _note_fork(recall, str(ref),
+               read_start or _read_end(_turns_session(route, session_id), "started"))
     recall_stream.settle(recall, number or 1, _as_gone(end), route)
     if recall.line.get("state") == recalls.SENDING:
         recall_stream.deliver(recall, send=send, sleep=sleep)

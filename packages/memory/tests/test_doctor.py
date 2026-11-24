@@ -254,7 +254,8 @@ def test_the_announcement_names_every_part():
     assert module.SETUP == "moxi_memory.setup:setup"
     assert module.TEARDOWN == "moxi_memory.setup:teardown"
     assert module.DOCTOR == "moxi_memory.doctor:rows"
-    assert set(module.OPTIONAL) == {"comms", "launcher", "connector", "secrets", "notes"}
+    assert set(module.OPTIONAL) == {"comms", "launcher", "connector", "secrets", "notes",
+                                    "slots"}
     assert module.TIMERS["ingest"] == {
         "command": "moxi-memory-ingest", "args": ["--walk"], "every": "1h",
         "switch": "ingest.timer.enabled",
@@ -469,17 +470,29 @@ class FakeSession:
 def test_live_sessions_are_checked_as_a_recalls_own_try_checks_them(monkeypatch):
     import moxi_turns as client
 
+    from moxi_memory import recall_start
+
     on = {"MOXI_MEMORY_SUBCONSCIOUS": "automatic"}
+    slot = {**on, "MOXI_MEMORY_SUBCONSCIOUS_ROUTE": "slot"}
+    monkeypatch.setattr(recall_start, "offers_fork", lambda sid: sid != "c-none")
+    monkeypatch.setattr(recall_start, "slot_why", lambda sid: (
+        None if sid == "x-slot" else recall_start.NO_SLOTS))
     monkeypatch.setattr(client, "sessions", lambda: [
         FakeSession("c-fork", "claude", on),
         FakeSession("c-none", "claude", on, capabilities=()),
+        FakeSession("c-slot", "claude", slot),
         FakeSession("x-codex", "codex", {"MOXI_MEMORY_SUBCONSCIOUS": "on-demand"}),
+        FakeSession("x-slot", "codex", slot),
+        FakeSession("c-forked", "claude", {**on, "MOXI_MEMORY_SUBCONSCIOUS_FORK": "r-1"}),
         FakeSession("c-off", "claude", {}),
         FakeSession("c-bad", "claude", {"MOXI_MEMORY_SUBCONSCIOUS": "sometimes"})])
     assert LIVE_SUBCONSCIOUS() == [
         ("c-fork", "automatic", None),
-        ("c-none", "automatic", "no turns fork in this session"),
-        ("x-codex", "on-demand", "Codex: no recall route runs on Codex")]
+        ("c-none", "automatic", "no turns fork in this session; the slot route: no slots "
+                                "here"),
+        ("c-slot", "automatic", "no slots here"),
+        ("x-codex", "on-demand", "Codex: off unless the launch picks the slot route"),
+        ("x-slot", "automatic", None)]
 
 
 def test_a_route_that_answers_by_comms_is_off_while_its_recall_sender_cant_send(
@@ -493,6 +506,7 @@ def test_a_route_that_answers_by_comms_is_off_while_its_recall_sender_cant_send(
     whys = {"c-free": None, "c-held": "recall sender in conflict: held-subconscious",
             "c-nameless": "no comms name for this session"}
     monkeypatch.setattr(recall_start, "comms_why", lambda sid: whys[sid])
+    monkeypatch.setattr(recall_start, "offers_fork", lambda sid: True)
     monkeypatch.setattr(client, "sessions", lambda: [
         FakeSession(sid, "claude", on) for sid in whys])
     live = LIVE_SUBCONSCIOUS()
