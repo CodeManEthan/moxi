@@ -100,7 +100,7 @@ def test_a_send_refused_before_the_token_leaves_no_record(digest):  # noqa: F811
 # --------------------------------------------------------------------------- scoped_sender
 
 @pytest.mark.parametrize("name,parent", [(FORMED, PARENT), ("lead-digest", "lead"),
-                                         ("agent-3-digest@acme", "agent-3@acme")])
+                                         ("agent-3-digest", "agent-3")])
 def test_an_active_scoped_sender_reads_back_with_its_module_and_parent(digest, name,
                                                                        parent):  # noqa: F811
     assert api.scoped_sender(name) == api.ScopedSender(
@@ -205,6 +205,38 @@ def test_scoped_state_raises_for_a_parent_that_is_no_name_or_an_unnamed_word(rig
         api.scoped_state("pager", PARENT)
     assert api.scoped_state("pager", PARENT, word="nightly").qualified == \
         "main-nightly@proj-a"
+
+
+# --------------------------------------------------------------------------- the parent's identity
+
+def test_an_ephemeral_parent_spelled_with_a_scope_reads_back_and_sends_as_one(
+        digest):  # noqa: F811
+    """`agent-N@proj-a` is the global ephemeral `agent-N`, as comms resolves every tag:
+    the formed name, its read-back and the send agree, and `scoped_state` reads
+    `can_send` only for a parent the send then reaches."""
+    shim = digest.shim()
+    ephemeral = shim.identity
+    spelled = f"{ephemeral}@proj-a"
+    got = api.scoped_state("pager", spelled)
+    assert (got.can_send, got.parent, got.qualified) == \
+        (True, ephemeral, f"{ephemeral}-digest")
+    back = api.scoped_sender(got.qualified)
+    assert (back.parent, back.qualified) == (ephemeral, got.qualified)
+    assert api.scoped_sender(f"{ephemeral}-digest@proj-a") is None
+    result = api.send_scoped("pager", spelled, spelled, "x")
+    assert result.outcome == "sent", result.lines()
+    assert digest.record.get_message(result.message_id).author_id == got.qualified
+
+
+def test_a_scoped_ordinary_parents_name_read_back_and_send_agree(digest):  # noqa: F811
+    digest.shim(name="main", scope="proj-a")
+    got = api.scoped_state("pager", PARENT)
+    assert (got.can_send, got.parent, got.qualified) == (True, PARENT, FORMED)
+    back = api.scoped_sender(got.qualified)
+    assert (back.parent, back.qualified, back.module) == (PARENT, FORMED, "pager")
+    result = api.send_scoped("pager", PARENT, PARENT, "x")
+    assert result.outcome == "sent", result.lines()
+    assert digest.record.get_message(result.message_id).author_id == got.qualified
 
 
 def test_the_reasons_are_pinned():

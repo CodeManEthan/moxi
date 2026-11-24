@@ -666,7 +666,10 @@ A scoped sender is a send-only name that belongs to one parent comms name and on
 comms forms it from the parent and a word the module declares: for the parent
 `builder@acme` and the word `digest`, it is `builder-digest@acme`, the parent's name, a
 dash and the word, in the parent's scope (`fleet-lead-digest` for the global
-`fleet-lead`). A module uses one to send a session something of its own, under a name
+`fleet-lead`). The parent is the identity comms resolves the name to, as for any
+recipient: an ephemeral `agent-N` is the global one however it is spelled, so the
+scoped sender of `agent-3@acme` is `agent-3-digest`, and `agent-3-digest@acme` is no
+scoped sender's name. A module uses one to send a session something of its own, under a name
 the session can tell apart from any agent's, without a name per session to reserve.
 
 A module declares a word by an entry point in comms' group `moxi.comms.scoped_senders`,

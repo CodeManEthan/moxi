@@ -59,7 +59,7 @@ from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
 
 from .bindings import stamp
-from .scoping import GLOBAL, NAME_RE, qualify, split_tag
+from .scoping import GLOBAL, NAME_RE, is_auto_name, qualify, split_tag
 
 log = logging.getLogger("comms.scoped")
 
@@ -107,7 +107,10 @@ def form(parent: str, word: str) -> str:
 
 
 def _parent(parent) -> tuple[str, str]:
-    """(name, scope) of `parent`, checked."""
+    """(name, scope) of the identity `parent` names, checked. The identity is the one
+    `scoping.identity_of` gives, so the formed name, its read-back and the send agree on
+    the parent: an ephemeral `agent-N` is the global one, whatever scope it is spelled
+    with."""
     if not isinstance(parent, str) or not parent:
         raise ValueError(f"{parent!r} is not a comms name")
     name, scope = split_tag(parent)
@@ -116,19 +119,24 @@ def _parent(parent) -> tuple[str, str]:
     scope = GLOBAL if scope is None else scope
     if not NAME_RE.match(name) or (scope != GLOBAL and not NAME_RE.match(scope)):
         raise ValueError(f"{parent!r} is not a comms name")
+    if is_auto_name(name):
+        scope = GLOBAL
     return name, scope
 
 
 def parent_of(parent: str) -> str:
-    """`parent` qualified, as comms writes it (`builder@acme`, `fleet-lead`). Raises
-    `ValueError` for what is not a comms name."""
+    """The identity `parent` names, qualified as comms writes it (`builder@acme`,
+    `fleet-lead`, and `agent-3` for `agent-3@acme`): `scoping.identity_of`'s rule.
+    Raises `ValueError` for what is not a comms name."""
     name, scope = _parent(parent)
     return qualify(name, scope)
 
 
 def split(qualified: str) -> tuple[str, str] | None:
     """(parent, word) for a name of the scoped form, read from its shape alone: the part
-    of its name after the last dash is the word. None for a name that has no such part."""
+    of its name after the last dash is the word. None for a name that has no such part,
+    or that is not the name comms forms for that parent and word (`agent-3-digest@acme`:
+    the parent `agent-3` is global, so its name is `agent-3-digest`)."""
     if not isinstance(qualified, str) or not qualified:
         return None
     name, scope = split_tag(qualified)
@@ -137,6 +145,8 @@ def split(qualified: str) -> tuple[str, str] | None:
     if not dash or not head or not WORD_RE.match(word) or not NAME_RE.match(head):
         return None
     if scope != GLOBAL and not NAME_RE.match(scope):
+        return None
+    if is_auto_name(head) and scope != GLOBAL:
         return None
     return qualify(head, scope), word
 

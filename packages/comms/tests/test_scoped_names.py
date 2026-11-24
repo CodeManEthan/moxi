@@ -61,6 +61,27 @@ def test_comms_forms_the_name_in_the_parents_scope(parent, want):
     assert scoped.split(want) == (parent, "digest")
 
 
+@pytest.mark.parametrize("spelled", ["agent-3@proj-a", "agent-3@global", "agent-3"])
+def test_an_ephemeral_parent_is_the_global_one_whatever_scope_it_is_spelled_with(spelled):
+    """comms' one identity rule: `agent-N`, however spelled, is the global ephemeral, so
+    its scoped sender is the global `agent-3-digest`, and the parent it reads back is
+    the identity a send to `agent-3@proj-a` resolves to."""
+    assert scoped.parent_of(spelled) == "agent-3"
+    assert scoped.form(spelled, "digest") == "agent-3-digest"
+    assert scoped.split("agent-3-digest") == ("agent-3", "digest")
+
+
+def test_a_scoped_spelling_of_an_ephemeral_parents_name_is_not_of_the_form():
+    assert scoped.split("agent-3-digest@proj-a") is None
+    assert scoped.split("agent-3x-digest@proj-a") == ("agent-3x@proj-a", "digest")
+
+
+def test_a_scoped_ordinary_parent_keeps_its_scope():
+    assert scoped.parent_of("builder@acme") == "builder@acme"
+    assert scoped.parent_of("builder@global") == "builder"
+    assert scoped.form("builder@global", "digest") == "builder-digest"
+
+
 @pytest.mark.parametrize("parent", ["", "a b", "x@", "x@a b", None])
 def test_a_parent_that_is_no_name_is_refused(parent):
     with pytest.raises(ValueError):
