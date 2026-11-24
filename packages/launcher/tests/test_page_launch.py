@@ -24,6 +24,7 @@ import launcher_fake_turns as fake_turns
 from launcher_fake_harness import Harness
 from moxi_launcher import (api, catalog, cli, first, job, page, pagehandlers, presets, slots,
                            store, targets)
+from moxi_dev.testing import toml_string
 
 BRIEF = "Read the design and start the build."
 POSIX = pytest.mark.skipif(sys.platform == "win32",
@@ -172,7 +173,7 @@ FIXED = uuid.UUID("00000000-0000-4000-8000-000000000001")
 
 RULE_FILE = """\
 [defaults]
-cwd = "{work}"
+cwd = {work}
 model = "sonnet"
 effort = "low"
 permission_mode = "acceptEdits"
@@ -180,7 +181,7 @@ permission_mode = "acceptEdits"
 [seat.planner]
 harness = "claude"
 effort = "high"
-add_dir = ["{work}"]
+add_dir = [{work}]
 brief = "the planner's brief"
 
 [seat.scratchy]
@@ -193,7 +194,7 @@ search = true
 profile = "fast"
 
 [project.there]
-cwd = "{there}"
+cwd = {there}
 instructions = "the project's instructions"
 extra_flags = ["--verbose"]
 """
@@ -203,7 +204,7 @@ extra_flags = ["--verbose"]
 def rule_file(work) -> None:
     there = work / "there"
     there.mkdir()
-    write_presets(RULE_FILE.format(work=work, there=there))
+    write_presets(RULE_FILE.format(work=toml_string(work), there=toml_string(there)))
 
 
 @pytest.fixture
@@ -357,7 +358,7 @@ def test_a_value_sent_equal_to_its_layer_keeps_the_layers_source(rule_file):
 @POSIX
 def test_a_defaults_row_the_mode_does_not_take_stays_not_applied(work, harness):
     write_presets(f'[defaults]\napproval = "never"\n\n[seat.coder]\nharness = "codex"\n'
-                  f'cwd = "{work}"\ntarget = "headless"\nbrief = "{BRIEF}"\n')
+                  f'cwd = {toml_string(work)}\ntarget = "headless"\nbrief = "{BRIEF}"\n')
     body = filled(CODER)
     assert body["values"]["approval"] == "never"
     said = previewed(body)
@@ -367,7 +368,7 @@ def test_a_defaults_row_the_mode_does_not_take_stays_not_applied(work, harness):
 
 def test_limit_at_at_its_shipped_default_is_not_refused_for_its_companion(work, monkeypatch):
     monkeypatch.setattr(slots, "links", lambda name: name in ("turns", "usage"))
-    write_presets(f'[seat.lead]\ncwd = "{work}"\n')
+    write_presets(f'[seat.lead]\ncwd = {toml_string(work)}\n')
     body = filled({"seat": "lead"})
     assert (body["values"].get("limit_at", ""), body["values"]["recycle_at_limit"]) == (
         "", "off")
@@ -389,7 +390,7 @@ def test_the_pages_preview_refuses_a_scratch_set_to_recycle_itself(work, monkeyp
 def test_a_word_enum_left_out_with_its_companion_off_launches_with_no_recycling(
         work, monkeypatch):
     monkeypatch.setattr(slots, "links", lambda name: name in ("turns", "usage"))
-    write_presets(f'[seat.lead]\ncwd = "{work}"\nrecycle_at_limit = "compact"\n'
+    write_presets(f'[seat.lead]\ncwd = {toml_string(work)}\nrecycle_at_limit = "compact"\n'
                   'limit_at = "2x"\n')
     body = edited(filled({"seat": "lead"}), {"recycle_at_limit": "off"}, ["limit_at"])
     request, _ = pagehandlers.launch_request(body, "r1")
@@ -406,7 +407,7 @@ def test_limit_at_the_preset_sets_to_its_shipped_word_can_still_be_left_out(
     # removes that choice, as --leave-out does on the command line.
     monkeypatch.setenv("PATH", str(tmp_path))
     monkeypatch.setattr(slots, "links", lambda name: name in ("turns", "usage"))
-    write_presets(f'[seat.lead]\ncwd = "{work}"\nrecycle_at_limit = "compact"\n'
+    write_presets(f'[seat.lead]\ncwd = {toml_string(work)}\nrecycle_at_limit = "compact"\n'
                   'limit_at = "1x"\n')
     body = edited(filled({"seat": "lead"}), {"recycle_at_limit": "off"}, ["limit_at"])
     said = previewed(body)
@@ -424,7 +425,7 @@ def test_limit_at_the_preset_sets_to_its_shipped_word_can_still_be_left_out(
 @POSIX
 def test_a_codex_seats_approval_at_its_shipped_word_left_out_is_not_refused(
         work, harness, fixed_ids):
-    write_presets(f'[seat.coder]\nharness = "codex"\ncwd = "{work}"\ntarget = "headless"\n'
+    write_presets(f'[seat.coder]\nharness = "codex"\ncwd = {toml_string(work)}\ntarget = "headless"\n'
                   f'brief = "{BRIEF}"\napproval = "on-request"\n')
     assert codes(previewed(filled(CODER))) == ["not-taken"]
     said = previewed(edited(filled(CODER), {}, ["approval"]))
@@ -438,7 +439,7 @@ def test_a_codex_seats_approval_at_its_shipped_word_left_out_is_not_refused(
 
 @POSIX
 def test_a_codex_seats_approval_left_out_on_a_mode_without_it_is_not_refused(work, harness):
-    write_presets(f'[seat.coder]\nharness = "codex"\ncwd = "{work}"\ntarget = "headless"\n'
+    write_presets(f'[seat.coder]\nharness = "codex"\ncwd = {toml_string(work)}\ntarget = "headless"\n'
                   f'brief = "{BRIEF}"\napproval = "never"\n')
     # approval "never" is off the default posture, so the seat needs the allowance.
     kept = previewed({**filled(CODER), "off_posture": True})
@@ -449,7 +450,7 @@ def test_a_codex_seats_approval_left_out_on_a_mode_without_it_is_not_refused(wor
 
 @POSIX
 def test_a_codex_seats_approval_left_out_launches_under_claude(work, harness):
-    write_presets(f'[seat.coder]\nharness = "codex"\ncwd = "{work}"\ntarget = "headless"\n'
+    write_presets(f'[seat.coder]\nharness = "codex"\ncwd = {toml_string(work)}\ntarget = "headless"\n'
                   f'brief = "{BRIEF}"\napproval = "never"\n')
     said = previewed({"seat": "coder", "values": {"harness": "claude"},
                       "leave_out": ["approval"]})
@@ -489,7 +490,7 @@ def test_a_row_in_both_lists_harness_or_no_row_at_all_is_refused_bad_value(rule_
 
 
 def test_an_empty_list_or_a_switch_set_off_reads_as_a_leave_out(work):
-    write_presets(f'[seat.lead]\ncwd = "{work}"\nadd_dir = ["{work}"]\n'
+    write_presets(f'[seat.lead]\ncwd = {toml_string(work)}\nadd_dir = [{toml_string(work)}]\n'
                   'remote_control = true\nextra_flags = ["--verbose"]\n')
     request, command = pagehandlers.launch_request(
         {"seat": "lead", "values": {"add_dir": [], "remote_control": "false",
@@ -505,7 +506,7 @@ def test_an_empty_list_or_a_switch_set_off_reads_as_a_leave_out(work):
 def test_a_seat_with_scratch_unticked_launches_in_the_typed_cwd(work, tmp_path):
     elsewhere = tmp_path / "elsewhere"
     elsewhere.mkdir()
-    write_presets(f'[defaults]\ncwd = "{work}"\n\n[seat.scratchy]\nscratch = true\n')
+    write_presets(f'[defaults]\ncwd = {toml_string(work)}\n\n[seat.scratchy]\nscratch = true\n')
     body = edited(filled(SCRATCHY), {"cwd": str(elsewhere)}, ["scratch"])
     request, _ = pagehandlers.launch_request(body, "r1")
     assert dict(request.typed) == {"cwd": str(elsewhere)}
@@ -515,7 +516,7 @@ def test_a_seat_with_scratch_unticked_launches_in_the_typed_cwd(work, tmp_path):
 
 
 def test_an_unchanged_form_sends_no_left_out_row(work):
-    write_presets(f'[defaults]\ncwd = "{work}"\n\n[seat.home]\nproject = "moxi"\n')
+    write_presets(f'[defaults]\ncwd = {toml_string(work)}\n\n[seat.home]\nproject = "moxi"\n')
     body = filled({"seat": "home"})
     assert "cwd" in body["leave_out"] and body["values"]["project"] == "moxi"
     request, command = pagehandlers.launch_request(body, "r1")
@@ -538,9 +539,9 @@ def test_an_unchanged_form_types_nothing_and_leaves_nothing_out_over_every_prese
     monkeypatch.setattr(slots, "links", lambda name: name in ("turns", "usage"))
     there = work / "there"
     there.mkdir()
-    write_presets(RULE_FILE.format(work=work, there=there) + f"""
+    write_presets(RULE_FILE.format(work=toml_string(work), there=toml_string(there)) + f"""
 [seat.lead]
-cwd = "{work}"
+cwd = {toml_string(work)}
 recycle_at_limit = "compact"
 limit_at = "1x"
 
@@ -638,7 +639,7 @@ def test_every_row_a_layer_sets_is_kept_as_filled_and_left_out_when_emptied(
 def test_the_policy_opt_out_round_trips_through_the_form(work, monkeypatch):
     # Its default is true, so the panel sends an unticked box as false, never a leave-out.
     monkeypatch.setattr(slots, "links", _every_module_but_projects)
-    write_presets(f'[defaults]\ncwd = "{work}"\n[seat.s]\nidentity = "s"\n'
+    write_presets(f'[defaults]\ncwd = {toml_string(work)}\n[seat.s]\nidentity = "s"\n'
                   'takes_policy_directors = false\n[seat.t]\nidentity = "t"\n')
     body = filled({"seat": "s"})
     assert body["values"]["takes_policy_directors"] == "false"
@@ -682,7 +683,7 @@ def test_a_typed_cwd_with_the_presets_project_left_out_launches_in_cwd(tmp_path)
 
 
 def test_a_typed_brief_with_the_presets_brief_file_carried_is_refused(work):
-    write_presets(f'[seat.filed]\ncwd = "{work}"\nbrief_file = "/b.md"\n')
+    write_presets(f'[seat.filed]\ncwd = {toml_string(work)}\nbrief_file = "/b.md"\n')
     body = edited(filled({"seat": "filed"}), {"brief": BRIEF}, [])
     with pytest.raises(catalog.BadValue) as refused:
         job.placed(pagehandlers.launch_request(body, "r1")[0])
@@ -695,7 +696,7 @@ def test_a_typed_brief_with_the_presets_brief_file_carried_is_refused(work):
 def test_a_kept_withheld_brief_with_a_typed_brief_file_takes_the_file(work):
     """A kept withheld brief is in neither list, so the typed file replaces the preset's
     brief as `--brief-file` does on the command line; unticked, it is left out."""
-    write_presets(f'[seat.planner]\ncwd = "{work}"\nbrief = "the planner\'s brief"\n')
+    write_presets(f'[seat.planner]\ncwd = {toml_string(work)}\nbrief = "the planner\'s brief"\n')
     body = filled({"seat": "planner"})
     assert "brief" not in body["values"] and "brief" not in body["leave_out"]
     typed = edited(body, {"brief_file": "/b.md"}, [])
@@ -712,11 +713,11 @@ def test_a_kept_withheld_brief_with_a_typed_brief_file_takes_the_file(work):
 # --- the comparison at launch, and nothing written to the presets file ---
 
 def test_the_comparison_runs_again_at_launch(work):
-    write_presets(f'[seat.lead]\ncwd = "{work}"\nmodel = "opus"\n')
+    write_presets(f'[seat.lead]\ncwd = {toml_string(work)}\nmodel = "opus"\n')
     body = filled({"seat": "lead"})
     request, _ = pagehandlers.launch_request(body, "r1")
     assert "model" not in request.typed
-    write_presets(f'[seat.lead]\ncwd = "{work}"\nmodel = "sonnet"\n')
+    write_presets(f'[seat.lead]\ncwd = {toml_string(work)}\nmodel = "sonnet"\n')
     request, _ = pagehandlers.launch_request(body, "r1")
     assert request.typed["model"] == "opus"
 
@@ -774,7 +775,7 @@ def test_a_preview_shows_the_launch_and_issues_a_ticket(work, harness):
 
 
 def test_a_value_the_page_sends_overrides_the_preset_even_the_shipped_default(work, harness):
-    write_presets(f'[project.here]\ncwd = "{work}"\nmodel = "opus"\ntarget = "headless"\n'
+    write_presets(f'[project.here]\ncwd = {toml_string(work)}\nmodel = "opus"\ntarget = "headless"\n'
                   f'brief = "{BRIEF}"\n')
     shown = previewed({"project_preset": "here"})
     assert shown["refused"] == [] and "opus" in shown["argv"]
@@ -791,7 +792,7 @@ def test_a_launch_that_names_no_place_is_refused_no_cwd(harness):
 def test_a_scratch_or_a_project_preset_is_a_place(work, harness):
     assert previewed({"values": {"target": "headless", "brief": BRIEF,
                                  "scratch": "true"}})["refused"] == []
-    write_presets(f'[project.here]\ncwd = "{work}"\n')
+    write_presets(f'[project.here]\ncwd = {toml_string(work)}\n')
     said = previewed({"project_preset": "here",
                       "values": {"target": "headless", "brief": BRIEF}})
     assert said["refused"] == []
@@ -1076,7 +1077,7 @@ def test_the_job_reads_the_rows_a_request_file_leaves_out():
 
 @POSIX
 def test_the_job_launches_without_the_rows_its_request_leaves_out(work, harness):
-    write_presets(f'[defaults]\ncwd = "{work}"\nmodel = "opus"\n')
+    write_presets(f'[defaults]\ncwd = {toml_string(work)}\nmodel = "opus"\n')
     request_file(typed={"target": "headless", "brief": BRIEF}, left_out=["model"])
     assert job.main(["launch", "r1"]) == 0
     assert row("r1").state == "started" and row("r1").values["model"] == ""
@@ -1084,7 +1085,7 @@ def test_the_job_launches_without_the_rows_its_request_leaves_out(work, harness)
 
 
 def test_a_request_leaving_out_the_only_place_is_refused_no_cwd(work, harness):
-    write_presets(f'[defaults]\ncwd = "{work}"\n')
+    write_presets(f'[defaults]\ncwd = {toml_string(work)}\n')
     path = request_file(typed={"target": "headless", "brief": BRIEF}, left_out=["cwd"])
     assert job.run_request("r1") == "refused"
     assert requested("r1")["refused"]["code"] == "no-cwd"

@@ -14,7 +14,7 @@ from types import SimpleNamespace
 import pytest
 from moxi import modules
 from moxi.paths import Layout
-from moxi_dev.testing import wait_for
+from moxi_dev.testing import toml_string, wait_for
 
 import launcher_fake_turns as fake_turns
 from launcher_fake_harness import Harness, run_child
@@ -442,9 +442,9 @@ permission_mode = "acceptEdits"
 
 [seat.lead]
 harness = "claude"
-cwd = "{tmp_path}"
+cwd = {toml_string(tmp_path)}
 model = "opus"
-add_dir = ["{tmp_path}"]
+add_dir = [{toml_string(tmp_path)}]
 """)
     request = presets.Request(seat="lead", typed={"effort": "high"})
     request = SimpleNamespace(**vars(request), request_id="r1", session_id=SID, actor="ann")

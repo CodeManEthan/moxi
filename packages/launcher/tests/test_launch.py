@@ -17,7 +17,7 @@ import pytest
 from moxi import exit as exits
 from moxi import modules, proc, terminal
 from moxi.config import ConfigError
-from moxi_dev.testing import wait_for
+from moxi_dev.testing import toml_string, wait_for
 
 import launcher_fake_turns as fake_turns
 from launcher_fake_harness import Harness, run_child
@@ -933,7 +933,7 @@ def test_a_go_launch_with_no_brief_is_refused_before_anything_is_written(harness
 
 
 def test_a_notes_dir_from_the_defaults_is_left_out_of_a_scratch_launch(harness, tmp_path):
-    write_presets(f'[defaults]\nnotes_dir = "{tmp_path / "notes"}"\n')
+    write_presets(f'[defaults]\nnotes_dir = {toml_string(tmp_path / "notes")}\n')
     req = LaunchRequest(typed={"harness": "codex", "scratch": True, "target": "headless",
                                "brief": BRIEF}, cwd=str(tmp_path), request_id="r9")
     assert api.preview(req).values["notes_dir"] == ""

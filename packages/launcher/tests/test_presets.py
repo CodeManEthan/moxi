@@ -16,6 +16,7 @@ from moxi.config import ConfigError
 from moxi_launcher import catalog, presets
 from moxi_launcher.catalog import NeedsModule
 from moxi_launcher.presets import Request
+from moxi_dev.testing import toml_string
 
 
 def write(text: str, file: Path | None = None) -> Path:
@@ -349,7 +350,7 @@ def test_a_preset_key_of_another_harness_refuses_the_launch():
 
 
 def test_the_latest_layer_naming_a_place_wins_whole(tmp_path):
-    text = f'[defaults]\nscratch = true\n[seat.s]\ncwd = "{tmp_path}"\n'
+    text = f'[defaults]\nscratch = true\n[seat.s]\ncwd = {toml_string(tmp_path)}\n'
     got = resolve(text)
     assert got.scratch and got.cwd is None and got.values["cwd"] == ""
     got = resolve(text, seat="s")
@@ -1022,8 +1023,8 @@ def test_a_good_file_checks_clean(tmp_path):
     instructions.write_text("Plan the work.\n", encoding="utf-8")
     text = (f'[defaults]\npermission_mode = "bypassPermissions"\nsandbox = "read-only"\n'
             f'[seat.planner]\nharness = "claude"\nmodel = "opus"\n'
-            f'instructions_file = "{instructions}"\nposture = "operator"\ntarget = "slot"\n'
-            f'[project.moxi]\ncwd = "{tmp_path}"\nharness = "codex"\n'
+            f'instructions_file = {toml_string(instructions)}\nposture = "operator"\ntarget = "slot"\n'
+            f'[project.moxi]\ncwd = {toml_string(tmp_path)}\nharness = "codex"\n'
             f'sandbox = "workspace-write"\n')
     assert problems(text, available=only("slots")) == []
 
@@ -1127,7 +1128,7 @@ def test_check_an_agent_role_among_the_harnesss_role_files(claude_home, tmp_path
     (project / ".claude" / "agents").mkdir(parents=True)
     (project / ".claude" / "agents" / "local.md").write_text("x", encoding="utf-8")
     text = ('[seat.a]\nagent = "reviewer"\n[seat.b]\nagent = "code-reviewer"\n'
-            f'[seat.c]\nagent = "local"\ncwd = "{project}"\n'
+            f'[seat.c]\nagent = "local"\ncwd = {toml_string(project)}\n'
             '[seat.d]\nagent = "local"\n[seat.e]\nagent = "nobody"\n')
     found = errors(text, env=claude_home)
     assert [(p.where, p.code) for p in found] == [("seat.d", "no-role"),
@@ -1155,8 +1156,8 @@ def test_the_codex_start_ceiling_is_the_launchers_half_of_turns_share():
 def test_check_warns_when_a_codex_seat_passes_the_start_ceiling(tmp_path):
     long = tmp_path / "long.md"
     long.write_text("x" * presets.CODEX_START_CEILING, encoding="utf-8")
-    text = (f'[seat.c]\nharness = "codex"\ninstructions_file = "{long}"\n'
-            f'[seat.claude]\ninstructions_file = "{long}"\n'
+    text = (f'[seat.c]\nharness = "codex"\ninstructions_file = {toml_string(long)}\n'
+            f'[seat.claude]\ninstructions_file = {toml_string(long)}\n'
             '[seat.short]\nharness = "codex"\ninstructions = "Be brief."\n')
     found = problems(text)
     assert [(p.where, p.code, p.level) for p in found] == [("seat.c", "too-long",

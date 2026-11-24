@@ -24,6 +24,7 @@ from launcher_fake_harness import Harness
 from moxi_launcher import (api, catalog, first, job, page, pagehandlers, presets, slots, store,
                            targets)
 from moxi_launcher.api import ReplayRequest
+from moxi_dev.testing import toml_string
 
 BRIEF = "Read the design and start the build."
 #: The first turn the seat `scout` gives.
@@ -130,13 +131,13 @@ brief = "{SCOUT_BRIEF}"
 
 [seat.pilot]
 harness = "claude"
-brief_file = "{brief_file}"
+brief_file = {toml_string(brief_file)}
 
 [project.proj-a]
 project = "proj-a"
 model = "opus"
 effort = "medium"
-add_dir = ["{added}"]
+add_dir = [{toml_string(added)}]
 """)
     return SimpleNamespace(root=roots["proj-a"], other=roots["proj-b"], work=work,
                            added=added, brief_file=brief_file, elsewhere=tmp_path,
