@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- On Windows comms reads cards again. The read opened a card with `O_NOFOLLOW`, which
+  Windows lacks; there it now refuses a card that is a link or another reparse point by
+  its own `lstat`, and reads only the file that `lstat` saw.
 - On Windows the send-only verbs (`send-only add --take`, `renew`, `remove`), a send
   under a send-only name and the connector's sign-in code mint work from your own
   terminal. Windows never gives an orphan a new parent, so comms' strict walk up a

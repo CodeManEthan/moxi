@@ -169,6 +169,11 @@ def answer(arg: str, env) -> Answer:
 
 # --------------------------------------------------------------------------- reading
 
+#: The open's flags where the system has them; Windows has neither.
+_NOFOLLOW = getattr(os, "O_NOFOLLOW", 0)
+_NONBLOCK = getattr(os, "O_NONBLOCK", 0)
+
+
 class NotACard(Exception):
     """The path is there and it is not a regular file comms will read."""
 
@@ -193,11 +198,22 @@ def _read(path: Path) -> tuple[bytes, bool]:
     the read. Everything irregular joins the existing unreadable-card arm, which already
     says whose card it is and guesses nothing.
     """
-    fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+    seen = None
+    if not _NOFOLLOW:
+        # Windows has no `O_NOFOLLOW` (and no FIFO): there a link, or any other reparse
+        # point, is refused by its own `lstat`, and the file opened must be the one read.
+        seen = os.lstat(path)
+        if (stat.S_ISLNK(seen.st_mode)
+                or getattr(seen, "st_file_attributes", 0) & stat.FILE_ATTRIBUTE_REPARSE_POINT):
+            raise OSError(errno.ELOOP, "a symbolic link", str(path))
+    fd = os.open(path, os.O_RDONLY | _NOFOLLOW | _NONBLOCK | getattr(os, "O_BINARY", 0))
     try:
-        if not stat.S_ISREG(os.fstat(fd).st_mode):
+        held = os.fstat(fd)
+        if not stat.S_ISREG(held.st_mode):
             raise NotACard("it is not a regular file, and comms reads only regular "
                            "files here")
+        if seen is not None and (held.st_dev, held.st_ino) != (seen.st_dev, seen.st_ino):
+            raise NotACard("it was replaced while comms opened it")
         chunks, size = [], 0
         while size <= CARD_READ_LIMIT:
             chunk = os.read(fd, CARD_READ_LIMIT + 1 - size)

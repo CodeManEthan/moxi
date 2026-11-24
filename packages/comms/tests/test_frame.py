@@ -627,6 +627,10 @@ def local_tz(monkeypatch):
     fixture restores the library."""
     import time
 
+    if not hasattr(time, "tzset"):
+        pytest.skip("Windows: time.tzset is POSIX-only, so a test can't move the local "
+                    "zone; the age is the same arithmetic on every system")
+
     def _set(name: str):
         monkeypatch.setenv("TZ", name)
         time.tzset()
