@@ -42,7 +42,7 @@ from moxi_launcher import presets
 projects_store = pytest.importorskip("moxi_projects.store", reason="projects is not installed")
 WAIT_S = pytest.importorskip("moxi_ui.testing", reason="ui is not installed").WAIT_S
 
-pytestmark = [pytest.mark.browser, pytest.mark.timeout(180),
+pytestmark = [pytest.mark.browser, pytest.mark.timeout(180, method="thread"),
               pytest.mark.skipif(not sys.platform.startswith("linux"),
                                  reason="the Projects page is checked in a browser on Linux; the "
                                         "Windows and macOS runs are owed")]
