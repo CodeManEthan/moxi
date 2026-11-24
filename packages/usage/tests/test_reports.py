@@ -286,6 +286,8 @@ def test_a_day_after_a_daylight_saving_change_is_the_zones_own_day(conn):
     assert [r["day"] for r in report.rows] == ["2026-02-28", "2026-03-09"]
 
 
+@pytest.mark.skipif(not hasattr(time, "tzset"),
+                    reason="Windows has no time.tzset to move the local zone")
 def test_no_tz_is_local_time(conn):
     before = os.environ.get("TZ")
     os.environ["TZ"] = "Asia/Tokyo"

@@ -39,7 +39,8 @@ def test_the_index_is_state_usage_index_db_private_and_wal():
     try:
         path = Layout("usage").state_dir() / "index.db"
         assert store.index_path() == path and path.exists()
-        assert stat.S_IMODE(os.stat(path).st_mode) == 0o600
+        if os.name == "posix":  # Windows keeps no mode bits
+            assert stat.S_IMODE(os.stat(path).st_mode) == 0o600
         assert conn.execute("PRAGMA journal_mode").fetchone()[0] == "wal"
         assert conn.execute("PRAGMA foreign_keys").fetchone()[0] == 1
         assert store.lock_path() == path.with_name("index.lock")

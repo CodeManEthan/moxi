@@ -65,7 +65,8 @@ def test_the_store_is_created_private_under_usage_state():
     path = Layout("usage").state_dir() / "readings.db"
     assert readings.path() == path and path.exists()
     assert version == len(readings.STEPS) and mode == "wal"
-    assert stat.S_IMODE(os.stat(path).st_mode) == 0o600
+    if os.name == "posix":  # Windows keeps no mode bits
+        assert stat.S_IMODE(os.stat(path).st_mode) == 0o600
 
 
 # --- Codex ----------------------------------------------------------------------------

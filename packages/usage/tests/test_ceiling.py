@@ -380,8 +380,9 @@ def test_markers_live_in_a_private_dir_per_agent():
     where = ceiling.marker_dir(SESSION, AGENT)
     assert where == Layout("usage").state_dir() / "ceiling" / SESSION / AGENT
     assert (where / f"warn-{WARN}").is_file()
-    assert os.stat(where).st_mode & 0o777 == 0o700
-    assert os.stat(where.parent).st_mode & 0o777 == 0o700
+    if os.name == "posix":  # Windows keeps no mode bits
+        assert os.stat(where).st_mode & 0o777 == 0o700
+        assert os.stat(where.parent).st_mode & 0o777 == 0o700
 
 
 def test_making_an_agents_dir_sweeps_old_ones():

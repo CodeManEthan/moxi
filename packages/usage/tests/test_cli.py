@@ -2,6 +2,7 @@
 network."""
 
 import json
+import os
 
 import pytest
 
@@ -108,7 +109,8 @@ def test_update_writes_the_snapshot_and_names_the_changes(fetched, capsys):
     facts = models.model_facts("claude-opus-5-5")
     assert facts.input == 3.0 and facts.provenance.layer == "snapshot"
     assert facts.tiers["fast"]["input"] == 8.0      # the supplement rides along
-    assert models.snapshot_path().stat().st_mode & 0o777 == 0o600
+    if os.name == "posix":  # Windows keeps no mode bits
+        assert models.snapshot_path().stat().st_mode & 0o777 == 0o600
 
 
 def test_update_keeps_a_model_priced_when_litellm_drops_one_the_supplement_adds_to(

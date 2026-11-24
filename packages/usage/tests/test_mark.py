@@ -558,7 +558,8 @@ def test_a_restarted_endpoint_does_not_fire_twice_and_gone_deletes_the_file():
     doc = json.loads(path.read_text())
     assert doc["readers"]["main"]["notice"]["mark"] == "1x"
     assert doc["marks"] == {"notice": "1x", "crossing": "off"}
-    assert oct(path.stat().st_mode & 0o777) == "0o600"
+    if os.name == "posix":  # Windows keeps no mode bits
+        assert oct(path.stat().st_mode & 0o777) == "0o600"
     mark.reset()                                  # a new endpoint process
     s.context(125_000)
     assert mark.on_tool(s.event()) is None
