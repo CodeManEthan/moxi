@@ -191,7 +191,7 @@ def _ask(conn: sqlite3.Connection, session_id: str, turns: Any, slots_api: Any, 
          dry_run: bool) -> Verdict:
     from . import exits, job, recycle
 
-    row = store.resolve(conn, session_id)
+    row = target.resolve(conn, session_id, turns=turns)
     if row is None:
         return Verdict(None, "not-launched", f"no launch holds session {session_id}")
     if not on(conn, row, session_id):
