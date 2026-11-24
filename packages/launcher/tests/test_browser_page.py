@@ -26,7 +26,7 @@ from playwright.sync_api import expect
 import launcher_page_kit as kit
 from moxi_launcher import presets, targets
 
-pytestmark = [pytest.mark.browser,
+pytestmark = [pytest.mark.browser, pytest.mark.timeout(120, method="thread"),
               pytest.mark.skipif(sys.platform == "win32",
                                  reason="the fake harness is a script run by its #! line")]
 

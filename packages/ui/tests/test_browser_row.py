@@ -11,7 +11,7 @@ from __future__ import annotations
 import pytest
 from playwright.sync_api import expect
 
-pytestmark = [pytest.mark.browser, pytest.mark.timeout(90)]
+pytestmark = [pytest.mark.browser, pytest.mark.timeout(90, method="thread")]
 
 FULL = {
     "name": "planner",

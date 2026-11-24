@@ -28,7 +28,7 @@ from moxi_launcher import presets
 
 _copying = pytest.importorskip("moxi_ui.testing.browser", reason="ui is not installed")
 
-pytestmark = [pytest.mark.browser, pytest.mark.timeout(120),
+pytestmark = [pytest.mark.browser, pytest.mark.timeout(120, method="thread"),
               pytest.mark.skipif(not sys.platform.startswith("linux"),
                                  reason="the fake harness is a script run by its #! line")]
 

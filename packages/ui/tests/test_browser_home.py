@@ -26,7 +26,7 @@ import fixture_kit
 from fixture_kit import CHECK_DETAIL as DETAIL
 from fixture_kit import CHECK_FIX as FIX
 
-pytestmark = [pytest.mark.browser, pytest.mark.timeout(90)]
+pytestmark = [pytest.mark.browser, pytest.mark.timeout(90, method="thread")]
 
 # The doctor runs `moxi doctor --json` in a child; give it longer than a click.
 DOCTOR_MS = 30_000

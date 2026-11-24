@@ -32,7 +32,7 @@ from moxi_sessions.testing import CodexRollout
 from test_browser_list import changed_at, claude, count_line, env_of, filter_button, group, row, sid, tid
 from test_browser_running import running_topic
 
-pytestmark = [pytest.mark.browser, pytest.mark.timeout(240),
+pytestmark = [pytest.mark.browser, pytest.mark.timeout(240, method="thread"),
               pytest.mark.skipif(not sys.platform.startswith("linux"),
                                  reason="sessions' page is checked in a browser on Linux; the "
                                         "Windows and macOS runs are owed")]

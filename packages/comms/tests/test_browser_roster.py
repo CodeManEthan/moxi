@@ -30,7 +30,7 @@ from test_reply_enforcement import PLANNER, REVIEWER, P, R, indexed, send
 
 WAIT_S = pytest.importorskip("moxi_ui.testing", reason="ui is not installed").WAIT_S
 
-pytestmark = [pytest.mark.browser,
+pytestmark = [pytest.mark.browser, pytest.mark.timeout(120, method="thread"),
               pytest.mark.skipif(not sys.platform.startswith("linux"),
                                  reason="comms runs on Linux only")]
 

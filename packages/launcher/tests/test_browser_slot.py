@@ -27,7 +27,7 @@ from playwright.sync_api import expect
 import launcher_page_kit as kit
 from moxi_launcher import store
 
-pytestmark = [pytest.mark.browser,
+pytestmark = [pytest.mark.browser, pytest.mark.timeout(120, method="thread"),
               pytest.mark.skipif(sys.platform == "win32", reason="slots needs tmux"),
               pytest.mark.skipif(importlib.util.find_spec("moxi_slots") is None,
                                  reason="slots is not installed"),

@@ -26,7 +26,7 @@ import launcher_page_kit as kit
 
 _copying = pytest.importorskip("moxi_ui.testing.browser", reason="ui is not installed")
 
-pytestmark = [pytest.mark.browser, pytest.mark.timeout(120),
+pytestmark = [pytest.mark.browser, pytest.mark.timeout(120, method="thread"),
               pytest.mark.skipif(not sys.platform.startswith("linux"),
                                  reason="projects' picker is checked in a browser on Linux")]
 

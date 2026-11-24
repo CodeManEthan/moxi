@@ -30,6 +30,18 @@ import weakref
 from pathlib import Path
 from typing import Any
 
+import pytest
+
+#: Every browser test module's marks. The bound is kept by a thread that, past it, prints
+#: every thread's stack and ends the test's process: under xdist the run reports the worker
+#: crashed while running that test, and goes on in a new worker. A signal raises once
+#: inside the test, and a teardown that then waits on a browser that stopped answering
+#: would hold the worker with no end.
+MARKS = [pytest.mark.browser, pytest.mark.timeout(180, method="thread"),
+         pytest.mark.skipif(not sys.platform.startswith("linux"),
+                            reason="services' page is checked in a browser on Linux; the "
+                                   "Windows and macOS runs are owed")]
+
 TESTS = Path(__file__).resolve().parent
 
 SITECUSTOMIZE = textwrap.dedent('''\
