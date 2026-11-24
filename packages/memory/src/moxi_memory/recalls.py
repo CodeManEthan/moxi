@@ -35,6 +35,7 @@ Standard library at import; the core is imported at the first read or write.
 from __future__ import annotations
 
 import json
+import os
 import re
 import threading
 import time
@@ -101,17 +102,20 @@ def log_path(session_id: str, env: Mapping[str, str] | None = None) -> Path:
 def session_lock(session_id: str, *, timeout_s: float | None = None) -> Iterator[None]:
     """Hold the session's subconscious lock for the block. Threads of this process queue
     for it first, so a listener thread and another in the same endpoint take turns.
-    `timeout_s` bounds the wait for another process (`moxi.files.LockTimeout`)."""
+    `timeout_s` bounds the whole wait, for this process's threads and for another
+    process together (`moxi.files.LockTimeout`)."""
     from moxi import files
 
     path = subconscious_dir() / LOCKS / f"{_checked(session_id)}.lock"
     files.private_dir(path.parent)
     with _thread_locks_guard:
         gate = _thread_locks.setdefault(str(path), threading.Lock())
+    deadline = None if timeout_s is None else time.monotonic() + max(timeout_s, 0.0)
     if not gate.acquire(timeout=-1 if timeout_s is None else max(timeout_s, 0.0)):
-        raise files.LockTimeout(f"{path} is held by another thread of this process")
+        raise files.LockTimeout(path, os.getpid())  # another thread of this process
     try:
-        with files.lock(path, timeout_s=timeout_s):
+        left = None if deadline is None else max(deadline - time.monotonic(), 0.0)
+        with files.lock(path, timeout_s=left):
             yield
     finally:
         gate.release()

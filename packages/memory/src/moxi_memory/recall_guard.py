@@ -21,7 +21,12 @@ alone.
 - Every other call (writes, edits, agents, messages, MCP tools, other shell commands)
   is refused with `READ_ONLY`.
 
-Each call allowed is counted on the record, under the session's lock.
+Each call allowed is counted on the record, under the session's lock. A judge has
+`BUDGET_S` from its start, inside its guard's deadline: the wait for a `starting`
+record and the wait for the lock both come out of it. When the lock is still held
+(a child acks a round under it) once the budget is spent, the judge decides from the
+record as it reads without the lock (records are written whole): the call is refused
+as above, or allowed without being counted, so a busy lock never breaks the guard.
 
 **A plain read (`plain_read`).** The test allows what it can see whole and refuses the
 rest: every character prints (`str.isprintable`) and none is one of `REFUSED_CHARS`; the
@@ -59,8 +64,9 @@ SHELL = "Bash"
 REFUSED_CHARS = frozenset(";&<>(){}`$\\!")
 #: How long a call waits for a `starting` record's fork id, in seconds.
 STARTING_WAIT_S = 1.0
-#: How long a judge waits for the session's lock, in seconds.
-LOCK_WAIT_S = 0.5
+#: How long a judge may take, from its start, in seconds: under the guards' deadline
+#: (`moxi_memory.guards`), with room for turns' own wait for a thread.
+BUDGET_S = 1.6
 _POLL_S = 0.05
 
 
@@ -159,21 +165,36 @@ def allowed(call, settings: Mapping[str, object]) -> bool:
     return plain_read(given.get("command"), settings.get("fork_commands"))
 
 
+def _refusal(call, record: dict) -> str | None:
+    if time_up(record):
+        return TIME_UP
+    if not allowed(call, record.get("settings") or {}):
+        return READ_ONLY
+    return None
+
+
 def judge_call(call):
     """The call-step judge of `memory.subconscious-fork`."""
+    from moxi.files import LockTimeout
     from moxi_turns import Deny
 
-    record = fork_record(call.session_id, call.agent_id)
+    started = time.monotonic()
+    record = fork_record(call.session_id, call.agent_id,
+                         wait_s=min(STARTING_WAIT_S, BUDGET_S))
     if record is None:
         return None
     session_id, recall_id = str(call.session_id), str(record["recall"])
-    with recalls.session_lock(session_id, timeout_s=LOCK_WAIT_S):
-        record = records.read(session_id, recall_id) or record
-        if time_up(record):
-            return Deny(TIME_UP)
-        if not allowed(call, record.get("settings") or {}):
-            return Deny(READ_ONLY)
-        records.update(session_id, recall_id, tools=int(record.get("tools") or 0) + 1)
+    left = max(BUDGET_S - (time.monotonic() - started), 0.0)
+    try:
+        with recalls.session_lock(session_id, timeout_s=left):
+            record = records.read(session_id, recall_id) or record
+            refusal = _refusal(call, record)
+            if refusal is not None:
+                return Deny(refusal)
+            records.update(session_id, recall_id, tools=int(record.get("tools") or 0) + 1)
+    except LockTimeout:
+        refusal = _refusal(call, records.read(session_id, recall_id) or record)
+        return Deny(refusal) if refusal is not None else None
     return None
 
 
@@ -187,5 +208,5 @@ def judge_ask(call):
 
 
 __all__ = ["TIME_UP", "READ_ONLY", "ASK_REFUSED", "READ_TOOLS", "SHELL", "REFUSED_CHARS",
-           "STARTING_WAIT_S", "LOCK_WAIT_S", "guarded", "fork_record",
+           "STARTING_WAIT_S", "BUDGET_S", "guarded", "fork_record",
            "time_up", "plain_read", "allowed", "judge_call", "judge_ask"]

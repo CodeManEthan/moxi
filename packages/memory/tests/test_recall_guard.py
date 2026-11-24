@@ -98,6 +98,45 @@ def test_a_call_while_a_record_is_starting_is_judged_as_its_fork():
     assert found is not None and found["recall"] == record["recall"]
 
 
+@pytest.mark.parametrize("tool, given, decision", [
+    ("Read", {"file_path": "/x"}, None),
+    ("Write", {"file_path": "/x", "content": ""}, Deny(recall_guard.READ_ONLY))])
+def test_a_lock_held_past_the_budget_still_gets_a_decision_in_time(tool, given, decision):
+    import threading
+    import time
+
+    from moxi_memory import recalls
+
+    record = a_fork()
+    held, done = threading.Event(), threading.Event()
+
+    def hold():
+        # a child acking a round over turns' socket holds the lock this long
+        with recalls.session_lock(SESSION):
+            held.set()
+            done.wait(10)
+
+    holder = threading.Thread(target=hold)
+    holder.start()
+    try:
+        held.wait(5)
+        began = time.monotonic()
+        assert recall_guard.judge_call(call(tool, **given)) == decision
+        took = time.monotonic() - began
+    finally:
+        done.set()
+        holder.join()
+    assert took < recall_guard.BUDGET_S + 0.3
+    # judged without the lock, an allowed call is not counted
+    assert records.read(SESSION, record["recall"])["tools"] == 0
+
+
+def test_the_budget_fits_inside_the_guards_deadline():
+    for guard in guards.GUARDS:
+        assert recall_guard.BUDGET_S < guard.deadline_ms / 1000
+    assert recall_guard.STARTING_WAIT_S < recall_guard.BUDGET_S
+
+
 def test_every_ask_of_a_fork_is_refused():
     a_fork(state="ended")
     assert recall_guard.judge_ask(call("Bash", command="moxi sessions read x")) == Deny(
