@@ -156,15 +156,23 @@ class Server:
     def stop(self, grace: float = TERM_GRACE) -> None:
         proc, self.process = self.process, None
         if proc is not None and proc.poll() is None:
-            with contextlib.suppress(OSError, ProcessLookupError):
-                os.killpg(proc.pid, signal.SIGTERM)
+            end_group(proc, signal.SIGTERM)
             try:
                 proc.wait(timeout=grace)
             except subprocess.TimeoutExpired:
-                with contextlib.suppress(OSError, ProcessLookupError):
-                    os.killpg(proc.pid, signal.SIGKILL)
+                end_group(proc, getattr(signal, "SIGKILL", signal.SIGTERM))
                 with contextlib.suppress(subprocess.TimeoutExpired):
                     proc.wait(timeout=grace)
+
+
+def end_group(proc: subprocess.Popen, sig: int) -> None:
+    """Send `sig` to the process group `proc` leads (started with `start_new_session`). On
+    Windows, which has no process group to signal, `proc` itself is ended."""
+    with contextlib.suppress(OSError, ProcessLookupError):
+        if os.name == "posix":
+            os.killpg(proc.pid, sig)
+        else:
+            proc.kill()
 
 
 class Http:

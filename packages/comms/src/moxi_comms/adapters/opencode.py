@@ -98,7 +98,7 @@ from ..context import BARE_COMMS, MOXI_COMMS_PATH_LINE, layer_one_form, own_comm
 from . import opencode_roster
 from .harness import (REQUEUE, SOURCE_CLEAR, SOURCE_COMPACT, SOURCE_STARTUP, TURN_COMPLETED,
                       HarnessAdapter, TurnLedger, launch_stamp, plan_comms, plan_head)
-from .opencode_server import (EventStream, Http, NoAnswer, Server, Unreachable,
+from .opencode_server import (EventStream, Http, NoAnswer, Server, Unreachable, end_group,
                               parse_stream_line)
 
 log = logging.getLogger("comms.opencode")
@@ -879,7 +879,7 @@ class OpenCodeAdapter(HarnessAdapter):
 
         It refreshed when the command exits 0 in time with no `MODELS_FETCH_FAILED`
         line on stderr. It runs in a process group of its own, so an overrun is killed
-        whole. The list is the person's own model cache, which OpenCode rewrites itself
+        whole (on Windows, the command itself). The list is the person's own model cache, which OpenCode rewrites itself
         hourly; a server started within 5 minutes of the write skips its own refresh."""
         import signal
         import subprocess
@@ -898,10 +898,7 @@ class OpenCodeAdapter(HarnessAdapter):
             try:
                 _out, err = proc.communicate(timeout=MODELS_REFRESH_TIMEOUT)
             except subprocess.TimeoutExpired:
-                try:
-                    os.killpg(proc.pid, signal.SIGKILL)
-                except OSError:
-                    pass
+                end_group(proc, getattr(signal, "SIGKILL", signal.SIGTERM))
                 proc.communicate()
                 reason = f"no answer within {MODELS_REFRESH_TIMEOUT:g}s"
             else:

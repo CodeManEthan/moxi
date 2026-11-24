@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- On Windows the OpenCode adapter stops its server, and a model-list refresh that runs
+  past its bound, by ending the process itself. It signalled a process group with
+  `os.killpg`, which Windows lacks.
 - On Windows comms reads cards again. The read opened a card with `O_NOFOLLOW`, which
   Windows lacks; there it now refuses a card that is a link or another reparse point by
   its own `lstat`, and reads only the file that `lstat` saw.
