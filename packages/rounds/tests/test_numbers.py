@@ -409,7 +409,8 @@ def test_the_numbers_read_as_one_line_a_group():
         "questions by origin: comms 2",
         "decisions: accepted 1, rejected 0; settled by the lead: accepted 0, "
         "rejected 0",
-        "skips 1, step-ups 0, repairs 0, corrections 1, dropped builds 1, cleared locks 0",
+        "skips 1, step-ups 0, checklist step-ups 0, repairs 0, corrections 1, "
+        "dropped builds 1, cleared locks 0",
         "flags: extra-full-pass 0, model-below-tier 1",
         "a_later_count: 4"]
 
