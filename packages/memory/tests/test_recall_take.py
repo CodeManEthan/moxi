@@ -265,7 +265,7 @@ def test_the_child_s_take_mode(monkeypatch):
     taken = []
     monkeypatch.setattr(recall_take, "take_all", lambda **kw: taken.append(kw) or {})
     assert recall_child.main(["--take", "--session", SESSION]) == 0
-    assert taken == [{"sessions": [SESSION]}]
+    assert taken == [{"sessions": [SESSION], "skip": None}]
     assert recall_child.main(["--session", SESSION]) == 2
     assert recall_child.main(["--take", "--session", SESSION, "--recall", "abc"]) == 2
     assert recall_child.main(["--take", "--session", "../x"]) == 2

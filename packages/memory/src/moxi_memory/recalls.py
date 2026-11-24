@@ -24,7 +24,10 @@ it came back (`rounds`), and when the line was first and last written.
 A line's state says where the recall's answer is (`LINE_STATES`): `open` while its child
 runs a round and holds no answer for it yet, `back` once an answer came back, `lost`
 when none did, `discarded` when a person ended it, and `off` for a session whose
-subconscious could not run.
+subconscious could not run. A person may discard only a line in a state of
+`DISCARDABLE`, an answer memory still holds to send; on Claude Code's subagent route the
+harness brings every answer back itself, so no line of it is ever in one. A discarded
+line names who discarded it and when (`discarded_by`, `discarded_at`).
 
 Standard library at import; the core is imported at the first read or write.
 """
@@ -52,6 +55,8 @@ LOST = "lost"
 DISCARDED = "discarded"
 OFF = "off"
 LINE_STATES = (OPEN, BACK, LOST, DISCARDED, OFF)
+#: The states a person may discard a line in: an answer memory still holds to send.
+DISCARDABLE: tuple[str, ...] = ()
 #: How a recall started: a prompt, or the agent's own request.
 PROMPT = "prompt"
 ASKED = "asked"
@@ -60,7 +65,8 @@ HEAD_CHARS = 80
 #: The fields of a recall's line.
 LINE_FIELDS = ("recall", "session", "harness", "state", "reason", "error", "start", "head",
                "route", "fork", "child", "taker", "ref", "kept", "prefetch_hits", "widened",
-               "startup_s", "hurried", "past_limit", "rounds", "at", "updated")
+               "startup_s", "hurried", "past_limit", "rounds", "discarded_by",
+               "discarded_at", "at", "updated")
 #: A session id the log may name a file after.
 _SAFE = re.compile(r"[A-Za-z0-9_][A-Za-z0-9_.-]{0,199}")
 
@@ -209,6 +215,6 @@ def head(text: str) -> str:
 
 
 __all__ = ["DIR_NAME", "LOG", "LOCKS", "OPEN", "BACK", "LOST", "DISCARDED", "OFF",
-           "LINE_STATES", "PROMPT", "ASKED", "HEAD_CHARS", "LINE_FIELDS", "is_safe",
+           "LINE_STATES", "DISCARDABLE", "PROMPT", "ASKED", "HEAD_CHARS", "LINE_FIELDS", "is_safe",
            "subconscious_dir", "log_path", "session_lock", "read_lines", "logged_sessions",
            "all_lines", "find_line", "put_line", "note_off", "head"]

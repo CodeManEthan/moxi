@@ -22,11 +22,11 @@ record holds, never on a fresh read of memory's config:
    on the line and acked to turns, and the record ended.
 
 From its start, beside these steps, a thread takes over every session's lines whose
-owner is gone (`moxi_memory.recall_take.take_all`), and the child waits for it before
-it exits.
+owner is gone (`moxi_memory.recall_take.take_all`) and then sweeps the records a day
+old (`moxi_memory.records.sweep_old`), and the child waits for it before it exits.
 
-With `--take`, it takes over the session's lines whose owner is gone and exits: the
-taker memory's `gone` listener starts when a session with the subconscious on ends.
+With `--take`, it does the same for the one session and exits: the taker memory's
+`gone` listener starts when a session with the subconscious on ends.
 
 It exits 0 when the recall ran to an end or the taking is done, 2 for arguments or a
 record it can't use.
@@ -166,14 +166,18 @@ def run(session_id: str, recall_id: str, *, route=None) -> int:
         taking.join()
 
 
-def take_others(recall_id: str) -> None:
-    """Take over every session's lines whose owner is gone, leaving out this child's own
-    recall. Never raises."""
+def take_others(recall_id: str | None = None, *, sessions: list[str] | None = None) -> None:
+    """Take over the lines of `sessions` (every session's when None) whose owner is gone,
+    leaving out recall `recall_id`, then sweep their records a day old. Never raises."""
     from . import recall_take
 
     try:
-        recall_take.take_all(skip=recall_id)
+        recall_take.take_all(sessions=sessions, skip=recall_id)
     except Exception:  # noqa: BLE001 - a taking that fails leaves the lines for the next
+        pass
+    try:
+        records.sweep_old(sessions=sessions)
+    except Exception:  # noqa: BLE001 - a sweep that fails leaves the records for the next
         pass
 
 
@@ -194,9 +198,7 @@ def main(argv: list[str] | None = None) -> int:
               file=sys.stderr)
         return 2
     if args.take:
-        from . import recall_take
-
-        recall_take.take_all(sessions=[args.session])
+        take_others(sessions=[args.session])
         return 0
     return run(args.session, args.recall)
 

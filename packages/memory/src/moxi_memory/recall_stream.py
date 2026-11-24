@@ -23,7 +23,9 @@ is `End of recall.`; after `subconscious.max_rounds` rounds; once the fork has m
 `subconscious.max_tools` tool calls (counted on the record); at `subconscious.limit_s`
 from the recall's start; or once the record is `hurried`. Then the record ends `ended`
 when an answer came back, the line noting whether the recall was hurried or ran past
-its limit.
+its limit. A line a person discarded (`moxi_memory.recall_discard`) ends the stream as
+it is: the child asks no further round and leaves the line's state and the record as
+the discard set them.
 
 A route (`Route`) asks turns for the rounds; `moxi_memory.recall_route` holds the
 subagent route's.
@@ -162,17 +164,32 @@ def settle(recall, round_number: int, end, route: Route, *, now: float | None = 
     return got
 
 
+def open_round(recall, round_number: int, round_ref: str) -> bool:
+    """Under the session's lock, write round `round_number`'s ref on the line with the
+    kept mark, the line `open`, before the round is asked. False, writing nothing, when
+    a person has discarded the line."""
+    with recalls.session_lock(recall.session_id):
+        current = recalls.find_line(recall.session_id, recall.recall_id)
+        if current is not None and current.get("state") == recalls.DISCARDED:
+            recall.line = current
+            return False
+        recall.write(record={"rounds": round_number}, state=recalls.OPEN, ref=round_ref,
+                     kept=True)
+    return True
+
+
 def run(recall, route: Route, brief: str, *, clock=time.time) -> str:
     """Run the recall's rounds to the stream's end, and return how it ended: `ended`,
-    `lost`, or `unsettled` (a round's end never came; the line keeps its mark)."""
+    `lost`, `discarded` (a person discarded its line; no further round is asked), or
+    `unsettled` (a round's end never came; the line keeps its mark)."""
     settings = recall.settings
     bound = round_bound_s(settings)
     handle = None
     round_number = 1
     while True:
         round_ref = ref(recall.recall_id, round_number)
-        recall.put(record={"rounds": round_number}, state=recalls.OPEN, ref=round_ref,
-                   kept=True)
+        if not open_round(recall, round_number, round_ref):
+            return recalls.DISCARDED
         if handle is None:
             handle = route.first(brief, ref=round_ref, round_timeout_s=bound)
         else:
@@ -191,6 +208,8 @@ def run(recall, route: Route, brief: str, *, clock=time.time) -> str:
         except TimeoutError:
             return "unsettled"
         got = settle(recall, round_number, end, route, now=clock())
+        if recall.line.get("state") == recalls.DISCARDED:
+            return recalls.DISCARDED
         if not got:
             if recall.record.get("state") == records.LOST:
                 return records.LOST
@@ -212,4 +231,4 @@ def run(recall, route: Route, brief: str, *, clock=time.time) -> str:
 
 __all__ = ["ROUND_MARGIN_S", "END_WAIT_MARGIN_S", "NOTHING", "END_LINE", "CONTINUE", "Route",
            "ref", "round_bound_s", "ends_stream", "continue_text", "why_stop", "settle",
-           "run"]
+           "open_round", "run"]

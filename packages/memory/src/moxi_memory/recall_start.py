@@ -32,6 +32,15 @@ the record and a log line `lost`, with the reason `spawn`.
 at `subconscious/asked/<session>.json`, read and raised by the command and reset by the
 listener, each under the session's lock.
 
+**On demand (`ask`).** `moxi memory subconscious recall TOPIC` finds its session by its
+own process id through turns' client, reads the session's mode from its stamps, reads
+memory's settings itself and passes them on, checks the route, raises the agent's
+count, and begins a recall with the topic in place of a prompt (`start`: `asked`). It
+refuses a session where the subconscious is off (with the reason) or automatic, a count
+at its cap, and a config file in error (with the error; the command keeps no last good
+settings). The start line (`START_LINE`) tells an on-demand session's agent the command
+exists.
+
 Standard library at import; the core and turns are imported at use.
 """
 
@@ -169,6 +178,85 @@ def spawn_child(session_id: str, recall_id: str) -> int:
                            detached=True, output=os.devnull, cwd=os.sep)
 
 
+# -- the on-demand command -------------------------------------------------------------
+
+#: What the on-demand command prints when it started a recall.
+STARTED = ('Started a recall on "{topic}". Its points come back to you as it finds them; '
+           "keep working.")
+#: The line memory's `start` listener adds in an on-demand session.
+START_LINE = ('subconscious: `moxi memory subconscious recall "<topic>"` starts a second '
+              "agent that searches past sessions and notes for the topic and sends you "
+              "what it finds. Use it when a topic has much prior work you don't have in "
+              "front of you; each recall spends tokens.")
+
+
+class Refused(Exception):
+    """An on-demand recall the command refuses, with the reason."""
+
+
+def this_session():
+    """The session the calling process runs in, found by its own process id through
+    turns' client: (session id, harness, the session's environment stamps, its launch
+    directory), or None when no turns endpoint serves it."""
+    from moxi_turns import client
+
+    found = client.find(pid=os.getpid())
+    if found is None:
+        return None
+    with found:
+        try:
+            env = {k: v for k, v in found.env([SUBCONSCIOUS_ENV]).items() if v is not None}
+        except Exception:  # noqa: BLE001 - an endpoint that can't read it: the caller's own
+            value = os.environ.get(SUBCONSCIOUS_ENV)
+            env = {SUBCONSCIOUS_ENV: value} if value is not None else {}
+        return found.session_id, found.harness, env, found.info.get("cwd")
+
+
+def ask(topic: str, *, session=None, spawn=None) -> dict:
+    """Start an on-demand recall on `topic` for the calling session and return its
+    record. Raises `Refused`, with the line to print, for a session where the
+    subconscious is off or automatic, a cap used up, or memory's config file in error.
+    `session` stands in for `this_session()`'s answer."""
+    from moxi.config import ConfigError
+
+    from . import settings
+
+    topic = " ".join(str(topic).split())
+    if not topic:
+        raise Refused("give the topic to recall")
+    found = this_session() if session is None else session
+    if found is None or not recalls.is_safe(found[0]):
+        raise Refused("this shell runs in no session turns serves, so no recall can start")
+    session_id, harness, env, cwd = found
+    run_mode = mode(env)
+    if run_mode is None:
+        raise Refused("the subconscious is off in this session")
+    if run_mode == AUTOMATIC:
+        raise Refused("this session runs the subconscious automatically: every prompt "
+                      "starts a recall, so none is started on demand")
+    try:
+        held = subconscious_settings(settings.read())
+    except ConfigError as exc:
+        raise Refused(f"memory's config file is in error, so no recall starts: {exc}") \
+            from None
+    route_name, why = route(harness, session_id)
+    if route_name is None:
+        recalls.note_off(session_id, why, harness=harness)
+        raise Refused(f"the subconscious is off in this session: {why}")
+    cap = int(held["on_demand_per_prompt"])
+    with recalls.session_lock(session_id):
+        count = asked(session_id)
+        if count >= cap:
+            raise Refused(f"this prompt's recalls are used up ({cap}); the next prompt "
+                          "of new work allows more")
+        write_asked(session_id, count + 1)
+    from .listener import notes_override
+
+    return begin(session_id, harness, start=recalls.ASKED, text=topic, senders=(),
+                 settings=held, cwd=cwd, notes_dir=notes_override(os.environ),
+                 route_name=route_name, spawn=spawn)
+
+
 # -- the agent's count, in on-demand mode -----------------------------------------------
 
 def _asked_path(session_id: str):
@@ -206,4 +294,5 @@ def reset_asked(session_id: str) -> None:
 __all__ = ["SUBCONSCIOUS_ENV", "AUTOMATIC", "ON_DEMAND", "MODES", "SUBAGENT", "NO_FORK",
            "CODEX", "USER", "USER_AND_COMMS", "SCRIPT", "ASKED", "SPAWN", "mode", "counts",
            "route", "subconscious_settings", "settings_keys", "default_settings", "new_id",
-           "begin", "spawn_child", "asked", "write_asked", "reset_asked"]
+           "begin", "spawn_child", "STARTED", "START_LINE", "Refused", "this_session", "ask",
+           "asked", "write_asked", "reset_asked"]

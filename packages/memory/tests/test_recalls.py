@@ -90,9 +90,9 @@ def _two_sessions():
         recalls.put_line(SESSION, {
             "recall": "r1", "state": recalls.BACK, "start": recalls.PROMPT,
             "head": recalls.head("why did the\nbuild fail"), "route": "subagent",
-            "rounds": [{"n": 1, "text": "Recalled from past sessions:\n- a point",
-                        "back_at": 20.0},
-                       {"n": 2, "text": None, "reason": "gone"}],
+            "rounds": [{"round": 1, "text": "Recalled from past sessions:\n- a point",
+                        "at": 20.0},
+                       {"round": 2, "lost": "gone", "error": "gone: the bound passed"}],
             "hurried": True}, now=20.0)
     recalls.note_off(OTHER, "no turns fork in this session", now=10.0)
 
@@ -116,7 +116,7 @@ def test_list_for_one_session_shows_each_rounds_answer(capsys):
     assert len(lines) == 3 and lines[0].startswith("r1  back")
     assert lines[1].startswith("    round 1  ") and lines[1].endswith(
         "Recalled from past sessions: - a point")
-    assert lines[2].endswith("round 2  -  (no answer: gone)")
+    assert lines[2] == "    round 2  -  (no answer: gone)"
 
 
 def test_list_json_prints_the_lines_as_stored(capsys):

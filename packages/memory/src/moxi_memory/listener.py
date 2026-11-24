@@ -6,7 +6,8 @@ first ask. It imports only the standard library at import time.
 
 `start(event)` answers a `start` with the start line, the same for every harness. It names
 the session's project label when the session's folder gives one, and leaves the
-parenthesis about `--project` out when it doesn't.
+parenthesis about `--project` out when it doesn't. In a session whose launch turned the
+subconscious on on demand, a second line names `moxi memory subconscious recall`.
 
 `prompt(event)` answers a main-loop prompt with the reminder, the same for every harness,
 or None when config `reminder.enabled` is off.
@@ -117,8 +118,14 @@ def start_line(label: str | None) -> str:
 
 
 def start(event) -> str:
-    """The start line for `event`'s session."""
-    return start_line(_label(event))
+    """The start line for `event`'s session, and the on-demand command's line under it
+    in a session whose launch turned the subconscious on on demand."""
+    line = start_line(_label(event))
+    from . import recall_start
+
+    if recall_start.mode(getattr(event, "env", None)) == recall_start.ON_DEMAND:
+        return f"{line}\n{recall_start.START_LINE}"
+    return line
 
 
 def prompt(event) -> str | None:

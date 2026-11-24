@@ -22,6 +22,13 @@ id, the tool calls the fork has made (`tools`), whether any answer came back
 (`answered`), how many rounds were asked (`rounds`), the brief the fork was given, and
 when it was written first and last.
 
+**The day sweep (`sweep_old`).** A record stays, in whatever state, until it is a day
+old (`SWEEP_AFTER_S` from when it was first written), so a fork still calling after its
+recall ended is judged by its own record. Then the sweep removes it, except a record
+whose log line still carries the kept mark: turns still keeps that round's end for
+memory, and the record stays until a taker settles the line. Every recall child sweeps
+at its start, and so does the taker memory's `gone` listener starts.
+
 Standard library at import; the core is imported at the first write.
 """
 
@@ -47,6 +54,8 @@ LOST = "lost"
 RECORD_STATES = (STARTING, RUNNING, HURRIED, BACK, ENDED, LOST)
 #: The states of a recall that is over.
 DONE = (ENDED, LOST)
+#: How old a record is, in seconds, when the day sweep removes it.
+SWEEP_AFTER_S = 86400.0
 #: The fields of a record.
 RECORD_FIELDS = ("recall", "session", "harness", "state", "reason", "error", "start",
                  "text", "senders", "settings", "cwd", "notes_dir", "route", "fork",
@@ -135,6 +144,45 @@ def hurry_running(session_id: str, *, now: float | None = None) -> list[str]:
     return hurried
 
 
+def sweep_old(*, sessions: list[str] | None = None, now: float | None = None) -> list[str]:
+    """Remove every record older than `SWEEP_AFTER_S` whose log line does not carry the
+    kept mark, in `sessions` (every session with records when None), each session under
+    its lock, and return the ids removed."""
+    now = time.time() if now is None else now
+    if sessions is None:
+        try:
+            sessions = sorted(p.name for p in (recalls.subconscious_dir() / RECORDS).iterdir()
+                              if p.is_dir())
+        except OSError:
+            sessions = []
+    removed = []
+    for session_id in sessions:
+        if not recalls.is_safe(session_id):
+            continue
+        old = [r for r in session_records(session_id)
+               if isinstance(r.get("at"), (int, float)) and now - r["at"] >= SWEEP_AFTER_S]
+        if not old:
+            continue
+        with recalls.session_lock(session_id):
+            kept = {line.get("recall") for line in recalls.read_lines(session_id)
+                    if line.get("kept") is True}
+            for record in old:
+                recall_id = str(record.get("recall"))
+                if recall_id in kept or not recalls.is_safe(recall_id):
+                    continue
+                try:
+                    record_path(session_id, recall_id).unlink(missing_ok=True)
+                except OSError:
+                    continue
+                removed.append(recall_id)
+            try:
+                records_dir(session_id).rmdir()
+            except OSError:
+                pass
+    return removed
+
+
 __all__ = ["RECORDS", "STARTING", "RUNNING", "HURRIED", "BACK", "ENDED", "LOST",
            "RECORD_STATES", "DONE", "RECORD_FIELDS", "records_dir", "record_path", "read",
-           "session_records", "write", "update", "hurry_running"]
+           "session_records", "write", "update", "hurry_running", "SWEEP_AFTER_S",
+           "sweep_old"]

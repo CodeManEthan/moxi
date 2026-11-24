@@ -6,6 +6,8 @@
     moxi memory reindex [--relabel]
     moxi memory status [--json]
     moxi memory subconscious list [--session ID] [--json]
+    moxi memory subconscious recall TOPIC [--json]
+    moxi memory subconscious discard RECALL_ID
 
 `search` prints each hit (harness, session id, time, project, row kind, then a snippet),
 and under them one `moxi sessions read` command that opens the first hit's session
