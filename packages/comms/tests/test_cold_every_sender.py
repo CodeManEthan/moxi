@@ -92,6 +92,10 @@ HELD_LAST = held_last()
 
 # ------------------------------------------------------------------------ the guard
 
+#: How a Windows named pipe's address starts; such an address is a name, not a file.
+PIPE_PREFIX = "\\\\.\\pipe\\"
+
+
 def _live_paths():
     return {
         "socket": paths.daemon_socket(),
@@ -103,13 +107,25 @@ def _live_paths():
     }
 
 
-def assert_all_under(paths, roots, when):
-    """Fails unless every path in `paths` (a name -> path mapping) resolves under one of
+def assert_all_under(found, roots, when):
+    """Fails unless every path in `found` (a name -> path mapping) resolves under one of
     `roots`. The guard's check, kept apart from the fixture so a test can drive it
     (a test-temp guard accepts the run's own pytest base temp
-    or `tempfile.gettempdir()`, and nothing else)."""
+    or `tempfile.gettempdir()`, and nothing else).
+
+    A Windows pipe address is checked by its name and never resolved, since resolving
+    one opens the pipe: it passes only as the address `moxi.ipc` gives comms' daemon
+    under the current environment, whose runtime folder is then checked as a path."""
+    from moxi import ipc
+
     roots = [Path(root).resolve() for root in roots]
-    for what, path in paths.items():
+    for what, path in found.items():
+        if str(path).startswith(PIPE_PREFIX):
+            expected = ipc.address("comms", "daemon")
+            assert str(path) == expected, (
+                f"{when}: the {what} pipe {path} is not {expected}, the daemon's pipe "
+                "under this test's runtime folder; this test could reach live comms state")
+            what, path = f"{what} pipe's runtime", paths.runtime_dir()
         resolved = Path(path).resolve()
         assert any(resolved.is_relative_to(root) for root in roots), (
             f"{when}: the {what} path {resolved} is under neither "
@@ -147,6 +163,47 @@ def test_the_guard_fails_a_path_outside_both_roots_and_names_both(tmp_path_facto
     said = str(raised.value)
     assert "probe: the socket path" in said
     assert str(base) in said and str(gettemp) in said
+
+
+@pytest.fixture
+def a_pipe(monkeypatch):
+    """The daemon's address as a Windows pipe, on every system, and a `resolve` that
+    fails the test if it is ever asked to resolve a pipe."""
+    from moxi import ipc
+
+    pipe = PIPE_PREFIX + "moxi-comms-daemon-0123abcd"
+    monkeypatch.setattr(ipc, "address", lambda module, name: pipe)
+    resolve = Path.resolve
+
+    def resolve_no_pipe(self, *args, **kwargs):
+        assert not str(self).startswith(PIPE_PREFIX), f"the guard resolved {self}"
+        return resolve(self, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "resolve", resolve_no_pipe)
+    return pipe
+
+
+def test_the_guard_passes_the_daemons_pipe_by_name_without_resolving_it(
+        tmp_path_factory, a_pipe):
+    roots = (tmp_path_factory.getbasetemp(), tempfile.gettempdir())
+    assert_all_under({"socket": a_pipe}, roots, "probe")
+
+
+def test_the_guard_fails_a_pipe_of_another_name(tmp_path_factory, a_pipe):
+    roots = (tmp_path_factory.getbasetemp(), tempfile.gettempdir())
+    other = PIPE_PREFIX + "moxi-comms-daemon-ffffffff"
+    with pytest.raises(AssertionError) as raised:
+        assert_all_under({"socket": other}, roots, "probe")
+    assert f"probe: the socket pipe {other} is not {a_pipe}" in str(raised.value)
+
+
+def test_the_guard_fails_the_pipe_when_its_runtime_folder_is_outside(
+        tmp_path_factory, a_pipe, monkeypatch):
+    base = tmp_path_factory.getbasetemp()
+    with monkeypatch.context() as patched, pytest.raises(AssertionError) as raised:
+        patched.setattr(paths, "runtime_dir", lambda env=None: Path("/proc/self/x"))
+        assert_all_under({"socket": a_pipe}, (base, tempfile.gettempdir()), "probe")
+    assert "probe: the socket pipe's runtime path" in str(raised.value)
 
 
 # --------------------------------------------------------------------------- helpers
