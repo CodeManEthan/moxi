@@ -67,7 +67,7 @@ def test_a_slot_launch_where_slots_do_not_run_cannot():
     assert item(row(), slots_here=False) == selfrecycle.SLOTS
 
 
-def test_a_launch_with_no_notes_dir_has_no_handoff_folder(monkeypatch):
+def test_a_launch_with_no_notes_dir_has_no_handoff_dir(monkeypatch):
     def homeless(cwd, **kw):
         raise handoffs.NoNotesDir(cwd)
 
@@ -78,7 +78,7 @@ def test_a_launch_with_no_notes_dir_has_no_handoff_folder(monkeypatch):
                              "it has no handoffs/ to read from")
 
 
-def test_the_handoff_folder_is_looked_up_without_being_made(monkeypatch):
+def test_the_handoff_dir_is_looked_up_without_being_made(monkeypatch):
     asked = []
     monkeypatch.setattr(handoffs, "handoff_dir", lambda cwd, **kw: asked.append(kw))
     assert item(row(notes_dir="/n")) is None

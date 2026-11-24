@@ -1668,7 +1668,7 @@ def test_a_relaunch_set_for_a_launch_that_cannot_act_on_it_is_kept_with_a_warnin
                     "the seat on Claude")
 
 
-def test_a_typed_relaunch_with_no_handoff_folder_is_warned_of(recyclable, monkeypatch):
+def test_a_typed_relaunch_with_no_handoff_dir_is_warned_of(recyclable, monkeypatch):
     no_notes_dir(monkeypatch)
     got = resolve("", SLOTTED, typed={"recycle_at_limit": "relaunch", **IN_SLOT})
     assert got.values["recycle_at_limit"] == "relaunch"
