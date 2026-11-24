@@ -31,7 +31,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from types import MappingProxyType
 
-from moxi import config, files, modules, names, paths
+from moxi import files, modules, names, paths
 
 from .. import catalog, store
 from ..catalog import TAKES_POLICY
@@ -688,16 +688,35 @@ def commands(values: Mapping[str, object]) -> tuple[str, ...]:
 
 def option_stamps(values: Mapping[str, object]) -> dict[str, str]:
     """The stamps a launch's option rows set: keep-warm on, recycle on expiry's value,
-    and the crossing mark (`limit_mark`) when it recycles at its limit. A row at `off`
-    stamps nothing."""
+    and the crossing mark (`limit_mark`) when it recycles at its limit: a `compact`
+    launch always, a `relaunch` launch only where it is told it may recycle itself
+    (`selfrecycle.missing` with `told`): its arm would be accepted and it warns at a mark.
+    A row at `off` stamps nothing."""
     env: dict[str, str] = {}
     if values.get("keep_warm") == "on":
         env[KEEP_WARM_ENV] = "on"
     if values.get("recycle_on_expiry") in ("clear", "compact"):
         env[RECYCLE_ON_EXPIRY_ENV] = str(values["recycle_on_expiry"])
-    if values.get("recycle_at_limit") in ("relaunch", "compact"):
+    at_limit = values.get("recycle_at_limit")
+    if at_limit == "compact" or relaunch_holds(values):
         _stamp(env, "usage", 1, "CROSSING_AT_ENV", limit_mark(values))
     return env
+
+
+def relaunch_holds(values: Mapping[str, object]) -> bool:
+    """Whether a launch of `values` (its `harness`, `target`, `cwd` and the rest, as the
+    composer has them) is set to `recycle_at_limit = relaunch`, can recycle itself and is
+    told it may at its warn-at mark, by `selfrecycle.missing` with `told`; a launch not yet
+    placed in a slot counts as in one when its target is a slot."""
+    from .. import selfrecycle
+
+    if values.get("recycle_at_limit") != "relaunch":
+        return False
+    target = values.get("target")
+    return selfrecycle.missing(
+        harness=str(values.get("harness") or "claude"), target=str(target or ""),
+        in_slot=target == "slot", cwd=str(values.get("cwd") or "") or None,
+        values=values, source=None, told=True) is None
 
 
 #: The mark a limit crossing falls back to when no other mark applies.
@@ -706,34 +725,18 @@ LIMIT_FALLBACK = "1x"
 
 def limit_mark(values: Mapping[str, object]) -> str:
     """The mark a launch that recycles at its limit is stamped to cross at, read when the
-    launch is composed: `limit_at` when it is a mark; else `warn_at` when it is one; else,
-    when `warn_at` is unset, usage's config `marks.default` when usage loads and that is a
-    mark, since usage warns an unstamped launch at it; else `LIMIT_FALLBACK` (`warn_at` is
-    `off`, or usage warns at none). So the recycle line comes with usage's warning."""
+    launch is composed. A `relaunch` launch crosses at its `warn_at`, the mark usage warns
+    it at, so the relaunch line rides on that warning; `relaunch_holds` has made sure it
+    is a mark. A `compact` launch crosses at `limit_at` when it is a mark; else `warn_at`
+    when it is one; else `LIMIT_FALLBACK` (`warn_at` is `off` or unset, and usage warns
+    the launch at no mark)."""
     marks = catalog.launcher()["limit_at"].values
+    if values.get("recycle_at_limit") == "relaunch" and values.get("warn_at") in marks:
+        return str(values["warn_at"])
     for name in ("limit_at", "warn_at"):
         if values.get(name) in marks:
             return str(values[name])
-    if not catalog.is_set(values.get("warn_at")):
-        default = usage_default_mark()
-        if default in marks:
-            return str(default)
     return LIMIT_FALLBACK
-
-
-def usage_default_mark() -> str | None:
-    """usage's config `marks.default`, the mark usage warns a launch at that stamps none;
-    None when usage is not installed or does not load, or its config can't be read."""
-    if not modules.available("usage"):
-        return None
-    found = modules.load("usage", interface=1)
-    if not found.ok:
-        return None
-    try:
-        value = config.load("usage", config.schema_for(found))["marks.default"]
-    except Exception:  # noqa: BLE001  (a config usage can't read warns at none)
-        return None
-    return value if isinstance(value, str) else None
 
 
 def stamps(request_id: str, *, turns: bool = False, additions: Additions | None = None,
@@ -921,7 +924,7 @@ __all__ = ["BASE_NAMES", "BASE_PREFIXES", "CODEX_KEEP", "COMMANDS", "CREDENTIAL"
            "director_words", "encode",
            "env_class", "child_env", "first_turn", "headless_words", "identity_block",
            "LIMIT_FALLBACK", "limit_mark", "locator", "no_credentials", "option_stamps",
-           "prompt_path", "read_settings", "usage_default_mark",
+           "prompt_path", "read_settings", "relaunch_holds",
            "replay_env", "scratch_dir", "scratch_name", "scratch_root",
            "scratch_root_problem", "scrub", "seat_text", "settings_file", "settings_path",
            "settings_value", "short_env",
