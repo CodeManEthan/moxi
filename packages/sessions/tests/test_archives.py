@@ -282,7 +282,9 @@ def test_an_absent_live_root_lists_as_absent_and_its_archives_are_listed(home):
     assert listings[1].ok and ids(listings[1]) == [TWO]
 
 
-@pytest.mark.skipif(os.geteuid() == 0, reason="root lists a folder whatever its mode")
+@pytest.mark.skipif(os.name != "posix" or os.geteuid() == 0,
+                    reason="Windows has no POSIX modes to take a read away with, "
+                           "and root lists a folder whatever its mode")
 def test_a_live_root_that_cant_be_listed_lists_no_archive(home, spawned):
     session(arch(home, "claude", 1), "claude", TWO)
     root = live(home, "claude")
@@ -299,7 +301,9 @@ def test_a_live_root_that_cant_be_listed_lists_no_archive(home, spawned):
 
 # --- what a listing records ---------------------------------------------------------------
 
-@pytest.mark.skipif(os.geteuid() == 0, reason="root lists a folder whatever its mode")
+@pytest.mark.skipif(os.name != "posix" or os.geteuid() == 0,
+                    reason="Windows has no POSIX modes to take a read away with, "
+                           "and root lists a folder whatever its mode")
 def test_corpus_records_a_subdir_below_the_top_it_cant_list(home):
     session(arch(home, "claude", 1), "claude", TWO)
     project = next(arch(home, "claude", 1).iterdir())

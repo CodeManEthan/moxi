@@ -22,8 +22,9 @@ from moxi_sessions.testing.codex import spawn_meta
 NOW = START + 600.0
 HOUR = 3600.0
 
-not_root = pytest.mark.skipif(os.geteuid() == 0,
-                              reason="root reads a folder without permission")
+not_root = pytest.mark.skipif(os.name != "posix" or os.geteuid() == 0,
+                              reason="Windows has no POSIX modes to take a read away with, "
+                                     "and root reads a folder without permission")
 
 
 def sid(n: int) -> str:

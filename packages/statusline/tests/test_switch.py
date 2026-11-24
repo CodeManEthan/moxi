@@ -110,7 +110,8 @@ def test_switch_with_no_settings_file_makes_one_private():
     act = switch.switch(None, by="test")
     assert act.ok
     assert settings()["statusLine"]["command"] == here()
-    assert stat.S_IMODE(settings_file().stat().st_mode) == 0o600
+    if os.name == "posix":  # Windows has no mode bits
+        assert stat.S_IMODE(settings_file().stat().st_mode) == 0o600
     assert not config_file().exists()
 
 
@@ -161,7 +162,8 @@ def test_the_files_mode_key_order_and_indent_are_kept():
     settings_file().chmod(0o644)
     assert switch.switch(None, by="test").ok
     text = settings_file().read_text()
-    assert stat.S_IMODE(settings_file().stat().st_mode) == 0o644
+    if os.name == "posix":  # Windows has no mode bits
+        assert stat.S_IMODE(settings_file().stat().st_mode) == 0o644
     assert list(json.loads(text)) == ["z", "statusLine", "a"]
     assert text.splitlines()[1].startswith('    "z"')
 
@@ -183,7 +185,8 @@ def test_a_backup_holds_the_old_bytes_and_no_lock_file_is_left():
     assert switch.switch(None, by="test").ok
     found = backups()
     assert len(found) == 1 and found[0].read_bytes() == raw
-    assert stat.S_IMODE(found[0].stat().st_mode) == 0o600
+    if os.name == "posix":  # Windows has no mode bits
+        assert stat.S_IMODE(found[0].stat().st_mode) == 0o600
     assert os.listdir(settings_file().parent) == ["settings.json"]
 
 

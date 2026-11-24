@@ -304,8 +304,9 @@ def test_a_harness_that_is_not_on_the_machine_has_no_sessions(roots, stand_in, t
     assert "roots" not in answer
 
 
-not_root = pytest.mark.skipif(os.geteuid() == 0,
-                              reason="root reads a folder or file without permission")
+not_root = pytest.mark.skipif(os.name != "posix" or os.geteuid() == 0,
+                              reason="Windows has no POSIX modes to take a read away with, "
+                                     "and root reads a folder or file without permission")
 TWO = {"/work/moxi": "moxi", "/work/notes": "notes"}
 
 

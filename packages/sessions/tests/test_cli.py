@@ -438,7 +438,9 @@ def test_list_names_a_default_root_that_exists_and_cannot_be_read(listed, capsys
     assert f"codex: {sessions} could not be listed" in err
 
 
-@pytest.mark.skipif(os.geteuid() == 0, reason="root lists a folder without permission")
+@pytest.mark.skipif(os.name != "posix" or os.geteuid() == 0,
+                    reason="Windows has no POSIX modes to take a read away with, "
+                           "and root lists a folder without permission")
 def test_list_says_how_many_parts_of_a_root_it_could_not_list(listed, capsys):
     claude_session(listed, 1, time.time() - HOUR)
     unlisted = listed / ".claude" / "projects" / "-work-proj-c"

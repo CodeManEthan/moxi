@@ -22,6 +22,7 @@ from moxi_sessions.testing import ClaudeTranscript, CodexRollout, OpenCodeDb
 
 from conftest import write_config
 from test_page import LB, ROUTES, get, read, refused
+from test_lists import NO_TZSET, in_utc
 
 HOUR = 3600.0
 DAY = 24 * HOUR
@@ -39,6 +40,13 @@ def tid(n: int) -> str:
 @pytest.fixture(autouse=True)
 def fresh_catalog():
     """Each test meets a page server that has read nothing, in UTC."""
+    if not hasattr(time, "tzset"):
+        if not in_utc():
+            pytest.skip(NO_TZSET)
+        catalog_module.reset()
+        yield
+        catalog_module.reset()
+        return
     before = os.environ.get("TZ")
     os.environ["TZ"] = "UTC"
     time.tzset()
@@ -338,7 +346,9 @@ def test_a_default_root_that_exists_and_cannot_be_read_is_named(roots):
     assert [h["harness"] for h in answer["harnesses"]] == ["claude", "codex"]
 
 
-@pytest.mark.skipif(os.geteuid() == 0, reason="root lists a folder without permission")
+@pytest.mark.skipif(os.name != "posix" or os.geteuid() == 0,
+                    reason="Windows has no POSIX modes to take a read away with, "
+                           "and root lists a folder without permission")
 def test_parts_that_could_not_be_listed_are_said_and_a_count_not_read_is_null(roots):
     now = time.time()
     claude(roots, 1, now - 600)

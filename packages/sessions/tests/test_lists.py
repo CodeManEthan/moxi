@@ -40,7 +40,21 @@ def tid(n: int) -> str:
     return f"0190c000-0000-7000-8000-{n:012x}"
 
 
+#: Why a test that needs another local zone skips where Python can't move it.
+NO_TZSET = ("Windows: time.tzset is POSIX-only, so a test can't move the local zone there; "
+            "these run there only where the zone already is UTC")
+
+
+def in_utc() -> bool:
+    """Whether this process's local time is UTC (winter and summer alike)."""
+    return all(time.localtime(t)[:6] == time.gmtime(t)[:6] for t in (0, 15_552_000))
+
+
 def set_zone(zone: str | None) -> None:
+    if not hasattr(time, "tzset"):
+        if zone != "UTC" or not in_utc():
+            pytest.skip(NO_TZSET)
+        return
     if zone is None:
         os.environ.pop("TZ", None)
     else:
@@ -55,7 +69,8 @@ def zone():
     before = os.environ.get("TZ")
     set_zone("UTC")
     yield set_zone
-    set_zone(before)
+    if hasattr(time, "tzset"):
+        set_zone(before)
 
 
 @pytest.fixture
@@ -927,8 +942,9 @@ def test_a_root_that_failed_has_no_count_and_no_zero(roots, tmp_path):
     assert answer["unreadable"] is None
 
 
-not_root = pytest.mark.skipif(os.geteuid() == 0,
-                              reason="root lists a folder without permission")
+not_root = pytest.mark.skipif(os.name != "posix" or os.geteuid() == 0,
+                              reason="Windows has no POSIX modes to take a read away with, "
+                                     "and root lists a folder without permission")
 
 
 @pytest.fixture

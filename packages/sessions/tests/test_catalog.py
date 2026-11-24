@@ -281,7 +281,9 @@ def test_a_default_root_that_exists_and_cannot_be_read_is_a_failure(home):
     assert gathered.listed == ()
 
 
-@pytest.mark.skipif(os.geteuid() == 0, reason="root reads a folder without permission")
+@pytest.mark.skipif(os.name != "posix" or os.geteuid() == 0,
+                    reason="Windows has no POSIX modes to take a read away with, "
+                           "and root reads a folder without permission")
 def test_a_default_root_without_permission_is_a_failure(home):
     locked = home / ".codex" / "sessions"
     locked.mkdir(parents=True)
@@ -295,8 +297,9 @@ def test_a_default_root_without_permission_is_a_failure(home):
     assert failure.harness == CODEX and "unreadable" in failure.reason
 
 
-not_root = pytest.mark.skipif(os.geteuid() == 0,
-                              reason="root lists a folder without permission")
+not_root = pytest.mark.skipif(os.name != "posix" or os.geteuid() == 0,
+                              reason="Windows has no POSIX modes to take a read away with, "
+                                     "and root lists a folder without permission")
 
 
 @pytest.fixture

@@ -93,8 +93,9 @@ def test_a_root_that_is_not_a_dir_warns(home):
     assert row.state == "warn" and "not a directory" in row.detail
 
 
-@pytest.mark.skipif(hasattr(os, "geteuid") and os.geteuid() == 0,
-                    reason="permission bits do not hold for root")
+@pytest.mark.skipif(os.name != "posix" or os.geteuid() == 0,
+                    reason="Windows has no POSIX modes to take a read away with, and "
+                           "permission bits do not hold for root")
 def test_a_root_that_cannot_be_listed_warns(home):
     root = home / ".claude" / "projects"
     root.mkdir(parents=True)

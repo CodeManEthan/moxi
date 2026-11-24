@@ -25,8 +25,9 @@ THREAD = "0190c000-0000-7000-8000-0000000c0de1"
 THREAD_B = "0190c000-0000-7000-8000-0000000c0de2"
 
 needs_permissions = pytest.mark.skipif(
-    hasattr(os, "geteuid") and os.geteuid() == 0,
-    reason="permission bits do not hold for root")
+    os.name != "posix" or os.geteuid() == 0,
+    reason="Windows has no POSIX modes to take a read away with, and permission bits do "
+           "not hold for root")
 
 
 @pytest.fixture

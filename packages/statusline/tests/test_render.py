@@ -127,7 +127,9 @@ def test_a_missing_config_file_prints_config_question_mark(tmp_path):
     assert "gone.toml" in err
 
 
-@pytest.mark.skipif(os.geteuid() == 0, reason="root reads any file")
+@pytest.mark.skipif(os.name != "posix" or os.geteuid() == 0,
+                    reason="Windows has no POSIX modes to take a read away with, "
+                           "and root reads any file")
 def test_an_unreadable_config_file_prints_config_question_mark(tmp_path):
     draft = tmp_path / "locked.toml"
     draft.write_text('show = ["model"]\n')

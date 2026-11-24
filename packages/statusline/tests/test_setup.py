@@ -179,7 +179,8 @@ def test_unreadable_settings_exit_1_and_change_nothing():
 def test_the_record_is_private_and_names_the_answer_and_time():
     setup.record("keep")
     path = setup.asked_path()
-    assert stat.S_IMODE(os.stat(path).st_mode) == 0o600
+    if os.name == "posix":  # Windows has no mode bits
+        assert stat.S_IMODE(os.stat(path).st_mode) == 0o600
     data = json.loads(open(path).read())
     assert data["answer"] == "keep" and data["at"].endswith("Z")
     with pytest.raises(ValueError):
