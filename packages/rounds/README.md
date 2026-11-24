@@ -1032,9 +1032,9 @@ split is done.
 
 **Main afterwards.** The target's head always gets a full run, and the queue cancels
 none. Each pass the lander reads the full run at the head, by the workflows not marked
-`reads_candidates` alone, and leaves out every run whose id a batch's read recorded: a
-candidate's run is the candidate's, never main's, even where it was a full run (no
-workflow marked) or an older `green` or `red` named it. A head with no run is pushed, forced, to the
+`reads_candidates` alone, so a candidate's scoped run at the same commit never counts
+for it; a head whose candidate's run was a full run (no workflow marked) needs nothing
+more, and `queue` names that run as the candidate's. A head with no run is pushed, forced, to the
 target's own `ci` ref (`ci/main` for moxi), but not while a run pushed there earlier is
 still going: when that ends it is read, and then the newest head is pushed. A push that
 shows no run after ten minutes is made once more; after a second the head is given up,
@@ -1074,7 +1074,8 @@ said. Without comms nothing is sent, and `next` and `queue` are where the news s
 `moxi rounds queue [--repo KEY]` shows each queue project's queue: whether a lander
 runs, a pause and its reason, each running batch and its CI reading (a run still
 running is named), the members still in the queue in the order they are taken, the
-target's last full run, the last landing with its candidate's run, and the messages no
+target's last full run (with the ref of the candidate whose run it was, where it was
+one), the last landing with its candidate's run, and the messages no
 name received, each send named, with a fix for a name comms has never seen bound and for
 a refused credential. `--resume` lifts a pause.
 

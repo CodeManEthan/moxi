@@ -369,15 +369,6 @@ def test_read_runs_names_runs_with_no_url():
     assert [one["databaseId"] for one in runs] == [7, 8]
 
 
-def test_read_runs_leaves_out_the_runs_it_is_told_not_to_read():
-    older = run(databaseId=7, createdAt="2026-11-01T09:00:00Z")
-    found = whole_runs(older, run(databaseId=8, conclusion="failure"))
-    reading, runs = ci.read_runs(found, values={"tip": TIP}, cwd=None, not_runs=("8",))
-    assert [one["databaseId"] for one in runs] == [7]
-    assert reading.workflows[0]["reading"] == ci.GREEN
-    assert reading.workflows[1]["reading"] == ci.ABSENT
-
-
 @pytest.mark.parametrize("second", [
     {"conclusion": "cancelled"},
     {"conclusion": "failure"},

@@ -40,11 +40,10 @@
   while other jobs of the run still go. A batch or head `read` event held pending names
   the runs still going in `running`, and the lander's log and `moxi rounds queue` say
   the run is still running.
-- Main's full run is never a candidate's run: the lander leaves out every run whose id a
-  batch's read recorded when it reads the target's head, and `green` and `red` events
-  that named a candidate's run, older ones included, no longer count as main's. With no
-  `ci.ref`, a head that shows no run for ten minutes is given up (`no ref`) and the
-  director told. `moxi rounds queue` names the last landing and its candidate's run.
+- With no `ci.ref`, a head that shows no run of the full workflows for ten minutes is
+  given up (`no ref`) and the director told, so the lander can exit. `moxi rounds
+  queue` names the last landing and its candidate's run, and where main's last full run
+  was a candidate's run of the full workflows, says so with the ref it was pushed to.
 - The lander tells a member's builder only while comms reads the builder's name as held
   by a live session; a builder passed over is neither sent to nor recorded. A member's
   notice that no name received goes once to the project's director, saying who it could

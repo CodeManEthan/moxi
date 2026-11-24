@@ -40,9 +40,7 @@ job's log with no `picked:` line) is a failed read (`ReadFailed`), and nothing i
 path; a path none names reads `absent`. Of the `status` objects whose
 `workflowDatabaseId` is that id and whose `headSha` is the tip, the newest by
 `createdAt`, the first listed on a tie, is the workflow's run (`run_of`); with none the
-workflow reads `absent`. The queue's read of the target's full run leaves out the runs
-its candidates were read by (`read_runs`'s `not_runs`), as if `status` had not printed
-them. A workflow read whole reads its run: `green` (completed, with success),
+workflow reads `absent`. A workflow read whole reads its run: `green` (completed, with success),
 `pending` (not completed) or `red` (completed, with any other conclusion). A workflow
 read by its jobs reads each job it names from the first of the run's jobs with exactly
 that name, in the same words, and by each `matrix` pattern every other job whose name the
@@ -73,7 +71,7 @@ import json
 import re
 import shlex
 import subprocess
-from collections.abc import Callable, Collection, Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 
 from moxi import proc
@@ -487,19 +485,14 @@ def read(found: Declared, *, values: Mapping[str, str], cwd) -> Reading:
 
 
 def read_runs(found: Declared, *, values: Mapping[str, str], cwd,
-              is_candidate: bool = False,
-              not_runs: Collection[str] = ()) -> tuple[Reading, tuple[dict, ...]]:
+              is_candidate: bool = False) -> tuple[Reading, tuple[dict, ...]]:
     """`read`'s reading, by the candidate's workflows with `is_candidate`
     (`Declared.candidate_workflows`), and the runs at the tip that each workflow read
     (`run_of`: the newest of its file's runs there), as the `status` command printed
-    them. A run whose `databaseId` is one of `not_runs` is left out before the reading,
-    as if `status` had not printed it."""
+    them."""
     status = tuple(checking.fill(found.status, values))
     ids = tuple(checking.fill(found.ids, values))
-    left_out = {str(one) for one in not_runs}
-    runs = [run for run in _runs(status, _json(status, cwd=cwd,
-                                               timeout_s=found.status_timeout_s))
-            if run.get("databaseId") is None or str(run["databaseId"]) not in left_out]
+    runs = _runs(status, _json(status, cwd=cwd, timeout_s=found.status_timeout_s))
     by_path = _ids(ids, _json(ids, cwd=cwd, timeout_s=found.status_timeout_s))
     jobs_argvs: list[tuple[str, ...]] = []
 

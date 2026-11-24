@@ -30,11 +30,7 @@ class FakeCi:
     its run 101, `main_word` for any other, by run 201, `words` by commit, and
     `landed_word`, when set, for the target's head as `main_of()` gives it, by run 202;
     `read_full`, the target's full run, reads `full_word` by run 303 where it is set and
-    else the same, and leaves out the runs its `not_runs` names: a commit whose run is
-    left out then reads by run 201, the target's own full run there, while
-    `full_beside` holds, as it does unless set False, or once the commit is pushed to a
-    ref that is not a candidate's, and else reads absent; each commit it reads is kept
-    in `full_reads`), what a push says
+    else the same, each commit it reads kept in `full_reads`), what a push says
     (`refusal`, None for a push that goes), the local run's exit code (`local_code`, or
     `local_codes` by commit), and a red run's failures (`failed`, or `failed_at` by
     commit), each commit they are read at kept in `failure_reads`. While `going`, when
@@ -60,7 +56,6 @@ class FakeCi:
         self.full_reads: list[str] = []
         self.full_word: str | None = None
         self.failure_reads: list[str] = []
-        self.full_beside = True
         self.going = None
 
     def push(self, place, commit, ref):
@@ -89,16 +84,11 @@ class FakeCi:
             return queue_ci.Read(self.words[commit], runs)
         return queue_ci.Read(self.word if candidate else self.main_word, runs)
 
-    def read_full(self, place, commit, *, not_runs=()):
+    def read_full(self, place, commit):
         self.full_reads.append(commit)
-        read = (queue_ci.Read(self.full_word, ("303",)) if self.full_word is not None
-                else FakeCi.read(self, place, commit))
-        if not set(read.runs) & set(not_runs):
-            return read
-        if self.full_beside or any(pushed == commit and "queue-" not in ref
-                                   for pushed, ref in self.pushes):
-            return queue_ci.Read(self.words.get(commit, self.main_word), ("201",))
-        return queue_ci.Read(ci.ABSENT)
+        if self.full_word is not None:
+            return queue_ci.Read(self.full_word, ("303",))
+        return FakeCi.read(self, place, commit)
 
     def failures(self, place, commit, read):
         self.failure_reads.append(commit)
@@ -692,7 +682,7 @@ class Runs:
                      for name in ("linux", "web")]
         self.jobs.append({"name": "macos", "status": "in_progress", "conclusion": ""})
 
-    def read_runs(self, found, *, values, cwd, is_candidate=False, not_runs=()):
+    def read_runs(self, found, *, values, cwd, is_candidate=False):
         run = {"databaseId": self.id, "workflowDatabaseId": 11, "headSha": values["tip"],
                "status": self.status, "conclusion": self.conclusion,
                "createdAt": "2026-11-01T10:00:00Z"}

@@ -1,8 +1,8 @@
 """What `moxi rounds queue` says of a repo's queue, as lines: whether a lander runs, a
 pause and its reason, a wait on something outside the queue, each running batch and its
 CI reading (two or more while a red batch is split) or the CI run it waits on to end,
-each member still in the queue in the order it is taken, the target's last full run, the
-newest landing and its candidate's run, a full run still running at the newest head
+each member still in the queue in the order it is taken, the target's last full run
+(and, where a batch was read by it, the candidate's ref), the newest landing and its candidate's run, a full run still running at the newest head
 read, and the messages the lander could not send.
 
 Everything said is read from the queue file (`queue_file.read`); nothing is written.
@@ -53,7 +53,8 @@ def lines(queue: queue_file.Queue, *, lander_runs: bool,
     if queue.mains:
         last = queue.mains[-1]
         said.append(f"main's last full run: {last['event']} at "
-                    f"{str(last.get('head'))[:12]}, run {last.get('run')}")
+                    f"{str(last.get('head'))[:12]}, run {last.get('run')}"
+                    + candidates_run(queue, last))
     landing = landing_line(queue)
     if landing is not None:
         said.append(landing)
@@ -74,6 +75,20 @@ def lines(queue: queue_file.Queue, *, lander_runs: bool,
             said.append(f"main's full run at {str(one.get('head'))[:12]} never showed, "
                         "and the ci setting names no ref to push it to")
     return said + told_lines(queue)
+
+
+def candidates_run(queue: queue_file.Queue, main: dict) -> str:
+    """Where the `red` or `green` event `main` names a run a batch was read by, the
+    words that say so, with the ref the batch was pushed to; else nothing."""
+    batch_id = next((queue.candidate_runs[str(one)] for one in main.get("run") or ()
+                     if str(one) in queue.candidate_runs), None)
+    if batch_id is None:
+        return ""
+    batch = queue.batch(batch_id)
+    pushed = next((one for one in (batch.runs if batch is not None else [])
+                   if one.get("kind") == "pushed" and one.get("ref")), None)
+    where = (pushed or {}).get("ref") or (batch.branch if batch is not None else batch_id)
+    return f", the candidate's run on {where}"
 
 
 def landing_line(queue: queue_file.Queue) -> str | None:
@@ -176,4 +191,5 @@ def _fix(record: dict) -> str | None:
     return None
 
 
-__all__ = ["UNDELIVERED_SHOWN", "lines", "landing_line", "spell_line", "told_lines"]
+__all__ = ["UNDELIVERED_SHOWN", "lines", "candidates_run", "landing_line", "spell_line",
+           "told_lines"]

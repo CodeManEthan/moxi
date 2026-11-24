@@ -9222,7 +9222,7 @@ rounds	packages/rounds/src/moxi_rounds/batching.py	self.drop_branch(batch.branch
 rounds	packages/rounds/src/moxi_rounds/batching.py	self.place.parent.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
 rounds	packages/rounds/src/moxi_rounds/batching.py	str(batch.candidate), ok=(0, 1, 128))	keep	ok	ok
 rounds	packages/rounds/src/moxi_rounds/batching.py	values = {"round": f"queue/{self.repo}", "stage": batch.id, "repo": self.repo,	keep	round	round
-rounds	packages/rounds/src/moxi_rounds/batching.py	if self.teller.comms is None or any(	keep	any	any
+rounds	packages/rounds/src/moxi_rounds/batching.py	if self.teller.comms is None or not tried or any(	keep	any	any
 rounds	packages/rounds/src/moxi_rounds/board.py	"closed": one.state.status != states.OPEN,	keep	closed	closed
 rounds	packages/rounds/src/moxi_rounds/board.py	"opened": opened.get("at"), "standing": str(versions.standing(state)),	keep	opened	opened
 rounds	packages/rounds/src/moxi_rounds/board.py	"strip", "tenth_act", "EVENT_STEPS", "event_step", "events_of", "record",	keep	record	record
@@ -10023,14 +10023,13 @@ rounds	packages/rounds/src/moxi_rounds/questions.py	return f"{letter}{max(number
 rounds	packages/rounds/src/moxi_rounds/questions.py	return set(old) <= set(new)	keep	set	set
 rounds	packages/rounds/src/moxi_rounds/queue_ci.py	if any(run.get("conclusion") == CANCELLED for run in runs):	keep	any	any
 rounds	packages/rounds/src/moxi_rounds/queue_ci.py	return Local(argv, code, round(time.monotonic() - began, 1), str(self.local_log))	keep	round	round
-rounds	packages/rounds/src/moxi_rounds/queue_ci.py	elif any(run.get("conclusion") == CANCELLED for run in runs):	keep	any	any
+rounds	packages/rounds/src/moxi_rounds/queue_ci.py	if any(run.get("conclusion") == CANCELLED for run in runs):	keep	any	any
 rounds	packages/rounds/src/moxi_rounds/queue_file.py	for index, one in enumerate(self.queued(), start=1):	keep	start	start
 rounds	packages/rounds/src/moxi_rounds/queue_file.py	for line, event in enumerate(events, start=1):	keep	start	start
 rounds	packages/rounds/src/moxi_rounds/queue_file.py	key = (event.get("round"), event.get("stage"))	keep	round	round
 rounds	packages/rounds/src/moxi_rounds/queue_file.py	members=tuple((str(one["round"]), str(one["stage"]), str(one["tip"]))	keep	round	round
 rounds	packages/rounds/src/moxi_rounds/queue_file.py	name=str(event.get("round")), stage=str(event.get("stage")),	keep	round	round
 rounds	packages/rounds/src/moxi_rounds/queue_file.py	path.parent.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
-rounds	packages/rounds/src/moxi_rounds/queue_file.py	return any(str(one) in queue.candidate_runs for one in event.get("run") or ())	keep	any	any
 rounds	packages/rounds/src/moxi_rounds/queue_log.py	without another member) writes `queue.requeued` for it, so the gates, `next` and `show`	keep	show	show
 rounds	packages/rounds/src/moxi_rounds/queue_view.py	for position, member in enumerate(members, start=1):	keep	start	start
 rounds	packages/rounds/src/moxi_rounds/queue_view.py	return (f"last landing: {landed.get('round')} {landed.get('stage')} at "	keep	round	round
@@ -10642,6 +10641,9 @@ rounds	packages/rounds/tests/test_check.py	actor="planner")	use	actor=	by=
 rounds	packages/rounds/tests/test_check.py	assert cli.main(["projects", "set", "proj-a", "--notes-root",	keep	set	set
 rounds	packages/rounds/tests/test_check.py	opening.open_round(ROUND, description="a placeholder round", actor="planner",	use	actor=	by=
 rounds	packages/rounds/tests/test_check.py	proc.wait(timeout=PROC_WAIT_S)	keep	timeout	timeout
+rounds	packages/rounds/tests/test_check.py	ahead = _ticket({**check_line.me(), "round": "proj-a/ahead"})	keep	round	round
+rounds	packages/rounds/tests/test_check.py	assert behind.wait(timeout=PROC_WAIT_S) == 0	keep	timeout	timeout
+rounds	packages/rounds/tests/test_check.py	path = _ticket({**check_line.me(), "round": "proj-a/x"})	keep	round	round
 rounds	packages/rounds/tests/test_check.py	assert proc.wait(timeout=PROC_WAIT_S) == 0	keep	timeout	timeout
 rounds	packages/rounds/tests/test_check.py	killed.wait(timeout=PROC_WAIT_S)	keep	timeout	timeout
 rounds	packages/rounds/tests/test_check.py	assert after.wait(timeout=PROC_WAIT_S) == 0	keep	timeout	timeout
@@ -11507,8 +11509,6 @@ rounds	packages/rounds/tests/test_queue_batch.py	return {"event": queue_file.JOI
 rounds	packages/rounds/tests/test_queue_batch.py	queue_file.append("proj-a", {"event": queue_file.LEFT, "round": OTHER, "stage": "B1",	keep	round	round
 rounds	packages/rounds/tests/test_queue_batch.py	for event in ({"event": queue_file.LEFT, "round": ROUND, "stage": "B1", "tip": old,	keep	round	round
 rounds	packages/rounds/tests/test_queue_batch.py	{"event": queue_file.JOIN, "round": ROUND, "stage": "B1", "tip": new,	keep	round	round
-rounds	packages/rounds/tests/test_queue_batch.py	if not set(read.runs) & set(not_runs):	keep	set	set
-rounds	packages/rounds/tests/test_queue_batch.py	if self.full_beside or any(pushed == commit and "queue-" not in ref	keep	any	any
 rounds	packages/rounds/tests/test_queue_batch.py	assert len(read_events()) == 1 and not any("still running" in line for line in said)	keep	any	any
 rounds	packages/rounds/tests/test_queue_batch.py	"members": [{"round": ROUND, "stage": "B1", "tip": "t" * 40}]}	keep	round	round
 rounds	packages/rounds/tests/test_queue_batch.py	assert not any("still running" in line for line in said)	keep	any	any
@@ -11521,7 +11521,6 @@ rounds	packages/rounds/tests/test_queue_main.py	assert [one["round"] for one in 
 rounds	packages/rounds/tests/test_queue_main.py	assert any("never started" in line for line in queue_view.lines(queue(),	keep	any	any
 rounds	packages/rounds/tests/test_queue_main.py	assert any("past failures main has too" in text for text in comms.to("lead-a"))	keep	any	any
 rounds	packages/rounds/tests/test_queue_main.py	assert not any("red" in text for text in comms.to("lead-a"))	keep	any	any
-rounds	packages/rounds/tests/test_queue_main.py	assert not any(one.get("run") == ["101"] for one in queue().events	keep	any	any
 rounds	packages/rounds/tests/test_queue_main.py	"members": [{"round": ROUND, "stage": "B1", "tip": "t" * 40}]},	keep	round	round
 rounds	packages/rounds/tests/test_queue_main.py	{"event": queue_file.LANDED, "round": ROUND, "stage": "B1", "tip": "t" * 40,	keep	round	round
 rounds	packages/rounds/tests/test_queue_telling.py	assert any("ejected from proj-a's queue: conflict with" in text	keep	any	any

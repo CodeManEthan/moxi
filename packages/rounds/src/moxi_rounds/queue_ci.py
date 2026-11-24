@@ -18,10 +18,10 @@ takes any object with the same methods, so a test gives it a stand-in.
   `pending` while any run it read has not completed (their ids in `running`), so a
   failed job of a run that goes on reads no red; a green reading of the jobs it reads
   stands at once, while other jobs of the run still go.
-  `read_full(place, commit, not_runs=...)` reads the target's full run there the same
-  way, by the full run's workflows (`ci.Declared.full_workflows`), so a candidate's
-  scoped run at the same commit never stands in for it, and leaves out the runs
-  `not_runs` names, the runs candidates were read by.
+  `read_full(place, commit)` reads the target's full run there the same way, by the
+  full run's workflows (`ci.Declared.full_workflows`), so a candidate's scoped run at the
+  same commit never stands in for it, while a candidate's run of those workflows there
+  is that full run.
 - `rerun(place, runs, failed=...)` reruns each run, or only its failed jobs.
 - `failures(place, commit, read)` lists the failures of a red read's runs at `commit`
   (`failures.of_run`): each run's failed jobs by the setting's `jobs` command, of the
@@ -147,14 +147,12 @@ class QueueCi:
     def read(self, place: Path, commit: str) -> Read:
         return self._read(place, commit, is_candidate=True)
 
-    def read_full(self, place: Path, commit: str, *,
-                  not_runs: Sequence[str] = ()) -> Read:
-        return self._read(place, commit, is_candidate=False, not_runs=not_runs)
+    def read_full(self, place: Path, commit: str) -> Read:
+        return self._read(place, commit, is_candidate=False)
 
-    def _read(self, place: Path, commit: str, *, is_candidate: bool,
-              not_runs: Sequence[str] = ()) -> Read:
+    def _read(self, place: Path, commit: str, *, is_candidate: bool) -> Read:
         reading, runs = ci.read_runs(self.found, values={"tip": commit}, cwd=place,
-                                     is_candidate=is_candidate, not_runs=not_runs)
+                                     is_candidate=is_candidate)
         # A run with no id is still named, so it still holds the read at pending.
         going = tuple(str(run.get("databaseId", "unknown")) for run in runs
                       if run.get("status") != "completed")

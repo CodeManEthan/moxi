@@ -28,8 +28,8 @@ The kinds:
 - `paused`, `resumed`: the queue stopped taking members that are not urgent, with its
   `reason`, and started again.
 - `red`, `green`: a full run on the target at `head` as the lander read it, with its
-  `run` (never a run a candidate was read by: an older event naming one is left out of
-  `Queue.mains`), the landings it `covers` and, for red, its `failures` and its red
+  `run` (a candidate's, where a batch read the full workflows at the commit that
+  landed), the landings it `covers` and, for red, its `failures` and its red
   spell: the head the spell started at (`since`), main's `owner` and the build that
   makes it the owner (`owning`), and `starts` on the run that starts the spell.
 - `told`: a message the lander sent or could not send, with what comms reported.
@@ -171,9 +171,8 @@ class Queue:
     paused), the target's full runs read (`mains`, each a `red` or `green` event), what
     the lander did to them (`head_runs`, the `run` events with a `head`), the `told`
     events, the newest `waiting` event (None once a batch moved past it), every event
-    in order (`events`), and the ids of the runs a batch's `read` event recorded
-    (`candidate_runs`). A `red` or `green` event any of whose `run` ids is a
-    candidate's is not a full run of the target's, and `mains` leaves it out."""
+    in order (`events`), and the batch each run a batch's `read` event recorded was
+    read for, by the run's id (`candidate_runs`)."""
 
     repo: str
     members: dict[tuple[str, str], Member] = field(default_factory=dict)
@@ -184,7 +183,7 @@ class Queue:
     told: list[dict] = field(default_factory=list)
     waiting_on: dict | None = None
     events: list[dict] = field(default_factory=list)
-    candidate_runs: set[str] = field(default_factory=set)
+    candidate_runs: dict[str, str] = field(default_factory=dict)
 
     def member(self, name: str, stage: str) -> Member | None:
         return self.members.get((name, stage))
@@ -318,23 +317,18 @@ def _apply(queue: Queue, event: dict, line: int) -> None:
             batch.run = event
             batch.runs.append(event)
         if event.get("kind") == READ_KIND:
-            queue.candidate_runs.update(str(one) for one in event.get("runs") or ())
-            queue.mains[:] = [one for one in queue.mains if not _candidates(queue, one)]
+            queue.candidate_runs.update((str(one), str(event.get("batch")))
+                                        for one in event.get("runs") or ())
     elif kind == PAUSED:
         queue.paused = str(event.get("reason") or "paused")
     elif kind == RESUMED:
         queue.paused = None
     elif kind == WAITING:
         queue.waiting_on = event
-    elif kind in (RED, GREEN) and not _candidates(queue, event):
+    elif kind in (RED, GREEN):
         queue.mains.append(event)
     elif kind == TOLD:
         queue.told.append(event)
-
-
-def _candidates(queue: Queue, event: dict) -> bool:
-    """Whether the `red` or `green` event `event` names a run a candidate was read by."""
-    return any(str(one) in queue.candidate_runs for one in event.get("run") or ())
 
 
 def _landed_late(member: Member, event: dict) -> bool:

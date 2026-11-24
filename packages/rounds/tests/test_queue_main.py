@@ -43,61 +43,50 @@ def main_pushes(fake) -> list[str]:
 
 # -- the push and the read ---------------------------------------------------------------
 
-def test_mains_run_at_the_head_beside_the_candidates_is_read(
+def test_a_candidates_full_run_at_the_landed_head_is_mains_full_run(
         repo, ready, fake, lander_pass, with_ref):
     ready()
     landed(lander_pass)
     head = repo.rev("main")
-    # the candidate's run 101 is at this commit too; the target's own run 201 is read
+    # The candidate ran the full workflows at this very commit: no second run is owed.
     assert (queue().main_at(head)["event"], queue().main_at(head)["run"]) == (
-        queue_file.GREEN, ["201"])
+        queue_file.GREEN, ["101"])
     assert main_pushes(fake) == []
     assert lander.settled("proj-a", queue())
+    ref = next(ref for commit, ref in fake.pushes if commit == head)
+    assert (f"main's last full run: green at {head[:12]}, run ['101'], the candidate's "
+            f"run on {ref}") in queue_view.lines(queue(), lander_runs=False)
 
 
-def test_a_candidates_run_at_the_head_is_not_mains_full_run(
-        repo, ready, fake, lander_pass, with_ref):
-    ready()
-    fake.full_beside = False
-    landed(lander_pass)
-    head = repo.rev("main")
-    assert "101" in queue().candidate_runs
-    assert queue().main_at(head) is None
-    assert not any(one.get("run") == ["101"] for one in queue().events
-                   if one["event"] in (queue_file.GREEN, queue_file.RED))
-    assert main_pushes(fake) == [head]
-    assert not lander.settled("proj-a", queue())
-    lander_pass(60.0)
-    assert queue().main_at(head)["run"] == ["201"]
-    assert lander.settled("proj-a", queue())
-
-
-def test_an_old_green_naming_a_candidate_run_is_not_mains_last_full_run():
+def test_an_old_green_naming_a_candidates_run_counts_as_mains_and_says_so():
     old, kept = "o" * 40, "k" * 40
     events = [
         {"event": queue_file.GREEN, "head": kept, "run": ["7"]},
         {"event": queue_file.BATCH, "state": queue_file.BUILT, "id": "kkk-1", "n": 1,
          "main": kept, "branch": "queue-kkk-1", "candidate": old,
          "members": [{"round": ROUND, "stage": "B1", "tip": "t" * 40}]},
+        {"event": queue_file.RUN, "batch": "kkk-1", "kind": batching.PUSHED,
+         "ref": "ci/queue-kkk-1"},
         {"event": queue_file.RUN, "batch": "kkk-1", "kind": batching.READ,
          "reading": ci.GREEN, "runs": ["9"]},
         {"event": queue_file.GREEN, "head": old, "run": ["9"]},
     ]
     found = queue_file.fold("proj-a", events)
-    assert [one["head"] for one in found.mains] == [kept]
-    assert found.main_at(old) is None and found.main_at(kept)["run"] == ["7"]
+    assert [one["head"] for one in found.mains] == [kept, old]
+    assert found.main_at(old)["run"] == ["9"]
+    assert (f"main's last full run: green at {old[:12]}, run ['9'], the candidate's run "
+            "on ci/queue-kkk-1") in queue_view.lines(found, lander_runs=False)
+    found = queue_file.fold("proj-a", events[:1])
     assert f"main's last full run: green at {kept[:12]}, run ['7']" in queue_view.lines(
         found, lander_runs=False)
-    # a batch read recorded after the green leaves it out all the same
-    found = queue_file.fold("proj-a", [events[0], events[3], *events[1:3]])
-    assert [one["head"] for one in found.mains] == [kept]
 
 
 def test_a_head_with_no_ref_and_no_run_is_given_up(repo, ready, fake, lander_pass,
                                                     write_config, comms):
     write_config(config_text(table='director = "dir-a"'))
     ready()
-    fake.full_beside = False
+    lander_pass()
+    fake.full_word = ci.ABSENT
     landed(lander_pass)
     head = repo.rev("main")
     assert main_pushes(fake) == [] and not lander.settled("proj-a", queue())
