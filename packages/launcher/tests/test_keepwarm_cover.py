@@ -2,8 +2,8 @@
 `cover_off`, for one launch and one session id only, the newest event winning; `on` as the
 launch value or cover; the ask's first read under cover and without it; the ask under
 cover, through a stub comms: its signals, the cover's end only on lists read whole, the
-holds counted by the launch value alone, and the cap counted from the press; and the hold
-verbs, which keep to the launch value."""
+holds counted wherever keep-warm is on, cover included, and the cap counted from the press;
+and the hold verbs, which work wherever keep-warm is on."""
 
 from __future__ import annotations
 
@@ -199,29 +199,40 @@ def test_an_ask_about_a_session_id_the_cover_does_not_name_ends_off(conn):
     assert got.session.delivered == [] and got.runs == []
 
 
-# -- holds keep to the launch value ----------------------------------------------------------
+# -- holds work wherever keep-warm is on, cover included ------------------------------
+
+
+def test_every_hold_verb_works_on_a_launch_under_cover(conn):
+    off(conn)
+    covered(conn)
+    assert verb(keepwarm.hold, conn, "x").data["outcome"] == "opened"
+    assert [h["name"] for h in verb(keepwarm.holds, conn).data["holds"]] == ["x"]
+    assert verb(keepwarm.release, conn, "x").data["outcome"] == "released"
 
 
 @pytest.mark.parametrize("fn, args", [
     (keepwarm.hold, ("x",)), (keepwarm.release, ("x",)), (keepwarm.holds, ()),
 ])
-def test_every_hold_verb_is_refused_on_a_launch_with_cover_alone(conn, fn, args):
+def test_every_hold_verb_is_refused_where_the_cover_names_another_session_id(conn, fn,
+                                                                            args):
     off(conn)
-    covered(conn)
+    covered(conn, sid=NEW)
     with pytest.raises(relaunch.Refused) as refused:
         verb(fn, conn, *args)
     assert refused.value.code == "off" and refused.value.exit_code == codes.REFUSED
     assert conn.execute("SELECT count(*) FROM warm_holds").fetchone()[0] == 0
 
 
-def test_the_api_refuses_a_hold_on_a_launch_with_cover_alone(conn):
+def test_the_api_takes_a_hold_on_a_launch_under_cover_and_refuses_it_once_the_cover_ends(
+        conn):
     off(conn)
     covered(conn)
+    assert api.open_hold("r1", "x", conn=conn).new
+    assert [h.name for h in api.release_hold("r1", "x", conn=conn)] == ["x"]
+    keepwarm.cover_off(conn, row(conn), SID, "idle")
     with pytest.raises(relaunch.Refused) as refused:
         api.open_hold("r1", "x", conn=conn)
     assert refused.value.code == "off"
-    with pytest.raises(relaunch.Refused):
-        api.release_hold("r1", "x", conn=conn)
 
 
 # -- the ask under cover -----------------------------------------------------------------------
@@ -431,17 +442,26 @@ def test_an_installed_comms_that_does_not_load_keeps_the_cover_and_is_unreadable
 # -- holds under cover ------------------------------------------------------------------------
 
 
-def test_with_a_hold_and_nobody_at_work_the_cover_ends_and_the_hold_nudges_as_today(conn):
+def test_with_a_hold_and_nobody_at_work_the_cover_stays_and_the_hold_nudges(conn):
+    """An open hold is work out: it keeps the cover, and the count starts at the press."""
     store.open_hold(conn, "r1", "port-cache")
     nudged(conn, number=3, word="director")
     covered(conn)
     w = world(main=FakeSession())
     got = ask_in(conn, w)
     assert [name for name, _ in w.comms.calls] == ["owner", "roster", "session_of"]
-    assert offs(conn) == [{"state": "off", "why": "idle", "session_id": SID}]
+    assert offs(conn) == [] and keepwarm.cover(conn, row(conn), SID) is not None
     assert (got.verdict.outcome, got.verdict.word) == ("nudged", "director")
-    assert lines(got) == ["Keep-warm from launcher", "recheck holds",
-                          "Open holds: port-cache"]
+    assert lines(got) == ["Keep-warm from launcher", "reply warm"]
+
+
+def test_with_the_hold_released_and_nobody_at_work_the_cover_ends(conn):
+    store.open_hold(conn, "r1", "port-cache")
+    store.release_hold(conn, "r1", "port-cache")
+    covered(conn)
+    got = ask_in(conn, world(main=FakeSession()))
+    assert offs(conn) == [{"state": "off", "why": "idle", "session_id": SID}]
+    assert (got.verdict.outcome, got.verdict.word) == (None, "idle")
 
 
 def test_with_a_hold_and_a_directed_agent_at_work_both_are_named_and_the_cover_stays(conn):
@@ -465,7 +485,7 @@ def test_with_a_hold_and_comms_down_the_hold_nudges_and_the_cover_stays(conn):
     assert offs(conn) == [] and keepwarm.cover(conn, row(conn), SID) is not None
 
 
-def test_a_hold_in_the_chain_is_no_signal_for_a_launch_under_cover_alone(conn):
+def test_a_hold_in_the_chain_is_a_signal_for_a_headless_launch_under_cover(conn):
     store.open_hold(conn, "r1", "port-cache")
     conn.execute("UPDATE launches SET endpoint = NULL WHERE request_id = 'r1'")
     launched(conn, request_id="r2", session_id=NEW, relaunch_of="r1",
@@ -475,8 +495,11 @@ def test_a_hold_in_the_chain_is_no_signal_for_a_launch_under_cover_alone(conn):
     w = SimpleNamespace(main=main, comms=Comms(), turns=Turns({NEW: main}))
     verdict = keepwarm.ask(NEW, conn=conn, turns=w.turns, slots_api=FakeSlots(),
                            cache=FakeCache(), comms=w.comms, settings=SETTINGS)
-    assert (verdict.outcome, verdict.word) == (None, "idle")
-    assert main.delivered == [] and store.open_holds(conn, "r2") == ["port-cache"]
+    assert (verdict.outcome, verdict.word) == ("nudged", "director")
+    [(text, _)] = main.delivered
+    assert text.splitlines() == ["Keep-warm from launcher", "reply warm"]
+    assert store.open_holds(conn, "r2") == ["port-cache"]
+    assert keepwarm.cover(conn, row(conn, "r2"), NEW) is not None
 
 
 def test_without_cover_a_directed_agent_at_work_draws_a_director_nudge_naming_it(conn):

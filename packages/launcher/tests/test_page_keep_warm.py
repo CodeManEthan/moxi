@@ -17,7 +17,7 @@ from test_keepwarm import agent, me
 from test_page import _send, loopback, post, served
 from test_page_joiner import fresh, stop, until
 from test_page_waits import (ASKS, OFF, Cache, Turns, agents_case, joined, live, pressed,
-                             seeded, wired)
+                             seeded, subagent_nudges, wired)
 
 from moxi import aio
 from moxi_dev.testing import PROC_WAIT_S
@@ -418,6 +418,19 @@ def director(wired, *workers):
     sid = next(s for s in wired.turns.sessions if wired.comms.owners.get(s))
     wired.cache = Clock([sid], asks=ASKS)
     return sid
+
+
+def test_a_press_past_the_subagent_cap_with_an_agent_it_directs_at_work_is_answered(
+        wired, woken):
+    """The press reads the join the ask reads: under cover, with the subagent case's cap
+    spent since the press and a directed agent at work, the next ask nudges as a
+    director, so a second press is answered and writes nothing."""
+    sid = director(wired, ("coder@proj-a", live("x", turn_open=True)))
+    wired.turns.sessions[sid] = live(sid, entries=[agent("a1")])
+    assert press() is None and len(covers()) == 1
+    subagent_nudges(sid, 3)
+    assert press() is None
+    assert len(covers()) == 1 and joined()["covered"] is True
 
 
 def test_a_join_cut_short_with_nobody_found_is_unreadable(wired, monkeypatch, woken):

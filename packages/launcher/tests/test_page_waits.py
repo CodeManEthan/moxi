@@ -14,7 +14,7 @@ from types import SimpleNamespace
 
 import launcher_page_kit as kit
 import pytest
-from test_keepwarm import FakeSession, agent
+from test_keepwarm import FakeSession, agent, me
 from test_page_joiner import HERE, Skewed, fresh, one_pass
 
 from moxi_launcher import (cachetimers, catalog, first, joiner, keepwarm, settings, slots,
@@ -556,6 +556,54 @@ def test_a_director_is_coverable_at_the_director_cap_and_covered_once_pressed(wi
     pressed(sid)
     got = joined()
     assert got["covered"] is True and got["coverable"] is None
+
+
+def subagent_nudges(sid, count):
+    """`count` subagent nudges in a row on launch r1, the newest opening turn 4: the
+    subagent case's cap spent when `count` is 3."""
+    conn = store.connect()
+    try:
+        for number in range(4 - count, 4):
+            run = store.insert_run(conn, kind="keep-warm", mode="ask", request_id="r1",
+                                   session_id=sid, by="launcher", state="acting",
+                                   job=f"proc:{me()}", turn_number=number)
+            store.end_run(conn, run.run_id, "nudged", word=keepwarm.SUBAGENTS,
+                          turn_number=number + 1)
+    finally:
+        conn.close()
+
+
+def test_with_the_subagent_cap_spent_an_agent_it_directs_at_work_keeps_it_covered(wired):
+    """Home reads the join the ask reads: past the subagent case's cap the ask joins and
+    nudges as a director, so the row reads covered."""
+    sid, _ = agents_case(wired, ("coder@proj-a", live("x", turn_open=True)),
+                         values={"keep_warm": "on"})
+    wired.turns.sessions[sid] = live(sid, entries=[agent("a1")])
+    wired.cache = Cache([sid], asks=ASKS)
+    subagent_nudges(sid, 3)
+    got = joined()
+    assert got["waits"] == {"kind": "subagents", "count": 1}
+    assert got["covered"] is True and got["coverable"] is None
+    assert [name for name, _ in wired.comms.calls][:1] == ["owner"]
+
+
+def test_under_the_subagent_cap_home_makes_no_join_as_the_ask_makes_none(wired):
+    sid, _ = agents_case(wired, ("coder@proj-a", live("x", turn_open=True)),
+                         values={"keep_warm": "on"})
+    wired.turns.sessions[sid] = live(sid, entries=[agent("a1")])
+    wired.cache = Cache([sid], asks=ASKS)
+    subagent_nudges(sid, 2)
+    got = joined()
+    assert got["covered"] is True and wired.comms.calls == []
+
+
+def test_with_the_subagent_cap_spent_and_nobody_directed_at_work_it_is_not_covered(wired):
+    sid, _ = agents_case(wired, ("coder@proj-a", live("x")), values={"keep_warm": "on"})
+    wired.turns.sessions[sid] = live(sid, entries=[agent("a1")])
+    wired.cache = Cache([sid], asks=ASKS)
+    subagent_nudges(sid, 3)
+    got = joined()
+    assert got["covered"] is False and got["coverable"] == {"cap": 3}
 
 
 def test_a_record_whose_asks_lacks_the_subscription_gives_neither_with_keep_warm_on(wired):

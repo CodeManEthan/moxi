@@ -289,14 +289,14 @@ def test_keep_warm_says_a_short_lifetime_leaves_no_window(conn):
     assert read(conn, cache=FakeCache()).keep_warm.window is None
 
 
-def test_keep_warm_under_cover_alone_is_on_with_no_holds_listed(conn):
+def test_keep_warm_under_cover_alone_is_on_with_the_chain_s_holds_listed(conn):
     store.open_hold(conn, "r1", "port-cache")
     launched(conn, request_id="r2", session_id=NEW, relaunch_of="r1", target="headless")
     keepwarm.cover_on(conn, store.get(conn, "r2"), NEW, turn_number=3,
                       waits={"kind": "subagents", "count": 1})
     got = read(conn, NEW).keep_warm
-    assert got.on and got.holds == ()
-    assert read(conn, NEW).lines()[3].startswith("keep warm: on; holds: none")
+    assert got.on and got.holds == ("port-cache",)
+    assert read(conn, NEW).lines()[3].startswith("keep warm: on; holds: port-cache")
 
 
 def test_cover_for_another_session_id_leaves_keep_warm_off(conn):

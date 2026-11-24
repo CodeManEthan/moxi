@@ -9,6 +9,13 @@
   subagent reads the agents the session directs (the join, within 20 s), and with comms
   absent nobody is directed. A join or agent list not read whole, with no case found,
   ends the ask `unreadable`, quietly.
+- Holds are taken and read wherever keep-warm is on, cover included: a headless launch
+  made with `keep_warm` off takes holds while its session is covered, the hold verbs work
+  there, `show` lists them, and an open hold keeps the cover as work out does.
+- Home's Sessions row and the `Keep warm` press read the agents a session directs
+  wherever keep-warm's ask would (`keepwarm.joins`): unless a live subagent's case is
+  under its cap. A session whose subagent nudges are spent while an agent it directs
+  works reads `kept warm`, and a press there is answered, as the ask nudges it.
 - The `keep_warm` row's shipped default is `on`, and it is read on a headless launch
   alone: there it holds `off` unless a flag, the preset or `[defaults]` sets `on`, and a
   headless launch with an identity still has `on` left out with a warning. On any other

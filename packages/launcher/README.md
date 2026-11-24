@@ -666,15 +666,16 @@ under cover: a session past its cap gets a new count, and a headless session lau
 without `--keep-warm on` is kept warm. Cover belongs to one launch and the session id it
 has now: a `/clear` gives the session a new id, and a relaunch or a resume is a new
 launch, so each starts without it. A covered session is nudged for both cases, and under
-cover the count in a row starts at the press. Holds belong to the launch alone: a launch
-with cover alone takes no holds, and a hold left open in its chain does not keep it
-warm. `moxi launcher show` reads a covered session as keep-warm on.
+cover the count in a row starts at the press. Holds work wherever keep-warm is on, cover
+included: a covered headless session takes holds with the verbs above while its cover
+lasts, and its chain's open holds keep it warm. `moxi launcher show` reads a covered
+session as keep-warm on, with its holds.
 
 Cover lasts until a keep-warm ask reads the session's own subagents and its directed
-agents in full and finds nobody at work. Asks come only near the end of a cache
-lifetime, so a session that goes back to work and then waits again is still covered. If
-comms or turns can't be read, the cover is kept. There is no off short of a `/clear`, a relaunch
-or ending the session.
+agents in full and finds nobody at work and no hold open. Asks come only near the end of
+a cache lifetime, so a session that goes back to work and then waits again is still
+covered. If comms or turns can't be read, the cover is kept. There is no off short of a
+`/clear`, a relaunch or ending the session.
 
 **What keep-warm costs.** Each nudge is a turn: the session reads its whole cached
 context and writes a short reply. It comes about once per cache lifetime while the
@@ -846,13 +847,15 @@ A session waits only while its own turn is closed. With turns, it waits on its s
 and teammates at work, counted as keep-warm counts them; with none, and comms installed,
 on the agents its comms name directs whose turn is open, or whose turn is closed while
 they wait on subagents of their own (a Claude session's; a Codex session counts only by
-its open turn). Each comms read may take 2 seconds, and once comms' daemon is found down
-the pass asks it nothing more. A waiting session reads `kept warm` when every step of
+its open turn). The directed agents are read wherever keep-warm's ask would read them,
+so a session whose subagent nudges are spent still reads `kept warm` while an agent it
+directs works, as the ask nudges it. Each comms read may take 2 seconds, and once comms'
+daemon is found down the pass asks it nothing more. A waiting session reads `kept warm` when every step of
 keep-warm's next ask that can be read without writing ends in a nudge, with an ask still
 certain to come before its window shuts: its launch keeps warm (any Claude launch but a
 headless one made without `keep_warm` on, or one under cover), cache's watcher says it
 asks keep-warm about the session, no run open on the launch, no turn open, a live
-subagent, a directed agent at work or an open hold of a launch kept warm by itself, a
+subagent, a directed agent at work or an open hold, a
 case under its cap, nothing typed into the prompt box, and no ask since the session's
 last request that ended without a nudge. Any
 step it can't read counts against it, so the row says `goes cold` whenever a nudge is

@@ -31,9 +31,10 @@ order, and stops at the first that answers:
 4. The signals. The subagent case: the session's own subagents at work
    (`waits.live_subagents`: `subagent` or `teammate` entries not final, pending, running
    or waiting, no fork of the main loop; a `shell` never counts). The director case: an
-   open hold of the launch chain, counted only on a launch on by itself (`launch_on`),
-   or an agent the session directs at work (`waits.directed`, the join, made on every
-   ask that does not nudge for a subagent, cover or not, within `ASK_JOIN_BUDGET_S`).
+   open hold of the launch chain, counted wherever keep-warm is on (`on`, cover
+   included), or an agent the session directs at work (`waits.directed`, the join, made
+   on every ask that does not nudge for a subagent under its cap (`joins`), cover or
+   not, within `ASK_JOIN_BUDGET_S`). Home's row and the press join by the same rule.
    Neither: nothing (`idle`). **An agent a nudge of the current run of nudges named,
    which turns then stops listing or reports `unknown`, is dropped for the rest of that
    run, even if it comes back.**
@@ -81,15 +82,15 @@ newest `keep-warm-cover` event of the launch, when it says `on` and names the se
 asked about. A `/clear`'s new id, a relaunch and a resume (each a new launch) start
 without it, and an id the session comes back to reads its cover again. **Only the ask
 ends a cover, and only on lists read whole**: an ask under cover that finds no live
-subagent and no directed agent at work writes the `off` event when the session's own
-agents list and the directed join were both read whole (`Signal.sure`), and then ends
-`idle`, or nudges for an open hold by the launch. When either was not read whole it
-writes nothing, keeps the cover, and with no case ends `unreadable`. A hold neither keeps
-a cover nor ends one.
+subagent, no open hold and no directed agent at work writes the `off` event when the
+session's own agents list and the directed join were both read whole (`Signal.sure`),
+and then ends `idle`. When either was not read whole it writes nothing, keeps the cover,
+and with no case ends `unreadable`. An open hold keeps a cover, as work out does.
 
 **Holds.** `keep-warm hold NAME`, run from the director's own session, opens a hold on
-its launch; `release NAME` releases it; `holds` lists them. Each is refused on a launch
-not on by itself (`launch_on`), cover or not, and a hold is a signal only there. **A
+its launch; `release NAME` releases it; `holds` lists them. Each is refused where
+keep-warm is not on for the caller's session (`on`: the launch keeps warm by itself, or
+the session is under cover), and a hold is a signal only there. **A
 launch's holds are the open holds of its whole chain**: the launch and each launch it
 replaced (`relaunch_of`, `resume_of`), so work handed out before a relaunch or a resume
 still keeps the new launch warm and is released from it. Opening a name open anywhere in
@@ -227,11 +228,12 @@ def _ask(conn: sqlite3.Connection, session_id: str, turns: Any, slots_api: Any, 
         current_settings = settings if settings is not None else _settings()
         caps = {case: int(current_settings[CAPS[case]]) for case in CASES}
         nudges = run_of_nudges(conn, row.request_id, sid, number)
-        counted = _since(nudges, held)
-        room = run_counts(counted)[SUBAGENTS] < caps[SUBAGENTS]
-        signal, joined = _signal(conn, row, session, nudges, _joiner(turns, comms, sid),
-                                 subagent_room=room, write=not dry_run)
-        if joined is not None and not signal.agents and not joined.names:
+        room = subagent_room(conn, row, sid, nudges, current_settings)
+        signal, joined = _signal(conn, row, sid, session, nudges,
+                                 _joiner(turns, comms, sid), subagent_room=room,
+                                 write=not dry_run)
+        nobody = not (signal.agents or signal.holds)
+        if joined is not None and nobody and not joined.names:
             if signal.sure:
                 if held is not None and not dry_run:
                     cover_off(conn, row, sid, "idle")
@@ -376,12 +378,12 @@ class Signal:
     sure: bool = False
 
 
-def _signal(conn: sqlite3.Connection, row: store.LaunchRow, session: Any,
+def _signal(conn: sqlite3.Connection, row: store.LaunchRow, sid: str, session: Any,
             nudges: Sequence[store.Run], join: Callable[[], waits.Directed], *,
             subagent_room: bool, write: bool = True) -> tuple[Signal, waits.Directed | None]:
-    """The ask's signal, and the directed join when it was made: by `join`, unless a
-    subagent is live and `subagent_room` says its case is under its cap, so the ask
-    nudges for it. With `write`, writes the agents newly dropped."""
+    """The ask's signal for the session id `sid`, and the directed join when it was made:
+    by `join`, unless `joins` says the ask nudges for a live subagent under its cap
+    (`subagent_room`). With `write`, writes the agents newly dropped."""
     named, dropped = _run_record(conn, nudges)
     try:
         listed = session.agents()
@@ -389,12 +391,12 @@ def _signal(conn: sqlite3.Connection, row: store.LaunchRow, session: Any,
         listed, failed = None, _words(exc)
     else:
         failed = None
-    held = _holds(conn, row)
+    held = _holds(conn, row, sid)
     signal, newly = signal_of(listed, named, dropped, held)
     if newly and write:
         store.add_run_event(conn, nudges[0].run_id, "dropped", {"agents": list(newly)})
     joined = None
-    if not (signal.agents and subagent_room):
+    if joins(signal, room=subagent_room):
         joined = join()
         signal, _ = signal_of(listed, named, dropped, held, directed=joined)
     if signal.case is None:
@@ -404,12 +406,35 @@ def _signal(conn: sqlite3.Connection, row: store.LaunchRow, session: Any,
     return signal, joined
 
 
-def _holds(conn: sqlite3.Connection, row: store.LaunchRow) -> list[str]:
-    """The open holds of the launch's chain when the launch keeps warm by itself
-    (`launch_on`); none otherwise, since cover alone takes no holds."""
-    if not launch_on(row):
+def _holds(conn: sqlite3.Connection, row: store.LaunchRow, sid: str | None, *,
+           pressed: bool = False) -> list[str]:
+    """The open holds of the launch's chain wherever keep-warm is on for the session id
+    `sid` (`on`: the launch keeps warm by itself, or `sid` is under cover), or `pressed`
+    reads it as if cover had just been set; none otherwise."""
+    if not (pressed or launch_on(row) or (sid and cover(conn, row, sid) is not None)):
         return []
     return store.open_holds(conn, row.request_id)
+
+
+def subagent_room(conn: sqlite3.Connection, row: store.LaunchRow, sid: str,
+                  nudges: Sequence[store.Run], settings: Mapping[str, Any]) -> bool:
+    """Whether the subagent case of the session id `sid` is under its cap
+    (`keep_warm.subagent_cap` in `settings`), counting its nudges in the run of nudges
+    `nudges` as the ask counts them before its join: under cover, only those since the
+    press. A cap that can't be read is no room, so the join is made."""
+    try:
+        cap = int(settings[CAPS[SUBAGENTS]])
+    except (KeyError, TypeError, ValueError):
+        return False
+    return run_counts(_since(nudges, cover(conn, row, sid)))[SUBAGENTS] < cap
+
+
+def joins(signal: Signal, *, room: bool) -> bool:
+    """Whether a reading of keep-warm makes the directed join: unless a subagent is live
+    and its case is under its cap (`room`, from `subagent_room`), so the ask nudges for
+    it. The ask, Home's row and the press each join by this one rule, so they read the
+    same cases."""
+    return not (signal.agents and room)
 
 
 def _joiner(turns: Any, comms: Any, sid: str) -> Callable[[], waits.Directed]:
@@ -447,7 +472,7 @@ def signal_of(listed: Any | None, named: Iterable[str], dropped: Iterable[str],
     """The signal an ask reads, from values alone, writing nothing: `listed` is turns'
     agents value (None when it could not be read), `named` and `dropped` the agents the
     current run of nudges named and dropped, `holds` the open holds the caller counts (the
-    chain's, only for a launch on by itself, `launch_on`), `directed` the directed join
+    chain's, wherever keep-warm is on, `on`), `directed` the directed join
     (None when it was not made). Its `case` is the first that holds: live subagents, the
     subagent case; an open hold or directed agents at work, the director case; else
     none. It carries all three, whichever case is first. Returns the signal and the agents newly
@@ -480,14 +505,16 @@ def signal_of(listed: Any | None, named: Iterable[str], dropped: Iterable[str],
 
 
 def signal_now(conn: sqlite3.Connection, row: store.LaunchRow, listed: Any | None,
-               nudges: Sequence[store.Run], *,
-               directed: waits.Directed | None = None) -> Signal:
+               nudges: Sequence[store.Run], *, directed: waits.Directed | None = None,
+               sid: str | None = None, pressed: bool = False) -> Signal:
     """The signal an ask would read now, with `listed` its agents value, `nudges` its run
     of nudges and `directed` its directed join (None when not made), from the launch log;
     writes nothing, so an agent the next ask will drop is already not counted. The holds
-    are the chain's only for a launch on by itself (`launch_on`), as the ask's."""
+    are the chain's wherever keep-warm is on for the session id `sid` (`on`), or with
+    `pressed`, as the ask's; with no `sid`, only for a launch on by itself."""
     named, dropped = _run_record(conn, nudges)
-    signal, _ = signal_of(listed, named, dropped, _holds(conn, row), directed=directed)
+    holds = _holds(conn, row, sid, pressed=pressed)
+    signal, _ = signal_of(listed, named, dropped, holds, directed=directed)
     return signal
 
 
@@ -738,11 +765,12 @@ def would_nudge(conn: sqlite3.Connection, row: store.LaunchRow, session_id: str,
        age under it by more than `SHUT_S` and the most two asks can lie apart (the
        timer's interval and a watcher tick);
     5. no turn is open;
-    6. a signal (`signal_of`): a live subagent; an open hold of the chain, for a launch
-       on by itself; or a directed agent at work in `directed`;
+    6. a signal (`signal_of`): a live subagent; an open hold of the chain, wherever
+       keep-warm is on (cover, or `pressed`, included); or a directed agent at work in
+       `directed`;
     7. a case that holds is under its cap, counted per case (`chosen`, `run_counts`).
-       While the cover holds (a live subagent, a directed agent at work, or a join not
-       read whole) only the nudges since the cover's press count, and none when
+       While the cover holds (a live subagent, an open hold, a directed agent at work, or
+       a join not read whole) only the nudges since the cover's press count, and none when
        `pressed`; otherwise the whole run, as the ask counts it once it ends a cover;
     8. no draft in the prompt box (`draft` False; a box that could not be read is one);
     9. no keep-warm run ended other than `nudged` since the session's last request. A
@@ -780,7 +808,8 @@ def reading(conn: sqlite3.Connection, row: store.LaunchRow, session_id: str, clo
         return Reading(5)
     covering = held is not None or pressed
     nudges = run_of_nudges(conn, row.request_id, sid, getattr(facts, "turn_number", None))
-    signal = signal_now(conn, row, listed, nudges, directed=directed)
+    signal = signal_now(conn, row, listed, nudges, directed=directed, sid=sid,
+                        pressed=pressed)
     if signal.case is None:
         return Reading(6)
     try:
@@ -800,10 +829,10 @@ def reading(conn: sqlite3.Connection, row: store.LaunchRow, session_id: str, clo
 
 
 def _kept(signal: Signal, joined: waits.Directed | None) -> bool:
-    """Whether the next ask keeps a cover on this signal: a live subagent, a directed
-    agent at work, or a join not read whole. With none (a hold alone, or no join made)
-    the ask ends the cover, and counts the whole run of nudges."""
-    if signal.agents:
+    """Whether the next ask keeps a cover on this signal: a live subagent, an open hold, a
+    directed agent at work, or a join not read whole. With none (or no join made) the ask
+    ends the cover, and counts the whole run of nudges."""
+    if signal.agents or signal.holds:
         return True
     return joined is not None and (bool(joined.names) or not signal.sure)
 
@@ -957,7 +986,7 @@ def _caller(conn: sqlite3.Connection, pid: int | None, turns: Any | None,
             slots_api: Any | None) -> store.LaunchRow:
     found = target.caller(pid=pid, conn=conn, turns=turns, slots_api=slots_api)
     found.close()
-    _check_on(found.row)
+    _check_on(conn, found.row, found.session_id or found.row.session_id)
     return found.row
 
 
@@ -966,13 +995,24 @@ def _launch(conn: sqlite3.Connection, request_id: str) -> store.LaunchRow:
     if row is None:
         raise target.NotLaunched(f"there is no launch {request_id}",
                                  "`moxi launcher log` lists the launches")
-    _check_on(row)
+    _check_on(conn, row, None)
     return row
 
 
-def _check_on(row: store.LaunchRow) -> None:
+def _check_on(conn: sqlite3.Connection, row: store.LaunchRow, sid: str | None) -> None:
+    """Refuse a hold verb unless keep-warm is on for the session id `sid` (`on`): the
+    launch keeps warm by itself, or `sid` is under cover. With no `sid` (a caller that
+    names the launch alone), cover of whichever session id the launch's newest cover
+    event names."""
     if launch_on(row):
         return
+    if sid:
+        if cover(conn, row, sid) is not None:
+            return
+    else:
+        event = store.last_event(conn, row.request_id, COVER)
+        if event is not None and event.detail.get("state") == "on":
+            return
     hint = ("launch it with keep_warm on to use holds" if row.target == "headless"
             and row.harness in catalog.CACHE_TIMED
             else f"keep-warm keeps only {', '.join(catalog.CACHE_TIMED)} sessions warm")
@@ -1015,4 +1055,5 @@ __all__ = ["ASK_EVERY_S", "ASK_JOIN_BUDGET_S", "BLOCKED_REFUSALS", "CAPS", "CASE
            "cover", "cover_off", "cover_on", "on", "asked_before_shut", "check_name", "delivered",
            "hold", "holds", "keep_warm", "no_window", "nudge_text", "open_hold", "reading", "release",
            "release_hold", "run_counts", "run_of_nudges", "signal_now", "signal_of", "spent",
-           "timed", "window", "chosen", "launch_on", "would_nudge"]
+           "timed", "window", "chosen", "launch_on", "would_nudge", "subagent_room",
+           "joins"]
