@@ -51,11 +51,12 @@ LOCKS = "locks"
 
 #: A line's states.
 OPEN = "open"
+SENDING = "sending"
 BACK = "back"
 LOST = "lost"
 DISCARDED = "discarded"
 OFF = "off"
-LINE_STATES = (OPEN, BACK, LOST, DISCARDED, OFF)
+LINE_STATES = (OPEN, SENDING, BACK, LOST, DISCARDED, OFF)
 #: The states a person may discard a line in: an answer memory still holds to send.
 DISCARDABLE: tuple[str, ...] = ()
 #: How a recall started: a prompt, or the agent's own request.
@@ -66,7 +67,8 @@ HEAD_CHARS = 80
 #: The fields of a recall's line.
 LINE_FIELDS = ("recall", "session", "harness", "state", "reason", "error", "start", "head",
                "route", "fork", "child", "taker", "ref", "kept", "prefetch_hits", "widened",
-               "startup_s", "hurried", "past_limit", "rounds", "discarded_by",
+               "startup_s", "hurried", "past_limit", "past_bound", "rounds", "sending_at",
+               "send_tries", "send_reason", "sent_at", "message_id", "discarded_by",
                "discarded_at", "at", "updated")
 #: A session id the log may name a file after.
 _SAFE = re.compile(r"[A-Za-z0-9_][A-Za-z0-9_.-]{0,199}")
@@ -227,7 +229,7 @@ def head(text: str) -> str:
     return " ".join(str(text).split())[:HEAD_CHARS]
 
 
-__all__ = ["DIR_NAME", "LOG", "LOCKS", "OPEN", "BACK", "LOST", "DISCARDED", "OFF",
+__all__ = ["DIR_NAME", "LOG", "LOCKS", "OPEN", "SENDING", "BACK", "LOST", "DISCARDED", "OFF",
            "LINE_STATES", "DISCARDABLE", "PROMPT", "ASKED", "HEAD_CHARS", "LINE_FIELDS", "is_safe",
            "subconscious_dir", "log_path", "session_lock", "read_lines", "logged_sessions",
            "all_lines", "fork_ids", "find_line", "put_line", "note_off", "head"]

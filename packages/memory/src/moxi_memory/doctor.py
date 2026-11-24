@@ -40,9 +40,10 @@
   that answers by comms is off while the session has no comms name or its recall sender
   can't send, and the reason names that sender, in conflict among them), naming the
   reason only while it holds; while memory's config file is in error, each recall it
-  stopped (its line `lost` with the reason `config`) and the error; and each recall line
-  still open or kept whose child and taker are gone, with its age, until a taker settles
-  it. `warn` for each of those. With the subconscious on in a live session it also says
+  stopped (its line `lost` with the reason `config`) and the error; each recall line
+  still open, sending or kept whose child and taker are gone, with its age, until a
+  taker settles it; and each recall line still `sending`, an answer comms has not taken
+  yet, with how long it has waited and comms' last refusal. `warn` for each of those. With the subconscious on in a live session it also says
   that a recall fork's permission asks are refused. Recall runs on Claude Code's subagent
   route only.
 
@@ -575,6 +576,15 @@ def _subconscious(*, config_in_error: bool, now: float | None = None) -> Row:
                  for line in untaken[::-1]]
         parts.append(f"{_plural(len(untaken), 'recall line')} not yet taken, child gone: "
                      f"{_shown(named)}; the next recall child or session end takes it")
+    sending = [line for line in lines if line.get("state") == recalls.SENDING]
+    if sending:
+        warn = True
+        from .recall_cli import sending_text
+
+        named = [f"{line.get('recall')} ({sending_text(line, now=now)})"
+                 for line in sending[::-1]]
+        parts.append(f"{_plural(len(sending), 'recall')} still sending, waiting for comms "
+                     f"to take its answer: {_shown(named)}")
     never_ran = _never_ran(lines, now=now)
     if never_ran:
         warn = True

@@ -383,6 +383,21 @@ def test_only_the_recalls_stopped_since_the_config_last_read_cleanly_are_listed(
     assert "r-fixed" not in row.detail and "an error fixed since" not in row.detail
 
 
+def test_a_line_still_sending_is_listed_with_its_wait_and_last_refusal():
+    import time
+
+    from moxi_memory import recall_take, recalls
+
+    now = time.time()
+    recall_line("r-send", updated=now, state=recalls.SENDING, child=recall_take.me(),
+                sending_at=now - 120, send_tries=4, send_reason="unavailable: daemon down")
+    row = by_name()["subconscious"]
+    assert row.state == "warn"
+    assert ("1 recall still sending, waiting for comms to take its answer: r-send "
+            "(sending for 120s, 4 tries refused, the last: unavailable: daemon down)"
+            ) in row.detail
+
+
 def test_a_line_whose_child_is_gone_is_listed_with_its_age_until_taken():
     import time
 

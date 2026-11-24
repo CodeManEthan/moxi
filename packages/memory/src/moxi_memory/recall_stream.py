@@ -35,6 +35,26 @@ was written still asks that round, since the lock is not held over turns' call; 
 fork's calls before the fork's id is written are judged by its own record
 (`moxi_memory.recall_guard`, "Knowing its fork").
 
+**A route that answers by comms** (its name in `recall_start.BY_COMMS`). The harness does
+not bring the fork's answer back, so memory sends it. An answer with points goes on the
+line `sending` before anything else is done with it, then the ack, then the mark; then
+the child sends it under the session's recall sender (`moxi_memory.recall_send.send`)
+until comms takes it (`deliver`): a send comms refuses is tried again every
+`RESEND_FAST_S` for `RESEND_FAST_FOR_S`, then every `RESEND_SLOW_S`, with no last try,
+each refusal's reason kept on the line. The line goes `back` once comms takes it. An
+answer of `NOTHING` sends nothing. Before each try the line is read again under the lock,
+and a line a person discarded is left alone; a try comms took while the discard was made
+is noted on the line, not undone.
+
+On these routes turns does not end a round at its bound, so the child waits the bound
+itself. Past it, with no end, it notes the loss as the bound sets it (`note_bound`: a
+first round ends record and line `lost`, `gone`; a later one the line `back` with the
+round's loss noted and the record `ended`), marks the line `past_bound` and keeps the
+mark, and waits on at most `LATE_WAIT_S` only to settle the round (`settle_late`): an
+answer with points is a late text, which takes the line to `sending`, is acked and sent
+as above, the record left as the bound set it; any other end is acked, the line keeping
+the bound's state. At the wait's last limit it stops, the line kept for a taker.
+
 A route (`Route`) asks turns for the rounds; `moxi_memory.recall_route` holds the
 subagent route's.
 
@@ -53,6 +73,19 @@ from . import recalls, records
 ROUND_MARGIN_S = 30
 #: How long past a round's bound the child waits for turns to give the round's end.
 END_WAIT_MARGIN_S = 60
+#: On a route that answers by comms, how long past a round's bound the child waits only to
+#: settle the round.
+LATE_WAIT_S = 300
+#: A send comms did not take is tried again every `RESEND_FAST_S` seconds for the first
+#: `RESEND_FAST_FOR_S` seconds, then every `RESEND_SLOW_S` seconds.
+RESEND_FAST_S = 10
+RESEND_FAST_FOR_S = 60
+RESEND_SLOW_S = 300
+#: Why a round got no answer by its bound.
+GONE = "gone"
+PAST_BOUND = "the round's bound passed with no answer"
+#: How `run` ended when a round's end never came.
+UNSETTLED = "unsettled"
 #: The answer that says the fork found nothing, and the line that ends a stream.
 NOTHING = "NOTHING"
 END_LINE = "End of recall."
@@ -125,6 +158,118 @@ def why_stop(record: dict, settings, round_number: int, *, now: float) -> str | 
     return None
 
 
+def by_comms(route) -> bool:
+    """Whether `route` (a route, or a route's name) answers by comms."""
+    from . import recall_start
+
+    name = route if isinstance(route, str) else getattr(route, "name", None)
+    return name in recall_start.BY_COMMS
+
+
+def has_points(answer: str | None) -> bool:
+    """Whether `answer` has anything to send: some text, and not `NOTHING`."""
+    text = (answer or "").strip()
+    return bool(text) and text != NOTHING
+
+
+def _refresh(recall) -> None:
+    """Read the record and the line again; the caller holds the session's lock."""
+    recall.record = records.read(recall.session_id, recall.recall_id) or recall.record
+    recall.line = recalls.find_line(recall.session_id, recall.recall_id) or recall.line
+
+
+def _sending(recall, rounds: list, *, now: float, record: dict | None = None) -> None:
+    recall.write(record=record, state=recalls.SENDING, rounds=rounds, sending_at=now,
+                 send_tries=0, send_reason=None)
+
+
+def _newest_text(line: dict) -> str:
+    for entry in reversed(line.get("rounds") or []):
+        if isinstance(entry, dict) and isinstance(entry.get("text"), str):
+            return entry["text"]
+    return ""
+
+
+def deliver(recall, *, send=None, sleep=time.sleep, clock=time.time) -> str:
+    """Send a `sending` line's newest text under the session's recall sender until comms
+    takes it, and return the line's state then: `back`, or the state someone else set
+    (`discarded`). Never gives up: a refusal is kept on the line and tried again."""
+    if send is None:
+        from .recall_send import send
+    began = clock()
+    while True:
+        with recalls.session_lock(recall.session_id):
+            _refresh(recall)
+            if recall.line.get("state") != recalls.SENDING:
+                return str(recall.line.get("state"))
+            text = _newest_text(recall.line)
+        sent = send(recall.session_id, text)
+        now = clock()
+        with recalls.session_lock(recall.session_id):
+            _refresh(recall)
+            tries = int(recall.line.get("send_tries") or 0)
+            if sent.taken:
+                fields = {"sent_at": now, "message_id": sent.message_id}
+                if recall.line.get("state") == recalls.SENDING:
+                    fields["state"] = recalls.BACK
+                recall.write(**fields)
+                return str(recall.line.get("state"))
+            if recall.line.get("state") != recalls.SENDING:
+                return str(recall.line.get("state"))
+            recall.write(send_tries=tries + 1, send_reason=sent.reason)
+        sleep(RESEND_FAST_S if now - began < RESEND_FAST_FOR_S else RESEND_SLOW_S)
+
+
+def note_bound(recall, round_number: int, *, now: float | None = None) -> None:
+    """On a route that answers by comms, note that round `round_number`'s bound passed
+    with no answer, as the bound sets it, keeping the line's kept mark: a first round
+    (or one with no answer before it) ends record and line `lost` (`gone`); a later one
+    leaves the line `back` with the round's loss noted and ends the record."""
+    now = time.time() if now is None else now
+    with recalls.session_lock(recall.session_id):
+        _refresh(recall)
+        if recall.line.get("state") == recalls.DISCARDED:
+            return
+        if round_number == 1 or not recall.record.get("answered"):
+            recall.write(record={"state": records.LOST, "reason": GONE, "error": PAST_BOUND},
+                         state=recalls.LOST, reason=GONE, error=PAST_BOUND, past_bound=True)
+            return
+        rounds = list(recall.line.get("rounds") or [])
+        rounds.append({"round": round_number, "lost": GONE, "error": PAST_BOUND,
+                       "at": now})
+        recall.write(record={"state": records.ENDED}, state=recalls.BACK, rounds=rounds,
+                     past_bound=True)
+
+
+def settle_late(recall, round_number: int, end, route: Route, *, now: float | None = None,
+                send=None, sleep=time.sleep) -> str:
+    """Settle a round its bound ended, on a route that answers by comms, with turns'
+    `end` for it: an answer with points is a late text, written on the line `sending`,
+    then acked, the mark cleared, and sent; any other end is acked and the mark cleared,
+    the line keeping the bound's state. The record keeps the state the bound set. Returns
+    the line's state at the end."""
+    from moxi_turns import Ended
+
+    now = time.time() if now is None else now
+    with recalls.session_lock(recall.session_id):
+        _refresh(recall)
+        if (recall.line.get("state") != recalls.DISCARDED and isinstance(end, Ended)
+                and has_points(end.answer)):
+            rounds = list(recall.line.get("rounds") or [])
+            rounds.append({"round": round_number, "text": end.answer, "at": now,
+                           "late": True})
+            _sending(recall, rounds, now=now)
+        try:
+            route.ack(ref(recall.recall_id, round_number))
+        except Exception:  # noqa: BLE001 - an ack not taken leaves the mark for a taker
+            pass
+        else:
+            recall.write(kept=False)
+    if recall.line.get("state") == recalls.SENDING:
+        return deliver(recall, send=send, sleep=sleep)
+    return str(recall.line.get("state"))
+
+
 def _reason(end) -> tuple[str, str]:
     text = str(getattr(end, "reason", "") or "gone")
     return text.split(":")[0].split()[0] if text.strip() else "gone", text
@@ -133,7 +278,9 @@ def _reason(end) -> tuple[str, str]:
 def settle(recall, round_number: int, end, route: Route, *, now: float | None = None) -> bool:
     """Settle round `round_number` with turns' `end` for it: the line, then the ack,
     then the mark. True when an answer came back. The line is read again under the lock;
-    one a person discarded keeps its state, and only the ack and the mark follow."""
+    one a person discarded keeps its state, and only the ack and the mark follow. On a
+    route that answers by comms an answer with points goes on the line `sending`, for
+    `deliver` to send once the mark is cleared."""
     from moxi_turns import Ended
 
     now = time.time() if now is None else now
@@ -151,7 +298,10 @@ def settle(recall, round_number: int, end, route: Route, *, now: float | None = 
             fields = {"answered": True}
             if state in (records.STARTING, records.RUNNING):
                 fields["state"] = records.BACK
-            recall.write(record=fields, state=recalls.BACK, rounds=rounds)
+            if by_comms(route) and has_points(answer):
+                _sending(recall, rounds, now=now, record=fields)
+            else:
+                recall.write(record=fields, state=recalls.BACK, rounds=rounds)
             got = True
         else:
             reason, error = _reason(end)
@@ -223,11 +373,31 @@ def lose_hurried(recall) -> None:
                state=recalls.LOST, reason=records.HURRIED, error=error, hurried=True)
 
 
-def run(recall, route: Route, brief: str, *, clock=time.time) -> str:
+def _past_bound(recall, route: Route, handle, round_number: int, *, clock, send,
+                sleep) -> str:
+    """A round its bound ended on a route that answers by comms: note the bound, wait on
+    at most `LATE_WAIT_S` only to settle the round, and return how the recall ended."""
+    note_bound(recall, round_number, now=clock())
+    try:
+        end = route.ended(handle, LATE_WAIT_S)
+    except TimeoutError:
+        return UNSETTLED
+    if recall.line.get("fork") is None:
+        note_fork(recall, route.started(handle))
+    if settle_late(recall, round_number, end, route, now=clock(), send=send,
+                   sleep=sleep) == recalls.DISCARDED:
+        return recalls.DISCARDED
+    current = records.read(recall.session_id, recall.recall_id) or recall.record
+    return str(current.get("state"))
+
+
+def run(recall, route: Route, brief: str, *, clock=time.time, send=None,
+        sleep=time.sleep) -> str:
     """Run the recall's rounds to the stream's end, and return how it ended: `ended`,
     `lost`, `discarded` (a person discarded its line; no further round is asked), or
     `unsettled` (a round's end never came; the line keeps its mark). A round whose ack
-    turns did not take ends the stream there, its ref and mark left on the line."""
+    turns did not take ends the stream there, its ref and mark left on the line. On a
+    route that answers by comms, `send` and `sleep` are `deliver`'s."""
     settings = recall.settings
     bound = round_bound_s(settings)
     handle = None
@@ -251,14 +421,20 @@ def run(recall, route: Route, brief: str, *, clock=time.time) -> str:
             text = continue_text(recall.record, settings, now=clock())
             handle = route.next(handle, text, ref=round_ref, round_timeout_s=bound)
         note_fork(recall, route.started(handle))
+        comms = by_comms(route)
         try:
-            end = route.ended(handle, bound + END_WAIT_MARGIN_S)
+            end = route.ended(handle, bound if comms else bound + END_WAIT_MARGIN_S)
         except TimeoutError:
-            return "unsettled"
+            if not comms:
+                return UNSETTLED
+            return _past_bound(recall, route, handle, round_number, clock=clock,
+                               send=send, sleep=sleep)
         if recall.line.get("fork") is None:
             # the start was not read in its wait; once the round has ended it is known
             note_fork(recall, route.started(handle))
         got = settle(recall, round_number, end, route, now=clock())
+        if recall.line.get("state") == recalls.SENDING:
+            deliver(recall, send=send, sleep=sleep, clock=clock)
         if recall.line.get("state") == recalls.DISCARDED:
             return recalls.DISCARDED
         if not got:
@@ -280,6 +456,8 @@ def run(recall, route: Route, brief: str, *, clock=time.time) -> str:
     return records.ENDED
 
 
-__all__ = ["ROUND_MARGIN_S", "END_WAIT_MARGIN_S", "NOTHING", "END_LINE", "CONTINUE", "Route",
-           "ref", "round_bound_s", "ends_stream", "continue_text", "why_stop", "settle",
-           "KEPT", "open_round", "note_fork", "lose_hurried", "run"]
+__all__ = ["ROUND_MARGIN_S", "END_WAIT_MARGIN_S", "LATE_WAIT_S", "RESEND_FAST_S",
+           "RESEND_FAST_FOR_S", "RESEND_SLOW_S", "GONE", "PAST_BOUND", "UNSETTLED", "NOTHING",
+           "END_LINE", "CONTINUE", "Route", "ref", "round_bound_s", "ends_stream",
+           "continue_text", "why_stop", "by_comms", "has_points", "deliver", "note_bound",
+           "settle_late", "settle", "KEPT", "open_round", "note_fork", "lose_hurried", "run"]
