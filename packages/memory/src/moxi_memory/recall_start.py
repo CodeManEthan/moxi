@@ -25,9 +25,11 @@ only while the session's recall sender can send (`comms_why`,
 the session still running `hurried` and writes the new recall's record, state
 `starting`, holding everything its child runs on: the prompt's text or the topic, its
 senders and the subconscious settings the caller holds. Then it starts the child,
-`moxi-memory-subconscious`, detached and outside the session, with the session and the
-recall's id, and returns without waiting for it. A child that can't be started leaves
-the record and a log line `lost`, with the reason `spawn`.
+`moxi-memory-subconscious`, with the session and the recall's id, through the detached
+starter (`spawn_starter`), and returns without waiting for it: the starter starts the
+child detached and exits, so the child runs outside every session. A child that can't
+be started, by this process or by the starter, leaves the record and a log line `lost`,
+with the reason `spawn`.
 
 **The agent's count (`asked`).** In on-demand mode the agent may start at most
 `subconscious.on_demand_per_prompt` recalls between two counted prompts. The count lives
@@ -178,26 +180,46 @@ def begin(session_id: str, harness: str | None, *, start: str, text: str,
     try:
         (spawn or spawn_child)(session_id, recall_id)
     except Exception as exc:  # noqa: BLE001 - a child that can't start loses the recall
-        error = f"{type(exc).__name__}: {exc}"
-        with recalls.session_lock(session_id):
-            record = records.update(session_id, recall_id, state=records.LOST,
-                                    reason=SPAWN, error=error) or record
-            recalls.put_line(session_id, {
-                "recall": recall_id, "harness": harness, "state": recalls.LOST,
-                "reason": SPAWN, "error": error, "start": start,
-                "head": recalls.head(text), "route": route_name})
+        record = lose_spawn(session_id, recall_id, f"{type(exc).__name__}: {exc}") or record
     return record
 
 
-def spawn_child(session_id: str, recall_id: str) -> int:
-    """Start `moxi-memory-subconscious` for the recall, detached, its output discarded,
-    and return its process id without waiting for it."""
+def lose_spawn(session_id: str, recall_id: str, error: str) -> dict | None:
+    """End recall `recall_id`, whose child could not be started, `lost` with the reason
+    `spawn`, record and line together, under the session's lock; the record as written,
+    or None when it has none."""
+    with recalls.session_lock(session_id):
+        record = records.update(session_id, recall_id, state=records.LOST, reason=SPAWN,
+                                error=error)
+        known = record or {}
+        recalls.put_line(session_id, {
+            "recall": recall_id, "harness": known.get("harness"), "state": recalls.LOST,
+            "reason": SPAWN, "error": error, "start": known.get("start"),
+            "head": recalls.head(known.get("text") or ""), "route": known.get("route")})
+    return record
+
+
+#: The flag that runs `moxi-memory-subconscious` as the detached starter.
+DETACH = "--detach"
+
+
+def spawn_starter(args: list[str]) -> int:
+    """Start `moxi-memory-subconscious --detach ARGS`, detached, its output discarded,
+    and return its process id without waiting for it. The starter starts
+    `moxi-memory-subconscious ARGS` detached in its turn and exits, so that process's
+    parent is the system's and it runs outside every session: comms takes a send under
+    a scoped sender only from such a process."""
     import moxi.paths
     import moxi.proc
 
-    return moxi.proc.spawn([str(moxi.paths.script(SCRIPT)), "--session", session_id,
-                            "--recall", recall_id],
+    return moxi.proc.spawn([str(moxi.paths.script(SCRIPT)), DETACH, *args],
                            detached=True, output=os.devnull, cwd=os.sep)
+
+
+def spawn_child(session_id: str, recall_id: str) -> int:
+    """Start the recall's child through the detached starter (`spawn_starter`), and
+    return the starter's process id without waiting for it."""
+    return spawn_starter(["--session", session_id, "--recall", recall_id])
 
 
 # -- the on-demand command -------------------------------------------------------------
@@ -316,5 +338,6 @@ def reset_asked(session_id: str) -> None:
 __all__ = ["SUBCONSCIOUS_ENV", "AUTOMATIC", "ON_DEMAND", "MODES", "SUBAGENT", "BY_COMMS",
            "NO_FORK", "CODEX", "USER", "USER_AND_COMMS", "SCRIPT", "ASKED", "SPAWN", "mode",
            "counts", "route", "comms_why", "subconscious_settings", "settings_keys",
-           "default_settings", "new_id", "begin", "spawn_child", "STARTED", "START_LINE",
+           "default_settings", "new_id", "begin", "lose_spawn", "DETACH", "spawn_starter",
+           "spawn_child", "STARTED", "START_LINE",
            "Refused", "this_session", "ask", "asked", "write_asked", "reset_asked"]

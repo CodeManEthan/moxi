@@ -28,6 +28,13 @@ old (`moxi_memory.records.sweep_old`), and the child waits for it before it exit
 With `--take`, it does the same for the one session and exits: the taker memory's
 `gone` listener starts when a session with the subconscious on ends.
 
+With `--detach` first, it is the detached starter: it starts `moxi-memory-subconscious`
+with the rest of its arguments, detached, and exits, so the process it started has the
+system's for its parent and runs outside every session (comms takes a send under a
+scoped sender only from such a process). The listener, the on-demand command and the
+`gone` listener start every child and taker through it. A recall's child it can't start
+ends the recall `lost` with the reason `spawn`.
+
 It exits 0 when the recall ran to an end or the taking is done, 2 for arguments or a
 record it can't use.
 """
@@ -181,13 +188,46 @@ def take_others(recall_id: str | None = None, *, sessions: list[str] | None = No
         pass
 
 
-def main(argv: list[str] | None = None) -> int:
+def detach(argv: list[str], *, spawn=None) -> int:
+    """The detached starter: start `moxi-memory-subconscious ARGV`, detached, and
+    return 0 at once; 2 when it can't be started, after ending a recall it was to run
+    `lost` (`spawn`)."""
+    import moxi.paths
+    import moxi.proc
+
+    from . import recall_start
+
+    try:
+        if spawn is None:
+            moxi.proc.spawn([str(moxi.paths.script(recall_start.SCRIPT)), *argv],
+                            detached=True, output=os.devnull, cwd=os.sep)
+        else:
+            spawn(argv)
+    except Exception as exc:  # noqa: BLE001 - a child that can't start loses its recall
+        args = _parser().parse_known_args(argv)[0]
+        if args.recall and recalls.is_safe(args.session) and recalls.is_safe(args.recall):
+            recall_start.lose_spawn(args.session, args.recall, f"{type(exc).__name__}: {exc}")
+        return 2
+    return 0
+
+
+def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="moxi-memory-subconscious",
                                      description="Run one recall of memory's subconscious.")
     parser.add_argument("--session", required=True, help="the main session's id")
     parser.add_argument("--recall", help="the recall's id")
     parser.add_argument("--take", action="store_true",
                         help="take over the session's lines whose owner is gone, and exit")
+    return parser
+
+
+def main(argv: list[str] | None = None) -> int:
+    from .recall_start import DETACH
+
+    argv = sys.argv[1:] if argv is None else list(argv)
+    if argv[:1] == [DETACH]:
+        return detach(argv[1:])
+    parser = _parser()
     args = parser.parse_args(argv)
     if args.take == bool(args.recall):
         print("moxi-memory-subconscious: give --recall, or --take", file=sys.stderr)
@@ -204,4 +244,4 @@ def main(argv: list[str] | None = None) -> int:
 
 
 __all__ = ["CONFIG", "Recall", "open_line", "read_config", "lose", "write_brief", "run",
-           "take_others", "main"]
+           "take_others", "detach", "main"]

@@ -11,7 +11,8 @@ line names none.
 **Who takes them.** Two takers: every recall child at its start, for the lines of every
 session (`take_all`, in a thread beside its own recall), and the taker memory's `gone`
 listener starts when a session with the subconscious on ends, for that session's lines
-(`moxi-memory-subconscious --take --session SESSION`). A taker claims a line under the
+(`moxi-memory-subconscious --take --session SESSION`, through the detached starter). A
+taker claims a line under the
 line's own session's lock (`claim`): it reads the line again there and writes its own
 identity as `taker` only while the owner is still gone, so of two takers one claims the
 line and the other leaves it. A line a taker left is free again once that taker exits.
@@ -251,15 +252,12 @@ def session_needs_taking(session_id: str) -> bool:
 
 
 def start_taker(session_id: str) -> int:
-    """Start `moxi-memory-subconscious --take` for the session, detached, its output
-    discarded, and return its process id without waiting for it."""
-    import moxi.paths
-    import moxi.proc
+    """Start `moxi-memory-subconscious --take` for the session through the detached
+    starter, so the taker runs outside every session and can send what a line holds,
+    and return the starter's process id without waiting for it."""
+    from .recall_start import spawn_starter
 
-    from .recall_start import SCRIPT
-
-    return moxi.proc.spawn([str(moxi.paths.script(SCRIPT)), "--take", "--session",
-                            session_id], detached=True, output=os.devnull, cwd=os.sep)
+    return spawn_starter(["--take", "--session", session_id])
 
 
 __all__ = ["TAKER", "NONE", "LEFT", "ACKED", "SETTLED", "GONE", "UNKNOWN_DELIVERY", "me",
