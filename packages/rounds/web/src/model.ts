@@ -965,15 +965,19 @@ export function itemView(record: RecordValue, ctx: Context): ItemView {
 // --- acting --------------------------------------------------------------------------------
 
 /** A holder's lead: a round's from the board, a project's from any of its rounds led by
- * the project's lead. Null for a round on the board with no lead; undefined when the
- * board can't tell. */
+ * the project's lead. Null for a round on the board with no lead, and for a project one
+ * of whose rounds has none (such a round would read its project's lead if it had one);
+ * undefined when the board can't tell. */
 export function leadOf(board: Board): (holder: string) => string | null | undefined {
   return (holder) => {
     if (holder.includes("/")) {
       const round = board.rounds.find((one) => one.name === holder);
       return round ? round.lead?.name ?? null : undefined;
     }
-    return board.rounds.find((one) => one.project === holder && one.lead?.from === "project")?.lead?.name;
+    const rounds = board.rounds.filter((one) => one.project === holder);
+    const led = rounds.find((one) => one.lead?.from === "project");
+    if (led) return led.lead!.name;
+    return rounds.some((one) => one.lead === null) ? null : undefined;
   };
 }
 

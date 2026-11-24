@@ -3,7 +3,7 @@ import test from "node:test";
 
 import {
   ACT_ID, BODY_MAX_BYTES, bodyOf, chipOf, correctionFound, DRAFT_TEXT_MAX, DRAFTS_MAX, draftOf, EACH, eachLeadWords,
-  isAnswerable, kindWords, messageWords, mintId, overCap, postsOf, recipientWords, noLeadWords, readBackOf, receiptLines, RULE_LINE,
+  isAnswerable, kindWords, leadsKnown, messageWords, mintId, overCap, postsOf, recipientWords, noLeadWords, readBackOf, receiptLines, RULE_LINE,
   RULE_LINE_ALONE, sendable, sendWords, Tray, trayKey,
 } from "../src/tray.ts";
 
@@ -78,6 +78,36 @@ test("a project's lead reads (the project's) in the chips, the Send now name and
   // An agent picked is named as it is.
   assert.equal(recipientWords(ledger, { ...reach, to: "builder-1" }), "builder-1");
   assert.equal(recipientWords(draft("pick", {}, "kestrel/payroll"), { ...reach, leadOf: () => null }), null);
+});
+
+test("a project with no lead offers no send to a lead, before any send and once the server keeps its draft", () => {
+  const words = draft("words", { text: "Yes, ship it." }, "beta", "P1");
+  const pick = draft("pick", { chose: "a" }, "beta", "P2");
+  // Before any send: the board reads no lead for the project.
+  const board = { comms: true, to: EACH, leadOf: leadsKnown((holder) => (holder === "beta" ? null : undefined), [words]) };
+  assert.equal(recipientWords(words, board), null);
+  assert.equal(chipOf(words, board), noLeadWords("beta"));
+  assert.deepEqual(sendable([words, pick], board), []);
+  // The board can't tell, so the page names "the lead" until the server answers.
+  const unknown = (holder) => undefined;
+  assert.equal(recipientWords(words, { ...board, leadOf: leadsKnown(unknown, [words]) }), "the lead");
+  // The server keeps it for having no lead: every draft of the holder then offers the picker only.
+  const kept = { ...words, receipt: { act: words.act, holder: "beta", item: "P1", kind: "words", state: "kept",
+                                      reason: noLeadWords("beta"), fix: null } };
+  const after = { comms: true, to: EACH, leadOf: leadsKnown(unknown, [kept, pick]) };
+  assert.equal(recipientWords(kept, after), null);
+  assert.equal(recipientWords(pick, after), null);
+  assert.equal(chipOf(kept, after), noLeadWords("beta"));
+  assert.deepEqual(sendable([kept, pick], after), []);
+  assert.equal(eachLeadWords([kept, pick], after), "Each round's lead");
+  // An agent picked takes them, and a lead the board reads later wins over the kept answer.
+  assert.deepEqual(sendable([kept, pick], { ...after, to: "builder-1" }).map((one) => one.act), [kept.act, pick.act]);
+  assert.equal(recipientWords(kept, { ...after, to: "builder-1" }), "builder-1");
+  assert.equal(leadsKnown(() => "beta-lead", [kept])("beta"), "beta-lead");
+  // A draft kept for another reason, or a kept draft of another holder, tells nothing of this one's lead.
+  const alone = { ...kept, receipt: { ...kept.receipt, reason: "comms is not installed", fix: "moxi rounds rule" } };
+  assert.equal(leadsKnown(unknown, [alone])("beta"), undefined);
+  assert.equal(leadsKnown(unknown, [kept])("gamma"), undefined);
 });
 
 test("Sent lists each message a send made, and comms' refusal of one", () => {

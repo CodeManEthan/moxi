@@ -458,6 +458,12 @@ test("a holder's lead: a round's own, a project's from a round its project's lea
   assert.equal(of("kestrel"), "atlas");
   assert.equal(of("heron"), undefined);
   assert.equal(of("kestrel/gone"), undefined);
+  // A round with no lead would read its project's lead if it had one, so its project has none.
+  const bare = leadOf(board({ rounds: [round("heron/a", "moving", { lead: null }),
+                                       round("heron/b", "moving", { lead: { name: "builder-1", from: "round" } }),
+                                       round("wren/a", "moving", { lead: { name: "builder-1", from: "round" } })] }));
+  assert.equal(bare("heron"), null);
+  assert.equal(bare("wren"), undefined);
 });
 
 test("a prepared answer marks its option and says who recommends it, the lead by that name", () => {

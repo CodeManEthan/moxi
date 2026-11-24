@@ -58,7 +58,7 @@ import {
 import type { Address, Context, DropFacts, Filter, GroupView, Held, Item, ItemKind, ItemView, Piece, Section } from "./model.ts";
 import {
   bodyOf, chipOf, correctionFound, draftOf, EACH, eachLeadWords, isAnswerable, isPageKind, kindWords, messageWords,
-  mintId, overCap, postsOf, readBackOf, receiptLines, recipientWords, RULE_LINE, RULE_LINE_ALONE, sendable, sendWords,
+  leadsKnown, mintId, overCap, postsOf, readBackOf, receiptLines, recipientWords, RULE_LINE, RULE_LINE_ALONE, sendable, sendWords,
   Tray, trayKey,
 } from "./tray.ts";
 import type { Draft, Kind, Reach, Receipt, ReceiptLine, Store } from "./tray.ts";
@@ -1138,7 +1138,8 @@ export class RoundsPage extends LitElement {
   // --- acting ------------------------------------------------------------------------------
 
   #reach(value: Board): Reach {
-    return { comms: this.#hasComms(), to: this.#to, leadOf: leadOf(value), fromProject: leadFromProject(value) };
+    return { comms: this.#hasComms(), to: this.#to, leadOf: leadsKnown(leadOf(value), this.#tray.drafts),
+             fromProject: leadFromProject(value) };
   }
 
   /** Whether the page server sends through comms: what `/api/agents` said, else whether
@@ -1263,7 +1264,7 @@ export class RoundsPage extends LitElement {
     if (!this.#hasComms()) return nothing;
     const names = [...new Set([...(this.#agents ?? []), ...(this.#to === EACH ? [] : [this.#to])])];
     const notLed = this.#to === EACH ? [] : [...new Set(this.#tray.drafts.map((one) => one.holder))]
-      .filter((holder) => leadOf(value)(holder) !== this.#to);
+      .filter((holder) => this.#reach(value).leadOf(holder) !== this.#to);
     return html`<label>To <select aria-label="Send to" @focus=${() => void this.#readAgents()} @change=${(event: Event) => {
         this.#to = (event.target as HTMLSelectElement).value;
         this.requestUpdate();

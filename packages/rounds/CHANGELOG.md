@@ -16,7 +16,9 @@
   installed one message goes to each recipient under rounds' send-only name; without it
   nothing is sent and the row shows the command a lead would run. Each draft gets a
   receipt, and `Sent` lists the sent drafts and the messages sent. A draft longer than
-  the answers route takes stays in the tray with its row saying so.
+  the answers route takes stays in the tray with its row saying so. A draft of a round
+  or project with no lead, as the board shows or the page server answers, offers no send
+  to a lead: it stays in the tray until an agent is picked in the To picker.
 - An act posted twice runs once: each act carries an act id, the page server answers a
   repeat from the receipts it keeps, and after a restart an event whose pointer holds
   the act id is that act's record, so it is not recorded again.

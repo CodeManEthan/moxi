@@ -201,6 +201,23 @@ export function noLeadWords(holder: string): string {
   return `No lead for ${holder}: pick an agent to send it to`;
 }
 
+/** Whether a receipt is the server's answer that a draft's holder has no lead: the
+ * route keeps the draft with `noLeadWords` as its reason. */
+export function isNoLead(draft: Pick<Draft, "holder" | "receipt">): boolean {
+  return draft.receipt?.state === "kept" && draft.receipt.reason === noLeadWords(draft.holder);
+}
+
+/** A holder's lead as the board reads it, or null where the board can't tell and the
+ * server has kept a draft of that holder for having no lead, so a holder known to have
+ * no lead offers no send to one. */
+export function leadsKnown(leadOf: Reach["leadOf"], drafts: readonly Draft[]): Reach["leadOf"] {
+  const none = new Set(drafts.filter(isNoLead).map((one) => one.holder));
+  return (holder) => {
+    const lead = leadOf(holder);
+    return lead === undefined && none.has(holder) ? null : lead;
+  };
+}
+
 /** The command a lead runs to record an own-words answer or a correction, `PTR` its
  * pointer and `TEXT` the lead's wording of the operator's words, which the row shows
  * above it. The words are never put in the command, so it reads the same in any shell. */
