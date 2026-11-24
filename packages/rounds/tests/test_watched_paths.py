@@ -113,6 +113,22 @@ def test_a_new_file_deep_in_a_tree_matches_a_double_star_and_an_old_one_does_not
     assert write(root / "packages" / "core" / "src" / "old.py") is None
 
 
+def test_an_only_new_folder_pattern_counts_a_new_folder_at_any_depth_it_matches(
+        root, write_config):
+    write_config("""\
+        [projects.proj-a]
+        watched_paths = [
+          { pattern = "src/**/", only_new = true, note = "A new source folder.", skills = ["s"] },
+        ]
+        """)
+    (root / "src" / "old").mkdir(parents=True)
+
+    said = line_of(write(root / "src" / "old" / "fresh" / "a.py"))
+    assert said == ("rounds: watched path of proj-a: src/old/fresh/ - A new source "
+                    "folder. Load: s.")
+    assert write(root / "src" / "old" / "b.py") is None
+
+
 def test_a_path_relative_to_the_call_s_cwd_and_in_another_case_matches(root):
     said = line_of(write(Path("PACKAGES") / "Core" / "pyproject.toml", cwd=root))
 

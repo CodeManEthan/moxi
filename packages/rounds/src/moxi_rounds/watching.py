@@ -28,9 +28,10 @@ file, and the old path of a moved one, are written by no one.
    parts relative to the base: `*` any run of characters within a part, `?` one
    character, `[...]` one of a set, a whole part `**` any number of parts. A pattern
    with the folder mark (one `/` at its end) is matched against each folder above the
-   file inside the base.
+   file inside the base, and names the shallowest folder it matches.
 5. With `only_new` an entry counts only when what it matched did not exist before the
-   call; a Codex `Add File` section is new by its own word.
+   call; a folder pattern then counts when any folder it matches, at any depth, is new,
+   and names the shallowest new one. A Codex `Add File` section is new by its own word.
 
 Each `(agent, project, entry, path)` is named once in this process; an agent is the main
 loop or one subagent by its id. Every error is caught and logged once per kind, and the
@@ -150,12 +151,15 @@ def matches(file: str, settings, *, added: bool = False) -> list[Match]:
         marks_dir = pattern.endswith("/")
         wanted = pattern.rstrip("/").split("/")
         if marks_dir:
-            hit = next((parts[:n] for n in range(1, len(parts))
-                        if matched(wanted, parts[:n])), None)
-            if hit is None:
+            hits = [parts[:n] for n in range(1, len(parts))
+                    if matched(wanted, parts[:n])]
+            if not hits:
                 continue
+            fresh = [hit for hit in hits
+                     if not os.path.lexists(os.path.join(base, *hit))]
+            hit = fresh[0] if fresh and entry.get("only_new") else hits[0]
             named = "/".join(hit) + "/"
-            new = not os.path.lexists(os.path.join(base, *hit))
+            new = bool(fresh)
         else:
             if not matched(wanted, parts):
                 continue
