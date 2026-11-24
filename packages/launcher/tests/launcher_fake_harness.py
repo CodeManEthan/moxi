@@ -1,7 +1,7 @@
 """A fake harness on PATH for the launch tests, and a launch run in a process of its own.
 
 Each fake (`claude`, `codex`, and `moxi-comms-fake` standing in for comms' wrapper) is a
-`console_script` stand-in: Python under the suite's interpreter, a `.cmd` on Windows. It
+`console_script` stand-in: Python under the suite's interpreter, an `.exe` on Windows. It
 records what it was started with (its argv, directory, environment, pid and open files)
 as one JSON file per run in the directory `LAUNCHER_FAKE_HARNESS` names (`runs-seen`
 beside its own `bin` when a replay's environment leaves that name out), prints one line

@@ -120,7 +120,8 @@ def test_a_terminal_launch_records_the_process_that_runs_claude(tmp_path, work, 
     code, seen = run_child(tmp_path, req)
     run = harness.one()
     assert code == 0, seen["stderr"]
-    assert Path(run["argv"][0]).name == "claude"
+    # The program, without the suffix a Windows search adds (`claude.EXE`).
+    assert Path(run["argv"][0]).stem == "claude"
     got = row()
     assert got.pid == run["pid"]
     assert run["started"] is not None and got.pid_started is not None
@@ -344,7 +345,7 @@ def test_a_headless_launch_starts_detached_and_returns(work, harness, harness_na
     assert result.state == "started" and result.exit_code == exits.OK
     run = harness.one()
     assert run["pid"] == result.pid and run["cwd"] == str(work)
-    assert Path(run["argv"][0]).name == harness_name and run["argv"][1:] == list(
+    assert Path(run["argv"][0]).stem == harness_name and run["argv"][1:] == list(
         shown.argv[1:])
     assert run["env"]["MOXI_LAUNCHER_REQUEST"] == "r1" and "CLAUDECODE" not in run["env"]
     got = row()

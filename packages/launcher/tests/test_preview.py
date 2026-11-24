@@ -392,7 +392,7 @@ def test_preview_argv_is_the_argv_launch_hands_the_target(tmp_path, monkeypatch,
     code, seen = run_child(tmp_path, req, moxi="moxi-comms-fake", free_identity=True)
     assert code == 0, seen["stderr"]
     run = rig.one()
-    handed = [Path(run["argv"][0]).name, *run["argv"][1:]]
+    handed = [Path(run["argv"][0]).stem, *run["argv"][1:]]
     assert handed == seen["preview"]
     assert run["env"]["MOXI_LAUNCHER_REQUEST"] == "r1"
     if with_turns and typed.get("target") not in ("headless", "slot"):
