@@ -125,7 +125,7 @@ class FakeTailscale:
         self.bin = bin_dir
         self.path = bin_dir / "tailscale-state.json"
         bin_dir.mkdir(parents=True, exist_ok=True)
-        #: The stand-in's path: `tailscale` on POSIX, `tailscale.cmd` on Windows.
+        #: The stand-in's path: `tailscale` on POSIX, `tailscale.exe` on Windows.
         self.script = console_script(bin_dir, "tailscale", SCRIPT)
         self.save({"status": status(), "prefs": {"OperatorUser": this_user(),
                                                  "ShieldsUp": False, "Hostname": "box"},
