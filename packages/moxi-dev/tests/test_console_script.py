@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+import json
 import os
 import shutil
 import subprocess
 import sys
+import zipfile
 
 import pytest
 
@@ -18,7 +20,7 @@ def test_the_scripts_dir_lookup_finds_it(tmp_path, monkeypatch):
     monkeypatch.setattr(moxi.paths, "_scripts", lambda: tmp_path)
     path = console_script(tmp_path, "moxi-demo-relay")
     assert moxi.paths.script("moxi-demo-relay") == path
-    assert path.name == ("moxi-demo-relay.cmd" if testing.WINDOWS else "moxi-demo-relay")
+    assert path.name == ("moxi-demo-relay.exe" if testing.WINDOWS else "moxi-demo-relay")
 
 
 def test_a_path_lookup_finds_it(tmp_path):
@@ -34,13 +36,13 @@ def test_on_posix_it_is_a_bare_sh_script_with_the_execute_bits(tmp_path):
     assert path.stat().st_mode & 0o777 == 0o755
 
 
-@pytest.mark.skipif(os.name != "nt", reason="the Windows shape: a .cmd batch file")
-def test_on_windows_it_is_a_cmd_file_with_crlf_lines(tmp_path):
+@pytest.mark.skipif(os.name != "nt", reason="the Windows shape: uv's launcher, an .exe")
+def test_on_windows_it_is_an_exe_launcher_holding_the_source(tmp_path):
     path = console_script(tmp_path, "moxi", "print('a')\nprint('b')\n")
-    assert path == tmp_path / "moxi.cmd"
-    lines = path.read_bytes().split(b"\r\n")
-    assert lines[1:] == [b"print('a')", b"print('b')", b""]
-    assert b"\n" not in b"".join(lines)
+    assert path == tmp_path / "moxi.exe"
+    assert path.read_bytes()[:2] == b"MZ"
+    with zipfile.ZipFile(path) as archive:
+        assert archive.read("__main__.py").decode().endswith("print('a')\nprint('b')\n")
 
 
 def test_with_no_source_it_runs_and_exits_0(tmp_path):
@@ -70,3 +72,25 @@ def test_a_path_lookup_runs_it_by_its_bare_name(tmp_path):
     found = shutil.which("moxi", path=str(tmp_path))
     subprocess.run([found, "alpha", "x"], check=True, timeout=30)
     assert out.read_text() == "alpha x"
+
+
+# Each holds a character a shell or cmd.exe reads as its own: none may arrive changed.
+AWKWARD = ["two\nlines", "a & b | c", "^%PATH%<in>out", 'say "hi"', "ends in \\",
+           "tab\there", "", "  spaced  "]
+
+
+def test_the_arguments_arrive_exactly_as_passed(tmp_path):
+    out = tmp_path / "out.json"
+    path = console_script(tmp_path, "moxi",
+                          f"import json, sys\njson.dump(sys.argv[1:], open({str(out)!r}, 'w'))\n")
+    subprocess.run([str(path), *AWKWARD], check=True, timeout=30)
+    assert json.loads(out.read_text()) == AWKWARD
+
+
+def test_its_pid_is_the_pid_of_the_process_that_was_started(tmp_path):
+    out = tmp_path / "pid"
+    path = console_script(tmp_path, "moxi",
+                          f"import os\nopen({str(out)!r}, 'w').write(str(os.getpid()))\n")
+    child = subprocess.Popen([str(path)])
+    assert child.wait(timeout=30) == 0
+    assert int(out.read_text()) == child.pid

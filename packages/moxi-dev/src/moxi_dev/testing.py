@@ -335,6 +335,7 @@ import contextlib
 import dataclasses
 import functools
 import inspect
+import io
 import ipaddress
 import json
 import math
@@ -347,9 +348,11 @@ import socket
 import sqlite3
 import subprocess
 import sys
+import sysconfig
 import tempfile
 import threading
 import time
+import zipfile
 from collections.abc import Callable, Generator, Iterable, Iterator, Mapping, Sequence
 from enum import Enum
 from pathlib import Path, PurePath
@@ -2420,28 +2423,25 @@ def console_script(script_dir: str | os.PathLike[str], name: str,
 
     It has the name this system finds a console script by, so `moxi.paths.script(name)`
     finds it when the scripts directory is `script_dir`, and so does a PATH lookup
-    (`shutil.which`) when `script_dir` is on PATH; and it runs. On POSIX it is `name`, a
-    `/bin/sh` script with mode 0o755. On Windows it is `name.cmd`, a batch file: an
-    installer writes `name.exe`, which a test can't write as text, and `.cmd` is on every
-    `PATHEXT`. A test that needs the path uses the one returned, never `script_dir / name`.
+    (`shutil.which`, or a start by bare name) when `script_dir` is on PATH; and it runs.
+    On POSIX it is `name`, a `/bin/sh` script with mode 0o755. On Windows it is
+    `name.exe`, the launcher uv writes for a console script, copied from this
+    environment's own scripts folder, with its script and its Python replaced. A test
+    that needs the path uses the one returned, never `script_dir / name`.
 
     With no `source` it does nothing and exits 0. With `source`, Python code, it runs
-    that code under this interpreter, with the stand-in's arguments in `sys.argv[1:]`,
-    and exits with its status. On Windows the arguments pass through `cmd.exe`, so one
-    holding `&`, `|`, `^`, `%`, `<` or `>` doesn't arrive as written.
+    that code under this interpreter, with the stand-in's arguments in `sys.argv[1:]`
+    exactly as the program that started it passed them, and exits with its status.
+    `os.getpid()` in that code is the pid of the process that was started: on Windows
+    the launcher runs Python as a child, so the stand-in reads its launcher's pid and
+    answers that.
     """
-    python = sys.executable
     if WINDOWS:
-        if source is not None and "%" in python:
-            raise ValueError(f"can't quote {python!r} for cmd.exe")
-        path = Path(script_dir, f"{name}.cmd")
-        # `-x` makes Python skip the first line, the one cmd.exe runs; `call` reads
-        # Python's exit status after it ran, not when cmd.exe read the line.
-        head = ("@exit /b 0" if source is None
-                else f'@"{python}" -x "%~f0" %* & call exit /b %%errorlevel%%')
-        path.write_bytes(f"{head}\r\n{source or ''}".replace("\r\n", "\n")
-                         .replace("\n", "\r\n").encode())
+        path = Path(script_dir, f"{name}.exe")
+        script = "" if source is None else _STAND_IN_PID.format(exe=path.name) + source
+        _write_launcher(path, sys.executable, script)
         return path
+    python = sys.executable
     path = Path(script_dir, name)
     if source is None:
         path.write_text("#!/bin/sh\n")
@@ -2452,6 +2452,154 @@ def console_script(script_dir: str | os.PathLike[str], name: str,
         path.write_text(f"#!/bin/sh\n\"exec\" '{python}' \"$0\" \"$@\"\n{source}")
     path.chmod(0o755)
     return path
+
+
+# The head of a Windows stand-in's script. The launcher starts Python as its child (and a
+# venv's python.exe starts the base interpreter as one more), so the script's own pid is
+# not the one the product started: it walks up its parents to the nearest process with
+# the stand-in's file name and makes `os.getpid` answer that pid.
+_STAND_IN_PID = """\
+def _stand_in_pid(exe):
+    import ctypes, os
+    from ctypes import wintypes
+    class Entry(ctypes.Structure):
+        _fields_ = [("size", wintypes.DWORD), ("usage", wintypes.DWORD),
+                    ("pid", wintypes.DWORD), ("heap", ctypes.c_size_t),
+                    ("module", wintypes.DWORD), ("threads", wintypes.DWORD),
+                    ("parent", wintypes.DWORD), ("priority", ctypes.c_long),
+                    ("flags", wintypes.DWORD), ("exe", ctypes.c_wchar * 260)]
+    kernel = ctypes.WinDLL("kernel32", use_last_error=True)
+    kernel.CreateToolhelp32Snapshot.restype = wintypes.HANDLE
+    kernel.CreateToolhelp32Snapshot.argtypes = [wintypes.DWORD, wintypes.DWORD]
+    kernel.Process32FirstW.argtypes = [wintypes.HANDLE, ctypes.POINTER(Entry)]
+    kernel.Process32NextW.argtypes = [wintypes.HANDLE, ctypes.POINTER(Entry)]
+    kernel.CloseHandle.argtypes = [wintypes.HANDLE]
+    snap = kernel.CreateToolhelp32Snapshot(2, 0)
+    if snap in (None, wintypes.HANDLE(-1).value):
+        return None
+    seen = {{}}
+    try:
+        entry = Entry(size=ctypes.sizeof(Entry))
+        more = kernel.Process32FirstW(snap, ctypes.byref(entry))
+        while more:
+            seen[entry.pid] = (entry.parent, entry.exe.lower())
+            more = kernel.Process32NextW(snap, ctypes.byref(entry))
+    finally:
+        kernel.CloseHandle(snap)
+    pid = os.getpid()
+    for _ in range(4):
+        pid = seen.get(pid, (None, ""))[0]
+        if pid is None:
+            return None
+        if seen.get(pid, (None, ""))[1] == exe:
+            return pid
+    return None
+_pid = _stand_in_pid({exe!r}.lower())
+if _pid is not None:
+    import os as _os
+    _os.getpid = lambda: _pid
+del _stand_in_pid
+"""
+
+# The resources a uv console-script launcher reads (all RT_RCDATA): its kind (1 runs the
+# zip in its own file as a script), the Python it starts, and that zip.
+_LAUNCHER_KIND = "UV_TRAMPOLINE_KIND"
+_LAUNCHER_PYTHON = "UV_PYTHON_PATH"
+_LAUNCHER_SCRIPT = "UV_SCRIPT_DATA"
+_RT_RCDATA = 10
+
+
+def _write_launcher(path: Path, python: str, script: str) -> None:
+    """Write a uv launcher to `path` that runs `script` under `python`.
+
+    It starts from a copy of a launcher in this environment's scripts folder and replaces
+    the resources it reads. The launcher starts `python` on its own file, which Python
+    reads as a zip holding `__main__.py`, and hands it the command line as it got it."""
+    import ctypes
+    from ctypes import wintypes
+
+    template, language = _launcher_template()
+    shutil.copyfile(template, path)
+    data = io.BytesIO()
+    with zipfile.ZipFile(data, "w", zipfile.ZIP_STORED) as archive:
+        archive.writestr("__main__.py", script)
+    kernel = ctypes.WinDLL("kernel32", use_last_error=True)
+    kernel.BeginUpdateResourceW.restype = wintypes.HANDLE
+    kernel.BeginUpdateResourceW.argtypes = [wintypes.LPCWSTR, wintypes.BOOL]
+    kernel.UpdateResourceW.argtypes = [wintypes.HANDLE, ctypes.c_void_p, wintypes.LPCWSTR,
+                                       wintypes.WORD, ctypes.c_char_p, wintypes.DWORD]
+    kernel.EndUpdateResourceW.argtypes = [wintypes.HANDLE, wintypes.BOOL]
+    delete_others = False
+    update = kernel.BeginUpdateResourceW(str(path), delete_others)
+    if not update:
+        raise ctypes.WinError(ctypes.get_last_error())
+    ok = True
+    for resource, value in ((_LAUNCHER_PYTHON, os.fsencode(python)),
+                            (_LAUNCHER_SCRIPT, data.getvalue())):
+        ok = ok and bool(kernel.UpdateResourceW(update, _RT_RCDATA, resource, language,
+                                                value, len(value)))
+    error = ctypes.get_last_error()
+    if not kernel.EndUpdateResourceW(update, not ok) or not ok:
+        raise ctypes.WinError(error or ctypes.get_last_error())
+    # Python finds the script as the last zip in the file; the update leaves the old one
+    # in a later section, so the zip goes at the end as well, where the loader reads
+    # nothing.
+    with open(path, "ab") as out:
+        out.write(data.getvalue())
+
+
+@functools.cache
+def _launcher_template() -> tuple[Path, int]:
+    """A uv console-script launcher in this environment's scripts folder (moxi-dev's own
+    first) and the language its script resource is stored under."""
+    import ctypes
+    from ctypes import wintypes
+
+    scripts = Path(sysconfig.get_path("scripts"))
+    found = sorted(scripts.glob("*.exe"), key=lambda p: p.name.lower() != "moxi-dev.exe")
+    kernel = ctypes.WinDLL("kernel32", use_last_error=True)
+    kernel.LoadLibraryExW.restype = wintypes.HMODULE
+    kernel.LoadLibraryExW.argtypes = [wintypes.LPCWSTR, wintypes.HANDLE, wintypes.DWORD]
+    kernel.FreeLibrary.argtypes = [wintypes.HMODULE]
+    kernel.FindResourceW.restype = ctypes.c_void_p
+    kernel.FindResourceW.argtypes = [wintypes.HMODULE, wintypes.LPCWSTR, ctypes.c_void_p]
+    kernel.LoadResource.restype = ctypes.c_void_p
+    kernel.LoadResource.argtypes = [wintypes.HMODULE, ctypes.c_void_p]
+    kernel.LockResource.restype = ctypes.c_void_p
+    kernel.LockResource.argtypes = [ctypes.c_void_p]
+    kernel.SizeofResource.restype = wintypes.DWORD
+    kernel.SizeofResource.argtypes = [wintypes.HMODULE, ctypes.c_void_p]
+    languages = ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.HMODULE, ctypes.c_void_p,
+                                   ctypes.c_void_p, wintypes.WORD, ctypes.c_void_p)
+    kernel.EnumResourceLanguagesW.argtypes = [wintypes.HMODULE, ctypes.c_void_p,
+                                              wintypes.LPCWSTR, languages, ctypes.c_void_p]
+    for exe in found:
+        # As data only: nothing in the file runs.
+        module = kernel.LoadLibraryExW(str(exe), None, 0x2 | 0x20)
+        if not module:
+            continue
+        try:
+            kind = kernel.FindResourceW(module, _LAUNCHER_KIND, _RT_RCDATA)
+            if not kind or kernel.SizeofResource(module, kind) != 1:
+                continue
+            if ctypes.string_at(kernel.LockResource(kernel.LoadResource(module, kind)),
+                                1) != b"\x01":
+                continue
+            seen: list[int] = []
+
+            def note(_module: int, _type: int, _name: int, language: int,
+                     _param: int) -> bool:
+                seen.append(language)
+                return True
+
+            kernel.EnumResourceLanguagesW(module, _RT_RCDATA, _LAUNCHER_SCRIPT,
+                                          languages(note), None)
+            if seen:
+                return exe, seen[0]
+        finally:
+            kernel.FreeLibrary(module)
+    raise RuntimeError(f"no uv console-script launcher in {scripts} to copy for a "
+                       "stand-in; install this environment with uv")
 
 
 def toml_string(value: str | os.PathLike[str]) -> str:

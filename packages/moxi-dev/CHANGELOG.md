@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- `console_script` on Windows writes `name.exe`, a copy of the launcher uv writes for a
+  console script, in place of a `.cmd` file. Its source gets the arguments exactly as
+  the program that started it passed them (cmd.exe cut one at a newline and read `&`,
+  `|`, `^`, `%`, `<` and `>`), a start by bare name finds it, and `os.getpid()` in it
+  is the pid of the process that was started, not the Python child the launcher runs.
 - `toml_string(value)` gives a path, or any text, as a TOML basic string that reads back
   as it is. A test writes a path into a TOML file through it, so a Windows path's
   backslashes don't read as escapes.
