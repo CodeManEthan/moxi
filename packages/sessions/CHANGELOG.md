@@ -2,9 +2,10 @@
 
 ## Unreleased
 
-- With cache installed, a row on the page ends its first line in `warm until <time>` or
-  `cold`, from cache's clock record for the session, and turns cold at its time; an opened
-  row has a `Cache` line linking cache's page. On a running launch launcher's cache fact
+- With cache installed, a row of `Active recently` ends its first line in `warm until
+  <time>` or `cold`, from cache's clock record for the session, and turns cold at its
+  time; opened, it has a `Cache` line linking cache's page. A day's rows say nothing of
+  cache. On a running launch launcher's cache fact
   wins, and cache's is used only where launcher gives none. The page reads cache's
   `/api/clocks` and follows its topic `clocks` at the desk; without cache, and on the
   phone, nothing of it is drawn and cache is not read.

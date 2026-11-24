@@ -501,17 +501,19 @@ in every state of the page and opens `/m/turns/`. It is drawn only with turns in
 and not through the phone gateway.
 
 **Cache.** With cache installed, at the desk, the list reads cache's `/api/clocks` when it
-opens and when its tab is shown again, and follows cache's topic `clocks`. A row whose
-session cache keeps a clock record for, matched by harness and session id, ends its first
-line in a dim `warm until 19:12`, or `cold` once that time has passed on cache's clock;
-the list is drawn again at that time, so the row turns cold with no read. Opened, the row
-has a `Cache` line, `warm until 19:12` or `cold since 18:35` (with when cache last read it,
+opens and when its tab is shown again, and follows cache's topic `clocks`. A row of
+`Active recently` whose session cache keeps a clock record for, matched by harness and
+session id, ends its first line in a dim `warm until 19:12`, or `cold` once that time has
+passed on cache's clock; the list is drawn again at that time, so the row turns cold with
+no read. Opened, the row has a `Cache` line, `warm until 19:12` or `cold since 18:35` (with when cache last read it,
 where cache has not rewritten the record lately), and a `Cache` link to cache's page.
 Which records have a clock time and when each goes cold are cache's rules. On a running
 launch launcher's cache fact wins, as it does on Home and the Comms page: the row's fact
 and its `Cache` line are launcher's (`kept warm while 1 agent works` after a covered
 one's), and cache's record is used only where launcher gives the launch no cache. A
 record with no clock time, a session with no record and a read that fails draw nothing.
+The rows of a day's group, of `Earlier` and of a find say nothing of cache, closed or
+opened, whatever cache holds for them.
 Without cache, and through the phone gateway, none of this is drawn and cache is not read.
 
 A row opens in place, by its `Open` or by a click, Enter or Space on its line, and several

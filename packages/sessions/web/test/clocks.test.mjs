@@ -177,8 +177,8 @@ const cacheOf = (rows, now = NOW) => ({ clocks: read(rows), now });
 const rowsOf = (view) => view.groups.flatMap((group) => group.rows);
 
 test("a row takes the record of its own harness and session: the fact, and the opened row's Cache line", () => {
-  const state = stateOf(listAnswer([row("s1", at("19:07")), row("s2", at("19:00"))],
-                                   [row("s3", at("15:07")), row("s4", at("09:06"), { harness: "codex" })]));
+  const state = stateOf(listAnswer([row("s1", at("19:07")), row("s2", at("19:00")),
+                                    row("s3", at("18:07")), row("s4", at("18:06"), { harness: "codex" })], []));
   const cache = cacheOf([clock("s1"), clock("s3", { kind: "cold", last_request: at("15:07") }), clock("s4"),
                          clock("s9")]);
   const view = listView(state, { zone: UTC, cache });
@@ -190,6 +190,34 @@ test("a row takes the record of its own harness and session: the fact, and the o
     ["s4", null, null],
   ]);
   assert.ok(rowsOf(view).every((one) => one.factHeavy === false));
+});
+
+test("cache speaks on Active recently's rows only; a day's rows and a find's say nothing of it", () => {
+  const program = row("p1", at("19:05"), { by_program: "cron" });
+  const state = stateOf(listAnswer([row("s1", at("19:07"))], [row("s3", at("15:07")), row("s5", at("14:07"))]));
+  // `Active recently`'s fold of sessions started by a program, opened.
+  state.groups[0].program = { count: 1, open: true, rows: [program], before: null, pages: 1 };
+  const cache = cacheOf([clock("s1"), clock("p1"), clock("s3"), clock("s5", { kind: "cold", last_request: at("14:07") })]);
+  const view = listView(state, { zone: UTC, cache });
+  const facts = (group) => group.rows.concat(group.program?.rows ?? [])
+    .map((one) => [one.session, one.fact, one.cache?.value ?? null]);
+  assert.deepEqual(view.groups.map((group) => [group.key, facts(group)]), [
+    ["recent", [["s1", "warm until 19:12", "warm until 19:12"], ["p1", "warm until 19:12", "warm until 19:12"]]],
+    // Timed records, warm and cold, and the day's rows draw neither.
+    [TODAY, [["s3", null, null], ["s5", null, null]]],
+  ]);
+  // A day's row opened has no Cache line.
+  const opened = stateOf(listAnswer([], [row("s3", at("15:07"))]));
+  opened.opened = ["claude/s3"];
+  const shown = listView(opened, { zone: UTC, cache: cacheOf([clock("s3")]) }).groups[0].rows[0];
+  assert.equal(shown.open, true);
+  assert.equal(openedView(shown, null, { today: TODAY, zone: UTC, cacheLink: true }).cache, null);
+  // A find's matches say nothing of cache either.
+  const query = queryOf({ ...NO_FILTERS, find: "build" }, TODAY, UTC);
+  const found = refresh(null, { ...listAnswer([], []), all: 1, total: 1,
+                               groups: [{ key: "found", count: 1, rows: [row("s1", at("19:07"))], before: null }] },
+                        query).state;
+  assert.deepEqual(rowsOf(listView(found, { zone: UTC, cache })).map((one) => [one.fact, one.cache]), [[null, null]]);
 });
 
 test("without cache's records nothing of them is drawn, and the rows are as they were", () => {

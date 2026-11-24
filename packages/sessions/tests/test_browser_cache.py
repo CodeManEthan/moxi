@@ -1,10 +1,11 @@
 """cache's clocks on sessions' page, in a browser, through a real shell that starts
 sessions' real page server: a session started by hand ends its row's first line in `warm
 until <time>` or `cold`, from cache's record for it, and turns cold at its time with no
-read; opened, its `Cache` line says the same and links cache's page; on a running launch
-launcher's cache fact wins, and cache's record speaks only where launcher gives none; a
-failed read draws nothing; and a small
-install, with ui and sessions only, reads nothing of cache and draws none of it.
+read; opened, its `Cache` line says the same and links cache's page; a row in a day's
+group says nothing of cache, closed or opened, whatever cache holds for it; on a running
+launch launcher's cache fact wins, and cache's record speaks only where launcher gives
+none; a failed read draws nothing; and a small install, with ui and sessions only, reads
+nothing of cache and draws none of it.
 
 cache's `clocks` route is answered in the browser (`CacheStub`), so each test sets the
 records it needs, and the shell's push stream is kept from bringing the real cache's
@@ -19,13 +20,14 @@ import json
 import re
 import sys
 import time
+from pathlib import Path
 from typing import Any
 
 import pytest
 from moxi import modules
 from playwright.sync_api import expect
 
-from test_browser_list import group, open_list, row, sid, tid
+from test_browser_list import claude, day_key, env_of, group, noon, open_list, row, sid, tid
 from test_browser_running import SMALL, LauncherStub, labels, launch, launched_row, seed, small_shell  # noqa: F401
 from test_browser_running import full_shell  # noqa: F401
 
@@ -175,6 +177,32 @@ def test_a_row_turns_cold_at_its_time_with_no_read(full_shell, ui_contexts):
     reads = stub.reads
     expect(first).to_have_attribute("fact", "cold", timeout=15_000)
     assert stub.reads == reads
+
+
+@pytest.fixture(scope="module")
+def days_shell(ui_shells, tmp_path_factory):
+    """A shell with one session of the last hour and two from two days back."""
+    shell = ui_shells(**env_of(tmp_path_factory.mktemp("days")))
+    root = Path(shell.env["CLAUDE_CONFIG_DIR"]) / "projects"
+    claude(root, 1, time.time() - 600, typed="Make the build smaller.")
+    claude(root, 10, noon(2).timestamp(), typed="Rotate the certificates.")
+    claude(root, 11, noon(2).timestamp() + 60, typed="Trim the export.")
+    return shell
+
+
+def test_a_days_rows_say_nothing_of_cache(days_shell, ui_contexts):
+    _, view, stub = open_with(days_shell, ui_contexts, [record(sid(1)), record(sid(10)), record(sid(11), cold_in=-300)])
+    expect(group(view, "recent").locator(f'moxi-ui-row[data-key="claude/{sid(1)}"]')).to_have_attribute("fact", WARM)
+    day = group(view, day_key(2))
+    warm, cold = (day.locator(f'moxi-ui-row[data-key="claude/{sid(n)}"]') for n in (10, 11))
+    for past in (warm, cold):
+        expect(past).to_be_visible()
+        expect(past).not_to_have_attribute("fact", re.compile(""))
+    # Opened, it has no Cache line.
+    warm.get_by_role("button", name="Open").click()
+    expect(warm.locator('[data-line="session"]')).to_be_visible()
+    expect(warm.locator('[data-line="cache"]')).to_have_count(0)
+    assert stub.reads >= 1
 
 
 def test_on_a_running_launch_launchers_fact_wins(full_shell, ui_contexts):

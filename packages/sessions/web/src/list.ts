@@ -615,7 +615,8 @@ export interface RowView {
   name: string;
   where: string | null;
   /** The right end of line one: the session's cache fact, launcher's on a running launch
-   * that has one, else cache's record's; null for none. */
+   * that has one, else cache's record's on a running or `Active recently` row; null for
+   * none, and always on the other groups' rows. */
   fact: string | null;
   /** Whether the fact is heavy: a running launch that goes cold with nothing to keep it warm. */
   factHeavy: boolean;
@@ -989,8 +990,11 @@ function groupView(group: GroupState, state: ListState, zone: Zone, taken: Set<s
   if (group.rows.length === 0 && group.count <= 0 && programCount <= 0) return null;
   // The day a time in this group is taken to be of, unless it says otherwise.
   const on = /^\d{4}-\d{2}-\d{2}$/.test(group.key) ? group.key : today;
+  // Cache's records speak only on `Active recently`'s rows; a day's, a find's and an
+  // earlier day's rows say nothing of cache, whatever it holds.
+  const clocks = group.key === "recent" ? cache : null;
   const view = (row: ListRow): RowView =>
-    withClock(rowView(row, on, today, state.opened.includes(keyOf(row)), zone), cache, today, zone);
+    withClock(rowView(row, on, today, state.opened.includes(keyOf(row)), zone), clocks, today, zone);
   // A session the running group holds is drawn there only. It still counts as shown here,
   // so `N more` stays the group's count less the rows read.
   const free = (row: ListRow): boolean => !taken.has(keyOf(row));
@@ -1021,8 +1025,9 @@ function groupView(group: GroupState, state: ListState, zone: Zone, taken: Set<s
  * read: with a root unread, an empty list says nothing of what is there. A list that a
  * filter or the find field leaves empty reads `No sessions match.`.
  *
- * With `cache`, cache's records where the list reads them, each row with a record says
- * what it says (`withClock`); on a running launch, only where launcher gives no cache.
+ * With `cache`, cache's records where the list reads them, each row of `Active recently`
+ * with a record says what it says (`withClock`), and so does a running launch where
+ * launcher gives it no cache. The rows of the other groups say nothing of cache.
  */
 export function listView(state: ListState, { launcher = false, zone = LOCAL, running = null, presses = NO_PRESSES, desk = true,
                                             readsTurns = false, turnsRead = null, cache = null }:
