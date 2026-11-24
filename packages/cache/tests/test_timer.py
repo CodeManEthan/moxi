@@ -699,6 +699,8 @@ def test_a_windows_ask_whose_status_is_no_longer_held_logs_no_exit(tmp_path, exe
     assert line["error"] == "its exit status is not known: it was no longer held"
 
 
+@pytest.mark.skipif(sys.platform == "win32",
+                    reason="Windows: an ask's output goes to a file there")
 def test_a_posix_ask_logs_no_output_file(tmp_path, exe):
     t, spawner, _ = make_timer(tmp_path, [raw_sub(exe, name="r", at=0)])
     (entry,) = t.tick({A: record()}, T0 + TTL)

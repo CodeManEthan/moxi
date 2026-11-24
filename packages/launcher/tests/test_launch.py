@@ -250,6 +250,7 @@ def test_the_deliverer_starts_after_started_and_before_exec(work, harness, no_ex
     assert handed["row"].state == "started"
 
 
+@EXECS
 def test_a_deliverer_that_fails_to_start_fails_the_launch_and_execs_nothing(
         work, harness, no_exec, turns, monkeypatch):
     def broken(rid, *, pid=None, env=None):
@@ -872,6 +873,9 @@ def test_an_offline_comms_daemon_is_a_try_again_naming_the_daemon(work, monkeypa
     assert nothing_written()
 
 
+@pytest.mark.skipif(sys.platform == "win32",
+                    reason="Windows: comms' wrapper forks, so no wrapped launch runs there "
+                           "and the terminal starts no deliverer for one")
 def test_a_retried_launch_whose_first_run_holds_the_name_gets_the_stored_outcome(
         work, harness, no_exec, deliverers, monkeypatch):
     first_asks = fake_comms(monkeypatch, state("free"))

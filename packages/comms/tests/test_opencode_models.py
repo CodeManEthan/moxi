@@ -132,8 +132,8 @@ def launch(rig, tmp_path, monkeypatch):
         fake.stop()
     for e in build.events("serve"):
         try:
-            os.kill(e["pid"], signal.SIGKILL)
-        except ProcessLookupError:
+            os.kill(e["pid"], getattr(signal, "SIGKILL", signal.SIGTERM))
+        except OSError:  # gone (Windows answers a gone pid with another OSError)
             pass
 
 
