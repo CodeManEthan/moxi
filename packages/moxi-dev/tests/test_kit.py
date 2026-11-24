@@ -448,3 +448,54 @@ def test_the_core_no_longer_holds_the_check():
     import importlib.util
 
     assert importlib.util.find_spec("moxi.contract") is None
+
+
+# --- stacks ----------------------------------------------------------------------------
+
+#: Imports the kit, says so, reads the stacks time from stdin, arms, prints the file it
+#: armed, and sleeps.
+ARMED = """\
+import os, sys, time
+from moxi_dev import testing
+print("ready", flush=True)
+at = sys.stdin.readline().strip()
+print(testing.arm_stacks({**os.environ, testing.STACKS_AT_ENV: at}), flush=True)
+time.sleep(60)
+"""
+
+
+def test_a_process_still_running_at_the_stacks_time_writes_every_threads_stack(tmp_path):
+    import subprocess
+
+    stacks_dir = tmp_path / "stacks"
+    env = {**os.environ, testing.STACKS_ENV: str(stacks_dir), "PYTEST_XDIST_WORKER": "gw3"}
+    child = subprocess.Popen([sys.executable, "-c", ARMED], env=env, text=True,
+                             stdin=subprocess.PIPE, stdout=subprocess.PIPE)
+    try:
+        assert child.stdout.readline().strip() == "ready"
+        child.stdin.write(f"{time.time() + 0.5}\n")
+        child.stdin.flush()
+        path = Path(child.stdout.readline().strip())
+        assert path == stacks_dir / f"gw3-{child.pid}.txt"
+        wait_for(lambda: "most recent call first" in path.read_text(), testing.PROC_WAIT_S,
+                 what="the armed process to write its stacks")
+        assert 'File "<string>", line 6 in <module>' in path.read_text()
+        assert child.poll() is None
+    finally:
+        child.kill()
+        child.communicate()
+
+
+@pytest.mark.parametrize("given", [
+    {},
+    {testing.STACKS_AT_ENV: "9999999999"},
+    {testing.STACKS_ENV: "{stacks}"},
+    {testing.STACKS_ENV: "{stacks}", testing.STACKS_AT_ENV: "{past}"},
+    {testing.STACKS_ENV: "{stacks}", testing.STACKS_AT_ENV: "soon"},
+])
+def test_without_a_stacks_dir_and_a_time_to_come_nothing_is_armed(tmp_path, given):
+    stacks_dir = tmp_path / "stacks"
+    env = {key: value.format(stacks=stacks_dir, past=time.time() - 1)
+           for key, value in given.items()}
+    assert testing.arm_stacks(env) is None
+    assert not stacks_dir.exists()

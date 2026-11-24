@@ -220,6 +220,13 @@ seconds it waited in all. It goes to the path in
 `moxi-dev/durations.json` in pytest's cache directory; with neither (the cache plugin
 off) nothing is written.
 
+Stacks. With `MOXI_TEST_STACKS=<dir>` and `MOXI_TEST_STACKS_AT=<time>` (seconds since
+the epoch) in the environment pytest starts with, each process of the run (under xdist
+the controller and every worker) that is still running at that time writes every
+thread's stack (`faulthandler`) to `<dir>/<worker or main>-<pid>.txt`. Each process
+opens its file at the start, so one that ended in time leaves it empty. `moxi-dev check`
+sets both for each package's run, shortly before its bound (`arm_stacks`).
+
 A seam with two implementations: `Seam` parametrizes a fixture over every
 implementation for the contract suites and gives the rest the default one.
 """
@@ -228,6 +235,7 @@ from __future__ import annotations
 
 import contextlib
 import dataclasses
+import faulthandler
 import functools
 import ipaddress
 import json
@@ -304,6 +312,10 @@ TIMED_SLACK_ENV = "MOXI_TEST_TIMED_SLACK"
 TIMED_LOCK_FD_ENV = "MOXI_TEST_TIMED_LOCK_FD"
 #: Tiers this run never puts back, comma-separated (module doc, Selection).
 LEAVE_OUT_ENV = "MOXI_TEST_LEAVE_OUT"
+#: The directory each process of a run writes its stacks to (module doc, Stacks).
+STACKS_ENV = "MOXI_TEST_STACKS"
+#: When, in seconds since the epoch, the processes write them (module doc, Stacks).
+STACKS_AT_ENV = "MOXI_TEST_STACKS_AT"
 
 #: The marker of a test that asserts a wall-clock budget (module doc, Timed tests).
 TIMED = "timed"
@@ -801,7 +813,36 @@ def pytest_configure(config: pytest.Config) -> None:
     _SESSION.setdefault("timed_slack", _timed_slack(os.environ))
     _SESSION.setdefault("modules", _modules())
     _SESSION.setdefault("uv", _uv_dirs(os.environ, os.path.expanduser("~")))
+    arm_stacks(os.environ)
     _install()
+
+
+# This process's open stacks file while its dump is armed (`arm_stacks`).
+_STACKS_FH: list = []
+
+
+def arm_stacks(env: Mapping[str, str]) -> Path | None:
+    """Have this process write every thread's stack at the time `env` names (module doc,
+    Stacks), into a file of its own; the file, or None when `env` names no directory or
+    time, the time has passed, the file can't be made, or this process is already armed."""
+    where = env.get(STACKS_ENV, "").strip()
+    try:
+        delay_s = float(env.get(STACKS_AT_ENV, "")) - time.time()
+    except ValueError:
+        return None
+    if not where or _STACKS_FH or not math.isfinite(delay_s) or delay_s <= 0:
+        return None
+    name = env.get("PYTEST_XDIST_WORKER") or "main"
+    path = Path(where) / f"{name}-{os.getpid()}.txt"
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        # Held open, not closed by a `with`: faulthandler writes to it at the time.
+        fh = open(path, "w", encoding="utf-8")
+    except OSError:
+        return None
+    _STACKS_FH.append(fh)
+    faulthandler.dump_traceback_later(delay_s, file=fh)
+    return path
 
 
 def _timed_slack(env: Mapping[str, str]) -> float:
@@ -1818,9 +1859,9 @@ __all__ = ["ANCHOR_HOME_ENV", "CHANGED_ENV", "DURATIONS_ENV", "FINDING_ENV",
            "FenceError", "Gauge", "GaugeReading", "HARNESS_HOMES", "IDLE_ENV", "Idle",
            "KEPT_ENV", "LEAVE_OUT_ENV", "LIFTED", "LIVE_ENV", "MARKERS", "NOT_MEASURED",
            "PROC_STAT", "PROC_WAIT_S", "REAL_SUPERVISOR_ENV", "RECORD_FORMAT",
-           "SHUTDOWN_POLL", "Seam", "Selection", "TIERS", "TIERS_ENV", "TIMED",
+           "SHUTDOWN_POLL", "STACKS_AT_ENV", "STACKS_ENV", "Seam", "Selection", "TIERS", "TIERS_ENV", "TIMED",
            "TIMED_CLOCKS", "TIMED_ENV", "TIMED_LOCK_FD_ENV", "TIMED_SLACK_ENV",
-           "WINDOWS_HOMES", "WINDOWS_KEPT_ENV", "console_script", "fence", "findings_of",
+           "WINDOWS_HOMES", "WINDOWS_KEPT_ENV", "arm_stacks", "console_script", "fence", "findings_of",
            "idle", "param_id", "selection", "served", "short_dir", "stat_counts",
            "terminal_record", "timed_reading", "timed_slack", "touches_match", "uv_env",
            "wait_for", "write_sqlite"]
