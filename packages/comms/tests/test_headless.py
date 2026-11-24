@@ -283,6 +283,22 @@ def test_idle_counts_from_the_last_turns_end():
     assert w.due() == "idle"
 
 
+def test_idle_waits_while_short_turns_keep_coming_and_fires_once_they_stop():
+    """A keep-warm nudge is a turn like any other: each one starts the idle count again,
+    so the rule fires `idle=` after the last of them, once they stop."""
+    w = watch("idle=10m")
+    answered(w)
+    for _ in range(3):
+        w.clock_.advance(540)
+        assert w.due() is None
+        w.on_turn_started()
+        w.on_turn_ended("answer")
+    w.clock_.advance(599)
+    assert w.due() is None
+    w.clock_.advance(1)
+    assert w.due() == "idle"
+
+
 # `after=`
 
 def test_after_fires_mid_turn_and_waits_for_no_shells():

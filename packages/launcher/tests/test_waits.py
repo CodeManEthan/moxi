@@ -160,6 +160,72 @@ def test_an_open_turn_with_no_subagent_list_is_at_work_and_not_unlisted():
         ("coder@proj-a",))
 
 
+def test_live_subagents_counts_busy_subagents_and_teammates_but_no_fork_or_shell():
+    fork = SimpleNamespace(id="f1", kind="subagent", state="running", final=False,
+                           is_fork=True)
+    listed = SimpleNamespace(complete=True, entries=[
+        agent("a1"), agent("a2", state="waiting"), agent("a3", state="pending"),
+        agent("t1", kind="teammate"), agent("a4", state="idle"),
+        agent("a5", state="done", final=True), agent("a6", final=True),
+        agent("s1", kind="shell"), fork])
+    assert [a.id for a in waits.live_subagents(listed)] == ["a1", "a2", "a3", "t1"]
+    assert waits.live_subagents(None) == ()
+
+
+def test_a_closed_turn_counts_by_its_listed_subagents_not_turns_busy_count():
+    # turns' busy count says 1 (a fork), the list holds only the fork: not at work.
+    fork = SimpleNamespace(id="f1", kind="subagent", state="running", final=False,
+                           is_fork=True)
+    comms, turns = world(("coder@proj-a", live("x", entries=[fork], agents=1)),
+                         ("critic@proj-a", live("x", entries=[agent("a1", state="waiting")],
+                                                agents=0)))
+    found = waits.directed(reads_for(comms, turns), "boss")
+    assert found == waits.Directed(("critic@proj-a",)) and found.sure
+
+
+def test_a_directed_agent_whose_only_subagent_turns_judged_stale_is_not_at_work():
+    # An endpoint that judges stale entries lists a stale `waiting` subagent `idle`.
+    comms, turns = world(("coder@proj-a", live("x", entries=[agent("a1", state="idle")])))
+    found = waits.directed(reads_for(comms, turns), "boss")
+    assert found == waits.Directed() and found.sure
+
+
+def test_an_open_turn_reads_no_agent_list_and_a_codex_closed_turn_none_either():
+    comms, turns = world(("coder@proj-a", live("x", turn_open=True)),
+                         ("pilot@proj-a", live("x", entries=[agent("a1")], harness="codex")))
+    for session in turns.sessions.values():
+        session.agents = lambda: pytest.fail("the agent list was read")
+    assert waits.directed(reads_for(comms, turns), "boss") == waits.Directed(
+        ("coder@proj-a",))
+
+
+def test_an_agent_list_that_raises_is_unlisted_and_not_logged(caplog):
+    comms, turns = world(("coder@proj-a", live("x", turn_open=True)),
+                         ("critic@proj-a", live("x")))
+    turns.sessions[comms.sessions["critic@proj-a"]].entries = RuntimeError("gone")
+    with caplog.at_level(logging.ERROR, logger="moxi.launcher.waits"):
+        found = waits.directed(reads_for(comms, turns), "boss")
+    assert found == waits.Directed(("coder@proj-a",), unlisted=True)
+    assert caplog.records == []
+    assert turns.sessions[comms.sessions["critic@proj-a"]].closed == 1
+
+
+def test_the_agent_list_is_a_call_the_deadline_stops():
+    clock = Clock()
+    comms, turns = world(("coder@proj-a", live("x", entries=[agent("a1")])))
+    reads = reads_for(comms, turns, clock=clock, budget_s=5.0)
+    coder = turns.sessions[comms.sessions["coder@proj-a"]]
+    real_facts = coder.facts
+
+    def facts():
+        clock.now = reads.deadline
+        return real_facts()
+
+    coder.facts = facts
+    assert waits.directed(reads, "boss") == waits.Directed(late=True)
+    assert coder.closed == 1
+
+
 # -- one launch's Reads ------------------------------------------------------------------------
 
 

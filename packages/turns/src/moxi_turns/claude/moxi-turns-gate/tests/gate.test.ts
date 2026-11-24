@@ -31,7 +31,7 @@ function world(on: On) {
   const clock = mock.clock(on, { now: 5_000 })
   const w = {
     clock,
-    agents: [] as { id: string; status: string }[] | Error,
+    agents: [] as { id: string; type: string; status: string; parentId?: string }[] | Error,
     box: '' as string | Error,
     got: [] as { path: string; body: Record<string, unknown> }[],
     answers: {} as Record<string, Answer>,
@@ -131,7 +131,7 @@ describe('entry: every runner prompt is admitted by the endpoint, or dropped', (
     await w.mark($, endpointMark)
     const r = await w.submit($, prompt('mail\nline two'), RUNNER_ORIGIN, ['ctx'])
     expect(r.drop).toBeUndefined()
-    expect(w.got).toEqual([{ path: '/gate/entry', body: { nonce: NONCE, draft: false, agents: 0 } }])
+    expect(w.got).toEqual([{ path: '/gate/entry', body: { nonce: NONCE, draft: false, agents: [] } }])
     expect(w.entered).toEqual(['mail\nline two'])
     expect(w.origins).toEqual([RUNNER_ORIGIN])
     expect(w.contexts).toEqual([['ctx']])
@@ -162,9 +162,13 @@ describe('entry: every runner prompt is admitted by the endpoint, or dropped', (
     await w.boot($)
     await w.mark($, endpointMark)
     w.box = 'half typed'
-    w.agents = [{ id: 'a', status: 'waiting' }, { id: 'b', status: 'completed' }]
+    // The list's entries, for the endpoint to judge and count.
+    w.agents = [{ id: 'a', type: 'general-purpose', status: 'waiting' },
+      { id: 'b', type: 'fork', status: 'completed', parentId: 'a' }]
     await w.submit($, prompt('go'))
-    expect(w.got[0]?.body).toEqual({ nonce: NONCE, draft: true, agents: 1 })
+    expect(w.got[0]?.body).toEqual({ nonce: NONCE, draft: true, agents: [
+      { id: 'a', type: 'general-purpose', status: 'waiting' },
+      { id: 'b', type: 'fork', status: 'completed', parentId: 'a' }] })
     w.box = new Error('unreadable')
     w.agents = new Error('no list')
     await w.submit($, prompt('go'))
@@ -219,7 +223,7 @@ describe('a session command\'s re-check', () => {
       await w.boot($)
       await w.mark($, commandMark(name))
       expect((await w.run($, name)).text).toBe(`engine ran ${name}`)
-      expect(w.got).toEqual([{ path: '/gate/command', body: { request: 'r1', draft: false, agents: 0 } }])
+      expect(w.got).toEqual([{ path: '/gate/command', body: { request: 'r1', draft: false, agents: [] } }])
     })
   }
 
@@ -237,9 +241,9 @@ describe('a session command\'s re-check', () => {
     await w.boot($)
     await w.mark($, commandMark())
     w.box = new Error('no box')
-    w.agents = [{ id: 'a', status: 'pending' }]
+    w.agents = [{ id: 'a', type: 'Explore', status: 'pending' }]
     await w.run($, 'clear')
-    expect(w.got[0]?.body).toEqual({ request: 'r1', draft: true, agents: 1 })
+    expect(w.got[0]?.body).toEqual({ request: 'r1', draft: true, agents: [{ id: 'a', type: 'Explore', status: 'pending' }] })
   })
 
   test('a run of the runner with no mark, or another command\'s mark, is withdrawn', PLUGINS, async ($: E, on) => {

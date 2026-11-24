@@ -43,8 +43,8 @@ export interface Waits {
   count: number;
 }
 
-/** The kinds of turns' agents that launcher counts in a `subagents` wait, as its keep-warm's
- * `SIGNAL_KINDS` names them; a test holds them equal. A shell is never one. */
+/** The kinds of turns' agents that launcher counts in a `subagents` wait, as its
+ * `waits.SUBAGENT_KINDS` names them; a test holds them equal. A shell is never one. */
 export const WAITED_KINDS: readonly string[] = ["subagent", "teammate"];
 
 /** The latest message in a running launch's session. */

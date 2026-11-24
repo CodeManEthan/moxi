@@ -18,9 +18,10 @@ read of the session's lifetime says when a lifetime has no keep-warm window.
   when the session was last told to recycle itself at its limit. A `relaunch` launch
   whose session can recycle itself but warns at no mark shows `relaunch (armed, no
   warning)`: its self relaunch is accepted and it is never told.
-- `keep_warm`: on or off (launched with it on, or under cover), the open holds of the
-  launch chain by name (with the launch value on), the last run of nudges, and the last
-  verdict.
+- `keep_warm`: on or off (`keepwarm.on`: launched with it on, or under cover; off
+  wherever keep-warm can't act on this install, `keepwarm.can_act`), the open holds of
+  the launch chain by name (wherever it is on, cover included), the last run of nudges,
+  and the last verdict.
 
 **`red` is true exactly when the latest ended run on the launch ended `blocked`, or in an
 outcome that needs a look, and no later run on it ended well.** The outcomes that need a
@@ -112,9 +113,10 @@ class RecycleState:
 
 @dataclass(frozen=True)
 class KeepWarmState:
-    """`on` (launched with keep-warm on, or under cover); the open holds of the launch
-    chain by name, listed only with the launch value on; `nudges`, the length of the last
-    run of nudges; the last keep-warm run; and `window`, set to `no window: lifetime <n> s`
+    """`on` (`keepwarm.on`: launched with keep-warm on, or under cover, where keep-warm
+    can act on this install, `keepwarm.can_act`); the open holds of the launch chain by
+    name, listed wherever it is on, cover included; `nudges`, the length of the last run
+    of nudges; the last keep-warm run; and `window`, set to `no window: lifetime <n> s`
     when the session's cache lifetime leaves keep-warm no window."""
 
     on: bool
@@ -341,8 +343,9 @@ def _limit_mark(row: store.LaunchRow, *, at_limit: str) -> str | None:
 def _keep_warm(conn: sqlite3.Connection, row: store.LaunchRow, own: Sequence[store.Run],
                lines: Mapping[str, RunLine], sid: str, cache: Any,
                env: Mapping[str, str]) -> KeepWarmState:
-    launched_on = row.values.get("keep_warm") == "on"
-    if not keepwarm.on(conn, row, sid):
+    # On only where keep-warm can act: a launch on an install without turns or cache is
+    # nudged by nothing, whatever its row says.
+    if not (keepwarm.can_act(row) and keepwarm.on(conn, row, sid)):
         return KeepWarmState(on=False)
     warm = [r for r in own if r.kind == keepwarm.KIND]
     nudged = next((r for r in warm if r.outcome == "nudged"), None)
@@ -354,8 +357,8 @@ def _keep_warm(conn: sqlite3.Connection, row: store.LaunchRow, own: Sequence[sto
         ttl = getattr(clock, "ttl_s", None) if clock is not None else None
         if keepwarm.no_window(ttl):
             window = f"no window: lifetime {ttl:g} s"
-    # Holds count only with the launch value on; under cover alone none is listed.
-    holds = tuple(store.open_holds(conn, row.request_id)) if launched_on else ()
+    # Holds count wherever keep-warm is on, under cover included.
+    holds = tuple(store.open_holds(conn, row.request_id))
     return KeepWarmState(on=True, holds=holds, nudges=nudges,
                          last=lines[warm[0].run_id] if warm else None, window=window)
 

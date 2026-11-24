@@ -72,7 +72,8 @@ def chain(tmp_path, monkeypatch):
         monkeypatch.setenv(name, value)
     monkeypatch.setattr(joiner, "JOIN_EVERY", 0.1)
     config = tmp_path / "claude"
-    sid = kit.seed(HERE, "r1", live=True, claimed=True, config_dir=config)
+    sid = kit.seed(HERE, "r1", live=True, claimed=True, config_dir=config,
+                   values={"keep_warm": "off"})
     kit.transcript(config, sid, hour=True, ago_s=PRESSED_AT_S)
     kit.timed(HERE, sid, asks=[cachetimers.KEEP_WARM])
     session = kit.waiting()

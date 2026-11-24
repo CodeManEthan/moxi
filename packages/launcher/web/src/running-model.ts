@@ -1,8 +1,8 @@
 // What Home's Sessions row says of the launches running now, worked out with no DOM so the
 // Node tests can drive it. running.ts draws it.
 //
-// One entry gives one of three cases. A session that waits on agents or subagents while
-// its cache is warm is `covered` when keep-warm will nudge it before the cache goes cold,
+// One entry gives one of three cases. A session that waits on agents, subagents or open
+// holds while its cache is warm is `covered` when keep-warm will nudge it before the cache goes cold,
 // and `uncovered` when nothing will: that one is loud, wherever its cold time is. Every
 // other session is `ordinary`, among them a waiting session whose cache is already cold
 // or was not read.
@@ -35,9 +35,10 @@ export interface Cache {
   estimated: boolean;
 }
 
-/** What a running launch waits on while its own turn is closed. */
+/** What a running launch waits on while its own turn is closed: subagents, else agents it
+ * directs, else its open holds. */
 export interface Waits {
-  kind: "agents" | "subagents";
+  kind: "agents" | "subagents" | "holds";
   count: number;
 }
 
@@ -146,7 +147,9 @@ function parseCache(value: unknown): Cache | null {
 }
 
 function parseWaits(value: unknown): Waits | null {
-  if (!isTable(value) || (value.kind !== "agents" && value.kind !== "subagents")) return null;
+  if (!isTable(value) || (value.kind !== "agents" && value.kind !== "subagents" && value.kind !== "holds")) {
+    return null;
+  }
   const count = typeof value.count === "number" && Number.isInteger(value.count) ? value.count : 0;
   return count > 0 ? { kind: value.kind, count } : null;
 }
@@ -211,7 +214,17 @@ function plural(n: number, one: string, many: string): string {
 }
 
 function waited(waits: Waits): string {
+  if (waits.kind === "holds") return plural(waits.count, "open hold", "open holds");
   return waits.kind === "agents" ? plural(waits.count, "agent", "agents") : plural(waits.count, "subagent", "subagents");
+}
+
+/** What keeps a covered session warm, after `kept warm while`. */
+function working(waits: Waits): string {
+  const one = waits.count === 1;
+  if (waits.kind === "holds") return `${plural(waits.count, "hold", "holds")} ${one ? "is" : "are"} open`;
+  return waits.kind === "agents"
+    ? `${plural(waits.count, "agent", "agents")} ${one ? "works" : "work"}`
+    : `${plural(waits.count, "subagent", "subagents")} ${one ? "runs" : "run"}`;
 }
 
 function estimated(cache: Cache): string {
@@ -232,12 +245,8 @@ export function factOf(entry: RunningEntry, short = false): { text: string; heav
     case "uncovered":
       return { text: `${goesCold(cache as Cache)}${estimated(cache as Cache)}`, heavy: true };
     case "covered": {
-      const waits = entry.waits as Waits;
       if (short) return { text: "kept warm", heavy: false };
-      const work = waits.kind === "agents"
-        ? `${plural(waits.count, "agent", "agents")} ${waits.count === 1 ? "works" : "work"}`
-        : `${plural(waits.count, "subagent", "subagents")} ${waits.count === 1 ? "runs" : "run"}`;
-      return { text: `kept warm while ${work}`, heavy: false };
+      return { text: `kept warm while ${working(entry.waits as Waits)}`, heavy: false };
     }
     default: {
       if (cache === null) return null;

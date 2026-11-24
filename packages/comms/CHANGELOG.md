@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- The launched sessions on the page read launcher's `holds` wait as launcher's Home row
+  does: a session whose open holds alone keep it waiting reads `waiting on 1 open hold`,
+  or `kept warm while 1 hold is open`, and gets `Keep warm` where a press would cover it.
 - Scoped senders, under a new interface of comms' API, 3 (interface 2 plus them): a
   send-only name comms forms from one parent comms name and a word a module declares by
   an entry point in the group `moxi.comms.scoped_senders` (`builder-digest@acme` for

@@ -178,6 +178,6 @@ def test_the_grant_reaches_the_stamp_and_the_additions_alike(monkeypatch):
 
 def test_a_keep_warm_launch_has_its_identity_line():
     block = common.identity_block(session_id="s", cwd="/w", posture="go", keep_warm=True)
-    assert block.splitlines()[-1].startswith('keep warm:     on; open a hold with "moxi '
-                                             'launcher keep-warm hold <name>"')
+    assert block.splitlines()[-1] == "keep warm:     " + common.KEEP_WARM_LINE
+    assert "agents you direct at work keep you warm" in common.KEEP_WARM_LINE
     assert "keep warm" not in common.identity_block(session_id="s", cwd="/w", posture="go")

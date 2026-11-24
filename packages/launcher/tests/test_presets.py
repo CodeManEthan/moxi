@@ -894,7 +894,7 @@ def test_the_exit_rule_needs_comms(monkeypatch):
                        "headless_exit": ["cold"]}, available=only("turns"))
 
 
-@pytest.mark.parametrize("row, value", [("keep_warm", "on"), ("recycle_on_expiry", "clear"),
+@pytest.mark.parametrize("row, value", [("recycle_on_expiry", "clear"),
                                         ("recycle_on_expiry", "compact")])
 def test_the_cache_timer_rows_are_left_out_of_a_headless_launch_with_an_identity(
         monkeypatch, row, value):
@@ -908,6 +908,67 @@ def test_the_cache_timer_rows_are_left_out_of_a_headless_launch_with_an_identity
     plain = headless_launch(monkeypatch, headless_comms("claude", "codex"),
                             harness="claude", identity="", brief="b", **{row: value})
     assert plain.values[row] == value
+
+
+@pytest.mark.parametrize("value", ["on", "off"])
+def test_a_headless_launch_with_an_identity_keeps_its_keep_warm(monkeypatch, value):
+    """Its nudges start the exit rule's idle count again, as any turn does, so the
+    session ends by its rule once they stop: the row is kept, with no warning."""
+    monkeypatch.setattr(catalog, "session_env_readable", lambda: True)
+    got = headless_launch(monkeypatch, headless_comms("claude", "codex"), harness="claude",
+                          brief="b", keep_warm=value)
+    assert got.values["keep_warm"] == value
+    assert not any("keep_warm" in w for w in got.warnings)
+
+
+# -- keep_warm: a launch setting, off unless set ------------------------------------------
+
+WARM = only("turns", "cache", "slots")
+
+
+@pytest.fixture
+def warm_rows(monkeypatch):
+    monkeypatch.setattr(catalog, "session_env_readable", lambda: True)
+    monkeypatch.setattr(catalog, "slots_here", lambda: True)
+
+
+@pytest.mark.parametrize("target", ["terminal", "slot", "headless"])
+def test_a_launch_that_sets_no_keep_warm_holds_it_off(warm_rows, target):
+    got = resolve(typed={"target": target, "brief": "b"}, available=WARM)
+    assert got.values["keep_warm"] == "off"
+    assert not any("keep_warm" in w for w in got.warnings)
+
+
+@pytest.mark.parametrize("setting", ["off", "on"])
+@pytest.mark.parametrize("where", ["typed", "preset", "preset-slot", "defaults",
+                                   "defaults-headless"])
+def test_keep_warm_from_any_layer_launches_as_given(warm_rows, setting, where):
+    """`off` as well as `on`, typed, in a preset or from `[defaults]`, on any target: no
+    refusal, no warning, and the value kept."""
+    line = f'keep_warm = "{setting}"\n'
+    text, request_ = {
+        "typed": ("", {"typed": {"keep_warm": setting}}),
+        "preset": ("[seat.s]\n" + line, {"seat": "s"}),
+        "preset-slot": ('[seat.s]\ntarget = "slot"\n' + line, {"seat": "s"}),
+        "defaults": ("[defaults]\n" + line, {}),
+        "defaults-headless": ("[defaults]\n" + line,
+                              {"typed": {"target": "headless", "brief": "b"}}),
+    }[where]
+    got = resolve(text, available=WARM, **request_)
+    assert got.values["keep_warm"] == setting
+    assert not any("keep_warm" in w for w in got.warnings)
+
+
+def test_presets_check_takes_keep_warm_off_and_on_on_any_seat(warm_rows):
+    text = ('[seat.s]\nkeep_warm = "off"\n'
+            '[seat.h]\ntarget = "headless"\nkeep_warm = "off"\n'
+            '[seat.o]\nkeep_warm = "on"\n')
+    assert not [p for p in errors(text, WARM) if p.key == "keep_warm"]
+
+
+def test_keep_warm_is_left_alone_on_a_codex_launch_and_where_it_is_not_offered(warm_rows):
+    assert "keep_warm" not in resolve(typed={"harness": "codex"}, available=WARM).values
+    assert "keep_warm" not in resolve(available=only("turns")).values
 
 
 @pytest.mark.parametrize("target", ["terminal", "slot"])

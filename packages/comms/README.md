@@ -354,13 +354,13 @@ claude`); else nothing. Line two says what kind of waiting it is:
 |---|---|---|---|
 | it asked you for one reply | `waiting for your reply` | `wrote to you <time>, wants one reply` | `Reply`, `Message` |
 | mail no session takes | `3 messages waiting` | `not running · since <time>, from <names>` | `Message` |
-| with launcher: warm, waiting on other agents, nothing keeping it warm | `goes cold at <time>` | `waiting on <n> agents` | `Keep warm`, `Message` |
+| with launcher: warm, waiting on other agents (or subagents, or open holds), nothing keeping it warm | `goes cold at <time>` | `waiting on <n> agents` (`subagents`, `open holds`) | `Keep warm`, `Message` |
 | running, mail held for its next turn | the cache fact | `2 messages held until its next turn · from <names> <time>` | `Message` |
 | running, waiting on another's reply | the cache fact | `waiting on <name>'s reply since <time> · <name> hasn't read it yet` | `Message` |
 | running, nothing waiting | the cache fact | `no mail waiting · last message <time>` | `Message` |
 
 The cache fact is `warm until <time>` or `cold`, and with launcher launcher's own words
-(`kept warm while 2 agents work`). When a name meets two cases, the higher gives the fact
+(`kept warm while 2 agents work`, `kept warm while 1 hold is open`). When a name meets two cases, the higher gives the fact
 and line two, and the second leads line three. Line three also has one piece for each
 other address of the name that holds mail or a session (`builder-2@kestrel-web · 2
 messages since 14:02, from planner`), so every count Home's row names is on the page. When

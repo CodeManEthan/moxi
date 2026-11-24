@@ -77,7 +77,8 @@ DELIVERY_VALUES = ("started", "refused", "lost", "ended")
 #: The fields of the values inside other values.
 NESTED = {
     results.OpenTurn: ("turn_id", "opening", "command", "started_at"),
-    results.Agent: ("id", "kind", "state", "final", "description", "parent_id"),
+    results.Agent: ("id", "kind", "state", "final", "description", "parent_id", "is_fork",
+                    "last_write_at"),
     results.Shells: ("stopped", "left", "complete"),
     results.LeftShell: ("id", "why"),
     results.Ready: ("source", "session_id", "at"),
@@ -125,6 +126,7 @@ CAPABILITIES = {
     "environ": (True, True, True),
     "fork": (True, False, False),
     "keep": (True, True, True),
+    "stale-agents": (True, False, False),
 }
 
 #: Each method, the capability it needs (None: always there), and its result's keys

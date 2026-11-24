@@ -20,6 +20,7 @@ const entry = (request, more = {}) => ({
 const warm = (until, estimated = false) => ({ state: "warm", until, estimated });
 const subagents = (count) => ({ kind: "subagents", count });
 const agents = (count) => ({ kind: "agents", count });
+const holds = (count) => ({ kind: "holds", count });
 const answer = (sessions, count = sessions.length) => parseRunning({ state: "up", detail: null, count, sessions });
 
 const UNTIL = "2026-03-01T19:22:00Z";
@@ -40,6 +41,12 @@ test("an entry that is not one is left out, and a wait of none reads as no wait"
   assert.equal(value.sessions.length, 1);
   assert.equal(value.sessions[0].waits, null);
   assert.equal(value.count, 2);
+});
+
+test("a wait on open holds is read, and a kind it does not know is no wait", () => {
+  const value = answer([entry("r1", { waits: holds(2) }), entry("r2", { waits: { kind: "shells", count: 1 } })]);
+  assert.deepEqual(value.sessions[0].waits, { kind: "holds", count: 2 });
+  assert.equal(value.sessions[1].waits, null);
 });
 
 // --- the three cases ---------------------------------------------------------------------------
@@ -73,6 +80,9 @@ test("a covered session says what keeps it warm, dim, singular for one", () => {
   assert.deepEqual(factOf(covered(agents(1))), { text: "kept warm while 1 agent works", heavy: false });
   assert.deepEqual(factOf(covered(subagents(3))), { text: "kept warm while 3 subagents run", heavy: false });
   assert.deepEqual(factOf(covered(subagents(1))), { text: "kept warm while 1 subagent runs", heavy: false });
+  assert.deepEqual(factOf(covered(holds(2))), { text: "kept warm while 2 holds are open", heavy: false });
+  assert.deepEqual(factOf(covered(holds(1))), { text: "kept warm while 1 hold is open", heavy: false });
+  assert.deepEqual(factOf(covered(holds(1)), true), { text: "kept warm", heavy: false });
   assert.equal(leadOf(covered(agents(2))), null);
 });
 
@@ -84,6 +94,15 @@ test("an uncovered session says when it goes cold and what it waits on, both hea
   assert.equal(leadOf(uncovered("r1", UNTIL, { waits: agents(1) })), "waiting on 1 agent");
   assert.equal(leadOf(uncovered("r1", UNTIL, { waits: subagents(3) })), "waiting on 3 subagents");
   assert.equal(leadOf(uncovered("r1", UNTIL, { waits: subagents(1) })), "waiting on 1 subagent");
+  assert.equal(leadOf(uncovered("r1", UNTIL, { waits: holds(1) })), "waiting on 1 open hold");
+  assert.equal(leadOf(uncovered("r1", UNTIL, { waits: holds(2) })), "waiting on 2 open holds");
+});
+
+test("a session at its cap with only holds open is offered the press at the desk", () => {
+  const capped = uncovered("r1", UNTIL, { waits: holds(1), coverable: { cap: 10 } });
+  assert.equal(caseOf(capped), "uncovered");
+  assert.deepEqual(actsOf(capped, true).map((act) => act.kind), ["keep-warm", "open"]);
+  assert.deepEqual(actsOf(capped, false), []);
 });
 
 // --- the row's report --------------------------------------------------------------------------
