@@ -31,7 +31,13 @@ pass, before its CI is read, so nothing lands without it. A repo with no `ci` se
 has no CI to read a candidate by: the queue pauses, saying so.
 
 **Read** CI each pass until it reads `green`, `red`, `cancelled`, or `absent` for
-`ABSENT_S` after the push. A cancelled run is rerun once; an absent one ends the batch,
+`ABSENT_S` after the push. A read that would be red, cancelled or absent while a run it
+names has not completed reads `pending` (`queue_ci.Read.running`): nothing is rerun or
+pushed again, no failure log is read and no failed read counted until every run it names
+has ended, and its
+`read` event names the runs still running. A read green on the jobs it reads stands at
+once, while other jobs of the run still go. Rounds sets no limit on a running run; the
+CI's own job limits end one. A cancelled run is rerun once; an absent one ends the batch,
 so the next pass pushes it again under the next batch number. A second cancelled run,
 or a second absent one in a row, pauses the queue with that reason. A read that fails
 (`ci.ReadFailed`) is tried again at each pass, and the queue pauses once `READ_FAILS_MAX`
@@ -86,11 +92,15 @@ and each member still in it, back to waiting in its place, gets `queue.requeued`
 round's log with the batch and why it ended.
 
 **Telling** (`telling`, through comms where it is installed): a member's end (landed,
-ejected, left) goes to its builder, the name its commission recorded, and to its
-round's lead (`leads.of`: the round's own, else the project's); with no lead recorded,
-to the builder alone, and that is recorded. When a member ends, each member ejected for
-a conflict with it is told too, with what to do now: after a landing, merge the target
-and finish again; after an ejection or a leave, finish again as it is. A pause, and a
+ejected, left) goes to its round's lead (`leads.of`: the round's own, else the
+project's), and to its builder, the name its commission recorded, only while comms reads
+that name held by a running session; with no lead recorded, that is recorded. A notice
+that reached no name (no lead, the builder not held, each send refused, failed or, once
+it is no longer tried, unsent) goes to the project's director once, naming who it could
+not reach and why. When a member
+ends, each member ejected for a conflict with it is told too, with what to do now: after
+a landing, merge the target and finish again; after an ejection or a leave, finish again
+as it is. A pause, and a
 wait on the target's checkout, go to the project's director (`director`), and "no
 director set" is recorded where none is. Each message is recorded once, as `told`, and
 one comms could not take is tried again at each pass for `telling.UNSENT_S`.
@@ -133,11 +143,13 @@ SPLIT_WHY = "split"
 #: The `run` events' kinds: the push, the local run, a read, a rerun, a push refused
 #: with no member named, a read that failed, a red candidate's failures, and the
 #: failures it lands with as the target's own.
-PUSHED, LOCAL, READ, RERUN = "pushed", "local", "read", "rerun"
+PUSHED, LOCAL, READ, RERUN = "pushed", "local", queue_file.READ_KIND, "rerun"
 PUSH_FAILED, READ_FAILED = "push failed", "read failed"
 FAILURES, EXCUSED = "failures", "excused"
 #: A target's head whose pushes showed no run, no longer waited for.
 GAVE_UP = "gave up"
+#: Why a head is given up with no push: the `ci` setting names no ref to push it to.
+NO_REF_WHY = "no ref"
 #: How many reads of a candidate's CI may fail in a row before the queue pauses.
 READ_FAILS_MAX = 5
 #: The identity state comms reads for a name a running session holds.
@@ -211,7 +223,8 @@ class _Pass:
     # -- the pass ------------------------------------------------------------------------
 
     def run(self) -> None:
-        self.teller.retry(reread=self.reread_owner)
+        for ended in self.teller.retry(reread=self.reread_owner):
+            self.tell_unsent(ended)
         queue = queue_file.read(self.repo, self.env)
         if self.ci is None:
             if queue.queued() and queue.paused is None:
@@ -434,11 +447,12 @@ class _Pass:
             self.read_failed(batch, exc)
             return
         last = next((one for one in reversed(batch.runs) if one.get("kind") == READ), None)
-        if last is None or last.get("reading") != read.word:
+        if _read_differs(last, read):
             self.run_event(batch, READ, reading=read.word, runs=list(read.runs),
                            workflows=[dict(one) for one in read.workflows],
                            status_argv=list(read.status_argv),
-                           ids_argv=list(read.ids_argv))
+                           ids_argv=list(read.ids_argv), **_running(read))
+            self.say_running(f"batch {batch.id}", last, read)
         local = next((one for one in reversed(batch.runs) if one.get("kind") == LOCAL),
                      None)
         word = read.word
@@ -473,6 +487,13 @@ class _Pass:
             self.red(batch, read, target=target, local_red=local_red)
         except ci.ReadFailed as exc:
             self.read_failed(batch, exc)
+
+    def say_running(self, what: str, last: dict | None, read: queue_ci.Read) -> None:
+        """Say in the lander's log, once as a read first finds it, that a run `what`
+        names is still running, so nothing is done with it until it ends."""
+        if read.running and not (last or {}).get("running"):
+            self.say(f"lander of {self.repo}: {what}: run {', '.join(read.running)} is "
+                     "still running; waiting for it to end")
 
     def read_failed(self, batch: queue_file.Batch, exc: ci.ReadFailed) -> None:
         """Record a failed read of the batch's CI; the queue pauses once
@@ -597,11 +618,14 @@ class _Pass:
 
     def read_head(self, head: str, *, push: bool = False) -> dict | None:
         """The target's full run at `head` as read: its `green` or `red` event, read once
-        the run has ended and, when red, after one rerun of its failed jobs. None until
-        then. Only the full run's workflows are read (`read_full`), so a candidate's
-        scoped run at the same commit never stands in for it. With `push`, a head with no run is pushed to the target's `ci` ref, again
-        once when no run shows `ABSENT_S` after the push; then it is given up on
-        (`GAVE_UP`) and the director is told."""
+        green, or once the run has ended and, when red, after one rerun of its failed
+        jobs. None until then. Only the full run's workflows are read (`read_full`), so
+        a candidate's scoped run at the same commit never stands in for it, while a
+        candidate's run of the full workflows there is that run. With `push`, a head
+        with no run is pushed to the target's `ci` ref, again once when no run shows
+        `ABSENT_S` after the push; then it is given up on (`GAVE_UP`) and the director
+        is told. With no `ref` to push to, it is given up once it has read absent for
+        `ABSENT_S`."""
         queue = queue_file.read(self.repo, self.env)
         known = queue.main_at(head)
         if known is not None:
@@ -611,10 +635,13 @@ class _Pass:
             return None
         read = self.ci.read_full(self.place, head)
         last = _newest(runs, READ)
-        if last is None or last.get("reading") != read.word:
+        if _read_differs(last, read):
             runs.append(queue_file.append(self.repo, {
                 "event": queue_file.RUN, "head": head, "kind": READ,
-                "reading": read.word, "runs": list(read.runs)}, self.env))
+                "reading": read.word, "runs": list(read.runs), "at_s": self.clock(),
+                **_running(read)}, self.env))
+            self.say_running(f"{self.target_name() or 'the target'}'s full run at "
+                             f"{head[:12]}", last, read)
         if read.word == ci.GREEN:
             return self.main_read(queue_file.GREEN, head, read, [])
         if read.word == ci.RED:
@@ -636,9 +663,13 @@ class _Pass:
 
     def push_head(self, head: str, runs: list[dict]) -> None:
         """Push `head` to the target's `ci` ref, forced, when it has no run: once, again
-        once `ABSENT_S` after the push, then give it up."""
+        once `ABSENT_S` after the push, then give it up. With no ref to push to, give it
+        up once it has read absent for `ABSENT_S`."""
         target = self.target_name()
-        if self.ref_template is None or target is None:
+        if target is None:
+            return
+        if self.ref_template is None:
+            self.give_up_unpushed(head, target, runs)
             return
         pushes = [one for one in runs if one.get("kind") == PUSHED]
         if pushes and self.clock() - float(pushes[-1].get("pushed_s") or 0) < ABSENT_S:
@@ -659,6 +690,23 @@ class _Pass:
                                       "code": pushed.code, "said": pushed.said}, self.env)
         self.say(f"lander of {self.repo}: pushed {head[:12]} to {ref}"
                  + ("" if pushed.code == 0 else f", refused: {pushed.said}"))
+
+    def give_up_unpushed(self, head: str, target: str, runs: list[dict]) -> None:
+        """Give up `head`, which the `ci` setting names no ref to push to, once its read
+        has said `absent` for `ABSENT_S`, and tell the director once."""
+        last = _newest(runs, READ)
+        if last is None or last.get("reading") != ci.ABSENT \
+                or self.clock() - float(last.get("at_s") or 0) < ABSENT_S:
+            return
+        queue_file.append(self.repo, {"event": queue_file.RUN, "head": head,
+                                      "kind": GAVE_UP, "why": NO_REF_WHY}, self.env)
+        self.tell_director(
+            "main run", f"gave up:{head}",
+            f"{target}'s full run at {head[:12]} never showed: no run of its full "
+            f"workflows was there {int(ABSENT_S)} s after it was first read, and "
+            f"{self.repo}'s ci setting names no ref the lander could push it to. The "
+            "lander stopped waiting for it. Run the full workflows at that commit by "
+            "hand to read it.")
 
     def target_name(self) -> str | None:
         """The target the queue lands on: the newest batch's."""
@@ -1146,17 +1194,60 @@ class _Pass:
 
     def tell_member(self, member: queue_file.Member, about: str, key: str,
                     text: str) -> None:
-        """Tell the member's builder and its round's lead, each once; with no lead
-        recorded, the builder alone, and that is recorded."""
+        """Tell the member's round's lead, and its builder only while comms reads that
+        name held by a running session (`telling.Teller.can_receive`), each once; a
+        builder passed over is neither sent nor recorded. With no lead recorded, that is
+        recorded. Then the director is told when no send reached a name
+        (`tell_unreached`)."""
         builder, lead = self.people(member.name, member.stage)
-        names = [one for one in dict.fromkeys((builder, lead)) if one]
-        for to in names:
+        passed = None
+        if builder and builder != lead and not self.teller.can_receive(builder):
+            passed, builder = builder, None
+        for to in [one for one in dict.fromkeys((lead, builder)) if one]:
             self.teller.tell(to, about, f"{key}:{to}", text,
                              member=[member.name, member.stage])
         if lead is None:
             self.teller.tell(None, about, f"{key}:lead", text,
                              why_nobody=f"{member.name} has no lead recorded",
                              member=[member.name, member.stage])
+        self.tell_unreached(key, text, passed=passed)
+
+    def tell_unsent(self, ended: dict) -> None:
+        """After the send `ended` was recorded `unsent`: when it was a send of a
+        member's notice, tell the director if no send of that notice reached a name."""
+        to, member = ended.get("to"), ended.get("member")
+        if not to or not member or len(member) != 2:
+            return
+        key = str(ended.get("key")).removesuffix(f":{to}")
+        builder, lead = self.people(str(member[0]), str(member[1]))
+        sent = {one.get("to") for one in self.sends(key)}
+        passed = builder if builder and builder != lead and builder not in sent else None
+        self.tell_unreached(key, str(ended.get("text")), passed=passed)
+
+    def sends(self, key: str) -> list[dict]:
+        """The newest record of each send of the member's notice `key`."""
+        return [one for one in telling.sends_of(queue_file.read(self.repo, self.env), key)
+                if one.get("member")]
+
+    def tell_unreached(self, key: str, text: str, *, passed: str | None) -> None:
+        """When no send of the member's notice `key`, whose text is `text`, reached a
+        name (none was a delivery, and none is still tried), tell the director once,
+        under `<key>:director`, naming who was not reached and why; `passed` is the
+        builder passed over, never sent to."""
+        tried = self.sends(key)
+        if self.teller.comms is None or not tried or any(
+                one.get("delivery") not in telling.NOT_DELIVERED
+                or one.get("delivery") == telling.OFFLINE for one in tried):
+            return
+        reasons = [f"{one.get('to') or 'no lead'}: {one.get('delivery')}"
+                   + (f" ({one['why']})" if one.get("why") else "") for one in tried]
+        if passed is not None:
+            reasons.append(f"{passed}: not sent (comms reads no running session for it: "
+                           f"{self.identity(passed)})")
+        director = self.director()
+        self.teller.tell(director, "director", f"{key}:director",
+                         f"For the director of {self.repo}: {text} It reached nobody: "
+                         + "; ".join(reasons) + ".", why_nobody="no director set")
 
     def tell_excused(self, member: queue_file.Member, who: str, fields: dict) -> None:
         """Tell main's owner, while a red spell holds, that a member landed past the
@@ -1223,6 +1314,18 @@ def _newest(runs: list[dict], kind: str, **fields) -> dict | None:
                  and all(one.get(key) == value for key, value in fields.items())), None)
 
 
+def _read_differs(last: dict | None, read: queue_ci.Read) -> bool:
+    """Whether `read` is to be recorded after the read event `last`: there is none, or
+    its reading or its runs still running differ."""
+    return (last is None or last.get("reading") != read.word
+            or list(last.get("running") or ()) != list(read.running))
+
+
+def _running(read: queue_ci.Read) -> dict:
+    """A read event's `running` field: the runs not completed, only when there is one."""
+    return {"running": list(read.running)} if read.running else {}
+
+
 def _runs(event: dict) -> str:
     return ", ".join(map(str, event.get("run") or [])) or "unknown"
 
@@ -1277,5 +1380,5 @@ class QueueGit(finishing.MergeGit):
 
 
 __all__ = ["LANDER", "QUEUE_PLACE", "BRANCH_PREFIX", "ABSENT_S", "LOCAL_JOB", "NOT_REREAD",
-           "READ_FAILS_MAX", "GAVE_UP", "place_of", "take", "step", "owed_heads",
-           "main_owed", "QueueGit"]
+           "READ_FAILS_MAX", "GAVE_UP", "NO_REF_WHY", "place_of", "take", "step",
+           "owed_heads", "main_owed", "QueueGit"]

@@ -15,12 +15,14 @@ do not count. A run of one step is never read for another.
 
 **A queue project's check** (`land = "queue"`) is the repo's `check.scoped` command,
 `{base}` filled in with the merge-base of `T` and the target's head: the check of the
-packages the build touched and their dependents. It pushes nothing and reads no CI, and
-`--full` is refused, since the full run of a queue project's build is its candidate's
-CI. The gate's argv fills `{base}` with the newest run's own `merge_base` when that run
-is at `T`, and with the merge-base read from git otherwise; the merge-base of `T` and
-the target does not change as the target moves forward, so the record stays good while
-the build waits in the queue.
+packages the build touched and their dependents. It pushes nothing and reads no CI.
+`--full` runs the repo's `check.command` there instead, as in any other project, and
+records it; `land` is neither read for it nor changed. The step is met at `T` by the
+newest run passing with either argv as the settings give it now (`steps.Seen.check`,
+`steps.Seen.full_check`). The scoped gate's argv fills `{base}` with the newest run's
+own `merge_base` when that run is at `T`, and with the merge-base read from git
+otherwise; the merge-base of `T` and the target does not change as the target moves
+forward, so the record stays good while the build waits in the queue.
 
 **The command line** is split as a shell would split it and run with no shell; a step of
 the user's own gives its words as a list. Each word may hold the placeholders `{round}`, `{stage}`, `{repo}`, `{root}`, `{branch}`, `{tip}`
@@ -60,10 +62,15 @@ builds of parallel rounds don't run whole test suites side by side: each run, th
 local part of a check by CI and a command step's included, holds an exclusive lock on
 `check.lock` in rounds' folder of lock files (`lock_file`) from just before its command
 starts until it ends, however it ends. The lock is the process's, so the system frees
-it when the verb dies, and the command does not inherit it. A run that finds it held
-says once who holds it and waits, then says how long it waited; with `wait=False`
-(`--no-wait`) it is refused at once instead, naming the holder, with nothing run or
-recorded. A wait that a tip moved during is caught by step 3.
+it when the verb dies, and the command does not inherit it. Runs take it in the order
+they asked for it: each takes a ticket in the lock's line and tries the lock only once
+no live ticket is ahead of it (`check_line`), and the run that holds it keeps a holder
+record naming its round, stage, step, repo and output file, which the doctor's check
+lock row reads. A run that must wait says once who holds the lock and how many are
+ahead of it, then says how long it waited; with `wait=False` (`--no-wait`) it takes the
+lock only when it is free and no ticket waits, and is refused at once otherwise, naming
+the holder and the number waiting, with nothing run or recorded. A wait that a tip
+moved during is caught by step 3.
 """
 
 from __future__ import annotations
@@ -74,14 +81,14 @@ import shlex
 import subprocess
 import time
 from collections.abc import Iterator, Mapping, Sequence
-from contextlib import contextmanager
+from contextlib import ExitStack, contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 
 from moxi import files, proc
 
-from . import (builds, findings, flows, folders, gitreads, open_builds, paths, places,
-               write)
+from . import (builds, check_line, findings, flows, folders, gitreads, open_builds,
+               paths, places, write)
 from . import settings as own
 from . import state as states
 from .errors import BadArgument, Refused, RoundsError, Unmet
@@ -363,6 +370,7 @@ def seen_of(state: states.State, name: str, *, settings,
             check=None if argv is None and declared(settings, build.repo) is None
             else tuple(argv or ()),
             values=None if head is None else values(name, build, root=root, tip=head),
+            full_check=_full_check(settings, name, build, root=root, tip=head),
             ci=(None if queued(settings, build.repo)
                 else _ci_now(settings, build, name=name, root=root, tip=head)),
             head=head, since=since, drift=moved, reported=reported,
@@ -372,6 +380,17 @@ def seen_of(state: states.State, name: str, *, settings,
             actions=tuple(own.build_setting(settings, build.repo, "finish")),
             shares=tuple(now.shares), ratify=ratify, private=private)
     return found
+
+
+def _full_check(settings, name: str, build: builds.Build, *, root,
+                tip: str | None) -> tuple[str, ...] | None:
+    """In a queue project, the argv the repo's `check.command` gives now at `tip`, which
+    meets the check step as the scoped argv does; None elsewhere, or with no tip or no
+    such command."""
+    words = declared(settings, build.repo)
+    if tip is None or words is None or not queued(settings, build.repo):
+        return None
+    return tuple(fill(words, values(name, build, root=root, tip=tip)))
 
 
 def _private_held(settings, build: builds.Build, commissioned: Mapping, git: Git,
@@ -522,7 +541,7 @@ def check(name: str, stage: str, *, by: str, step: str | None = None,
                                      by_ci=step is None and not full, full=full)
         return looked[id(view)]
 
-    held = _Held(wait=wait, say=say, again=again, env=env)
+    held = _Held(wait=wait, say=say, again=again, env=env, name=name, step=run_as)
 
     def act(view):
         found = look(view)
@@ -572,36 +591,85 @@ def check(name: str, stage: str, *, by: str, step: str | None = None,
 @dataclass(frozen=True)
 class _Held:
     """How a run takes the machine's check lock: whether it `wait`s, the `say` that
-    gets the waiting lines, the command that runs the check `again`, and the `env`
-    the lock file's place is read from."""
+    gets the waiting lines, the command that runs the check `again`, the `env` the lock
+    file's place is read from, and the round (`name`) and `step` its ticket and holder
+    record name."""
 
     wait: bool = True
     say: object = None
     again: str = ""
     env: object = None
+    name: str = ""
+    step: str = ""
 
 
 @contextmanager
-def _check_lock(held: _Held) -> Iterator[None]:
-    """Hold the machine's check lock for the block, waiting while another run holds
-    it, or refused at once where `held.wait` is false."""
+def _check_lock(held: _Held, found: _Look) -> Iterator[Path]:
+    """Hold the machine's check lock for the block, taken in the order the runs asked
+    for it (`check_line`), or refused at once where `held.wait` is false and the lock
+    is held or a run waits for it. The block gets the lock file's path, to name its
+    output in the holder record (`check_line.update_holder`)."""
     path = lock_file(held.env)
+    path.parent.mkdir(parents=True, exist_ok=True)
     say = held.say or (lambda _line: None)
-    try:
-        with files.lock(path, timeout_s=0):
-            yield
-        return
-    except files.LockTimeout as exc:
-        who = f"pid {exc.holder}" if exc.holder else "another process"
-    if not held.wait:
-        raise Refused([Unmet(f"another check holds the machine's check lock {path}: "
-                             f"{who}", f"run it again once {who} is done: {held.again}, "
-                             "or leave --no-wait out to wait for it")])
-    say(f"waiting for the machine's check lock {path}, held by {who}")
+    build = found.build
+    fields = {**check_line.me(), "round": held.name,
+              "stage": None if build is None else build.stage, "step": held.step,
+              "repo": None if build is None else build.repo}
+    with ExitStack() as stack:
+        if not held.wait:
+            waiting = check_line.remove_dead(path)
+            taken = False
+            if not waiting:
+                try:
+                    stack.enter_context(files.lock(path, timeout_s=0))
+                    taken = True
+                except files.LockTimeout:
+                    pass
+            if not taken:
+                who = check_line.held_by(check_line.holder(path),
+                                         check_line.lock_pid(path))
+                raise Refused([Unmet(
+                    f"another check holds or waits for the machine's check lock {path}: "
+                    f"held by {who}; {len(waiting)} waiting",
+                    f"run it again once those are done: {held.again}, or leave "
+                    "--no-wait out to wait in line")])
+        else:
+            _wait_in_line(stack, path, fields, say)
+        check_line.write_holder(path, fields)
+        try:
+            yield path
+        finally:
+            check_line.remove_holder(path)
+
+
+def _wait_in_line(stack: ExitStack, path: Path, fields: Mapping, say) -> None:
+    """Take a ticket in the check lock's line and wait until it is first and the lock
+    is free, then take the lock into `stack`. The ticket is removed however the wait
+    ends; one a killed waiter leaves is removed by the next poll of another."""
+    ticket = check_line.take(path, fields)
     started = time.monotonic()
-    with files.lock(path):
+    said = False
+    try:
+        while True:
+            ahead = check_line.remove_dead(path, own=ticket)
+            if not ahead:
+                try:
+                    stack.enter_context(files.lock(path, timeout_s=0))
+                    break
+                except files.LockTimeout:
+                    pass
+            if not said:
+                who = check_line.held_by(check_line.holder(path),
+                                         check_line.lock_pid(path))
+                say(f"waiting for the machine's check lock, held by {who}; "
+                    f"{len(ahead)} ahead of you")
+                said = True
+            time.sleep(check_line.LINE_POLL_S)
+    finally:
+        check_line.leave(path, ticket)
+    if said:
         say(f"got the check lock after {time.monotonic() - started:.1f} s")
-        yield
 
 
 def _run(found: _Look, argv: Sequence[str], timeout_s: float | None,
@@ -609,8 +677,9 @@ def _run(found: _Look, argv: Sequence[str], timeout_s: float | None,
     """Run `argv` in the build's worktree, holding the machine's check lock, its
     output to a new file in the scratch folder: its exit code (None when ended at
     `timeout_s`), duration and output file. The duration counts the run only."""
-    with _check_lock(held):
+    with _check_lock(held, found) as lock_path:
         output = _output_file(found.scratch)
+        check_line.update_holder(lock_path, output=str(output))
         started = time.monotonic()
         try:
             done = proc.run(list(argv), timeout_s=timeout_s, env=gitreads.git_env(),
@@ -873,11 +942,15 @@ def _output_file(scratch: Path) -> Path:
 
 
 def _command(state: states.State, build: builds.Build, step: str | None, *, name: str,
-             settings) -> tuple[list[str] | None, float | None, Unmet | None]:
+             settings, full: bool = False) -> tuple[list[str] | None, float | None,
+                                                    Unmet | None]:
     """The words of the command a run of `step` (the repo's check when None) runs,
-    placeholders as written, and its own time limit; or why there is none."""
+    placeholders as written, and its own time limit; or why there is none. With `full`,
+    the repo's check is its `check.command` in a queue project too, not its scoped
+    one."""
     if step is None:
-        words = scoped(settings, build.repo) or declared(settings, build.repo)
+        words = (None if full else scoped(settings, build.repo)) or declared(
+            settings, build.repo)
         if words is None:
             return None, None, Unmet(
                 f"{build.repo} declares no check, so a build in it has no check step",
@@ -913,7 +986,7 @@ def _look(view, *, name: str, stage: str, step: str | None, settings, again: str
         return found
     found.build = build
     words, own_timeout_s, missing = _command(state, build, step, name=name,
-                                             settings=settings)
+                                             settings=settings, full=full)
     if missing is not None:
         found.unmet.append(missing)
         return found
@@ -961,15 +1034,10 @@ def _look(view, *, name: str, stage: str, step: str | None, settings, again: str
 
 def _queue_look(found: _Look, *, full: bool, name: str, stage: str) -> None:
     """A queue project's check: `{base}` filled in with the merge-base read at the
-    tip; refused with `--full`, or where the merge-base is not one commit."""
+    tip; refused where the merge-base is not one commit. With `full` the run is the
+    repo's `check.command`, which has no `{base}`: nothing is filled or refused."""
     build = found.build
-    if full:
-        found.unmet.append(Unmet(
-            f"{build.repo} lands through its queue, so a build's full run is its "
-            "candidate's CI and its own check is the scoped one",
-            f"moxi rounds check {name} {stage}"))
-        return
-    if found.argv is None:
+    if full or found.argv is None:
         return
     if found.merge_base is None:
         found.unmet.append(Unmet(

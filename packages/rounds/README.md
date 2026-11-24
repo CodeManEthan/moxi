@@ -116,7 +116,7 @@ lower-case letters, digits and `-`.
 | `moxi rounds mark ROUND --restamp --record PTR` | re-stamp the design's current version with the digest of its frozen copy, when an edit outside the round rewrote the copy and `design.md` alike; changes no standing, and an ended round takes it too |
 | `moxi rounds commission ROUND --repo KEY --branch NAME --builder NAME [--slice ID=TEXT --minutes N]...` | in a flow that does not verify its design: declare a stage under the lowest `B<n>` not used, and commission it as below |
 | `moxi rounds commission ROUND B<n> --builder NAME [--record PTR] [--existing]` | build a stage: cut its branch from the target, add its worktree under `worktree_dir` as `<repo>/<branch>` and its scratch folder in rounds' cache directory, each with a marker naming the build, copy the repo's `private_files` into the worktree (see Config), and record the build; `--existing` builds on a branch that is there, one strictly inside or around another open build's branch included, and refuses one that overlaps another open build's or that a recorded landing already brought onto the target. It prints the commission block, which goes first in the builder's brief, then tells you which of the block's rulings the operator has not been shown |
-| `moxi rounds check [ROUND B<n>] [--step NAME \| --full] [--timeout-s N] [--no-wait]` | run the repo's declared check for a build at its tip, in its worktree, and record the run: its commit, that commit's merge-base with the target, the argv, its exit code and duration. The worktree must be clean on the build's branch and the build must have work. Its output goes to `check-<n>.log` in the build's scratch folder; at the check's `timeout_s`, or `--timeout-s`, else 3600 s, its whole process group gets SIGINT and 30 s later SIGKILL. One check runs at a time on the machine: a run waits for the check lock (`check.lock` in rounds' folder of lock files) while another holds it, or with `--no-wait` is refused. Nothing is recorded when the tip or the worktree changed while it ran. With no round, in a build's worktree, it checks that build; it exits 1 when the check failed. With `--step NAME` it runs the command step `NAME` of the round's flow, a step of your own, the same way, and records the run under that name. In a repo that declares `ci` it checks by CI instead: it pushes the tip to `ci.remote` when set (forced, to the branch `ci.ref` gives, when that is set), runs the local part (recorded under `check.local`) unless it passed at the tip, and reads CI, recording the reading; `--full` runs the full check there |
+| `moxi rounds check [ROUND B<n>] [--step NAME \| --full] [--timeout-s N] [--no-wait]` | run the repo's declared check for a build at its tip, in its worktree, and record the run: its commit, that commit's merge-base with the target, the argv, its exit code and duration. The worktree must be clean on the build's branch and the build must have work. Its output goes to `check-<n>.log` in the build's scratch folder; at the check's `timeout_s`, or `--timeout-s`, else 3600 s, its whole process group gets SIGINT and 30 s later SIGKILL. One check runs at a time on the machine, and the runs take the check lock (`check.lock` in rounds' folder of lock files) in the order they asked for it: a run that must wait takes a ticket in the lock's line (`check.line/` beside it) and says who holds the lock and how many are ahead of it; a waiter that dies loses its place at the next poll, on every system. With `--no-wait` it is refused while another run holds the lock or waits for it. The run holding the lock names its round, stage, step, repo and output file in `check.holder.json` beside it, which the doctor's `check lock` row reads. Nothing is recorded when the tip or the worktree changed while it ran. With no round, in a build's worktree, it checks that build; it exits 1 when the check failed. With `--step NAME` it runs the command step `NAME` of the round's flow, a step of your own, the same way, and records the run under that name. In a repo that declares `ci` it checks by CI instead: it pushes the tip to `ci.remote` when set (forced, to the branch `ci.ref` gives, when that is set), runs the local part (recorded under `check.local`) unless it passed at the tip, and reads CI, recording the reading; `--full` runs the full check there |
 | `moxi rounds finish [ROUND B<n>] [--again ID]` | finish a build at its branch's tip once every gate of finish holds there: take the repo's finish lock, the ref `refs/rounds/finishing/<into>` or the repo's `lock_ref`; read again the gates a move of the target can change; run the repo's finish actions in order, each recorded under its `id` before the next starts, an action recorded `ok` or `found` at the tip not run again; a merge already on the target (made by hand, by a fast-forward of the target, or by a finish that stopped before recording it) is recorded `found` with where it landed and is not made again, and a hand merge is printed as `found hand merge <commit>:` with what it put on the target; and record the finish when the gates read on the log still hold at the tip it merged, though the branch moved since. The `merge` action merges the tip, by its commit id, into the target with a merge commit, in the checkout that has the target, or in one it adds under `worktree_dir` and removes after. A conflict is aborted and refused with the way through; a failed action is recorded, undoes nothing, and exits 1. A refusal or failure after anything was recorded names each thing done and recorded, and says the build reads merged, not finished, when its merge is on the target. A lock left by a process on this machine that has ended is cleared and recorded; any other holder is named, with the git command that clears it. A `push` pushes the target at the merge's landing, or with no merge before it the build's branch at the tip, both by commit id. A push of the target git refuses still passes when the remote's target already holds the landing, so a rerun does not fail because the target moved on there; nothing is forced, so the remote's target never moves back. To read that, finish fetches the remote's target when the repo lacks its commit, which refreshes the repo's remote-tracking branch for it (`refs/remotes/<remote>/<into>`), as a push that succeeds would; no other ref changes. A `command` runs its argv with no shell in the build's worktree, placeholders filled as for a check, its output yours, with `started` recorded before it runs. A command that started and has no result may have done its work: it is run again, saying so, when its `repeat` is true, or once with `--again ID` after you have looked at what it did; otherwise it is refused with both ways on, that and the operator's `skip-action`. `--again` is refused for any other action. An action the operator skipped for the stage is not run and counts as done. Then it cleans up: after a merge, and only while the branch is still at the tip it finished, it removes the build's worktree and scratch folder and deletes the branch with `git branch -d` (not with `keep_branch`); with no merge it removes only the scratch folder. Each removal obeys the removal rule below, and a folder the rule keeps is named with the check that kept it. Before anything is written, finish is refused while a process of yours uses the build's scratch folder (its working folder, an open file, an argument or an environment value), naming the process: end it or leave the folder, then finish again. A scratch folder a process came to use after that read is not moved and is left for the sweep, named with the process. Where the processes can't be read, finish says the scratch gate was not run and goes on. Last, it removes from the remote CI's own refs of the build (see `ref` and `full_ref` under Config), each named with what became of it. With no round, in a build's worktree, it finishes that build |
 | `moxi rounds show ROUND [--json]` | one round: status, lead, flow, the step it is at, what its close waits for, its design and stages, its builds (for a build not finished, the newest record of each finish action at its head, with its state and landing), questions by state, rulings, verdicts and history |
 | `moxi rounds list [PROJECT] [--closed] [--json]` | the open rounds, each with its step and its counts, or with `--closed` the ended ones, each with how and when it ended; each row of `--json` also has the round's `lead` |
@@ -914,8 +914,10 @@ builds onto the target together and runs CI once on the result.
 **The check.** In a queue project `moxi rounds check` runs the check's `scoped` command
 in the build's worktree, `{base}` filled in with the merge-base of the tip and the
 target: the check of the packages the build touched and their dependents. It pushes
-nothing and reads no CI, and `--full` is refused, since a queued build's full run is its
-candidate's CI. The merge-base of the tip and the target does not change as the target
+nothing and reads no CI. `check --full` runs the repo's `check.command` there instead and
+records it, as in any other project, reading and changing nothing of `land`; the check
+step, the join's gate 3 and finish's are met by either check passing at the tip, so a
+build finished by hand after `land` is flipped to `finish` needs no other run. The merge-base of the tip and the target does not change as the target
 moves forward, so the record stays good while the build waits.
 
 **Joining.** `finish` reads the gates of finish at the branch's tip as a direct finish
@@ -964,6 +966,11 @@ conflicts with, one a commit hook refuses with the hook's output, and one whose 
 moved or whose build ended leaves. It pushes the candidate to its own ref (the `ci.ref`
 template filled with that branch), runs `ci.local` at it, and reads its CI each minute,
 by the `ci.workflows` marked `reads_candidates`, or by all of them where none is.
+A red, cancelled or absent reading counts only once the `status` command reads every
+run it names `completed`: until then the read is pending, nothing is rerun or pushed
+again, no failure log is read and nothing counts toward the failed reads, and the lander's log and `queue` name
+the run still running, with its id. A reading green on the jobs it reads stands at
+once, while other jobs of the run still go.
 A push refusal that names a member's tip or path ejects it; one that names none is tried
 again once, then pauses the queue. A cancelled run is rerun once and an absent one
 pushed again once under the next number; a second of either pauses the queue, as do
@@ -1026,11 +1033,12 @@ split is done.
 none. Each pass the lander reads the full run at the head, by the workflows not marked
 `reads_candidates` alone, so a candidate's scoped run at the same commit never counts
 for it; a head whose candidate's run was a full run (no workflow marked) needs nothing
-more. A head with no run is pushed, forced, to the
+more, and `queue` names that run as the candidate's. A head with no run is pushed, forced, to the
 target's own `ci` ref (`ci/main` for moxi), but not while a run pushed there earlier is
 still going: when that ends it is read, and then the newest head is pushed. A push that
 shows no run after ten minutes is made once more; after a second the head is given up,
-the director told, and `queue` says so. A red run's failed jobs are rerun once before
+the director told, and `queue` says so. A repo with no `ci.ref` gives up a head that has
+shown no run for ten minutes, with the reason `no ref`. A red run's failed jobs are rerun once before
 main counts as red, and the lander records `red` or `green` at the head, with the
 landings since the run read before (`covers`), which a red candidate's comparison reads
 too. A red run after green (or after none) starts a red spell: main's owner is the lead
@@ -1048,8 +1056,12 @@ owner nor the director has a running session and the notice waits.
 
 **Telling.** With comms installed, the lander sends its news under the send-only name
 `rounds`, which rounds reserves, and only to names something records: a member's end
-(landed, ejected, left) to its builder, the name its commission recorded, and to its
-round's lead (the round's own, else the project's); a member ejected for a conflict, once
+(landed, ejected, left) to its round's lead (the round's own, else the project's), and
+to its builder, the name its commission recorded, only while comms reads that name as
+held by a live session; a builder not held is neither sent to nor recorded. A member's
+notice that no name received (no lead, the builder not held, every send refused,
+failed or, after an hour of tries, unsent) goes once to the project's `director`, naming
+who it could not reach and why; a member ejected for a conflict, once
 the member it conflicts with lands, is ejected or leaves, with what to do now; a pause or
 a wait on the target's checkout to the project's `director`. Each message is recorded in
 the queue file as `told`, with what comms did with it. One comms could not take (its
@@ -1059,9 +1071,12 @@ tried again. Where no director is set, or a round has no lead, that is recorded 
 said. Without comms nothing is sent, and `next` and `queue` are where the news shows.
 
 `moxi rounds queue [--repo KEY]` shows each queue project's queue: whether a lander
-runs, a pause and its reason, each running batch and its CI reading, the members still in
-the queue in the order they are taken, the target's last full run, and the messages that
-reached nobody. `--resume` lifts a pause.
+runs, a pause and its reason, each running batch and its CI reading (a run still
+running is named), the members still in the queue in the order they are taken, the
+target's last full run (with the ref of the candidate whose run it was, where it was
+one), the last landing with its candidate's run, and the messages no
+name received, each send named, with a fix for a name comms has never seen bound and for
+a refused credential. `--resume` lifts a pause.
 
 ## Dropping a round
 
@@ -1580,6 +1595,7 @@ its call raises as a `moxi_rounds.errors.RoundsError`, with `reason`, `fix` and
 | `index` | warns when the index says something else than the logs do; `moxi rounds list` brings it up to them |
 | `ci <repo>` | for each repo that declares `ci`: warns when the commands that read CI are not on PATH, or, with the default `gh` commands, when `gh auth status` does not exit 0, with `check --full` as the way through; says so when the repo meets the check gate on CI alone |
 | `finish locks` | warns for each finish lock older than an hour in a project's repo, with its holder and the one git command that clears it, for you to run after asking the holder |
+| `check lock` | the machine's check lock, read without taking a lock: who holds it, for how long, its output file's size and last write, and each check waiting in line, in order; warns when the holder's output has not been written for 30 minutes (it may be hung: end it, and the next in line takes the lock), for a waiter's ticket not touched for a minute (a waiter stopped or suspended, passed over until it runs again), and for a lock held with no holder record |
 | `leftovers` | the sweep's dry run: warns with each folder an ended build left on this machine, whether it would go or the check that keeps it, and the command that removes what would go |
 
 The doctor only reads.
