@@ -109,18 +109,18 @@ history: 1 event
     assert list(found) == ["name", "project", "slug", "folder", "notice", "status",
                            "ended", "description", "lead", "parent", "inherits",
                            "flow",
-                           "steps", "step", "close", "skips",
+                           "steps", "checklist", "step", "close", "skips",
                            "stages", "versions", "standing", "trace", "threads",
                            "register_unreadable", "builds", "waits", "decisions",
                            "questions",
                            "rulings", "verdicts", "repairs", "history"]
-    assert {key: found[key] for key in list(found)[:22]} == {
+    assert {key: found[key] for key in list(found)[:23]} == {
         "name": B, "project": "proj-a", "slug": "b-round",
         "folder": str(rounds / "b-round"), "notice": None, "status": "open",
         "ended": None, "description": "a placeholder round", "lead": None,
         "parent": None,
         "inherits": [], "flow": "fix",
-        "steps": steps,
+        "steps": steps, "checklist": None,
         "step": {"step": "commission", "stage": None, "state": "ready",
                  "waits": [], "questions": []},
         "close": {"waits": [*OPENED_WAITS]},

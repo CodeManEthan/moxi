@@ -425,6 +425,9 @@ class State:
     #: The ids of the project's standing rulings the round starts from, as it was
     #: opened with them.
     inherits: list[str] = field(default_factory=list)
+    #: The checklist marks the round was opened with, None when its opening marked
+    #: nothing (a round whose design's block marks them).
+    marked: list[str] | None = None
     #: The agent who leads the round, from its opening or the newest change of its
     #: lead; None while the log names none. `leads.of` gives the lead to use, which
     #: falls back to the project's.
@@ -484,6 +487,8 @@ def _round_opened(state: State, event: dict) -> None:
     state.steps = copy.deepcopy(event["steps"])
     state.parent = event.get("parent")
     state.inherits = list(_ids(event.get("inherits")))
+    marked = event.get("marked")
+    state.marked = ([str(one) for one in marked] if isinstance(marked, list) else None)
     state.lead = event["lead"] if isinstance(event.get("lead"), str) else None
     state.status = OPEN
 
