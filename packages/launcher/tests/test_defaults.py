@@ -143,8 +143,12 @@ def test_keys_launches_refuse_are_listed_first_to_clear(conditions):
                                           "[defaults]")
     assert first[2]["refused"] == ("typo_row is not a launcher row or a row of any "
                                    "harness; moxi launcher catalog lists the rows.")
-    for name in ("session_id", "takes_policy_directors", "typo_row"):
-        assert change(name, "unset", available=ALL) == (True, [])
+    # Each clear answers the lines of the keys still held.
+    assert change("session_id", "unset", available=ALL) == (
+        True, [first[1]["refused"][:-1], first[2]["refused"][:-1]])
+    assert change("takes_policy_directors", "unset", available=ALL) == (
+        True, [first[2]["refused"][:-1]])
+    assert change("typo_row", "unset", available=ALL) == (True, [])
     assert presets.read().defaults == {"effort": "high"}
 
 
@@ -368,6 +372,16 @@ def test_relaunch_and_a_slot_target_save_in_either_order(order, conditions):
                               "with no preset: it is a codex launch, and only a Claude "
                               "session can be exited and relaunched; launch the seat on "
                               "Claude.")
+
+
+def test_clearing_a_slot_target_answers_the_relaunch_line_it_brings_back(conditions):
+    change("recycle_at_limit", "set", "relaunch", RECYCLES)
+    change("target", "set", "slot", RECYCLES)
+    changed, lines = change("target", "unset", None, RECYCLES)
+    assert changed and lines == [REFUSED_BARE]
+    assert rows(RECYCLES)["recycle_at_limit"]["warning"] == REFUSED_BARE + "."
+    # A clear that leaves nothing to say answers no line.
+    assert change("recycle_at_limit", "unset", None, RECYCLES) == (True, [])
 
 
 def test_two_places_are_written_and_both_rows_refused(tmp_path):

@@ -32,7 +32,7 @@ alone: `presets.defaults_problems` of that one key, `catalog.Row.check` of every
 name names (so a retired name or value is refused whatever `[defaults]` makes of it), and
 the values offered here. Nothing else in the file is read to refuse it, so the order of a
 Save's changes never matters; what the value meets is returned as warning lines. `unset`
-removes the key. A key `keys` doesn't list is refused with the row's own words, so a clear
+removes the key and returns the lines every row the table still holds carries. A key `keys` doesn't list is refused with the row's own words, so a clear
 of a key `keys` lists is refused only by a file that can't be read or a held lock.
 
 The write is one `moxi.files.edit_toml` block on `presets.path(env)`, under
@@ -103,7 +103,9 @@ class Table:
     def change(self, row: str, op: str, value: object = None, *, by: str,
                env: Mapping[str, str]) -> tuple[bool, list[str]]:
         """Set (`value` as the command line spells it) or unset `row`; whether the file
-        changed, and the launcher's lines for what the new value meets. Raises
+        changed, and the launcher's lines: after a `set`, what the new value meets; after
+        an `unset`, what every row the table still holds meets, since a clear can change
+        another row's lines (clearing `target = slot` brings back a relaunch's). Raises
         `ConfigError` for a refusal, keyed by `row`; a held lock and a file that is not
         TOML pass through from `edit_toml`."""
         avail = presets._avail(self.available)
@@ -124,7 +126,8 @@ class Table:
         except _Unchanged:
             return False, []
         if op != "set":
-            return True, []
+            del held[row]
+            return True, _table_lines(held, avail)
         held[row] = new
         refused, warning = _lines(held, avail).get(row, ([], []))
         return True, [*refused, *warning]
@@ -272,6 +275,18 @@ def _lines(held: Mapping[str, object], avail,
                 out.setdefault(key, ([], []))[1].append(f"{problem.problem}; {problem.hint}")
     for name, (problem, hint) in unmet.items():
         out.setdefault(name, ([], []))[0].append(f"{problem}; {hint}")
+    return out
+
+
+def _table_lines(held: Mapping[str, object], avail) -> list[str]:
+    """Every listed key's `refused` and `warning` lines for what `held` meets, in the order
+    `keys` lists them, each once."""
+    offered = offered_rows(avail)
+    lines = _lines(held, avail, offered)
+    out: list[str] = []
+    for name in [*(key for key in held if key not in offered), *offered]:
+        refused, warning = lines.get(name, ([], []))
+        out.extend(line for line in (*refused, *warning) if line not in out)
     return out
 
 

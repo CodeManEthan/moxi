@@ -20,7 +20,8 @@ read = "use"
 """
 
 #: The hook: rows kept as one JSON object in the file `DEMO_ROWS_FILE` names. A value
-#: `bad` is refused, `held` meets a held lock, `warn` is written with a warning line.
+#: `bad` is refused, `held` meets a held lock, `warn` is written with a warning line; an
+#: unset answers a line for each other row the file still holds.
 HOOK = '''
 import json
 from pathlib import Path
@@ -68,6 +69,8 @@ class _Rows:
             if row not in data:
                 return False, []
             del data[row]
+            self.file(env).write_text(json.dumps(data))
+            return True, [f"{name} is not a row" for name in data if name != "mode"]
         else:
             data[row] = value
         self.file(env).write_text(json.dumps(data))
@@ -231,6 +234,21 @@ def test_set_prints_the_hooks_warning_lines_after_its_own(tabled, capsys):
     assert (code, answer) == (0, {"changed": True, "problem": None, "fix": None,
                                   "units": []})
     assert err == "warning: a use with no preset refuses it\n"
+
+
+def test_unset_prints_the_lines_the_table_carries_after_it(tabled, capsys):
+    tabled.write_text('{"mode": "b", "stray": 1, "other": 2, "third": 3}')
+    code, out, _ = run(capsys, "config", "unset", "demo", "rows.stray")
+    assert code == 0
+    assert out == ("demo: rows.stray unset (by cli)\n"
+                   "warning: other is not a row\n"
+                   "warning: third is not a row\n")
+    code, answer, err = change_json(capsys, "unset", "demo", "rows.other")
+    assert (code, answer) == (0, {"changed": True, "problem": None, "fix": None,
+                                  "units": []})
+    assert err == "warning: third is not a row\n"
+    code, out, _ = run(capsys, "config", "unset", "demo", "rows.third")
+    assert (code, out) == (0, "demo: rows.third unset (by cli)\n")
 
 
 def test_a_row_name_holding_a_dot_reaches_the_hook_whole(tabled, capsys):
