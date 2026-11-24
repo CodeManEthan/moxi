@@ -878,18 +878,22 @@ def _scoped_state(module: str, parent: str, word, env):
         conn.close()
 
 
-def _send_scoped(args, ctx: Context, *, module: str, parent: str, word, tags) -> int:
+def _send_scoped(args, ctx: Context, *, module: str, parent: str, word, tags,
+                 seen: dict | None = None) -> int:
     """A send under `module`'s scoped sender for `parent`: refused when it can't send now
     (`scoped.state`) or when `tags` name anyone but the parent, before the token is read;
     then the module's token for the word, read through this process's credential chain,
     presented to the daemon's `send`, which checks the same again and refuses a sender
-    inside a live session."""
+    inside a live session. `seen` gets the word under `word` once the scoped sender can
+    send."""
     from . import reserved, scoped, secrets
 
     got = _scoped_state(module, parent, word, ctx.env)
     if not got.can_send:
         _refuse(ctx, SCOPED_REFUSALS[got.reason], f"{got.why}. Nothing was sent.")
         return _REFUSED
+    if seen is not None:
+        seen["word"] = got.word
     others = sorted({identity_of(t) for t in tags} - {got.parent})
     if others or not tags:
         said = (f", not to {', '.join(others)}" if others else
@@ -2550,19 +2554,27 @@ def run_reserved(ctx: Context, args, *, module: str | None, name: str,
 def run_scoped(ctx: Context, args, *, module: str, parent: str, word=None,
                tags) -> SendResult:
     """`run` for a send under `module`'s scoped sender for `parent` (`word`, or the one
-    word the module declares), to `tags`, which must name the parent alone."""
+    word the module declares), to `tags`, which must name the parent alone. A send
+    refused for its credential leaves the doctor a record, as `run_reserved` does."""
     capture, outer = _Capture(), ctx.capture
     ctx.capture = capture
+    seen: dict = {}
     try:
         try:
             code = _send_scoped(args, ctx, module=module, parent=parent, word=word,
-                                tags=list(tags))
+                                tags=list(tags), seen=seen)
         except config.ConfigError as exc:
             ctx.refuse("config", str(exc))
             code = _REFUSED
     finally:
         ctx.capture = outer
-    return _result(code, capture, ctx, check=bool(getattr(args, "check", False)))
+    result = _result(code, capture, ctx, check=bool(getattr(args, "check", False)))
+    if seen.get("word"):
+        from . import scoped
+        scoped.trace_send(module, seen["word"], sent=result.outcome == OUTCOME_SENT,
+                          credential=(result.refusal is not None
+                                      and result.refusal.code == "credential"))
+    return result
 
 
 def run(ctx: Context, args, *, tags=None, sender=None) -> SendResult:

@@ -1,4 +1,6 @@
-"""comms' interface 2: the module other code reaches (`moxi_comms.api`).
+"""comms' interfaces 2 and 3: the module other code reaches (`moxi_comms.api`).
+Interface 3 is interface 2 plus scoped senders (below), so a module for which comms is
+optional loads comms with `interface=3` to tell an older comms without them.
 
 Everything named here is public and pinned by comms' own tests; anything else in
 `moxi_comms` is private. A Moxi module reaches only this module (the contract check
@@ -24,8 +26,37 @@ outside comms.
   `message_id`, `recipients` (one `Recipient` per resolved name, its `delivery` one of
   `DELIVERIES`), `refusal` (a `Refusal`, `code` and `text`, when nothing was posted),
   `notes`, and `lines()`, the verb's text. Branch on the data, never on the text.
-* `send`, `check`, `send_as`, `send_under` and `delete` each close the record they opened
-  before they return, so no connection to it outlives the call.
+* `send`, `check`, `send_as`, `send_under`, `send_scoped` and `delete` each close the
+  record they opened before they return, so no connection to it outlives the call.
+
+**Scoped senders (interface 3).** A scoped sender is a send-only name comms forms from one
+parent comms name and a word a module declares (an entry point in the group
+`moxi.comms.scoped_senders`, named by the word, its target a one-line description in plain
+stdlib data): for the parent `builder@acme` and the word `digest`, `builder-digest@acme`.
+Only the declaring module's code sends under it, from a process outside every session, to
+its parent alone; nobody mails it, no session binds it, no program registers it, and no
+roster lists it.
+
+* `send_scoped(module, parent, to, text, *, word, expires, interrupt)` sends under
+  `module`'s scoped sender for `parent`, to `to`, which must name the parent alone. The
+  posture is always `[no reply]`. A refusal is the result's `outcome` and `refusal`:
+  `scoped-undeclared` (the module declares no such word), `scoped-conflict` (the word is
+  declared by two modules, or something already holds the name), `scoped-unreadable`
+  (comms' store can't be read), `scoped-recipient` (`to` names anyone but the parent),
+  `name-reserved` (sent from inside a session), `credential` (the token can't be read
+  or doesn't match: `moxi comms reserved renew --word WORD`, from this environment;
+  the miss is recorded for `moxi doctor`) or `protocol-mismatch` (a running daemon
+  older than scoped senders). It raises `ValueError` for a parent that is not a comms
+  name, and when `word` is None and the module declares more than one word.
+* `scoped_sender(name)` reads a sender name back: a `ScopedSender` (`qualified`,
+  `module`, `word`, `parent`) while it is an active scoped sender, else None. A name of
+  the form that a session or a program holds, or whose word no module declares now (or
+  two do), reads back as None.
+* `scoped_state(module, parent, *, word=None)` says whether `module`'s scoped sender for
+  `parent` can send now: a `ScopedState` (`module`, `parent`, `word`, `qualified`,
+  `can_send`, `reason`, one of `SCOPED_REASONS` when it can't, and `why` in words).
+* Both reads open comms' store read-only and never ask the daemon, so a listener can ask
+  at each prompt.
 
 **The other surfaces.**
 
@@ -88,6 +119,7 @@ from .. import kinds as _kinds
 from .. import machine_line as _machine_line
 from .. import paths as _paths
 from .. import reserved as _reserved_mod
+from .. import scoped as _scoped
 from .. import sending as _sending
 from .. import wire as _wire
 from ..adapters import codex_wrapper as _codex_wrapper
@@ -103,8 +135,8 @@ from ..scoping import GLOBAL, NAME_RE, is_auto_name, qualify, split_tag
 from ..sending import (DELIVERIES, EXIT_CODES, OUTCOMES, DeleteResult, Recipient, Refusal,
                        Sender, SendResult)
 
-#: The interface this module is.
-INTERFACE = 2
+#: The newest interface this module is (it offers 2 and 3).
+INTERFACE = 3
 
 #: The Codex wrapper takes `--resume THREAD_ID` (with `--name`) and reports a resume.
 CODEX_RESUME = True
@@ -230,6 +262,16 @@ def _send_only(verb: str, module, name, to, text, *, expires, interrupt: bool,
                timeout_s: float) -> SendResult:
     """`send_as` (with `module`) and `send_under` (without): one send under a send-only
     name, with no reply."""
+    args, tags = _no_reply(verb, to, text, expires=expires, interrupt=interrupt)
+    ctx = _sending.Context(env=dict(os.environ), deadline=timeout_s)
+    try:
+        return _sending.run_reserved(ctx, args, module=module, name=str(name), tags=tags)
+    finally:
+        ctx.close()
+
+
+def _no_reply(verb: str, to, text, *, expires, interrupt: bool):
+    """The verb's fields and the recipients of one send with no reply."""
     if expires is not None:
         _sending.expiry_seconds(expires)          # a bad duration raises ValueError
     names = to.split(",") if isinstance(to, str) else [str(t) for t in to]
@@ -240,11 +282,98 @@ def _send_only(verb: str, module, name, to, text, *, expires, interrupt: bool,
                            no_cap=False, audience=None, new=False, held=False,
                            standing=False, new_name=False, interrupt=bool(interrupt),
                            expires=expires, check=False, reply_to=None, message_id=None)
+    return args, tags
+
+
+# --------------------------------------------------------------------------- scoped senders
+
+#: Why a scoped sender can't send (`ScopedState.reason`): `undeclared`, the module
+#: declares no such word; `conflict`, two modules declare the word, or something holds
+#: the name; `unreadable`, comms' store can't be read.
+SCOPED_REASONS = _scoped.REASONS
+
+#: Whether a module's scoped sender for a parent can send now (`scoped_state`).
+ScopedState = _scoped.State
+
+
+@dataclass(frozen=True)
+class ScopedSender:
+    """An active scoped sender: its name, the module that declares its word, the word,
+    and the parent it reaches, each qualified as comms writes it."""
+
+    qualified: str
+    module: str
+    word: str
+    parent: str
+
+
+def send_scoped(module: str, parent: str, to, text: str, *, word: str | None = None,
+                expires=None, interrupt: bool = False,
+                timeout_s: float = 30.0) -> SendResult:
+    """Send `text` under `module`'s scoped sender for `parent` (of `word`, or of the one
+    word `module` declares), as that module's own code, to `to`, which must name the
+    parent alone. comms forms the name; its token is read through this process's
+    credential chain and presented to the daemon, which refuses a sender inside a live
+    session. The posture is always `[no reply]`, and the message is delivered as any
+    message is (`interrupt`, `expires` as for `send`).
+
+    A refusal is the result's `outcome` and `refusal`, posted nothing:
+    `scoped-undeclared`, `scoped-conflict`, `scoped-unreadable`, `scoped-recipient`,
+    `name-reserved`, `credential` (recorded for `moxi doctor`) or `protocol-mismatch`.
+    Raises `ValueError` for a parent that is not a comms name, for a word that is not
+    one, when `word` is None and `module` declares more than one word, and for arguments
+    `send` would refuse."""
+    args, tags = _no_reply("send_scoped", to, text, expires=expires, interrupt=interrupt)
     ctx = _sending.Context(env=dict(os.environ), deadline=timeout_s)
     try:
-        return _sending.run_reserved(ctx, args, module=module, name=str(name), tags=tags)
+        return _sending.run_scoped(ctx, args, module=str(module), parent=str(parent),
+                                   word=word, tags=tags)
     finally:
         ctx.close()
+
+
+def scoped_sender(name: str) -> ScopedSender | None:
+    """The active scoped sender `name` is, or None: a name that isn't of a declared
+    word's form, whose word two modules declare, that a session or a program holds, or
+    that can't be read (comms' store missing or unreadable). `name` is a sender name as
+    a delivery's `senders` carry it (`builder-digest@acme`; bare for the global scope).
+    Reads comms' store, never the daemon."""
+    import sqlite3
+
+    from ..store import StoreRefused
+    from ..store.open import open_read
+
+    if not isinstance(name, str) or name.endswith("@"):
+        return None
+    parts = _scoped.split(name)
+    if parts is None:
+        return None
+    parent, word = parts
+    qualified = _scoped.form(parent, word)
+    try:
+        conn = open_read()
+    except (StoreRefused, sqlite3.Error, OSError):
+        return None
+    try:
+        found = _scoped.sender_of(conn, qualified)
+    except sqlite3.Error:
+        return None
+    finally:
+        conn.close()
+    if found is None:
+        return None
+    module, word, parent = found
+    return ScopedSender(qualified=qualified, module=module, word=word, parent=parent)
+
+
+def scoped_state(module: str, parent: str, *, word: str | None = None) -> ScopedState:
+    """Whether `module`'s scoped sender for `parent` (of `word`, or of the one word
+    `module` declares) can send now, without a send and without the daemon: a
+    `ScopedState` whose `can_send` is True, or whose `reason` (one of `SCOPED_REASONS`)
+    and `why` say why not. Raises `ValueError` for a parent that is not a comms name,
+    for a word that is not one, and when `word` is None and `module` declares more than
+    one word."""
+    return _sending._scoped_state(str(module), str(parent), word, dict(os.environ))
 
 
 def delete(sender: Sender, message_id, *, timeout_s: float = 30.0) -> DeleteResult:
@@ -759,6 +888,8 @@ def daemon_socket() -> Path:
 
 __all__ = [
     "INTERFACE", "send", "send_as", "send_under", "check", "delete", "DeleteResult", "Sender", "SendResult",
+    "send_scoped", "scoped_sender", "scoped_state", "ScopedSender", "ScopedState",
+    "SCOPED_REASONS",
     "Recipient", "Refusal", "CODEX_RESUME", "ENDS_ON_BIND_TIMEOUT", "BIND_WAIT",
     "HEADLESS", "parse_exit", "OUTCOMES", "DELIVERIES", "EXIT_CODES", "POSTURES", "ClaimServer", "attributed",
     "session", "session_of", "caller_identity", "roster", "owner", "Roster", "Agent",

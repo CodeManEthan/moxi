@@ -164,7 +164,7 @@ def test_the_announcement_offers_codex_and_gates_its_script():
     assert module.SETTINGS == "settings.toml"
     assert set(module.OPTIONAL) == set(PYPROJECT["project"]["optional-dependencies"])
     assert module.GATED == {"moxi-comms-codex": "codex"}
-    assert module.API == "moxi_comms.api" and module.INTERFACES == frozenset({2})
+    assert module.API == "moxi_comms.api" and module.INTERFACES == frozenset({2, 3})
 
 
 def test_internal_env_is_the_wrapper_wiring_the_secrets_step_and_the_test_seam():

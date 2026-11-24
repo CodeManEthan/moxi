@@ -558,6 +558,7 @@ def _mint(conn, chain, word: str, module: str, description: str, clock, result, 
                   (word, module, module, description, token_hash(token), at))
     result.words.append((word, module))
     result.lines.append(f"{module}: the scoped sender word {word} declared")
+    _clear_trace(word)
     log.info("scoped sender word %s declared for %s (token in the %s step)", word, module,
              step)
 
@@ -572,6 +573,7 @@ def _remove_token(chain, word: str, module: str, result) -> None:
         result.lines.append(f"{module}: the token of the scoped sender word {word} "
                             f"couldn't be removed: {exc}")
         log.warning("the token of %s for %s couldn't be removed: %s", word, module, exc)
+    _clear_trace(word)
 
 
 def release_all(conn, chain, clock, result) -> None:
@@ -626,9 +628,63 @@ def renew(conn, chain, word: str, clock, result) -> None:
           since=row["declared_at"])
 
 
+# --------------------------------------------------------------------------- the trace
+
+def record_key(word: str) -> str:
+    """The key of the doctor record a send under `word`'s scoped sender leaves when its
+    process can't use the word's token."""
+    return f"scoped-token-{word}"
+
+
+def trace_send(module: str, word: str, *, credential: bool, sent: bool) -> None:
+    """Leave or clear the doctor's record of a send under `module`'s scoped sender of
+    `word`, as `reserved.trace_send` does for a send-only name: the process that sends
+    may read the credential chain from a different context than the shell the doctor
+    runs in, so a send refused for its credential records which process found no usable
+    token. The record stays until a send under the word works again, a fresh token is
+    minted (`moxi comms reserved renew --word WORD`), or the word's token is removed.
+    Never raises: the send's own result is the answer."""
+    import os
+    import sys
+
+    from moxi import doctor
+
+    from .release import MODULE
+
+    try:
+        if credential:
+            prog = os.path.basename(sys.argv[0]) if sys.argv and sys.argv[0] else "python"
+            where = f"the environment of {prog} (pid {os.getpid()})"
+            doctor.record(MODULE, f"comms can't read {module}'s token for the scoped "
+                          f"sender word {word} from {where}, where {module} sends under "
+                          "it; renew it from that environment if the shell you run this "
+                          "in reads it fine", key=record_key(word),
+                          fix=f"moxi comms reserved renew --word {word}")
+        elif sent:
+            doctor.clear(MODULE, record_key(word))
+    except Exception as exc:                                       # noqa: BLE001
+        log.warning("the doctor's record for the word %s couldn't be written: %s", word,
+                    exc)
+
+
+def _clear_trace(word: str) -> None:
+    """The doctor's record of `word`'s token cleared: a fresh token was minted, or the
+    word's token removed."""
+    from moxi import doctor
+
+    from .release import MODULE
+
+    try:
+        doctor.clear(MODULE, record_key(word))
+    except Exception as exc:                                       # noqa: BLE001
+        log.warning("the doctor's record for the word %s couldn't be cleared: %s", word,
+                    exc)
+
+
 __all__ = ["ACTIVE", "CONFLICT", "DESCRIPTION_MAX_CHARS", "GROUP", "IN_CONFLICT",
            "REASONS", "SECRET_PREFIX", "UNDECLARED", "UNREADABLE", "WORD_RE", "Broken",
            "Declared", "Form", "State", "bind_refusal", "check", "conflict_why",
            "declarers", "form", "form_of", "from_mapping", "held", "holders", "load",
-           "parent_of", "reconcile", "release_all", "renew", "rows", "secret_id",
-           "sender_of", "split", "state", "token_rows", "unmailable", "word_row"]
+           "parent_of", "reconcile", "record_key", "release_all", "renew", "rows",
+           "secret_id", "sender_of", "split", "state", "token_rows", "trace_send",
+           "unmailable", "word_row"]
