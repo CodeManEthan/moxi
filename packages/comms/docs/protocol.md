@@ -23,7 +23,9 @@ live. Numbers named here are in `src/moxi_comms/constants.py`.
   speaking through voice, which binds the operator's name as it. Both are person kinds,
   so their mail is never held and their cache is never read.
   A send-only name is one a module or a registered program sends under and nobody binds
-  or mails ([adapters.md](adapters.md#send-only-names)).
+  or mails ([adapters.md](adapters.md#send-only-names)). A scoped sender is a send-only
+  name comms forms from one parent name and a word a module declares, which reaches that
+  parent alone ([adapters.md](adapters.md#scoped-senders)).
 - **The CLI**, `moxi comms`, sends and reads through the daemon. With the daemon down
   nothing is sent: a send exits 75 and says so.
 
@@ -208,7 +210,8 @@ The frame line prints only what the reader can't get elsewhere:
 No mark means `chosen` and `verified`. Deviations print in one parenthetical, tier
 first: `(standing)`, `(ephemeral)`, `(send-only)`, `(unverified)`. `(send-only)` is a
 message a module or a registered program sent under its send-only name, from the time
-the name was reserved or registered until it was freed. `in <room>` prints
+the name was reserved or registered until it was freed, or a module sent under a scoped
+sender (`[comms] from builder-digest@acme (send-only) · msg <id> · [no reply]`). `in <room>` prints
 only outside `#names`. Control and format characters are removed from bodies, and a
 body line can never start at column zero, so a frame line forged inside a body is
 visibly indented.
@@ -435,7 +438,8 @@ Newline-delimited JSON-RPC 2.0 at `RUNTIME/comms/daemon.sock` (0600, in a 0700
 directory; Moxi's short socket path for it when that one is too long). Each adapter's
 claim socket speaks the same wire. Every connection opens with `rpc.hello`: the client
 offers a range of comms wire versions, and the daemon answers the highest common one and
-its capabilities (`remove`, `expiry`, `interrupt`, `reserved-names`, `mcp`, `connector`), or refuses with
+its capabilities (`remove`, `expiry`, `interrupt`, `reserved-names`, `mcp`, `connector`,
+`scoped-senders`), or refuses with
 -32001 naming both ranges. The wire is version 1. A version is raised only for a
 breaking change; an addition is a new capability, which a client tests by name. A verb
 or adapter refused at its hello says which side is older and the cure: restart the
@@ -468,7 +472,11 @@ the reads `resolve`, `agents`, `session`, `owner`, `asks`, `owed`, `readable`,
 `explain`, `binding_window`, `attributed_message`, `rooms`, `message`, `history`,
 `max_id`, `last_digest`, `replies_to` and `mcp_endpoint`. A send's credential is the live binding's token for a bound
 identity, the operator's credential for `operator`, or a send-only name's token for a
-send-only name: a module's, or the one a program registered it with.
+send-only name: a module's, or the one a program registered it with. A send under a
+scoped sender presents the declaring module's token for its word; the daemon refuses it
+`scoped-conflict` when the word is in conflict or something holds the name, and
+`scoped-recipient` unless line zero names the parent alone. A client sends under a scoped
+sender only to a daemon whose hello lists `scoped-senders`.
 
 An adapter's methods, on the connection that holds its binding: `bind` (answers the
 identity, a fresh binding token and `high`, the catch-up boundary), `open_digest`,
@@ -569,7 +577,8 @@ Errors use comms' codes, outside JSON-RPC's reserved range: refusals 1101-1149
 (`name-held` 1101, `name-reserved` 1102, `name-retired` 1103, `name-unknown` 1104,
 `not-mailable` 1105, `credential` 1106, `too-long` 1107, `not-sender` 1108,
 `already-delivered` 1109, `unknown-message` 1110, `unknown-adapter` 1111, `not-bound`
-1112, `mcp-token-taken` 1113, `mcp-token-revoked` 1114) and try-again 1150-1199 (`stopping` 1150, `failed` 1151, `busy` 1152, past 256
+1112, `mcp-token-taken` 1113, `mcp-token-revoked` 1114, `scoped-conflict` 1115,
+`scoped-recipient` 1116) and try-again 1150-1199 (`stopping` 1150, `failed` 1151, `busy` 1152, past 256
 connections, and `store-busy` 1153). A try-again code means the daemon committed nothing
 for the request. An error's `data` carries `reason`, the text a verb prints, and what the
 refusal names. A verb exits 3 on a refusal and 75 on a try-again; a read that timed out
@@ -713,7 +722,7 @@ binding's `handed`.
 
 | path | written by | what |
 |---|---|---|
-| `STATE/comms/comms.db` | the daemon; provisioning, the reserved-names listener and `moxi comms send-only` their own tables | messages, rooms, the queue, digests, cursors, the binding history, identities, operators, send-only names (a module's or a registered program's, by `reserved.holder`), dropped mail and the hashes of the tools' tokens (0600, WAL) |
+| `STATE/comms/comms.db` | the daemon; provisioning, the reserved-names listener and `moxi comms send-only` their own tables | messages, rooms, the queue, digests, cursors, the binding history, identities, operators, send-only names (a module's or a registered program's, by `reserved.holder`), the words modules declare for scoped senders (`scoped`), dropped mail and the hashes of the tools' tokens (0600, WAL) |
 | `DATA/comms/cards/<identity>` | each identity | the card `moxi comms whois` reads |
 | `STATE/comms/tokens/` | provisioning, the reserved-names listener, `moxi comms send-only` | the credential chain's token store (0600) |
 | `STATE/comms/codex/`, `STATE/comms/opencode/` | the Codex and OpenCode adapters | thread and session ids per identity |
