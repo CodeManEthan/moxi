@@ -1,8 +1,8 @@
 """Recycle against fakes of turns, slots and cache: the timer's subscription, the expiry
 ask's reads in order and every verdict (quiet, blocked, failed, unconfirmed, cleared,
 compacted), the background shells a clear stops after an idle hour, a repeated block as
-one run, the crossing handler in both modes and reached through usage's crossing group, a
-pending compact taken up by a run's end, and the limit compact's job."""
+one run, the crossing handler reached directly and through usage's crossing group, and the
+retired compact at the limit: no line, no run, and its job a stub."""
 
 from __future__ import annotations
 
@@ -19,8 +19,7 @@ from moxi_launcher import cachetimers, catalog, job, recycle, store
 SID = "5f6e7d8c-9b0a-4c1d-8e2f-3a4b5c6d7e8f"
 NEW = "0a1b2c3d-4e5f-4a6b-8c7d-9e0f1a2b3c4d"
 OTHER = "11111111-2222-4333-8444-555555555555"
-SETTINGS = {"relaunch.person_s": 120, "relaunch.wait_s": 900, "records.keep_days": 90,
-            "recycle.limit_wait_s": 1800}
+SETTINGS = {"relaunch.person_s": 120, "relaunch.wait_s": 900, "records.keep_days": 90}
 
 
 def me() -> str:
@@ -641,8 +640,8 @@ def script(monkeypatch):
 
 
 def limit(conn, value):
-    """Set r1 to recycle at its limit: a relaunch launch told at its warn_at, any other at
-    its limit_at."""
+    """Set r1 to recycle at its limit: a relaunch launch told at its warn_at, a `compact`
+    one recorded with its limit_at, as a row from before those were retired."""
     mark = "warn_at" if value == "relaunch" else "limit_at"
     conn.execute("UPDATE launches SET values_json = ? WHERE request_id = 'r1'",
                  (f'{{"recycle_at_limit": "{value}", "{mark}": "1x"}}',))
@@ -742,58 +741,21 @@ def test_an_older_scratch_row_set_to_relaunch_gets_no_line(conn, script):
                  ('{"scratch": true, "recycle_at_limit": "relaunch", "limit_at": "1x"}',))
     assert recycle.crossing_line(conn, crossing(), pid=os.getpid()) is None
     assert [e for e in store.events(conn, "r1") if e.kind == "recycle-told"] == []
-    # A scratch that compacts still compacts.
-    conn.execute("UPDATE launches SET values_json = ? WHERE request_id = 'r1'",
-                 ('{"scratch": true, "recycle_at_limit": "compact", "limit_at": "1x"}',))
-    spawn = Spawned()
-    assert recycle.crossing_line(conn, crossing(), pid=os.getpid(),
-                                 spawn=spawn) == recycle.COMPACT_LINE
-    assert len(spawn.calls) == 1
 
 
-def test_a_compact_crossing_writes_its_run_and_spawns_its_job(conn, script, monkeypatch):
-    # The handler runs in the session's endpoint, whose environment carries its stamps.
+def test_a_compact_row_from_before_its_retirement_gets_no_line_and_writes_nothing(
+        conn, script, monkeypatch):
     monkeypatch.setenv("MOXI_LAUNCHER_REQUEST", "r1")
     limit(conn, "compact")
     spawn = Spawned()
-    line = recycle.crossing_line(conn, crossing(), pid=os.getpid(), spawn=spawn)
-    assert line == recycle.COMPACT_LINE
-    [run] = store.runs(conn, request_id="r1")
-    assert (run.kind, run.mode, run.state) == ("compact", "limit", "armed")
-    assert run.crossing_key == f"{SID}|1x|2026-10-31T10:00:00Z"
-    assert run.job == f"proc:{me()}"
-    [(argv, options)] = spawn.calls
-    assert argv == ["/venv/bin/moxi-launcher-job", "compact", run.run_id]
-    assert options["detached"] is True
-    assert "MOXI_LAUNCHER_REQUEST" not in options["env"]
-
-
-def test_a_compact_crossing_twice_writes_one_run(conn, script):
-    limit(conn, "compact")
-    spawn = Spawned()
-    recycle.crossing_line(conn, crossing(), pid=os.getpid(), spawn=spawn)
-    assert recycle.crossing_line(conn, crossing(), pid=os.getpid(), spawn=spawn) is None
-    assert len(store.runs(conn, request_id="r1")) == 1 and len(spawn.calls) == 1
-
-
-def test_a_compact_launch_compacts_at_each_rise_in_one_session_id(conn, script):
-    limit(conn, "compact")
-    spawn = Spawned()
-    assert recycle.crossing_line(conn, crossing(), pid=os.getpid(),
-                                 spawn=spawn) == recycle.COMPACT_LINE
-    [first] = store.runs(conn, request_id="r1")
-    store.end_run(conn, first.run_id, "compacted")
-    # The compaction brought the context below the mark; it climbed back past it.
-    assert recycle.crossing_line(conn, crossing(at="2026-10-31T11:00:00Z"), pid=os.getpid(),
-                                 spawn=spawn) == recycle.COMPACT_LINE
-    assert len(store.runs(conn, request_id="r1")) == 2 and len(spawn.calls) == 2
-
-
-def test_a_compact_job_that_does_not_start_ends_its_run_failed(conn, script):
-    limit(conn, "compact")
-    recycle.crossing_line(conn, crossing(), pid=os.getpid(), spawn=Spawned(OSError("no")))
-    [run] = store.runs(conn, request_id="r1")
-    assert (run.state, run.outcome, run.word) == ("ended", "failed", "not-started")
+    monkeypatch.setattr(proc, "spawn", spawn)
+    before = len(store.events(conn, "r1"))
+    assert recycle.crossing_line(conn, crossing(), pid=os.getpid()) is None
+    assert recycle.crossing_line(conn, crossing(at="2026-10-31T11:00:00Z"),
+                                 pid=os.getpid()) is None
+    assert store.runs(conn, request_id="r1") == [] and spawn.calls == []
+    assert [e.kind for e in store.events(conn, "r1")][before:] == []
+    assert conn.execute("SELECT COUNT(*) FROM pending_compacts").fetchone() == (0,)
 
 
 def test_the_crossing_handler_is_found_through_usage_s_entry_point_group():
@@ -845,166 +807,13 @@ def test_a_relaunch_crossing_reaches_the_launcher_through_usage_s_group_once_a_r
     assert len(told) == 2
 
 
-def test_a_compact_crossing_reaches_the_launcher_through_usage_s_group_and_is_recorded(
+def test_a_compact_row_reached_through_usage_s_group_gets_no_line_and_no_run(
         usage_group, script, monkeypatch):
     limit(usage_group.conn, "compact")
     spawn = Spawned()
     monkeypatch.setattr(proc, "spawn", spawn)
-    assert recycle.COMPACT_LINE in through_usage(usage_group, 1761904800.0)
-    [run] = store.runs(usage_group.conn, request_id="r1")
-    assert (run.kind, run.mode, run.state) == ("compact", "limit", "armed")
-    assert run.crossing_key == f"{SID}|1x|1761904800.0"
-    [(argv, _)] = spawn.calls
-    assert argv == ["/venv/bin/moxi-launcher-job", "compact", run.run_id]
-
-
-def open_run(conn, kind="relaunch", mode="self"):
-    return store.insert_run(conn, kind=kind, mode=mode, request_id="r1", session_id=SID,
-                            by="ann", job="slots:relaunch-x")
-
-
-def test_a_compact_crossing_that_meets_an_open_run_leaves_a_pending_compact(conn, script):
-    limit(conn, "compact")
-    open_run(conn)
-    spawn = Spawned()
-    assert recycle.crossing_line(conn, crossing(), pid=os.getpid(),
-                                 spawn=spawn) == recycle.COMPACT_LINE
-    assert recycle.crossing_line(conn, crossing(at="later"), pid=os.getpid(),
-                                 spawn=spawn) == recycle.COMPACT_LINE
-    assert store.pending_compact(conn, "r1")[0] == f"{SID}|1x|later"
-    assert spawn.calls == [] and len(store.runs(conn, request_id="r1")) == 1
-    assert recycle.crossing_line(conn, crossing(at="later"), pid=os.getpid()) is None
-
-
-@pytest.fixture
-def started(monkeypatch):
-    seen = []
-    monkeypatch.setattr(recycle, "start_compact", lambda conn, run, **kw: seen.append(run))
-    return seen
-
-
-def test_a_run_that_ends_right_after_the_crossing_meets_it_takes_its_compact(
-        conn, monkeypatch, started):
-    limit(conn, "compact")
-    run = open_run(conn)
-    insert = store.insert_run
-
-    def then_the_run_ends(*args, **kwargs):
-        try:
-            return insert(*args, **kwargs)
-        except store.RunOpen:
-            store.end_run(conn, run.run_id, "not-exited", word="busy")
-            raise
-
-    monkeypatch.setattr(store, "insert_run", then_the_run_ends)
-    assert recycle.crossing_line(conn, crossing(), pid=os.getpid()) == recycle.COMPACT_LINE
-    assert store.pending_compact(conn, "r1") is None
-    [picked] = started
-    assert picked.crossing_key == store.crossing_key(SID, "1x", crossing().at)
-    assert picked.kind == "compact"
-
-
-def test_an_insert_that_pends_writes_the_pending_compact_and_no_run(conn):
-    run = open_run(conn)
-    with pytest.raises(store.RunOpen) as caught:
-        store.insert_run(conn, kind="compact", mode="limit", request_id="r1",
-                         session_id=SID, by=store.LAUNCHER, crossing_key="k", pend=True)
-    assert caught.value.run.run_id == run.run_id
-    assert store.pending_compact(conn, "r1")[0] == "k"
-    assert [r.run_id for r in store.runs(conn, request_id="r1")] == [run.run_id]
-
-
-
-def test_a_run_s_end_takes_the_pending_compact_and_starts_it(conn, started):
-    run = open_run(conn)
-    store.pend_compact(conn, "r1", f"{SID}|1x|t")
-    assert store.end_run(conn, run.run_id, "not-exited", word="busy")
-    assert store.pending_compact(conn, "r1") is None
-    [picked] = started
-    assert (picked.kind, picked.mode, picked.state) == ("compact", "limit", "armed")
-    assert picked.crossing_key == f"{SID}|1x|t" and picked.session_id == SID
-    assert store.open_run(conn, "r1").run_id == picked.run_id
-    assert [e.kind for e in store.run_events(conn, picked.run_id)] == ["picked"]
-
-
-@pytest.mark.parametrize("outcome", ["relaunched", "cleared", "compacted", "exited"])
-def test_an_end_that_left_the_context_fresh_drops_the_pending_compact(conn, started,
-                                                                      outcome):
-    run = open_run(conn)
-    store.pend_compact(conn, "r1", f"{SID}|1x|t")
-    store.end_run(conn, run.run_id, outcome)
-    assert started == [] and store.pending_compact(conn, "r1") is None
-    [dropped] = [e for e in store.events(conn, "r1") if e.kind == "pending-compact-dropped"]
-    assert dropped.detail["crossing_key"] == f"{SID}|1x|t"
-    assert store.open_run(conn, "r1") is None
-
-
-@pytest.mark.parametrize("result, outcome, word", [
-    ({"kind": "ran", "reason": None}, "exit-pending", "person"),
-    ({"kind": "ran", "reason": None}, "relaunch-failed", "name-held"),
-    ({"kind": "ran", "reason": None}, "error", "OSError"),
-    ({"kind": "error", "reason": "gone"}, "relaunch-failed", "gone"),
-    ({"kind": "refused", "reason": "gone"}, "relaunch-failed", "gone"),
-    ({"kind": "ran", "reason": None}, "not-exited", "no-dialog"),
-])
-def test_an_end_after_the_exit_ran_drops_the_pending_compact(conn, started, result,
-                                                            outcome, word):
-    run = open_run(conn)
-    store.add_run_event(conn, run.run_id, "exit", {"turn_number": 3})
-    store.add_run_event(conn, run.run_id, "exit-result", result)
-    store.pend_compact(conn, "r1", f"{SID}|1x|t")
-    store.end_run(conn, run.run_id, outcome, word=word)
-    assert started == [] and store.pending_compact(conn, "r1") is None
-    assert [e for e in store.events(conn, "r1") if e.kind == "pending-compact-dropped"]
-    assert store.open_run(conn, "r1") is None
-
-
-@pytest.mark.parametrize("kind, mode, outcome, word", [
-    ("relaunch", "self", "gone", "gone"),
-    ("relaunch", "repair", "relaunch-failed", "slots-busy"),
-    ("compact", "limit", "failed", "gone"),
-])
-def test_an_end_with_no_session_left_drops_the_pending_compact(conn, started, kind, mode,
-                                                              outcome, word):
-    run = open_run(conn, kind=kind, mode=mode)
-    store.pend_compact(conn, "r1", f"{SID}|1x|t")
-    store.end_run(conn, run.run_id, outcome, word=word)
-    assert started == [] and store.pending_compact(conn, "r1") is None
-
-
-def test_an_exit_refused_leaves_the_session_and_the_end_takes_the_pending_compact(
-        conn, started):
-    run = open_run(conn)
-    store.add_run_event(conn, run.run_id, "exit-result", {"kind": "refused",
-                                                          "reason": "busy"})
-    store.pend_compact(conn, "r1", f"{SID}|1x|t")
-    store.end_run(conn, run.run_id, "not-exited", word="busy")
-    assert len(started) == 1
-
-
-def test_an_end_that_made_a_new_launch_drops_the_pending_compact(conn, started):
-    run = open_run(conn)
-    store.pend_compact(conn, "r1", f"{SID}|1x|t")
-    store.end_run(conn, run.run_id, "not-exited", word="busy", new_request_id="r2")
-    assert started == [] and store.pending_compact(conn, "r1") is None
-
-
-def test_a_dropped_run_takes_the_pending_compact_too(conn, started):
-    run = open_run(conn, kind="clear", mode="expiry")
-    store.pend_compact(conn, "r1", f"{SID}|1x|t")
-    assert store.drop_run(conn, run.run_id)
-    assert store.get_run(conn, run.run_id) is None and len(started) == 1
-
-
-def test_a_stale_run_ended_by_an_insert_leaves_the_pending_compact(conn, started):
-    open_run_ = store.insert_run(conn, kind="keep-warm", mode="ask", request_id="r1",
-                                 session_id=SID, by="launcher", job="proc:999999999@1.0",
-                                 at="2020-01-01T00:00:00.000000Z")
-    store.pend_compact(conn, "r1", f"{SID}|1x|t")
-    store.insert_run(conn, kind="exit", mode="verb", request_id="r1", session_id=SID,
-                     by="ann", gone=lambda j: True)
-    assert store.get_run(conn, open_run_.run_id).outcome == "error"
-    assert started == [] and store.pending_compact(conn, "r1") is not None
+    assert recycle.RELAUNCH_LINE not in through_usage(usage_group, 1761904800.0)
+    assert store.runs(usage_group.conn, request_id="r1") == [] and spawn.calls == []
 
 
 def test_the_crossing_handler_gives_up_on_a_locked_store_within_its_bound(conn, tmp_path,
@@ -1040,7 +849,7 @@ def test_the_crossing_handler_without_a_launch_log_is_none(monkeypatch, tmp_path
     assert recycle.on_crossing(crossing()) is None
 
 
-# -- the limit compact's job -------------------------------------------------------------
+# -- the retired compact at the limit ----------------------------------------------------
 
 
 class Clock:
@@ -1057,91 +866,64 @@ class Clock:
         self.now += seconds
 
 
-def compact_run(conn, job_=None):
+def compact_run(conn, job_=None, state="armed"):
+    """A compact run of mode `limit`, as a launcher process from before the retirement
+    writes one at a crossing."""
     return store.insert_run(conn, kind="compact", mode="limit", request_id="r1",
                             session_id=SID, by="launcher", crossing_key=f"{SID}|1x|t",
-                            job=job_, slot="3", pane_id="%9")
+                            job=job_, slot="3", pane_id="%9", state=state)
 
 
-def run_compact(conn, run, session, settings=None):
+def run_job(conn, run, session, kind=None):
     clock = Clock()
-    runner = job.CompactJob(conn, run.run_id, turns=FakeTurns(session),
-                            slots_api=FakeSlots(), comms=None,
-                            settings={**SETTINGS, **(settings or {})}, clock=clock,
-                            sleep=clock.sleep)
+    runner = (kind or job.CompactJob)(conn, run.run_id, turns=FakeTurns(session),
+                                      slots_api=FakeSlots(), comms=None,
+                                      settings=dict(SETTINGS), clock=clock,
+                                      sleep=clock.sleep)
     outcome = runner.go()
     return SimpleNamespace(outcome=outcome, run=store.get_run(conn, run.run_id),
                            events=events(conn, run.run_id), clock=clock)
 
 
-def test_the_compact_job_compacts_an_idle_session_without_stopping_shells(conn):
+def test_the_compact_job_ends_its_run_retired_and_sends_nothing_to_turns(conn):
     session = FakeSession([ran()])
-    got = run_compact(conn, compact_run(conn, "proc:1@1.0"), session)
-    assert got.outcome == "compacted" and got.run.outcome == "compacted"
-    assert session.commands == [("compact", 4, {})]
-    assert got.events == ["compact", "result", "ended"]
+    got = run_job(conn, compact_run(conn, "proc:1@1.0"), session)
+    assert got.outcome == "failed"
+    assert (got.run.outcome, got.run.word, got.run.detail) == (
+        "failed", "retired", "the launcher no longer compacts a session at a context limit")
+    assert session.commands == [] and "compact" not in got.events
 
 
-def test_the_compact_job_records_itself_when_its_spawner_did_not(conn):
-    got = run_compact(conn, compact_run(conn), FakeSession([ran()]))
-    assert got.run.job == f"proc:{me()}"
+def test_the_compact_job_exits_zero(monkeypatch, capsys):
+    monkeypatch.setattr(job, "run", lambda kind, arg, signals: "failed")
+    assert job.main(["compact", "x1"]) == 0
+    assert capsys.readouterr().out.startswith("run x1: failed")
 
 
-def test_a_compact_held_past_its_wait_ends_blocked_with_the_word(conn):
-    session = FakeSession(facts_seq=[facts(turn_open=True)])
-    got = run_compact(conn, compact_run(conn, "proc:1@1.0"), session,
-                      {"recycle.limit_wait_s": 0})
-    assert (got.outcome, got.run.word) == ("blocked", "turn")
+class PreRetirementCompactJob(job.RelaunchJob):
+    """The steps of the compact job a launcher process started before the retirement still
+    runs from memory: its own prune (which ended nothing then), a wait during which
+    another launcher process prunes, then `guard` right before turns' `compact`."""
+
+    kind = "compact"
+
+    def _prune(self):
+        pass
+
+    def steps(self):
+        self.target = self._find()
+        store.prune(self.conn, 90)
+        self.guard()
+        self.target.session.command("compact", if_turn_number=4)
+        self.end("compacted")
+
+
+def test_a_waiting_compact_job_whose_run_prune_ended_stops_at_its_guard(conn):
+    session = FakeSession([ran()])
+    got = run_job(conn, compact_run(conn, "proc:1@1.0", state="waiting"), session,
+                  PreRetirementCompactJob)
+    assert (got.outcome, got.run.word) == ("failed", "retired")
     assert session.commands == []
-
-
-def test_a_refusal_that_may_clear_sends_the_compact_back_to_its_wait(conn):
-    session = FakeSession([Result("refused", "rate"), ran()])
-    got = run_compact(conn, compact_run(conn, "proc:1@1.0"), session)
-    assert got.outcome == "compacted" and len(session.commands) == 2
-    assert "again" in got.events and job.RETRY_S in got.clock.slept
-
-
-def test_a_refusal_at_the_bound_ends_the_compact_blocked(conn):
-    session = FakeSession([Result("refused", "draft")])
-    got = run_compact(conn, compact_run(conn, "proc:1@1.0"), session,
-                      {"recycle.limit_wait_s": 0})
-    assert (got.outcome, got.run.word) == ("blocked", "draft")
-
-
-@pytest.mark.parametrize("result, outcome, word", [
-    (Result("refused", "not-allowed"), "failed", "not-allowed"),
-    (Result("refused", "gone"), "failed", "gone"),
-    (Result("failed", "timeout"), "unconfirmed", "timeout"),
-])
-def test_the_compact_job_maps_turns_answers(conn, result, outcome, word):
-    got = run_compact(conn, compact_run(conn, "proc:1@1.0"), FakeSession([result]))
-    assert (got.outcome, got.run.word) == (outcome, word)
-
-
-def test_a_compact_of_a_session_not_live_fails(conn):
-    run = compact_run(conn, "proc:1@1.0")
-    got = run_compact(conn, run, None)
-    assert (got.outcome, got.run.word) == ("failed", "gone")
-
-
-def test_a_compact_ended_under_its_job_does_not_act(conn):
-    run = compact_run(conn, "proc:1@1.0")
-    store.end_run(conn, run.run_id, "error", word="job-gone")
-    session = FakeSession([ran()])
-    got = run_compact(conn, run, session)
-    assert got.outcome == "error" and session.commands == []
-
-
-def test_a_compact_inside_its_long_wait_is_not_stale(conn):
-    run = store.insert_run(conn, kind="compact", mode="limit", request_id="r1",
-                           session_id=SID, by="launcher", job=f"proc:{me()}",
-                           at="2020-01-01T00:00:00.000000Z")
-    assert not store.run_stale(store.get_run(conn, run.run_id),
-                               lambda j: job.gone(j))
-    with pytest.raises(store.RunOpen):
-        store.insert_run(conn, kind="relaunch", mode="self", request_id="r1",
-                         session_id=SID, by="ann", gone=lambda j: job.gone(j))
 
 
 # -- the job's command line and the chain ------------------------------------------------

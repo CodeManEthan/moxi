@@ -44,7 +44,6 @@ from dataclasses import asdict, dataclass, field
 from typing import Any
 
 from moxi import exit as codes
-from moxi import modules
 
 from . import keepwarm, relaunch, selfrecycle, slots, store, target
 from .recycle import LOOK, cache_read
@@ -54,8 +53,12 @@ FAILED = ("failed", "not-exited", "exit-pending", "at-dialog", "relaunch-failed"
           "first-turn-not-sent", "gone", "error", "unconfirmed")
 #: A run whose note to its session was not taken reads as this.
 NOTE_NOT_TAKEN = "note-not-taken"
-#: The run modes of recycle's runs.
+#: The run modes of recycle's runs: `limit` is a compact at the context limit, which the
+#: launcher no longer makes; its runs show until `records.keep_days` prunes them.
 RECYCLE_MODES = ("expiry", "limit")
+#: How `at limit` reads for a launch recorded with `recycle_at_limit = compact`, a value
+#: that no longer acts.
+RETIRED_AT_LIMIT = "compact (no longer acts)"
 
 
 @dataclass(frozen=True)
@@ -99,16 +102,14 @@ class RelaunchState:
 
 @dataclass(frozen=True)
 class RecycleState:
-    """The options in force; the last expiry or limit run; when a pending compact was
-    left; and when the session was last told to recycle itself at its limit."""
+    """The options in force (`at_limit` as `RETIRED_AT_LIMIT` for a recorded `compact`);
+    the last expiry or limit run; and when the session was last told to recycle itself at
+    its limit."""
 
     on_expiry: str
     at_limit: str
-    limit_at: str | None
     last: RunLine | None = None
-    pending_compact: str | None = None
     told_at: str | None = None
-    pending_dropped_at: str | None = None
 
 
 @dataclass(frozen=True)
@@ -167,13 +168,9 @@ class SessionState:
             line += f"; notice refused by {', '.join(relaunched.notices_refused)}"
         recycled = self.recycle
         rec = f"recycle: on expiry {recycled.on_expiry}, at limit {recycled.at_limit}"
-        if recycled.at_limit != "off" and recycled.limit_at:
-            rec += f" ({recycled.limit_at})"
         last = recycled.last
         if last is not None:
             rec += f"; last: {last.kind} {last.said} at {last.updated_at}"
-        if recycled.pending_compact:
-            rec += f"; a compact pending since {recycled.pending_compact}"
         if recycled.told_at:
             rec += f"; told to recycle itself at {recycled.told_at}"
         warm = self.keep_warm
@@ -295,18 +292,15 @@ def _recycle(conn: sqlite3.Connection, row: store.LaunchRow, own: Sequence[store
              lines: Mapping[str, RunLine]) -> RecycleState:
     values = row.values
     last = next((lines[r.run_id] for r in own if r.mode in RECYCLE_MODES), None)
-    pending = store.pending_compact(conn, row.request_id)
-    events = store.events(conn, row.request_id)
-    told = [e.at for e in events if e.kind == "recycle-told"]
-    dropped = [e.at for e in events if e.kind == "pending-compact-dropped"]
+    told = [e.at for e in store.events(conn, row.request_id) if e.kind == "recycle-told"]
     at_limit = str(values.get("recycle_at_limit") or "off")
     if at_limit == selfrecycle.RELAUNCH and _armed_untold(row):
         at_limit = ARMED_UNTOLD
+    elif at_limit == "compact":
+        at_limit = RETIRED_AT_LIMIT
     return RecycleState(
         on_expiry=str(values.get("recycle_on_expiry") or "off"), at_limit=at_limit,
-        limit_at=_limit_mark(row, at_limit=at_limit), last=last,
-        pending_compact=pending[1] if pending else None, told_at=told[-1] if told else None,
-        pending_dropped_at=dropped[-1] if dropped else None)
+        last=last, told_at=told[-1] if told else None)
 
 
 #: The `at limit` of a `relaunch` launch whose session can recycle itself but warns at no
@@ -321,23 +315,6 @@ def _armed_untold(row: store.LaunchRow) -> bool:
         return False
     told = selfrecycle.missing_of_row(row, told=True)
     return told is not None and told.item == selfrecycle.NO_MARK
-
-
-def _limit_mark(row: store.LaunchRow, *, at_limit: str) -> str | None:
-    """The mark a launch recycles at: for a compacting launch its `limit_at` when set;
-    else, when it recycles at its limit, the crossing mark stamped on it at launch
-    (usage's `CROSSING_AT_ENV`, so an unset `limit_at` shows the mark it followed, and a
-    relaunch launch the mark it is told at); else None. None too when usage can't be
-    loaded here to name the stamp."""
-    limit_at = row.values.get("limit_at")
-    if limit_at and at_limit == "compact":
-        return str(limit_at)
-    if at_limit in ("off", ARMED_UNTOLD):
-        return None
-    found = modules.load("usage", interface=1)
-    name = getattr(found.api, "CROSSING_AT_ENV", None) if found.ok else None
-    stamped = row.env.get(name) if name else None
-    return str(stamped) if stamped else None
 
 
 def _keep_warm(conn: sqlite3.Connection, row: store.LaunchRow, own: Sequence[store.Run],
@@ -387,6 +364,6 @@ def show(session_id: str | None = None, *, pid: int | None = None, turns: Any | 
                            data={**got.as_json(), "outcome": got.word or "ok"})
 
 
-__all__ = ["ARMED_UNTOLD", "FAILED", "NOTE_NOT_TAKEN", "RECYCLE_MODES", "KeepWarmState", "RelaunchState",
+__all__ = ["ARMED_UNTOLD", "FAILED", "NOTE_NOT_TAKEN", "RECYCLE_MODES", "RETIRED_AT_LIMIT", "KeepWarmState", "RelaunchState",
            "RecycleState", "RunLine", "SessionState", "line", "note_not_taken",
            "of_launch", "show", "state"]

@@ -4,7 +4,7 @@
     moxi-launcher-job repair RUN          # a repair run, from a failed run's record
     moxi-launcher-job expiry SESSION      # an expiry ask, started by cache's timer
     moxi-launcher-job keep-warm SESSION   # a keep-warm ask, started by cache's timer
-    moxi-launcher-job compact RUN         # a compact at the context limit
+    moxi-launcher-job compact RUN         # retired: ends a compact-at-limit run, acts on nothing
     moxi-launcher-job launch REQUEST      # a launch the page asked for, by its request id
 
 Internal, never typed. A relaunch and a repair are spawned as slots jobs
@@ -12,8 +12,9 @@ Internal, never typed. A relaunch and a repair are spawned as slots jobs
 slots' own tmux server, so it runs outside every session from its first instant: it
 outlives the session it exits, and comms takes its notices under the launcher's reserved
 name. Cache's timer starts an expiry ask (`recycle.ask_expiry`) and a keep-warm ask
-(`keepwarm.ask`), and a crossing or the end of a run that took a pending compact spawns a
-compact detached (`moxi.proc.spawn`); each records its own process as its run's job.
+(`keepwarm.ask`); each records its own process as its run's job. The launcher no longer
+compacts a session at its context limit, so nothing spawns `compact`: a launcher process
+started before that, still running, may, and the job ends that run (`CompactJob`).
 
 **The relaunch run** takes these steps, each writing its event before the next starts:
 
@@ -183,8 +184,6 @@ NAME_POLL_S = 0.5
 #: How long a relaunch waits for its new session to bind the comms name, and how often it
 #: asks, in seconds.
 BIND_WAIT_S, BIND_POLL_S = 60.0, 2.0
-#: How long a compact waits after a refusal of turns' before it reads the session again.
-RETRY_S = 5.0
 #: How often, and how many times, a job tries its run's first read.
 FIRST_READS, FIRST_READ_S = 5, 0.2
 #: The outcomes after which a run's session is down and its record can launch it again.
@@ -1162,62 +1161,19 @@ class RepairJob(RelaunchJob):
 
 
 class CompactJob(RelaunchJob):
-    """One compact at the context limit: the session's quiet read, waited for up to
-    `recycle.limit_wait_s` after the crossing, then turns' `compact` with the turn number
-    that read saw. Its end is `compacted`, `blocked` (still held at the bound, or turns'
-    `draft` or `busy-agents` then), `failed` (turns' `not-allowed`, `unsupported`, `gone`
-    or `failed`, or the session not live), or `unconfirmed` (turns' answer did not come).
-    A refusal of turns' that may clear (`busy-turn`, `stale-turn`, `rate`, `in-flight`,
-    `loading`, `draft`, `busy-agents`) sends it back to the wait. It passes no
-    `stop_shells`: the session is at work, not idle an hour."""
+    """The retired compact at the context limit. A launcher process started before the
+    launcher stopped compacting there may still spawn it for a run of mode `limit`; it
+    ends that run `failed`, word `retired`, sends nothing to turns and tells no one. The
+    job exits 0. Its start's prune (`store.prune`) usually ends the run first, the same
+    way."""
 
     kind = "compact"
-    #: Outcomes the relaunch's shared steps end with, as a compact's.
-    OUTCOMES = {"gone": "failed"}
 
     def steps(self) -> None:
-        from . import recycle
-        from .exits import own_job
-
-        run = self.run
-        if run.job is None:
-            store.set_run_job(self.conn, run.run_id, own_job())
-        self.target = self._find()
-        if run.state == "armed":
-            if not store.advance_run(self.conn, run.run_id, "waiting", leaving=("armed",)):
-                self._ended_under()
-        wait_s = float(self.setting("recycle.limit_wait_s"))
-        bound = store.parse_time(run.created_at).timestamp() + wait_s
-        while True:
-            number = self.wait(wait_s, expired="blocked")
-            self.check_stop()
-            self.guard()
-            self.acting = True
-            self.event("compact", {"turn_number": number})
-            try:
-                result = self.target.session.command("compact", if_turn_number=number)
-            except Exception as exc:  # noqa: BLE001  (turns' error is the verdict)
-                result = exc
-            verdict = recycle.verdict_of("compact", result)
-            self.event("result", {"outcome": verdict.outcome, "word": verdict.word,
-                                  "detail": verdict.detail})
-            self.acting = False
-            if verdict.outcome not in (None, "blocked"):
-                self.end(verdict.outcome, verdict.word, verdict.detail)
-            if self.wall() >= bound:
-                self.end("blocked", verdict.word, verdict.detail)
-            self.event("again", {"word": verdict.word})
-            self.sleep(RETRY_S)
-
-    def end(self, outcome: str, word: str | None = None, detail: str | None = None,
-            *, noted: Mapping[str, Any] | None = None, **fields: Any) -> None:
-        mapped = self.OUTCOMES.get(outcome, outcome)
-        if mapped != outcome and word is None:
-            word = outcome
-        super().end(mapped, word, detail, noted=noted, **fields)
+        self.end("failed", store.RETIRED, store.LIMIT_COMPACT_RETIRED)
 
     def _tell(self) -> None:
-        """A compact tells no one: its run is its record."""
+        """A retired compact tells no one: its run is its record."""
 
 
 #: The job each run kind runs; `expiry` and `keep-warm` are asks of a session (`ASKS`).
@@ -1472,8 +1428,8 @@ def run(kind: str, run_id: str, *, signals: bool = False, **seams: Any) -> str:
 
 def main(argv: Sequence[str] | None = None) -> int:
     """`moxi-launcher-job KIND ARG`: 0 when the run relaunched, cleared, compacted or
-    nudged its session, or an ask ended with nothing to do; 1 for any other end; 2 for
-    bad arguments."""
+    nudged its session, an ask ended with nothing to do, or the retired `compact` ended
+    its run; 1 for any other end; 2 for bad arguments."""
     parser = argparse.ArgumentParser(
         prog="moxi-launcher-job",
         description="Internal: run one of the launcher's detached runs, or a launch the "
@@ -1497,7 +1453,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         return 0 if verdict.outcome is None or verdict.outcome in DONE else 1
     outcome = run(args.kind, args.arg, signals=True)
     print(f"run {args.arg}: {outcome}", flush=True)
-    return 0 if outcome in DONE else 1
+    return 0 if outcome in DONE or args.kind == CompactJob.kind else 1
 
 
 def _stamp(at: float) -> str:
@@ -1513,7 +1469,7 @@ def _words(error: BaseException) -> str:
 
 __all__ = ["ACTED", "ACTS", "ASKS", "DONE", "GONE", "JOBS", "KINDS", "LAUNCHED", "LOOK",
            "HOLD_S", "NOT_SETTLED", "OFF_POSTURE_HINT", "PACED", "PACE_HOLD_OFF_S", "PAGE",
-           "POLL_S", "REPAIRABLE", "RETRY_S",
+           "POLL_S", "REPAIRABLE",
            "SETTLE_S", "TERMINAL", "TRANSIENT", "UNEXPECTED_JOB", "Choice", "CompactJob", "Ended",
            "LaunchCheckFailed", "NoPlace", "NotHere", "RelaunchJob", "RepairJob", "chain_of",
            "choose_slot", "gone", "job_name", "launch_check", "launch_request", "main",

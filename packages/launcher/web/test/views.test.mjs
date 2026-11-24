@@ -13,8 +13,7 @@ const run = (extra) => ({ run_id: "r1", kind: "relaunch", mode: "self", state: "
 const entry = (extra) => ({
   session_id: "s1", request_id: "q1",
   relaunch: { state: null, run: null, made_by: null, notices_refused: [], note_not_taken: false },
-  recycle: { on_expiry: "off", at_limit: "off", limit_at: null, last: null, pending_compact: null,
-             told_at: null, pending_dropped_at: null },
+  recycle: { on_expiry: "off", at_limit: "off", last: null, told_at: null },
   keep_warm: { on: false, holds: [], nudges: 0, last: null, window: null },
   red: false, since: null, why: null, word: null, run_id: null, unreadable: null, ...extra });
 const RED = entry({ red: true, word: "blocked", since: T, why: "person: someone is typing",
@@ -48,20 +47,22 @@ test("the lines say what `moxi launcher show` prints", () => {
   const busy = entry({
     relaunch: { state: "relaunch-failed", run: run({ outcome: "relaunch-failed", detail: "pane gone" }),
                 made_by: null, notices_refused: ["lead", "ops"], note_not_taken: true },
-    recycle: { on_expiry: "compact", at_limit: "relaunch", limit_at: "80%",
-               last: run({ kind: "expiry", outcome: "compacted" }), pending_compact: T, told_at: T,
-               pending_dropped_at: null },
+    recycle: { on_expiry: "compact", at_limit: "relaunch",
+               last: run({ kind: "expiry", outcome: "compacted" }), told_at: T },
     keep_warm: { on: true, holds: ["review"], nudges: 2, last: run({ kind: "keep-warm", outcome: "nudged" }),
                  window: "no window: lifetime 300 s" },
   });
   assert.deepEqual(stateLines(busy), [
     "relaunch: relaunch-failed: pane gone; its note to the session was not taken; notice refused by lead, ops",
-    "recycle: on expiry compact, at limit relaunch (80%); last: expiry compacted at 2026-10-31 10:01 UTC; "
-      + "a compact pending since 2026-10-31 10:01 UTC; told to recycle itself at 2026-10-31 10:01 UTC",
+    "recycle: on expiry compact, at limit relaunch; last: expiry compacted at 2026-10-31 10:01 UTC; "
+      + "told to recycle itself at 2026-10-31 10:01 UTC",
     "keep warm: on (no window: lifetime 300 s); holds: review; nudges in a row: 2; last: nudged at 2026-10-31 10:01 UTC",
   ]);
   assert.deepEqual(stateLines(entry()), [
     "relaunch: none", "recycle: on expiry off, at limit off", "keep warm: off"]);
+  // A launch recorded with a retired at-limit value shows it as the server words it.
+  assert.equal(stateLines(entry({ recycle: { ...entry().recycle, at_limit: "compact (no longer acts)" } }))[1],
+               "recycle: on expiry off, at limit compact (no longer acts)");
   assert.deepEqual(stateLines(entry({ keep_warm: { on: true, holds: [], nudges: 0, last: null, window: null } }))[2],
                    "keep warm: on; holds: none");
   assert.deepEqual(stateLines(UNREAD), []);
@@ -81,10 +82,9 @@ test("the summary is the red word, or what is under way, or ok", () => {
   const open = entry({
     relaunch: { state: "armed", run: run({ state: "armed", outcome: null }), made_by: null,
                 notices_refused: [], note_not_taken: false },
-    recycle: { ...entry().recycle, pending_compact: T },
     keep_warm: { on: true, holds: [], nudges: 0, last: null, window: null },
   });
-  assert.equal(summary(open), "relaunch armed · compact pending · warm");
+  assert.equal(summary(open), "relaunch armed · warm");
   // An ended relaunch is not under way.
   assert.equal(summary(entry({ relaunch: { state: "relaunched", run: run(), made_by: null,
                                            notices_refused: [], note_not_taken: false } })), "ok");

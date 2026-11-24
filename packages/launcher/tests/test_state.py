@@ -227,36 +227,37 @@ def test_a_refused_notice_is_named_by_its_recipients(conn):
 # -- the recycle part --------------------------------------------------------------------
 
 
-def test_recycle_shows_its_options_last_run_pending_compact_and_the_last_telling(conn):
-    conn.execute("UPDATE launches SET values_json = ? WHERE request_id = 'r1'",
-                 ('{"recycle_on_expiry": "clear", "recycle_at_limit": "compact", '
-                  '"limit_at": "1.5x"}',))
+def test_recycle_shows_its_options_last_run_and_the_last_telling(conn):
+    conn.execute("UPDATE launches SET values_json = ?, env_json = ? WHERE request_id = 'r1'",
+                 ('{"recycle_on_expiry": "clear", "recycle_at_limit": "relaunch"}',
+                  '{"MOXI_USAGE_CROSSING_AT": "2x"}'))
     ran(conn, "cleared", kind="clear", mode="expiry", at=OLD)
     ran(conn, "nudged")
-    store.pend_compact(conn, "r1", f"{SID}|1.5x|1", at="2026-01-02T00:00:00.000000Z")
     store.add_event(conn, "recycle-told", {"crossing_key": "k"}, request_id="r1",
                     session_id=SID, at="2026-01-03T00:00:00.000000Z")
     got = read(conn).recycle
-    assert (got.on_expiry, got.at_limit, got.limit_at) == ("clear", "compact", "1.5x")
+    assert (got.on_expiry, got.at_limit) == ("clear", "relaunch")
     assert (got.last.kind, got.last.outcome) == ("clear", "cleared")
-    assert got.pending_compact == "2026-01-02T00:00:00.000000Z"
     assert got.told_at == "2026-01-03T00:00:00.000000Z"
     line = read(conn).lines()[2]
-    assert "on expiry clear, at limit compact (1.5x)" in line and "clear cleared" in line
+    assert "on expiry clear, at limit relaunch;" in line and "clear cleared" in line
+    assert "2x" not in line
 
 
-def test_an_unset_limit_at_shows_the_mark_stamped_at_launch(conn):
+def test_an_old_compact_row_shows_it_no_longer_acts_and_no_mark(conn):
     conn.execute("UPDATE launches SET values_json = ?, env_json = ? WHERE request_id = 'r1'",
-                 ('{"recycle_at_limit": "relaunch"}', '{"MOXI_USAGE_CROSSING_AT": "2x"}'))
+                 ('{"recycle_at_limit": "compact", "limit_at": "1.5x"}',
+                  '{"MOXI_USAGE_CROSSING_AT": "1.5x"}'))
+    store.insert_run(conn, kind="compact", mode="limit", request_id="r1", session_id=SID,
+                     by="launcher", job="proc:1@1.0")
+    store.prune(conn, 90)
     got = read(conn)
-    assert (got.recycle.at_limit, got.recycle.limit_at) == ("relaunch", "2x")
-    assert "at limit relaunch (2x)" in got.lines()[2]
-
-
-def test_a_launch_that_recycles_off_shows_no_stamped_mark(conn):
-    conn.execute("UPDATE launches SET values_json = ?, env_json = ? WHERE request_id = 'r1'",
-                 ('{"recycle_at_limit": "off"}', '{"MOXI_USAGE_CROSSING_AT": "2x"}'))
-    assert read(conn).recycle.limit_at is None
+    assert got.recycle.at_limit == "compact (no longer acts)" == state.RETIRED_AT_LIMIT
+    assert (got.recycle.last.mode, got.recycle.last.outcome, got.recycle.last.word) == (
+        "limit", "failed", "retired")
+    assert "at limit compact (no longer acts); last: compact failed (retired)" in (
+        got.lines()[2])
+    assert "1.5x" not in got.lines()[2]
 
 
 @pytest.mark.parametrize("sources", [None, {"recycle_at_limit": "shipped"},
@@ -274,7 +275,7 @@ def test_a_launch_at_off_shows_off_whatever_its_source(conn, monkeypatch, source
     conn.execute("UPDATE launches SET values_json = ? WHERE request_id = 'r1'",
                  (json.dumps(values),))
     got = read(conn)
-    assert (got.recycle.at_limit, got.recycle.limit_at) == ("off", None)
+    assert got.recycle.at_limit == "off"
     assert "at limit off" in got.lines()[2] and "relaunch" not in got.lines()[2]
 
 
@@ -294,8 +295,6 @@ def test_a_relaunch_launch_with_no_mark_shows_it_is_armed_with_no_warning(
     got = read(conn)
     assert got.recycle.at_limit == shown
     assert f"at limit {shown}" in got.lines()[2]
-    if mark != "2x":
-        assert got.recycle.limit_at is None
 
 
 # -- the keep-warm part ------------------------------------------------------------------

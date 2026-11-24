@@ -1,10 +1,9 @@
-"""Recycle: a launched session cleared or compacted on the launcher's own reads, once its
-prompt cache has expired or its context has passed its mark.
+"""Recycle: a launched session cleared or compacted on the launcher's own reads around
+its prompt cache's expiry, and told at its context mark that it may relaunch itself.
 
     ask_expiry(session_id)       # moxi-launcher-job expiry SESSION, asked by cache's timer
     clear_expired(dry_run=...)   # moxi launcher clear-expired: the ask of each opted-in session
-    on_crossing(crossing)        # usage's crossing of the launch's limit_at mark
-    start_compact(conn, run)     # a limit compact's job, spawned detached
+    on_crossing(crossing)        # usage's crossing of the launch's warn_at mark
 
 **Recycle on expiry.** Cache's timer asks from the session's cache expiry on, every 120 s,
 for a session whose launch stamped `MOXI_LAUNCHER_RECYCLE_ON_EXPIRY` (`cachetimers`). The
@@ -49,21 +48,20 @@ and one that would end `blocked` says so and writes no run. A stale open run is 
 
 **Recycle at limit.** `on_crossing` is the launcher's entry on usage's `moxi.usage.crossings`
 group. usage calls it in turns' endpoint once per rise of the main session's context past
-the launch's crossing mark (`warn_at` for `relaunch`, `limit_at` for `compact`), with at
-most 200 ms to answer. The endpoint first takes its launch, claiming it or moving it to
+the launch's crossing mark (its `warn_at`, stamped only on a launch set to `relaunch`), with
+at most 200 ms to answer. The endpoint first takes its launch, claiming it or moving it to
 itself by parent and learning the session's id, as its `load` does, so a session whose
 endpoint was replaced is still found. Then it reads the store, writes at most one row more,
 and returns; it never waits on the session.
-`relaunch` writes an event and returns a line that tells the agent its launch lets it
+It writes an event and returns a line that tells the agent its launch lets it
 recycle itself, at its next pause point and only when it is mid-work (`RELAUNCH_LINE`),
 once per crossing: each rise past the mark, after a compaction too, is told again, and a
 retried call on one crossing gets no second line. It tells only a launch whose session can
 recycle itself and warns at a mark (`selfrecycle.missing_of_row` with `told`, the self
 arm's test and the mark), so never a scratch launch (`SCRATCH_RECYCLE`). usage appends
-the line to its notice on the same call, so the agent reads one line;
-`compact` writes a compact run and spawns its job, which waits for the session to be idle
-(`job.CompactJob`). A compact crossing that meets an open run leaves a pending compact,
-which the run's end takes up (`store.end_run`): it is never dropped silently.
+the line to its notice on the same call, so the agent reads one line. The launcher never
+clears or compacts a session at its context limit: a row from before `compact` was
+retired there gets no line and nothing is written.
 """
 
 from __future__ import annotations
@@ -78,8 +76,7 @@ from pathlib import Path
 from typing import Any
 
 from moxi import exit as codes
-from moxi import modules, paths, proc
-from moxi.paths import Layout
+from moxi import modules
 
 from . import catalog, listeners, quiet, selfrecycle, slots, store, target
 
@@ -117,8 +114,6 @@ RELAUNCH_LINE = ("This launch lets you recycle yourself. Only if you are mid-wor
                  "shells, then run `moxi launcher relaunch --self --handoff <file>` as your "
                  "last act and end your turn. If your work is nearly done, finish it and "
                  "stop as usual; don't recycle at the end of a task.")
-COMPACT_LINE = ("This launch compacts at its limit: the launcher compacts this session at "
-                "its next idle.")
 
 #: Why a scratch launch may not recycle itself, and what to do instead. A scratch folder
 #: has no notes directory to keep a handoff in. A launch that works in one and is given
@@ -126,7 +121,6 @@ COMPACT_LINE = ("This launch compacts at its limit: the launcher compacts this s
 #: values are checked (`catalog.refuse_scratch_recycle`); one that has it from
 #: `[defaults]` holds `off` with a warning (`presets.resolve`). An older such row is
 #: refused the self arm and gets no line at its mark, and a replay of one recycles `off`.
-#: `compact` stays open to a scratch.
 SCRATCH_RECYCLE = catalog.SCRATCH_RECYCLE
 
 #: Stands for a seam looked up here.
@@ -490,7 +484,7 @@ def sweep_log(conn: sqlite3.Connection | None) -> Iterator[sqlite3.Connection | 
 
 
 def on_crossing(crossing: Any) -> str | None:
-    """usage's crossing of a session's `limit_at` mark: the line for the session, or None.
+    """usage's crossing of a session's `warn_at` mark: the line for the session, or None.
     Reads the store, writes at most its claim, the session's id and one row, never waits
     on the session, and never raises."""
     try:
@@ -506,8 +500,7 @@ def on_crossing(crossing: Any) -> str | None:
         conn.close()
 
 
-def crossing_line(conn: sqlite3.Connection, crossing: Any, *, pid: int,
-                  spawn: Any | None = None) -> str | None:
+def crossing_line(conn: sqlite3.Connection, crossing: Any, *, pid: int) -> str | None:
     """`on_crossing` over an open launch log, for the endpoint process `pid`.
 
     The endpoint takes its launch first: the launch its session's stamp names
@@ -523,33 +516,20 @@ def crossing_line(conn: sqlite3.Connection, crossing: Any, *, pid: int,
     row = store.resolve(conn, session_id)
     if row is None or not row.endpoint or not target.claims(row.endpoint, pid):
         return None
-    value = row.values.get("recycle_at_limit")
+    if row.values.get("recycle_at_limit") != selfrecycle.RELAUNCH:
+        return None
+    if selfrecycle.missing_of_row(row, told=True) is not None:
+        return None
     key = store.crossing_key(session_id, getattr(crossing, "mark", None),
                              getattr(crossing, "at", None))
-    if value == "relaunch":
-        if selfrecycle.missing_of_row(row, told=True) is not None:
-            return None
-        if not _told(conn, row.request_id, key):
-            try:
-                store.add_event(conn, "recycle-told", {"crossing_key": key},
-                                request_id=row.request_id, session_id=session_id)
-            except store.Busy:
-                pass
-            return RELAUNCH_LINE
-        return None
-    if value != "compact" or store.crossing_known(conn, key):
+    if _told(conn, row.request_id, key):
         return None
     try:
-        run = store.insert_run(conn, kind="compact", mode="limit", request_id=row.request_id,
-                               session_id=session_id, by=store.LAUNCHER, state="armed",
-                               slot=row.slot, pane_id=row.pane_id, crossing_key=key,
-                               pend=True)
-    except store.RunOpen:
-        return COMPACT_LINE
-    except sqlite3.IntegrityError:
-        return None
-    start_compact(conn, run, spawn=spawn)
-    return COMPACT_LINE
+        store.add_event(conn, "recycle-told", {"crossing_key": key},
+                        request_id=row.request_id, session_id=session_id)
+    except store.Busy:
+        pass
+    return RELAUNCH_LINE
 
 
 def _take_launch(conn: sqlite3.Connection, crossing: Any, session_id: str) -> None:
@@ -577,35 +557,6 @@ def _told(conn: sqlite3.Connection, request_id: str, key: str) -> bool:
         (request_id, key)).fetchone() is not None
 
 
-def start_compact(conn: sqlite3.Connection, run: store.Run, *, spawn: Any | None = None,
-                  caller_env: Mapping[str, str] | None = None) -> bool:
-    """Spawn a limit compact's job, detached, and record it on the run; say whether it
-    started. One that does not start ends the run `failed`, word `not-started`."""
-    from .compose import common
-
-    env = dict(os.environ if caller_env is None else caller_env)
-    spawn = spawn or proc.spawn
-    try:
-        argv = [str(paths.script("moxi-launcher-job")), "compact", run.run_id]
-        cwd = Layout(store.MODULE).state_dir(env)
-        pid = spawn(argv, detached=True, env=common.scrub(env, modules.session_env()),
-                    cwd=str(cwd))
-    except Exception as exc:  # noqa: BLE001  (a job that did not start ends its run)
-        detail = f"the compact's job did not start: {_words(exc)}"
-        if store.end_run(conn, run.run_id, "failed", word="not-started", detail=detail):
-            store.add_run_event(conn, run.run_id, "ended", {"outcome": "failed",
-                                                            "word": "not-started",
-                                                            "detail": detail})
-        return False
-    ident = proc.identity(int(pid))
-    job = f"proc:{ident.pid}@{ident.started:.6f}" if ident is not None else f"proc:{pid}"
-    try:
-        store.set_run_job(conn, run.run_id, job)
-    except store.Busy:
-        pass  # the job records itself when it starts
-    return True
-
-
 # -- helpers ----------------------------------------------------------------------------
 
 
@@ -626,10 +577,10 @@ def _words(error: BaseException) -> str:
     return str(error) or type(error).__name__
 
 
-__all__ = ["BLOCKED_REFUSALS", "BUSY_WORDS", "COMPACT_LINE", "CROSSING_BUSY_S", "EXPIRY",
+__all__ = ["BLOCKED_REFUSALS", "BUSY_WORDS", "CROSSING_BUSY_S", "EXPIRY",
            "FAILED_REFUSALS", "QUIET_REFUSALS", "RAN", "RELAUNCH_LINE",
            "SCRATCH_RECYCLE", "SHELLS_IDLE_S", "STOP_SHELLS", "SWEEP_BUSY_S", "UNCONFIRMED",
            "Asked", "Verdict", "ask_expiry", "cache_read", "claude_projects", "clear_expired",
            "codex_sessions", "crossing_line", "end", "is_scratch_relaunch", "on_crossing",
-           "start_compact", "stops_shells", "sweep_log", "swept",
+           "stops_shells", "sweep_log", "swept",
            "verdict_of"]
