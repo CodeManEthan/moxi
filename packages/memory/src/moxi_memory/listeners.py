@@ -4,7 +4,7 @@ Standard library only, and it imports nothing else of memory: turns' endpoint re
 module when it starts, and imports each function from `moxi_memory.listener` in its own
 thread at the function's first ask.
 
-Four rows, in this order:
+Five rows, in this order:
 
 - `start` answers each session start, resume, clear and compaction with the start line,
   which says the search exists and names this session's project.
@@ -13,6 +13,9 @@ Four rows, in this order:
   line.
 - `prompt` answers each main-loop prompt with the short reminder, or nothing when config
   `reminder.enabled` is off.
+- `subconscious` answers each main-loop prompt with nothing: in a session whose launch
+  turned the subconscious on, it starts a recall's child, detached, or resets the
+  agent's count of recalls, and returns at once.
 - `fire` starts the ingest child, detached, when a main-loop turn ends and when the
   session's endpoint is ending.
 
@@ -23,6 +26,7 @@ LISTENERS = (
     (("start",), "moxi_memory.listener:start"),
     (("start",), "moxi_memory.listener:lists"),
     (("prompt",), "moxi_memory.listener:prompt"),
+    (("prompt",), "moxi_memory.listener:subconscious"),
     (("turn", "gone"), "moxi_memory.listener:fire"),
 )
 

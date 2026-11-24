@@ -103,11 +103,12 @@ def when(newest):
 
 # -- the registration ------------------------------------------------------------------
 
-def test_the_four_rows_in_order():
+def test_the_five_rows_in_order():
     assert listeners.LISTENERS == (
         (("start",), "moxi_memory.listener:start"),
         (("start",), "moxi_memory.listener:lists"),
         (("prompt",), "moxi_memory.listener:prompt"),
+        (("prompt",), "moxi_memory.listener:subconscious"),
         (("turn", "gone"), "moxi_memory.listener:fire"),
     )
     for _events, target in listeners.LISTENERS:

@@ -14,6 +14,13 @@ or None when config `reminder.enabled` is off.
 `fire(event)` only starts the ingest child for a `turn` or a `gone`, detached, and
 returns (`moxi_memory.start.fire`).
 
+`subconscious(event)` answers a main-loop prompt with nothing, always, and at once. In a
+session whose launch turned the subconscious on (`moxi_memory.recall_start`), a prompt
+config `subconscious.trigger` counts starts a recall in automatic mode, once a route can
+run (else it logs the session's `off` line), and resets the agent's count of recalls in
+on-demand mode. It runs on the last good `subconscious.*` settings while memory's config
+file is in error, and passes them to the recall's child. It never raises.
+
 `lists(event)` answers a `start` with two lists of recent sessions, read from memory's
 session table and nothing else: this agent's own recent sessions from any project, then
 the project's, each leaving out this session, subagents, scratch launches and sessions
@@ -36,6 +43,7 @@ ever raises: a store that is busy or broken costs the lists, never the start lin
 
 from __future__ import annotations
 
+import logging
 import os
 import shlex
 import threading
@@ -120,6 +128,75 @@ def prompt(event) -> str | None:
     except ConfigError:
         on = bool(settings.schema().keys["reminder.enabled"].default)
     return REMINDER if on else None
+
+
+#: The last good `subconscious.*` settings this process read.
+_good_subconscious: dict | None = None
+
+
+def subconscious_settings() -> dict:
+    """memory's `subconscious.*` settings now, keyed by their last names: the last good
+    ones while the config file is in error, and the defaults when none were ever good."""
+    global _good_subconscious
+    from moxi.config import ConfigError
+
+    from . import recall_start, settings
+
+    try:
+        _good_subconscious = recall_start.subconscious_settings(settings.read())
+    except ConfigError:
+        if _good_subconscious is None:
+            return recall_start.default_settings()
+    return dict(_good_subconscious)
+
+
+def subconscious(event) -> None:
+    """Start a recall for a counted prompt in an automatic session, or reset the agent's
+    count in an on-demand one, and return None at once. See the module's docstring."""
+    try:
+        _subconscious(event)
+    except Exception:  # noqa: BLE001 - the prompt never waits on a recall's start
+        logging.getLogger(__name__).exception("the subconscious's start failed")
+    return None
+
+
+def _subconscious(event) -> None:
+    from . import recall_start, recalls
+
+    env = getattr(event, "env", None) or {}
+    mode = recall_start.mode(env)
+    session_id = getattr(event, "session_id", None)
+    if mode is None or not recalls.is_safe(session_id):
+        return
+    held = subconscious_settings()
+    if not recall_start.counts(event, held["trigger"]):
+        return
+    if mode == recall_start.ON_DEMAND:
+        recall_start.reset_asked(session_id)
+        return
+    harness = getattr(event, "harness", None)
+    route, why = recall_start.route(harness, session_id)
+    if route is None:
+        recalls.note_off(session_id, why, harness=harness)
+        return
+    recall_start.begin(session_id, harness, start=recalls.PROMPT,
+                       text=getattr(event, "text", None) or "",
+                       senders=getattr(event, "delivery_senders", None) or (),
+                       settings=held, cwd=session_path(event),
+                       notes_dir=notes_override(env), route_name=route)
+
+
+def notes_override(env) -> str | None:
+    """The session's notes directory override from its environment, when the notes
+    module is installed and names one."""
+    from . import links
+
+    link = links.notes()
+    if not link.ready:
+        return None
+    name = getattr(link.api, "NOTES_DIR_ENV", None)
+    value = (env or {}).get(name) if isinstance(name, str) else None
+    return value or None
 
 
 def fire(event) -> None:
@@ -322,4 +399,5 @@ def lists(event) -> str | None:
 
 __all__ = ["START_LINE", "PROJECT", "REMINDER", "DEADLINE", "ROW_WAIT", "IDENTITY_WAIT",
            "IDENTITY_WRITE_WAIT", "QUERY_WAIT", "SHOWN", "session_path", "start_line",
-           "start", "prompt", "fire", "lists", "format_lists", "write_late_identity"]
+           "start", "prompt", "fire", "subconscious", "subconscious_settings",
+           "notes_override", "lists", "format_lists", "write_late_identity"]

@@ -13,6 +13,8 @@
   `StateUnreadable`, a kind of `IndexUnreadable`, says the index reads but memory's
   state store, which holds the session table, doesn't.
 * `cut(query)`: the tokens a query is searched for.
+* `SUBCONSCIOUS_ENV`: the variable a launch stamps with a session's subconscious mode,
+  `automatic` or `on-demand`.
 
 Reading a session is sessions' (`moxi sessions read`), not memory's: a hit names its
 harness, session and time for that.
@@ -22,7 +24,8 @@ from __future__ import annotations
 
 from .index import IndexMissing, IndexUnreadable, StateUnreadable
 from .search import Filling, Hit, Result, cut, search
+from .recall_start import SUBCONSCIOUS_ENV
 from .status import Status, status
 
 __all__ = ["search", "Result", "Hit", "Filling", "status", "Status", "IndexMissing",
-           "IndexUnreadable", "StateUnreadable", "cut"]
+           "IndexUnreadable", "StateUnreadable", "cut", "SUBCONSCIOUS_ENV"]

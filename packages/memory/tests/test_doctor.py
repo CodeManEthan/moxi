@@ -247,7 +247,7 @@ def test_the_announcement_names_every_part():
     assert module.SETUP == "moxi_memory.setup:setup"
     assert module.TEARDOWN == "moxi_memory.setup:teardown"
     assert module.DOCTOR == "moxi_memory.doctor:rows"
-    assert set(module.OPTIONAL) == {"comms", "launcher", "connector", "secrets"}
+    assert set(module.OPTIONAL) == {"comms", "launcher", "connector", "secrets", "notes"}
     assert module.TIMERS["ingest"] == {
         "command": "moxi-memory-ingest", "args": ["--walk"], "every": "1h",
         "switch": "ingest.timer.enabled",

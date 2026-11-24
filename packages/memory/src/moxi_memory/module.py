@@ -21,12 +21,18 @@ OPTIONAL = {
                 "search and out of the start lists.",
     "connector": "search_memory in the Claude apps, through the connector's MCP host, "
                  "each hit redacted for a chat.",
+    "notes": "The notes a recall of the subconscious reads beside past sessions: the "
+             "session's notes directory, or the notes root.",
     "secrets": "secrets' personal-data set, by name. secrets is already one of memory's "
                "dependencies and the connector extra brings the set's validators, so "
                "search_memory redacts with every chat set without this extra.",
 }
 GATED = {}
-INTERNAL_ENV = {}
+SESSION_ENV = {"MOXI_MEMORY_SUBCONSCIOUS": "the session's subconscious mode, automatic or "
+                                          "on-demand, stamped by the launcher's "
+                                          "subconscious row"}
+INTERNAL_ENV = {"MOXI_MEMORY_SUBCONSCIOUS": "set by the launcher for one launch; read from "
+                                            "the session's environment"}
 #: The config schema; every key is read at its use.
 SETTINGS = "settings.toml"
 #: The module's whole loader over a config text: the schema, then the rules it can't say.

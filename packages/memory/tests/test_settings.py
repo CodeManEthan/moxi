@@ -46,7 +46,7 @@ def test_every_key_is_read_at_its_use_and_none_from_the_env():
         "subconscious.max_rounds", "subconscious.max_points", "subconscious.prefetch_hits",
         "subconscious.on_demand_per_prompt", "subconscious.fork_commands"}
     assert all(key.read == "use" and key.env is None for key in keys)
-    assert module.INTERNAL_ENV == {}
+    assert set(module.INTERNAL_ENV) == set(module.SESSION_ENV) == {"MOXI_MEMORY_SUBCONSCIOUS"}
 
 
 def test_an_edit_takes_effect_at_the_next_read():
@@ -102,4 +102,5 @@ def test_the_dirs_are_the_cores_for_memory():
 def test_the_announcement_names_the_schema_and_its_check():
     assert module.SETTINGS == "settings.toml"
     assert module.CONFIG_CHECK == "moxi_memory.settings:check_text"
-    assert set(module.OPTIONAL) == {"comms", "launcher", "connector", "secrets"}
+    assert set(module.OPTIONAL) == {"comms", "launcher", "connector", "secrets",
+                                     "notes"}

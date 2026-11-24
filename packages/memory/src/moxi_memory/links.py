@@ -1,4 +1,4 @@
-"""memory's two optional links, comms and the launcher, each reached through
+"""memory's optional links, comms, the launcher and notes, each reached through
 `moxi.modules.load` at the moment it is needed.
 
 A link is in one of three states:
@@ -7,7 +7,7 @@ A link is in one of three states:
   API module.
 - `NONE`: the module is not installed, or is installed without that interface. memory
   runs as it does without it: no identities without comms, no launch kinds without the
-  launcher.
+  launcher, and a recall that reads past sessions only without notes.
 - `FAILING`: the module is installed and offers the interface, but loading it failed.
   A caller treats it as a link it can't ask this time, not as a missing one.
 
@@ -30,6 +30,9 @@ COMMS_INTERFACE = 2
 #: The launcher interface memory speaks: `launch_kind` and `launch_kinds`.
 LAUNCHER = "launcher"
 LAUNCHER_INTERFACE = 1
+#: The notes interface memory speaks: `notes_dir`, `root` and `NOTES_DIR_ENV`.
+NOTES = "notes"
+NOTES_INTERFACE = 1
 
 
 class Link(NamedTuple):
@@ -77,5 +80,11 @@ def launcher() -> Link:
     return load(LAUNCHER, LAUNCHER_INTERFACE)
 
 
+def notes() -> Link:
+    """The link to notes, for the notes a recall reads."""
+    return load(NOTES, NOTES_INTERFACE)
+
+
 __all__ = ["READY", "NONE", "FAILING", "COMMS", "COMMS_INTERFACE", "LAUNCHER",
-           "LAUNCHER_INTERFACE", "Link", "load", "comms", "launcher"]
+           "LAUNCHER_INTERFACE", "NOTES", "NOTES_INTERFACE", "Link", "load", "comms",
+           "launcher", "notes"]

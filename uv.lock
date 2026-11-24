@@ -1105,6 +1105,9 @@ connector = [
 launcher = [
     { name = "moxi-launcher" },
 ]
+notes = [
+    { name = "moxi-notes" },
+]
 secrets = [
     { name = "moxi-secrets", extra = ["personal-data"] },
 ]
@@ -1121,13 +1124,14 @@ requires-dist = [
     { name = "moxi-comms", marker = "extra == 'comms'", editable = "packages/comms" },
     { name = "moxi-connector", marker = "extra == 'connector'", editable = "packages/connector" },
     { name = "moxi-launcher", marker = "extra == 'launcher'", editable = "packages/launcher" },
+    { name = "moxi-notes", marker = "extra == 'notes'", editable = "packages/notes" },
     { name = "moxi-secrets", editable = "packages/secrets" },
     { name = "moxi-secrets", extras = ["personal-data"], marker = "extra == 'secrets'", editable = "packages/secrets" },
     { name = "moxi-sessions", editable = "packages/sessions" },
     { name = "moxi-turns", editable = "packages/turns" },
     { name = "python-stdnum", marker = "extra == 'connector'", specifier = ">=2.2" },
 ]
-provides-extras = ["comms", "launcher", "connector", "secrets"]
+provides-extras = ["comms", "launcher", "notes", "connector", "secrets"]
 
 [package.metadata.requires-dev]
 dev = [
