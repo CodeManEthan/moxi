@@ -98,26 +98,29 @@ class Session:
             record_path=str(self.t.path), cwd="/work/project")
 
 
-def notice(tokens, mark_name="1x", threshold=ONE_X, model=MODEL):
-    return mark.notice_line(tokens, mark_name, threshold, model)
+def notice(tokens, mark_name="1x", model=MODEL):
+    return mark.notice_line(tokens, mark_name, model)
 
 
 # --- selection --------------------------------------------------------------------------
 
-def test_the_notice_is_the_launchs_stamp_else_the_config_default():
+def test_the_notice_is_the_launchs_stamp_and_an_unstamped_session_is_off():
     assert mark.selected({"MOXI_USAGE_WARN_AT": "1.5x"}) == ("1.5x", None)
     assert mark.selected({}) == (None, None)
-    write_config(CONFIG + '\n[marks]\ndefault = "2x"\n')
-    assert mark.selected({}) == ("2x", None)
+    assert mark.selected({"MOXI_USAGE_WARN_AT": ""}) == (None, None)
     assert mark.selected({"MOXI_USAGE_WARN_AT": "off"}) == (None, None)
     assert mark.selected({"MOXI_USAGE_WARN_AT": "3x"}) == (None, None)
 
 
-def test_the_crossing_is_its_own_stamp_with_no_config_default():
-    write_config(CONFIG + '\n[marks]\ndefault = "2x"\n')
+def test_no_config_stands_in_for_a_missing_stamp():
+    assert mark.selected({}) == (None, None)
     assert mark.selected({"MOXI_USAGE_CROSSING_AT": "1x", "MOXI_USAGE_WARN_AT": "off"}) == (
         None, "1x")
-    assert mark.selected({"MOXI_USAGE_CROSSING_AT": "soon"}) == ("2x", None)
+    assert mark.selected({"MOXI_USAGE_CROSSING_AT": "soon"}) == (None, None)
+    s = Session()
+    s.context(400_000)
+    assert mark.on_tool(s.event(env={})) is None
+    assert mark.floor(s.event(env={})) == mark.NEVER
 
 
 def test_with_both_off_the_listener_reads_nothing_and_holds_no_state():
@@ -141,12 +144,9 @@ def test_off_imports_nothing_beyond_the_mark_module():
     assert out == ["moxi_usage", "moxi_usage.mark"]
 
 
-def test_unstamped_beside_turns_endpoint_imports_only_usages_settings():
-    """With no stamp the first call reads `marks.default`. In turns' endpoint, the one
-    caller, the core is loaded already, so of Moxi's modules only usage's settings
-    module is new; `marks.default` is off, so the listener answers None."""
+def test_unstamped_imports_nothing_beyond_the_mark_module():
+    """With no stamp the session is off, as with a stamp of off: no config is read."""
     code = ("import sys; from types import SimpleNamespace as N; import __future__; "
-            "import moxi_turns.endpoint, moxi_turns.listeners; "
             "before = set(sys.modules); import moxi_usage.mark as m; "
             "e = N(event='after-tool', harness='claude', session_id='s', agent_id=None, "
             "env={}, record_path='/nowhere'); "
@@ -154,8 +154,7 @@ def test_unstamped_beside_turns_endpoint_imports_only_usages_settings():
             "print(' '.join(sorted(set(sys.modules) - before)))")
     out = subprocess.run([sys.executable, "-I", "-c", code], capture_output=True,
                          text=True, check=True).stdout.split()
-    assert [name for name in out if name.startswith("moxi")] == [
-        "moxi_usage", "moxi_usage.mark", "moxi_usage.settings"]
+    assert out == ["moxi_usage", "moxi_usage.mark"]
 
 
 # --- firing -----------------------------------------------------------------------------
@@ -164,8 +163,7 @@ def test_a_first_observation_past_the_mark_fires_once():
     s = Session()
     s.context(120_000)
     assert mark.on_tool(s.event()) == notice(120_000)
-    assert notice(120_000) == (f"context 120,000 passed the 1x restart point (100,808) "
-                               f"for {MODEL}")
+    assert notice(120_000) == f"context 120k: past the 1x mark for {MODEL}"
     s.context(130_000)
     assert mark.on_tool(s.event()) is None
 
@@ -180,7 +178,17 @@ def test_below_the_mark_says_nothing_until_it_is_passed():
     assert mark.on_tool(s.event()) == notice(ONE_X)
 
 
-def test_marks_crossing_a_compaction_and_growth_past_it_again_give_a_second_of_each(
+def test_the_notice_rounds_thousands_halves_up():
+    assert mark.thousands(412_330) == 412
+    assert mark.thousands(412_500) == 413
+    assert mark.thousands(499) == 0
+    assert mark.notice_line(412_330, "1x", "claude-opus-5-5") == (
+        "context 412k: past the 1x mark for claude-opus-5-5")
+    assert mark.notice_line(412_330, "2x", None) == (
+        "context 412k: past the 2x mark for an unnamed model")
+
+
+def test_after_a_compaction_the_next_rise_warns_again_with_the_crossing_on_one_line(
         monkeypatch):
     got = []
     monkeypatch.setattr(mark, "handlers", lambda: [
@@ -188,14 +196,15 @@ def test_marks_crossing_a_compaction_and_growth_past_it_again_give_a_second_of_e
     s = Session()
     env = {"MOXI_USAGE_WARN_AT": "1x", "MOXI_USAGE_CROSSING_AT": "1x"}
     s.context(110_000)
-    assert mark.on_tool(s.event(env=env)) == f"{notice(110_000)}\nrecycle"
+    assert mark.on_tool(s.event(env=env)) == f"{notice(110_000)}. recycle"
     s.t.compaction(pre_tokens=110_000)
     s.context(30_000)                          # below the mark: both are armed again
     assert mark.on_tool(s.event(env=env)) is None
+    assert mark.floor(s.event(env=env)) == ONE_X
     s.context(60_000)
     assert mark.on_tool(s.event(env=env)) is None
     s.context(105_000)
-    assert mark.on_tool(s.event(env=env)) == f"{notice(105_000)}\nrecycle"
+    assert mark.on_tool(s.event(env=env)) == f"{notice(105_000)}. recycle"
     assert len(got) == 2
     assert [(c.mark, c.tokens, c.threshold, c.model, c.session_id) for c in got] == [
         ("1x", 110_000, ONE_X, MODEL, SESSION), ("1x", 105_000, ONE_X, MODEL, SESSION)]
@@ -366,14 +375,14 @@ def test_a_main_session_gets_the_notice_and_the_crossing_once_per_rise(monkeypat
     assert mark.on_tool(h.event()) is None
     assert mark.floor(h.event()) == ONE_X
     h.context(110_000)
-    assert mark.on_tool(h.event()) == f"{notice(110_000)}\nrecycle"
+    assert mark.on_tool(h.event()) == f"{notice(110_000)}. recycle"
     assert mark.floor(h.event()) == 0
     h.context(115_000)
     assert mark.on_tool(h.event()) is None
     h.context(30_000)                            # compacted: both are armed again
     assert mark.on_tool(h.event()) is None
     h.context(105_000)
-    assert mark.on_tool(h.event()) == f"{notice(105_000)}\nrecycle"
+    assert mark.on_tool(h.event()) == f"{notice(105_000)}. recycle"
     harness, session_id = h.event().harness, h.event().session_id
     assert [(c.harness, c.session_id, c.tokens, c.threshold, c.model) for c in got] == [
         (harness, session_id, 110_000, ONE_X, MODEL),
@@ -398,6 +407,13 @@ def test_a_subagent_is_warned_on_its_own_context_and_its_line_drains(monkeypatch
     assert mark.on_tool(h.event()) is None
     h.agent_context(102_000)
     assert mark.on_tool(h.agent_event()) is None  # fired once per rise
+    h.agent_context(20_000)                       # compacted: armed again
+    assert mark.on_tool(h.agent_event()) is None
+    h.agent_context(103_000)
+    again = notice(103_000)
+    assert mark.on_tool(h.agent_event()) == again
+    assert mark.on_tool(h.event()) == f"subagent {label} {again}"
+    assert got == []
 
 
 def test_a_codex_subagents_source_is_its_own_rollout():
@@ -460,8 +476,11 @@ def test_the_floor_is_zero_while_a_main_purpose_is_fired_and_never_with_both_off
     s = Session()
     s.context(150_000)
     mark.on_tool(s.event())
-    assert mark.floor(s.event()) == 0
+    assert mark.floor(s.event()) == 0                    # its re-arm must be seen
     assert mark.floor(s.event(env={"MOXI_USAGE_WARN_AT": "off"})) == mark.NEVER
+    s.context(20_000)
+    mark.on_tool(s.event())                              # armed again
+    assert mark.floor(s.event()) == ONE_X
 
 
 def test_the_floor_is_zero_with_no_measure_and_follows_a_new_one():
@@ -567,14 +586,30 @@ def test_a_restarted_endpoint_does_not_fire_twice_and_gone_deletes_the_file():
     assert mark._sessions == {}
 
 
-def test_a_re_arm_is_written_too():
+@pytest.mark.parametrize("env", [
+    {"MOXI_USAGE_WARN_AT": "1x"},
+    {"MOXI_USAGE_WARN_AT": "off", "MOXI_USAGE_CROSSING_AT": "1x"}], ids=["notice", "crossing"])
+def test_a_re_arm_is_written_too(env):
     s = Session()
     s.context(120_000)
-    mark.on_tool(s.event())
+    mark.on_tool(s.event(env=env))
     s.context(10_000)
-    mark.on_tool(s.event())
+    mark.on_tool(s.event(env=env))
     doc = json.loads(mark.state_file("claude", SESSION).read_text())
     assert doc["readers"] == {}
+
+
+def test_a_compaction_re_arms_the_notice_and_each_rise_warns_again():
+    s = Session()
+    s.context(120_000)
+    assert mark.on_tool(s.event()) == notice(120_000)
+    for rise in (130_000, 140_000):
+        s.t.compaction(pre_tokens=120_000)
+        s.context(10_000)
+        assert mark.on_tool(s.event()) is None
+        s.context(rise)
+        assert mark.on_tool(s.event()) == notice(rise)
+        assert mark.on_tool(s.event()) is None           # once per rise
 
 
 def test_a_fired_mark_of_another_mark_does_not_hold_this_one():
@@ -584,7 +619,7 @@ def test_a_fired_mark_of_another_mark_does_not_hold_this_one():
     mark.reset()
     s.context(200_000)
     assert mark.on_tool(s.event(env={"MOXI_USAGE_WARN_AT": "1.5x"})) == notice(
-        200_000, "1.5x", ONE_HALF_X)
+        200_000, "1.5x")
 
 
 # --- fail open --------------------------------------------------------------------------
@@ -630,11 +665,11 @@ def test_api_mark_reads_the_fired_purposes_and_the_marks_recorded():
     assert doc["purposes"][0]["state"] == "fired" and "unknown" not in doc
 
 
-def test_api_mark_with_nothing_on_disk_reads_the_config_default():
+def test_api_mark_with_nothing_on_disk_is_off():
     s = Session()
     s.context(50_000)
     found = api.mark(SESSION, live=False)
-    assert found.marks_from == "config"
+    assert found.marks_from == "nothing"
     assert [p.state for p in found.purposes] == ["off", "off"]
 
 

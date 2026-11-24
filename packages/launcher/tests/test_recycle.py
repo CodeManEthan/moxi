@@ -14,7 +14,7 @@ from types import SimpleNamespace
 import pytest
 from moxi import modules, paths, proc
 
-from moxi_launcher import cachetimers, job, recycle, store
+from moxi_launcher import cachetimers, catalog, job, recycle, store
 
 SID = "5f6e7d8c-9b0a-4c1d-8e2f-3a4b5c6d7e8f"
 NEW = "0a1b2c3d-4e5f-4a6b-8c7d-9e0f1a2b3c4d"
@@ -134,6 +134,15 @@ class FakeCache:
     def read(self, harness, session_id, **options):
         self.reads.append((harness, session_id, options))
         return SimpleNamespace(kind=self.kind, age_s=self.age, ttl_s=3600)
+
+
+@pytest.fixture(autouse=True)
+def recyclable_here(monkeypatch):
+    """slots runs here and notes is not installed, so a slot launch in a folder has the
+    launcher's own handoff folder and can recycle itself."""
+    monkeypatch.setattr(catalog, "slots_here", lambda: True)
+    real = modules.available
+    monkeypatch.setattr(modules, "available", lambda name: name != "notes" and real(name))
 
 
 @pytest.fixture
@@ -632,25 +641,74 @@ def script(monkeypatch):
 
 
 def limit(conn, value):
+    """Set r1 to recycle at its limit: a relaunch launch told at its warn_at, any other at
+    its limit_at."""
+    mark = "warn_at" if value == "relaunch" else "limit_at"
     conn.execute("UPDATE launches SET values_json = ? WHERE request_id = 'r1'",
-                 (f'{{"recycle_at_limit": "{value}", "limit_at": "1x"}}',))
+                 (f'{{"recycle_at_limit": "{value}", "{mark}": "1x"}}',))
 
 
 def test_a_relaunch_crossing_tells_the_agent_and_records_that_it_was_told(conn):
     limit(conn, "relaunch")
     line = recycle.crossing_line(conn, crossing(), pid=os.getpid())
-    assert line == recycle.relaunch_line("1x") and "relaunch --self --handoff" in line
+    assert line == recycle.RELAUNCH_LINE and "relaunch --self --handoff" in line
     [told] = [e for e in store.events(conn, "r1") if e.kind == "recycle-told"]
     assert told.detail["crossing_key"] == f"{SID}|1x|2026-10-31T10:00:00Z"
     assert store.runs(conn, request_id="r1") == []
 
 
-def test_the_same_crossing_twice_writes_once(conn):
+def test_a_relaunch_launch_is_told_at_each_rise_in_one_session_id(conn):
     limit(conn, "relaunch")
-    recycle.crossing_line(conn, crossing(), pid=os.getpid())
+    assert recycle.crossing_line(conn, crossing(), pid=os.getpid()) == recycle.RELAUNCH_LINE
+    # A compaction brought the context below the mark; it climbed back past it.
+    assert recycle.crossing_line(conn, crossing(at="2026-10-31T11:00:00Z"),
+                                 pid=os.getpid()) == recycle.RELAUNCH_LINE
+    told = [e for e in store.events(conn, "r1") if e.kind == "recycle-told"]
+    assert [(e.session_id, e.detail["crossing_key"]) for e in told] == [
+        (SID, f"{SID}|1x|2026-10-31T10:00:00Z"), (SID, f"{SID}|1x|2026-10-31T11:00:00Z")]
+
+
+def test_a_retried_call_on_one_crossing_is_told_once(conn):
+    limit(conn, "relaunch")
+    assert recycle.crossing_line(conn, crossing(), pid=os.getpid()) == recycle.RELAUNCH_LINE
     assert recycle.crossing_line(conn, crossing(), pid=os.getpid()) is None
-    assert recycle.crossing_line(conn, crossing(at="later"), pid=os.getpid())
-    assert len([e for e in store.events(conn, "r1") if e.kind == "recycle-told"]) == 2
+    assert len([e for e in store.events(conn, "r1") if e.kind == "recycle-told"]) == 1
+
+
+def test_a_crossing_on_a_launch_held_by_a_gone_endpoint_moves_the_claim_and_is_told(
+        conn, monkeypatch):
+    # The endpoint was replaced on a reload and the session took an id the launch never
+    # learned; the new endpoint (this process, a child of the launch's claude) had no
+    # session event to claim at. The crossing claims, learns the id and tells it.
+    from moxi_launcher import listeners
+
+    gone = "4194999@1761728401.500000"
+    ident = proc.identity(os.getppid())
+    conn.execute("UPDATE launches SET endpoint = ?, pid = ?, pid_started = ? "
+                 "WHERE request_id = 'r1'", (gone, ident.pid, ident.started))
+    limit(conn, "relaunch")
+    monkeypatch.setenv("MOXI_LAUNCHER_REQUEST", "r1")
+    line = recycle.crossing_line(conn, crossing(session_id=NEW), pid=os.getpid())
+    assert line == recycle.RELAUNCH_LINE
+    row = store.get(conn, "r1")
+    assert row.endpoint == listeners.endpoint_id()
+    [moved] = [e for e in store.events(conn, "r1") if e.kind == store.RECLAIMED]
+    assert moved.detail == {"endpoint": row.endpoint, "was": gone, "by": "parent"}
+    assert (NEW, "load") in store.session_ids(conn, "r1")
+    assert store.resolve(conn, NEW).request_id == "r1"
+
+
+def test_a_crossing_of_a_nested_session_takes_nothing(conn, monkeypatch):
+    # It carries the launch's stamp, but its endpoint is no child of the launch's claude.
+    gone = "4194999@1761728401.500000"
+    ident = proc.identity(os.getpid())
+    conn.execute("UPDATE launches SET endpoint = ?, pid = ?, pid_started = ? "
+                 "WHERE request_id = 'r1'", (gone, ident.pid, ident.started))
+    limit(conn, "relaunch")
+    monkeypatch.setenv("MOXI_LAUNCHER_REQUEST", "r1")
+    assert recycle.crossing_line(conn, crossing(session_id=NEW), pid=os.getpid()) is None
+    assert store.get(conn, "r1").endpoint == gone
+    assert NEW not in [sid for sid, _ in store.session_ids(conn, "r1")]
 
 
 def test_a_crossing_of_a_launch_off_unknown_or_claimed_elsewhere_is_none(conn):
@@ -659,6 +717,24 @@ def test_a_crossing_of_a_launch_off_unknown_or_claimed_elsewhere_is_none(conn):
     limit(conn, "relaunch")
     assert recycle.crossing_line(conn, crossing(session_id=NEW), pid=os.getpid()) is None
     assert recycle.crossing_line(conn, crossing(), pid=os.getppid()) is None
+
+
+@pytest.mark.parametrize("values", [
+    '{"recycle_at_limit": "relaunch"}',
+    '{"recycle_at_limit": "relaunch", "warn_at": "off"}',
+    '{"recycle_at_limit": "off", "warn_at": "1x", "sources": {"recycle_at_limit": "typed"}}'])
+def test_a_crossing_of_a_launch_that_is_not_told_gets_no_line(conn, values):
+    # The handler tells exactly the launches whose self arm would be accepted and that
+    # warn at a mark; a relaunch launch with no mark is armed but never told.
+    conn.execute("UPDATE launches SET values_json = ? WHERE request_id = 'r1'", (values,))
+    assert recycle.crossing_line(conn, crossing(), pid=os.getpid()) is None
+    assert [e for e in store.events(conn, "r1") if e.kind == "recycle-told"] == []
+
+
+def test_a_relaunch_crossing_where_slots_do_not_run_gets_no_line(conn, monkeypatch):
+    monkeypatch.setattr(catalog, "slots_here", lambda: False)
+    limit(conn, "relaunch")
+    assert recycle.crossing_line(conn, crossing(), pid=os.getpid()) is None
 
 
 def test_an_older_scratch_row_set_to_relaunch_gets_no_line(conn, script):
@@ -700,6 +776,19 @@ def test_a_compact_crossing_twice_writes_one_run(conn, script):
     assert len(store.runs(conn, request_id="r1")) == 1 and len(spawn.calls) == 1
 
 
+def test_a_compact_launch_compacts_at_each_rise_in_one_session_id(conn, script):
+    limit(conn, "compact")
+    spawn = Spawned()
+    assert recycle.crossing_line(conn, crossing(), pid=os.getpid(),
+                                 spawn=spawn) == recycle.COMPACT_LINE
+    [first] = store.runs(conn, request_id="r1")
+    store.end_run(conn, first.run_id, "compacted")
+    # The compaction brought the context below the mark; it climbed back past it.
+    assert recycle.crossing_line(conn, crossing(at="2026-10-31T11:00:00Z"), pid=os.getpid(),
+                                 spawn=spawn) == recycle.COMPACT_LINE
+    assert len(store.runs(conn, request_id="r1")) == 2 and len(spawn.calls) == 2
+
+
 def test_a_compact_job_that_does_not_start_ends_its_run_failed(conn, script):
     limit(conn, "compact")
     recycle.crossing_line(conn, crossing(), pid=os.getpid(), spawn=Spawned(OSError("no")))
@@ -734,27 +823,26 @@ def through_usage(group, at):
     return group.mark.run_handlers(crossing, wait=5.0)
 
 
-def test_the_relaunch_line_says_the_launch_lets_the_agent_recycle_at_the_mark(conn):
+def test_the_relaunch_line_says_to_hand_off_stop_shells_and_relaunch(conn):
     limit(conn, "relaunch")
     line = recycle.crossing_line(conn, crossing(mark="1.5x"), pid=os.getpid())
-    assert line.startswith("This launch lets you recycle yourself, now that its context "
-                           "has passed the 1.5x mark.")
-    assert "start nothing new" in line and "as your last act" in line
-    assert "don't recycle at the end of a task" in line
-    assert "background shells" not in line
+    assert line == (
+        "This launch lets you recycle yourself. Only if you are mid-work with more to do: at "
+        "your next pause point (let running subagents finish, start nothing new), write a "
+        "handoff with the handoff skill, stop your background shells, then run "
+        "`moxi launcher relaunch --self --handoff <file>` as your last act and end your "
+        "turn. If your work is nearly done, finish it and stop as usual; don't recycle at "
+        "the end of a task.")
 
 
-def test_a_crossing_with_no_mark_gets_the_line_without_its_clause():
-    assert recycle.relaunch_line(None).startswith(
-        "This launch lets you recycle yourself. Only if you are mid-work")
-
-
-def test_a_relaunch_crossing_reaches_the_launcher_through_usage_s_group_once(usage_group):
+def test_a_relaunch_crossing_reaches_the_launcher_through_usage_s_group_once_a_rise(
+        usage_group):
     limit(usage_group.conn, "relaunch")
-    assert recycle.relaunch_line("1x") in through_usage(usage_group, 1761904800.0)
-    assert recycle.relaunch_line("1x") not in through_usage(usage_group, 1761904800.0)
+    assert recycle.RELAUNCH_LINE in through_usage(usage_group, 1761904800.0)
+    assert recycle.RELAUNCH_LINE not in through_usage(usage_group, 1761904800.0)
+    assert recycle.RELAUNCH_LINE in through_usage(usage_group, 1761908400.0)
     told = [e for e in store.events(usage_group.conn, "r1") if e.kind == "recycle-told"]
-    assert len(told) == 1
+    assert len(told) == 2
 
 
 def test_a_compact_crossing_reaches_the_launcher_through_usage_s_group_and_is_recorded(
@@ -941,7 +1029,7 @@ def test_a_relaunch_crossing_keeps_its_line_when_the_store_is_locked(conn, tmp_p
     lock_conn = store.connect(tmp_path / "launcher.db")
     lock_conn.execute("BEGIN IMMEDIATE")
     try:
-        assert recycle.on_crossing(crossing()) == recycle.relaunch_line("1x")
+        assert recycle.on_crossing(crossing()) == recycle.RELAUNCH_LINE
     finally:
         lock_conn.execute("ROLLBACK")
         lock_conn.close()

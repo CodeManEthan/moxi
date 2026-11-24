@@ -9,10 +9,12 @@
 Relaunch is offered with turns and slots installed and slots running here; the session
 must be a slot launch, claimed, live, on a harness whose turns session offers `exit`.
 comms is optional: without it there is no director mode, no name to wait for and no
-notices. A self arm needs a launch made with `--recycle-at-limit relaunch`: a launch that
-recycles by compacting, or not at all, is refused `no-self-recycle`, a dry run too, and
-so is a scratch launch recorded with the option before a scratch was refused it. A
-director's call and a repair need no such launch.
+notices. A self arm needs a launch whose session can recycle itself
+(`selfrecycle.missing`): made with `recycle_at_limit = relaunch` (the row ships `off`); a
+Claude slot launch; not in a scratch folder; with a handoff folder. It needs no warn-at
+mark: a launch with none is never told, and its agent may still run the verb. Any other is
+refused `no-self-recycle`, a dry run too, with the item it fails. A director's call and a
+repair need no such launch.
 
 A launch that names no model comes back on the model its session last used (`pin`): the
 arm and the call read it and put it in their `--json` (`model`, `model_how`), and the job
@@ -35,33 +37,33 @@ session's stamps; it takes nothing else of the caller's, and the new session's
 environment is built from the launch row and the settings alone.
 
 **A self arm** (in the session's own turn): the caller's session (turns walking up from
-this process), the handoff (a regular, readable, non-empty file of at most 64 KiB,
-modified after the session's current id was first seen, so a stale one is refused; with
+this process; an id no launch knows is the launch whose `claude` serves it,
+`target.by_process`), the handoff (a regular, readable, non-empty file of at most 64 KiB,
+modified after the session's current id began (`began`), so a stale one is refused; with
 notes installed, in notes' handoff folder for the launch), and no live subagent (a
 background shell never refuses: the exit dialog stops it). Then it prints the armed text
 and the agent ends its turn, making no further tool call; the job waits for the session
 to be quiet. The armed text names the model the session comes back on.
 
 **A director's call** needs comms: the caller's identity, proven by its session's claim
-(never a variable it sets); the target by session id (anything shaped like a UUID,
-looked up in the launch log only), or else by a bound comms name; the caller among the
-launch's directors (`values_json`: a director named with a scope admits that qualified
-name only, a plain one the name in the target launch's own scope) or among the box's
-policy directors (comms' `policy_directors()`, read at the call: the names of comms'
-`[policy] directors` provisioned as standing identities now, each already qualified, a
-bare one the global identity, never read in the target's scope), for a target with a
-comms identity whose launch didn't opt out (`takes_policy_directors = false`). The
-setting is read as it is now, not as it was at the target's launch: a relaunch is what
-brings the target's comms side into line with it. With
-cache installed, a session whose cache is warm or fresh is refused `warm` (it can be
-mailed); and the quiet read must pass now, or the call ends `held` (exit 75) with nothing
-written. The call then follows the run for `relaunch.follow_s` and prints its outcome;
-past that it exits 75 naming `--status`. A relaunch that came back says the identity, the
-slot, the new session, the posture, the model and whether comms has bound the name
-within 60 s, or could not be read. An
-agent runs the call with a Bash timeout of at least `relaunch.follow_s` plus 30 s.
-`--status` exits as the call would: by the run's end, 75 while it runs, and 1 for an
-open run whose job is gone, which no end will come to.
+(never a variable it sets); the target by session id (anything shaped like a UUID, found
+as an act finds it, never through comms), or else by a bound comms name; the caller among
+the launch's directors (`values_json`: a director named with a scope admits that
+qualified name only, a plain one the name in the target launch's own scope) or among the
+box's policy directors (comms' `policy_directors()`, read at the call: the names of
+comms' `[policy] directors` provisioned as standing identities now, each already
+qualified, a bare one the global identity, never read in the target's scope), for a
+target with a comms identity whose launch didn't opt out
+(`takes_policy_directors = false`). The setting is read as it is now, not as it was at the target's launch: a
+relaunch is what brings the target's comms side into line with it. With cache installed,
+a session whose cache is warm or fresh is refused `warm` (it can be mailed); and the
+quiet read must pass now, or the call ends `held` (exit 75) with nothing written. The
+call then follows the run for `relaunch.follow_s` and prints its outcome; past that it
+exits 75 naming `--status`. A relaunch that came back says the identity, the slot, the
+new session, the posture, the model and whether comms has bound the name within 60 s, or
+could not be read. An agent runs the call with a Bash timeout of at least
+`relaunch.follow_s` plus 30 s. `--status` exits as the call would: by the run's end, 75
+while it runs, and 1 for an open run whose job is gone, which no end will come to.
 
 **A stop** (`--stop`) sends the job of an open relaunch or repair run SIGTERM: before the
 exit the run ends `stopped` and a self run's session is told by a note; from the exit on,
@@ -98,7 +100,8 @@ from moxi import modules, paths
 from moxi import store as core_store
 from moxi.paths import Layout
 
-from . import catalog, first, handoffs, job, notices, pin, quiet, recycle, slots, store, target
+from . import (catalog, first, handoffs, job, notices, pin, quiet, recycle, selfrecycle, slots,
+               store, target)
 from .compose import common
 
 #: The job script every relaunch run runs as.
@@ -163,9 +166,9 @@ def arm_self(handoff: str, *, dry_run: bool = False,
         try:
             api = offered(found, slots_api)
             row, sid = found.row, found.session_id
-            may_recycle(row)
+            may_recycle(row, slots_here=lambda: True)    # `offered` asked slots already
             _no_open_run(c, row, api)
-            path = check_handoff(handoff, c, row, sid)
+            path = check_handoff(handoff, c, row, sid, sessions=sessions, env=env)
             number = _no_live_agents(found.session)
             chosen = _pin(row, sid, sessions, env)
             data = {"session_id": sid, "request_id": row.request_id, "slot": row.slot,
@@ -198,44 +201,31 @@ def arm_self(handoff: str, *, dry_run: bool = False,
             found.close()
 
 
-#: The hint of a launch refused `no-self-recycle` for its `recycle_at_limit`.
-SELF_RECYCLE_HINT = ("finish the work and stop; a launch with --recycle-at-limit relaunch "
-                     "can recycle itself")
-#: The same hint for a scratch launch, which can't be made with that option.
-SCRATCH_HINT = ("finish the work and stop; a scratch launch recycles only by compacting, "
-                "and a launch in a directory with --recycle-at-limit relaunch can recycle "
-                "itself")
+#: What a launch refused `no-self-recycle` does now; the hint adds what would let a
+#: launch recycle itself.
+SELF_RECYCLE_HINT = "finish the work and stop"
 
 
-def may_recycle(row: store.LaunchRow) -> None:
-    """Refuse `no-self-recycle` unless the launch was made with `--recycle-at-limit
-    relaunch`, the option that lets its session recycle itself, and not in a scratch
-    folder (`recycle.SCRATCH_RECYCLE`: a row recorded before a scratch launch was refused
-    the option). A scratch row refused for its value gets `SCRATCH_HINT`, since a scratch
-    launch can't take the option."""
-    value = row.values.get("recycle_at_limit")
-    if recycle.is_scratch_relaunch(row.values):
-        problem, hint = recycle.SCRATCH_RECYCLE
-        raise Refused("no-self-recycle", f"launch {row.request_id} works in a scratch "
-                                         f"folder, and {problem}", hint)
-    if value == "relaunch":
-        return
-    hint = SCRATCH_HINT if row.values.get("scratch") else SELF_RECYCLE_HINT
-    if value == "compact":
-        raise Refused("no-self-recycle", f"launch {row.request_id} recycles at its limit by "
-                                         "compacting, so it can't relaunch itself", hint)
-    raise Refused("no-self-recycle", f"launch {row.request_id} was started without "
-                                     "--recycle-at-limit relaunch, so it can't recycle "
-                                     "itself", hint)
+def may_recycle(row: store.LaunchRow, *, slots_here: Callable[[], bool] | None = None) -> None:
+    """Refuse `no-self-recycle` unless the launch's session can recycle itself
+    (`selfrecycle.missing_of_row`, the test its crossing line is told by, less the warn-at
+    mark), naming the item it fails: opted out, not a Claude slot launch, slots not
+    running here, a scratch folder, or no handoff folder. `slots_here` stands in for
+    `catalog.slots_here`."""
+    found = selfrecycle.missing_of_row(row, slots_here=slots_here)
+    if found is not None:
+        raise Refused("no-self-recycle", f"launch {row.request_id} {found.problem}",
+                      f"{SELF_RECYCLE_HINT}; {found.hint}")
 
 
 def check_handoff(handoff: str, conn: sqlite3.Connection, row: store.LaunchRow,
-                  session_id: str | None, *, cwd: str | None = None) -> Path:
+                  session_id: str | None, *, cwd: str | None = None, sessions: Any = LOOK,
+                  env: Mapping[str, str] | None = None) -> Path:
     """The handoff a self relaunch carries, checked: a regular file of at most
     `HANDOFF_CAP` bytes of UTF-8 text that is not blank, modified after the session's
-    current id was first seen (after the launch was made, when that was not recorded);
-    with notes installed, in notes' handoff folder for the launch, and refused when notes
-    gives the launch no notes directory. Returns its absolute path."""
+    current id began (`began`); with notes installed, in notes' handoff folder for the
+    launch, and refused when notes gives the launch no notes directory. Returns its
+    absolute path. `sessions` stands in for sessions' API (None: not installed)."""
     path = Path(handoff).expanduser()
     if not path.is_absolute():
         path = Path(cwd or os.getcwd()) / path
@@ -263,8 +253,7 @@ def check_handoff(handoff: str, conn: sqlite3.Connection, row: store.LaunchRow,
         raise Refused("handoff", f"the handoff {path} is not UTF-8 text", hint) from None
     if not text.strip():
         raise Refused("handoff", f"the handoff {path} is blank", hint)
-    seen = store.seen_at(conn, row.request_id, session_id) if session_id else None
-    seen = seen or row.created_at
+    seen = began(conn, row, session_id, sessions=sessions, env=env)
     if seen and info.st_mtime <= store.parse_time(seen).timestamp():
         raise Refused("handoff", f"the handoff {path} was last written before this session "
                                  f"began ({seen}): it is stale",
@@ -279,6 +268,66 @@ def check_handoff(handoff: str, conn: sqlite3.Connection, row: store.LaunchRow,
                                      f"folder, {handoff_dir}",
                           "write it there (moxi launcher handoff dir prints the folder)")
     return path
+
+
+def began(conn: sqlite3.Connection, row: store.LaunchRow, session_id: str | None, *,
+          sessions: Any = LOOK, env: Mapping[str, str] | None = None) -> str:
+    """When the session `session_id` of the launch `row` began, as the store writes a
+    time: when the launch first became known by the id (`store.seen_at`); for an id it
+    never learned (a session found by its process, `target.by_process`), the time of the
+    first timestamped record of the id's own transcript, found through sessions as the
+    model pin finds it; else when the launch was made. `sessions` stands in for sessions'
+    API (None: not installed)."""
+    if not session_id:
+        return row.created_at
+    seen = store.seen_at(conn, row.request_id, session_id)
+    if seen:
+        return seen
+    first = _transcript_began(row, session_id, sessions,
+                              os.environ if env is None else env)
+    if first is None:
+        return row.created_at
+    from datetime import datetime, timezone
+
+    return store.stamp(datetime.fromtimestamp(first, timezone.utc))
+
+
+def _transcript_began(row: store.LaunchRow, session_id: str, sessions: Any,
+                      env: Mapping[str, str]) -> float | None:
+    """The time, in epoch seconds, of the first record that has one in the main transcript
+    of `session_id`; None when sessions is absent or no transcript is read."""
+    from . import joiner
+
+    if sessions is LOOK:
+        sessions = joiner.sessions_api()
+    if sessions is None:
+        return None
+    try:
+        found = sessions.find(row.harness, session_id,
+                              root=joiner.transcripts_root(sessions, row, env))
+    except Exception:  # noqa: BLE001  (a find that fails is a transcript not read)
+        return None
+    times = []
+    for hit in found.hits:
+        if hit.compressed or getattr(hit.source, "agent_id", None) is not None:
+            continue
+        try:
+            read = sessions.records(hit.source)
+        except Exception:  # noqa: BLE001  (a source that can't be read is passed over)
+            continue
+        try:
+            for record in read:
+                moment = getattr(record, "time", None)
+                if isinstance(moment, (int, float)) and not isinstance(moment, bool):
+                    times.append(float(moment))
+                    break
+        except Exception:  # noqa: BLE001  (a source that breaks mid-read is passed over)
+            continue
+        finally:
+            close = getattr(read, "close", None)
+            if close is not None:
+                close()
+    return min(times) if times else None
 
 
 def _no_live_agents(session: Any) -> int | None:
@@ -331,7 +380,7 @@ def call_director(which: str, *, dry_run: bool = False, follow: bool = True,
                                      "session's claim proves",
                       "run it from a session launched with a comms name")
     with _store(conn) as c:
-        sid = _session_of(c, which, comms)
+        sid = _session_of(c, which, comms, turns)
         found = target.find(sid, conn=c, turns=turns, slots_api=slots_api)
         try:
             api = offered(found, slots_api)
@@ -386,12 +435,13 @@ def _caller_identity(comms: Any, env: Mapping[str, str]) -> str | None:
         return None
 
 
-def _session_of(conn: sqlite3.Connection, which: str, comms: Any) -> str:
-    """`which` as a session id. Shaped like one (a UUID), it is looked up in the launch log
-    only: one no launch holds is refused `not-launched`, and comms is never asked. Anything
-    else is a comms identity: the live session behind it as a bound name."""
+def _session_of(conn: sqlite3.Connection, which: str, comms: Any, turns: Any | None) -> str:
+    """`which` as a session id. Shaped like one (a UUID), it is found as an act finds it
+    (`target.resolve`: the launch log, else the `claude` process serving the live session
+    of that id): one neither finds is refused `not-launched`, and comms is never asked.
+    Anything else is a comms identity: the live session behind it as a bound name."""
     if target.session_id_shaped(which):
-        if store.resolve(conn, which) is None:
+        if target.resolve(conn, which, turns=turns) is None:
             raise target.NotLaunched(f"session {which} was not launched by the launcher")
         return which
     try:
@@ -926,8 +976,8 @@ def _span(seconds: float) -> str:
     return f"{seconds:g} seconds"
 
 
-__all__ = ["ARMED", "HANDOFF_CAP", "JOB_SCRIPT", "LOOK", "REACHABLE", "SCRATCH_HINT",
-           "SELF_RECYCLE_HINT", "UNREADABLE", "Refused", "Result", "arm_self", "call_director",
+__all__ = ["ARMED", "HANDOFF_CAP", "JOB_SCRIPT", "LOOK", "REACHABLE",
+           "SELF_RECYCLE_HINT", "UNREADABLE", "Refused", "Result", "arm_self", "began", "call_director",
            "check_handoff", "follow_run", "from_record", "is_director", "job_argv",
            "may_recycle", "model_words", "not_warm", "offered",
            "outcome_result", "run_line", "start_job", "status", "stop_run"]

@@ -3,7 +3,7 @@ import test from "node:test";
 
 import {
   addressRoute, ageWord, arrange, cardView, cellLabel, chips, closedWords, foldsOf, footWords, holdOf, isOpenNow,
-  isShown, itemMarker, itemsOf, itemView, layoutOf, linesShown, markAttributes, markKey, moreLabel, noLongerOpen,
+  isShown, itemMarker, itemsOf, itemView, linesShown, markAttributes, markKey, moreLabel, noLongerOpen,
   parseAddress, parseMarkKey, passageText, phoneWaiting, phraseShown, phraseText, placePopover, pointerPath, popoverWidth,
   recordQuery, revealBy, revealing, sessionAt, sheetMarks, sheetQuestions, stepHead, stepSections, stripCard, stripKey, stripStep,
   timeWord, waitingCounts, walkFoot, walkStep,
@@ -90,8 +90,6 @@ test("a mark's attributes: flags set or left off, the key with its stage, nothin
   assert.equal(markKey("docket", null), "docket");
   assert.deepEqual(parseMarkKey("check|B1"), { column: "check", stage: "B1" });
   assert.deepEqual(parseMarkKey("close"), { column: "close", stage: null });
-  assert.deepEqual(layoutOf(COLUMNS).labelAt, 3);
-  assert.equal(layoutOf(COLUMNS.filter((one) => one.part !== "stage")).labelAt, 6);
 });
 
 test("a phrase shows its first three parts, and nothing owed when it has none", () => {
@@ -442,4 +440,89 @@ test("a passage joins the source's wrapped lines and keeps its paragraphs, lists
   assert.equal(passageText(source),
                "Whether it also lives in a file is open. Every setting is a variable alone.\n\n"
                + "- one item wrapped\n- two\n1. first\n\n```\ncode line\nkept\n```\nafter");
+});
+
+// --- acting ---------------------------------------------------------------------------------
+
+import { dropLines, dropReceipt, hasOpenBuild, leadOf, parkedGroups, parkedOf, parkedWords, parkingWords,
+         preparedView } from "../src/model.ts";
+
+test("a holder's lead: a round's own, a project's from a round its project's lead leads, else unknown", () => {
+  const value = board({ rounds: [round("kestrel/a", "yours", { lead: { name: "atlas", from: "project" } }),
+                                 round("kestrel/b", "moving", { lead: null })] });
+  const of = leadOf(value);
+  assert.equal(of("kestrel/a"), "atlas");
+  assert.equal(of("kestrel/b"), null);
+  assert.equal(of("kestrel"), "atlas");
+  assert.equal(of("heron"), undefined);
+  assert.equal(of("kestrel/gone"), undefined);
+  // A round with no lead would read its project's lead if it had one, so its project has none.
+  const bare = leadOf(board({ rounds: [round("heron/a", "moving", { lead: null }),
+                                       round("heron/b", "moving", { lead: { name: "builder-1", from: "round" } }),
+                                       round("wren/a", "moving", { lead: { name: "builder-1", from: "round" } })] }));
+  assert.equal(bare("heron"), null);
+  assert.equal(bare("wren"), undefined);
+});
+
+test("a prepared answer marks its option and says who recommends it, the lead by that name", () => {
+  const prepared = { by: "atlas", model: "m", recommend: "b", sure: "high", why: "It keeps the old export.",
+                     flips: null, read: [], options: [], actor: "atlas", at: null, current: true };
+  assert.deepEqual(preparedView(prepared, "atlas"),
+                   { recommend: "b", line: "The lead recommends b, sure: high. It keeps the old export." });
+  assert.equal(preparedView(prepared, "kestrel-lead").line.startsWith("atlas recommends b"), true);
+  assert.equal(preparedView({ ...prepared, current: false }, "atlas"), null);
+  assert.equal(preparedView(null, "atlas"), null);
+});
+
+test("parked questions: listed round by round, each with what it waits for, and opened by address", () => {
+  const value = waitingBoard();
+  value.waiting.parked_questions = [{ holder: "kestrel/a", id: "Q5", text: "Later?", until: "B1 finished" },
+                                    { holder: "kestrel/b", id: "Q4", text: "Park?", until: null }];
+  assert.deepEqual(parkedGroups(value, ["kestrel/b", "kestrel/a"]), [
+    { holder: "kestrel/b", rows: [{ id: "Q4", text: "Park?", until: null }] },
+    { holder: "kestrel/a", rows: [{ id: "Q5", text: "Later?", until: "until B1 finished" }] }]);
+  assert.equal(parkedWords(value), "2 parked questions");
+  assert.equal(parkedOf(value, "kestrel/a", "Q5").id, "Q5");
+  assert.equal(isOpenNow({ kind: "question", holder: "kestrel/a", id: "Q5" }, value), true);
+  assert.equal(isOpenNow({ kind: "decision", holder: "kestrel/a", id: "Q5" }, value), false);
+  const record = { what: "question", item: { holder: "kestrel/a", id: "Q5", state: "parked", until: "B1 finished" },
+                   ruling: { id: "C3", text: "park:Q5", record: "page:rounds/x@t", actor: "atlas",
+                             at: "2026-11-21T11:40:00Z", shown: false } };
+  assert.equal(parkingWords(record, "2026-11-21", UTC), "Parked by C3 at 11:40, until B1 finished");
+  assert.equal(parkingWords({ ...record, item: { ...record.item, state: "open" } }, "2026-11-21", UTC), "");
+});
+
+test("a stage has an open build to drop while its commission is done and its finish is not", () => {
+  const building = round("kestrel/a", "moving", { lines: [
+    line("round", "B1", [null, null, null, cell("done"), cell("waiting"), cell("todo"), cell("todo"), cell("todo"),
+                         null, null, null]),
+    line("build", "B2", [null, null, null, cell("done"), cell("done"), cell("done"), cell("done"), cell("done"),
+                         null, null, null])] });
+  assert.equal(hasOpenBuild(building, COLUMNS, "B1"), true);
+  assert.equal(hasOpenBuild(building, COLUMNS, "B2"), false);
+  assert.equal(hasOpenBuild(building, COLUMNS, "B3"), false);
+  assert.equal(hasOpenBuild(building, COLUMNS, null), false);
+});
+
+test("the drop's confirm names what ends, what goes, what stays and what is recorded", () => {
+  const facts = { round: "kestrel/a", stage: "B1", open: true, reason: null, branch: "b1-branch", builder: "builder-1",
+                  at: "2026-11-21T10:00:00Z", tip: "0123456789abcdef",
+                  folders: [{ kind: "worktree", path: "/home/u/wt/b1", goes: false, why: "it holds work that is not committed (notes.txt)" },
+                            { kind: "scratch folder", path: "/home/u/scratch/b1", goes: true, why: null }],
+                  refs: ["refs/ci/b1"] };
+  const made = dropLines(facts, "2026-11-21", "/home/u", UTC);
+  assert.deepEqual(made.map((one) => one.head), ["Ends", "Removes, if nothing in them would be lost",
+                                                 "Removes from the remote", "Keeps", "Records"]);
+  assert.equal(made[0].rows[0], "The open build of B1 on branch b1-branch, commissioned 10:00 by builder-1.");
+  assert.deepEqual(made[1].rows, ["The worktree ~/wt/b1: will be kept: it holds work that is not committed (notes.txt)",
+                                  "The scratch folder ~/scratch/b1: will be removed"]);
+  assert.match(made[3].rows[0], /^The branch b1-branch at 0123456/);
+  assert.deepEqual(dropReceipt({ state: "recorded", record: "page:rounds/x@t", removed: ["/home/u/scratch/b1"],
+                                 kept: [{ path: "/home/u/wt/b1", why: "it holds work that is not committed (notes.txt)" }],
+                                 not_told: "no lead for kestrel/a, so no one is told" },
+                               "2026-11-21", "/home/u", UTC),
+                   ["Dropped.", "Recorded with page:rounds/x@t", "Removed ~/scratch/b1", "Kept ~/wt/b1: it holds work that is not committed (notes.txt)",
+                    "Not told: no lead for kestrel/a, so no one is told"]);
+  assert.deepEqual(dropReceipt({ state: "refused", reason: "no open build of B1" }, "2026-11-21", null, UTC),
+                   ["no open build of B1"]);
 });

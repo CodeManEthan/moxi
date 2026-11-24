@@ -47,9 +47,10 @@ OPTIONAL = {
              "expires, as Keep warm on a running session's row does from the press on, "
              "and recycle_on_expiry clears or compacts an idle session once it has. "
              "Without it those rows and Keep warm aren't offered.",
-    "usage": "Context warnings: warn_at sets the mark where usage warns the session, and "
-             "recycle_at_limit with limit_at relaunches or compacts a session past its "
-             "mark. Without it those rows aren't offered.",
+    "usage": "Context warnings: warn_at sets the mark where usage warns the session and "
+             "a session that can relaunch itself is told it may; recycle_at_limit "
+             "compact with limit_at compacts a session past its mark. Without it those "
+             "rows aren't offered.",
     "sessions": "The latest thing said in each running session, on Home's Sessions row. "
                 "Without it a row shows when it was launched.",
     "memory": "memory's subconscious: the subconscious row turns it on for a launch, "
