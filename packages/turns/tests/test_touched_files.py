@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
+
 import moxi_turns as turns
 from moxi_turns.guards import TOUCH_KINDS, ToolCall, TouchedFile, touched_files
 
@@ -80,3 +82,21 @@ def test_an_unknown_tool_or_wrong_input_gives_nothing():
     assert touched_files(_call("codex", "apply_patch", {"command": None})) == ()
     assert touched_files(object()) == ()
     assert touched_files(None) == ()
+
+
+class _Raising(Mapping):
+    """Input that is a mapping but raises when a field is read."""
+
+    def __getitem__(self, key):
+        raise RuntimeError("unreadable")
+
+    def __iter__(self):
+        return iter(())
+
+    def __len__(self):
+        return 0
+
+
+def test_input_that_raises_when_read_gives_nothing_and_never_raises():
+    assert touched_files(_call("claude", "Write", _Raising())) == ()
+    assert touched_files(_call("codex", "apply_patch", _Raising())) == ()

@@ -229,6 +229,19 @@ def test_a_linked_worktree_inside_the_root_is_matched_from_its_own_top(root):
     assert said is not None and "of proj-a: packages/fresh/ -" in said
 
 
+def test_a_linked_worktree_of_another_repo_inside_the_root_is_matched_from_the_root(
+        root, tmp_path):
+    _main_tree(root)
+    other = tmp_path / "other"
+    _main_tree(other)
+    worktree = root / "vendor" / "x"
+    _linked(other, worktree, "x")
+    file = worktree / "packages" / "fresh" / "a.md"
+
+    assert watching.base_of(str(file), str(root)) == str(root)
+    assert write(file) is None
+
+
 def test_a_linked_worktree_elsewhere_takes_the_root_s_place_below_its_git_top(
         tmp_path, add_project, write_config):
     from moxi import cli

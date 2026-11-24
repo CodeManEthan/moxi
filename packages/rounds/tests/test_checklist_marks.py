@@ -103,6 +103,39 @@ def test_a_wrong_mark_is_refused_at_the_fold(round_dir, top, repo, words):
     assert not (round_dir / "versions").exists()
 
 
+def test_a_block_that_says_nothing_is_refused_while_only_a_stage_repo_has_a_checklist(
+        round_dir):
+    opening.open_round("proj-c/a-round", description="a round", by="planner",
+                       flow="full")
+    other = round_dir.parent.parent.parent / "notes-c" / "rounds" / "a-round"
+    text = ("# A design\n\n```toml rounds\n[[stage]]\nid = \"B1\"\n"
+            "repo = \"proj-b\"\nbranch = \"b1\"\nafter = []\n```\n")
+    (other / "design.md").write_text(text, encoding="utf-8")
+
+    with pytest.raises(BadBlock) as caught:
+        freezing.freeze("proj-c/a-round", by="scout")
+
+    assert "no `checklist` key" in str(caught.value)
+    assert "checklist of proj-b is not empty" in str(caught.value)
+
+
+def test_a_version_frozen_with_no_key_marks_none_not_the_opening_s(round_dir,
+                                                                    write_config):
+    open_fix(("public-surface",))
+    fix_dir = round_dir.parent / "a-fix"
+    write_config("")
+    (fix_dir / "design.md").write_text(
+        "# A design\n\n```toml rounds\n[[stage]]\nid = \"B1\"\nrepo = \"proj-a\"\n"
+        "branch = \"b1\"\nafter = []\n```\n", encoding="utf-8")
+    freezing.freeze(FIX, by="scout")
+    events = log.read(log.round_log(fix_dir))
+    for event in events:
+        if event["type"] == "design.frozen":
+            event["declared"].pop("checklist", None)
+
+    assert checklist.marks_of(state.fold(events)) == checklist.Marks((), "v1")
+
+
 def test_marks_compare_as_a_set_and_a_version_with_no_key_marks_none():
     assert brake.differences({"checklist": ["a", "b"]}, {"checklist": ["b", "a"]}) == []
     assert brake.differences({}, {"checklist": []}) == []
@@ -169,6 +202,14 @@ def test_marks_on_a_round_with_a_design_step_are_refused(round_dir):
         opening.open_round("proj-a/another", description="x", by="lead", flow="full",
                            checklist=("public-surface",))
     assert "checklist = [...]" in str(caught.value)
+
+
+def test_none_on_a_round_with_a_design_step_is_refused_too(round_dir):
+    with pytest.raises(Refused) as caught:
+        opening.open_round("proj-a/another", description="x", by="lead", flow="full",
+                           checklist=())
+    assert "checklist = [...]" in str(caught.value)
+    assert not (round_dir.parent / "another").exists()
 
 
 def test_the_command_takes_the_marks_and_none(round_dir, capsys):
