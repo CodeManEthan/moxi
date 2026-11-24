@@ -911,16 +911,23 @@ def cmd_send_only(args, ctx: Context) -> int:
 def cmd_reserved(args, ctx: Context) -> int:
     """`moxi comms reserved renew NAME`: a fresh token for a reserved name, minted into
     the first writable step of this process's credential chain, its hash committed. The
-    one repair for a token a context can't read; nothing else ever replaces one."""
+    one repair for a token a context can't read; nothing else ever replaces one. With
+    `--word`, NAME is a word one module declares for scoped senders, and its token is
+    renewed the same way."""
     from moxi.files import LockTimeout
     from moxi.store import StoreError
 
     from . import reserved, secrets
 
     try:
-        result = reserved.renew(args.name, env=ctx.env)
+        if args.word:
+            result = reserved.renew_word(args.name, env=ctx.env)
+        else:
+            result = reserved.renew(args.name, env=ctx.env)
     except KeyError:
-        ctx.say(f"{args.name} isn't reserved for a module; nothing was changed")
+        ctx.say(f"no one module declares the word {args.name} for scoped senders; nothing "
+                "was changed" if args.word else
+                f"{args.name} isn't reserved for a module; nothing was changed")
         return moxi_exit.REFUSED
     except reserved.Refused as exc:
         ctx.say(f"{exc}; nothing was changed")
@@ -1332,6 +1339,9 @@ def build_parser(prog: str = PROG) -> argparse.ArgumentParser:
     rn = rs_sub.add_parser("renew", help="mint a fresh token for a reserved name into "
                                          "this process's credential chain")
     rn.add_argument("name")
+    rn.add_argument("--word", action="store_true",
+                    help="NAME is a word a module declares for scoped senders: renew the "
+                         "module's token for it")
     rs.set_defaults(func=cmd_reserved)
 
     so = sub.add_parser("send-only", help="the send-only names programs register: nobody "

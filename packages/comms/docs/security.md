@@ -103,6 +103,20 @@ step (an environment variable, a keychain entry), it names that step, and removi
 copy there is the cure. comms' uninstall frees every program's name and removes every
 `comms/send-only/` token too.
 
+A word a module declares for scoped senders has a token minted for that module when the
+word is read (the module's install, the daemon's start, `moxi doctor`), as
+`comms/scoped/<word>`; the daemon keeps only its hash. One token sends under the module's
+scoped sender for every parent, and only to that parent: the daemon refuses any other
+recipient before anything is posted. As for a module's name, no session is given it, a
+session's binding token never sends under a scoped sender, and the daemon refuses a send
+under one from any process inside a live session, or one whose ancestry it can't read. A
+process of your user that reads the token and leaves every session's process tree can
+still send under it, to a parent. When a send finds no token it can use, comms leaves a
+doctor record naming the process, until a send under the word works again or `moxi comms
+reserved renew --word WORD`, run from that environment, mints a new token. A word no
+module declares any more is freed and its token removed, and so are the tokens of a word
+two modules declare.
+
 comms' config file, `config.toml`, holds non-secret values only. comms refuses to load
 it when a key looks like a token.
 
