@@ -8,7 +8,6 @@ the shell's anchor folder.
 
 from __future__ import annotations
 
-import sys
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -16,10 +15,7 @@ import pytest
 import repo_page_kit as kit
 from playwright.sync_api import expect
 
-pytestmark = [pytest.mark.browser, pytest.mark.timeout(240),
-              pytest.mark.skipif(not sys.platform.startswith("linux"),
-                                 reason="repo's page is checked in a browser on Linux; the "
-                                        "Windows and macOS runs are owed")]
+pytestmark = kit.MARKS
 
 ADD = ("repo", "git-hooks", "add")
 

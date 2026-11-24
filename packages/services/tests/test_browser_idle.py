@@ -9,18 +9,13 @@ so its status answers `unknown` and the row's state shows the outcome.
 from __future__ import annotations
 
 import os
-import sys
 import time
 
-import pytest
 from playwright.sync_api import expect
 
-from browser_kit import fake_site, get, seed, written
+from browser_kit import MARKS, fake_site, get, seed, written
 
-pytestmark = [pytest.mark.browser, pytest.mark.timeout(180),
-              pytest.mark.skipif(not sys.platform.startswith("linux"),
-                                 reason="services' page is checked in a browser on Linux; the "
-                                        "Windows and macOS runs are owed")]
+pytestmark = MARKS
 
 #: The idle time every page server of the test's shell gets, in seconds.
 IDLE_S = 1.0

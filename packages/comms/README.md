@@ -174,7 +174,7 @@ meets.
 | `moxi comms send --as <name> <to> "text"` | send under a send-only name a program registered, from outside every session, with no reply |
 | `moxi comms send-only add\|renew\|remove <name>` | register a send-only name for a program (any program or service, not only a module), replace its token, or free it; inside a session, only a plain `add` of an unused name |
 | `moxi comms exit-session <name> [--scope S \| --global]` | end a headless session by its name, and wait for the name to be released |
-| `moxi comms reserved renew <name>` | mint a fresh token for a send-only name a module reserved, into this process's credential chain |
+| `moxi comms reserved renew <name>` | mint a fresh token for a send-only name a module reserved, into this process's credential chain; with `--word`, `<name>` is a word a module declares for scoped senders |
 | `moxi comms migrate [--dry-run]` | move an older comms' files into `comms.db` now (the daemon's start does it too) |
 | `moxi comms claude` | launch a named Claude Code session (also `"$(uv tool dir)/moxi/bin/moxi-comms-claude"`) |
 | `moxi comms codex` | launch a named Codex session through Moxi turns' Codex host (experimental) |
@@ -191,6 +191,16 @@ its path: `"$(uv tool dir)/moxi/bin/<script>"`.
 callers `[policy] cache_callers` names) and `moxi comms owner <session-id>` (which
 identity owns a session, for a program that nudges idle sessions; left out of the help
 list) are read-only: they ask the daemon or read local files and post nothing.
+
+A module may send a session something of its own under that session's **scoped
+sender**, a send-only name comms forms from the session's name and a word the module
+declares (`builder-digest@acme` for `builder@acme`). It reaches that session alone,
+nobody mails it, no session binds it and no roster lists it; its messages read
+`(send-only)` and `[no reply]`. A module declares the word by an entry point in
+`moxi.comms.scoped_senders` and sends with `moxi_comms.api.send_scoped` (comms' API,
+interface 3);
+[docs/adapters.md](https://github.com/CodeManEthan/moxi/blob/moxi-comms-v0.3.1/packages/comms/docs/adapters.md#scoped-senders)
+says how, with the refusals and the read-back.
 
 Every new `moxi comms send` says what it wants back with `--posture`: `none` (no reply; a
 reply to it is refused), `optional` (a reply only if the recipient has something to add;
@@ -344,13 +354,13 @@ claude`); else nothing. Line two says what kind of waiting it is:
 |---|---|---|---|
 | it asked you for one reply | `waiting for your reply` | `wrote to you <time>, wants one reply` | `Reply`, `Message` |
 | mail no session takes | `3 messages waiting` | `not running · since <time>, from <names>` | `Message` |
-| with launcher: warm, waiting on other agents, nothing keeping it warm | `goes cold at <time>` | `waiting on <n> agents` | `Keep warm`, `Message` |
+| with launcher: warm, waiting on other agents (or subagents, or open holds), nothing keeping it warm | `goes cold at <time>` | `waiting on <n> agents` (`subagents`, `open holds`) | `Keep warm`, `Message` |
 | running, mail held for its next turn | the cache fact | `2 messages held until its next turn · from <names> <time>` | `Message` |
 | running, waiting on another's reply | the cache fact | `waiting on <name>'s reply since <time> · <name> hasn't read it yet` | `Message` |
 | running, nothing waiting | the cache fact | `no mail waiting · last message <time>` | `Message` |
 
 The cache fact is `warm until <time>` or `cold`, and with launcher launcher's own words
-(`kept warm while 2 agents work`). When a name meets two cases, the higher gives the fact
+(`kept warm while 2 agents work`, `kept warm while 1 hold is open`). When a name meets two cases, the higher gives the fact
 and line two, and the second leads line three. Line three also has one piece for each
 other address of the name that holds mail or a session (`builder-2@kestrel-web · 2
 messages since 14:02, from planner`), so every count Home's row names is on the page. When

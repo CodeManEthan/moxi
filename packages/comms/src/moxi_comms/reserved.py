@@ -26,7 +26,8 @@ A row with `freed_at` set is no longer reserved: the name is ordinary again. No 
 binds a name whose row isn't freed, and nobody mails an `active` or `unowned` one.
 
 `reconcile(gone=None)` is the one writer. It reads the declared names of every installed
-module except `gone`, and brings the table in line: a declared name with no row is
+module except `gone`, and brings the table in line (and, in the same lock, the words
+modules declare for scoped senders, `scoped.py`): a declared name with no row is
 reserved (a fresh token, a row, and a `bindings` interval of kind `reserved`), a row whose
 module no longer declares it is freed (its interval closed, its token removed). A module
 that is installed but reads as broken keeps its names: only an absent module, or the one
@@ -142,6 +143,13 @@ class Result:
     #: (name, why) for each name a program holds whose token this process doesn't read
     #: back as the one comms holds the hash of.
     unreadable: list = field(default_factory=list)
+    #: The words modules declare for scoped senders (`scoped.reconcile`): each declared
+    #: (word, module), each freed (word, module), each in conflict or left out (word,
+    #: module or None, why), and each whose token couldn't be written (word, module, why).
+    words: list = field(default_factory=list)
+    words_freed: list = field(default_factory=list)
+    word_conflicts: list = field(default_factory=list)
+    word_failed: list = field(default_factory=list)
 
 
 class Refused(Exception):
@@ -262,20 +270,28 @@ def _blocked(conn, name: str) -> str | None:
 
 # --------------------------------------------------------------------------- reconcile
 
-def reconcile(gone: str | None = None, *, declared=None, chain=None, env=None,
-              target=None, clock=time.time) -> Result:
+def reconcile(gone: str | None = None, *, declared=None, words=None, chain=None,
+              env=None, target=None, clock=time.time) -> Result:
     """Bring the `reserved` table in line with the names every installed module but
-    `gone` declares. `declared` (module -> names, or `UNKNOWN` for a module whose names
-    can't be read) stands in for the installed modules; `chain` for the credential chain
-    the config names. Raises `StoreRefused` with
-    nothing written when comms.db can't be opened for writing."""
+    `gone` declares, and the `scoped` table with the words they declare for scoped
+    senders. `declared` (module -> names, or `UNKNOWN` for a module whose names can't be
+    read) stands in for the installed modules' names; `words` (module -> {word:
+    description}) for the group `moxi.comms.scoped_senders`; `chain` for the credential
+    chain the config names. Raises `StoreRefused` with nothing written when comms.db
+    can't be opened for writing."""
+    from . import scoped
+
     if declared is None:
         declared = declared_names(gone)
     else:
         declared = {m: n if n is UNKNOWN else tuple(n)
                     for m, n in declared.items() if m != gone}
+    words = scoped.load(gone) if words is None else scoped.from_mapping(words, gone)
+    chain = _chain(chain, env)
     with _Held(target, env) as conn:
-        return _reconcile(conn, declared, _chain(chain, env), clock)
+        result = _reconcile(conn, declared, chain, clock)
+        scoped.reconcile(conn, words, chain, clock, result)
+        return result
 
 
 def release_all(*, chain=None, env=None, target=None, clock=time.time) -> Result:
@@ -298,6 +314,9 @@ def release_all(*, chain=None, env=None, target=None, clock=time.time) -> Result
             if row["state"] == ACTIVE and row["freed_at"] is None:
                 _free(conn, chain, name, row["module"], clock, result,
                       holder=row["holder"])
+        from . import scoped
+
+        scoped.release_all(conn, chain, clock, result)
         _revoke_tool_tokens(conn, clock, result)
     done = set(result.freed)
     for name, module in sorted(_minted(chain, found) - done):
@@ -398,6 +417,21 @@ def renew(name: str, *, chain=None, env=None, target=None, clock=time.time) -> R
     return result
 
 
+def renew_word(word: str, *, chain=None, env=None, target=None,
+               clock=time.time) -> Result:
+    """Mint a fresh token for `word`, a word one module declares for scoped senders,
+    into the first writable step of this process's chain, and commit its hash: the
+    repair for a word token a context can't read. Raises `KeyError` when no one module
+    declares `word`."""
+    from . import scoped
+
+    chain = _chain(chain, env)
+    result = Result()
+    with _Held(target, env) as conn:
+        scoped.renew(conn, chain, word, clock, result)
+    return result
+
+
 # --------------------------------------------------------------------------- a program's names
 
 #: Where `session_place` finds this process: inside a live session, or somewhere its
@@ -479,6 +513,13 @@ def register(name: str, *, take: bool = False, chain=None, env=None, target=None
         if directory.retired(conn, name, GLOBAL):
             raise Refused(f"{name} is retired: a retired name means nobody, and a send-only "
                           "name would bring it back")
+        from . import scoped
+
+        form = scoped.form_of(conn, name)
+        if form is not None:
+            raise Refused(f"{name} has the form of a scoped sender of the word "
+                          f"{form.word}, which {' and '.join(scoped.declarers(form.row))} "
+                          "declares: no program registers it")
         why = _blocked(conn, name)
         if why:
             raise Refused(f"{name} can't be registered: {why}")
@@ -1003,7 +1044,7 @@ def _say(lines) -> None:
 
 # --------------------------------------------------------------------------- doctor
 
-def doctor_rows(env=None, *, declared=None, chain=None) -> list:
+def doctor_rows(env=None, *, declared=None, words=None, chain=None) -> list:
     """comms' doctor rows about reserved names: reconcile first (which catches a module
     installed before comms, and a store restored from a backup), then one row per name
     that isn't reserved as declared, and per reserved token this process can't read."""
@@ -1016,7 +1057,7 @@ def doctor_rows(env=None, *, declared=None, chain=None) -> list:
         # reconciles then.
         return []
     try:
-        result = reconcile(declared=declared, chain=chain, env=env)
+        result = reconcile(declared=declared, words=words, chain=chain, env=env)
     except StoreRefused as exc:
         return [Row(MODULE, "reserved", "warn", f"reserved names weren't checked: "
                     f"{exc.reason}")]
@@ -1026,7 +1067,43 @@ def doctor_rows(env=None, *, declared=None, chain=None) -> list:
     out += [Row(MODULE, "reserved", "fail", f"{module}: {name} isn't reserved: {why}",
                 "check the credential chain, then run moxi doctor")
             for name, module, why in result.failed]
+    out += [Row(MODULE, "scoped", "warn", f"{module or 'a module'}: the scoped sender word "
+                f"{word} isn't declared: {why}",
+                "moxi doctor runs again after the cause is gone")
+            for word, module, why in result.word_conflicts]
+    out += [Row(MODULE, "scoped", "fail", f"{module}: the scoped sender word {word} isn't "
+                f"declared: {why}", "check the credential chain, then run moxi doctor")
+            for word, module, why in result.word_failed]
     out += token_rows(env=env, chain=chain)
+    out += _scoped_rows(env, _chain(chain, env))
+    return out
+
+
+def _scoped_rows(env, chain) -> list:
+    """A row for each parent whose scoped sender is in conflict, since something holds
+    its name, and for each word token this process can't read."""
+    from moxi.doctor import Row
+
+    from . import scoped
+    from .store import StoreRefused
+    from .store.open import open_read
+
+    try:
+        conn = open_read(env=env)
+    except (StoreRefused, sqlite3.Error):
+        return []
+    try:
+        out = [Row(MODULE, "scoped", "warn",
+                   f"{qualified} is held ({why}), so {module}'s scoped sender for {parent} "
+                   "is in conflict: a send under it is refused",
+                   f"{qualified} stays its holder's; once nothing holds it, {module}'s "
+                   f"scoped sender for {parent} sends again")
+               for qualified, parent, _word, module, why in scoped.holders(conn)]
+        out += scoped.token_rows(conn, chain, "this process's")
+    except sqlite3.Error:
+        return []
+    finally:
+        conn.close()
     return out
 
 
@@ -1100,5 +1177,5 @@ __all__ = ["ACTIVE", "CONFLICT", "UNOWNED", "UNKNOWN", "MODULE_HOLDER", "PROGRAM
            "INSIDE", "UNPLACED", "credential", "declared_names", "doctor_rows", "held_by_program", "lookup",
            "module_words", "on_install", "on_uninstall", "owner", "program_owner",
            "program_secret_id", "reconcile", "record_key", "register", "release_all",
-           "remove_program", "renew", "renew_program", "rows", "secret_id", "session_guard", "session_place", "token_hash",
+           "remove_program", "renew", "renew_program", "renew_word", "rows", "secret_id", "session_guard", "session_place", "token_hash",
            "token_rows", "trace_send"]

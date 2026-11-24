@@ -924,6 +924,6 @@ def test_a_closed_round_s_numbers_are_written_beside_its_note(closed):
 
     assert "\nstatus: closed\n" in text
     assert f"\n- ended: closed at {closing_event['at']}\n" in text
-    assert "\n- skips 1, step-ups 0, repairs 0, corrections 0, dropped builds 0, " \
-           "cleared locks 0\n" in text
+    assert "\n- skips 1, step-ups 0, checklist step-ups 0, repairs 0, " \
+           "corrections 0, dropped builds 0, cleared locks 0\n" in text
     assert text == rendering.retro("proj-a", "a-round", events(closed))

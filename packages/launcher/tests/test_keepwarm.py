@@ -128,9 +128,14 @@ def conn(tmp_path):
     conn.close()
 
 
+#: The launch log's change that makes launch r1 a launch made with keep_warm off.
+MADE_OFF = ("UPDATE launches SET values_json = '{\"keep_warm\": \"off\"}' "
+            "WHERE request_id = 'r1'")
+
+
 def launched(conn, *, request_id="r1", values=None, session_id=SID, claimed=True,
-             relaunch_of=None, resume_of=None):
-    store.insert(conn, request_id=request_id, by="ann", harness="claude", target="slot",
+             relaunch_of=None, resume_of=None, target="slot", harness="claude"):
+    store.insert(conn, request_id=request_id, by="ann", harness=harness, target=target,
                  cwd="/work", values={"model": "opus", "keep_warm": "on", **(values or {})},
                  argv=["claude"], env={}, posture="operator", session_id=session_id,
                  slot="3", relaunch_of=relaunch_of, resume_of=resume_of)
@@ -142,6 +147,7 @@ def launched(conn, *, request_id="r1", values=None, session_id=SID, claimed=True
 
 def ask(conn, *, session=None, cache=None, which=SID, request_id="r1", **kw):
     session = session or FakeSession(agents=[agent("a1", description="tests")])
+    kw.setdefault("comms", None)
     verdict = keepwarm.ask(which, conn=conn, turns=FakeTurns(session),
                            slots_api=FakeSlots(), cache=cache or FakeCache(),
                            settings=kw.pop("settings", SETTINGS), **kw)
@@ -153,13 +159,14 @@ def events(conn, run_id):
     return [e.kind for e in store.run_events(conn, run_id)]
 
 
-def nudged(conn, *, session_id=SID, number=4, agents=(), request_id="r1"):
+def nudged(conn, *, session_id=SID, number=4, agents=(), request_id="r1",
+           word="subagents"):
     """A `nudged` run as an ask leaves it: the turn it opened is `number + 1`."""
     run = store.insert_run(conn, kind="keep-warm", mode="ask", request_id=request_id,
                            session_id=session_id, by="launcher", state="acting",
                            turn_number=number, job=f"proc:{me()}")
     store.add_run_event(conn, run.run_id, "nudge", {"agents": list(agents)})
-    store.end_run(conn, run.run_id, "nudged", word="subagents", turn_number=number + 1)
+    store.end_run(conn, run.run_id, "nudged", word=word, turn_number=number + 1)
     return run
 
 
@@ -306,14 +313,26 @@ AT_WORK = waits.Directed(("coder@proj-a", "critic@proj-a"))
 
 def test_live_subagents_come_before_holds_and_holds_before_directed_agents():
     by_agents, _ = keepwarm.signal_of(listing(agent("a1")), (), (), ["h"], directed=AT_WORK)
-    assert by_agents.case == keepwarm.SUBAGENTS and by_agents.directed == ()
+    assert by_agents.case == keepwarm.SUBAGENTS
+    # It carries the director case too, for an ask whose subagent case is spent.
+    assert by_agents.holds == ("h",) and by_agents.directed == AT_WORK.names
     by_hold, _ = keepwarm.signal_of(listing(), (), (), ["h"], directed=AT_WORK)
-    assert (by_hold.case, by_hold.holds, by_hold.directed) == (keepwarm.DIRECTOR, ("h",), ())
+    assert (by_hold.case, by_hold.holds, by_hold.directed) == (
+        keepwarm.DIRECTOR, ("h",), AT_WORK.names)
     by_directed, _ = keepwarm.signal_of(listing(), (), (), [], directed=AT_WORK)
     assert by_directed.case == keepwarm.DIRECTOR and by_directed.holds == ()
     assert by_directed.directed == ("coder@proj-a", "critic@proj-a")
     nobody, _ = keepwarm.signal_of(listing(), (), (), [], directed=waits.Directed())
     assert nobody.case is None and nobody.directed == ()
+
+
+def test_a_fork_of_the_main_loop_is_no_subagent_signal():
+    fork = SimpleNamespace(id="f1", kind="subagent", state="running", final=False,
+                           description="subconscious", is_fork=True)
+    signal, _ = keepwarm.signal_of(listing(fork), (), (), [])
+    assert signal.case is None
+    signal, _ = keepwarm.signal_of(listing(fork, agent("a1")), (), (), [])
+    assert [a.id for a in signal.agents] == ["a1"]
 
 
 def test_the_signal_is_sure_only_on_lists_read_whole():
@@ -388,9 +407,36 @@ def test_the_cache_read_names_the_harness_and_newest_id(conn):
 
 
 def test_a_launch_that_does_not_keep_warm_ends_quietly(conn):
-    conn.execute("UPDATE launches SET values_json = '{}' WHERE request_id = 'r1'")
+    conn.execute(MADE_OFF)
     got = ask(conn)
     assert (got.verdict.outcome, got.verdict.word) == (None, "off")
+
+
+@pytest.mark.parametrize("target", ["slot", "terminal", "headless"])
+@pytest.mark.parametrize(("values", "nudged"), [
+    ('{"keep_warm": "on"}', True), ('{"keep_warm": "off"}', False), ("{}", False)],
+    ids=["on", "off", "no-value"])
+def test_a_launch_is_nudged_only_when_made_with_keep_warm_on(conn, target, values, nudged):
+    """No value is off, as `off` is: the ask ends at its read of the launch log."""
+    conn.execute("UPDATE launches SET values_json = ?, target = ? WHERE request_id = 'r1'",
+                 (values, target))
+    got = ask(conn)
+    assert (got.verdict.outcome == "nudged") is nudged
+    if not nudged:
+        assert got.verdict.word == "off" and not got.session.delivered
+        assert got.runs == []
+
+
+def test_a_headless_launch_with_an_identity_and_keep_warm_on_is_nudged_while_work_is_out(
+        conn):
+    conn.execute("UPDATE launches SET values_json = ?, target = 'headless', slot = NULL "
+                 "WHERE request_id = 'r1'",
+                 ('{"keep_warm": "on", "identity": "coder", "headless_exit": ["idle=30m"]}',))
+    got = ask(conn)
+    assert (got.verdict.outcome, got.verdict.word) == ("nudged", "subagents")
+    # With nothing at work it isn't nudged, so its exit rule's idle count runs on.
+    back = ask(conn, session=FakeSession(facts_seq=[facts(number=9)]))
+    assert back.verdict.word == "idle" and back.session.delivered == []
 
 
 def test_a_session_no_launch_holds_ends_quietly(conn):
@@ -466,7 +512,7 @@ def test_past_the_subagent_cap_the_ask_is_blocked_capped(conn):
     got = ask(conn, session=FakeSession(facts_seq=[facts(number=7)], agents=[agent("a1")]))
     assert (got.verdict.outcome, got.verdict.word) == ("blocked", "capped")
     assert got.session.delivered == []
-    assert "cap is 3" in got.runs[0].detail
+    assert got.runs[0].detail.endswith("are spent: subagents 3/3")
 
 
 def test_a_repeated_capped_block_updates_one_run(conn):
@@ -485,8 +531,45 @@ def test_the_director_cap_is_its_own(conn):
     for number in range(4, 14):
         nudged(conn, number=number)
     got = ask(conn, session=FakeSession(facts_seq=[facts(number=14)]))
+    assert (got.verdict.outcome, got.verdict.word) == ("nudged", "director")
+
+
+def test_ten_director_nudges_then_capped(conn):
+    store.open_hold(conn, "r1", "port-cache")
+    for number in range(4, 14):
+        nudged(conn, number=number, word="director")
+    got = ask(conn, session=FakeSession(facts_seq=[facts(number=14)]))
     assert (got.verdict.outcome, got.verdict.word) == ("blocked", "capped")
-    assert "director cap is 10" in got.runs[0].detail
+    assert got.runs[0].detail.endswith("are spent: director 10/10")
+
+
+def test_three_subagent_nudges_then_a_director_nudge_then_capped_naming_both(conn):
+    store.open_hold(conn, "r1", "port-cache")
+    for number in (4, 5, 6):
+        nudged(conn, number=number, agents=["a1"])
+    session = FakeSession(facts_seq=[facts(number=7)], agents=[agent("a1")])
+    got = ask(conn, session=session)
+    assert (got.verdict.outcome, got.verdict.word) == ("nudged", "director")
+    text = session.delivered[0][0].splitlines()
+    assert text[1] == "reply warm" and "a1" not in "".join(text)
+    nudge = next(e.detail for e in store.run_events(conn, got.runs[0].run_id)
+                 if e.kind == "nudge")
+    assert nudge["case"] == "director" and nudge["agents"] == []
+    for number in range(8, 17):
+        nudged(conn, number=number, word="director")
+    got = ask(conn, session=FakeSession(facts_seq=[facts(number=17)], agents=[agent("a1")]))
+    assert (got.verdict.outcome, got.verdict.word) == ("blocked", "capped")
+    assert got.runs[0].detail.endswith("are spent: subagents 3/3, director 10/10")
+
+
+def test_a_dry_run_names_the_case_and_its_own_count(conn):
+    store.open_hold(conn, "r1", "port-cache")
+    for number in (4, 5, 6):
+        nudged(conn, number=number, agents=["a1"])
+    got = ask(conn, session=FakeSession(facts_seq=[facts(number=7)], agents=[agent("a1")]),
+              dry_run=True)
+    assert (got.verdict.word, got.verdict.detail) == (
+        "would-nudge", "a run would nudge for the director case now: nudge 1 of 10")
 
 
 def test_a_turn_no_nudge_opened_starts_a_new_run(conn):
@@ -621,7 +704,7 @@ def test_a_keep_warm_dry_run_exits_1_on_a_capped_session(conn):
 
 
 def test_a_keep_warm_dry_run_with_no_launch_on_says_so(conn):
-    conn.execute("UPDATE launches SET values_json = '{}' WHERE request_id = 'r1'")
+    conn.execute(MADE_OFF)
     got = hand(conn, FakeSession(), dry_run=True)
     assert (got.exit_code, got.lines) == (0, ("no live launch keeps warm",))
 
@@ -739,7 +822,7 @@ def test_holds_lists_the_open_holds(conn):
     (keepwarm.hold, ("x",)), (keepwarm.release, ("x",)), (keepwarm.holds, ()),
 ])
 def test_every_hold_verb_is_refused_while_keep_warm_is_off(conn, fn, args):
-    conn.execute("UPDATE launches SET values_json = '{}' WHERE request_id = 'r1'")
+    conn.execute(MADE_OFF)
     with pytest.raises(relaunch.Refused) as refused:
         verb(fn, conn, *args)
     assert refused.value.code == "off" and refused.value.exit_code == codes.REFUSED
@@ -791,8 +874,14 @@ def test_the_api_refuses_a_launch_unknown_or_not_keeping_warm(conn):
     with pytest.raises(target.NotLaunched):
         api.open_hold("nope", "x", conn=conn)
     launched(conn, request_id="r2", session_id=NEW, values={"keep_warm": "off"})
-    with pytest.raises(relaunch.Refused):
+    with pytest.raises(relaunch.Refused) as refused:
         api.release_hold("r2", "x", conn=conn)
+    assert refused.value.hint == "launch it with keep_warm on to use holds"
+    launched(conn, request_id="r3", session_id=OTHER, harness="codex",
+             values={"keep_warm": "off"})
+    with pytest.raises(relaunch.Refused) as refused:
+        api.open_hold("r3", "x", conn=conn)
+    assert refused.value.hint == "keep-warm keeps only claude sessions warm"
 
 
 def test_a_released_hold_blocks_no_clear_and_no_keep_warm(conn):

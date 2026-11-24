@@ -40,9 +40,11 @@ def _types(*types: EventType) -> dict[str, EventType]:
 TYPES = _types(
     # A round begins: what it is for, the flow it follows with that flow's steps as they
     # stood then, the round it is a child of, the register entries it starts from, the
-    # pointer to the operator's go, and the agent who leads it (`lead`).
+    # pointer to the operator's go, the agent who leads it (`lead`), and for a round whose
+    # flow has no design step the checklist marks it was opened with (`marked`).
     EventType("round.opened",
-              ("description", "flow", "steps", "parent", "inherits", "record", "lead"),
+              ("description", "flow", "steps", "parent", "inherits", "record", "lead",
+               "marked"),
               required=("description", "flow", "steps")),
     # The round's own lead was set or changed: the new name (`lead`) and the round's
     # own lead before, None when it had none (`was`). A lead is a record the leads
@@ -50,8 +52,9 @@ TYPES = _types(
     EventType("lead.changed", ("lead", "was"), required=("lead",)),
     # The round moved to another flow: the name it had, the new name and its steps, and
     # who moved it. The operator's move is a ruling, and that ruling's own event
-    # holds the same three.
-    EventType("flow.changed", ("was", "flow", "steps", "by")),
+    # holds the same three. `marked`, the checklist marks a round was opened with, says
+    # the move is the step-up those marks made at the opening; `by` still says who.
+    EventType("flow.changed", ("was", "flow", "steps", "by", "marked")),
     # A design version was frozen: its number and digest, whether only records changed
     # and the pointer that says so, the trace result, what the design's block declared
     # (`declared`), what of that was new to the record and is added by this event

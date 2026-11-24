@@ -21,7 +21,18 @@ import subprocess
 import sys
 from pathlib import Path
 
+import pytest
 from playwright.sync_api import expect
+
+#: Every browser test module's marks. The bound is kept by a thread that, past it, prints
+#: every thread's stack and ends the test's process: under xdist the run reports the worker
+#: crashed while running that test, and goes on in a new worker. A signal raises once
+#: inside the test, and a teardown that then waits on a browser that stopped answering
+#: would hold the worker with no end.
+MARKS = [pytest.mark.browser, pytest.mark.timeout(240, method="thread"),
+         pytest.mark.skipif(not sys.platform.startswith("linux"),
+                            reason="repo's page is checked in a browser on Linux; the "
+                                   "Windows and macOS runs are owed")]
 
 PANEL = "#moxi-panel > moxi-repo-page"
 #: A module of the test's own whose one closed piece is registered in a repo while a site

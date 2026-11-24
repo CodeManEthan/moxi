@@ -73,6 +73,22 @@ worker count or base stops it there, before any step runs. Then, in order:
    caller's `PYTEST_ADDOPTS` are dropped from the suites' environment, and an option that
    would undo the workers (`--pdb`) makes pytest refuse the run.
 
+   Each package's run has a wall-clock bound, `SUITE_BOUND_S` (900 s) unless
+   `MOXI_TEST_SUITE_BOUND_S` sets another number of seconds. At the bound the check ends
+   the run and every process under it (`moxi.proc.run`: its process group on Linux and
+   macOS, its job on Windows), prints a line naming the package and the bound, and fails
+   that package; the other packages still run. `STACKS_LEAD_S` (10 s) before the bound,
+   each process of the run still going writes every thread's stack to a file of its own
+   in `.moxi-dev/run/<package>.stacks/` (the test kit's `MOXI_TEST_STACKS`), and the
+   line names that folder. A run that ends in time leaves no such folder.
+
+   A check ended by SIGINT, SIGTERM or SIGHUP (Ctrl-Break on Windows) ends the run under
+   way with its tree before it exits, with 128 plus the signal's number for the others
+   than SIGINT; a signal the check was started ignoring (as nohup leaves SIGHUP) stays
+   ignored. One killed outright (SIGKILL, or TerminateProcess on Windows) can do
+   nothing, so the run watches it (the kit's `MOXI_TEST_PARENT_PID`) and ends itself and
+   every process under it within a few seconds.
+
    What runs is the package's plain `pytest` (its `-m` deselects the `browser`, `slow`,
    `build` and `live` tiers), and besides it, through the test kit's variables
    (`moxi_dev.testing`): a tier test marked `touches` whose glob matches a changed path;
@@ -146,33 +162,56 @@ on stdout when the workspace or the base can't be read.
 from __future__ import annotations
 
 import argparse
+import contextlib
 import json
+import math
 import os
 import re
 import shutil
+import signal
 import subprocess
 import sys
+import threading
 import time
 import tomllib
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Callable, Mapping, Sequence
+from typing import Callable, Iterator, Mapping, Protocol, Sequence
+
+from moxi import proc
 
 from . import (durations, lint, machine_text, naming, pronouns, refs, release, rename,
                ruff_check, stamp, tags, temp)
 from .testing import (CHANGED_ENV, DURATIONS_ENV, FINDING_ENV, FINDING_NAME,
-                      LEAVE_OUT_ENV, TIERS_ENV, TIMED_ENV)
+                      LEAVE_OUT_ENV, PARENT_PID_ENV, STACKS_AT_ENV, STACKS_ENV, TIERS_ENV,
+                      TIMED_ENV)
 
 PYTHON = "3.12"
 ENV_DIR = Path(".moxi-dev") / f"env-{PYTHON}"
 LINT_DIR = Path(".moxi-dev") / "lint"
 RUN_DIR = Path(".moxi-dev") / "run"       # this run's changed paths and suites' durations
 WORKERS_ENV = "MOXI_TEST_WORKERS"
+#: Seconds one package's test run may take before the check ends it, in place of
+#: `SUITE_BOUND_S`.
+SUITE_BOUND_ENV = "MOXI_TEST_SUITE_BOUND_S"
+#: How long one package's test run may take, wall clock, before the check ends it: well
+#: under an hour, and a few times the slowest package's run on a 16-CPU machine.
+SUITE_BOUND_S = 900.0
+#: How long before a run's bound its processes write their stacks (the kit's
+#: `MOXI_TEST_STACKS_AT`); at most half the bound.
+STACKS_LEAD_S = 10.0
 #: How many of the renames step's unsettled rows and leftovers a failure prints.
 RENAMES_SHOWN = 10
 
-# A step's command, run from `cwd` with `env`; returns the exit code. Tests replace it.
-Run = Callable[[Sequence[str], Path, Mapping[str, str]], int]
+class Run(Protocol):
+    """A step's command, run from `cwd` with `env`; returns the exit code. With
+    `timeout_s`, past that many seconds it ends the command and everything it started and
+    raises `subprocess.TimeoutExpired`. Tests replace it."""
+
+    def __call__(self, cmd: Sequence[str], cwd: Path, env: Mapping[str, str], /, *,
+                 timeout_s: float | None = None) -> int: ...
+
+
 # The lint's commands for a package: (package dir, work dir, every member's dir).
 Plan = Callable[[Path, Path, Sequence[Path]], list[lint.Command]]
 
@@ -389,9 +428,30 @@ def worker_args(env: Mapping[str, str], cpus: int | None = None) -> list[str]:
     return ["-n", str(count)]
 
 
-def _run(cmd: Sequence[str], cwd: Path, env: Mapping[str, str]) -> int:
+def suite_bound(env: Mapping[str, str]) -> float:
+    """The seconds one package's test run may take: `MOXI_TEST_SUITE_BOUND_S`, else
+    `SUITE_BOUND_S`; a value that is not a finite number above 0 stops the check."""
+    raw = env.get(SUITE_BOUND_ENV, "").strip()
+    if not raw:
+        return SUITE_BOUND_S
     try:
-        return subprocess.run(list(cmd), cwd=cwd, env=dict(env)).returncode
+        bound_s = float(raw)
+    except ValueError:
+        bound_s = math.nan
+    if not math.isfinite(bound_s) or bound_s <= 0:
+        raise CheckError(f"{SUITE_BOUND_ENV} must be a number of seconds above 0; "
+                         f"it is {raw!r}")
+    return bound_s
+
+
+def _run(cmd: Sequence[str], cwd: Path, env: Mapping[str, str], /, *,
+         timeout_s: float | None = None) -> int:
+    try:
+        if timeout_s is None:
+            return subprocess.run(list(cmd), cwd=cwd, env=dict(env)).returncode
+        # Its own process group (a job on Windows), so the whole tree ends at the bound.
+        return proc.run(list(cmd), timeout_s=timeout_s, env=dict(env), cwd=cwd,
+                        capture=False).returncode
     except OSError as exc:
         raise CheckError(f"could not run {cmd[0]} ({exc})") from exc
 
@@ -474,6 +534,8 @@ class Result:
     suites: list[tuple[str, bool | None, float]] = field(default_factory=list)
     #: The packages whose browser tests were left out, Chromium not starting.
     no_browser: list[str] = field(default_factory=list)
+    #: The packages whose test run the check ended at its bound.
+    cut: list[str] = field(default_factory=list)
     #: How many timed tests the suites held back; None when the suites never ran.
     timed: int | None = None
     durations: durations.Summary | None = None
@@ -522,6 +584,7 @@ class Result:
         word = {True: "pass", False: "fail", None: "none"}
         suites = ", ".join(f"{name} {word[ok]} {secs:.1f}s"
                            + (" without its browser tests" if name in self.no_browser else "")
+                           + (" ended at its bound" if name in self.cut else "")
                            for name, ok, secs in self.suites) or "no suites run"
         if self.timed is None:
             timed = "not run"
@@ -584,6 +647,39 @@ def temp_env(env: Mapping[str, str]) -> tuple[dict[str, str], str | None, bool]:
     return checked, why, given
 
 
+#: The signals that end the check as an interrupt does, so a package's run under way is
+#: ended with its tree before the check exits: Python's default for each ends the
+#: process at once, leaving the run, in a process group of its own, running.
+END_SIGNALS = tuple(getattr(signal, name) for name in ("SIGTERM", "SIGHUP", "SIGBREAK")
+                    if hasattr(signal, name))
+
+
+def _ended_by(signum: int, frame: object) -> None:
+    raise SystemExit(128 + signum)
+
+
+@contextlib.contextmanager
+def _signals_end_the_check() -> Iterator[None]:
+    """While the check runs, a signal of `END_SIGNALS` raises `SystemExit` (128 plus its
+    number) in it, as Ctrl-C raises KeyboardInterrupt, and each handler it replaced is put
+    back after. Only a signal still at its default is taken: one the check was started
+    ignoring (as nohup leaves SIGHUP) stays ignored, and one with a handler of its own,
+    Python's or not, keeps it. Off the main thread, where Python takes no handler,
+    nothing changes."""
+    if threading.current_thread() is not threading.main_thread():
+        yield
+        return
+    taken = [one for one in END_SIGNALS if signal.getsignal(one) == signal.SIG_DFL]
+    replaced = {}
+    try:
+        for one in taken:
+            replaced[one] = signal.signal(one, _ended_by)
+        yield
+    finally:
+        for one, handler in replaced.items():
+            signal.signal(one, handler)
+
+
 def check(root: Path, *, full: bool = False, base: str | None = None,
           finding: Sequence[str] = (), static: bool = False,
           env: Mapping[str, str] | None = None, run: Run | None = None,
@@ -599,35 +695,48 @@ def check(root: Path, *, full: bool = False, base: str | None = None,
     sweep = sweep or _sweep
     started = time.monotonic()
     result = Result(is_temp_chosen=not static)
-    try:
-        if not static:
-            env, result.temp_why, result.is_temproot_given = temp_env(env)
-            _swept(sweep)
-        findings = check_findings(finding)
-        result.commit = _commit(root)
-        packages = load_workspace(root)
-        if static:
-            result.packages = []
-            steps = _Steps(root, packages, (), env, run, plan, result, probe=probe)
-            result.code = 0 if steps.static() else 1
-            result.seconds = time.monotonic() - started
-            return result
-        workers = worker_args(env)
-        changed = None if full else changed_paths(root, base or "main")
-        chosen = list(packages) if changed is None else pick(packages, changed)
-        result.packages = [package.dir for package in chosen]
-        steps = _Steps(root, packages, workers, env, run, plan, result,
-                       changed=changed, findings=findings, base=base or "main",
-                       probe=probe, sweep=lambda: _swept(sweep))
-        result.code = 0 if steps.all(chosen) else 1
-    except CheckError as exc:
-        print(f"moxi-dev check: {exc}", file=sys.stderr, flush=True)
-        result.code = 2
-    finally:
-        if not static:
-            _swept(sweep)
-    result.seconds = time.monotonic() - started
-    return result
+    with _signals_end_the_check():
+        try:
+            if not static:
+                env, result.temp_why, result.is_temproot_given = temp_env(env)
+                _swept(sweep)
+            findings = check_findings(finding)
+            result.commit = _commit(root)
+            packages = load_workspace(root)
+            if static:
+                result.packages = []
+                steps = _Steps(root, packages, (), env, run, plan, result, probe=probe)
+                result.code = 0 if steps.static() else 1
+                result.seconds = time.monotonic() - started
+                return result
+            workers = worker_args(env)
+            bound_s = suite_bound(env)
+            changed = None if full else changed_paths(root, base or "main")
+            chosen = list(packages) if changed is None else pick(packages, changed)
+            result.packages = [package.dir for package in chosen]
+            steps = _Steps(root, packages, workers, env, run, plan, result,
+                           changed=changed, findings=findings, base=base or "main",
+                           probe=probe, suite_bound_s=bound_s,
+                           sweep=lambda: _swept(sweep))
+            result.code = 0 if steps.all(chosen) else 1
+        except CheckError as exc:
+            print(f"moxi-dev check: {exc}", file=sys.stderr, flush=True)
+            result.code = 2
+        finally:
+            if not static:
+                _swept(sweep)
+        result.seconds = time.monotonic() - started
+        return result
+
+
+def stacks_said(written: int, stacks_dir: Path) -> str:
+    """The cut line's last part: how many of the run's processes wrote their stacks into
+    `stacks_dir` at the stacks time."""
+    if written == 0:
+        return "none of its processes wrote its stacks"
+    if written == 1:
+        return f"the one process still running then wrote its stacks to {stacks_dir}"
+    return f"the {written} processes still running then wrote their stacks to {stacks_dir}"
 
 
 @dataclass
@@ -643,6 +752,7 @@ class _Steps:
     findings: Sequence[str] = ()
     base: str = "main"
     probe: Probe = chromium_probe
+    suite_bound_s: float = SUITE_BOUND_S
     sweep: Callable[[], None] = lambda: None
 
     def all(self, chosen: Sequence[Package]) -> bool:
@@ -722,10 +832,21 @@ class _Steps:
         for package in chosen:
             where = work / f"{package.dir}.durations.json"
             where.unlink(missing_ok=True)
+            stacks_dir = work / f"{package.dir}.stacks"
+            shutil.rmtree(stacks_dir, ignore_errors=True)
             began = time.monotonic()
             args, extra = browsers.get(package.dir, ((), {}))
-            code = run([python, "-m", "pytest", *self.workers, *args], package.path,
-                       {**env, **extra, TIMED_ENV: "hold", DURATIONS_ENV: str(where)})
+            code: int | None
+            try:
+                code = run([python, "-m", "pytest", *self.workers, *args], package.path,
+                           {**env, **extra, TIMED_ENV: "hold", DURATIONS_ENV: str(where),
+                            **self.stacks_env(stacks_dir)},
+                           timeout_s=self.suite_bound_s)
+            except subprocess.TimeoutExpired:
+                code = None
+                self.cut(package, stacks_dir)
+            else:
+                shutil.rmtree(stacks_dir, ignore_errors=True)
             self.sweep()
             chosen_temp = durations.load_temp(where) or {}
             if chosen_temp.get("is_in_memory"):
@@ -765,6 +886,34 @@ class _Steps:
         self.timings({name: one for name, (_, one) in timed.items()},
                      {name: one for name, (passed, one) in timed.items() if passed})
         return ok
+
+    def stacks_env(self, stacks_dir: Path) -> dict[str, str]:
+        """The kit's variables that have each process of a package's run write its stacks
+        `STACKS_LEAD_S` before the run's bound (at most half the bound), and end the run
+        when this process is gone."""
+        bound_s = self.suite_bound_s
+        at = time.time() + max(bound_s - STACKS_LEAD_S, bound_s / 2)
+        return {STACKS_ENV: str(stacks_dir), STACKS_AT_ENV: f"{at:.3f}",
+                PARENT_PID_ENV: str(os.getpid())}
+
+    def cut(self, package: Package, stacks_dir: Path) -> None:
+        """Say that a package's run was ended at its bound, and where its processes'
+        stacks are; record it in the result."""
+        self.result.cut.append(package.dir)
+        written = []
+        if stacks_dir.is_dir():
+            for path in sorted(stacks_dir.iterdir()):
+                try:
+                    if path.stat().st_size:
+                        written.append(path)
+                    else:
+                        path.unlink()
+                except OSError:
+                    continue
+        where = stacks_said(len(written), stacks_dir)
+        print(f"moxi-dev check: {package.dir}: its tests ran past their "
+              f"{self.suite_bound_s:g} s bound, so the check ended the run and every "
+              f"process under it and fails the package; {where}", flush=True)
 
     def browsers(self, chosen: Sequence[Package], venv: Path, suite_env: Mapping[str, str]
                  ) -> dict[str, tuple[Sequence[str], Mapping[str, str]]]:

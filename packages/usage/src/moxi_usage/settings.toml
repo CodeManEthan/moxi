@@ -83,14 +83,7 @@ group = "Limits"
 unit = "minutes"
 
 [marks.default]
-type = "enum"
-values = ["off", "1x", "1.5x", "2x"]
-default = "off"
-doc = "The warn-at mark for a session its launch stamped none for."
-read = "use"
-label = "Warn when a session passes"
-line = "Of the restart point, for a session whose launch set no mark."
-common = true
+retired = "remove it: a session is warned only at the mark its launch stamps; set warn_at on the launch, its preset or the launcher's [defaults]"
 
 [marks.max_age_days]
 type = "int"

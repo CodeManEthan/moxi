@@ -853,9 +853,77 @@ def _registered_refusal(ctx: Context, name: str, row) -> int | None:
     return _REFUSED
 
 
+#: The refusal code of each reason `scoped.state` gives for a scoped sender that can't
+#: send.
+SCOPED_REFUSALS = {"undeclared": "scoped-undeclared", "conflict": "scoped-conflict",
+                   "unreadable": "scoped-unreadable"}
+
+
+def _scoped_state(module: str, parent: str, word, env):
+    """`scoped.state` for `module`'s scoped sender for `parent`, read from comms.db
+    without writing; a store that can't be opened reads as `unreadable`."""
+    import sqlite3
+
+    from . import scoped
+    from .store import StoreRefused
+    from .store.open import open_read
+
+    try:
+        conn = open_read(env=env)
+    except (StoreRefused, sqlite3.Error, OSError):
+        return scoped.state(None, module, parent, word)
+    try:
+        return scoped.state(conn, module, parent, word)
+    finally:
+        conn.close()
+
+
+def _send_scoped(args, ctx: Context, *, module: str, parent: str, word, tags,
+                 seen: dict | None = None) -> int:
+    """A send under `module`'s scoped sender for `parent`: refused when it can't send now
+    (`scoped.state`) or when `tags` name anyone but the parent, before the token is read;
+    then the module's token for the word, read through this process's credential chain,
+    presented to the daemon's `send`, which checks the same again and refuses a sender
+    inside a live session. `seen` gets the word under `word` once the scoped sender can
+    send."""
+    from . import reserved, scoped, secrets
+
+    got = _scoped_state(module, parent, word, ctx.env)
+    if not got.can_send:
+        _refuse(ctx, SCOPED_REFUSALS[got.reason], f"{got.why}. Nothing was sent.")
+        return _REFUSED
+    if seen is not None:
+        seen["word"] = got.word
+    others = sorted({identity_of(t) for t in tags} - {got.parent})
+    if others or not tags:
+        said = (f", not to {', '.join(others)}" if others else
+                ": name it as the one recipient")
+        _refuse(ctx, "scoped-recipient", f"{got.qualified} sends only to {got.parent}"
+                f"{said}. Nothing was sent.")
+        return _REFUSED
+    try:
+        chain = secrets.from_config(env=ctx.env)
+        token = chain.get(scoped.secret_id(got.word), owner=reserved.owner(module))["value"]
+    except secrets.SecretNotFound:
+        _refuse(ctx, "credential",
+                f"comms holds no token for {module}'s scoped sender word {got.word} in "
+                "this process's credential chain — nothing was sent. Run `moxi doctor`.")
+        return _REFUSED
+    except secrets.SecretError as exc:
+        _refuse(ctx, "credential", f"{exc} Nothing was sent. Run `moxi doctor`.")
+        return _FAILED
+    name, scope = split_tag(got.qualified)
+    sender = SenderIdentity(qualified=got.qualified, scope=scope or GLOBAL, name=name)
+    return _send_resolved(args, ctx, sender=sender, operator_id=None, tags=[got.parent],
+                          reply_to=None, channel_room=NAMES,
+                          project=project_key(env=ctx.env), reserved_token=token,
+                          scoped=True)
+
+
 def _send_resolved(args, ctx: Context, *, sender, operator_id, tags, reply_to,
                    channel_room, project, referent=None, claim_answer=None,
-                   claim_path=None, author=None, reserved_token=None, bound=None) -> int:
+                   claim_path=None, author=None, reserved_token=None, bound=None,
+                   scoped: bool = False) -> int:
     """Everything a send does once it knows WHO is sending: the checks, the machine
     line, the length cap and the post.
 
@@ -878,6 +946,9 @@ def _send_resolved(args, ctx: Context, *, sender, operator_id, tags, reply_to,
 
     `bound` is a `Sender.bound`: its token is presented as the claim's would be, and a
     refused one is checked against the binding once more (`_post_bound`).
+
+    `scoped` says `sender` is a scoped sender, posted with `reserved_token` only to a
+    daemon whose hello lists `scoped-senders`.
     """
     typed_names = author is None
     if not typed_names:
@@ -923,7 +994,7 @@ def _send_resolved(args, ctx: Context, *, sender, operator_id, tags, reply_to,
     (body,) = bodies
     if operator_id is None:
         posted = (_post_bound(ctx, sender, bound, body) if bound is not None else
-                  _post_reserved(ctx, sender, reserved_token, body)
+                  _post_reserved(ctx, sender, reserved_token, body, scoped=scoped)
                   if reserved_token is not None else
                   _post_from_claim(ctx, claim_path, sender, claim_answer["token"], body))
     else:
@@ -1086,12 +1157,26 @@ def _no_answer(ctx) -> str:
     return NO_ANSWER_TOOL if _tool(ctx) else NO_ANSWER
 
 
-def _post_reserved(ctx: Context, sender: SenderIdentity, token: str, content: str):
-    """A post under a reserved name, with its token. Returns the message id, or a step
-    code once the refusal is said."""
+#: The daemon's capability a send under a scoped sender needs.
+SCOPED_CAPABILITY = "scoped-senders"
+
+
+def _post_reserved(ctx: Context, sender: SenderIdentity, token: str, content: str, *,
+                   scoped: bool = False):
+    """A post under a reserved name, with its token, or, with `scoped`, under a scoped
+    sender, refused before the post when the daemon running has no scoped senders.
+    Returns the message id, or a step code once the refusal is said."""
     client = None
     try:
         client = ctx.daemon()
+        if scoped and SCOPED_CAPABILITY not in (getattr(client, "capabilities", None)
+                                                or ()):
+            from .checks import restart
+
+            _refuse(ctx, "protocol-mismatch", "the comms daemon running is older than this "
+                    f"comms and has no scoped senders. Restart it ({restart()}), then send "
+                    "again. Nothing was sent.")
+            return _FAILED
         try:
             answer = client.send(sender.qualified, token, content)
         except DaemonError as exc:
@@ -1099,8 +1184,8 @@ def _post_reserved(ctx: Context, sender: SenderIdentity, token: str, content: st
                 _refuse(ctx, "credential", f"comms refused the token for "
                         f"{sender.qualified} — nothing was sent. Run `moxi doctor`.")
                 return _REFUSED
-            if exc.code == wire.NAME_RESERVED:
-                _refuse(ctx, "name-reserved", f"{exc} — nothing was sent.")
+            if exc.code in _RESERVED_CODES:
+                _refuse(ctx, _RESERVED_CODES[exc.code], f"{exc} — nothing was sent.")
                 return _REFUSED
             raise
         return answer["message_id"]
@@ -1118,6 +1203,13 @@ def _post_reserved(ctx: Context, sender: SenderIdentity, token: str, content: st
     finally:
         if client is not None:
             client.close()
+
+
+#: The daemon's refusals of a post under a send-only name or a scoped sender, by the
+#: refusal code the send gives.
+_RESERVED_CODES = {wire.NAME_RESERVED: "name-reserved",
+                   wire.SCOPED_CONFLICT: "scoped-conflict",
+                   wire.SCOPED_RECIPIENT: "scoped-recipient"}
 
 
 def _post_as_operator(ctx: Context, user_id: str, token: str, content: str):
@@ -2456,6 +2548,32 @@ def run_reserved(ctx: Context, args, *, module: str | None, name: str,
                                     and result.refusal.code == "credential"),
                         holder=(reserved.MODULE_HOLDER if module else
                                 reserved.PROGRAM_HOLDER))
+    return result
+
+
+def run_scoped(ctx: Context, args, *, module: str, parent: str, word=None,
+               tags) -> SendResult:
+    """`run` for a send under `module`'s scoped sender for `parent` (`word`, or the one
+    word the module declares), to `tags`, which must name the parent alone. A send
+    refused for its credential leaves the doctor a record, as `run_reserved` does."""
+    capture, outer = _Capture(), ctx.capture
+    ctx.capture = capture
+    seen: dict = {}
+    try:
+        try:
+            code = _send_scoped(args, ctx, module=module, parent=parent, word=word,
+                                tags=list(tags), seen=seen)
+        except config.ConfigError as exc:
+            ctx.refuse("config", str(exc))
+            code = _REFUSED
+    finally:
+        ctx.capture = outer
+    result = _result(code, capture, ctx, check=bool(getattr(args, "check", False)))
+    if seen.get("word"):
+        from . import scoped
+        scoped.trace_send(module, seen["word"], sent=result.outcome == OUTCOME_SENT,
+                          credential=(result.refusal is not None
+                                      and result.refusal.code == "credential"))
     return result
 
 

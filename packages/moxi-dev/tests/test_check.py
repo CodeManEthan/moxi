@@ -7,6 +7,7 @@ real thing once.
 
 from __future__ import annotations
 
+import contextlib
 import dataclasses
 import json
 import os
@@ -16,12 +17,15 @@ import shutil
 import subprocess
 import sys
 import threading
+import time
 import tomllib
 from pathlib import Path
 
 import pytest
+from moxi import proc
 
 from moxi_dev import check, temp, testing
+from moxi_dev.testing import wait_for
 from test_release import METADATA, release_files
 
 REPO = Path(__file__).resolve().parents[3]
@@ -138,9 +142,11 @@ class Runs:
     def __init__(self, codes=None):
         self.calls = []
         self.codes = codes or {}
+        self.bounds = []                # (cwd's name, timeout_s) of each call
 
-    def __call__(self, cmd, cwd, env):
+    def __call__(self, cmd, cwd, env, /, *, timeout_s=None):
         self.calls.append((list(cmd), Path(cwd), dict(env)))
+        self.bounds.append((Path(cwd).name, timeout_s))
         for key, code in self.codes.items():
             if key(list(cmd), Path(cwd)):
                 return code
@@ -533,6 +539,251 @@ def test_the_suites_drop_what_could_make_them_serial(repo):
     for _, _, env in suites:
         assert "PYTEST_XDIST_AUTO_NUM_WORKERS" not in env and "PYTEST_ADDOPTS" not in env
         assert env["PYTEST_DEBUG_TEMPROOT"] == "/var/tmp"
+
+
+def test_each_suite_and_nothing_else_runs_under_the_default_bound(repo):
+    runs = Runs()
+    run_check(repo, runs, full=True)
+    assert [(name, bound) for name, bound in runs.bounds if bound is not None] == [
+        (name, check.SUITE_BOUND_S) for name in LAYOUT]
+    assert [cmd for (cmd, _, _), (_, bound) in zip(runs.calls, runs.bounds)
+            if bound is None] == [cmd for cmd, _, _ in runs.calls if "pytest" not in cmd]
+    assert check.SUITE_BOUND_S <= 900
+
+
+def test_the_variable_sets_the_bound(repo):
+    runs = Runs()
+    run_check(repo, runs, full=True, env={"PATH": "/usr/bin",
+                                          "MOXI_TEST_SUITE_BOUND_S": "1200"})
+    assert {bound for _, bound in runs.bounds if bound is not None} == {1200.0}
+
+
+@pytest.mark.parametrize("value", ["0", "-5", "ten", "nan", "inf"])
+def test_a_bad_bound_stops_the_check(repo, value, capsys):
+    runs = Runs()
+    result = run_check(repo, runs, full=True, env={"MOXI_TEST_SUITE_BOUND_S": value})
+    assert result.code == 2 and runs.calls == []
+    assert "MOXI_TEST_SUITE_BOUND_S" in capsys.readouterr().err
+
+
+def test_each_suite_is_told_where_and_when_to_write_its_stacks_and_an_in_time_run_keeps_none(
+        repo):
+    stale = repo / check.RUN_DIR / "cache.stacks"
+    stale.mkdir(parents=True)
+    (stale / "main-1.txt").write_text("old\n")
+    runs = Runs()
+    before = time.time()
+    run_check(repo, runs, full=True, env={"PATH": "/usr/bin",
+                                          "MOXI_TEST_SUITE_BOUND_S": "100"})
+    for cmd, cwd, env in runs.calls:
+        if "pytest" in cmd:
+            assert env[testing.STACKS_ENV] == str(repo / check.RUN_DIR / f"{cwd.name}.stacks")
+            assert env[testing.PARENT_PID_ENV] == str(os.getpid())
+            at = float(env[testing.STACKS_AT_ENV])
+            assert before + 90 - 1 <= at <= time.time() + 90 + 1
+    assert not stale.exists()
+
+
+def test_a_short_bound_writes_the_stacks_at_half_of_it(repo):
+    runs = Runs()
+    before = time.time()
+    run_check(repo, runs, full=True, env={"PATH": "/usr/bin",
+                                          "MOXI_TEST_SUITE_BOUND_S": "6"})
+    ats = [float(env[testing.STACKS_AT_ENV]) for cmd, _, env in runs.calls if "pytest" in cmd]
+    assert ats and all(before + 3 - 1 <= at <= time.time() + 3 + 1 for at in ats)
+
+
+#: A package run that never ends: it starts a child that sleeps, notes the child's pid in
+#: the file its argument names, writes one process's stacks and one empty file where the
+#: kit would, and sleeps.
+HANG = """\
+import os, subprocess, sys, time
+from pathlib import Path
+child = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(120)"])
+Path(sys.argv[1]).write_text(str(child.pid))
+stacks = Path(os.environ["MOXI_TEST_STACKS"])
+stacks.mkdir(parents=True, exist_ok=True)
+(stacks / "main-1.txt").write_text("Thread 0x1 (most recent call first):\\n")
+(stacks / "gw0-2.txt").write_text("")
+time.sleep(120)
+"""
+
+
+def _running(pid: int) -> bool:
+    found = proc.identity(pid)
+    return found is not None and proc.alive(found)
+
+
+def test_a_package_run_past_its_bound_is_ended_with_its_tree_and_fails_alone(
+        repo, tmp_path, capsys):
+    pid_file = tmp_path / "child.pid"
+    runs = Runs()
+
+    def run(cmd, cwd, env, /, *, timeout_s=None):
+        runs(cmd, cwd, env, timeout_s=timeout_s)
+        if "pytest" in cmd and Path(cwd).name == "cache":
+            return check._run([sys.executable, "-c", HANG, str(pid_file)], cwd, env,
+                              timeout_s=timeout_s)
+        return 0
+
+    began = time.monotonic()
+    result = run_check(repo, run, full=True,
+                       env={**os.environ, "MOXI_TEST_SUITE_BOUND_S": "4"})
+    took = time.monotonic() - began
+    assert result.code == 1
+    assert [(n, ok) for n, ok, _ in result.suites] == [
+        (name, name != "cache") for name in LAYOUT]
+    assert result.cut == ["cache"]
+    assert re.search(r"\| moxi pass [\d.]+s, sessions pass [\d.]+s, turns pass [\d.]+s, "
+                     r"cache fail [\d.]+s ended at its bound, comms pass", result.line())
+    assert 4 <= took < 4 + 30
+    stacks = repo / check.RUN_DIR / "cache.stacks"
+    out = capsys.readouterr().out
+    assert (f"moxi-dev check: cache: its tests ran past their 4 s bound, so the check "
+            f"ended the run and every process under it and fails the package; the one "
+            f"process still running then wrote its stacks to {stacks}") in out
+    assert [path.name for path in stacks.iterdir()] == ["main-1.txt"]
+    child = int(pid_file.read_text())
+    wait_for(lambda: not _running(child), testing.PROC_WAIT_S,
+             what="the run's child to be ended")
+
+
+#: A check whose cache package's run is a process that starts a sleeping child, notes
+#: both pids in the file its second argument names, and sleeps.
+SIGNALLED = """\
+import os, sys
+from pathlib import Path
+from moxi_dev import check
+
+TREE = (
+    "import subprocess, sys, time, os\\n"
+    "from pathlib import Path\\n"
+    "child = subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(120)'])\\n"
+    "Path(sys.argv[1]).write_text(f'{os.getpid()} {child.pid}')\\n"
+    "time.sleep(120)\\n")
+
+
+def run(cmd, cwd, env, /, *, timeout_s=None):
+    if "pytest" in cmd and Path(cwd).name == "cache":
+        return check._run([sys.executable, "-c", TREE, sys.argv[2]], cwd, env,
+                          timeout_s=timeout_s)
+    return 0
+
+
+if len(sys.argv) > 3:
+    import signal
+    signal.signal(getattr(signal, sys.argv[3]), signal.SIG_IGN)
+result = check.check(Path(sys.argv[1]), run=run, full=True, env=dict(os.environ),
+                     plan=lambda package, work, members: [])
+sys.exit(result.code)
+"""
+
+
+@pytest.mark.skipif(sys.platform == "win32",
+                    reason="Windows has no SIGTERM to send: os.kill there ends the process "
+                           "outright, which the test kit's parent watch covers")
+@pytest.mark.parametrize("name", ["SIGTERM", "SIGHUP"])
+def test_a_check_ended_by_a_signal_ends_the_package_run_under_way(repo, tmp_path, name):
+    import signal
+
+    pids_file = tmp_path / "pids"
+    checker = subprocess.Popen([sys.executable, "-c", SIGNALLED, str(repo), str(pids_file)],
+                               stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    try:
+        wait_for(lambda: pids_file.exists() and " " in pids_file.read_text(),
+                 testing.PROC_WAIT_S, what="the package run to start")
+        run_pid, child = (int(one) for one in pids_file.read_text().split())
+        signum = getattr(signal, name)
+        checker.send_signal(signum)
+        assert checker.wait(timeout=testing.PROC_WAIT_S) == 128 + signum
+        wait_for(lambda: not _running(run_pid) and not _running(child), testing.PROC_WAIT_S,
+                 what="the package run and its child to be ended")
+    finally:
+        checker.kill()
+        checker.wait()
+        for pid in (pids_file.read_text().split() if pids_file.exists() else ()):
+            with contextlib.suppress(OSError):
+                os.kill(int(pid), signal.SIGKILL)
+
+
+def test_the_check_puts_back_the_signal_handlers_it_found(repo):
+    import signal
+
+    before = {one: signal.getsignal(one) for one in check.END_SIGNALS}
+    run_check(repo, Runs(), full=True)
+    assert {one: signal.getsignal(one) for one in check.END_SIGNALS} == before
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="Windows has no SIGHUP")
+def test_a_check_started_ignoring_sighup_survives_it_and_its_run_goes_on(repo, tmp_path):
+    import signal
+
+    pids_file = tmp_path / "pids"
+    checker = subprocess.Popen(
+        [sys.executable, "-c", SIGNALLED, str(repo), str(pids_file), "SIGHUP"],
+        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    try:
+        wait_for(lambda: pids_file.exists() and " " in pids_file.read_text(),
+                 testing.PROC_WAIT_S, what="the package run to start")
+        run_pid, child = (int(one) for one in pids_file.read_text().split())
+        checker.send_signal(signal.SIGHUP)
+        with pytest.raises(subprocess.TimeoutExpired):
+            checker.wait(timeout=1)
+        assert _running(run_pid) and _running(child)
+        checker.send_signal(signal.SIGTERM)
+        assert checker.wait(timeout=testing.PROC_WAIT_S) == 128 + signal.SIGTERM
+        wait_for(lambda: not _running(run_pid) and not _running(child), testing.PROC_WAIT_S,
+                 what="the package run and its child to be ended")
+    finally:
+        checker.kill()
+        checker.wait()
+        for pid in (pids_file.read_text().split() if pids_file.exists() else ()):
+            with contextlib.suppress(OSError):
+                os.kill(int(pid), signal.SIGKILL)
+
+
+def test_the_check_leaves_a_handler_python_did_not_install_in_place(repo, monkeypatch):
+    import signal
+
+    foreign = check.END_SIGNALS[0]
+    getsignal, install = signal.getsignal, signal.signal
+    installed = []
+
+    def recording(signum, handler):                       # as Python's own does for one
+        installed.append(signum)                          # it did not install: None back
+        was = install(signum, handler)
+        return None if signum == foreign else was
+
+    monkeypatch.setattr(signal, "getsignal",
+                        lambda signum: None if signum == foreign else getsignal(signum))
+    monkeypatch.setattr(signal, "signal", recording)
+    before = {one: getsignal(one) for one in check.END_SIGNALS}
+    run_check(repo, Runs(), full=True)
+    assert foreign not in installed
+    assert {one: getsignal(one) for one in check.END_SIGNALS} == before
+
+
+@pytest.mark.parametrize(("written", "said"), [
+    (0, "none of its processes wrote its stacks"),
+    (1, "the one process still running then wrote its stacks to {where}"),
+    (3, "the 3 processes still running then wrote their stacks to {where}"),
+])
+def test_the_cut_line_says_how_many_processes_wrote_their_stacks(tmp_path, written, said):
+    where = tmp_path / "cache.stacks"
+    assert check.stacks_said(written, where) == said.format(where=where)
+
+
+def test_a_run_ended_at_its_bound_with_no_stacks_says_so(repo, capsys):
+    def run(cmd, cwd, env, /, *, timeout_s=None):
+        if "pytest" in cmd and Path(cwd).name == "turns":
+            raise subprocess.TimeoutExpired(cmd, timeout_s)
+        return 0
+
+    result = run_check(repo, run, full=True)
+    assert result.code == 1 and result.cut == ["turns"]
+    assert ("moxi-dev check: turns: its tests ran past their 900 s bound, so the check "
+            "ended the run and every process under it and fails the package; none of its "
+            "processes wrote its stacks") in capsys.readouterr().out
 
 
 @pytest.mark.parametrize("value", ["0", "-2", "two", "1.5"])
@@ -1256,8 +1507,8 @@ class Timed(Runs):
                 **({"lifted": lifted} if lifted else {})}
         return tests
 
-    def __call__(self, cmd, cwd, env):
-        code = super().__call__(cmd, cwd, env)
+    def __call__(self, cmd, cwd, env, /, *, timeout_s=None):
+        code = super().__call__(cmd, cwd, env, timeout_s=timeout_s)
         name = Path(cwd).name
         if "pytest" not in cmd or not self.write:
             return code
@@ -1748,13 +1999,13 @@ def test_a_suite_in_memory_after_all_is_named_in_the_summary(repo):
     commit_file(repo, "packages/sessions/x.py")
 
     class Writing(Runs):
-        def __call__(self, cmd, cwd, env):
+        def __call__(self, cmd, cwd, env, /, *, timeout_s=None):
             if "pytest" in cmd and cwd.name in ("sessions", "cache"):
                 chosen = {"mode": "disk", "root": "/tmp", "is_in_memory": True,
                           "why": "/var/tmp is not writable"}
                 Path(env[testing.DURATIONS_ENV]).write_text(
                     json.dumps({"format": 1, "tests": {}, "temp": chosen}))
-            return super().__call__(cmd, cwd, env)
+            return super().__call__(cmd, cwd, env, timeout_s=timeout_s)
 
     result = run_check(repo, Writing())
     assert ("| temp disk (2 suites in memory at /tmp: /var/tmp is not writable) |"

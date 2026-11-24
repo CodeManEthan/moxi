@@ -25,7 +25,7 @@ from playwright.sync_api import expect
 from test_browser_list import env_of, open_list, sid, tid
 from test_browser_running import T, LauncherStub, launch, launched_row, seed
 
-pytestmark = [pytest.mark.browser, pytest.mark.timeout(180),
+pytestmark = [pytest.mark.browser, pytest.mark.timeout(180, method="thread"),
               pytest.mark.skipif(not sys.platform.startswith("linux"),
                                  reason="sessions' page is checked in a browser on Linux; the "
                                         "Windows and macOS runs are owed"),

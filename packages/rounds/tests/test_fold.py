@@ -106,7 +106,7 @@ def test_a_fold_copies_the_design_to_its_first_version_and_records_its_digest(ro
             "question": [{"id": "Q1", "text": ASKED, "blocks": "all"}],
             "stage": [{"id": "B1", "after": [], "repo": "proj-a",
                        "branch": "branch-b1", "slices": []}],
-            "trace": [], "commitment": []},
+            "trace": [], "commitment": [], "checklist": []},
         "added": {"stages": ["B1"], "questions": ["Q1"]}, "pending": []}
     found = folded(round_dir)
     assert versions.current(found).n == 1

@@ -70,7 +70,8 @@ def test_the_agents_answer_carries_its_kind_on_the_wire(make_endpoint, connect):
     assert answer["kind"] == "agents" and answer["complete"] is True
     assert answer["entries"] == [{"id": "a1", "kind": "subagent", "state": "running",
                                   "final": False, "description": None,
-                                  "parent_id": "p"}]
+                                  "parent_id": "p", "is_fork": False,
+                                  "last_write_at": None}]
     assert from_wire(answer) == Agents((entry("a1", parent_id="p"),), complete=True,
                                                      at=answer["at"])
 

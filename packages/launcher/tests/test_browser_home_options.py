@@ -24,7 +24,7 @@ from moxi_launcher import presets
 WAIT_S = pytest.importorskip("moxi_ui.testing", reason="ui is not installed").WAIT_S
 _copying = pytest.importorskip("moxi_ui.testing.browser", reason="ui is not installed")
 
-pytestmark = [pytest.mark.browser, pytest.mark.timeout(120)]
+pytestmark = [pytest.mark.browser, pytest.mark.timeout(120, method="thread")]
 
 BRIEF = "say the word options"
 PREVIEW = "/m/launcher/api/preview"

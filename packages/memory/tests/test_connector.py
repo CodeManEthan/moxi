@@ -172,7 +172,7 @@ def test_the_tool_is_read_only_ends_with_the_untrusted_line_and_bounds_its_input
     assert props["words"]["maxLength"] == 500 and props["words"]["minLength"] == 1
     assert props["limit"] == {"type": "integer", "minimum": 1, "maximum": 20, "default": 8,
                               "description": "How many hits."}
-    for switch in ("results", "subagents", "scratch"):
+    for switch in ("results", "subagents", "scratch", "forks"):
         assert props[switch]["default"] is False
     assert props["harness"]["enum"] == ["claude", "codex", "opencode"]
     assert isinstance(connector.MEMORY.limit, HOST.Limit)
@@ -406,6 +406,17 @@ def test_scratch_widens_the_search(db):
     sc.close()
     assert search({"words": "deploy"})[0].structured["hits"] == []
     assert len(search({"words": "deploy", "scratch": True})[0].structured["hits"]) == 1
+
+
+def test_forks_widens_the_search(db):
+    put(db, "deploy in a fork launch", session="s-fork")
+    sc = state.connect()
+    with sc:
+        sc.execute("INSERT INTO sessions (harness, session_id, kind, newest, written) "
+                   "VALUES ('claude', 's-fork', 'fork', 1, 1)")
+    sc.close()
+    assert search({"words": "deploy"})[0].structured["hits"] == []
+    assert len(search({"words": "deploy", "forks": True})[0].structured["hits"]) == 1
 
 
 def test_project_since_and_harness_filter(db):

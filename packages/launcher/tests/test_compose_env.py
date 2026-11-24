@@ -131,14 +131,22 @@ def test_the_stamps_with_turns_the_additions_usage_and_notes():
 
 def test_a_value_for_a_module_that_cannot_load_is_not_stamped_and_the_launch_goes_on(
         monkeypatch):
-    # A replayed row can carry warn_at or notes_dir after usage or notes was removed.
+    # A replayed row can carry warn_at, notes_dir or subconscious after usage, notes or
+    # memory was removed.
     real = modules.load
     monkeypatch.setattr(modules, "load", lambda name, **kw: (
-        SimpleNamespace(ok=False, api=None) if name in ("usage", "notes")
+        SimpleNamespace(ok=False, api=None) if name in ("usage", "notes", "memory")
         else real(name, **kw)))
     assert common.stamps("r1", warn_at="1.5x", notes_dir="/notes") == {
         "MOXI_LAUNCHER_REQUEST": "r1"}
     assert common.option_stamps({"recycle_at_limit": "compact", "limit_at": "1x"}) == {}
+    assert common.option_stamps({"subconscious": "automatic"}) == {}
+
+
+@pytest.mark.parametrize("mode", ["automatic", "on-demand"])
+def test_the_subconscious_row_stamps_its_mode_under_memorys_variable(mode):
+    assert common.option_stamps({"subconscious": mode}) == {"MOXI_MEMORY_SUBCONSCIOUS": mode}
+    assert common.option_stamps({"subconscious": "off"}) == {}
 
 
 @pytest.mark.parametrize("harness, extra", [("claude", {}), ("codex", {})])
@@ -152,6 +160,21 @@ def test_a_launch_stamps_the_grant_only_with_turns(harness, extra):
                                              host="/host"))
     assert with_turns.env == {"MOXI_TURNS_COMMANDS": "exit", **warn,
                               "MOXI_LAUNCHER_REQUEST": "r1"}
+
+
+@pytest.mark.parametrize(("values", "warm"), [
+    ({"keep_warm": "on"}, True),
+    ({"keep_warm": "off"}, False),
+    ({"target": "headless", "keep_warm": "off"}, False),
+    ({"target": "headless", "keep_warm": "on"}, True),
+    # The resolver left the row out: the install doesn't offer it, and it reads off.
+    ({}, False),
+])
+def test_a_claude_launch_is_stamped_and_told_keep_warm_only_when_made_on(values, warm):
+    got = claude.compose({"harness": "claude", "cwd": "/work", **values}, ctx(brief="b"))
+    assert (got.env.get(common.KEEP_WARM_ENV) == "on") is warm
+    assert ("keep warm:     " + common.KEEP_WARM_LINE in got.prompt_file.text) is warm
+    assert got.values["keep_warm"] == values.get("keep_warm", "off")
 
 
 def test_the_rows_that_stamp():
@@ -237,49 +260,80 @@ def test_on_windows_the_whole_line_is_limited():
 # -- the limit mark -------------------------------------------------------------------------
 
 
-@pytest.fixture
-def usage_default(monkeypatch):
-    """usage's config `marks.default` as the launcher reads it, set per test."""
-    def set_to(mark):
-        monkeypatch.setattr(common, "usage_default_mark", lambda: mark)
-    return set_to
-
-
-@pytest.mark.parametrize("values, default, mark", [
+@pytest.mark.parametrize("values, mark", [
     # limit_at set to a mark wins over everything.
-    ({"limit_at": "1.5x", "warn_at": "2x"}, "2x", "1.5x"),
+    ({"limit_at": "1.5x", "warn_at": "2x"}, "1.5x"),
     # Unset, it follows the launch's warn_at.
-    ({"limit_at": "", "warn_at": "2x"}, "1x", "2x"),
-    ({"warn_at": "1.5x"}, None, "1.5x"),
-    # No warn_at: usage warns at its config default, so the line comes with it.
-    ({"limit_at": "", "warn_at": ""}, "1.5x", "1.5x"),
-    ({}, "2x", "2x"),
-    # warn_at off, or usage warns at none: 1x.
-    ({"warn_at": "off"}, "2x", "1x"),
-    ({"warn_at": ""}, None, "1x"),
-    ({}, "off", "1x"),
+    ({"limit_at": "", "warn_at": "2x"}, "2x"),
+    ({"warn_at": "1.5x"}, "1.5x"),
+    # warn_at off or unset: usage warns at no mark, and no config stands in; 1x.
+    ({"warn_at": "off"}, "1x"),
+    ({"limit_at": "", "warn_at": ""}, "1x"),
+    ({}, "1x"),
 ])
-def test_the_limit_mark_follows_limit_at_then_warn_at_then_usage(usage_default, values,
-                                                                  default, mark):
-    usage_default(default)
-    assert common.limit_mark(values) == mark
-    for recycle in ("relaunch", "compact"):
-        stamped = common.option_stamps({"recycle_at_limit": recycle, **values})
-        assert stamped == {"MOXI_USAGE_CROSSING_AT": mark}
+def test_the_compact_mark_follows_limit_at_then_warn_at(values, mark):
+    compact = {"recycle_at_limit": "compact", **values}
+    assert common.limit_mark(compact) == mark
+    assert common.option_stamps(compact) == {"MOXI_USAGE_CROSSING_AT": mark}
     assert common.option_stamps({"recycle_at_limit": "off", **values}) == {}
 
 
-def test_usage_s_default_mark_is_read_from_its_config():
+#: A Claude slot launch in a folder, which can recycle itself once it relaunches at a mark.
+SLOT_LAUNCH = {"harness": "claude", "target": "slot", "cwd": "/work",
+               "recycle_at_limit": "relaunch"}
+
+
+@pytest.fixture
+def slot_here(monkeypatch):
+    """slots runs here and notes is not installed, so the launcher keeps the handoffs."""
+    from moxi_launcher import catalog
+
+    monkeypatch.setattr(catalog, "slots_here", lambda: True)
+    real = modules.available
+    monkeypatch.setattr(modules, "available", lambda name: name != "notes" and real(name))
+
+
+@pytest.mark.parametrize("warn_at", ["1x", "1.5x", "2x"])
+@pytest.mark.parametrize("limit_at", ["", "1x"])
+def test_a_relaunch_launch_crosses_at_its_warn_at(slot_here, warn_at, limit_at):
+    # The relaunch line rides on usage's warning; a limit_at never moves it.
+    values = {**SLOT_LAUNCH, "warn_at": warn_at, "limit_at": limit_at}
+    assert common.limit_mark(values) == warn_at
+    assert common.relaunch_holds(values)
+    assert common.option_stamps(values) == {"MOXI_USAGE_CROSSING_AT": warn_at}
+
+
+@pytest.mark.parametrize("change", [
+    {"target": "terminal"}, {"harness": "codex"}, {"scratch": True}, {"warn_at": "off"},
+    {"warn_at": ""}, {"recycle_at_limit": "off"}])
+def test_a_relaunch_launch_that_cannot_recycle_itself_is_not_stamped(slot_here, change):
+    values = {**SLOT_LAUNCH, "warn_at": "2x", **change}
+    assert not common.relaunch_holds(values)
+    assert common.option_stamps(values) == {}
+
+
+def test_a_relaunch_launch_where_slots_do_not_run_is_not_stamped(slot_here, monkeypatch):
+    from moxi_launcher import catalog
+
+    monkeypatch.setattr(catalog, "slots_here", lambda: False)
+    assert common.option_stamps({**SLOT_LAUNCH, "warn_at": "2x"}) == {}
+
+
+def test_a_relaunch_launch_with_no_notes_dir_is_not_stamped(slot_here, monkeypatch):
+    # notes installed and giving the folder no notes directory: no handoff folder.
+    from moxi_launcher import handoffs
+
+    def homeless(cwd, **kw):
+        raise handoffs.NoNotesDir(cwd)
+
+    monkeypatch.setattr(handoffs, "handoff_dir", homeless)
+    assert common.option_stamps({**SLOT_LAUNCH, "warn_at": "2x"}) == {}
+
+
+def test_a_config_naming_a_default_mark_moves_no_launch_mark():
+    # usage keeps no default mark; a config still naming one is refused by usage and read
+    # by no launch.
     path = Layout("usage").config_file()
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text('[marks]\ndefault = "1.5x"\n', encoding="utf-8")
-    assert common.usage_default_mark() == "1.5x"
-    assert common.limit_mark({"warn_at": ""}) == "1.5x"
-    path.write_text('[marks]\ndefault = "off"\n', encoding="utf-8")
-    assert common.limit_mark({"warn_at": ""}) == "1x"
-
-
-def test_without_usage_there_is_no_default_mark(monkeypatch):
-    real = modules.available
-    monkeypatch.setattr(modules, "available", lambda name: name != "usage" and real(name))
-    assert common.usage_default_mark() is None
+    assert common.limit_mark({"recycle_at_limit": "compact", "warn_at": ""}) == "1x"

@@ -2,6 +2,92 @@
 
 ## Unreleased
 
+- The `subconscious` row (`off`, `automatic`, `on-demand`; needs turns and memory) turns
+  memory's subconscious on for one launch, or for every launch of a preset that sets it:
+  a launch with it on stamps the mode under memory's `SUBCONSCIOUS_ENV`, read from
+  memory's API. For now a recall runs on Claude Code only: a Codex launch with the row
+  on is accepted and has the subconscious off at run time, which memory's log and doctor
+  say. A fork drops it. memory joins the optional links, with a `memory` extra.
+- A headless launch with an identity keeps `keep_warm = "on"`, with no warning, as any
+  other launch does. A nudge is a turn, which starts the exit rule's `idle=` count again,
+  so the session ends by its rule once keep-warm stops nudging. `recycle_on_expiry` is
+  still left out there with its warning.
+- An open hold is work out wherever a live subagent or a directed agent at work is. Home's
+  Sessions row reads a session with neither, but holds of its chain open, as waiting on
+  them (`waits` kind `holds`, `waiting on 1 open hold`, `kept warm while 1 hold is
+  open`), and offers `Keep warm` at its cap; the press counts those holds as work out
+  (read as if cover had just been set) and records cover with that wait. A refused
+  press with nobody at work now says no hold is open either.
+- `moxi launcher show` reads keep-warm off wherever keep-warm can't act on this install
+  (`keepwarm.can_act`: the `keep_warm` row isn't offered, with turns or cache missing or
+  where cache can't read a session's environment), as the stamp and the start text's
+  `keep warm:` line already do.
+- The director case no longer needs cover: every ask about a launch keep-warm is on for
+  that doesn't nudge for a subagent reads the agents the session directs (the join,
+  within 20 s), and with comms absent nobody is directed. A join or agent list not read
+  whole, with no case found, ends the ask `unreadable`, quietly.
+- Holds are taken and read wherever keep-warm is on, cover included: a launch made with
+  `keep_warm` off takes holds while its session is covered, the hold verbs work
+  there, `show` lists them, and an open hold keeps the cover as work out does.
+- Home's Sessions row and the `Keep warm` press read the agents a session directs
+  wherever keep-warm's ask would (`keepwarm.joins`): unless a live subagent's case is
+  under its cap. A session whose subagent nudges are spent while an agent it directs
+  works reads `kept warm`, and a press there is answered, as the ask nudges it.
+- The start text's `keep warm:` line no longer asks for a hold per piece of work: it says
+  subagents and directed agents at work keep the session warm, and that a hold covers
+  other work.
+- A run of nudges counts each case apart, by the word each nudge ended with: the subagent
+  case up to `keep_warm.subagent_cap`, then the director case up to
+  `keep_warm.director_cap`, so a director whose subagent nudges are spent is still nudged
+  while an agent it directs works. A run with every case spent ends `blocked` (`capped`)
+  naming each count (`subagents 3/3, director 10/10`). Each case's texts go by its own
+  count. A director nudge with agents it directs at work and holds open names both: the
+  directing texts, the agents, then `Open holds:`.
+- Keep-warm's subagent case and the agents a session directs count the same entries
+  (`waits.live_subagents`): a `subagent` or `teammate` entry not final and pending,
+  running or waiting, and not a fork of the session's main loop. A directed Claude agent
+  whose turn is closed is at work by the subagents its own agent list holds at work, not
+  by turns' busy count, so a fork, or a subagent turns' `stale-agents` judgment lists
+  `idle`, keeps neither case going. A list turns can't read whole leaves that agent
+  unlisted, as before.
+- A `compact` launch with `limit_at` unset and no `warn_at` mark crosses at `1x`; it no
+  longer reads usage's `marks.default`, which usage no longer has, and
+  `compose.common.usage_default_mark` is removed.
+- A Claude launch is found by its `claude` process. An act accepts a session served by
+  a new endpoint whose parent is the launch's `claude` when the claimed endpoint is gone,
+  where it said `changed`; a session id no launch knows resolves to the launch whose
+  `claude` serves it, where it said `not-launched`, in `relaunch --self`, exit-session,
+  keep-warm, recycle on expiry, `show SESSION_ID` and a director's call by session id. A
+  context crossing claims the launch for its endpoint (moving it by parent) and learns
+  the session's id before it answers. A self relaunch's handoff of an id the launch never
+  learned is checked against the first record of the id's transcript.
+- A `relaunch` launch's self relaunch is armed only where its session can recycle
+  itself: a Claude launch in a slot, where slots run, not in a scratch folder, with a
+  handoff folder. It is told at its `warn_at` mark that it may only where it is also
+  warned at a mark. One test (`selfrecycle.missing`, with `told` for the mark) decides
+  what the composer stamps, what the crossing tells and what `relaunch --self` accepts.
+  A `relaunch` with no warn-at mark is armed and never told, with no refusal and no
+  warning; `show` says `at limit relaunch (armed, no warning)`. `recycle_at_limit` still
+  ships `off`.
+- A `relaunch` launch is told at `warn_at`, never at `limit_at`. A `limit_at` typed or
+  set by the preset beside `relaunch` is refused `relaunch-mark`; from `[defaults]` it is
+  left out with a warning. A `relaunch` set for a launch that can't act on it, a Codex one
+  or one with no handoff folder, is kept and the launch warns, naming why.
+- A `relaunch --self` refusal names what the launch fails: not set to `relaunch`, not a
+  Claude slot launch, slots not here, a scratch folder, or no handoff folder. A launch with no notes directory is now refused `no-self-recycle` before its
+  handoff is read.
+- The relaunch line now says to stop your background shells: "write a handoff with the
+  handoff skill, stop your background shells, then run `moxi launcher relaunch --self
+  --handoff <file>`". It no longer names the mark (usage's notice, which it is appended
+  to, does), so `RELAUNCH_AFTER` and `relaunch_line` are gone; the crossing returns
+  `RELAUNCH_LINE`. A `relaunch` launch is still told at every rise past the mark, a
+  compaction's included, and a `compact` launch still compacts at every rise.
+- The `moxi-handoff` skill's recycle steps stop your background shells before the
+  relaunch.
+- With the `ui` extra, a `project-facts` component reports to the Projects page how many
+  launched sessions run in each project, and for the opened project where its lead runs,
+  a `Launch` row (its preset, its last launch and how it names sessions) and a `Sessions`
+  row of what runs there. It reads only the launcher's existing routes.
 - After a topic value the page reads its past sessions again through moxi-ui's
   `readLater`, so the page root's `data-reading` mark counts that read from the moment it
   is scheduled until its answer is drawn, and a test's press waits for the list it

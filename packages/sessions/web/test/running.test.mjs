@@ -188,10 +188,10 @@ test("the words, the path and the wait are launcher's own, where its source sits
 });
 
 test("the kinds a subagents wait counts are launcher's keep-warm's, where its source sits beside sessions'", () => {
-  const theirs = new URL("../../../launcher/src/moxi_launcher/keepwarm.py", import.meta.url);
+  const theirs = new URL("../../../launcher/src/moxi_launcher/waits.py", import.meta.url);
   if (!existsSync(theirs)) return;
-  const line = readFileSync(theirs, "utf8").match(/^SIGNAL_KINDS = \(([^)]*)\)$/m);
-  assert.ok(line, "keepwarm.py has no one-line SIGNAL_KINDS tuple");
+  const line = readFileSync(theirs, "utf8").match(/^SUBAGENT_KINDS = \(([^)]*)\)$/m);
+  assert.ok(line, "waits.py has no one-line SUBAGENT_KINDS tuple");
   assert.deepEqual(WAITED_KINDS, [...line[1].matchAll(/"([^"]*)"/g)].map((kind) => kind[1]));
 });
 

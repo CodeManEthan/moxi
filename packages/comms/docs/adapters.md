@@ -659,3 +659,99 @@ later holder of a freed name is someone else. Its sender is not told. `moxi comm
 reserved]`. The daemon drops it at its start, at the name's next release point, and when
 `moxi comms agents` or `explain` asks, so a name another process reserved or registered
 takes effect at the next of those. A name in conflict isn't reserved, and keeps its mail.
+
+## Scoped senders
+
+A scoped sender is a send-only name that belongs to one parent comms name and one module.
+comms forms it from the parent and a word the module declares: for the parent
+`builder@acme` and the word `digest`, it is `builder-digest@acme`, the parent's name, a
+dash and the word, in the parent's scope (`fleet-lead-digest` for the global
+`fleet-lead`). The parent is the identity comms resolves the name to, as for any
+recipient: an ephemeral `agent-N` is the global one however it is spelled, so the
+scoped sender of `agent-3@acme` is `agent-3-digest`, and `agent-3-digest@acme` is no
+scoped sender's name. A module uses one to send a session something of its own, under a name
+the session can tell apart from any agent's, without a name per session to reserve.
+
+A module declares a word by an entry point in comms' group `moxi.comms.scoped_senders`,
+named by the word, whose target is a one-line description in plain stdlib data, so the
+declaration imports nothing of comms (as an adapter kind is declared in
+`moxi.comms.kinds`):
+
+```toml
+[project.entry-points."moxi.comms.scoped_senders"]
+digest = "some_package.words:DIGEST"
+```
+
+```python
+# some_package/words.py
+DIGEST = "the nightly digest a session gets from its own reader"
+```
+
+A word is lower-case letters and digits, starting with a letter, with no dash, so a
+formed name reads back to one parent and one word. The module that owns the word is the
+one whose distribution carries the entry point. comms reads the group where it reads a
+module's `RESERVED_NAMES`: when a module installs or is uninstalled, at the daemon's
+start and in `moxi doctor`. A word one module declares is active, and comms mints that
+module's token for it into the credential chain, as `comms/scoped/<word>`. A word two
+modules declare is in conflict for both, and no token sends under it; `moxi doctor`
+warns until one lets it go. A word no module declares any more is freed and its token
+removed.
+
+**Sending.** Only the module's own code sends under its scoped sender, through comms'
+API (interface 3, so a module for which comms is optional loads comms with
+`interface=3` to tell an older comms without scoped senders):
+
+```python
+from moxi_comms import api
+
+result = api.send_scoped("some", "builder@acme", "builder@acme", "the digest",
+                         interrupt=True, expires="never")
+```
+
+The send reaches its parent alone: `to` must name the parent and no one else. It is
+refused, with nothing posted, as `scoped-recipient` when it names anyone else (the
+parent and another included), and the daemon refuses the same with the verb bypassed
+(`scoped-recipient`, 1116). As for any send-only name, a session's binding token never
+sends under it, and the daemon refuses a send from any process inside a live session,
+or one whose ancestry it can't read (`name-reserved`). Its messages carry `[no reply]`.
+The other refusals: `scoped-undeclared` (the module declares no such word),
+`scoped-conflict` (the word is in conflict, or the name is held; the daemon's code is
+1115), `scoped-unreadable` (comms' store can't be read), `credential` (the token can't
+be read or doesn't match) and `protocol-mismatch` (a running daemon older than scoped
+senders: restart it). A send refused for its credential leaves a record that `moxi
+doctor` shows, naming the process, until a send under the word works again or `moxi
+comms reserved renew --word WORD`, run from that process's environment, mints a new
+token.
+
+Delivery is unchanged: the message reaches the parent as any message does (`interrupt`
+into a running turn between tool calls, else at the turn boundary; held for a cold
+cache; its expiry as given). Its frame line names the scoped sender and marks it
+`(send-only)`, a delivery's `senders` carry its qualified name, and `moxi comms
+history` shows it as the author, `(send-only, verified)`. `moxi comms explain`
+explains the parent's delivery of it, as for any message.
+
+**Nobody mails it or holds it.** `moxi comms send` and `reply` refuse it as a recipient,
+and the daemon refuses a line zero that names it (`not-mailable`). Once a word is
+declared, no session binds a name of its form, and `moxi comms send-only add` refuses
+one. A name of the form someone held before the word was declared (a live session's
+binding, or a program's send-only name) stays its holder's; that one parent's scoped
+sender is in conflict (`scoped-conflict`), and `moxi doctor` names the holder. Other
+parents' scoped senders of the word are unaffected. A scoped sender is never a binding,
+so `moxi comms agents` (and `--json`), `api.roster()`, `api.roster_rows()`, the launch
+snapshot, the roster's join and leave notices and comms' page list none.
+
+**Reading one back.** Both reads open comms' store read-only and never ask the daemon,
+so a listener can ask at each prompt:
+
+- `api.scoped_sender(name)`: for a sender name (as a delivery's `senders` carry it), an
+  `api.ScopedSender` (`qualified`, `module`, `word`, `parent`) while it is an active
+  scoped sender, else None. Only an active one reads back: a name of the form that a
+  session or a program holds, or whose word no module declares now (or two do), reads
+  back as None, so no module takes mail from it for its own.
+- `api.scoped_state(module, parent, *, word=None)`: whether the module's scoped sender
+  for the parent can send now, an `api.ScopedState` with `can_send`, its `qualified`
+  name, and, when it can't, `reason` (one of `api.SCOPED_REASONS`: `undeclared`,
+  `conflict`, `unreadable`) and `why` in words.
+
+`word` may be left out of `send_scoped` and `scoped_state` when the module declares one
+word; with more than one, each call names it.

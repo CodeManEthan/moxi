@@ -175,6 +175,32 @@ def test_subagents_only_with_the_switch_and_under_the_main_session():
     assert table.row(sc, "codex", "0190c000-0000-7000-8000-0000000c0de9") is None
 
 
+def test_a_recall_forks_transcript_stays_out_of_the_index_even_with_subagents_on():
+    from moxi_memory import recalls
+
+    t = claude()
+    t.user("main prompt")
+    plain = t.subagent("a0190b0000000001")
+    plain.user("subagent work item")
+    fork = t.subagent("a0190b00000000f1")
+    fork.user("fork work item")
+    t.write()
+    with_subagents = config(**{"index.include_subagents": True})
+    run("all", config=with_subagents)
+    assert "fork work item" in texts()     # read before its id reached the log
+    with recalls.session_lock(t.session_id):
+        recalls.put_line(t.session_id, {"recall": "r1", "state": recalls.BACK,
+                                        "harness": "claude", "fork": "a0190b00000000f1"})
+    fork.user("fork second item")
+    t.write()
+    run(config=with_subagents)
+    assert not any("fork" in x for x in texts())
+    assert "subagent work item" in texts()
+    run("rebuild", config=with_subagents)
+    assert not any("fork" in x for x in texts())
+    assert "subagent work item" in texts()
+
+
 def test_imported_codex_threads_are_skipped_and_compressed_ones_counted():
     r = T.CodexRollout(api.root("codex"), imported=True)
     r.turn()

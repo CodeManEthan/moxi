@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.1.4 (unreleased)
+## 0.1.5 (unreleased)
 
 - On Windows a sweep or drop removes a build's folders again. The removal's walk read each
   entry's device from its folder listing, which on Windows holds none, so every folder
@@ -12,6 +12,76 @@
   process of this machine has its pid, or when the process that has it started after the
   lock was taken (`moxi.proc.identity`). On Windows it never cleared one, and on POSIX a
   pid given to another process since kept the lock.
+- The page acts, at a desk. An item's popover and the walk take the operator's answer:
+  an option picked, an answer in the operator's own words, a request to explain, a park,
+  an unpark, a ruling read back or corrected, a decision accepted or rejected, a job
+  done. Answers wait in a tray, `Your answers`, kept in the browser's storage, and
+  `Send` sends it, or `Send now` one row. The page records the picks, decisions,
+  read-backs, done jobs, parks and unparks itself through rounds' own calls, each with a
+  page pointer; own words and corrections go in the message to the agent chosen in the
+  To picker (each round's lead by default, a project's lead marked `(the project's)`),
+  who words and records them, and the row reads recorded once the agent's ruling
+  appears. The message quotes the words as written and gives the command with
+  `--text TEXT` for the agent's wording, so no shell reads the words. With comms
+  installed one message goes to each recipient under rounds' send-only name; without it
+  nothing is sent and the row shows the command a lead would run. Each draft gets a
+  receipt, and `Sent` lists the sent drafts and the messages sent. A draft longer than
+  the answers route takes stays in the tray with its row saying so. A draft of a round
+  or project with no lead, as the board shows or the page server answers, offers no send
+  to a lead: it stays in the tray until an agent is picked in the To picker.
+- An act posted twice runs once: each act carries an act id, the page server answers a
+  repeat from the receipts it keeps, and after a restart an event whose pointer holds
+  the act id is that act's record, so it is not recorded again.
+- `Unpark` on a parked question takes back the parking that stands, a ruling of
+  `revoke:` that parking, whoever recorded it. A question offers `Unpark` while parked
+  and its answer form while open, whatever its row in the tray says.
+- `Drop this build…` on a step of a stage with an open build opens a confirm that names
+  what the drop ends, removes and keeps, read fresh; the drop is recorded as the
+  operator's with the page as the pointer, and with comms installed and a lead for the
+  round, the lead is told what the drop removed and kept. A drop whose post gets no
+  answer offers `Drop again` under the same act id.
+- The page reads each round's lead, a question's prepared answer (its recommended option
+  marked `recommended`), a question's record in every state with the ruling that put it
+  there, and the parked questions, which the foot's count opens.
+- New page routes, none open to the phone gateway: `GET /api/agents`, `GET /api/drop`,
+  `POST /api/answers` and `POST /api/drop/build`. Nothing acts at phone width.
+- `pointers.page_act` gives the act id a page pointer holds.
+- A board line's stage name, its id and branch with the round's `+N`, is drawn in a
+  cell of its own between the round's name and the rail, and the column labels put
+  `stage` there too. The rail holds only its steps' markers, so its line runs unbroken
+  from the round's own steps into the stage's, and no text sits on it. An unreadable
+  round's line grows to hold its reason, which no longer spills onto the line above.
+- Board lines are 38 px high, up from 34, around the same 34 px rail, so the ▼ over a
+  line's current step stays 5 px clear of the step words of the line above, where it
+  stood 1 px from them. An unreadable round's line keeps at least that height.
+
+## 0.1.4 (unreleased)
+
+- A project's table takes three settings of its own, empty by default and with no
+  `defaults.` form: `checklist`, items of an `id`, a line of `text` and the `skills` to
+  load; `watched_paths`, entries of a `pattern`, a `note`, `skills` and optionally
+  `only_new`; and `verifier_brief`, lines for a verifier. `moxi config rounds check`
+  refuses a value that breaks their rules, with the key and the fix.
+- A design's block gains a top-level `checklist` key, the items its work touches: a bare
+  id for the round's project, `<key>:<id>` for a project a stage names. `fold` refuses a
+  mark of no item and a block with no key while a weighed checklist is not empty; a
+  change of marks is no change of records only. `open --checklist LIST|none` marks for a
+  round with no design step, required while its project has a checklist, and any mark
+  steps the round up to `full` at its opening: `flow.changed` by the lead with the marks
+  as `marked`, counted in the numbers as `checklist_step_ups`, apart from `step_ups`.
+- `next` names the marked items' skills: the design group lists the items to mark, the
+  design's verification gives the marks, their skills and every item, and a build's
+  steps give the marks and their skills; the commission block carries the same line
+  above the repo's `brief`. A verifying group prints each `verifier_brief` line of its
+  projects as `brief: <line>`. `show`, `show --json` and the round note give the
+  round's marks with where they come from, under the same condition as `next`.
+- The watched-paths guard, `rounds.watched-paths`, registered with turns through the
+  `moxi.turns.guards` entry `rounds`: after a write to a path a project watches it adds
+  one line with the note and the skills, once per agent, and never refuses. It runs
+  only while `watched_paths_guard.enabled` is on, which `moxi install` asks about. The
+  `turns` extra needs turns 0.2.8, whose `touched_files` it reads the written files
+  with.
+
 - A `ci.workflows` entry can read jobs by name pattern (`matrix = ["browser (*)"]`), name
   its run's `pick` job, and carry `reads_candidates = true`: a merge queue's candidate is
   then read by the entries so marked, and a build's check and the target's full run by
@@ -43,6 +113,40 @@
   finishing would bring into the target holds a private file, a path under one, or a
   file where its folder would be; `check` reads it before it runs and `finish` again
   under its lock. `moxi rounds doctor` gains a private files row.
+- The merge queue acts on a red, cancelled or absent CI reading only once its run has
+  finished. Until every run such a read names reads `completed`, the candidate, rerun
+  and main paths read it as pending: they rerun nothing, read no failure log, push
+  nothing again and count nothing toward the failed reads. A reading green on the jobs it reads stands at once,
+  while other jobs of the run still go. A batch or head `read` event held pending names
+  the runs still going in `running`, and the lander's log and `moxi rounds queue` say
+  the run is still running.
+- With no `ci.ref`, a head that shows no run of the full workflows for ten minutes is
+  given up (`no ref`) and the director told, so the lander can exit. `moxi rounds
+  queue` names the last landing and its candidate's run, and where main's last full run
+  was a candidate's run of the full workflows, says so with the ref it was pushed to.
+- The lander tells a member's builder only while comms reads the builder's name as held
+  by a live session; a builder passed over is neither sent to nor recorded. A member's
+  notice that no name received goes once to the project's director, saying who it could
+  not reach, also when that is known only once a send comms could not take ends
+  `unsent`. A message counts as undelivered only when no name got its text, and
+  `moxi rounds queue` names each send and a fix for a never-bound name and for a refused
+  credential.
+- `moxi rounds check --full` runs in a queue project: it runs and records the repo's
+  `check.command` at the tip without reading or changing `land`, and a passing run meets
+  the check step, the join's gate 3 and finish's, also after `land` is flipped to
+  `finish`.
+- The machine's check lock is taken in the order the checks asked for it, through a line
+  of ticket files beside the lock (`check.line/`). A ticket whose process is gone (pid
+  and start time, read the same way on every system) is removed at the next poll; one
+  not touched for a minute is passed over until it is touched again. `--no-wait` is
+  refused while a ticket waits, and the waiting line names the holder's round and stage,
+  how long it has held the lock and how many are ahead. The holder keeps
+  `check.holder.json` beside the lock, and `moxi doctor`'s new `check lock` row shows the
+  holder, its output's size and last write and the line in order, and warns of a holder
+  whose output has been quiet for 30 minutes, of a stale ticket and of a lock held with no
+  holder record. A ticket or holder record that can't be removed while another process
+  has it open, as on Windows, is tried again for a second and then left, so a removal
+  never ends a check or loses its record.
 
 ## 0.1.3 (2026-11-23)
 

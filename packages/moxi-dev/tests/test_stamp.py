@@ -288,7 +288,7 @@ def test_check_fails_a_stale_stamp_before_the_sync(repo, capsys):
     write(repo, "packages/alpha/web/src/page.ts", "export const name = 2;\n")
     calls = []
     result = check.check(repo, env={"PATH": "/usr/bin"},
-                         run=lambda cmd, cwd, env: calls.append(cmd) or 0)
+                         run=lambda cmd, cwd, env, **_: calls.append(cmd) or 0)
     assert result.code == 1
     assert calls == [["uv", "lock", "--check"]]
     assert ("| packages: alpha | lock pass | tags pass | refs pass | names pass | ruff pass | "
@@ -296,7 +296,7 @@ def test_check_fails_a_stale_stamp_before_the_sync(repo, capsys):
             "sync not run |") in result.line()
     assert "npm run build" in capsys.readouterr().err
     rebuild(repo)
-    result = check.check(repo, env={"PATH": "/usr/bin"}, run=lambda cmd, cwd, env: 0)
+    result = check.check(repo, env={"PATH": "/usr/bin"}, run=lambda cmd, cwd, env, **_: 0)
     assert result.code == 0 and "stamps pass" in result.line()
 
 

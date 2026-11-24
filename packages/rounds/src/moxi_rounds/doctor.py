@@ -29,6 +29,14 @@ be, with the right mode and size. These look at what rounds needs and keeps:
   writes has a holder and a time to read; whatever else a repo's `lock_ref` points at
   is another tool's, and not judged here. A project whose root git can't read has no
   locks to look at.
+- check lock: the machine's check lock, its holder record and its line of waiting
+  tickets (`check_line`), read without taking any lock. `ok` while it is free with no
+  live ticket, or while its holder's output was written within `check_line.QUIET_S`,
+  naming the holder, how long it has held the lock, its output's size and last write,
+  and each waiter in order. `warn` when the holder's output has not been written for
+  `check_line.QUIET_S` (an empty output counts from when the lock was taken), for a
+  ticket not touched for `check_line.TICKET_STALE_S`, and for a lock held by a live
+  process that wrote no holder record.
 - private files: for each project whose `private_files` lists any, `warn` naming each
   entry that is missing at the project's root, is not a file, is tracked at the root's
   `HEAD`, or that git at the root does not read as ignored, each with its fix, as
@@ -49,6 +57,7 @@ import re
 import shutil
 import sqlite3
 import subprocess
+import time
 from collections.abc import Iterator
 
 from moxi import config, proc, store
@@ -86,6 +95,7 @@ def rows() -> Iterator[Row]:
     yield from _ci()
     yield from _queues()
     yield from _locks()
+    yield _check_lock()
     yield from _private_files()
     yield from _leftovers()
 
@@ -200,6 +210,108 @@ def _locks() -> Iterator[Row]:
         yield Row(MODULE, "finish locks", "ok",
                   f"no finish lock older than an hour in the {read} "
                   f"repo{'' if read == 1 else 's'} read")
+
+
+# -- the check lock ----------------------------------------------------------------------
+
+def _check_lock() -> Row:
+    from . import check_line, checking
+
+    path = checking.lock_file()
+    now_s = time.time()
+    found = check_line.holder(path)
+    pid = check_line.lock_pid(path)
+    if found is None and pid is not None and proc.identity(pid) is None:
+        pid = None  # the process died holding it, so the system freed the lock
+    line = [one for one in check_line.tickets(path) if not one.dead]
+    waiting = f"{len(line)} waiting" + (": " + "; ".join(
+        f"{number}. {_waiter(one)}" for number, one in enumerate(line, 1)) if line else "")
+    warned, fixes = [], []
+    if found is not None:
+        detail = f"held by {_holder_words(found)}; {_output_words(found, now_s)}"
+        if _quiet(found, now_s):
+            warned.append("it may be hung")
+            output = found.get("output") or "no output file named"
+            fixes.append(f"look at pid {found.get('pid')} (its output: {output}); if it "
+                         "is hung, end it: the lock frees with the process and the next "
+                         "in line takes it")
+    elif pid is not None:
+        detail = f"held by pid {pid}, which wrote no holder record"
+        warned.append("a check that keeps no holder record holds it")
+        fixes.append(f"look at pid {pid}: the lock frees with the process")
+    else:
+        detail = "free"
+    for one in line:
+        if one.stale(now_s):
+            untouched = int(now_s - one.touched_s)
+            warned.append(f"the ticket of pid {one.fields.get('pid')} has not been "
+                          f"touched for {untouched} s, so it is passed over")
+            fixes.append(f"pid {one.fields.get('pid')} waits but does not run (stopped "
+                         "or suspended): resume it to take its place back, or end it")
+    detail = f"{detail}; {waiting}"
+    if warned:
+        return Row(MODULE, "check lock", "warn", f"{detail}; " + "; ".join(warned),
+                   "; ".join(fixes))
+    return Row(MODULE, "check lock", "ok", detail)
+
+
+def _holder_words(found) -> str:
+    from . import check_line
+
+    return (f"pid {found.get('pid')} ({found.get('round')} {found.get('stage')}, repo "
+            f"{found.get('repo')}) for {check_line.age(found.get('since'))}")
+
+
+def _waiter(ticket) -> str:
+    from . import check_line
+
+    fields = ticket.fields
+    return (f"pid {fields.get('pid')} {fields.get('round')} {fields.get('stage')} for "
+            f"{check_line.age(fields.get('since'))}")
+
+
+def _output_stat(found) -> os.stat_result | None:
+    try:
+        return os.stat(found["output"])
+    except (KeyError, TypeError, OSError):
+        return None
+
+
+def _output_words(found, now_s: float) -> str:
+    seen = _output_stat(found)
+    if seen is None:
+        return "its output is not there yet"
+    name = os.path.basename(str(found["output"]))
+    return (f"its output {name}, {_size(seen.st_size)}, last written "
+            f"{_ago(now_s - seen.st_mtime)} ago")
+
+
+def _quiet(found, now_s: float) -> bool:
+    """Whether the holder's output has gone unwritten for `check_line.QUIET_S`: an
+    empty or missing output counts from when the lock was taken."""
+    from . import check_line
+
+    seen = _output_stat(found)
+    if seen is not None and seen.st_size > 0:
+        last_s = seen.st_mtime
+    else:
+        last_s = check_line.seconds(found.get("since"))
+        if last_s is None:
+            return False
+    return now_s - last_s >= check_line.QUIET_S
+
+
+def _size(size: int) -> str:
+    if size < 1024:
+        return f"{size} B"
+    if size < 1024 * 1024:
+        return f"{size / 1024:.1f} KB"
+    return f"{size / (1024 * 1024):.1f} MB"
+
+
+def _ago(gone_s: float) -> str:
+    gone_s = max(gone_s, 0.0)
+    return f"{int(gone_s)} s" if gone_s < 120 else f"{int(gone_s // 60)} min"
 
 
 # -- private files -------------------------------------------------------------------------

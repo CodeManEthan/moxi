@@ -133,6 +133,7 @@ from dataclasses import dataclass, field
 from typing import Any, BinaryIO
 
 from . import claude_leg as leg
+from . import claude_stale
 from . import listeners as turns_listeners
 from .guards import ToolCall
 from .guards.run import GuardRunner, prompts_of
@@ -183,7 +184,7 @@ class ClaudeHarness(Harness):
     name = "claude"
     can = frozenset({"deliver", "only-if-idle", "steer", "stop-handler", "clear", "exit",
                      "compact", "agents", "stop-shells", "guards", "after-tool", "usage",
-                     "environ", "fork", "keep"})
+                     "environ", "fork", "keep", "stale-agents"})
     live_wait_s = LIVE_WAIT_S
 
     @staticmethod
@@ -297,17 +298,35 @@ class ClaudeHarness(Harness):
         answer = self._ask_runner(leg.LINE_LIVE, "the live facts")
         agents, draft = answer.get("agents"), answer.get("draft")
         # `agents` null: the runner could not list the subagents. Unknown, which counts
-        # as busy and never reads as 0.
-        if (isinstance(agents, bool) or not (agents is None or isinstance(agents, int))
+        # as busy and never reads as 0. A list is the runner's entries, counted judged; an
+        # integer is an older runner's own count, read unjudged.
+        if (isinstance(agents, bool)
+                or not (agents is None or isinstance(agents, (int, list)))
                 or not isinstance(draft, bool)):
             raise OSError(f"the runner's live answer is malformed: {answer!r}")
+        if isinstance(agents, list):
+            agents = self._judged(agents).busy()
         return Live(agents=agents, draft=draft)
 
     def agents(self) -> Agents:
-        """The runner's `$.agent.list()`, read on this call; the states are mapped here. A
-        list the runner could not read, or that came back malformed, is not complete."""
+        """The runner's `$.agent.list()`, read on this call; the states are mapped and the
+        `waiting` subagents judged here (`claude_stale`). A list the runner could not
+        read, or that came back malformed, is not complete."""
         answer = self._ask_runner(leg.LINE_AGENTS, "agents")
-        return agents_from_runner(answer.get("entries"), time.time())
+        return self._judged(answer.get("entries"))
+
+    def _busy_agents(self, agents: Any) -> bool:
+        """What the gate read of the subagents keeps the session busy: its entries, judged,
+        hold one pending, running or waiting, or could not be read whole; an older gate's
+        count is above 0; or the gate could not read the list."""
+        if isinstance(agents, list):
+            count = self._judged(agents).busy()
+            return count is None or count > 0
+        return isinstance(agents, bool) or not isinstance(agents, int) or agents > 0
+
+    def _judged(self, entries: Any) -> Agents:
+        """The runner's or the gate's unmapped entries, mapped and judged."""
+        return claude_stale.judge(agents_from_runner(entries, time.time()), self.record_path)
 
     def floors_changed(self, values: dict[str, int]) -> None:
         """The core read a floor that changed: the runner gets the whole map."""
@@ -667,6 +686,7 @@ class ClaudeHarness(Harness):
         if not isinstance(nonce, str) or not nonce:
             raise leg.BadRequest('needs "nonce"')
         ep = self.endpoint
+        busy = self._busy_agents(body.get("agents"))   # judged outside the lock
         with self._lock:
             w = self._window
             if w is None or w.nonce != nonce or w.admitted:
@@ -686,7 +706,7 @@ class ClaudeHarness(Harness):
             if reason is None and spec is not None and spec.only_if_idle:
                 if spec.refuse_draft and body.get("draft") is not False:
                     reason = "draft"      # a draft, or a box the gate could not read
-                elif spec.refuse_agents and _busy_agents(body.get("agents")):
+                elif spec.refuse_agents and busy:
                     reason = "busy-agents"
                 if reason is not None:
                     ep.on_refused(w.delivery, reason)
@@ -701,6 +721,7 @@ class ClaudeHarness(Harness):
     def _gate_command(self, body: dict[str, Any]) -> dict[str, Any]:
         request_id = body.get("request")
         ep = self.endpoint
+        busy = self._busy_agents(body.get("agents"))
         with self._lock:
             request = self._commands.get(request_id) if isinstance(request_id, str) else None
         if request is None:
@@ -710,7 +731,7 @@ class ClaudeHarness(Harness):
             if reason is None:
                 if body.get("draft") is not False:
                     reason = "draft"
-                elif _busy_agents(body.get("agents")):
+                elif busy:
                     reason = "busy-agents"
                 if reason is not None:
                     ep.command_settled(request.id, Refused(reason))
@@ -823,12 +844,15 @@ CLAUDE_STATES = {"pending": "pending", "running": "running", "waiting": "waiting
                  "killed": "stopped"}
 #: The statuses that are a final notice.
 CLAUDE_FINAL = frozenset({"completed", "failed", "killed"})
+#: The agent type Claude Code lists a fork of the main loop as.
+FORK_TYPE = "fork"
 
 
 def agents_from_runner(entries: Any, at: float) -> Agents:
     """The runner's unmapped `$.agent.list()` entries as `Agents`. Null is a list the runner
     could not read; an entry with no id makes the list not complete, never shorter. A
-    status turns does not know reads `unknown`, with no notice to call final."""
+    status turns does not know reads `unknown`, with no notice to call final. An entry of
+    type `fork` is a fork of the main loop (`Agent.is_fork`)."""
     if not isinstance(entries, list):
         return Agents((), complete=False, at=at)
     out: list[Agent] = []
@@ -843,18 +867,14 @@ def agents_from_runner(entries: Any, at: float) -> Agents:
         final = (status in CLAUDE_FINAL) if state != "unknown" else None
         teammate = isinstance(raw.get("teammateId"), str) or raw.get("type") == "teammate"
         out.append(Agent(raw["id"], "teammate" if teammate else "subagent", state, final,
-                         _opt_str(raw, "description"), _opt_str(raw, "parentId")))
+                         _opt_str(raw, "description"), _opt_str(raw, "parentId"),
+                         is_fork=raw.get("type") == FORK_TYPE))
     return Agents(tuple(out), complete, at)
 
 
 def _opt_str(body: dict[str, Any], key: str) -> str | None:
     value = body.get(key)
     return value if isinstance(value, str) and value else None
-
-
-def _busy_agents(agents: Any) -> bool:
-    """A subagent pending, running or waiting, or a count the gate could not read."""
-    return isinstance(agents, bool) or not isinstance(agents, int) or agents > 0
 
 
 def _outcome(body: dict[str, Any]) -> str:

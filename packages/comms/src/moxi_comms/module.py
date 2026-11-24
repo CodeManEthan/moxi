@@ -4,7 +4,8 @@ Standard library only, and imports nothing of comms: the umbrella reads it to li
 module, dispatch `moxi comms`, offer its extras and check its contract.
 """
 
-INTERFACES = frozenset({2})
+#: Interface 3 is interface 2 plus scoped senders (`api.send_scoped` and its reads).
+INTERFACES = frozenset({2, 3})
 #: The module other code calls: sending, the reads, the names, `api.tokens`.
 API = "moxi_comms.api"
 #: What `moxi comms` runs, in process, as `main(argv, prog="moxi comms")`.

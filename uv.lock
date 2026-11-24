@@ -939,6 +939,7 @@ dependencies = [
     { name = "moxi-publishing" },
     { name = "moxi-secrets" },
     { name = "packaging" },
+    { name = "psutil" },
     { name = "pytest" },
     { name = "pytest-timeout" },
     { name = "pytest-xdist" },
@@ -958,6 +959,7 @@ requires-dist = [
     { name = "moxi-publishing", editable = "packages/publishing" },
     { name = "moxi-secrets", editable = "packages/secrets" },
     { name = "packaging" },
+    { name = "psutil", specifier = ">=5.9" },
     { name = "pytest" },
     { name = "pytest-timeout" },
     { name = "pytest-xdist" },
@@ -982,6 +984,9 @@ cache = [
 ]
 comms = [
     { name = "moxi-comms" },
+]
+memory = [
+    { name = "moxi-memory" },
 ]
 notes = [
     { name = "moxi-notes" },
@@ -1018,6 +1023,7 @@ requires-dist = [
     { name = "moxi", editable = "packages/moxi" },
     { name = "moxi-cache", marker = "extra == 'cache'", editable = "packages/cache" },
     { name = "moxi-comms", marker = "extra == 'comms'", editable = "packages/comms" },
+    { name = "moxi-memory", marker = "extra == 'memory'", editable = "packages/memory" },
     { name = "moxi-notes", marker = "extra == 'notes'", editable = "packages/notes" },
     { name = "moxi-projects", marker = "extra == 'projects'", editable = "packages/projects" },
     { name = "moxi-sessions", marker = "extra == 'sessions'", editable = "packages/sessions" },
@@ -1027,7 +1033,7 @@ requires-dist = [
     { name = "moxi-usage", marker = "extra == 'usage'", editable = "packages/usage" },
     { name = "psutil", specifier = ">=5.9" },
 ]
-provides-extras = ["turns", "comms", "projects", "slots", "ui", "notes", "cache", "usage", "sessions"]
+provides-extras = ["turns", "comms", "projects", "slots", "ui", "notes", "cache", "usage", "sessions", "memory"]
 
 [package.metadata.requires-dev]
 dev = [
@@ -1105,6 +1111,9 @@ connector = [
 launcher = [
     { name = "moxi-launcher" },
 ]
+notes = [
+    { name = "moxi-notes" },
+]
 secrets = [
     { name = "moxi-secrets", extra = ["personal-data"] },
 ]
@@ -1121,13 +1130,14 @@ requires-dist = [
     { name = "moxi-comms", marker = "extra == 'comms'", editable = "packages/comms" },
     { name = "moxi-connector", marker = "extra == 'connector'", editable = "packages/connector" },
     { name = "moxi-launcher", marker = "extra == 'launcher'", editable = "packages/launcher" },
+    { name = "moxi-notes", marker = "extra == 'notes'", editable = "packages/notes" },
     { name = "moxi-secrets", editable = "packages/secrets" },
     { name = "moxi-secrets", extras = ["personal-data"], marker = "extra == 'secrets'", editable = "packages/secrets" },
     { name = "moxi-sessions", editable = "packages/sessions" },
     { name = "moxi-turns", editable = "packages/turns" },
     { name = "python-stdnum", marker = "extra == 'connector'", specifier = ">=2.2" },
 ]
-provides-extras = ["comms", "launcher", "connector", "secrets"]
+provides-extras = ["comms", "launcher", "notes", "connector", "secrets"]
 
 [package.metadata.requires-dev]
 dev = [
@@ -1296,7 +1306,7 @@ dev = [
 
 [[package]]
 name = "moxi-rounds"
-version = "0.1.4"
+version = "0.1.5"
 source = { editable = "packages/rounds" }
 dependencies = [
     { name = "moxi" },
@@ -1572,7 +1582,7 @@ dev = [
 
 [[package]]
 name = "moxi-turns"
-version = "0.2.7"
+version = "0.2.8"
 source = { editable = "packages/turns" }
 dependencies = [
     { name = "moxi" },

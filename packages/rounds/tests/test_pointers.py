@@ -100,3 +100,12 @@ def test_a_page_pointer_gives_its_time_and_no_other_pointer_does():
     for other in ("comms:12", "0a1b2c3d@2026-01-02T03:04:05Z",
                   "page:rounds/k3J9xQ2aZf1T@2026-11-21T04:18Z", None):
         assert pointers.page_at(other) is None
+
+
+def test_a_page_pointer_gives_its_act_id_and_no_other_pointer_does():
+    assert pointers.page_act("page:rounds/k3J9xQ2aZf1T@2026-11-21T04:18:05Z") == \
+        "k3J9xQ2aZf1T"
+    for other in ("comms:12", "0a1b2c3d@2026-01-02T03:04:05Z",
+                  "page:rounds/k3J9xQ2aZf1T@2026-11-21T04:18Z",
+                  "page:rounds/k3J9xQ2aZf1T@2026-02-30T04:18:05Z", None):
+        assert pointers.page_act(other) is None

@@ -25,7 +25,7 @@ from playwright.sync_api import expect
 import launcher_page_kit as kit
 from moxi_launcher import presets, targets
 
-pytestmark = [pytest.mark.browser]
+pytestmark = [pytest.mark.browser, pytest.mark.timeout(120, method="thread")]
 
 BRIEF = "say the word ready"
 #: A directory long enough to wrap at 360 px.

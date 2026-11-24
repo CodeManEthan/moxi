@@ -72,7 +72,9 @@
 //                main-loop turn is open as the hook runs (false: it joins the running turn)
 //   /ask/stop    {turn_id, session_id, stop_hook_active, task_types, crons}
 //                                                          -> {reason: string | null}
-//   /live        {ask, agents, draft}                      -> {}  (agents null: unreadable)
+//   /live        {ask, agents, draft}                      -> {}  `agents` the list's
+//                entries, {id, type, status, parentId?, teammateId?}, which the endpoint
+//                judges and counts (agents null: unreadable)
 //   /agents      {ask, entries}                            -> {}  each entry as the engine
 //                gives it, {id, type, description, status, parentId?, teammateId?}; the
 //                endpoint maps the states (entries null: unreadable)
@@ -354,7 +356,7 @@ import type { EngineInterface, Register } from 'claude-code'
 
 type Dollar = EngineInterface
 
-const MOD_VERSION = '0.3.1'
+const MOD_VERSION = '0.3.2'
 const GATE = 'moxi-turns-gate'
 const MARGIN_MS = 1000
 const REPORT_WAIT_MS = 1000
@@ -368,7 +370,6 @@ const IDLE_FAIL_MS = 5000
 const SEND_TRIES = 5
 const SEND_RETRY_MS = 100
 const QUEUE_MAX = 1000
-const BUSY_AGENT = new Set(['pending', 'running', 'waiting'])
 const GATE_DROP = /^moxi-turns-gate: .*\(([a-z-]+)\)$/
 const NONCE_LINE = 'moxi-turns-window: '
 const LEG = 5
@@ -758,12 +759,19 @@ const str = (v: unknown): string | undefined => (typeof v === 'string' ? v : und
 const num = (v: unknown, d: number): number => (typeof v === 'number' && Number.isFinite(v) && v >= 0 ? v : d)
 
 async function live($: Dollar, askId: unknown): Promise<void> {
-  // An unreadable subagent list is unknown, sent as null, which the endpoint counts as
-  // busy: never as 0. An unreadable box counts as a draft.
-  let agents: number | null = null
+  // The list's entries go unjudged and uncounted: the endpoint judges the waiting ones
+  // and counts the busy. An unreadable subagent list is unknown, sent as null, which the
+  // endpoint counts as busy: never as 0. An unreadable box counts as a draft.
+  let agents: Record<string, unknown>[] | null = null
   let draft = true
   try {
-    agents = (await $.agent.list()).filter(a => BUSY_AGENT.has(String(a.status))).length
+    agents = (await $.agent.list()).map(a => ({
+      id: a.id,
+      type: a.type,
+      status: a.status,
+      ...(a.parentId !== undefined ? { parentId: a.parentId } : {}),
+      ...(a.teammateId !== undefined ? { teammateId: a.teammateId } : {}),
+    }))
   } catch {
     agents = null
   }

@@ -76,6 +76,11 @@ test("launcher's words: where, the three cases, the fact with est., the lead, th
   assert.deepEqual([covered.fact, covered.uncovered, covered.waits, covered.cache.kept],
                    [{ text: "kept warm while 1 agent works", heavy: false }, false, null, "kept warm while 1 agent works"]);
   assert.equal(one({ waits: { kind: "subagents", count: 2 }, covered: true }).fact.text, "kept warm while 2 subagents run");
+  assert.equal(one({ waits: { kind: "holds", count: 1 }, covered: true }).fact.text, "kept warm while 1 hold is open");
+  assert.equal(one({ waits: { kind: "holds", count: 2 }, covered: true }).fact.text, "kept warm while 2 holds are open");
+  // A session at its cap with only holds open is loud, and a press would cover it.
+  const held = one({ waits: { kind: "holds", count: 1 }, coverable: { cap: 10 } });
+  assert.deepEqual([held.uncovered, held.waits, held.coverable], [true, "waiting on 1 open hold", true]);
   assert.deepEqual(one({}).fact, { text: "warm until 19:22", heavy: false });
   assert.equal(one({ cache: { state: "warm", until: null, estimated: true } }).fact.text, "warm, est.");
   assert.deepEqual(one({ cache: { state: "cold", until: iso("18:35"), estimated: false } }).fact, { text: "cold", heavy: false });
@@ -131,7 +136,9 @@ test("Keep warm's words, path and wait are launcher's own", async () => {
   const entries = [entry("a"), uncovered("b"), uncovered("c", { covered: true }), uncovered("d", { coverable: null }),
                    entry("e", { cache: { state: "cold", until: null, estimated: false } }), entry("f", { cache: null }),
                    uncovered("g", { waits: { kind: "subagents", count: 1 }, cache: { state: "warm", until: null, estimated: true } }),
-                   uncovered("h", { covered: true, waits: { kind: "subagents", count: 2 } })];
+                   uncovered("h", { covered: true, waits: { kind: "subagents", count: 2 } }),
+                   uncovered("i", { waits: { kind: "holds", count: 2 } }),
+                   uncovered("j", { covered: true, waits: { kind: "holds", count: 1 } })];
   for (const one of entries) {
     const parsed = parseRunning(running([one])).sessions[0];
     const their = launcher.parseRunning(running([one])).sessions[0];

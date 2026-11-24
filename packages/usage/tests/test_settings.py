@@ -20,7 +20,6 @@ DEFAULTS = {
     "limits.codex_pull_after_s": 600,
     "limits.history_days": 8,
     "limits.projection_minutes": 60,
-    "marks.default": "off",
     "marks.max_age_days": 7,
     "marks.handler_wait_ms": 200,
     "restart_point.days": 21,
@@ -96,8 +95,16 @@ def test_a_row_of_limits_or_provider_alone_needs_no_price():
 
 def test_config_check_runs_the_schema_first():
     with pytest.raises(ConfigError):
-        settings.check('[marks]\ndefault = "3x"\n')
-    settings.check('[marks]\ndefault = "1.5x"\n')
+        settings.check('[marks]\nmax_age_days = "soon"\n')
+    settings.check('[marks]\nmax_age_days = 3\n')
+
+
+def test_the_default_mark_is_refused_saying_where_a_mark_is_set():
+    # A session is warned only at the mark its launch stamps; no config stands in.
+    with pytest.raises(ConfigError) as caught:
+        settings.check('[marks]\ndefault = "2x"\n')
+    assert caught.value.key == "marks.default"
+    assert caught.value.fix.startswith("remove it:") and "warn_at" in caught.value.fix
 
 
 @pytest.mark.parametrize("text, key, said", [
@@ -148,8 +155,7 @@ def test_a_pass_may_wait_part_of_a_second():
 # -- page fields: how the settings page shows each key --------------------------------------
 
 #: The keys the settings page shows before More, in schema order.
-COMMON = ["claude.archive_roots", "prices.max_age_days", "marks.default",
-          "restart_point.measure_weekly", "ceiling.enabled", "ceiling.warn_tokens",
+COMMON = ["claude.archive_roots", "prices.max_age_days", "restart_point.measure_weekly", "ceiling.enabled", "ceiling.warn_tokens",
           "ceiling.hard_tokens"]
 #: The sub-heads behind More, in the order they first appear, and the keys under each.
 GROUPS = {
@@ -187,7 +193,6 @@ def test_the_schema_passes_the_cores_check_with_its_page_fields():
 def test_show_json_gives_every_key_a_label(capsys):
     keys = show_json(capsys)
     assert all(key["label"] for key in keys.values())
-    assert keys["marks.default"]["label"] == "Warn when a session passes"
     assert keys["ceiling.enabled"]["label"] == "Worker ceiling"
     assert keys["limits.history_days"]["line"] == "They cannot be rebuilt."
     for key in keys.values():

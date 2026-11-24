@@ -22,6 +22,24 @@
   a home, temp directory or uv folder outside the run, and gives an isolated Python child
   a byte-code folder in the run. `uv_env` is now the fenced environment with these keys,
   not uv's real cache, and `started_env()` gives the environment pytest started with.
+- `moxi-dev check` bounds each package's test run at 900 s of wall clock, or the
+  seconds `MOXI_TEST_SUITE_BOUND_S` gives. A run past it is ended with every process
+  under it (the process group on Linux and macOS, a job on Windows), and the check
+  prints a line naming the package and the bound, fails that package and still runs the
+  rest; the summary line marks it `ended at its bound`. Ten seconds before the bound,
+  each process of the run still going writes its threads' stacks under
+  `.moxi-dev/run/<package>.stacks/`, which the line names.
+- The test kit writes each process's stacks at a set time when `MOXI_TEST_STACKS` and
+  `MOXI_TEST_STACKS_AT` name a directory and a time (`arm_stacks`), a process that
+  saw a failed or errored test too: the kit arms the dump again after pytest's
+  faulthandler plugin cancels it.
+- The run ends with the check: a check stopped by SIGTERM or SIGHUP (Ctrl-Break on
+  Windows) ends the run's tree as Ctrl-C does, and exits 128 plus the signal's number
+  (a signal the check was started ignoring, as `nohup` leaves SIGHUP, stays ignored);
+  for a check killed outright, the test kit ends the run and every process under it
+  once the process `MOXI_TEST_PARENT_PID` names is gone (`watch_parent`).
+- moxi-dev requires moxi 0.1.7 or later, and psutil 5.9 or later, which the test kit's
+  parent watch uses.
 - `MOXI_TEST_TEMP` (`disk` or `ram`, unset meaning `disk`) decides where a test run keeps
   its temp: on Linux `/var/tmp` or `/dev/shm`, elsewhere the system's own, where `ram`
   runs as `disk` and says so. The kit's short directories leave `/tmp` for the same root,

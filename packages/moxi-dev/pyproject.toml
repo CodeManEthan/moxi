@@ -23,7 +23,7 @@ classifiers = [
 # reads the requirements and versions the release step compares. moxi-publishing owns
 # the release tag scheme and the CHANGELOG heading reader the release step uses.
 # moxi-secrets reads the contributor's private-names list for the machine-text step.
-dependencies = ["moxi>=0.1.6,<0.2", "pytest", "pytest-xdist", "pytest-timeout", "import-linter", "deptry",
+dependencies = ["moxi>=0.1.7,<0.2", "psutil>=5.9", "pytest", "pytest-xdist", "pytest-timeout", "import-linter", "deptry",
                 "packaging", "ruff>=0.17,<0.18", "moxi-publishing>=0.1,<0.2",
                 "moxi-secrets>=0.1,<0.2"]
 

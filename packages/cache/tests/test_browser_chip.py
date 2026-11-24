@@ -23,7 +23,7 @@ from playwright.sync_api import expect
 import page_kit
 from page_kit import chip, place_chips, put, record
 
-pytestmark = [pytest.mark.browser,
+pytestmark = [pytest.mark.browser, pytest.mark.timeout(120, method="thread"),
               pytest.mark.skipif(not sys.platform.startswith("linux"),
                                  reason="cache runs on Linux only")]
 
