@@ -82,6 +82,12 @@ worker count or base stops it there, before any step runs. Then, in order:
    in `.moxi-dev/run/<package>.stacks/` (the test kit's `MOXI_TEST_STACKS`), and the
    line names that folder. A run that ends in time leaves no such folder.
 
+   A check ended by SIGINT, SIGTERM or SIGHUP (Ctrl-Break on Windows) ends the run under
+   way with its tree before it exits, with 128 plus the signal's number for the others
+   than SIGINT. One killed outright (SIGKILL, or TerminateProcess on Windows) can do
+   nothing, so the run watches it (the kit's `MOXI_TEST_PARENT_PID`) and ends itself and
+   every process under it within a few seconds.
+
    What runs is the package's plain `pytest` (its `-m` deselects the `browser`, `slow`,
    `build` and `live` tiers), and besides it, through the test kit's variables
    (`moxi_dev.testing`): a tier test marked `touches` whose glob matches a changed path;
@@ -155,25 +161,29 @@ on stdout when the workspace or the base can't be read.
 from __future__ import annotations
 
 import argparse
+import contextlib
 import json
 import math
 import os
 import re
 import shutil
+import signal
 import subprocess
 import sys
+import threading
 import time
 import tomllib
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Callable, Mapping, Protocol, Sequence
+from typing import Callable, Iterator, Mapping, Protocol, Sequence
 
 from moxi import proc
 
 from . import (durations, lint, machine_text, naming, pronouns, refs, release, rename,
                ruff_check, stamp, tags, temp)
 from .testing import (CHANGED_ENV, DURATIONS_ENV, FINDING_ENV, FINDING_NAME,
-                      LEAVE_OUT_ENV, STACKS_AT_ENV, STACKS_ENV, TIERS_ENV, TIMED_ENV)
+                      LEAVE_OUT_ENV, PARENT_PID_ENV, STACKS_AT_ENV, STACKS_ENV, TIERS_ENV,
+                      TIMED_ENV)
 
 PYTHON = "3.12"
 ENV_DIR = Path(".moxi-dev") / f"env-{PYTHON}"
@@ -636,6 +646,33 @@ def temp_env(env: Mapping[str, str]) -> tuple[dict[str, str], str | None, bool]:
     return checked, why, given
 
 
+#: The signals that end the check as an interrupt does, so a package's run under way is
+#: ended with its tree before the check exits: Python's default for each ends the
+#: process at once, leaving the run, in a process group of its own, running.
+END_SIGNALS = tuple(getattr(signal, name) for name in ("SIGTERM", "SIGHUP", "SIGBREAK")
+                    if hasattr(signal, name))
+
+
+def _ended_by(signum: int, frame: object) -> None:
+    raise SystemExit(128 + signum)
+
+
+@contextlib.contextmanager
+def _signals_end_the_check() -> Iterator[None]:
+    """While the check runs, a signal of `END_SIGNALS` raises `SystemExit` (128 plus its
+    number) in it, as Ctrl-C raises KeyboardInterrupt; the handlers before are put back
+    after. Off the main thread, where Python takes no handler, nothing changes."""
+    if threading.current_thread() is not threading.main_thread():
+        yield
+        return
+    before = {one: signal.signal(one, _ended_by) for one in END_SIGNALS}
+    try:
+        yield
+    finally:
+        for one, handler in before.items():
+            signal.signal(one, handler)
+
+
 def check(root: Path, *, full: bool = False, base: str | None = None,
           finding: Sequence[str] = (), static: bool = False,
           env: Mapping[str, str] | None = None, run: Run | None = None,
@@ -651,37 +688,38 @@ def check(root: Path, *, full: bool = False, base: str | None = None,
     sweep = sweep or _sweep
     started = time.monotonic()
     result = Result(is_temp_chosen=not static)
-    try:
-        if not static:
-            env, result.temp_why, result.is_temproot_given = temp_env(env)
-            _swept(sweep)
-        findings = check_findings(finding)
-        result.commit = _commit(root)
-        packages = load_workspace(root)
-        if static:
-            result.packages = []
-            steps = _Steps(root, packages, (), env, run, plan, result, probe=probe)
-            result.code = 0 if steps.static() else 1
-            result.seconds = time.monotonic() - started
-            return result
-        workers = worker_args(env)
-        bound_s = suite_bound(env)
-        changed = None if full else changed_paths(root, base or "main")
-        chosen = list(packages) if changed is None else pick(packages, changed)
-        result.packages = [package.dir for package in chosen]
-        steps = _Steps(root, packages, workers, env, run, plan, result,
-                       changed=changed, findings=findings, base=base or "main",
-                       probe=probe, suite_bound_s=bound_s,
-                       sweep=lambda: _swept(sweep))
-        result.code = 0 if steps.all(chosen) else 1
-    except CheckError as exc:
-        print(f"moxi-dev check: {exc}", file=sys.stderr, flush=True)
-        result.code = 2
-    finally:
-        if not static:
-            _swept(sweep)
-    result.seconds = time.monotonic() - started
-    return result
+    with _signals_end_the_check():
+        try:
+            if not static:
+                env, result.temp_why, result.is_temproot_given = temp_env(env)
+                _swept(sweep)
+            findings = check_findings(finding)
+            result.commit = _commit(root)
+            packages = load_workspace(root)
+            if static:
+                result.packages = []
+                steps = _Steps(root, packages, (), env, run, plan, result, probe=probe)
+                result.code = 0 if steps.static() else 1
+                result.seconds = time.monotonic() - started
+                return result
+            workers = worker_args(env)
+            bound_s = suite_bound(env)
+            changed = None if full else changed_paths(root, base or "main")
+            chosen = list(packages) if changed is None else pick(packages, changed)
+            result.packages = [package.dir for package in chosen]
+            steps = _Steps(root, packages, workers, env, run, plan, result,
+                           changed=changed, findings=findings, base=base or "main",
+                           probe=probe, suite_bound_s=bound_s,
+                           sweep=lambda: _swept(sweep))
+            result.code = 0 if steps.all(chosen) else 1
+        except CheckError as exc:
+            print(f"moxi-dev check: {exc}", file=sys.stderr, flush=True)
+            result.code = 2
+        finally:
+            if not static:
+                _swept(sweep)
+        result.seconds = time.monotonic() - started
+        return result
 
 
 @dataclass
@@ -834,10 +872,12 @@ class _Steps:
 
     def stacks_env(self, stacks_dir: Path) -> dict[str, str]:
         """The kit's variables that have each process of a package's run write its stacks
-        `STACKS_LEAD_S` before the run's bound (at most half the bound)."""
+        `STACKS_LEAD_S` before the run's bound (at most half the bound), and end the run
+        when this process is gone."""
         bound_s = self.suite_bound_s
         at = time.time() + max(bound_s - STACKS_LEAD_S, bound_s / 2)
-        return {STACKS_ENV: str(stacks_dir), STACKS_AT_ENV: f"{at:.3f}"}
+        return {STACKS_ENV: str(stacks_dir), STACKS_AT_ENV: f"{at:.3f}",
+                PARENT_PID_ENV: str(os.getpid())}
 
     def cut(self, package: Package, stacks_dir: Path) -> None:
         """Say that a package's run was ended at its bound, and where its processes'

@@ -257,7 +257,10 @@ each failed or errored test and on entering pdb, so the kit arms it again after 
 and after each test; while a test runs under pytest's `faulthandler_timeout` that
 setting holds the timer. Each process opens its file at the start, so one that ended in
 time leaves it empty. `moxi-dev check` sets both for each package's run, shortly before
-its bound (`arm_stacks`).
+its bound (`arm_stacks`). It also sets `MOXI_TEST_PARENT_PID` to its own pid: the run's
+first process watches that process (`watch_parent`) and, once it has ended by any death
+(a SIGKILL, a TerminateProcess), ends every process under it, SIGTERM and then SIGKILL,
+then on Linux and macOS its own process group, then itself.
 
 A seam with two implementations: `Seam` parametrizes a fixture over every
 implementation for the contract suites and gives the rest the default one.
@@ -353,6 +356,12 @@ LEAVE_OUT_ENV = "MOXI_TEST_LEAVE_OUT"
 STACKS_ENV = "MOXI_TEST_STACKS"
 #: When, in seconds since the epoch, the processes write them (module doc, Stacks).
 STACKS_AT_ENV = "MOXI_TEST_STACKS_AT"
+#: The pid of the process whose end ends the run (module doc, Stacks).
+PARENT_PID_ENV = "MOXI_TEST_PARENT_PID"
+#: How often a run watching its parent looks whether it is still running.
+PARENT_POLL_S = 1.0
+#: How long the run's processes get after SIGTERM when its parent is gone, before SIGKILL.
+PARENT_GRACE_S = 2.0
 
 #: The marker of a test that asserts a wall-clock budget (module doc, Timed tests).
 TIMED = "timed"
@@ -894,6 +903,8 @@ def pytest_configure(config: pytest.Config) -> None:
     _SESSION.setdefault("modules", _modules())
     _SESSION.setdefault("uv", _uv_dirs(os.environ, os.path.expanduser("~")))
     arm_stacks(os.environ)
+    if not hasattr(config, "workerinput"):
+        watch_parent(os.environ)
     _install()
 
 
@@ -958,6 +969,65 @@ def pytest_runtest_protocol() -> Generator[None, object, object]:
         return (yield)
     finally:
         _rearm_stacks()
+
+
+# The thread watching this run's parent, once one is (`watch_parent`).
+_WATCHER: list[threading.Thread] = []
+
+
+def watch_parent(env: Mapping[str, str]) -> threading.Thread | None:
+    """Have this run end, with every process under it, once the process `env` names in
+    `MOXI_TEST_PARENT_PID` has ended (module doc, Stacks): the watching thread, or None
+    when `env` names none or this process already watches. A parent already gone ends
+    the run at once."""
+    from moxi import proc
+
+    try:
+        pid = int(env.get(PARENT_PID_ENV, ""))
+    except ValueError:
+        return None
+    if _WATCHER:
+        return None
+    parent = proc.identity(pid)
+
+    def watch() -> None:
+        while parent is not None and proc.alive(parent):
+            time.sleep(PARENT_POLL_S)
+        _end_this_run(pid)
+
+    thread = threading.Thread(target=watch, name="moxi-dev-parent", daemon=True)
+    _WATCHER.append(thread)
+    thread.start()
+    return thread
+
+
+def _end_this_run(parent_pid: int) -> None:
+    """End every process under this one, SIGTERM (TerminateProcess on Windows) and
+    `PARENT_GRACE_S` later SIGKILL; then, on Linux and macOS, this process's group when it
+    leads one, which takes the processes that left the tree but not the group; then this
+    process."""
+    import psutil
+
+    with contextlib.suppress(OSError, ValueError):
+        print(f"moxi-dev: the process that started this run ({parent_pid}) is gone, so "
+              f"the run ends with every process under it", file=sys.__stderr__, flush=True)
+    try:
+        under = psutil.Process().children(recursive=True)
+    except psutil.Error:
+        under = []
+    for one in under:
+        with contextlib.suppress(psutil.Error):
+            one.terminate()
+    _, left = psutil.wait_procs(under, timeout=PARENT_GRACE_S)
+    for one in left:
+        with contextlib.suppress(psutil.Error):
+            one.kill()
+    if not WINDOWS and os.getpgrp() == os.getpid():
+        import signal
+
+        with contextlib.suppress(OSError):
+            os.killpg(os.getpid(), signal.SIGKILL)
+    os._exit(1)
 
 
 def _timed_slack(env: Mapping[str, str]) -> float:
@@ -2115,10 +2185,11 @@ __all__ = ["ANCHOR_HOME_ENV", "CHANGED_ENV", "DURATIONS_ENV", "FINDING_ENV",
            "GATE_CHAIN_S", "GATE_RESAMPLE_S", "GATE_SAMPLE_S", "GAUGES", "Fence",
            "FenceError", "Gauge", "GaugeReading", "HARNESS_HOMES", "IDLE_ENV", "Idle",
            "KEPT_ENV", "LEAVE_OUT_ENV", "LIFTED", "LIVE_ENV", "MARKERS", "NOT_MEASURED",
-           "PROC_STAT", "PROC_WAIT_S", "REAL_SUPERVISOR_ENV", "RECORD_FORMAT",
-           "SHUTDOWN_POLL", "STACKS_AT_ENV", "STACKS_ENV", "Seam", "Selection", "TIERS", "TIERS_ENV", "TIMED",
-           "TIMED_CLOCKS", "TIMED_ENV", "TIMED_LOCK_FD_ENV", "TIMED_SLACK_ENV",
-           "WINDOWS_HOMES", "WINDOWS_KEPT_ENV", "arm_stacks", "console_script", "fence", "findings_of",
-           "idle", "param_id", "selection", "served", "short_dir", "stat_counts",
-           "terminal_record", "timed_reading", "timed_slack", "touches_match", "uv_env",
-           "wait_for", "write_sqlite"]
+           "PARENT_GRACE_S", "PARENT_PID_ENV", "PARENT_POLL_S", "PROC_STAT",
+           "PROC_WAIT_S", "REAL_SUPERVISOR_ENV", "RECORD_FORMAT", "SHUTDOWN_POLL",
+           "STACKS_AT_ENV", "STACKS_ENV", "Seam", "Selection", "TIERS", "TIERS_ENV",
+           "TIMED", "TIMED_CLOCKS", "TIMED_ENV", "TIMED_LOCK_FD_ENV", "TIMED_SLACK_ENV",
+           "WINDOWS_HOMES", "WINDOWS_KEPT_ENV", "arm_stacks", "console_script", "fence",
+           "findings_of", "idle", "param_id", "selection", "served", "short_dir",
+           "stat_counts", "terminal_record", "timed_reading", "timed_slack",
+           "touches_match", "uv_env", "wait_for", "watch_parent", "write_sqlite"]

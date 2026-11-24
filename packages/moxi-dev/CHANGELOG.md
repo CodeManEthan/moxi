@@ -13,6 +13,10 @@
   `MOXI_TEST_STACKS_AT` name a directory and a time (`arm_stacks`), a process that
   saw a failed or errored test too: the kit arms the dump again after pytest's
   faulthandler plugin cancels it.
+- The run ends with the check: a check stopped by SIGTERM or SIGHUP (Ctrl-Break on
+  Windows) ends the run's tree as Ctrl-C does, and exits 128 plus the signal's number;
+  for a check killed outright, the test kit ends the run and every process under it
+  once the process `MOXI_TEST_PARENT_PID` names is gone (`watch_parent`).
 - moxi-dev requires moxi 0.1.7 or later.
 - `MOXI_TEST_TEMP` (`disk` or `ram`, unset meaning `disk`) decides where a test run keeps
   its temp: on Linux `/var/tmp` or `/dev/shm`, elsewhere the system's own, where `ram`

@@ -572,8 +572,19 @@ removes it. The test kit does the writing, so it works in any package that loads
 `moxi_dev.testing`: `MOXI_TEST_STACKS=<dir>` and `MOXI_TEST_STACKS_AT=<seconds since the
 epoch>` arm it in a run started by hand too.
 
+The run ends with the check, however the check ends. A check stopped by Ctrl-C,
+SIGTERM or SIGHUP (Ctrl-Break on Windows) ends the run's tree before it exits; the
+signals other than Ctrl-C give exit code 128 plus their number. A check killed outright
+(SIGKILL, or `TerminateProcess` on Windows) can do nothing itself, so the test kit in
+the run's first process watches the check, named in `MOXI_TEST_PARENT_PID`, and once it
+is gone ends every process under it, SIGTERM and two seconds later SIGKILL, then on
+Linux and macOS its own process group, then itself: within a few seconds of the kill.
+
 On Linux and macOS a process a test started in a session of its own is outside the
-run's group and is not ended with it.
+run's group and is not ended with it. After a kill outright, one whose parent ended
+before the watch saw the check go has also left the tree, so it survives too, on every
+system; so does the whole run if its first process is stuck holding Python's lock,
+where the watch can't run.
 
 ## Browser tests
 

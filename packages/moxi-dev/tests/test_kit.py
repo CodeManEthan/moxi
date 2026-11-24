@@ -4,11 +4,13 @@ public names."""
 
 from __future__ import annotations
 
+import contextlib
 import enum
 import os
 import socket
 import socketserver
 import sqlite3
+import subprocess
 import sys
 import tempfile
 import time
@@ -548,6 +550,79 @@ def test_a_process_that_saw_a_failure_still_writes_its_stacks_at_the_time(
     assert hung, written
     assert hung[0].startswith("gw0-" if workers else "main-")
     assert "most recent call first" in written[hung[0]]
+
+
+#: A test that starts a child that sleeps, notes its own pid and the child's in `pids`
+#: in its tmp_path, and sleeps.
+SLEEPS = """\
+import os
+import subprocess
+import sys
+import time
+
+
+def test_sleeps(tmp_path):
+    child = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(120)"])
+    (tmp_path / "pids").write_text(f"{os.getpid()} {child.pid}")
+    time.sleep(120)
+"""
+
+#: Starts the pytest run its arguments give, with this process as the run's parent, notes
+#: the run's pid and sleeps.
+STARTER = """\
+import os, subprocess, sys, time
+from moxi_dev import testing
+run = subprocess.Popen(sys.argv[2:], cwd=sys.argv[1],
+                       env={**os.environ, testing.PARENT_PID_ENV: str(os.getpid())},
+                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+print(run.pid, flush=True)
+time.sleep(120)
+"""
+
+
+def _running(pid: int) -> bool:
+    from moxi import proc
+
+    found = proc.identity(pid)
+    return found is not None and proc.alive(found)
+
+
+def test_a_run_whose_parent_is_killed_ends_with_every_process_under_it(pytester, tmp_path):
+    from moxi import proc
+
+    base = tmp_path / "base"
+    pytester.makeconftest('pytest_plugins = ["moxi_dev.testing"]\n')
+    pytester.makepyfile(test_sleeps=SLEEPS)
+    starter = subprocess.Popen(
+        [sys.executable, "-c", STARTER, str(pytester.path), sys.executable, "-m", "pytest",
+         "-p", "no:cacheprovider", "-p", "no:randomly", "-n", "1", f"--basetemp={base}"],
+        stdout=subprocess.PIPE, text=True)
+
+    def noted() -> list[int]:
+        for path in base.rglob("pids"):
+            said = path.read_text().split()
+            if len(said) == 2:
+                return [int(one) for one in said]
+        return []
+
+    pids: list[int] = []
+    try:
+        pids.append(int(starter.stdout.readline()))
+        pids.extend(wait_for(noted, testing.PROC_WAIT_S,
+                             what="the run's test to start its child"))
+        assert all(_running(pid) for pid in pids)
+        starter.kill()                      # SIGKILL, TerminateProcess: nothing it can catch
+        starter.wait()
+        wait_for(lambda: not any(_running(pid) for pid in pids), testing.PROC_WAIT_S,
+                 what="the run, its worker and the worker's child to end")
+    finally:
+        starter.kill()
+        starter.wait()
+        for pid in pids:
+            found = proc.identity(pid)
+            if found is not None and proc.alive(found):
+                with contextlib.suppress(OSError):
+                    os.kill(pid, 9)
 
 
 @pytest.mark.parametrize("given", [

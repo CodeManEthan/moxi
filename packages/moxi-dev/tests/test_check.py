@@ -7,6 +7,7 @@ real thing once.
 
 from __future__ import annotations
 
+import contextlib
 import dataclasses
 import json
 import os
@@ -577,6 +578,7 @@ def test_each_suite_is_told_where_and_when_to_write_its_stacks_and_an_in_time_ru
     for cmd, cwd, env in runs.calls:
         if "pytest" in cmd:
             assert env[testing.STACKS_ENV] == str(repo / check.RUN_DIR / f"{cwd.name}.stacks")
+            assert env[testing.PARENT_PID_ENV] == str(os.getpid())
             at = float(env[testing.STACKS_AT_ENV])
             assert before + 90 - 1 <= at <= time.time() + 90 + 1
     assert not stale.exists()
@@ -644,6 +646,69 @@ def test_a_package_run_past_its_bound_is_ended_with_its_tree_and_fails_alone(
     child = int(pid_file.read_text())
     wait_for(lambda: not _running(child), testing.PROC_WAIT_S,
              what="the run's child to be ended")
+
+
+#: A check whose cache package's run is a process that starts a sleeping child, notes
+#: both pids in the file its second argument names, and sleeps.
+SIGNALLED = """\
+import os, sys
+from pathlib import Path
+from moxi_dev import check
+
+TREE = (
+    "import subprocess, sys, time, os\\n"
+    "from pathlib import Path\\n"
+    "child = subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(120)'])\\n"
+    "Path(sys.argv[1]).write_text(f'{os.getpid()} {child.pid}')\\n"
+    "time.sleep(120)\\n")
+
+
+def run(cmd, cwd, env, /, *, timeout_s=None):
+    if "pytest" in cmd and Path(cwd).name == "cache":
+        return check._run([sys.executable, "-c", TREE, sys.argv[2]], cwd, env,
+                          timeout_s=timeout_s)
+    return 0
+
+
+result = check.check(Path(sys.argv[1]), run=run, full=True, env=dict(os.environ),
+                     plan=lambda package, work, members: [])
+sys.exit(result.code)
+"""
+
+
+@pytest.mark.skipif(sys.platform == "win32",
+                    reason="Windows has no SIGTERM to send: os.kill there ends the process "
+                           "outright, which the test kit's parent watch covers")
+@pytest.mark.parametrize("name", ["SIGTERM", "SIGHUP"])
+def test_a_check_ended_by_a_signal_ends_the_package_run_under_way(repo, tmp_path, name):
+    import signal
+
+    pids_file = tmp_path / "pids"
+    checker = subprocess.Popen([sys.executable, "-c", SIGNALLED, str(repo), str(pids_file)],
+                               stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    try:
+        wait_for(lambda: pids_file.exists() and " " in pids_file.read_text(),
+                 testing.PROC_WAIT_S, what="the package run to start")
+        run_pid, child = (int(one) for one in pids_file.read_text().split())
+        signum = getattr(signal, name)
+        checker.send_signal(signum)
+        assert checker.wait(timeout=testing.PROC_WAIT_S) == 128 + signum
+        wait_for(lambda: not _running(run_pid) and not _running(child), testing.PROC_WAIT_S,
+                 what="the package run and its child to be ended")
+    finally:
+        checker.kill()
+        checker.wait()
+        for pid in (pids_file.read_text().split() if pids_file.exists() else ()):
+            with contextlib.suppress(OSError):
+                os.kill(int(pid), signal.SIGKILL)
+
+
+def test_the_check_puts_back_the_signal_handlers_it_found(repo):
+    import signal
+
+    before = {one: signal.getsignal(one) for one in check.END_SIGNALS}
+    run_check(repo, Runs(), full=True)
+    assert {one: signal.getsignal(one) for one in check.END_SIGNALS} == before
 
 
 def test_a_run_ended_at_its_bound_with_no_stacks_says_so(repo, capsys):
