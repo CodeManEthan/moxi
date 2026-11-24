@@ -39,15 +39,15 @@ class Subagent:
 
     def __init__(self, session_id: str):
         self.session_id = session_id
-        self._session = None
+        self._session_obj = None
         self._bound_s: float | None = None
 
     def _find(self):
         import moxi_turns as client
 
-        if self._session is None:
-            self._session = client.find(session_id=self.session_id)
-        return self._session
+        if self._session_obj is None:
+            self._session_obj = client.find(session_id=self.session_id)
+        return self._session_obj
 
     def _gone(self, why: str) -> _Known:
         from moxi_turns import Lost
@@ -57,11 +57,11 @@ class Subagent:
     def first(self, text: str, *, ref: str, round_timeout_s: float):
         self._bound_s = round_timeout_s
         try:
-            session = self._find()
-            if session is None:
+            session_obj = self._find()
+            if session_obj is None:
                 return self._gone("no live turns endpoint for the session")
-            return session.fork(text, by=BY, ref=ref, keep=True,
-                                round_timeout_s=round_timeout_s)
+            return session_obj.fork(text, by=BY, ref=ref, keep=True,
+                                    round_timeout_s=round_timeout_s)
         except Exception as exc:  # noqa: BLE001 - a fork turns refused is a lost round
             from moxi_turns import Refused
 
@@ -73,11 +73,11 @@ class Subagent:
         if not delivery:
             return self._gone("the fork's earlier round has no delivery id")
         try:
-            session = self._find()
-            if session is None:
+            session_obj = self._find()
+            if session_obj is None:
                 return self._gone("no live turns endpoint for the session")
-            return session.fork_continue(delivery, text, ref=ref, keep=True,
-                                         round_timeout_s=round_timeout_s)
+            return session_obj.fork_continue(delivery, text, ref=ref, keep=True,
+                                             round_timeout_s=round_timeout_s)
         except Exception as exc:  # noqa: BLE001
             from moxi_turns import Refused
 
@@ -105,9 +105,9 @@ class Subagent:
         client.ack(ref, session_id=self.session_id)
 
     def close(self) -> None:
-        if self._session is not None:
-            self._session.close()
-            self._session = None
+        if self._session_obj is not None:
+            self._session_obj.close()
+            self._session_obj = None
 
 
 def for_recall(recall) -> Subagent:
