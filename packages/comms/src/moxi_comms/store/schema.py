@@ -1,8 +1,9 @@
 """comms.db's schema: the steps `moxi.store.migrate` walks, one per `user_version`.
 
 Version 1 is the whole store, version 2 renames the operator's `author_kind`, version 3
-adds `mcp_tokens`, the hashes of the per-session tokens comms' tools take, and version 4
-adds `reserved.holder`, which says who holds a send-only name. Each table
+adds `mcp_tokens`, the hashes of the per-session tokens comms' tools take, version 4
+adds `reserved.holder`, which says who holds a send-only name, and version 5 adds
+`scoped`, the words modules declare for scoped senders. Each table
 names what it holds; the rules about who writes which table live in
 `store/__init__.py`.
 
@@ -43,6 +44,8 @@ RESERVED_STATES = ("active", "conflict", "unowned")
 RESERVED_HOLDERS = ("module", "program")
 DROP_REASONS = ("expired", "withdrawn", "reserved")
 ROOM_KINDS = ("names",)
+#: The states of a `scoped` row's word: declared by one module, or by more than one.
+SCOPED_STATES = ("active", "conflict")
 #: Why a per-session tool token was revoked (`mcp/tokens.py`).
 REVOKED_WHY = ("session-ended", "name-lost", "superseded", "port-taken", "uninstall")
 
@@ -222,16 +225,35 @@ ALTER TABLE reserved ADD COLUMN holder TEXT
 UPDATE reserved SET holder = 'module' WHERE state != 'unowned';
 """
 
+#: Version 5: `scoped`, one row per word a module declares for scoped senders
+#: (`scoped.py`). `module` is the word's owner while it is `active`, NULL in `conflict`;
+#: `declared_by` names every module that declares it, space-separated; `token_hash` is
+#: the hash of the owner's token for the word; `declared_at` is when it last became
+#: declared, and a row with `freed_at` set is declared by nobody now.
+V5 = f"""
+CREATE TABLE scoped (
+    word           TEXT PRIMARY KEY,
+    module         TEXT,
+    declared_by    TEXT NOT NULL,
+    description    TEXT,
+    token_hash     TEXT,
+    state          TEXT NOT NULL {_among("state", SCOPED_STATES)},
+    declared_at    TEXT,
+    freed_at       TEXT,
+    note           TEXT
+);
+"""
+
 #: The steps, oldest first; the store's `user_version` counts those run.
-STEPS = (V1, V2, V3, V4)
+STEPS = (V1, V2, V3, V4, V5)
 
 #: The tables the steps make, in the order above.
 TABLES = ("meta", "rooms", "messages", "queue", "digests", "cursors", "bindings",
           "identities", "operators", "reserved", "dropped", "principals", "denied",
-          "mcp_tokens")
+          "mcp_tokens", "scoped")
 
 __all__ = ["ID_BASE", "META_NEXT_ID", "META_MIGRATED_FROM", "META_AUTHOR_STAMPS",
            "META_QUEUE_MIGRATED", "QUEUE_STATES", "BINDING_KINDS",
            "IDENTITY_KINDS", "IDENTITY_STATUSES", "RESERVED_STATES", "RESERVED_HOLDERS",
-           "DROP_REASONS", "ROOM_KINDS", "REVOKED_WHY", "STEPS", "TABLES", "V1", "V2",
-           "V3", "V4"]
+           "DROP_REASONS", "ROOM_KINDS", "REVOKED_WHY", "SCOPED_STATES", "STEPS", "TABLES",
+           "V1", "V2", "V3", "V4", "V5"]

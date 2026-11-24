@@ -87,8 +87,12 @@ TERMS: tuple[Entry, ...] = (
         "under it, so the message carries `[no reply]`: a reply has nowhere to go. `moxi "
         "comms agents` lists such a name as `send-only, reserved for <module>` or "
         "`send-only, registered`. Mail that was already waiting for the name when it was "
-        "reserved or registered is dropped, and `moxi comms explain` says `reserved`.",
-        aliases=("reserved name", "reserved"),
+        "reserved or registered is dropped, and `moxi comms explain` says `reserved`. A "
+        "module may also send to one session under that session's scoped sender, its "
+        "name plus a word the module declares (`builder-digest@acme` for "
+        "`builder@acme`): it reaches only that session, nobody mails it, and `moxi comms "
+        "agents` doesn't list it.",
+        aliases=("reserved name", "reserved", "scoped sender"),
     ),
     Entry(
         "operator lane",
