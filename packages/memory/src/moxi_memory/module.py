@@ -17,16 +17,23 @@ SUMMARY = ("Search past sessions: a stemmed keyword index of every harness's tra
 OPTIONAL = {
     "comms": "Each session's comms identity at start, so the start lists show an agent "
              "its own recent sessions and name the agent behind each project session.",
-    "launcher": "Each session's launch kind, so scratch launches stay out of default "
-                "search and out of the start lists.",
+    "launcher": "Each session's launch kind, so scratch and fork launches stay out of "
+                "default search and out of the start lists, and the launcher's "
+                "subconscious row, which turns the subconscious on for a launch.",
     "connector": "search_memory in the Claude apps, through the connector's MCP host, "
                  "each hit redacted for a chat.",
+    "notes": "The notes a recall of the subconscious reads beside past sessions: the "
+             "session's notes directory, or the notes root.",
     "secrets": "secrets' personal-data set, by name. secrets is already one of memory's "
                "dependencies and the connector extra brings the set's validators, so "
                "search_memory redacts with every chat set without this extra.",
 }
 GATED = {}
-INTERNAL_ENV = {}
+SESSION_ENV = {"MOXI_MEMORY_SUBCONSCIOUS": "the session's subconscious mode, automatic or "
+                                          "on-demand, stamped by the launcher's "
+                                          "subconscious row"}
+INTERNAL_ENV = {"MOXI_MEMORY_SUBCONSCIOUS": "set by the launcher for one launch; read from "
+                                            "the session's environment"}
 #: The config schema; every key is read at its use.
 SETTINGS = "settings.toml"
 #: The module's whole loader over a config text: the schema, then the rules it can't say.
@@ -43,12 +50,16 @@ TIMERS = {"ingest": {"command": "moxi-memory-ingest", "args": ["--walk"], "every
                      "switch": "ingest.timer.enabled",
                      "doc": "read the transcripts that changed since the last walk"}}
 #: The session table, which holds each session's identity and launch kind and can't be
-#: rebuilt from the transcripts; and the index folder, which holds the index generations,
-#: their locks and the pointer, and is rebuilt with `moxi memory reindex`.
+#: rebuilt from the transcripts; the index folder, which holds the index generations,
+#: their locks and the pointer, and is rebuilt with `moxi memory reindex`; and the
+#: subconscious's folder, its log of recalls and its session locks.
 STORES = {
     "sessions": {"root": "state", "path": "state.db", "kind": "sqlite", "private": True,
                  "retention": "keep", "rebuildable": False, "lazy": True},
     "index": {"root": "cache", "path": "index", "kind": "dir", "private": True,
               "retention": "keep", "rebuildable": True, "lazy": True},
+    "subconscious": {"root": "state", "path": "subconscious", "kind": "dir",
+                     "private": True, "retention": "keep", "rebuildable": False,
+                     "lazy": True},
 }
 SEGMENT = None

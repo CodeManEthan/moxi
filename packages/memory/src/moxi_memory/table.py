@@ -20,7 +20,7 @@ Who writes what:
 
 The two start lists are `agent_sessions` and `project_sessions`. Both read only this
 table, through an index that holds only listable rows: a row whose kind is settled and
-is not `scratch`. Each returns at most `MAX_ROWS` rows, newest first, and never this
+is neither `scratch` nor `fork`. Each returns at most `MAX_ROWS` rows, newest first, and never this
 session's own row.
 
 Every function takes an open state store connection (`moxi_memory.state.connect`) and
@@ -40,8 +40,10 @@ if TYPE_CHECKING:
 
 #: The most rows one list query returns.
 MAX_ROWS = 10
-#: The launch kind that keeps a session out of the lists and out of default search.
+#: The launch kinds that keep a session out of the lists and out of default search: a
+#: scratch launch, and a fork launch, which copies another session's whole transcript.
 SCRATCH = "scratch"
+FORK = "fork"
 
 
 class Row(NamedTuple):
@@ -210,7 +212,7 @@ def remove_unseen(conn: sqlite3.Connection, seen: Iterable[tuple[str, str]],
 
 # -- the start lists ------------------------------------------------------------------
 
-_LISTABLE = "settled = 1 AND kind IS NOT 'scratch'"
+_LISTABLE = "settled = 1 AND kind IS NOT 'scratch' AND kind IS NOT 'fork'"
 
 
 def _leave_out(me: tuple[str, str], others: Iterable[tuple[str, str]]):
@@ -225,7 +227,7 @@ def agent_sessions(conn: sqlite3.Connection, identity: str, me: tuple[str, str],
     project, newest first, at most `limit` (never more than `MAX_ROWS`).
 
     `me` is this session's (harness, session id), which is left out, as is every session
-    whose kind is unsettled or `scratch`. An empty identity gives no rows.
+    whose kind is unsettled, `scratch` or `fork`. An empty identity gives no rows.
     """
     identity = _text(identity)
     if identity is None:
@@ -250,7 +252,7 @@ def project_sessions(conn: sqlite3.Connection, label: str, me: tuple[str, str], 
 
     `me` is this session's (harness, session id), and `leave_out` the (harness, session
     id) keys the first list shows; all of them are left out, as is every session whose
-    kind is unsettled or `scratch`. An empty label gives no rows.
+    kind is unsettled, `scratch` or `fork`. An empty label gives no rows.
     """
     label = _text(label)
     if label is None:
@@ -270,6 +272,6 @@ def _cap(limit: int) -> int:
     return max(0, min(int(limit), MAX_ROWS))
 
 
-__all__ = ["MAX_ROWS", "SCRATCH", "Row", "Listed", "row", "write_start", "write_identity",
+__all__ = ["MAX_ROWS", "SCRATCH", "FORK", "Row", "Listed", "row", "write_start", "write_identity",
            "write_late_identity", "write_read", "relabel", "remove_unseen",
            "agent_sessions", "project_sessions"]
