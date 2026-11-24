@@ -18,7 +18,9 @@
   `scoped-recipient` (1116) and `scoped-unreadable`; the daemon's hello lists
   `scoped-senders`. `moxi doctor` reports a word in conflict, a held name and a word
   token it can't read, and `moxi comms reserved renew --word WORD` mints a fresh one.
-  comms.db gains the table `scoped`.
+  comms.db gains the table `scoped` and moves to schema step 5 at its next write; a
+  comms older than this one can't open it afterwards, so a downgrade needs the store's
+  backup.
 - comms' config gains `[policy] directors`, by default the plain name `fleet-lead`:
   names that direct every comms session on the box that doesn't opt out, after its
   launch's own directors. Each directs only while its name holds a standing row
