@@ -6,7 +6,8 @@ repository's `uv sync` installs it, and no Moxi module depends on it at run time
 - `moxi-dev check` runs the checks a change must pass before it merges: the lock, the
   tag, comment-reference, naming and Ruff checks, the renames step (about 45 s here; see
   below), the release step (see below), the contract's import rules (import-linter and
-  deptry) and the tests of the packages the change reaches. A test in the `slow`,
+  deptry) and the tests of the packages the change reaches, each package's run
+  ending at a bound (see "The bound on each package's run" below). A test in the `slow`,
   `browser` or `build` tier runs when a path its `touches` mark names changed; `--full`
   runs every package and every tier but `live`; `--finding L<n>` runs only the tests
   marked with that finding (see "The tag check" below); `--static` runs only the
@@ -518,6 +519,27 @@ uv run --locked moxi-dev timed schedule --machine host-a --record-dir ~/moxi-tim
 
 The host needs uv with its Python 3.12, git on its PATH (some timed tests build temporary
 repositories), and linger, so its timer fires while no one is logged in.
+
+## The bound on each package's run
+
+Each package's test run in `moxi-dev check` ends at a wall-clock bound: 900 s, or the
+seconds `MOXI_TEST_SUITE_BOUND_S` gives (a number above 0; any other value exits 2). A
+run that reaches it is ended with every process under it (its process group on Linux and
+macOS, its job on Windows), and the check prints
+`moxi-dev check: <package>: its tests ran past their <bound> s bound, ...`, fails that
+package and goes on with the rest. The summary line gives that package as
+`<package> fail <seconds>s ended at its bound`.
+
+Ten seconds before the bound (at most half of it), each process of the run still going
+(under xdist the controller and every worker) writes all its threads' stacks, as
+`faulthandler` prints them, to `.moxi-dev/run/<package>.stacks/<worker>-<pid>.txt` under
+the root, and the line names that folder. A run that ends in time leaves no such folder,
+and the next check removes it. The test kit does the writing, so it works in any
+package that loads `moxi_dev.testing`: `MOXI_TEST_STACKS=<dir>` and
+`MOXI_TEST_STACKS_AT=<seconds since the epoch>` arm it in a run started by hand too.
+
+On Linux and macOS a process a test started in a session of its own is outside the
+run's group and is not ended with it.
 
 ## Browser tests
 

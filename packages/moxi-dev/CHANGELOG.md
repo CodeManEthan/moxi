@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+- `moxi-dev check` bounds each package's test run at 900 s of wall clock, or the
+  seconds `MOXI_TEST_SUITE_BOUND_S` gives. A run past it is ended with every process
+  under it (the process group on Linux and macOS, a job on Windows), and the check
+  prints a line naming the package and the bound, fails that package and still runs the
+  rest; the summary line marks it `ended at its bound`. Ten seconds before the bound,
+  each process of the run still going writes its threads' stacks under
+  `.moxi-dev/run/<package>.stacks/`, which the line names.
+- The test kit writes each process's stacks at a set time when `MOXI_TEST_STACKS` and
+  `MOXI_TEST_STACKS_AT` name a directory and a time (`arm_stacks`).
+- moxi-dev requires moxi 0.1.7 or later.
+
 - `moxi-dev check --pick [--base REV]` prints the packages the change picks as one JSON
   line, `{"packages": [...]}`, and runs no step, so a workflow can run only the picked
   packages' jobs.
