@@ -72,7 +72,8 @@ What this module gives the rest of the launcher:
 - `refuse_values(harness, values, chosen=...)`: the rules between a launch's values that
   `when` and `offered_with` state, each refused with its own words, and the rules no row
   states: a scratch launch can't recycle itself (`refuse_scratch_recycle`), and a launch
-  that relaunches itself does so at its `warn_at` mark (`refuse_relaunch_mark`).
+  that relaunches itself is told at its `warn_at` mark, not at a `limit_at`
+  (`refuse_relaunch_mark`).
 - `Row.check(value)` and `Row.tokens(mode, value, cwd=...)`: a value checked against its
   row, and the tokens one mode spells it as.
 - `fit(harness, mode, values, chosen)`: the modes rule. A composed command carries only
@@ -1069,7 +1070,7 @@ def refuse_values(harness: str, values: Mapping[str, object], *,
     `refuse_scratch_recycle` and `refuse_relaunch_mark`, so a launch, its preview and
     `presets check` all refuse those pairs in their own words."""
     refuse_scratch_recycle(values)
-    refuse_relaunch_mark(values, harness=harness)
+    refuse_relaunch_mark(values)
     avail = _available(available)
     chosen = frozenset(chosen)
     for name, value in values.items():
@@ -1109,49 +1110,27 @@ def refuse_scratch_recycle(values: Mapping[str, object]) -> None:
 
 
 class RelaunchMark(Refused):
-    """A launch set to relaunch itself whose marks can't say when: no `warn_at` mark, or a
-    `limit_at`, which no longer moves the relaunch line."""
+    """A launch set to relaunch itself with a `limit_at`, which no longer moves the
+    relaunch line."""
 
     code = "relaunch-mark"
 
 
 #: The hint of a `limit_at` on a launch that relaunches itself.
 RELAUNCH_LIMIT_HINT = "the relaunch line comes at warn_at; set warn_at"
-#: The hint of a launch that relaunches itself with no `warn_at` mark.
-RELAUNCH_MARK_HINT = "set warn_at to 1x, 1.5x or 2x, or recycle_at_limit to off"
 
 
-def refuse_relaunch_mark(values: Mapping[str, object], *, harness: str | None = None) -> None:
-    """Refuse `RelaunchMark` when `values` set `recycle_at_limit = relaunch` with no
-    warn-at mark, or with a `limit_at`. The relaunch line rides on usage's warning, so
-    with `warn_at` off it never comes; a launch that holds no `warn_at` (a seat or Codex
-    launch that sets none, `presets.resolve`) is refused the same way, except a Codex
-    launch, which can't relaunch itself whatever its mark and is warned of that instead.
-    A `limit_at` would do nothing, since the relaunch line comes at `warn_at`.
-    `presets.resolve` has already set a `[defaults]` relaunch with no mark to `off`, and
-    left a `[defaults]` `limit_at` out of a relaunch launch, each with a warning, so what
-    reaches here was chosen for the launch."""
+def refuse_relaunch_mark(values: Mapping[str, object]) -> None:
+    """Refuse `RelaunchMark` when `values` set `recycle_at_limit = relaunch` with a
+    `limit_at`: the relaunch line comes at `warn_at`, so a `limit_at` would do nothing.
+    `presets.resolve` has already left a `[defaults]` `limit_at` out of a relaunch
+    launch, with a warning, so what reaches here was chosen for the launch. A relaunch
+    with no warn-at mark is not refused: its session is armed and never told."""
     if values.get("recycle_at_limit") != "relaunch":
         return
-    why = no_relaunch_mark(values, harness=harness)
-    if why is not None:
-        raise RelaunchMark("warn_at", "recycle_at_limit relaunch tells the session at its "
-                                      f"warn_at mark, and {why}", RELAUNCH_MARK_HINT)
     if is_set(values.get("limit_at")):
         raise RelaunchMark("limit_at", "limit_at does nothing on a launch that relaunches "
                                        "itself", RELAUNCH_LIMIT_HINT)
-
-
-def no_relaunch_mark(values: Mapping[str, object], *, harness: str | None) -> str | None:
-    """Why a launch of `values` has no warn-at mark to be told at, or None when it has one
-    or is a Codex launch with none (a Codex launch can't relaunch itself whatever its
-    mark). A row not in `values` is not offered and has no say."""
-    mark = values.get("warn_at")
-    if mark == "off":
-        return "warn_at is off"
-    if "warn_at" in values and not is_set(mark) and harness != "codex":
-        return "this launch sets no warn_at"
-    return None
 
 
 def _met(need: When, values: Mapping[str, object], avail: Callable[[str], bool],

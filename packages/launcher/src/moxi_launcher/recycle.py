@@ -57,8 +57,9 @@ and returns; it never waits on the session.
 `relaunch` writes an event and returns a line that tells the agent its launch lets it
 recycle itself, at its next pause point and only when it is mid-work (`RELAUNCH_LINE`),
 once per crossing: each rise past the mark, after a compaction too, is told again, and a
-retried call on one crossing gets no second line. It tells only a launch whose session can recycle itself (`selfrecycle.missing_of_row`, the
-test the self arm reads), so never a scratch launch (`SCRATCH_RECYCLE`). usage appends
+retried call on one crossing gets no second line. It tells only a launch whose session can
+recycle itself and warns at a mark (`selfrecycle.missing_of_row` with `told`, the self
+arm's test and the mark), so never a scratch launch (`SCRATCH_RECYCLE`). usage appends
 the line to its notice on the same call, so the agent reads one line;
 `compact` writes a compact run and spawns its job, which waits for the session to be idle
 (`job.CompactJob`). A compact crossing that meets an open run leaves a pending compact,
@@ -526,7 +527,7 @@ def crossing_line(conn: sqlite3.Connection, crossing: Any, *, pid: int,
     key = store.crossing_key(session_id, getattr(crossing, "mark", None),
                              getattr(crossing, "at", None))
     if value == "relaunch":
-        if selfrecycle.missing_of_row(row) is not None:
+        if selfrecycle.missing_of_row(row, told=True) is not None:
             return None
         if not _told(conn, row.request_id, key):
             try:

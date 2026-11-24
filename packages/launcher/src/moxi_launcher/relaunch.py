@@ -11,8 +11,10 @@ must be a slot launch, claimed, live, on a harness whose turns session offers `e
 comms is optional: without it there is no director mode, no name to wait for and no
 notices. A self arm needs a launch whose session can recycle itself
 (`selfrecycle.missing`): made with `recycle_at_limit = relaunch` (the row ships `off`); a
-Claude slot launch; not in a scratch folder; with a handoff folder; warned at a mark. Any
-other is refused `no-self-recycle`, a dry run too, with the item it fails. A director's call and a repair need no such launch.
+Claude slot launch; not in a scratch folder; with a handoff folder. It needs no warn-at
+mark: a launch with none is never told, and its agent may still run the verb. Any other is
+refused `no-self-recycle`, a dry run too, with the item it fails. A director's call and a
+repair need no such launch.
 
 A launch that names no model comes back on the model its session last used (`pin`): the
 arm and the call read it and put it in their `--json` (`model`, `model_how`), and the job
@@ -206,9 +208,9 @@ SELF_RECYCLE_HINT = "finish the work and stop"
 
 def may_recycle(row: store.LaunchRow, *, slots_here: Callable[[], bool] | None = None) -> None:
     """Refuse `no-self-recycle` unless the launch's session can recycle itself
-    (`selfrecycle.missing_of_row`, the test its crossing line is told by), naming the
-    item it fails: opted out, not a Claude slot launch, slots not running here, a scratch
-    folder, no handoff folder, or no warn-at mark. `slots_here` stands in for
+    (`selfrecycle.missing_of_row`, the test its crossing line is told by, less the warn-at
+    mark), naming the item it fails: opted out, not a Claude slot launch, slots not
+    running here, a scratch folder, or no handoff folder. `slots_here` stands in for
     `catalog.slots_here`."""
     found = selfrecycle.missing_of_row(row, slots_here=slots_here)
     if found is not None:

@@ -406,21 +406,15 @@ def test_a_scratch_row_held_off_by_the_launcher_is_refused_for_its_scratch(conn,
 
 
 @pytest.mark.parametrize("mark", [None, "off", ""])
-def test_a_launch_warned_at_no_mark_refuses_the_self_arm(conn, tmp_path, mark):
+def test_a_relaunch_launch_warned_at_no_mark_may_still_recycle_itself(conn, tmp_path, mark):
+    # Never told, since no mark is set, but its self relaunch is armed and accepted.
     row = store.get(conn, "r1")
     values = {k: v for k, v in row.values.items() if k != "warn_at"}
     if mark is not None:
         values["warn_at"] = mark
     conn.execute("UPDATE launches SET values_json = ? WHERE request_id = 'r1'",
                  (json.dumps(values),))
-    slots_api = FakeSlots()
-    with pytest.raises(relaunch.Refused) as refused:
-        arm(conn, handoff(tmp_path), slots_api=slots_api)
-    assert refused.value.code == "no-self-recycle"
-    assert refused.value.problem == (f"launch r1 warns at no mark (warn_at {mark or 'unset'}), "
-                                     "so nothing tells it when to recycle")
-    assert refused.value.hint.endswith("set warn_at to 1x, 1.5x or 2x")
-    nothing_written(conn, slots_api)
+    assert arm(conn, handoff(tmp_path)).data["outcome"] == "armed"
 
 
 def test_a_slot_check_comes_before_the_self_recycle_gate(tmp_path):

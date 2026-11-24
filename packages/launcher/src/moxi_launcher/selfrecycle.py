@@ -1,10 +1,12 @@
-"""Whether a launch's session can recycle itself: the one test the launcher's three places
-read, so what a session is told and what its arm accepts can't drift apart.
+"""Whether a launch's session can recycle itself, and whether it is told it may: the one
+test the launcher's places read, so what a session is told and what its arm accepts can't
+drift apart.
 
     missing(harness=..., target=..., ...)   # the first item that fails, or None
-    missing_of_row(row)                     # the same, read from a launch row
+    missing(..., told=True)                 # the same, with the warn-at mark
+    missing_of_row(row, told=...)           # either, read from a launch row
 
-A launch can finish a self relaunch when it is:
+A launch is armed (its session can finish a self relaunch) when it is:
 
 1. **set to relaunch**: `recycle_at_limit = relaunch`, set by a flag, the page, its
    preset or `[defaults]`. The row ships `off`, and `off` or `compact` from any layer
@@ -15,13 +17,18 @@ A launch can finish a self relaunch when it is:
 4. **not in a scratch folder** (`catalog.SCRATCH_RECYCLE`).
 5. **one with a handoff folder** (`handoffs.handoff_dir`): with notes installed, notes
    must give the launch's folder a notes directory.
+
+It is told, at its warn-at mark, that it may, when it is armed and also
+
 6. **warned at a mark**: its `warn_at` is `1x`, `1.5x` or `2x`. The relaunch line rides
    on usage's notice at that mark.
 
-The composer stamps the relaunch crossing only where this holds (`common.option_stamps`),
-the crossing handler answers only where it holds (`recycle.crossing_line`), and the self
-arm accepts only where it holds (`relaunch.may_recycle`). `presets.resolve` warns of a
-relaunch set for a launch where it fails.
+A launch armed with no mark keeps the self relaunch and is never told: nothing tells it
+when, and its agent may still run the verb. The composer stamps the relaunch crossing
+only where the told test holds (`common.option_stamps`), the crossing handler answers only
+where it holds (`recycle.crossing_line`), and the self arm accepts where the armed test
+holds (`relaunch.may_recycle`). `presets.resolve` warns of a relaunch set for a launch
+that isn't armed.
 """
 
 from __future__ import annotations
@@ -67,8 +74,9 @@ def source_of(values: Mapping[str, Any], name: str = RECYCLE_AT_LIMIT) -> str | 
 def missing(*, harness: str, target: str | None, in_slot: bool, cwd: str | None,
             values: Mapping[str, Any], source: str | None,
             slots_here: Callable[[], bool] | None = None,
-            env: Mapping[str, str] | None = None) -> Missing | None:
-    """The first item a launch fails, or None when its session can recycle itself.
+            env: Mapping[str, str] | None = None, told: bool = False) -> Missing | None:
+    """The first item a launch fails, or None when its session can recycle itself (with
+    `told`, and is told it may at its warn-at mark: items 1 to 6, else 1 to 5).
     `in_slot` says the launch runs in a slot (a launch not yet placed: that its target is
     one). `values` are the launch's values; `source` is where `recycle_at_limit` came from
     (None when that was not recorded). `slots_here` stands in for `catalog.slots_here`.
@@ -77,10 +85,10 @@ def missing(*, harness: str, target: str | None, in_slot: bool, cwd: str | None,
     value = values.get(RECYCLE_AT_LIMIT)
     if value == RELAUNCH:
         return _cannot(harness=harness, target=target, in_slot=in_slot, cwd=cwd,
-                       values=values, slots_here=slots_here, env=env)
+                       values=values, slots_here=slots_here, env=env, told=told)
     if value == "off" and source == LEFT_OUT:
         found = _cannot(harness=harness, target=target, in_slot=in_slot, cwd=cwd,
-                        values=values, slots_here=slots_here, env=env)
+                        values=values, slots_here=slots_here, env=env, told=told)
         if found is not None:
             return found
         said = "holds recycle_at_limit off"
@@ -96,8 +104,8 @@ def missing(*, harness: str, target: str | None, in_slot: bool, cwd: str | None,
 
 def _cannot(*, harness: str, target: str | None, in_slot: bool, cwd: str | None,
             values: Mapping[str, Any], slots_here: Callable[[], bool] | None,
-            env: Mapping[str, str] | None) -> Missing | None:
-    """The first of items 2 to 6 the launch fails, or None."""
+            env: Mapping[str, str] | None, told: bool) -> Missing | None:
+    """The first of items 2 to 5 the launch fails, and with `told` item 6, or None."""
     if harness != "claude":
         return Missing(HARNESS, f"is a {harness} launch, and only a Claude session can be "
                                 "exited and relaunched", "launch the seat on Claude")
@@ -118,19 +126,19 @@ def _cannot(*, harness: str, target: str | None, in_slot: bool, cwd: str | None,
     except handoffs.NoNotesDir as exc:
         return Missing(HANDOFFS, exc.problem.removeprefix("this launch "), exc.hint)
     mark = values.get(WARN_AT)
-    if mark not in MARKS:
+    if told and mark not in MARKS:
         return Missing(NO_MARK, f"warns at no mark (warn_at {mark or 'unset'}), so nothing "
                                 "tells it when to recycle", "set warn_at to 1x, 1.5x or 2x")
     return None
 
 
 def missing_of_row(row: Any, *, slots_here: Callable[[], bool] | None = None,
-                   env: Mapping[str, str] | None = None) -> Missing | None:
+                   env: Mapping[str, str] | None = None, told: bool = False) -> Missing | None:
     """`missing` for the launch row `row` (a `store.LaunchRow`)."""
     return missing(harness=row.harness, target=row.target,
                    in_slot=row.target == "slot" and bool(row.slot), cwd=row.cwd,
                    values=row.values, source=source_of(row.values), slots_here=slots_here,
-                   env=env)
+                   env=env, told=told)
 
 
 __all__ = ["HANDOFFS", "HARNESS", "LEFT_OUT", "MARKS", "Missing", "NO_MARK", "OPTED_OUT",

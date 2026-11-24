@@ -15,7 +15,9 @@ read of the session's lifetime says when a lifetime has no keep-warm window.
   launch has none of its own), with any notice that was refused and a note that was not
   taken.
 - `recycle`: the options in force, the last expiry or limit run, a pending compact, and
-  when the session was last told to recycle itself at its limit.
+  when the session was last told to recycle itself at its limit. A `relaunch` launch
+  whose session can recycle itself but warns at no mark shows `relaunch (armed, no
+  warning)`: its self relaunch is accepted and it is never told.
 - `keep_warm`: on or off (launched with it on, or under cover), the open holds of the
   launch chain by name (with the launch value on), the last run of nudges, and the last
   verdict.
@@ -43,7 +45,7 @@ from typing import Any
 from moxi import exit as codes
 from moxi import modules
 
-from . import keepwarm, relaunch, slots, store, target
+from . import keepwarm, relaunch, selfrecycle, slots, store, target
 from .recycle import LOOK, cache_read
 
 #: The outcomes, beside `blocked`, after which a launch needs a look.
@@ -296,11 +298,27 @@ def _recycle(conn: sqlite3.Connection, row: store.LaunchRow, own: Sequence[store
     told = [e.at for e in events if e.kind == "recycle-told"]
     dropped = [e.at for e in events if e.kind == "pending-compact-dropped"]
     at_limit = str(values.get("recycle_at_limit") or "off")
+    if at_limit == selfrecycle.RELAUNCH and _armed_untold(row):
+        at_limit = ARMED_UNTOLD
     return RecycleState(
         on_expiry=str(values.get("recycle_on_expiry") or "off"), at_limit=at_limit,
         limit_at=_limit_mark(row, at_limit=at_limit), last=last,
         pending_compact=pending[1] if pending else None, told_at=told[-1] if told else None,
         pending_dropped_at=dropped[-1] if dropped else None)
+
+
+#: The `at limit` of a `relaunch` launch whose session can recycle itself but warns at no
+#: mark: its self relaunch is accepted, and nothing tells it when.
+ARMED_UNTOLD = "relaunch (armed, no warning)"
+
+
+def _armed_untold(row: store.LaunchRow) -> bool:
+    """Whether the launch `row` is armed to relaunch itself and never told
+    (`selfrecycle.missing_of_row` holds, but not with `told`)."""
+    if selfrecycle.missing_of_row(row) is not None:
+        return False
+    told = selfrecycle.missing_of_row(row, told=True)
+    return told is not None and told.item == selfrecycle.NO_MARK
 
 
 def _limit_mark(row: store.LaunchRow, *, at_limit: str) -> str | None:
@@ -312,7 +330,7 @@ def _limit_mark(row: store.LaunchRow, *, at_limit: str) -> str | None:
     limit_at = row.values.get("limit_at")
     if limit_at and at_limit == "compact":
         return str(limit_at)
-    if at_limit == "off":
+    if at_limit in ("off", ARMED_UNTOLD):
         return None
     found = modules.load("usage", interface=1)
     name = getattr(found.api, "CROSSING_AT_ENV", None) if found.ok else None
@@ -366,6 +384,6 @@ def show(session_id: str | None = None, *, pid: int | None = None, turns: Any | 
                            data={**got.as_json(), "outcome": got.word or "ok"})
 
 
-__all__ = ["FAILED", "NOTE_NOT_TAKEN", "RECYCLE_MODES", "KeepWarmState", "RelaunchState",
+__all__ = ["ARMED_UNTOLD", "FAILED", "NOTE_NOT_TAKEN", "RECYCLE_MODES", "KeepWarmState", "RelaunchState",
            "RecycleState", "RunLine", "SessionState", "line", "note_not_taken",
            "of_launch", "show", "state"]

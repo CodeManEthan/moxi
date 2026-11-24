@@ -723,8 +723,9 @@ def test_a_crossing_of_a_launch_off_unknown_or_claimed_elsewhere_is_none(conn):
     '{"recycle_at_limit": "relaunch"}',
     '{"recycle_at_limit": "relaunch", "warn_at": "off"}',
     '{"recycle_at_limit": "off", "warn_at": "1x", "sources": {"recycle_at_limit": "typed"}}'])
-def test_a_crossing_of_a_launch_that_cannot_recycle_itself_gets_no_line(conn, values):
-    # The handler tells exactly the launches whose self arm would be accepted.
+def test_a_crossing_of_a_launch_that_is_not_told_gets_no_line(conn, values):
+    # The handler tells exactly the launches whose self arm would be accepted and that
+    # warn at a mark; a relaunch launch with no mark is armed but never told.
     conn.execute("UPDATE launches SET values_json = ? WHERE request_id = 'r1'", (values,))
     assert recycle.crossing_line(conn, crossing(), pid=os.getpid()) is None
     assert [e for e in store.events(conn, "r1") if e.kind == "recycle-told"] == []

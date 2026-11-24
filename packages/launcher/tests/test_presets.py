@@ -1627,41 +1627,38 @@ def test_a_limit_at_with_recycle_at_limit_off_is_refused_for_its_companion(recyc
         resolve("", SLOTTED, typed={"limit_at": "1x", **IN_SLOT})
 
 
-@pytest.mark.parametrize("text, asked", [
-    ("", {"typed": {"recycle_at_limit": "relaunch", "warn_at": "off", **IN_SLOT}}),
-    (RELAUNCH_SEAT.replace('"2x"', '"off"'), {"seat": "s"}),
+@pytest.mark.parametrize("text, asked, source", [
+    ("", {"typed": {"recycle_at_limit": "relaunch", "warn_at": "off", **IN_SLOT}},
+     presets.TYPED),
+    ('[seat.s]\ntarget = "slot"\n', {"seat": "s", "typed": {"recycle_at_limit": "relaunch"}},
+     presets.TYPED),
+    (RELAUNCH_SEAT.replace('"2x"', '"off"'), {"seat": "s"}, presets.PRESET),
+    ('[seat.s]\ntarget = "slot"\nrecycle_at_limit = "relaunch"\n', {"seat": "s"},
+     presets.PRESET),
     ('[defaults]\nwarn_at = "off"\n[seat.s]\ntarget = "slot"\n'
-     'recycle_at_limit = "relaunch"\n', {"seat": "s"}),
+     'recycle_at_limit = "relaunch"\n', {"seat": "s"}, presets.PRESET),
+    ('[defaults]\nrecycle_at_limit = "relaunch"\nwarn_at = "off"\n', {"typed": IN_SLOT},
+     presets.DEFAULTS),
+    ('[defaults]\nrecycle_at_limit = "relaunch"\n[seat.s]\ntarget = "slot"\n',
+     {"seat": "s"}, presets.DEFAULTS),
 ])
-def test_a_relaunch_chosen_with_warn_at_off_is_refused(recyclable, text, asked):
-    with pytest.raises(catalog.RelaunchMark) as caught:
-        resolve(text, SLOTTED, **asked)
-    assert caught.value.row == "warn_at" and "warn_at is off" in caught.value.problem
+def test_a_relaunch_with_no_warn_at_mark_launches_armed_and_untold(recyclable, text, asked,
+                                                                    source):
+    # Typed, preset or [defaults], with warn_at off or a seat that sets none: no refusal
+    # and no warning. The self arm accepts it, and no crossing is stamped, so it is never
+    # told.
+    from moxi_launcher import selfrecycle
 
-
-@pytest.mark.parametrize("text, asked", [
-    ('[seat.s]\ntarget = "slot"\nrecycle_at_limit = "relaunch"\n', {"seat": "s"}),
-    ('[seat.s]\ntarget = "slot"\n', {"seat": "s", "typed": {"recycle_at_limit": "relaunch"}}),
-])
-def test_a_seat_relaunch_with_no_warn_at_is_refused_set_warn_at(recyclable, text, asked):
-    # A seat holds no warn_at unless set, so a relaunch chosen for it has no mark.
-    with pytest.raises(catalog.RelaunchMark) as caught:
-        resolve(text, SLOTTED, **asked)
-    assert caught.value.code == "relaunch-mark" and caught.value.row == "warn_at"
-    assert "sets no warn_at" in caught.value.problem
-    assert caught.value.hint.startswith("set warn_at")
-
-
-@pytest.mark.parametrize("text", [
-    '[defaults]\nrecycle_at_limit = "relaunch"\nwarn_at = "off"\n',
-    '[defaults]\nrecycle_at_limit = "relaunch"\n[seat.s]\ntarget = "slot"\n',
-])
-def test_a_defaults_relaunch_with_no_mark_holds_off_with_a_warning(recyclable, text):
-    asked = {"seat": "s"} if "[seat.s]" in text else {"typed": IN_SLOT}
     got = resolve(text, SLOTTED, **asked)
-    assert got.values["recycle_at_limit"] == "off"
-    assert got.sources["recycle_at_limit"] == presets.LEFT_OUT
-    assert presets.RELAUNCH_NO_MARK_OFF in got.warnings
+    assert got.values["recycle_at_limit"] == "relaunch"
+    assert got.sources["recycle_at_limit"] == source
+    assert got.values["warn_at"] in ("off", "")
+    assert got.warnings == ()
+    found = selfrecycle.missing(harness=got.harness, target=got.target, in_slot=True,
+                                cwd=got.cwd, values=got.values, source=source)
+    assert found is None
+    assert "MOXI_USAGE_CROSSING_AT" not in common.option_stamps(
+        {**got.values, "harness": got.harness})
 
 
 def test_the_presets_check_flags_a_limit_at_set_beside_relaunch(recyclable):
@@ -1671,14 +1668,10 @@ def test_the_presets_check_flags_a_limit_at_set_beside_relaunch(recyclable):
     assert not errors('[defaults]\nlimit_at = "1x"\n' + RELAUNCH_SEAT, SLOTTED)
 
 
-def test_the_presets_check_flags_a_seat_relaunch_with_no_warn_at(recyclable):
+def test_the_presets_check_passes_a_relaunch_with_no_warn_at(recyclable):
     seat = '[seat.s]\ntarget = "slot"\nrecycle_at_limit = "relaunch"\n'
-    found = errors(seat, SLOTTED)
-    assert [(p.where, p.key, p.code) for p in found] == [("seat.s", "warn_at",
-                                                          "relaunch-mark")]
-    assert not errors('[defaults]\nwarn_at = "1x"\n' + seat, SLOTTED)
-    assert not errors(RELAUNCH_SEAT, SLOTTED)
-    # From [defaults] it holds off with a warning, as a launch does.
+    assert not errors(seat, SLOTTED)
+    assert not errors(seat + 'warn_at = "off"\n', SLOTTED)
     assert not errors('[defaults]\nrecycle_at_limit = "relaunch"\n[seat.s]\n'
                       'target = "slot"\n', SLOTTED)
 

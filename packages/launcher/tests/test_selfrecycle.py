@@ -25,8 +25,8 @@ def row(*, harness="claude", target="slot", slot="3", **values):
                            values={k: v for k, v in values.items() if v is not None})
 
 
-def item(found_row, *, slots_here=True):
-    found = selfrecycle.missing_of_row(found_row, slots_here=lambda: slots_here)
+def item(found_row, *, slots_here=True, told=True):
+    found = selfrecycle.missing_of_row(found_row, slots_here=lambda: slots_here, told=told)
     return None if found is None else found.item
 
 
@@ -92,3 +92,9 @@ def test_an_off_the_launcher_held_names_the_item_that_made_it_so():
                     slot=None)) == selfrecycle.SLOT
     assert item(row(recycle_at_limit="off", sources=left)) == selfrecycle.OPTED_OUT
 
+
+
+@pytest.mark.parametrize("mark", ["off", "", None])
+def test_a_relaunch_launch_with_no_mark_is_armed_and_never_told(mark):
+    assert item(row(warn_at=mark), told=False) is None
+    assert item(row(warn_at=mark), told=True) == selfrecycle.NO_MARK

@@ -13,20 +13,20 @@
   context crossing claims the launch for its endpoint (moving it by parent) and learns
   the session's id before it answers. A self relaunch's handoff of an id the launch never
   learned is checked against the first record of the id's transcript.
-- A `relaunch` launch is told at its `warn_at` mark that it may recycle itself, and its
-  self relaunch is armed, only where its session can: a Claude launch in a slot, where
-  slots run, not in a scratch folder, with a handoff folder, and warned at a mark. One
-  test (`selfrecycle.missing`) decides what the composer stamps, what the crossing tells
-  and what `relaunch --self` accepts. `recycle_at_limit` still ships `off`.
+- A `relaunch` launch's self relaunch is armed only where its session can recycle
+  itself: a Claude launch in a slot, where slots run, not in a scratch folder, with a
+  handoff folder. It is told at its `warn_at` mark that it may only where it is also
+  warned at a mark. One test (`selfrecycle.missing`, with `told` for the mark) decides
+  what the composer stamps, what the crossing tells and what `relaunch --self` accepts.
+  A `relaunch` with no warn-at mark is armed and never told, with no refusal and no
+  warning; `show` says `at limit relaunch (armed, no warning)`. `recycle_at_limit` still
+  ships `off`.
 - A `relaunch` launch is told at `warn_at`, never at `limit_at`. A `limit_at` typed or
-  set by the preset beside `relaunch` is refused `relaunch-mark`, and so is `relaunch`
-  with no warn-at mark (`warn_at = off`, or a seat that sets no `warn_at`); from
-  `[defaults]` the `limit_at` is left out and the `relaunch` held `off`, each with a
-  warning. A `relaunch` set for a launch that can't act on it, a Codex one or one with no
-  handoff folder, is kept and the launch warns, naming why.
+  set by the preset beside `relaunch` is refused `relaunch-mark`; from `[defaults]` it is
+  left out with a warning. A `relaunch` set for a launch that can't act on it, a Codex one
+  or one with no handoff folder, is kept and the launch warns, naming why.
 - A `relaunch --self` refusal names what the launch fails: not set to `relaunch`, not a
-  Claude slot launch, slots not here, a scratch folder, no handoff folder, or no warn-at
-  mark. A launch with no notes directory is now refused `no-self-recycle` before its
+  Claude slot launch, slots not here, a scratch folder, or no handoff folder. A launch with no notes directory is now refused `no-self-recycle` before its
   handoff is read.
 - The relaunch line now says to stop your background shells: "write a handoff with the
   handoff skill, stop your background shells, then run `moxi launcher relaunch --self

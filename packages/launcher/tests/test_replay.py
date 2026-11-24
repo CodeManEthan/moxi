@@ -893,13 +893,13 @@ def test_a_relaunch_the_install_can_no_longer_run_is_replayed_off(work, harness,
 def test_a_seat_row_with_no_mark_of_its_own_replays_with_none(work, harness, no_exec,
                                                               recyclable):
     # A seat holds no warn_at unless set, and its replay keeps the row as recorded: no
-    # mark, so no warning, and a relaunch on it is neither told nor armed.
+    # mark, so no warning and no relaunch line, but its self relaunch stays armed.
     old = slot_row(work, warn_at="", recycle_at_limit="relaunch",
                    sources={"warn_at": "shipped", "recycle_at_limit": "preset"})
     replayed, new = replayed_row(old)
     assert new.values["warn_at"] == "" and "usage" not in replayed.links
     assert common.option_stamps(replayed.values) == {}
-    assert not can(new)
+    assert can(new)
 
 
 # -- the model pin ------------------------------------------------------------------------

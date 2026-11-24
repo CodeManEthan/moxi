@@ -615,22 +615,22 @@ own reads:
   context passes the launch's `warn_at` mark, the agent is told it may relaunch itself
   with a handoff. The line opens "This launch lets you recycle yourself", rides on
   usage's notice as one line, and comes at every rise past the mark: after a compaction,
-  the next rise past it is told again. A launch is told, and its self relaunch accepted,
-  only where it is set to `relaunch` and its session can recycle itself: a Claude launch
-  in a slot, where slots run, not in a scratch folder, with a handoff folder (with notes
-  installed, a notes directory for its folder), and warned at a mark. `moxi launcher
-  show` reads the same test. `off` or `compact` from any layer, the shipped `off`
-  included, leaves it out.
+  the next rise past it is told again. A launch's self relaunch is accepted only where
+  it is set to `relaunch` and its session can recycle itself: a Claude launch in a slot,
+  where slots run, not in a scratch folder, with a handoff folder (with notes installed,
+  a notes directory for its folder). It is told only where it is also warned at a mark.
+  A `relaunch` launch with no warn-at mark (`warn_at = off`, or a seat that sets no
+  `warn_at`, since a seat holds none unless set) launches with no refusal and no
+  warning: it is never told, and its agent may still relaunch itself; `moxi launcher
+  show` and Home say `at limit relaunch (armed, no warning)`. `off` or `compact` from
+  any layer, the shipped `off` included, leaves it out.
   - A `relaunch` typed or set by the preset needs slots and a slot launch. A scratch
     launch has no notes directory to keep a handoff in, so it can't take `relaunch`
     (`scratch-recycle`, exit 3): the launch and its preview, on the command line and the
     page, refuse the pair, and `presets check` flags a preset that sets `relaunch` and
-    launches in a scratch. A `relaunch` with no warn-at mark (`warn_at = off`, or a seat
-    that sets no `warn_at`, since a seat holds none unless set) is refused
-    (`relaunch-mark`, exit 3, hint "set warn_at"). A `relaunch` from `[defaults]` holds
-    `off`, with a warning, on a scratch launch or one with no warn-at mark. Where else a
-    `relaunch` set for the launch can't act (a Codex launch, no handoff folder), it is
-    kept and the launch warns, naming what it fails.
+    launches in a scratch. A `relaunch` from `[defaults]` holds `off`, with a warning, on
+    a scratch launch. Where else a `relaunch` set for the launch can't act (a Codex
+    launch, no handoff folder), it is kept and the launch warns, naming what it fails.
   - `relaunch` takes no `--limit-at`: its line comes at `warn_at`. A `limit_at` typed or
     set by the preset of a `relaunch` launch is refused (`relaunch-mark`, exit 3, hint
     "set warn_at"); one from `[defaults]` is left out, with a warning.

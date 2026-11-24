@@ -392,10 +392,8 @@ def _value_rules(preset: Preset, values: Mapping[str, object],
     """The rules between rows (`catalog.refuse_values`) over what a launch of the preset
     resolves to with nothing typed: the shipped defaults, `[defaults]`, then the preset,
     whose place, when it names one, replaces the one `[defaults]` names. As `resolve`
-    holds them: a seat or Codex launch that sets no `warn_at` holds none
-    (`_no_default_mark`); on a scratch launch, or with no warn-at mark, a `[defaults]`
-    relaunch holds `off`; and a `[defaults]` `limit_at` is left out of a relaunch
-    launch."""
+    holds them: on a scratch launch a `[defaults]` relaunch holds `off`, and a
+    `[defaults]` `limit_at` is left out of a relaunch launch."""
     harness = preset.harness if preset.harness in catalog.HARNESSES else base_harness
     rows = catalog.offered(harness, avail)
     effective = {name: row.default for name, row in rows.items()}
@@ -403,12 +401,8 @@ def _value_rules(preset: Preset, values: Mapping[str, object],
     if [k for k in PLACE if catalog.is_set(values.get(k))]:
         effective.update({k: rows[k].default for k in PLACE if k in rows})
     effective.update({k: v for k, v in values.items() if k in rows})
-    if (WARN_AT in effective and WARN_AT not in values and WARN_AT not in defaults
-            and _no_default_mark(harness, preset, scratch=bool(effective.get("scratch")),
-                                 source=SHIPPED)):
-        effective[WARN_AT] = ""
-    if (RECYCLE_AT_LIMIT not in values and effective.get(RECYCLE_AT_LIMIT) == "relaunch"
-            and (effective.get("scratch") or _no_mark(harness, effective))):
+    if (effective.get("scratch") and RECYCLE_AT_LIMIT not in values
+            and effective.get(RECYCLE_AT_LIMIT) == "relaunch"):
         effective[RECYCLE_AT_LIMIT] = "off"
     if (effective.get(RECYCLE_AT_LIMIT) == "relaunch" and LIMIT_AT not in values
             and LIMIT_AT in effective):
@@ -1100,8 +1094,7 @@ def resolve(request, *, presets: Presets | None = None,
     `recycle_at_limit = off`, with the `SCRATCH_RECYCLE_OFF` warning, when `relaunch` came
     from `[defaults]`; typed or set by the preset, the pair is refused
     (`catalog.ScratchRecycle`). Then `_settle_recycle`: a relaunch set for a launch that
-    can't act on it is warned of, or from `[defaults]` with no mark held `off`. Reads
-    projects when a place needs it. Raises a
+    can't act on it is warned of. Reads projects when a place needs it. Raises a
     `catalog.Refused`: `UnknownPreset`, `BadPreset`, `OffPosture`, `PostureBrief`,
     `NotYet`, `NeedsProjects`, `UnknownProject`, `ProjectsUnreadable`, `ProjectsBusy`, or the
     catalog's `BadValue`; a `moxi.config.ConfigError` when the file can't be read."""
@@ -1185,13 +1178,6 @@ SCRATCH_RECYCLE_OFF = ("recycle_at_limit relaunch is left out: a scratch launch 
                        "recycle itself, so the default relaunch holds off here")
 
 
-#: The warning of a launch whose `recycle_at_limit = relaunch` came from `[defaults]`
-#: while it warns at no mark (`warn_at` off, or a seat that sets none): the relaunch line
-#: rides on usage's warning, so it holds off.
-RELAUNCH_NO_MARK_OFF = ("recycle_at_limit relaunch is left out: this launch warns at no "
-                        "warn_at mark, and the relaunch line comes with usage's warning, "
-                        "so the relaunch from [defaults] holds off here; set warn_at to "
-                        "let it relaunch itself")
 #: The warning of a relaunch launch that has a `limit_at` from `[defaults]`.
 LIMIT_AT_LEFT_OUT = ("limit_at is left out: this launch relaunches itself, and the "
                      "relaunch line comes at warn_at; limit_at still acts on a launch that "
@@ -1208,22 +1194,18 @@ def _settle_recycle(harness: str, values: dict, sources: dict, *, cwd: str | Non
                     available: Callable[[str], bool]) -> list[str]:
     """Settle `recycle_at_limit = relaunch` before the values are checked, and return
     the warnings. `recycle_at_limit` ships `off`, so a relaunch here was set by a flag,
-    the page, the preset or `[defaults]`. A `[defaults]` relaunch holds `off`, with a
-    warning, where the launch warns at no mark (`_no_mark`). A relaunch the launch can't
-    act on (`selfrecycle.missing`) is kept, and warned of with the item it fails
+    the page, the preset or `[defaults]`. A relaunch whose session can't recycle itself
+    (`selfrecycle.missing`) is kept, and warned of with the item it fails
     (`RELAUNCH_NOT_APPLIED`), so a value set for the launch is never silently without
-    effect; `catalog.refuse_values` then refuses the pairs it refuses, a typed or preset
-    relaunch with no mark among them. A `[defaults]` `limit_at` is left out of a relaunch
-    launch, with a warning, since the same `[defaults]` serves compacting launches, where
-    it acts."""
+    effect; `catalog.refuse_values` then refuses the pairs it refuses. A relaunch with no
+    warn-at mark is armed and never told, and says nothing: that is what was set. A
+    `[defaults]` `limit_at` is left out of a relaunch launch, with a warning, since the
+    same `[defaults]` serves compacting launches, where it acts."""
     from . import selfrecycle
 
     if values.get(RECYCLE_AT_LIMIT) != "relaunch":
         return []
     source = sources.get(RECYCLE_AT_LIMIT)
-    if source == DEFAULTS and _no_mark(harness, values):
-        values[RECYCLE_AT_LIMIT], sources[RECYCLE_AT_LIMIT] = "off", LEFT_OUT
-        return [RELAUNCH_NO_MARK_OFF]
     target = values.get("target")
     found = selfrecycle.missing(
         harness=harness, target=str(target or ""), in_slot=target == "slot", cwd=cwd,
@@ -1250,12 +1232,6 @@ def _no_default_mark(harness: str, preset, *, scratch: bool, source: str | None)
         return False
     seat = preset is not None and preset.kind == "seat" and not scratch
     return seat or harness == "codex"
-
-
-def _no_mark(harness: str, values: Mapping[str, object]) -> bool:
-    """Whether a relaunch in `values` warns at no mark, the pair `catalog.refuse_relaunch_mark`
-    refuses: `warn_at` off, or none held by a launch other than Codex's."""
-    return catalog.no_relaunch_mark(values, harness=harness) is not None
 
 
 #: The row holding a headless launch's exit rule; each value is one `--exit` of comms'

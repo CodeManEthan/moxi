@@ -689,9 +689,9 @@ def commands(values: Mapping[str, object]) -> tuple[str, ...]:
 def option_stamps(values: Mapping[str, object]) -> dict[str, str]:
     """The stamps a launch's option rows set: keep-warm on, recycle on expiry's value,
     and the crossing mark (`limit_mark`) when it recycles at its limit: a `compact`
-    launch always, a `relaunch` launch only where its session can recycle itself
-    (`selfrecycle.missing`), so it is told exactly where its arm would be accepted. A row
-    at `off` stamps nothing."""
+    launch always, a `relaunch` launch only where it is told it may recycle itself
+    (`selfrecycle.missing` with `told`): its arm would be accepted and it warns at a mark.
+    A row at `off` stamps nothing."""
     env: dict[str, str] = {}
     if values.get("keep_warm") == "on":
         env[KEEP_WARM_ENV] = "on"
@@ -705,9 +705,9 @@ def option_stamps(values: Mapping[str, object]) -> dict[str, str]:
 
 def relaunch_holds(values: Mapping[str, object]) -> bool:
     """Whether a launch of `values` (its `harness`, `target`, `cwd` and the rest, as the
-    composer has them) is set to `recycle_at_limit = relaunch` and can recycle itself, by
-    `selfrecycle.missing`; a launch not yet placed in a slot counts as in one when its
-    target is a slot."""
+    composer has them) is set to `recycle_at_limit = relaunch`, can recycle itself and is
+    told it may at its warn-at mark, by `selfrecycle.missing` with `told`; a launch not yet
+    placed in a slot counts as in one when its target is a slot."""
     from .. import selfrecycle
 
     if values.get("recycle_at_limit") != "relaunch":
@@ -716,7 +716,7 @@ def relaunch_holds(values: Mapping[str, object]) -> bool:
     return selfrecycle.missing(
         harness=str(values.get("harness") or "claude"), target=str(target or ""),
         in_slot=target == "slot", cwd=str(values.get("cwd") or "") or None,
-        values=values, source=None) is None
+        values=values, source=None, told=True) is None
 
 
 #: The mark a limit crossing falls back to when no other mark applies.

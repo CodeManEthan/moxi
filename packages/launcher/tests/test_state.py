@@ -271,6 +271,26 @@ def test_a_launch_at_off_shows_off_whatever_its_source(conn, monkeypatch, source
     assert "at limit off" in got.lines()[2] and "relaunch" not in got.lines()[2]
 
 
+@pytest.mark.parametrize("mark, shown", [
+    ("off", "relaunch (armed, no warning)"), ("", "relaunch (armed, no warning)"),
+    (None, "relaunch (armed, no warning)"), ("2x", "relaunch")])
+def test_a_relaunch_launch_with_no_mark_shows_it_is_armed_with_no_warning(
+        conn, monkeypatch, mark, shown):
+    monkeypatch.setattr(catalog, "slots_here", lambda: True)
+    real = modules.available
+    monkeypatch.setattr(modules, "available", lambda name: name != "notes" and real(name))
+    values = {"recycle_at_limit": "relaunch"}
+    if mark is not None:
+        values["warn_at"] = mark
+    conn.execute("UPDATE launches SET values_json = ? WHERE request_id = 'r1'",
+                 (json.dumps(values),))
+    got = read(conn)
+    assert got.recycle.at_limit == shown
+    assert f"at limit {shown}" in got.lines()[2]
+    if mark != "2x":
+        assert got.recycle.limit_at is None
+
+
 # -- the keep-warm part ------------------------------------------------------------------
 
 
