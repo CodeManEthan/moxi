@@ -564,10 +564,13 @@ package and goes on with the rest. The summary line gives that package as
 Ten seconds before the bound (at most half of it), each process of the run still going
 (under xdist the controller and every worker) writes all its threads' stacks, as
 `faulthandler` prints them, to `.moxi-dev/run/<package>.stacks/<worker>-<pid>.txt` under
-the root, and the line names that folder. A run that ends in time leaves no such folder,
-and the next check removes it. The test kit does the writing, so it works in any
-package that loads `moxi_dev.testing`: `MOXI_TEST_STACKS=<dir>` and
-`MOXI_TEST_STACKS_AT=<seconds since the epoch>` arm it in a run started by hand too.
+the root, and the line names that folder. A failed or errored test earlier in the
+process doesn't stop it (pytest's faulthandler plugin cancels the timer then, and the
+kit arms it again); a test running under pytest's `faulthandler_timeout` holds the timer
+while it runs. A run that ends in time leaves no such folder, and the next check
+removes it. The test kit does the writing, so it works in any package that loads
+`moxi_dev.testing`: `MOXI_TEST_STACKS=<dir>` and `MOXI_TEST_STACKS_AT=<seconds since the
+epoch>` arm it in a run started by hand too.
 
 On Linux and macOS a process a test started in a session of its own is outside the
 run's group and is not ended with it.

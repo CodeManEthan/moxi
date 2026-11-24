@@ -251,9 +251,13 @@ off) nothing is written.
 Stacks. With `MOXI_TEST_STACKS=<dir>` and `MOXI_TEST_STACKS_AT=<time>` (seconds since
 the epoch) in the environment pytest starts with, each process of the run (under xdist
 the controller and every worker) that is still running at that time writes every
-thread's stack (`faulthandler`) to `<dir>/<worker or main>-<pid>.txt`. Each process
-opens its file at the start, so one that ended in time leaves it empty. `moxi-dev check`
-sets both for each package's run, shortly before its bound (`arm_stacks`).
+thread's stack (`faulthandler`) to `<dir>/<worker or main>-<pid>.txt`, whatever ran
+before in it. pytest's own faulthandler plugin cancels the one timer a process has on
+each failed or errored test and on entering pdb, so the kit arms it again after those
+and after each test; while a test runs under pytest's `faulthandler_timeout` that
+setting holds the timer. Each process opens its file at the start, so one that ended in
+time leaves it empty. `moxi-dev check` sets both for each package's run, shortly before
+its bound (`arm_stacks`).
 
 A seam with two implementations: `Seam` parametrizes a fixture over every
 implementation for the contract suites and gives the rest the default one.
@@ -893,8 +897,8 @@ def pytest_configure(config: pytest.Config) -> None:
     _install()
 
 
-# This process's open stacks file while its dump is armed (`arm_stacks`).
-_STACKS_FH: list = []
+# This process's armed dump (`arm_stacks`): its open file and the time it is due.
+_STACKS: dict[str, Any] = {}
 
 
 def arm_stacks(env: Mapping[str, str]) -> Path | None:
@@ -903,10 +907,10 @@ def arm_stacks(env: Mapping[str, str]) -> Path | None:
     time, the time has passed, the file can't be made, or this process is already armed."""
     where = env.get(STACKS_ENV, "").strip()
     try:
-        delay_s = float(env.get(STACKS_AT_ENV, "")) - time.time()
+        at = float(env.get(STACKS_AT_ENV, ""))
     except ValueError:
         return None
-    if not where or _STACKS_FH or not math.isfinite(delay_s) or delay_s <= 0:
+    if not where or _STACKS or not math.isfinite(at) or at - time.time() <= 0:
         return None
     name = env.get("PYTEST_XDIST_WORKER") or "main"
     path = Path(where) / f"{name}-{os.getpid()}.txt"
@@ -916,9 +920,44 @@ def arm_stacks(env: Mapping[str, str]) -> Path | None:
         fh = open(path, "w", encoding="utf-8")
     except OSError:
         return None
-    _STACKS_FH.append(fh)
-    faulthandler.dump_traceback_later(delay_s, file=fh)
+    _STACKS.update(fh=fh, at=at)
+    _rearm_stacks()
     return path
+
+
+def _rearm_stacks() -> None:
+    """Arm this process's dump again for the time left, since faulthandler keeps one
+    timer a process and pytest's own faulthandler plugin cancels it on a failed or
+    errored test, on entering pdb and around each test under `faulthandler_timeout`.
+    Past the time, a file still empty gets the stacks now: the process is still running."""
+    if not _STACKS:
+        return
+    fh, left_s = _STACKS["fh"], _STACKS["at"] - time.time()
+    try:
+        if left_s > 0:
+            faulthandler.dump_traceback_later(left_s, file=fh)
+        elif os.fstat(fh.fileno()).st_size == 0:
+            faulthandler.dump_traceback(file=fh)
+    except (OSError, ValueError):                   # the file was closed under us
+        pass
+
+
+@pytest.hookimpl(trylast=True)
+def pytest_exception_interact() -> None:
+    _rearm_stacks()
+
+
+@pytest.hookimpl(trylast=True)
+def pytest_enter_pdb() -> None:
+    _rearm_stacks()
+
+
+@pytest.hookimpl(wrapper=True)
+def pytest_runtest_protocol() -> Generator[None, object, object]:
+    try:
+        return (yield)
+    finally:
+        _rearm_stacks()
 
 
 def _timed_slack(env: Mapping[str, str]) -> float:

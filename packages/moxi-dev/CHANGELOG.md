@@ -10,7 +10,9 @@
   each process of the run still going writes its threads' stacks under
   `.moxi-dev/run/<package>.stacks/`, which the line names.
 - The test kit writes each process's stacks at a set time when `MOXI_TEST_STACKS` and
-  `MOXI_TEST_STACKS_AT` name a directory and a time (`arm_stacks`).
+  `MOXI_TEST_STACKS_AT` name a directory and a time (`arm_stacks`), a process that
+  saw a failed or errored test too: the kit arms the dump again after pytest's
+  faulthandler plugin cancels it.
 - moxi-dev requires moxi 0.1.7 or later.
 - `MOXI_TEST_TEMP` (`disk` or `ram`, unset meaning `disk`) decides where a test run keeps
   its temp: on Linux `/var/tmp` or `/dev/shm`, elsewhere the system's own, where `ram`

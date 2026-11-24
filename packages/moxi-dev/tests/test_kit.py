@@ -491,6 +491,65 @@ def test_a_process_still_running_at_the_stacks_time_writes_every_threads_stack(t
         child.communicate()
 
 
+#: A run whose first test fails and second errors in setup, so pytest's faulthandler
+#: plugin cancels the process's dump twice, and whose third outlives the dump time: it
+#: finds its file still empty, then waits for the stacks to land in it. The fence keeps
+#: the run's variables from the tests, so the folder is written into the module.
+FAILS_THEN_HANGS = """\
+import os
+import time
+from pathlib import Path
+
+import pytest
+
+STACKS = Path(STACKS_DIR)
+
+
+@pytest.fixture
+def broken():
+    raise RuntimeError("a setup that errors")
+
+
+def test_a_fails():
+    assert False, "a test that fails"
+
+
+def test_b_errors(broken):
+    pass
+
+
+def test_c_hangs_past_the_dump_time():
+    name = os.environ.get("PYTEST_XDIST_WORKER") or "main"
+    path = STACKS / f"{name}-{os.getpid()}.txt"
+    assert path.read_text() == "", "the dump came before the failures"
+    end = time.monotonic() + 30
+    while "most recent call first" not in path.read_text() and time.monotonic() < end:
+        time.sleep(0.05)
+    print(f"stacks={path}")
+"""
+
+
+@pytest.mark.parametrize("workers", [(), ("-n", "1")], ids=["serial", "xdist"])
+def test_a_process_that_saw_a_failure_still_writes_its_stacks_at_the_time(
+        pytester, monkeypatch, tmp_path, workers):
+    stacks_dir = tmp_path / "stacks"
+    pytester.makeconftest('pytest_plugins = ["moxi_dev.testing"]\n')
+    pytester.makepyfile(test_hangs=FAILS_THEN_HANGS.replace(
+        "STACKS_DIR", repr(str(stacks_dir))))
+    monkeypatch.setenv(testing.STACKS_ENV, str(stacks_dir))
+    monkeypatch.setenv(testing.STACKS_AT_ENV, f"{time.time() + 8:.3f}")
+    monkeypatch.delenv("PYTEST_XDIST_WORKER", raising=False)    # this run's own
+    result = pytester.runpytest_subprocess("-p", "no:cacheprovider", "-p", "no:randomly",
+                                           "-s", *workers)
+    result.assert_outcomes(passed=1, failed=1, errors=1)
+    written = {path.name: path.read_text() for path in stacks_dir.iterdir()}
+    hung = [name for name, text in written.items()
+            if "test_c_hangs_past_the_dump_time" in text]
+    assert hung, written
+    assert hung[0].startswith("gw0-" if workers else "main-")
+    assert "most recent call first" in written[hung[0]]
+
+
 @pytest.mark.parametrize("given", [
     {},
     {testing.STACKS_AT_ENV: "9999999999"},
