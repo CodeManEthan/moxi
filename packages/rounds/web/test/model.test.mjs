@@ -5,7 +5,7 @@ import {
   addressRoute, ageWord, arrange, cardView, cellLabel, chips, closedWords, foldsOf, footWords, holdOf, isOpenNow,
   isShown, itemMarker, itemsOf, itemView, linesShown, markAttributes, markKey, moreLabel, noLongerOpen,
   parseAddress, parseMarkKey, passageText, phoneWaiting, phraseShown, phraseText, placePopover, pointerPath, popoverWidth,
-  recordQuery, revealBy, revealing, sessionAt, sheetMarks, sheetQuestions, stepHead, stepSections, stripCard, stripKey, stripStep,
+  recordQuery, revealBy, revealing, rulingQuery, sessionAt, sheetMarks, sheetQuestions, stepHead, stepSections, stripCard, stripKey, stripStep,
   timeWord, waitingCounts, walkFoot, walkStep,
 } from "../src/model.ts";
 
@@ -252,6 +252,8 @@ test("an address's record query, and what the foot says when it is no longer ope
   assert.equal(recordQuery({ kind: "round", round: "kestrel/a" }), "api/record?what=card&round=kestrel%2Fa");
   assert.equal(recordQuery({ kind: "question", holder: "kestrel", id: "Q9" }), "api/record?what=question&round=kestrel&id=Q9");
   assert.equal(recordQuery({ kind: "key" }), null);
+  assert.equal(rulingQuery("kestrel/billing-export", "C3"), "api/record?what=ruling&round=kestrel%2Fbilling-export&id=C3");
+  assert.equal(rulingQuery("kestrel", "S2"), "api/record?what=ruling&round=kestrel&id=S2");
   assert.equal(noLongerOpen({ kind: "step", round: "kestrel/a", column: "check", stage: "B1" }),
                "check of B1 on kestrel/a is no longer open");
   assert.equal(noLongerOpen({ kind: "question", holder: "kestrel/a", id: "Q2" }), "Question Q2 of kestrel/a is no longer open");

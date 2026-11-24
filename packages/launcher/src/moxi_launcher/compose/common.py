@@ -692,7 +692,8 @@ def option_stamps(values: Mapping[str, object]) -> dict[str, str]:
     and the crossing mark (`limit_mark`) when it recycles at its limit: a `compact`
     launch always, a `relaunch` launch only where it is told it may recycle itself
     (`selfrecycle.missing` with `told`): its arm would be accepted and it warns at a mark.
-    A row at `off` stamps nothing."""
+    The subconscious row stamps its mode under memory's variable. A row at `off` stamps
+    nothing."""
     env: dict[str, str] = {}
     if values.get("keep_warm") == "on":
         env[KEEP_WARM_ENV] = "on"
@@ -701,6 +702,8 @@ def option_stamps(values: Mapping[str, object]) -> dict[str, str]:
     at_limit = values.get("recycle_at_limit")
     if at_limit == "compact" or relaunch_holds(values):
         _stamp(env, "usage", 1, "CROSSING_AT_ENV", limit_mark(values))
+    if values.get("subconscious") in ("automatic", "on-demand"):
+        _stamp(env, "memory", 1, "SUBCONSCIOUS_ENV", str(values["subconscious"]))
     return env
 
 

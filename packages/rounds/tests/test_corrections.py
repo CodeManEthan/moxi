@@ -199,6 +199,21 @@ def test_a_plain_ruling_is_replaced_by_another_that_names_it(rounds):
     assert [one.id for one in corrections.live(held(rounds).rulings)] == ["C2", "C3"]
 
 
+def test_the_newest_ruling_that_replaces_one_follows_each_replacement_in_turn(rounds):
+    rule(text=SAID)
+    rule(text="Another thing.")
+    assert corrections.newest_replacing(held(rounds), "C1") is None
+
+    rule(text="Usage is shown in the status line.", supersedes="C1")
+    rule(text="Usage is shown nowhere.", supersedes="C3")
+    revoke("C4", text="The operator took it back.")
+
+    assert corrections.newest_replacing(held(rounds), "C1").id == "C4"
+    assert corrections.newest_replacing(held(rounds), "C3").id == "C4"
+    assert corrections.newest_replacing(held(rounds), "C4") is None
+    assert corrections.newest_replacing(held(rounds), "C9") is None
+
+
 def test_a_plain_ruling_is_taken_back(rounds):
     rule(text=SAID)
 

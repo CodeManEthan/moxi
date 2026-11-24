@@ -80,6 +80,8 @@ INPUT = {
                       "description": "Also search subagents' messages."},
         "scratch": {"type": "boolean", "default": False,
                     "description": "Also search scratch launches."},
+        "forks": {"type": "boolean", "default": False,
+                  "description": "Also search fork launches."},
         "limit": {"type": "integer", "minimum": 1, "maximum": LIMIT_MAX,
                   "default": LIMIT_DEFAULT, "description": "How many hits."},
     },
@@ -207,6 +209,7 @@ class Searcher:
                            results=args.get("results") is True,
                            subagents=args.get("subagents") is True,
                            scratch=args.get("scratch") is True,
+                           forks=args.get("forks") is True,
                            limit=int(args.get("limit", LIMIT_DEFAULT)))
         try:
             walked = walk.walk(query, redact=redact, deadline=started + WALK_S,
