@@ -7,6 +7,7 @@ import {
   isCold, isOld, launchedLine, nextCold, parseClocks, READ_TAIL, serverNow, timed,
 } from "../src/clocks.ts";
 import { listView, NO_FILTERS, queryOf, refresh, rowView, withClock } from "../src/list.ts";
+import { openedView } from "../src/opened.ts";
 import { runningRead } from "../src/running.ts";
 
 // Times in UTC as `HH:MM`, so the words are the same in any zone.
@@ -234,4 +235,14 @@ test("on a running launch launcher's fact wins; cache's speaks only where launch
   const alone = listView(state, { zone: UTC, launcher: true, running });
   assert.deepEqual(alone.running.rows.map((one) => [one.fact, one.cache?.value ?? null]),
                    [["warm until 20:04", "warm until 20:04"], [null, null]]);
+});
+
+test("the opened row's Cache line is the row's, there before the session's answer, linked where cache's page is", () => {
+  const base = rowView(row("s1", at("19:07")), TODAY, TODAY, true, UTC);
+  const opened = withClock(base, cacheOf([clock("s1")]), TODAY, UTC);
+  assert.deepEqual(openedView(opened, null, { today: TODAY, zone: UTC, cacheLink: true }).cache,
+                   { label: "Cache", value: "warm until 19:12", tail: null, link: "Cache" });
+  assert.equal(openedView(opened, null, { today: TODAY, zone: UTC }).cache.link, null);
+  assert.equal(openedView(base, null, { today: TODAY, zone: UTC, cacheLink: true }).cache, null);
+  assert.deepEqual(clockOf(null, base), null);
 });
