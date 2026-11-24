@@ -81,7 +81,7 @@ def read(conn, which=SID, **kw):
 
 def test_a_session_no_launch_holds_is_refused(conn):
     with pytest.raises(target.NotLaunched):
-        read(conn, NEW)
+        read(conn, NEW, turns=SimpleNamespace(find=lambda **kw: None))
 
 
 def test_a_launch_with_no_runs_is_not_red_and_shows_its_options(conn):
@@ -340,3 +340,43 @@ def test_show_with_no_session_reads_the_caller_s_own(conn):
     turns = SimpleNamespace(find=lambda **kw: session)
     got = state.show(conn=conn, turns=turns, slots_api=FakeSlots(), cache=None)
     assert got.data["outcome"] == "ok" and got.lines[0].endswith("ok")
+
+
+def owned_by_parent(conn):
+    """The launch's own `claude` is this process's parent, as the launcher records it."""
+    ident = proc.identity(os.getppid())
+    conn.execute("UPDATE launches SET pid = ?, pid_started = ? WHERE request_id = 'r1'",
+                 (ident.pid, ident.started))
+
+
+def live(session_id):
+    """turns serving `session_id` from this process, a child of the launch's `claude`."""
+    session = SimpleNamespace(session_id=session_id, endpoint_pid=os.getpid(),
+                              pid=os.getppid(), close=lambda: None)
+    asked = []
+    return SimpleNamespace(find=lambda **kw: asked.append(kw) or session, asked=asked)
+
+
+def test_show_finds_an_id_the_launch_never_learned_by_its_claude_process(conn):
+    owned_by_parent(conn)
+    before = store.session_ids(conn, "r1")
+    turns = live(NEW)
+    got = state.show(NEW, conn=conn, turns=turns, slots_api=FakeSlots(), cache=None)
+    assert got.lines[0] == f"session {NEW} (launch r1): ok"
+    assert turns.asked == [{"session_id": NEW}]
+    assert store.session_ids(conn, "r1") == before
+
+
+def test_show_with_no_session_reads_the_caller_s_own_by_its_claude_process(conn):
+    owned_by_parent(conn)
+    ident = proc.identity(os.getpid())
+    conn.execute("UPDATE launches SET endpoint = ? WHERE request_id = 'r1'",
+                 (f"{ident.pid}@{ident.started:.6f}",))
+    got = state.show(conn=conn, turns=live(NEW), slots_api=FakeSlots(), cache=None)
+    assert got.lines[0] == f"session {NEW} (launch r1): ok"
+
+
+def test_show_of_an_id_whose_session_runs_in_another_claude_is_refused(conn):
+    # The row records no process of the launch, as a nested session's `claude` is none.
+    with pytest.raises(target.NotLaunched):
+        state.show(NEW, conn=conn, turns=live(NEW), slots_api=FakeSlots(), cache=None)

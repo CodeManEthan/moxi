@@ -978,6 +978,20 @@ def test_an_unknown_session_id_is_not_launched_and_comms_is_never_asked(conn, wh
     nothing_written(conn, slots_api)
 
 
+def test_a_session_id_the_launch_never_learned_is_found_by_its_claude_process(conn):
+    class Unasked(FakeComms):
+        def session_of(self, identity):
+            raise AssertionError("comms was asked about a session id")
+
+    ident = proc.identity(os.getppid())
+    conn.execute("UPDATE launches SET pid = ?, pid_started = ?", (ident.pid, ident.started))
+    before = store.session_ids(conn, "r1")
+    result = call(conn, CLEARED, session=FakeSession(session_id=CLEARED), comms=Unasked(),
+                  follow=False)
+    assert result.run.request_id == "r1" and result.run.session_id == CLEARED
+    assert store.session_ids(conn, "r1") == before
+
+
 def test_a_name_that_is_not_a_session_id_goes_to_comms_even_when_a_launch_holds_it(tmp_path):
     conn = store.connect(tmp_path / "launcher.db")
     launched(conn, request_id="r1", session_id="planner")

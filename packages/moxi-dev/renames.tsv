@@ -3957,7 +3957,7 @@ launcher	packages/launcher/src/moxi_launcher/state.py	"""`state` is the open rel
 launcher	packages/launcher/src/moxi_launcher/state.py	"of_launch", "show", "state"]	keep	show	show
 launcher	packages/launcher/src/moxi_launcher/state.py	`stale`), or the last relaunch's outcome (the one that made this launch, when the	keep	stale	stale
 launcher	packages/launcher/src/moxi_launcher/state.py	of_launch	name	environ	caller_env
-launcher	packages/launcher/src/moxi_launcher/state.py	run whose job is gone shows `stale`; and for a launch that keeps warm, cache's read of	keep	stale	stale
+launcher	packages/launcher/src/moxi_launcher/state.py	run shows an open run whose job is gone as `stale`. For a launch that keeps warm, cache's	keep	stale	stale
 launcher	packages/launcher/src/moxi_launcher/state.py	show	name	environ	caller_env
 launcher	packages/launcher/src/moxi_launcher/state.py	shown = "stale"	keep	stale	stale
 launcher	packages/launcher/src/moxi_launcher/state.py	state	name	environ	caller_env

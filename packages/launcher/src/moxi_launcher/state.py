@@ -1,12 +1,14 @@
 """A launched session's state: its relaunch, recycle and keep-warm, and whether it needs a
 look.
 
-    state(session_id) -> SessionState     # any launched session, from the launch log
+    state(session_id) -> SessionState     # any launched session, found as an act finds it
     show(session_id=None) -> Result       # moxi launcher show [SESSION_ID] [--json]
 
-Read from the launch log. **Its one live read is the job test of an open run**, so an open
-run whose job is gone shows `stale`; and for a launch that keeps warm, cache's read of
-the session's lifetime, so a lifetime with no keep-warm window says so.
+Read from the launch log. **Its live reads are three.** An id no launch holds is asked of
+turns, and its live session's `claude` process names the launch (`target.resolve`), so a
+session's current id resolves before its launch has learned it. The job test of an open
+run shows an open run whose job is gone as `stale`. For a launch that keeps warm, cache's
+read of the session's lifetime says when a lifetime has no keep-warm window.
 
 - `relaunch`: the open relaunch run's state (`armed`, `waiting: <word>`, `acting`,
   `stale`), or the last relaunch's outcome (the one that made this launch, when the
@@ -186,12 +188,15 @@ class SessionState:
 
 def state(session_id: str, *, conn: sqlite3.Connection | None = None,
           slots_api: Any = LOOK, cache: Any = LOOK,
-          caller_env: Mapping[str, str] | None = None) -> SessionState:
-    """The state of the launched session `session_id`. Raises `target.NotLaunched` when
-    no launch holds it."""
+          caller_env: Mapping[str, str] | None = None,
+          turns: Any | None = None) -> SessionState:
+    """The state of the launched session `session_id`, its launch found as an act finds
+    it (`target.resolve`): by the launch log, else by the `claude` process serving the
+    live session of that id. Raises `target.NotLaunched` when neither finds a launch.
+    `turns` stands in for turns' API."""
     env = dict(os.environ if caller_env is None else caller_env)
     with relaunch._store(conn) as c:
-        row = store.resolve(c, session_id)
+        row = target.resolve(c, session_id, turns=turns)
         if row is None:
             raise target.NotLaunched()
         return of_launch(c, row, slots_api=slots_api, cache=cache, caller_env=env)
@@ -200,7 +205,7 @@ def state(session_id: str, *, conn: sqlite3.Connection | None = None,
 def of_launch(conn: sqlite3.Connection, row: store.LaunchRow, *, slots_api: Any = LOOK,
               cache: Any = LOOK, caller_env: Mapping[str, str] | None = None) -> SessionState:
     """The state of the launch `row` (`newest_session_id` set when it came from
-    `store.resolve`)."""
+    `target.resolve` or a `target.Target`)."""
     from . import job
 
     env = dict(os.environ if caller_env is None else caller_env)
@@ -352,16 +357,19 @@ def show(session_id: str | None = None, *, pid: int | None = None, turns: Any | 
          slots_api: Any = LOOK, cache: Any = LOOK, conn: sqlite3.Connection | None = None,
          caller_env: Mapping[str, str] | None = None) -> relaunch.Result:
     """`moxi launcher show [SESSION_ID]`: the state of the session named, or with none,
-    of the session this process runs in (found through turns). Exits 0 with the state;
-    raises a refusal for a session no launch holds."""
+    of the session this process runs in (found through turns). Either is found as an act
+    finds it, so a live session's current id resolves before its launch has learned it.
+    Exits 0 with the state; raises a refusal for a session no launch holds."""
     env = dict(os.environ if caller_env is None else caller_env)
     with relaunch._store(conn) as c:
         if session_id is None:
             found = target.caller(pid=pid, conn=c, turns=turns,
                                   slots_api=None if slots_api is LOOK else slots_api)
             found.close()
-            session_id = found.session_id or found.row.session_id or ""
-        got = state(session_id, conn=c, slots_api=slots_api, cache=cache, caller_env=env)
+            got = of_launch(c, found.row, slots_api=slots_api, cache=cache, caller_env=env)
+        else:
+            got = state(session_id, conn=c, slots_api=slots_api, cache=cache,
+                        caller_env=env, turns=turns)
     return relaunch.Result(codes.OK, got.lines(),
                            data={**got.as_json(), "outcome": got.word or "ok"})
 

@@ -45,25 +45,24 @@ and the agent ends its turn, making no further tool call; the job waits for the 
 to be quiet. The armed text names the model the session comes back on.
 
 **A director's call** needs comms: the caller's identity, proven by its session's claim
-(never a variable it sets); the target by session id (anything shaped like a UUID,
-looked up in the launch log only), or else by a bound comms name; the caller among the
-launch's directors (`values_json`: a director named with a scope admits that qualified
-name only, a plain one the name in the target launch's own scope) or among the box's
-policy directors (comms' `policy_directors()`, read at the call: the names of comms'
-`[policy] directors` provisioned as standing identities now, each already qualified, a
-bare one the global identity, never read in the target's scope), for a target with a
-comms identity whose launch didn't opt out (`takes_policy_directors = false`). The
-setting is read as it is now, not as it was at the target's launch: a relaunch is what
-brings the target's comms side into line with it. With
-cache installed, a session whose cache is warm or fresh is refused `warm` (it can be
-mailed); and the quiet read must pass now, or the call ends `held` (exit 75) with nothing
-written. The call then follows the run for `relaunch.follow_s` and prints its outcome;
-past that it exits 75 naming `--status`. A relaunch that came back says the identity, the
-slot, the new session, the posture, the model and whether comms has bound the name
-within 60 s, or could not be read. An
-agent runs the call with a Bash timeout of at least `relaunch.follow_s` plus 30 s.
-`--status` exits as the call would: by the run's end, 75 while it runs, and 1 for an
-open run whose job is gone, which no end will come to.
+(never a variable it sets); the target by session id (anything shaped like a UUID, found
+as an act finds it, never through comms), or else by a bound comms name; the caller among
+the launch's directors (`values_json`: a director named with a scope admits that
+qualified name only, a plain one the name in the target launch's own scope) or among the
+box's policy directors (comms' `policy_directors()`, read at the call: the names of
+comms' `[policy] directors` provisioned as standing identities now, each already
+qualified, a bare one the global identity, never read in the target's scope), for a
+target with a comms identity whose launch didn't opt out
+(`takes_policy_directors = false`). The setting is read as it is now, not as it was at the target's launch: a
+relaunch is what brings the target's comms side into line with it. With cache installed,
+a session whose cache is warm or fresh is refused `warm` (it can be mailed); and the
+quiet read must pass now, or the call ends `held` (exit 75) with nothing written. The
+call then follows the run for `relaunch.follow_s` and prints its outcome; past that it
+exits 75 naming `--status`. A relaunch that came back says the identity, the slot, the
+new session, the posture, the model and whether comms has bound the name within 60 s, or
+could not be read. An agent runs the call with a Bash timeout of at least
+`relaunch.follow_s` plus 30 s. `--status` exits as the call would: by the run's end, 75
+while it runs, and 1 for an open run whose job is gone, which no end will come to.
 
 **A stop** (`--stop`) sends the job of an open relaunch or repair run SIGTERM: before the
 exit the run ends `stopped` and a self run's session is told by a note; from the exit on,
@@ -380,7 +379,7 @@ def call_director(which: str, *, dry_run: bool = False, follow: bool = True,
                                      "session's claim proves",
                       "run it from a session launched with a comms name")
     with _store(conn) as c:
-        sid = _session_of(c, which, comms)
+        sid = _session_of(c, which, comms, turns)
         found = target.find(sid, conn=c, turns=turns, slots_api=slots_api)
         try:
             api = offered(found, slots_api)
@@ -435,12 +434,13 @@ def _caller_identity(comms: Any, env: Mapping[str, str]) -> str | None:
         return None
 
 
-def _session_of(conn: sqlite3.Connection, which: str, comms: Any) -> str:
-    """`which` as a session id. Shaped like one (a UUID), it is looked up in the launch log
-    only: one no launch holds is refused `not-launched`, and comms is never asked. Anything
-    else is a comms identity: the live session behind it as a bound name."""
+def _session_of(conn: sqlite3.Connection, which: str, comms: Any, turns: Any | None) -> str:
+    """`which` as a session id. Shaped like one (a UUID), it is found as an act finds it
+    (`target.resolve`: the launch log, else the `claude` process serving the live session
+    of that id): one neither finds is refused `not-launched`, and comms is never asked.
+    Anything else is a comms identity: the live session behind it as a bound name."""
     if target.session_id_shaped(which):
-        if store.resolve(conn, which) is None:
+        if target.resolve(conn, which, turns=turns) is None:
             raise target.NotLaunched(f"session {which} was not launched by the launcher")
         return which
     try:

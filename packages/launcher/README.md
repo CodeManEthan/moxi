@@ -358,10 +358,11 @@ When the endpoint the claim names is gone and the one serving the session is a c
 the launch's `claude`, every act accepts it. A session id no launch knows (one the
 session took after a reload the launch never saw) is the launch whose `claude` serves
 that session, so `relaunch --self`, exit-session, keep-warm, recycle on expiry and a
-director's call by comms name all find it. The new endpoint also takes the launch at its
-next context crossing, so the session is told at its mark. A self relaunch's handoff must
-be written after the session's current id began: when the launch learned it, else the
-first record of its transcript, else when the launch was made.
+director's call by session id or comms name all find it, and `show` reads its state.
+The new endpoint also takes the launch at its next context crossing, so the session is
+told at its mark. A self relaunch's handoff must be written after the session's current
+id began: when the launch learned it, else the first record of its transcript, else
+when the launch was made.
 
 A launch has one act open at a time. A second one is refused (`run-open`, exit 3), naming
 the open run. Each act is a run in the launch log, with its events and its outcome.
