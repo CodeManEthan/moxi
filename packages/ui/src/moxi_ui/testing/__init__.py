@@ -80,7 +80,10 @@ or closed, a trace started or stopped, the browser closed) each end within `CALL
 Past it the fixture ends the processes `ui_browser` started, Playwright's driver and the
 browser under it, and the call fails saying which call it was; so a browser that stops
 answering fails a test's teardown rather than holding the run. Every later call to that
-browser fails the same way. A call a test makes itself is bounded by the test's own
+browser fails the same way. A call that returns all the same once its processes are ended
+(`browser.close` and `playwright.stop` do) leaves one `BoundWarning` naming the call and
+the bound, which the run's warnings summary shows, even under `-W error`; it fails
+nothing. A call a test makes itself is bounded by the test's own
 timeout (pytest-timeout's `method="thread"` ends even a call that waits on such a
 browser).
 
@@ -114,6 +117,7 @@ import os
 import re
 import sys
 import threading
+import warnings
 import weakref
 from collections.abc import Callable, Iterator
 from pathlib import Path
@@ -130,6 +134,12 @@ WAIT_S = WAIT_MS / 1000
 #: Seconds one of the fixtures' own calls to Playwright that takes no timeout of its own
 #: may take: past it the fixture ends the browser's processes and the call fails.
 CALL_S = 60.0
+
+class BoundWarning(UserWarning):
+    """One of the fixtures' calls to Playwright ran past `CALL_S`: the fixture ended the
+    browser's processes, and the call then returned, so nothing failed."""
+
+
 #: The module whose `expect` takes `WAIT_MS`.
 _SYNC_API = "playwright.sync_api"
 
@@ -292,12 +302,15 @@ class _Driver:
         self.ended: str | None = None
 
     def call(self, what: str, run: Callable[..., Any], *args: Any, **kwargs: Any) -> Any:
+        """`run(*args, **kwargs)`, bounded at `CALL_S`. Past the bound a call that fails
+        raises a `RuntimeError` naming the call; one that returns gives a `BoundWarning`."""
         timer = threading.Timer(CALL_S, self.end, args=(what,))
         timer.daemon = True
-        if self.ended is None:
+        armed = self.ended is None
+        if armed:
             timer.start()
         try:
-            return run(*args, **kwargs)
+            returned = run(*args, **kwargs)
         except Exception as exc:
             if self.ended is None:
                 raise
@@ -305,6 +318,15 @@ class _Driver:
                                f"{CALL_S:g} s, so its processes were ended") from exc
         finally:
             timer.cancel()
+        if armed and self.ended is not None:
+            # Recorded as a warning whatever the run's filters say: the bound has done its
+            # work, and the test it ran in stands on its own outcome.
+            with warnings.catch_warnings():
+                warnings.simplefilter("always", BoundWarning)
+                warnings.warn(f"the browser stopped answering: {self.ended} took more than "
+                              f"{CALL_S:g} s, so its processes were ended and the call "
+                              f"went on", BoundWarning, stacklevel=2)
+        return returned
 
     def end(self, what: str) -> None:
         """Kill the processes and every process under them; `what` is the call that ran

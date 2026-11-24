@@ -8,6 +8,7 @@ import re
 import subprocess
 import sys
 import textwrap
+import warnings
 from pathlib import Path
 
 import pytest
@@ -527,6 +528,65 @@ def test_a_teardown_whose_browser_stops_answering_ends_at_the_bound(tmp_path, ui
     took = re.search(r"1 failed, 1 error in ([\d.]+)s", done.stdout)
     assert took is not None and float(took.group(1)) >= _INNER_CALL_S, out
     assert left == [], f"the plugin left stopped processes running: {left}"
+
+
+def test_a_call_that_returns_past_its_bound_leaves_one_warning_naming_it(monkeypatch):
+    import time
+
+    from moxi_ui import testing as kit
+
+    monkeypatch.setattr(kit, "CALL_S", 0.2)
+    driver = kit._Driver([])
+    with warnings.catch_warnings(record=True) as log:
+        warnings.simplefilter("error")
+        assert driver.call("stopping Playwright", lambda: time.sleep(0.6) or "stopped") \
+            == "stopped"
+    assert driver.ended == "stopping Playwright"
+    assert [(found.category, str(found.message)) for found in log] == [
+        (kit.BoundWarning, "the browser stopped answering: stopping Playwright took more "
+                           "than 0.2 s, so its processes were ended and the call went on")]
+
+
+def test_a_call_within_its_bound_leaves_no_warning(monkeypatch):
+    from moxi_ui import testing as kit
+
+    monkeypatch.setattr(kit, "CALL_S", 5.0)
+    driver = kit._Driver([])
+    with warnings.catch_warnings(record=True) as log:
+        warnings.simplefilter("always")
+        assert driver.call("closing a context", lambda: "returned") == "returned"
+    assert driver.ended is None and log == []
+
+
+def test_a_teardown_call_past_its_bound_shows_in_the_runs_summary_and_fails_nothing(tmp_path):
+    # A fake call that outlives a short bound, in a fixture's teardown, in a run under
+    # xdist that turns every other warning into an error.
+    (tmp_path / "test_outlives.py").write_text(textwrap.dedent("""
+        import time
+
+        import pytest
+
+        import moxi_ui.testing as kit
+
+        kit.CALL_S = 0.2
+
+        @pytest.fixture
+        def slow_stop():
+            driver = kit._Driver([])
+            yield
+            driver.call("stopping Playwright", time.sleep, 0.6)
+
+        def test_it(slow_stop):
+            pass
+    """))
+    done = subprocess.run([sys.executable, "-m", "pytest", "-q", "-p", "no:cacheprovider",
+                           "-W", "error", "-n", "1", str(tmp_path)], cwd=tmp_path,
+                          capture_output=True, text=True, timeout=60)
+    out = done.stdout + done.stderr
+    assert done.returncode == 0, out
+    assert re.search(r"1 passed, 1 warning in", done.stdout), out
+    assert ("BoundWarning: the browser stopped answering: stopping Playwright took more "
+            "than 0.2 s, so its processes were ended and the call went on") in done.stdout, out
 
 
 def _stopped(listed: Path) -> list:
