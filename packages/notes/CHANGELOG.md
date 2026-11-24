@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- `list_notes` and `search_notes` show a note changed near the epoch on Windows, which
+  refused that local time in a zone west of UTC; the zone's offset now stands in.
 - `read_note` and `search_notes` read files on Windows. Their open asked for
   `O_NOFOLLOW`, which Windows lacks, so every read failed there; it now takes each open
   flag where the system has one, and the file read must still be the file judged. The

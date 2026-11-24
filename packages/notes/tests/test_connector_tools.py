@@ -7,6 +7,7 @@ from __future__ import annotations
 import ast
 import asyncio
 import os
+from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
@@ -126,6 +127,21 @@ def test_list_refuses_a_dir_the_rules_refuse(root, tools, rel_dir, code):
     result, logged = call(tools["list_notes"], {"folder": rel_dir})
     assert result.is_error and result.refusal == code
     assert logged == {"refusal": code}
+
+
+def test_a_time_the_system_cant_read_as_local_takes_the_zones_offset_now(monkeypatch):
+    # Windows refuses a local time that falls before the epoch in its own zone.
+    class Refusing(datetime):
+        @classmethod
+        def fromtimestamp(cls, ts, tz=None):
+            if tz is None:
+                raise OSError(22, "Invalid argument")
+            return datetime.fromtimestamp(ts, tz)
+
+    offset = datetime.now().astimezone().utcoffset()
+    monkeypatch.setattr(tools_mod, "datetime", Refusing)
+    expected = datetime(1970, 1, 1, 0, 50, tzinfo=UTC) + offset
+    assert tools_mod.local(3_000) == expected.strftime("%Y-%m-%d %H:%M")
 
 
 # -- read_note ------------------------------------------------------------------------------

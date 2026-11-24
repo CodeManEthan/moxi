@@ -28,7 +28,7 @@ from __future__ import annotations
 import os
 import re
 from collections.abc import Callable, Mapping
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from . import pathrules
@@ -144,8 +144,15 @@ def utc(ts: float) -> str:
 
 
 def local(ts: float) -> str:
-    """Seconds since the epoch as local time, to the minute."""
-    return datetime.fromtimestamp(ts).astimezone().strftime("%Y-%m-%d %H:%M")
+    """Seconds since the epoch as local time, to the minute. Where the system can't read
+    the time as local (Windows refuses one that falls before the epoch in its own zone),
+    the zone's offset now stands in for the offset then."""
+    try:
+        when = datetime.fromtimestamp(ts).astimezone()
+    except (OSError, OverflowError, ValueError):
+        when = datetime.fromtimestamp(ts, UTC) + (datetime.now().astimezone().utcoffset()
+                                                  or timedelta(0))
+    return when.strftime("%Y-%m-%d %H:%M")
 
 
 def _size(n: int) -> str:
