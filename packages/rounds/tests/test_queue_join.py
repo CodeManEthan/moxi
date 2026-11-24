@@ -1,7 +1,7 @@
 """Joining a repo's queue: `finish` in a queue project enqueues at the tip after the
 finish gates but the target's, the check met by the scoped local check with its own
-merge-base; `--urgent` and `--leave`; a moved member leaves; a direct finish is
-refused; and `next` says where the build stands."""
+merge-base or by the full check (`--full`); `--urgent` and `--leave`; a moved member
+leaves; a direct finish is refused; and `next` says where the build stands."""
 
 from __future__ import annotations
 
@@ -116,11 +116,56 @@ def test_the_scoped_check_stays_good_while_the_target_moves_on(repo, ready, roun
     assert checking.passes(state, "B1", checking.CHECK, tip=tree.rev(), argv=seen.check)
 
 
-def test_a_full_check_is_refused_in_a_queue_project(ready):
-    ready()
+def test_a_full_check_runs_in_a_queue_project(ready, round_log, configure):
+    # a ci remote that does not exist: a push would refuse the run
+    configure('ci = { workflows = ["ci.yml"], local = "none", remote = "nowhere" }')
+    tree = ready()
+    ran = checking.check(ROUND, "B1", by="coder", full=True)
+    assert ran.exit_code == 0 and list(ran.argv) == shlex.split(FULL)
+    recorded = events(round_log, checking.RAN)[-1]
+    assert (recorded["step"], recorded["commit"], recorded["argv"]) == (
+        checking.CHECK, tree.rev(), shlex.split(FULL))
+    assert recorded["merge_base"] is not None
+    assert not events(round_log, "ci.read")
+    assert own.build_setting(own.load(), "proj-a", "land") == own.LAND_QUEUE
+
+
+def full_only(tree, round_log) -> None:
+    """A new commit on the build, verified, and only the full check run at it."""
+    tree.commit("more.txt", "more work")
+    verify(round_log, "B1", tree.rev())
+    assert checking.check(ROUND, "B1", by="coder", full=True).exit_code == 0
+
+
+def test_a_full_check_meets_the_check_gate_of_a_queue_project(ready, round_log):
+    tree = ready()
+    full_only(tree, round_log)
+    assert joining.join(ROUND, "B1", by="coder").tip == tree.rev()
+
+
+def test_a_full_check_in_a_queue_project_meets_gate_3_after_land_is_flipped(
+        repo, ready, round_log, configure):
+    tree = ready()
+    full_only(tree, round_log)
+    tip = tree.rev()
+    configure(land="finish")
+    finishing.finish(ROUND, "B1", by="coder")
+    assert repo.git("merge-base", "--is-ancestor", tip, "main") == ""
+
+
+def test_a_failed_full_check_after_a_passed_scoped_one_leaves_the_step_owed(
+        ready, round_log, write_config):
+    tree = ready()
+    failing = shlex.join([sys.executable, "-c", "raise SystemExit(1)"])
+    write_config(f"[projects.proj-a]\nland = \"queue\"\n"
+                 f"check = {{ command = {json.dumps(failing)}, "
+                 f"scoped = {json.dumps(SCOPED)} }}\n")
+    assert checking.check(ROUND, "B1", by="coder", full=True).exit_code == 1
     with pytest.raises(Refused) as caught:
-        checking.check(ROUND, "B1", by="coder", full=True)
-    assert "candidate's CI" in caught.value.unmet[0].reason
+        joining.join(ROUND, "B1", by="coder")
+    assert any("the check of B1 has not passed" in one.reason
+               for one in caught.value.unmet)
+    assert events(round_log, checking.RAN)[-1]["commit"] == tree.rev()
 
 
 # -- joining -----------------------------------------------------------------------------
@@ -154,17 +199,6 @@ def test_a_build_whose_scoped_check_did_not_run_at_the_tip_is_refused(ready, rou
     assert any("check of B1 has not passed" in one.reason for one in caught.value.unmet)
     assert not events(round_log, joining.JOINED)
     assert queue_file.read("proj-a").members == {}
-
-
-def test_a_full_check_does_not_meet_the_check_gate_of_a_queue_project(
-        ready, round_log, configure):
-    tree = ready()
-    configure(land="finish")
-    checking.check(ROUND, "B1", by="coder")
-    configure()
-    with pytest.raises(Refused):
-        joining.join(ROUND, "B1", by="coder")
-    assert tree.rev() == events(round_log, checking.RAN)[-1]["commit"]
 
 
 def test_finish_actions_other_than_one_merge_are_refused(ready, configure):
