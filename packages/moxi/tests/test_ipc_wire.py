@@ -594,7 +594,8 @@ def test_the_public_surface():
     for name in ("address", "hello", "Hello", "Agreed", "IpcError", "RpcError", "NotRpc",
                  "NotServing", "AlreadyServing", "Timeout"):
         assert name in ipc.__all__ and hasattr(ipc, name)
-    for name in ("serve", "sweep", "connect", "Client", "Server", "Connection", "Peer"):
+    for name in ("serve", "sweep", "lock_path", "connect", "Client", "Server", "Connection",
+                 "Peer"):
         assert name in ipc.__all__ and name in dir(ipc)
     with pytest.raises(AttributeError):
         ipc.no_such_name  # noqa: B018

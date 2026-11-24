@@ -342,8 +342,8 @@ class ClaimHolder:
         host, self._host = self._host, None
         if host is not None:
             host.close()
-            # The lock file beside the socket is this process's alone (its path carries
-            # the holder's key), so it goes with the socket.
+            # The socket's lock file is this process's alone (its name carries the
+            # holder's key), so it goes with the socket.
             Path(ipc_lock_path(str(self.socket_path))).unlink(missing_ok=True)
         if remove_file:
             claimfile.remove(self.key)
@@ -373,8 +373,12 @@ class ClaimHolder:
 
 
 def ipc_lock_path(address: str) -> str:
-    """The lock file `moxi.ipc.serve` holds beside a socket while it serves it."""
-    return address + ".lock"
+    """The lock file `moxi.ipc.serve` holds while it serves `address`
+    (`moxi.ipc.lock_path`): beside a Unix socket, and for a Windows pipe in comms'
+    runtime directory, since a pipe has no directory of its own."""
+    from moxi import ipc
+
+    return ipc.lock_path(address)
 
 
 # --------------------------------------------------------------------------- client
@@ -433,7 +437,8 @@ def checked_socket(path, env=None) -> Path:
     """`path` when it is one of this comms' claim sockets, else raise
     `paths.OutsideRuntime` naming `MOXI_COMMS_CLAIM_SOCKET` and the directory.
 
-    One of comms' own is a path inside RUNTIME/comms (`env`'s, else this process's), or
+    One of comms' own is a path inside RUNTIME/comms (`env`'s, else this process's), a
+    Windows pipe named for this process's (`paths.own_pipe`), or
     a short path the core gave a holder whose path there was too long
     (`paths.claim_socket`): in the core's short socket directory, and recorded as its
     socket by the holder's claim file in RUNTIME/comms. A short path no claim file of

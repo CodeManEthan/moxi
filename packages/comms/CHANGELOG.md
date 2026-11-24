@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+- On Windows the send-only verbs (`send-only add --take`, `renew`, `remove`), a send
+  under a send-only name and the connector's sign-in code mint work from your own
+  terminal. Windows never gives an orphan a new parent, so comms' strict walk up a
+  process's ancestors met an exited parent for nearly every process and refused it; it
+  now ends there, and at a pid a later process took, as at a process with no parent. A
+  process comms can't read is still refused. Linux and macOS are unchanged.
+- On Windows a claim socket is a `moxi.ipc` pipe throughout: comms tells whether a
+  holder serves one by its lock, takes one stamped in `MOXI_COMMS_CLAIM_SOCKET` when it
+  is named for this comms' runtime folder, and removes its lock file from that folder.
+
 - comms' config gains `[policy] directors`, by default the plain name `fleet-lead`:
   names that direct every comms session on the box that doesn't opt out, after its
   launch's own directors. Each directs only while its name holds a standing row

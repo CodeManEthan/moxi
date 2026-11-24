@@ -16,8 +16,8 @@ from moxi.ipc import Peer
 from moxi_comms import api, claimfile, machine_line, reserved, secrets, wire
 from moxi_comms.client import DaemonClient, DaemonError
 from moxi_comms.daemon import Refusal
-from moxi_comms.membership import (SELF, TREE, ProcView, PsutilView, Root, Unplaceable,
-                                   root_of, sessions_of)
+from moxi_comms.membership import (DEFAULT_PROC, SELF, TREE, ProcView, PsutilView, Root,
+                                   Unplaceable, gone, root_of, sessions_of)
 from moxi_comms.paths import daemon_socket
 from moxi_comms.store import open_write
 from moxi_comms.tokens import TokenStore
@@ -213,8 +213,8 @@ def test_a_peer_that_has_gone_is_refused_as_unplaceable(console):
     assert "can't tell" in str(e.value)
 
 
-class Blind(ProcView):
-    """The real `/proc`, except that one pid can't be read."""
+class Blind(type(DEFAULT_PROC)):
+    """This platform's own reader of processes, except that one pid can't be read."""
 
     def __init__(self, hidden):
         super().__init__()
@@ -224,12 +224,18 @@ class Blind(ProcView):
         return None if pid == self.hidden else super().stat(pid)
 
 
+class EndingBlind(Blind):
+    """`Blind` on a view whose tree ends at a gone parent; the hidden pid is there."""
+
+    ends_at_gone_parent = True
+
+
 def test_a_peer_whose_ancestor_cant_be_read_is_refused(console):
     console.daemon.proc_view = Blind(os.getppid())
     result = api.send_as("launcher", "console", ["main@proj-a"], "x")
     assert (result.outcome, result.refusal.code) == ("refused", "name-reserved")
     assert "can't tell whether this process is inside a session" in result.refusal.text
-    console.daemon.proc_view = ProcView()
+    console.daemon.proc_view = type(DEFAULT_PROC)()
     assert api.send_as("launcher", "console", ["main@proj-a"], "x").outcome == "sent"
 
 
@@ -262,6 +268,111 @@ def test_the_strict_walk_ends_at_a_process_with_no_parent():
 def test_the_strict_walk_meets_a_root_before_an_unreadable_ancestor():
     view = Table({30: (20, "c"), 20: (10, "b")})
     assert sessions_of(30, [("k", [Root(20, "b", TREE)])], view, strict=True) == ["k"]
+
+
+class Ending(Table):
+    """A table on a platform whose tree ends at a gone parent, as Windows' does: a pid
+    in `there` exists but can't be read; any other pid missing from the table is gone."""
+
+    ends_at_gone_parent = True
+
+    def __init__(self, table, there=()):
+        super().__init__(table)
+        self.there = set(there)
+
+    def gone(self, pid):
+        return pid not in self.table and pid not in self.there
+
+
+def test_on_an_ending_view_a_gone_ancestor_ends_the_walk_outside_every_session():
+    view = Ending({30: (20, "3.0"), 20: (10, "2.0")})       # 10 has exited
+    assert sessions_of(30, [("k", [Root(99, "9.0", TREE)])], view, strict=True) == []
+    assert [p for p, _ in view.ancestry(30, strict=True)] == [30, 20]
+
+
+def test_on_an_ending_view_a_reused_pid_ends_the_walk_before_the_strangers_ancestry():
+    # 10 exited and a later process took its pid; above that stranger is a session.
+    view = Ending({30: (20, "3.0"), 20: (10, "2.0"), 10: (5, "9.0"), 5: (0, "0.5")})
+    files = [("k", [Root(5, "0.5", TREE)]), ("s", [Root(10, "9.0", TREE)])]
+    assert sessions_of(30, files, view, strict=True) == []
+    assert [p for p, _ in view.ancestry(30, strict=True)] == [30, 20]
+    assert sessions_of(30, files, view) == ["s"]              # the plain walk as before
+
+
+def test_on_an_ending_view_a_root_before_a_gone_ancestor_places_the_process_inside():
+    view = Ending({30: (20, "3.0"), 20: (10, "2.0")})
+    assert sessions_of(30, [("k", [Root(20, "2.0", TREE)])], view, strict=True) == ["k"]
+
+
+def test_a_start_that_is_no_number_never_reads_as_a_reused_pid():
+    view = Ending({30: (20, "s30"), 20: (0, "s99")})
+    assert [p for p, _ in view.ancestry(30, strict=True)] == [30, 20]
+
+
+def test_the_windows_walk_refuses_an_ancestor_it_cant_read():
+    view = Ending({30: (20, "3.0"), 20: (10, "2.0")}, there={10})
+    with pytest.raises(Unplaceable) as e:
+        sessions_of(30, [("k", [Root(99, "9.0", TREE)])], view, strict=True)
+    assert e.value.pid == 10
+
+
+@pytest.mark.parametrize("view, pid", [
+    (Ending({}), 30),                                          # its own process is gone
+    (Ending({}, there={30}), 30),                              # or can't be read
+    (Ending({30: (20, "3.0"), 20: (30, "2.0")}), 30),          # a loop
+])
+def test_on_an_ending_view_the_walks_own_process_and_a_loop_still_raise(view, pid):
+    with pytest.raises(Unplaceable):
+        sessions_of(pid, [], view, strict=True)
+
+
+def test_on_an_ending_view_the_limit_still_raises():
+    view = Ending({n: (n - 1, f"{n}.0") for n in range(1, 40)})
+    with pytest.raises(Unplaceable):
+        list(view.ancestry(39, limit=10, strict=True))
+
+
+def test_a_view_that_does_not_end_at_a_gone_parent_raises_at_one():
+    view = Ending({30: (20, "3.0"), 20: (10, "2.0")})
+    view.ends_at_gone_parent = False
+    with pytest.raises(Unplaceable) as e:
+        sessions_of(30, [], view, strict=True)
+    assert e.value.pid == 10
+
+
+def test_on_an_ending_view_a_peer_whose_ancestor_cant_be_read_is_refused(console):
+    console.daemon.proc_view = EndingBlind(os.getppid())
+    result = api.send_as("launcher", "console", ["main@proj-a"], "x")
+    assert (result.outcome, result.refusal.code) == ("refused", "name-reserved")
+    assert "can't tell whether this process is inside a session" in result.refusal.text
+
+
+def test_gone_answers_from_a_views_own_hook():
+    assert gone(Ending({}), 7) is True
+    assert gone(Ending({}, there={7}), 7) is False
+
+    class Broken(Table):
+        def gone(self, pid):
+            raise OSError("no table")
+    assert gone(Broken({}), 7) is False
+
+
+def test_gone_answers_for_psutil():
+    import psutil
+
+    free = max(psutil.pids()) + 4096
+    while psutil.pid_exists(free):
+        free += 4096
+    assert gone(PsutilView(), free) is True
+    assert gone(PsutilView(), os.getpid()) is False
+
+
+def test_gone_answers_for_the_proc_reader(tmp_path):
+    (tmp_path / "7").mkdir()                       # there, its stat unreadable
+    view = ProcView(root=str(tmp_path))
+    assert view.stat(7) is None
+    assert gone(view, 7) is False
+    assert gone(view, 8) is True                   # no entry
 
 
 @pytest.mark.skipif(not sys.platform.startswith("linux"),

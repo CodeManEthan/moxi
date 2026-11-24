@@ -17787,3 +17787,9 @@ moxi-dev	packages/moxi-dev/tests/test_run_fence.py	"-s", timeout=900)	keep	timeo
 moxi-dev	packages/moxi-dev/src/moxi_dev/testing.py	if not _holds(env, "HOME") and current_env.get("HOME"):	keep	HOME	HOME
 moxi-dev	packages/moxi-dev/src/moxi_dev/testing.py	env["HOME"] = current_env["HOME"]	keep	HOME	HOME
 moxi-dev	packages/moxi-dev/tests/test_run_fence.py	for said_dir in said["folders"]:	keep	folders	folders
+comms	packages/comms/tests/test_connector_gate.py	self.there = set(there)	keep	set	set
+comms	packages/comms/tests/test_reserved_refusals.py	self.there = set(there)	keep	set	set
+comms	packages/comms/tests/test_reserved_refusals.py	assert [p for p, _ in view.ancestry(30, strict=True)] == [30, 20]	keep	strict	strict
+comms	packages/comms/tests/test_reserved_refusals.py	assert [p for p, _ in view.ancestry(30, strict=True)] == [30, 20]	keep	strict	strict
+comms	packages/comms/tests/test_reserved_refusals.py	assert [p for p, _ in view.ancestry(30, strict=True)] == [30, 20]	keep	strict	strict
+comms	packages/comms/tests/test_reserved_refusals.py	list(view.ancestry(39, limit=10, strict=True))	keep	strict	strict

@@ -7,6 +7,8 @@
   real path, case-folded. Two Moxi homes under one account no longer share a daemon's
   pipe, and two spellings of one home (a short 8.3 name, another case, a junction)
   still do. A client and a server of different versions don't meet across this change.
+- `moxi.ipc.lock_path(address)` is public: the lock file a server holds while it serves
+  `address`, beside a Unix socket, and for a Windows pipe in the module's runtime folder.
 - The start mark names a module run as `python -X <option> -m <module>` (or with `-W`)
   `python -m <module>`, as it does without the option, where it named the script's file.
 - New `moxi install <module> --setup-only`: runs an installed module's `SETUP` again in a

@@ -44,6 +44,7 @@ _LAZY = {
     "Server": "_server",
     "Connection": "_server",
     "sweep": "_sweep",
+    "lock_path": "_sweep",
     "Peer": "_server",
     "connect": "_client",
     "Client": "_client",
@@ -121,6 +122,6 @@ def __dir__() -> list[str]:
     return sorted(set(globals()) | set(_LAZY))
 
 
-__all__ = ["address", "serve", "sweep", "connect", "Server", "Connection", "Client",
-           "Hello", "Agreed", "hello", "Peer", "IpcError", "RpcError", "NotRpc",
+__all__ = ["address", "serve", "sweep", "lock_path", "connect", "Server", "Connection",
+           "Client", "Hello", "Agreed", "hello", "Peer", "IpcError", "RpcError", "NotRpc",
            "NotServing", "AlreadyServing", "Timeout"]

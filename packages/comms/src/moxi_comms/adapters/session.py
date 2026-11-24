@@ -362,18 +362,11 @@ def _flag_value(passthrough, *names):
 
 
 def _claim_socket_is_live(path) -> bool:
-    """True when another launch of the same session id still serves its claim socket.
-    A stale socket file or none at all is False."""
-    import socket
-    s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-    s.settimeout(0.5)
-    try:
-        s.connect(str(path))
-        return True
-    except OSError:
-        return False
-    finally:
-        s.close()
+    """True when another launch of the same session id still serves its claim socket
+    (`claimfile.serves`). A stale socket file or none at all is False."""
+    from .. import claimfile
+
+    return claimfile.serves(path)
 
 
 def launch_session_id(passthrough, own=None):

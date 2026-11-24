@@ -16,6 +16,7 @@ import pytest
 from moxi import exit as moxi_exit
 from moxi_comms import cli
 from moxi_comms.claimhold import ClaimHolder
+from moxi_comms.paths import claim_socket
 from moxi_comms.membership import SELF, TREE, root_of
 
 
@@ -33,7 +34,7 @@ def holders(tmp_path):
 
     def build(key="x-1", name="x", scope="proj-a", *, listen=True, **claim):
         h = ClaimHolder(kind="codex", key=key, keying="pid",
-                        socket_path=tmp_path / f"{key}.sock",
+                        socket_path=claim_socket(key),
                         roots=[root_of(os.getpid(), SELF if listen else TREE)])
         qualified = name if scope == "global" else f"{name}@{scope}"
         h.start_launch({"name": name, "scope": scope, "global": scope == "global",

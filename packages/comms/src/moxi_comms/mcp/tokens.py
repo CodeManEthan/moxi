@@ -55,9 +55,9 @@ import time
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass, replace
 
-from .. import claimfile, wire
+from .. import claimfile, membership, wire
 from ..bindings import stamp
-from ..membership import DEFAULT_PROC, ProcView, PsutilView, Root
+from ..membership import DEFAULT_PROC, ProcView, Root
 
 log = logging.getLogger("comms.mcp.tokens")
 
@@ -111,35 +111,7 @@ def root_ended(root: Root, proc: ProcView | None = None) -> bool:
         return False
     if st is not None:
         return st[1] != root.start
-    return _pid_gone(proc, root.pid)
-
-
-def _pid_gone(proc: ProcView, pid: int) -> bool:
-    """`proc.stat` answered nothing: is there positively no such process? A view may
-    answer itself (`gone(pid)`); else psutil off Linux, else the view's `/proc` entry."""
-    gone = getattr(proc, "gone", None)
-    if callable(gone):
-        try:
-            return gone(pid) is True
-        except Exception:                                        # noqa: BLE001
-            return False
-    if isinstance(proc, PsutilView):
-        try:
-            import psutil
-
-            return not psutil.pid_exists(int(pid))
-        except Exception:                                        # noqa: BLE001
-            return False
-    base = getattr(proc, "root", "")
-    if not base:
-        return False
-    try:
-        os.stat(f"{base}/{int(pid)}")
-    except FileNotFoundError:
-        return True
-    except (OSError, ValueError):
-        return False
-    return False                      # there, but its stat couldn't be read
+    return membership.gone(proc, root.pid)
 
 
 def claim_ended(key: str, proc: ProcView | None = None) -> bool:

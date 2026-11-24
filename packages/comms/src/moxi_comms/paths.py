@@ -24,6 +24,7 @@ that program's sockets. A claim socket the core moved to its short path passes o
 from __future__ import annotations
 
 import os
+import sys
 from pathlib import Path
 
 from moxi.paths import Layout
@@ -69,15 +70,41 @@ class OutsideRuntime(ValueError):
     """A socket path from the environment that is not under RUNTIME/comms."""
 
 
+def own_pipe(address) -> str | None:
+    """On Windows, the endpoint name of `address` when it is the pipe
+    `moxi.ipc.address` gives comms for that name in this process's runtime directory;
+    else None, and always None on Linux and macOS. Nothing is opened or resolved: a pipe
+    has no path, and opening one would take one of its instances."""
+    if sys.platform != "win32":
+        return None
+    from moxi import ipc
+
+    text = str(address)
+    probe = ipc.address(MODULE, "x")
+    head = probe[:probe.index("-x-") + 1]
+    tail = probe[len(head) + 1:]
+    if not (text.startswith(head) and text.endswith(tail)
+            and len(text) > len(head) + len(tail)):
+        return None
+    name = text[len(head):-len(tail)]
+    try:
+        return name if ipc.address(MODULE, name) == text else None
+    except ValueError:
+        return None
+
+
 def refuse_outside_runtime(path, variable: str, env=None) -> Path:
     """`path` when it lies under RUNTIME/comms, else raise `OutsideRuntime` naming
     `variable` and the directory.
 
     The check reads both paths with their links resolved, so a link inside RUNTIME/comms
-    that points elsewhere is refused too.
+    that points elsewhere is refused too. On Windows a pipe passes by its name alone
+    (`own_pipe`): one named for this process's comms runtime directory.
     """
     root = runtime_dir(env)
     given = Path(path)
+    if own_pipe(path) is not None:
+        return given
     real = Path(os.path.realpath(given))
     real_root = Path(os.path.realpath(root))
     if real != real_root and real_root in real.parents:

@@ -18,12 +18,20 @@ psutil (`PsutilView`, macOS and Windows); a test hands in its own.
 
 `sessions_of(..., strict=True)` is the walk a check that must not guess makes: a process
 it can't read (gone, access refused) before it reaches one with no parent raises
-`Unplaceable`, where the plain walk stops and reads "inside no session".
+`Unplaceable`, where the plain walk stops and reads "inside no session". One exception,
+on a view whose platform's tree ends at a gone parent (`ends_at_gone_parent`: psutil's
+on Windows, which never gives an orphan a new parent): there an ancestor that is
+positively gone (`gone`), or a pid whose start is later than its child's (a later
+process reused it; a real parent always starts first), ends the walk as a process with
+no parent does. An ancestor that is there but can't be read still raises, and so does
+the walk's own process. On Linux and macOS every orphan is given a live parent, so the
+walk never meets a gone one but in a race, and it raises there.
 """
 
 from __future__ import annotations
 
 import os
+import sys
 from dataclasses import dataclass
 
 TREE, SELF = "tree", "self"
@@ -53,6 +61,11 @@ class Root:
 class ProcView:
     """Reads a process's parent and start time from `/proc`. `stat(pid)` answers
     `(ppid, start)` or None when there is no such process (or it cannot be read)."""
+
+    #: Whether a strict walk ends at an ancestor that is gone or whose pid a later
+    #: process took, as at a process with no parent. False where an orphan is given a
+    #: live parent.
+    ends_at_gone_parent = False
 
     def __init__(self, root: str = "/proc"):
         self.root = root
@@ -85,8 +98,12 @@ class ProcView:
     def ancestry(self, pid: int, limit: int = 4096, *, strict: bool = False):
         """The process itself, then each ancestor up to (not including) pid 0. With
         `strict`, a process that can't be read, or a walk that loops or runs past
-        `limit`, raises `Unplaceable` instead of ending the walk."""
+        `limit`, raises `Unplaceable` instead of ending the walk; on a view that
+        `ends_at_gone_parent`, an ancestor that is gone, or one that started after its
+        child, ends it."""
         seen = set()
+        ends = strict and self.ends_at_gone_parent
+        child_start = None
         while pid and pid > 0:
             if pid in seen or len(seen) >= limit:
                 if strict:
@@ -95,10 +112,15 @@ class ProcView:
             seen.add(pid)
             st = self.stat(pid)
             if st is None:
+                if ends and child_start is not None and gone(self, pid):
+                    return
                 if strict:
                     raise Unplaceable(pid)
                 return
+            if ends and child_start is not None and _started_after(st[1], child_start):
+                return
             yield pid, st[1]
+            child_start = st[1]
             pid = st[0]
 
 
@@ -106,6 +128,8 @@ class PsutilView(ProcView):
     """Reads a process's parent and start time through psutil: where there is no
     `/proc` (macOS, Windows). The start time is psutil's `create_time()`, spelled as a
     string, so roots written on such a machine compare with what this reads."""
+
+    ends_at_gone_parent = sys.platform == "win32"
 
     def __init__(self):
         super().__init__(root="")
@@ -118,6 +142,45 @@ class PsutilView(ProcView):
             return int(p.ppid()), repr(p.create_time())
         except (psutil.Error, OSError, ValueError):
             return None
+
+
+def gone(proc: ProcView, pid: int) -> bool:
+    """`proc.stat` answered nothing: is there positively no such process? A view may
+    answer itself (`gone(pid)`); else psutil for `PsutilView` (which counts a process it
+    may not open as there), else the view's `/proc` entry (missing is gone). False
+    whenever it can't tell."""
+    hook = getattr(proc, "gone", None)
+    if callable(hook):
+        try:
+            return hook(pid) is True
+        except Exception:                                        # noqa: BLE001
+            return False
+    if isinstance(proc, PsutilView):
+        try:
+            import psutil
+
+            return not psutil.pid_exists(int(pid))
+        except Exception:                                        # noqa: BLE001
+            return False
+    base = getattr(proc, "root", "")
+    if not base:
+        return False
+    try:
+        os.stat(f"{base}/{int(pid)}")
+    except FileNotFoundError:
+        return True
+    except (OSError, ValueError):
+        return False
+    return False                      # there, but its stat couldn't be read
+
+
+def _started_after(start: str, child_start: str) -> bool:
+    """Whether `start`, read as a number, is later than `child_start`. A start that
+    doesn't read as a number reads as not later."""
+    try:
+        return float(start) > float(child_start)
+    except (TypeError, ValueError):
+        return False
 
 
 class Unplaceable(Exception):
@@ -149,7 +212,8 @@ def sessions_of(pid: int, files, proc: ProcView | None = None, *,
     holder that is a `self` root of several bindings (a module's own loop holding
     several names, a `ClaimServer` per binding). `files` is an iterable of `(key, roots)`, roots as `Root`s.
     An empty list: inside no session. With `strict`, a walk that can't reach a process
-    with no parent, short of a root, raises `Unplaceable`."""
+    with no parent, short of a root, raises `Unplaceable` (on a view that
+    `ends_at_gone_parent`, a gone ancestor ends the walk there)."""
     proc = proc or DEFAULT_PROC
     table = [(key, [r for r in roots if r is not None]) for key, roots in files]
     for depth, (at, start) in enumerate(proc.ancestry(pid, strict=strict)):
@@ -173,4 +237,4 @@ def inside(pid: int, key: str, files, proc: ProcView | None = None) -> bool:
 
 
 __all__ = ["DEFAULT_PROC", "REACHES", "SELF", "TREE", "ProcView", "PsutilView", "Root",
-           "Unplaceable", "inside", "root_of", "sessions_of"]
+           "Unplaceable", "gone", "inside", "root_of", "sessions_of"]

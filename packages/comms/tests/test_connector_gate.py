@@ -59,6 +59,28 @@ def test_a_peer_the_walk_cant_place_is_refused_never_read_as_outside():
     assert gate.peer(SimpleNamespace(pid=101, uid=1000, proc=None)) == gate.PEER_REFUSED
 
 
+class EndingTable(Table):
+    """`Table` on a platform whose tree ends at a gone parent, as Windows' does: a pid
+    in `there` exists but can't be read; any other missing pid is gone."""
+
+    ends_at_gone_parent = True
+
+    def __init__(self, rows, there=()):
+        super().__init__(rows)
+        self.there = set(there)
+
+    def gone(self, pid):
+        return pid not in self.rows and pid not in self.there
+
+
+def test_on_an_ending_view_a_peer_whose_ancestor_is_gone_mints_and_one_unread_is_refused():
+    rows = dict(TABLE.rows)
+    assert gate.peer(peer(300), view=EndingTable(rows), records=SESSION,
+                     alive=lambda ident: True) is None
+    assert gate.peer(peer(300), view=EndingTable(rows, there={299}), records=SESSION,
+                     alive=lambda ident: True) == gate.PEER_REFUSED
+
+
 def test_a_walk_that_fails_refuses():
     def broken(ident):
         raise OSError("no table")

@@ -32,7 +32,6 @@ from moxi_comms import daemon as daemon_mod
 from moxi_comms.adapters import claude_shim
 from moxi_comms.adapters.claude_shim import ClaudeShim
 from moxi_comms.client import DaemonError, DaemonOffline
-from moxi_comms.paths import runtime_root
 from moxi_dev.testing import PROC_WAIT_S
 
 import shim_drive
@@ -146,7 +145,7 @@ def payload(mid):
 
 @pytest.fixture
 def daemon():
-    d = FakeDaemon(runtime_root() / "fake-daemon.sock")
+    d = FakeDaemon(Path(ipc.address("comms", "fake-daemon")))
     yield d
     d.close()
 

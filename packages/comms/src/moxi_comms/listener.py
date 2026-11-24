@@ -74,12 +74,13 @@ def session_dir_of(env) -> Path | None:
     """The session's runtime directory, or None when it has none of comms' own (a
     session directory the wrapper made, named for its claim socket's key).
 
-    The key is read from the socket's name, `claim-<key>.sock` in RUNTIME/comms, or,
+    The key is read from the socket's name, `claim-<key>.sock` in RUNTIME/comms (on
+    Windows the pipe `moxi.ipc.address` names `claim-<key>`), or,
     for a short path the core gave a socket whose path there was too long, from the
     claim file that records it (the Claude adapter's is keyed by the session id)."""
     from .adapters.session import sessions_dir
     from .claimhold import CLAIM_SOCKET_ENV, checked_socket, record_at
-    from .paths import OutsideRuntime, runtime_dir
+    from .paths import OutsideRuntime, own_pipe, runtime_dir
 
     value = env.get(CLAIM_SOCKET_ENV)
     if not value:
@@ -89,7 +90,10 @@ def session_dir_of(env) -> Path | None:
     except OutsideRuntime:
         return None
     name = sock.name
-    if os.path.realpath(sock.parent) == os.path.realpath(runtime_dir(env)):
+    pipe = own_pipe(value)
+    if pipe is not None:
+        key = pipe[len("claim-"):] if pipe.startswith("claim-") else None
+    elif os.path.realpath(sock.parent) == os.path.realpath(runtime_dir(env)):
         key = (name[len("claim-"):-len(".sock")]
                if name.startswith("claim-") and name.endswith(".sock") else None)
     else:

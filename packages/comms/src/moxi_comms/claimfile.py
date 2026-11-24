@@ -27,6 +27,7 @@ import json
 import os
 import threading
 import socket
+import sys
 from pathlib import Path
 
 from .membership import DEFAULT_PROC, TREE, ProcView, Root
@@ -118,21 +119,33 @@ def roots_of(record: dict) -> list:
     return [r for r in (Root.from_dict(x) for x in record.get("roots") or ()) if r]
 
 
-#: How long `socket_answers` waits for a connect: a blocking connect onto a full
+#: How long `serves` waits for a connect: a blocking connect onto a full
 #: listen backlog would otherwise wait forever.
 PROBE_TIMEOUT = 0.5
 
 
 def socket_answers(record: dict) -> bool:
-    """Whether something listens on the claim record's socket now: a connect and a
-    close, nothing sent. Any failure reads as no."""
+    """Whether something serves the claim record's socket now (`serves`)."""
     sock = record.get("socket")
-    if not sock:
-        return False
+    return bool(sock) and serves(sock)
+
+
+def serves(address) -> bool:
+    """Whether a holder serves the claim socket at `address` now. On Linux and macOS: a
+    connect and a close, nothing sent. On Windows, where a connect would take one of
+    the pipe's instances: whether its server holds the address's lock
+    (`moxi.ipc.sweep`, which there only reads). Any failure reads as no."""
+    if sys.platform == "win32":
+        from moxi import ipc
+
+        try:
+            return ipc.sweep(str(address)) == "live"
+        except Exception:                                       # noqa: BLE001
+            return False
     s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
     s.settimeout(PROBE_TIMEOUT)
     try:
-        s.connect(str(Path(sock)))
+        s.connect(str(Path(address)))
     except Exception:                                           # noqa: BLE001
         return False
     finally:
@@ -211,5 +224,5 @@ def sweep_dead_harness_files(proc: ProcView | None = None) -> list:
 __all__ = ["BOUND", "HOLDS", "OFFLINE", "STANDBY", "STATES", "WAITING", "adapter_gone",
            "all_records", "claim_dir", "file_for", "gone_records", "held_identity", "is_live", "key_of",
            "live_records", "membership_table", "names_identity", "read", "read_path",
-           "remove", "roots_of", "socket_answers", "sweep_dead_harness_files",
+           "remove", "roots_of", "serves", "socket_answers", "sweep_dead_harness_files",
            "tree_root_alive", "write"]

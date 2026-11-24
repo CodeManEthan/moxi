@@ -10,9 +10,11 @@ import sys
 import pytest
 
 from claim_kit import FakeProc, World
+from conftest import CHECKS_MODE_BITS
 from moxi_comms import claimfile, claimhold
 from moxi_comms.claimhold import NOT_HEADLESS, NOT_INSIDE, ClaimHolder
 from moxi_comms.membership import SELF, TREE, ProcView, Root, inside, root_of, sessions_of
+from moxi_comms.paths import claim_socket
 
 PLANNER, REVIEWER = "planner@proj-a", "reviewer@proj-a"
 
@@ -67,6 +69,9 @@ def test_a_reused_pid_is_not_its_dead_root():
     assert not claimfile.tree_root_alive({"roots": [table[0][1][0].as_dict()]}, proc)
 
 
+@pytest.mark.skipif(not os.path.isdir("/proc/self"),
+                    reason="the /proc reader runs only on Linux; Windows and macOS have no "
+                           "/proc and read processes through psutil")
 def test_the_real_proc_reads_a_start_time_and_a_parent():
     view = ProcView()
     me = root_of(os.getpid())
@@ -107,7 +112,7 @@ def test_the_real_socket_reads_the_callers_pid(rig, tmp_path):
     root is refused `claim` and answered `state`."""
     me = root_of(os.getpid(), SELF)
     h = ClaimHolder(kind="codex", key="real-test", keying="pid",
-                    socket_path=tmp_path / "c.sock", roots=[me])
+                    socket_path=claim_socket("c"), roots=[me])
     h.start_launch({"name": "x", "scope": "proj-a", "qualified": "x@proj-a",
                     "directors": []})
     h.state = claimfile.BOUND
@@ -126,7 +131,7 @@ def test_the_real_socket_reads_the_callers_pid(rig, tmp_path):
 
 def _holder(tmp_path, **claim):
     h = ClaimHolder(kind="codex", key="end-test", keying="pid",
-                    socket_path=tmp_path / "c.sock", roots=[root_of(os.getpid(), SELF)])
+                    socket_path=claim_socket("c"), roots=[root_of(os.getpid(), SELF)])
     h.start_launch({"name": "x", "scope": "proj-a", "qualified": "x@proj-a",
                     "directors": [], **claim})
     h.state = claimfile.BOUND
@@ -205,7 +210,8 @@ def test_the_file_holds_the_recorded_keys_and_goes_with_a_clean_stop(rig, world)
                 "contingent_to", "grants"):                  # keys an older file carried
         assert key not in rec
     assert "temp" not in rec["claim"]
-    assert oct(os.stat(claimfile.file_for(n.key)).st_mode)[-3:] == "600"
+    if CHECKS_MODE_BITS:
+        assert oct(os.stat(claimfile.file_for(n.key)).st_mode)[-3:] == "600"
     n.stop()
     assert claimfile.read(n.key) is None
 
@@ -214,7 +220,7 @@ def test_an_old_files_passing_state_loads_as_standby(rig, tmp_path):
     """A claim file left by an older process may say
     `state: passing`: it loads as `standby`, holding nothing and registering nothing."""
     h = ClaimHolder(kind="claude-shim", key="old-passing", keying="session",
-                    socket_path=tmp_path / "c.sock", roots=[])
+                    socket_path=claim_socket("c"), roots=[])
     h.load({"state": "passing", "hold": 3, "lost": None,
             "claim": {"name": "planner", "scope": "proj-a", "global": False,
                       "qualified": PLANNER, "slot": 2, "tier": None, "directors": []}})
@@ -232,7 +238,7 @@ def test_an_old_files_passing_state_loads_as_standby(rig, tmp_path):
 
 def test_a_bind_rebuilds_the_claim_from_current_fields(rig, tmp_path):
     h = ClaimHolder(kind="claude-shim", key="old-claim", keying="session",
-                    socket_path=tmp_path / "c.sock", roots=[])
+                    socket_path=claim_socket("c"), roots=[])
     h.claim = {"name": "planner", "scope": "proj-a", "global": False,
                "qualified": PLANNER, "tier": None, "directors": [], "stale": "old"}
     h.bound({"identity": {"name": "planner", "scope": "proj-a",
@@ -245,7 +251,7 @@ def test_a_bind_rebuilds_the_claim_from_current_fields(rig, tmp_path):
 
 def test_a_bind_keeps_a_headless_claims_mark_and_rule(rig, tmp_path):
     h = ClaimHolder(kind="codex", key="headless-claim", keying="pid",
-                    socket_path=tmp_path / "c.sock", roots=[])
+                    socket_path=claim_socket("c"), roots=[])
     h.claim = {"name": "planner", "scope": "proj-a", "global": False,
                "qualified": PLANNER, "tier": None, "directors": [], "headless": True,
                "exit": ["idle=5m", "cold"]}

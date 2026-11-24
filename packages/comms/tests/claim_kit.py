@@ -24,7 +24,7 @@ from moxi_comms.claimhold import ClaimHolder
 from moxi_comms.client import DaemonClient
 from moxi_comms.daemon import Daemon
 from moxi_comms.membership import TREE, ProcView, Root
-from moxi_comms.paths import daemon_socket, runtime_root
+from moxi_comms.paths import claim_socket, daemon_socket
 from moxi_comms.scoping import qualify
 
 _pids = itertools.count(41000, 100)
@@ -73,7 +73,7 @@ class Session:
         self.dead = False
         self.holder = ClaimHolder(
             kind=kind, key=self.key,
-            socket_path=runtime_root() / f"comms-adapter-test-{self.root}.sock",
+            socket_path=claim_socket(f"test-{self.root}"),
             roots=[root or Root(self.root, f"s{self.root}", TREE)],
             keying="pid", proc=proc)
         claim = {"name": name, "scope": scope, "global": False,
