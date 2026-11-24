@@ -615,16 +615,11 @@ own reads:
   `marks.default` moves usage's notice but not the stamped mark, and a relaunch composes
   its mark again from the values then. A `compact` launch takes its mark the same way.
 
-**Keep-warm.** Every Claude Code launch that isn't headless is kept warm (needs turns and
-cache): shortly before its prompt cache would expire, while it waits on work it handed
-out, the launcher nudges it. A headless launch is kept warm only with `--keep-warm on`.
-The `keep_warm` row is read on a headless launch alone, where it takes `off` (its
-default there) or `on`. On any other launch it takes only `on`: `off` set by a preset or a
-flag is refused, and `off` from `[defaults]` is left out with a warning, so the line can
-go. A launch recorded `off` before keep-warm was on for every launch is kept warm all the
-same, and so is its relaunch. Where turns or cache is missing the row isn't offered and
-no launch is kept warm. A kept-warm session's start text has a `keep warm:` line saying
-what keeps it warm.
+**Keep-warm.** `--keep-warm on` (needs turns and cache) nudges a session shortly before
+its prompt cache would expire while it waits on work it handed out. It is off unless a
+flag, a preset, `[defaults]` or the launch page sets it on, and `off` from any of them
+launches as given. A kept-warm session's start text has a `keep warm:` line saying what
+keeps it warm.
 Work out is one of two cases. The subagent case: its own subagents or teammates at work;
 a fork of its main loop doesn't count. The director case: an agent whose comms claim
 names it as a director at work (its turn open, or its turn closed while subagents of its
@@ -662,16 +657,16 @@ Keep-warm and recycle on expiry are offered where cache can read a session's
 environment: Linux and WSL2 (macOS untested), for Claude Code sessions.
 
 **Cover.** `Keep warm` on Home's Sessions row (see "The page") puts a running session
-under cover: a session past its cap gets a new count, and a headless session launched
-without `--keep-warm on` is kept warm. Cover belongs to one launch and the session id it
-has now: a `/clear` gives the session a new id, and a relaunch or a resume is a new
-launch, so each starts without it. A covered session is nudged for both cases, and under
-cover the count in a row starts at the press. Holds work wherever keep-warm is on, cover
-included: a covered headless session takes holds with the verbs above while its cover
-lasts, and its chain's open holds keep it warm. `moxi launcher show` reads a covered
-session as keep-warm on, with its holds. It reads keep-warm off wherever keep-warm can't
-act on this install (turns or cache missing, or a system where cache can't read a
-session's environment), as the launch's stamp and start text do.
+under cover: a session past its cap gets a new count, and a session launched without
+`--keep-warm on` is kept warm. Cover belongs to one launch and the session id it has now:
+a `/clear` gives the session a new id, and a relaunch or a resume is a new launch, so
+each starts without it. A covered session is nudged for both cases, and under cover the
+count in a row starts at the press. Holds work wherever keep-warm is on, cover included:
+a covered session takes holds with the verbs above while its cover lasts, and its
+chain's open holds keep it warm. `moxi launcher show` reads a covered session as
+keep-warm on, with its holds. It reads keep-warm off wherever keep-warm can't act on
+this install (turns or cache missing, or a system where cache can't read a session's
+environment), as the launch's stamp and start text do.
 
 Cover lasts until a keep-warm ask reads the session's own subagents and its directed
 agents in full and finds nobody at work and no hold open. Asks come only near the end of
@@ -855,9 +850,8 @@ so a session whose subagent nudges are spent still reads `kept warm` while an ag
 directs works, as the ask nudges it. Each comms read may take 2 seconds, and once comms'
 daemon is found down the pass asks it nothing more. A waiting session reads `kept warm` when every step of
 keep-warm's next ask that can be read without writing ends in a nudge, with an ask still
-certain to come before its window shuts: its launch keeps warm (any Claude launch but a
-headless one made without `keep_warm` on, or one under cover), cache's watcher says it
-asks keep-warm about the session, no run open on the launch, no turn open, a live
+certain to come before its window shuts: its launch keeps warm (made with `keep_warm` on,
+or under cover), cache's watcher says it asks keep-warm about the session, no run open on the launch, no turn open, a live
 subagent, a directed agent at work or an open hold, a
 case under its cap, nothing typed into the prompt box, and no ask since the session's
 last request that ended without a nudge. Any
@@ -1101,7 +1095,7 @@ After upgrading to this version, restart cache's watcher so it asks about runnin
 sessions: `moxi services restart cache/watch` with services installed, or stop `moxi
 cache watch` and start it again. It is harmless where the upgrade already restarted it,
 and the asks it started keep running. Until it restarts, `Keep warm` is not offered for
-a running session; a launch kept warm by itself is kept warm as before.
+a running session; a session launched with `--keep-warm on` is kept warm as before.
 `moxi doctor`'s row `keep-warm.timer` warns while the restart is still needed and a
 launched session is there to read it by. If it says moxi-cache is older than 0.1.6,
 upgrade moxi-cache first: a restart alone doesn't help.

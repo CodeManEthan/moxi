@@ -14,13 +14,12 @@ work it handed out, and the named holds that say a director has work out.
     cover(conn, row, sid) / on(conn, row, sid)  # the record read; keep-warm on for a sid
     launch_on(row)                              # keep-warm on by the launch itself
 
-**Keep-warm acts only on a launch that is on (`on`): every launch of a harness cache times
-(Claude Code) that is not headless, with no value read; a headless one launched with
-`keep_warm` on; or a session under cover.** A launch recorded with `keep_warm` off that
-is not headless is on all the same. cache's timer asks about every session the launcher
-started (the stamp `MOXI_LAUNCHER_REQUEST`), from 900 s before its cache expires until
-360 s before, every 120 s (`cachetimers`), and an ask about a launch that is not on ends
-at its first read. The timer decides only when to ask; each ask reads for itself, in this
+**Keep-warm acts only on a launch that is on (`on`): launched with `keep_warm` on, or
+under cover for the session id.** `keep_warm` is off unless a flag, a preset,
+`[defaults]` or the launch page sets it on. cache's timer asks about every session the
+launcher started (the stamp `MOXI_LAUNCHER_REQUEST`), from 900 s before its cache expires
+until 360 s before, every 120 s (`cachetimers`), and an ask about a launch that is not on
+ends at its first read. The timer decides only when to ask; each ask reads for itself, in this
 order, and stops at the first that answers:
 
 1. The launch: launched, on (`on`), no open run (a stale one, whose job is gone, is ended
@@ -127,6 +126,8 @@ log = logging.getLogger("moxi.launcher.keepwarm")
 KIND, MODE = "keep-warm", "ask"
 #: The `events` kind of the cover record.
 COVER = "keep-warm-cover"
+#: The launch's catalog row that turns keep-warm on, `off` unless set.
+ROW = "keep_warm"
 #: The window before the cache's expiry in which an ask may nudge, in seconds: from
 #: `OPEN_S` before it to `SHUT_S` before it.
 OPEN_S, SHUT_S = 900.0, 360.0
@@ -714,18 +715,16 @@ def on(conn: sqlite3.Connection, row: store.LaunchRow, sid: str) -> bool:
 
 
 def launch_on(row: store.LaunchRow) -> bool:
-    """Whether the launch `row` keeps its session warm by itself: every launch of a
-    harness cache times (`catalog.CACHE_TIMED`, Claude Code) that is not headless, with
-    no value read, and a headless one launched with `keep_warm` on. A row recorded with
-    `keep_warm` off on any other target is on all the same (`catalog.keeps_warm`)."""
-    return catalog.keeps_warm(row.harness, row.target, row.values.get(catalog.KEEP_WARM))
+    """Whether the launch `row` keeps its session warm by itself: it was launched with
+    `keep_warm` on."""
+    return row.values.get(ROW) == "on"
 
 
 def can_act(row: store.LaunchRow) -> bool:
     """Whether keep-warm can act on the launch `row` on this install: its `keep_warm` row
     is offered for the launch's harness (turns and cache present, and cache's timer times
     that harness here), as a launch's stamp reads it when it is composed."""
-    return catalog.launcher()[catalog.KEEP_WARM].offered(harness=row.harness)
+    return catalog.launcher()[ROW].offered(harness=row.harness)
 
 
 # -- whether the next ask would nudge -----------------------------------------------------
@@ -1020,8 +1019,7 @@ def _check_on(conn: sqlite3.Connection, row: store.LaunchRow, sid: str | None) -
         event = store.last_event(conn, row.request_id, COVER)
         if event is not None and event.detail.get("state") == "on":
             return
-    hint = ("launch it with keep_warm on to use holds" if row.target == "headless"
-            and row.harness in catalog.CACHE_TIMED
+    hint = ("launch it with keep_warm on to use holds" if row.harness in catalog.CACHE_TIMED
             else f"keep-warm keeps only {', '.join(catalog.CACHE_TIMED)} sessions warm")
     raise relaunch.Refused("off", f"launch {row.request_id} does not keep its session "
                                   "warm, so it takes no holds", hint)

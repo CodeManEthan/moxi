@@ -6,8 +6,7 @@ the launcher refuses leaves its reason on the row's third line.
 
 The shell runs the fake turns in turns' place and reads the real cache and sessions over
 transcripts the tests write, as `test_browser_home_running.py` does. Each launch is a
-headless launch made with `keep_warm` off, the one Claude launch keep-warm is not on for
-by itself, whose process is this test's own, waiting on one subagent, with an hour cache
+slot launch whose process is this test's own, waiting on one subagent, with an hour cache
 lifetime; the cache watcher's clock record says whether its timer asks keep-warm about
 the session. No test starts a harness session or a keep-warm ask, and the shell's page
 server reaches no comms daemon: its homes are its own.
@@ -67,14 +66,14 @@ class Launches:
         self.sessions: dict[str, dict] = {}
 
     def seed(self, name: str, *, ago_s: float = 600.0, asks: bool = True) -> tuple[str, str]:
-        """A live headless launch named `name` with keep-warm off, waiting on one
-        subagent, its last request `ago_s` seconds ago on an hour lifetime; its clock
-        record says the timer asks keep-warm about it when `asks`, and says nothing of it
-        otherwise. Returns its request and session ids."""
+        """A live launch named `name` with keep-warm off, waiting on one subagent, its last
+        request `ago_s` seconds ago on an hour lifetime; its clock record says the timer
+        asks keep-warm about it when `asks`, and says nothing of it otherwise. Returns its
+        request and session ids."""
         request_id = f"{name}-{uuid.uuid4().hex[:8]}"
         config = self.root / request_id
-        sid = kit.seed(self.shell, request_id, target="headless", live=True, claimed=True,
-                       config_dir=config, values={"name": name, "keep_warm": "off"})
+        sid = kit.seed(self.shell, request_id, live=True, claimed=True, config_dir=config,
+                       values={"name": name})
         kit.transcript(config, sid, ago_s=ago_s, hour=True)
         kit.timed(self.shell, sid, asks=[cachetimers.KEEP_WARM] if asks else None)
         self.ids.append(request_id)

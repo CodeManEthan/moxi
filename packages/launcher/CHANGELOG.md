@@ -12,31 +12,20 @@
   (`keepwarm.can_act`: the `keep_warm` row isn't offered, with turns or cache missing or
   where cache can't read a session's environment), as the stamp and the start text's
   `keep warm:` line already do.
-- Keep-warm is on for every Claude Code launch that isn't headless, whatever its
-  `keep_warm` value, a launch recorded `off` included (`keepwarm.launch_on`); a headless
-  launch keeps the opt-in. Holds and the hold verbs follow it, so they work on any such
-  launch. The director case no longer needs cover: every ask that doesn't nudge for a
-  subagent reads the agents the session directs (the join, within 20 s), and with comms
-  absent nobody is directed. A join or agent list not read whole, with no case found,
-  ends the ask `unreadable`, quietly.
-- Holds are taken and read wherever keep-warm is on, cover included: a headless launch
-  made with `keep_warm` off takes holds while its session is covered, the hold verbs work
+- The director case no longer needs cover: every ask about a launch keep-warm is on for
+  that doesn't nudge for a subagent reads the agents the session directs (the join,
+  within 20 s), and with comms absent nobody is directed. A join or agent list not read
+  whole, with no case found, ends the ask `unreadable`, quietly.
+- Holds are taken and read wherever keep-warm is on, cover included: a launch made with
+  `keep_warm` off takes holds while its session is covered, the hold verbs work
   there, `show` lists them, and an open hold keeps the cover as work out does.
 - Home's Sessions row and the `Keep warm` press read the agents a session directs
   wherever keep-warm's ask would (`keepwarm.joins`): unless a live subagent's case is
   under its cap. A session whose subagent nudges are spent while an agent it directs
   works reads `kept warm`, and a press there is answered, as the ask nudges it.
-- The `keep_warm` row's shipped default is `on`, and it is read on a headless launch
-  alone: there it holds `off` unless a flag, the preset or `[defaults]` sets `on`, and a
-  headless launch with an identity still has `on` left out with a warning. On any other
-  Claude launch `keep_warm = "off"` set by a preset or a flag is refused, naming the line
-  to drop, `presets check` included; from `[defaults]` it is left out with a warning. The
-  stamp `MOXI_LAUNCHER_KEEP_WARM` and the start text's `keep warm:` line follow whether
-  the launch keeps warm, and the line no longer asks for a hold per piece of work: it
-  says subagents and directed agents at work keep the session warm, and that a hold
-  covers other work. A launch whose install doesn't offer the row (turns or cache
-  missing) records it `off`, and a replay there leaves it out, warning only for a
-  headless launch that had it `on`.
+- The start text's `keep warm:` line no longer asks for a hold per piece of work: it says
+  subagents and directed agents at work keep the session warm, and that a hold covers
+  other work.
 - A run of nudges counts each case apart, by the word each nudge ended with: the subagent
   case up to `keep_warm.subagent_cap`, then the director case up to
   `keep_warm.director_cap`, so a director whose subagent nudges are spent is still nudged

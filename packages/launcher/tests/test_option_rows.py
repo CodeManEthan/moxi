@@ -27,7 +27,7 @@ def readable(monkeypatch):
 
 def test_the_rows_their_values_and_needs():
     rows = catalog.launcher()
-    assert rows["keep_warm"].values == ("off", "on") and rows["keep_warm"].default == "on"
+    assert rows["keep_warm"].values == ("off", "on") and rows["keep_warm"].default == "off"
     assert rows["recycle_on_expiry"].values == ("off", "clear", "compact")
     assert rows["recycle_at_limit"].values == ("off", "relaunch", "compact")
     assert rows["limit_at"].values == ("1x", "1.5x", "2x") and rows["limit_at"].default == ""
@@ -143,27 +143,9 @@ def test_the_option_stamps():
     assert common.option_stamps({"keep_warm": "off", "recycle_on_expiry": "off",
                                  "recycle_at_limit": "off", "limit_at": "1x"}) == {}
     assert common.option_stamps({"keep_warm": "on", "recycle_on_expiry": "compact",
-                                 "recycle_at_limit": "relaunch", "limit_at": "1.5x"},
-                                keep_warm=True) == {
+                                 "recycle_at_limit": "relaunch", "limit_at": "1.5x"}) == {
         "MOXI_LAUNCHER_KEEP_WARM": "on", "MOXI_LAUNCHER_RECYCLE_ON_EXPIRY": "compact",
         "MOXI_USAGE_CROSSING_AT": "1.5x"}
-
-
-@pytest.mark.parametrize(("harness", "values", "warm"), [
-    ("claude", {"keep_warm": "on"}, True),
-    ("claude", {"target": "slot", "keep_warm": "on"}, True),
-    # A row recorded off before keep-warm was on for every launch: on all the same.
-    ("claude", {"target": "terminal", "keep_warm": "off"}, True),
-    ("claude", {"target": "headless", "keep_warm": "off"}, False),
-    ("claude", {"target": "headless", "keep_warm": "on"}, True),
-    # The install offers no keep_warm row (turns or cache missing): the launch has none.
-    ("claude", {"target": "terminal"}, False),
-    ("codex", {"keep_warm": "on"}, False),
-])
-def test_a_launch_keeps_warm_by_its_target_and_its_row(harness, values, warm):
-    """Every Claude launch but a headless one keeps warm with its value not read; a
-    headless one only with keep_warm on; a launch with no row, or a Codex one, never."""
-    assert common.keeps_warm(harness, values) is warm
 
 
 def test_the_grant_reaches_the_stamp_and_the_additions_alike(monkeypatch):

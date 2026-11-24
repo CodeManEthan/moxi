@@ -128,10 +128,9 @@ def conn(tmp_path):
     conn.close()
 
 
-#: The launch log's change that makes launch r1 a headless launch with keep_warm off: the
-#: one kind of Claude launch keep-warm is off for by its launch.
-HEADLESS_OFF = ("UPDATE launches SET values_json = '{\"keep_warm\": \"off\"}', "
-                "target = 'headless' WHERE request_id = 'r1'")
+#: The launch log's change that makes launch r1 a launch made with keep_warm off.
+MADE_OFF = ("UPDATE launches SET values_json = '{\"keep_warm\": \"off\"}' "
+            "WHERE request_id = 'r1'")
 
 
 def launched(conn, *, request_id="r1", values=None, session_id=SID, claimed=True,
@@ -408,33 +407,24 @@ def test_the_cache_read_names_the_harness_and_newest_id(conn):
 
 
 def test_a_launch_that_does_not_keep_warm_ends_quietly(conn):
-    conn.execute(HEADLESS_OFF)
+    conn.execute(MADE_OFF)
     got = ask(conn)
     assert (got.verdict.outcome, got.verdict.word) == (None, "off")
 
 
-@pytest.mark.parametrize("target", ["slot", "terminal"])
-@pytest.mark.parametrize("values", ['{"model": "opus"}', '{"keep_warm": "off"}'],
-                         ids=["no-value", "recorded-off"])
-def test_a_claude_launch_that_is_not_headless_is_nudged_whatever_its_row_says(
-        conn, target, values):
-    """No keep_warm value is read outside headless: a launch with none, and an old row
-    recorded off, are nudged alike."""
+@pytest.mark.parametrize("target", ["slot", "terminal", "headless"])
+@pytest.mark.parametrize(("values", "nudged"), [
+    ('{"keep_warm": "on"}', True), ('{"keep_warm": "off"}', False), ("{}", False)],
+    ids=["on", "off", "no-value"])
+def test_a_launch_is_nudged_only_when_made_with_keep_warm_on(conn, target, values, nudged):
+    """No value is off, as `off` is: the ask ends at its read of the launch log."""
     conn.execute("UPDATE launches SET values_json = ?, target = ? WHERE request_id = 'r1'",
                  (values, target))
-    got = ask(conn)
-    assert (got.verdict.outcome, got.verdict.word) == ("nudged", "subagents")
-
-
-@pytest.mark.parametrize(("values", "nudged"), [
-    ('{"keep_warm": "on"}', True), ('{"keep_warm": "off"}', False), ("{}", False)])
-def test_a_headless_launch_is_nudged_only_with_keep_warm_on(conn, values, nudged):
-    conn.execute("UPDATE launches SET values_json = ?, target = 'headless' "
-                 "WHERE request_id = 'r1'", (values,))
     got = ask(conn)
     assert (got.verdict.outcome == "nudged") is nudged
     if not nudged:
         assert got.verdict.word == "off" and not got.session.delivered
+        assert got.runs == []
 
 
 def test_a_session_no_launch_holds_ends_quietly(conn):
@@ -683,8 +673,7 @@ def test_keep_warm_by_hand_asks_the_one_session_and_nudges_it(conn):
 
 
 def test_a_keep_warm_dry_run_with_no_session_asks_every_live_launch_it_is_on_for(conn):
-    launched(conn, request_id="r2", session_id=NEW, values={"keep_warm": "off"},
-             target="headless")
+    launched(conn, request_id="r2", session_id=NEW, values={"keep_warm": "off"})
     launched(conn, request_id="r3", session_id=OTHER, claimed=False)
     session = FakeSession(agents=[agent("a1")])
     got = hand(conn, session, dry_run=True)
@@ -703,7 +692,7 @@ def test_a_keep_warm_dry_run_exits_1_on_a_capped_session(conn):
 
 
 def test_a_keep_warm_dry_run_with_no_launch_on_says_so(conn):
-    conn.execute(HEADLESS_OFF)
+    conn.execute(MADE_OFF)
     got = hand(conn, FakeSession(), dry_run=True)
     assert (got.exit_code, got.lines) == (0, ("no live launch keeps warm",))
 
@@ -821,7 +810,7 @@ def test_holds_lists_the_open_holds(conn):
     (keepwarm.hold, ("x",)), (keepwarm.release, ("x",)), (keepwarm.holds, ()),
 ])
 def test_every_hold_verb_is_refused_while_keep_warm_is_off(conn, fn, args):
-    conn.execute(HEADLESS_OFF)
+    conn.execute(MADE_OFF)
     with pytest.raises(relaunch.Refused) as refused:
         verb(fn, conn, *args)
     assert refused.value.code == "off" and refused.value.exit_code == codes.REFUSED
@@ -872,12 +861,12 @@ def test_the_api_opens_and_releases_a_hold_by_request_id(conn):
 def test_the_api_refuses_a_launch_unknown_or_not_keeping_warm(conn):
     with pytest.raises(target.NotLaunched):
         api.open_hold("nope", "x", conn=conn)
-    launched(conn, request_id="r2", session_id=NEW, values={"keep_warm": "off"},
-             target="headless")
+    launched(conn, request_id="r2", session_id=NEW, values={"keep_warm": "off"})
     with pytest.raises(relaunch.Refused) as refused:
         api.release_hold("r2", "x", conn=conn)
     assert refused.value.hint == "launch it with keep_warm on to use holds"
-    launched(conn, request_id="r3", session_id=OTHER, harness="codex")
+    launched(conn, request_id="r3", session_id=OTHER, harness="codex",
+             values={"keep_warm": "off"})
     with pytest.raises(relaunch.Refused) as refused:
         api.open_hold("r3", "x", conn=conn)
     assert refused.value.hint == "keep-warm keeps only claude sessions warm"

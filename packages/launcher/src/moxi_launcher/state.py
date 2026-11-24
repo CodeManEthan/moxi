@@ -14,10 +14,10 @@ the session's lifetime, so a lifetime with no keep-warm window says so.
   taken.
 - `recycle`: the options in force, the last expiry or limit run, a pending compact, and
   when the session was last told to recycle itself at its limit.
-- `keep_warm`: on or off (`keepwarm.on`: every Claude launch that is not headless, a
-  headless one launched with it on, or a session under cover; off wherever keep-warm
-  can't act on this install, `keepwarm.can_act`), the open holds of the launch chain by
-  name (wherever it is on, cover included), the last run of nudges, and the last verdict.
+- `keep_warm`: on or off (`keepwarm.on`: launched with it on, or under cover; off
+  wherever keep-warm can't act on this install, `keepwarm.can_act`), the open holds of
+  the launch chain by name (wherever it is on, cover included), the last run of nudges,
+  and the last verdict.
 
 **`red` is true exactly when the latest ended run on the launch ended `blocked`, or in an
 outcome that needs a look, and no later run on it ended well.** The outcomes that need a
@@ -109,11 +109,11 @@ class RecycleState:
 
 @dataclass(frozen=True)
 class KeepWarmState:
-    """`on` (`keepwarm.on`: on by the launch, or under cover, where keep-warm can act on
-    this install, `keepwarm.can_act`); the open holds of the
-    launch chain by name, listed wherever it is on, cover included; `nudges`, the length of
-    the last run of nudges; the last keep-warm run; and `window`, set to `no window:
-    lifetime <n> s` when the session's cache lifetime leaves keep-warm no window."""
+    """`on` (`keepwarm.on`: launched with keep-warm on, or under cover, where keep-warm
+    can act on this install, `keepwarm.can_act`); the open holds of the launch chain by
+    name, listed wherever it is on, cover included; `nudges`, the length of the last run
+    of nudges; the last keep-warm run; and `window`, set to `no window: lifetime <n> s`
+    when the session's cache lifetime leaves keep-warm no window."""
 
     on: bool
     holds: tuple[str, ...] = ()

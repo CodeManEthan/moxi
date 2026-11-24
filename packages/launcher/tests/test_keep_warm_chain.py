@@ -61,10 +61,10 @@ def covers(rid: str) -> list[dict]:
 
 @pytest.fixture
 def chain(tmp_path, monkeypatch):
-    """A headless launch made with `keep_warm` off whose live session waits on one
-    subagent, its turn closed, through the fake turns; its transcript's last request, on
-    an hour lifetime, `PRESSED_AT_S` old; and a fresh clock record whose watcher asks
-    keep-warm about it."""
+    """A launch made with `keep_warm` off whose live session waits on one subagent, its
+    turn closed, through the fake turns; its transcript's last request, on an hour
+    lifetime, `PRESSED_AT_S` old; and a fresh clock record whose watcher asks keep-warm
+    about it."""
     pytest.importorskip("moxi_cache.api", reason="cache is not installed")
     pytest.importorskip("moxi_sessions.api", reason="sessions is not installed")
     turns = kit.FakeTurns(tmp_path / "turns")
@@ -72,7 +72,7 @@ def chain(tmp_path, monkeypatch):
         monkeypatch.setenv(name, value)
     monkeypatch.setattr(joiner, "JOIN_EVERY", 0.1)
     config = tmp_path / "claude"
-    sid = kit.seed(HERE, "r1", live=True, claimed=True, config_dir=config, target="headless",
+    sid = kit.seed(HERE, "r1", live=True, claimed=True, config_dir=config,
                    values={"keep_warm": "off"})
     kit.transcript(config, sid, hour=True, ago_s=PRESSED_AT_S)
     kit.timed(HERE, sid, asks=[cachetimers.KEEP_WARM])
@@ -147,7 +147,7 @@ def test_a_press_covers_a_waiting_session_whose_asks_nudge_it_until_nobody_is_at
 
 
 def test_a_press_covers_a_director_whose_asks_nudge_it_until_its_agents_stop(wired):
-    # 1: a headless director made with `keep_warm` off, no subagent of its own, one directed agent
+    # 1: a director made with `keep_warm` off, no subagent of its own, one directed agent
     # whose turn is open; its last request before the window.
     sid, ids = agents_case(wired, ("coder@proj-a", live("x", turn_open=True)))
     wired.cache = Clock([sid], asks=ASKS, age_s=PRESSED_AT_S)

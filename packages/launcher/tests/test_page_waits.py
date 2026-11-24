@@ -108,9 +108,8 @@ def wired(monkeypatch):
     return state
 
 
-#: A headless launch made with keep_warm off: the one kind of Claude launch keep-warm is
-#: not on for by its launch, so the one a press covers.
-OFF = {"target": "headless", "values": {"keep_warm": "off"}}
+#: A launch made with keep_warm off, the kind a press covers.
+OFF = {"values": {"keep_warm": "off"}}
 
 
 def seeded(rid="r1", *, claimed: bool = True, **options) -> str:
@@ -167,8 +166,8 @@ def test_a_launch_not_live_or_not_claimed_has_no_waits(wired):
 
 def agents_case(wired, *workers, **options):
     """A director with no subagent, and the agents it directs, each `(name, session)`; the
-    director a headless launch made with keep_warm off (`OFF`) unless `options` say how
-    to seed it. Returns the director's session id and each agent's, by name."""
+    director a launch made with keep_warm off (`OFF`) unless `options` say how to seed
+    it. Returns the director's session id and each agent's, by name."""
     sid = seeded(**(options or OFF))
     sessions = {sid: live(sid)}
     bound, ids = [], {}

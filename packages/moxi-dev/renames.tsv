@@ -5176,7 +5176,6 @@ launcher	packages/launcher/tests/test_keepwarm_cover.py	assert verb(keepwarm.hol
 launcher	packages/launcher/tests/test_keepwarm_cover.py	assert verb(keepwarm.release, conn, "x").data["outcome"] == "released"	keep	released	released
 launcher	packages/launcher/tests/test_keepwarm_cover.py	[(text, _)] = main.delivered	keep	delivered	delivered
 launcher	packages/launcher/tests/test_presets.py	assert not any("keep_warm" in w for w in got.warnings)	keep	any	any
-launcher	packages/launcher/tests/test_replay.py	assert not any(line.startswith("keep_warm") for line in got.warnings)	keep	any	any
 launcher	packages/launcher/tests/test_waits.py	assert turns.sessions[comms.sessions["critic@proj-a"]].closed == 1	keep	closed	closed
 loadout	packages/loadout/src/moxi_loadout/adoption.py	-	name	at_its_folder	at_harness_dir
 loadout	packages/loadout/src/moxi_loadout/adoption.py	at_its_folder	name	folder	harness_dir

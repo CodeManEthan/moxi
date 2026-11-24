@@ -543,40 +543,11 @@ def test_an_option_the_install_no_longer_offers_is_not_replayed(work, harness, n
                                    relaunch_of="r1", request_id="r2", actor="ann"))
     new = row("r2").values
     assert (new["keep_warm"], new["recycle_on_expiry"]) == ("off", "off")
-    # keep_warm, on for every launch but a headless one with no value read, goes as a
-    # fresh launch here would leave it out: without a word.
-    assert not any(line.startswith("keep_warm") for line in got.warnings)
+    assert "keep_warm on is not applied: keep_warm needs turns" in got.warnings
     assert "recycle_on_expiry clear is not applied: recycle_on_expiry needs turns" in \
         got.warnings
     env = no_exec[-1]["env"]
     assert common.KEEP_WARM_ENV not in env and common.RECYCLE_ON_EXPIRY_ENV not in env
-
-
-def test_an_old_row_recorded_keep_warm_off_is_replayed_keeping_warm(work, harness, no_exec,
-                                                                    monkeypatch):
-    monkeypatch.setattr(slots, "links", lambda module: True)
-    monkeypatch.setattr(catalog, "session_env_readable", lambda: True)
-    api.launch(request(work))
-    old = row("r1")
-    stored = {**old.values, "keep_warm": "off"}
-    replayed = api._replayed(ReplayRequest(
-        dataclasses.replace(old, values_json=json.dumps(stored)), relaunch_of="r1",
-        request_id="r2", actor="ann"))
-    assert replayed.values["keep_warm"] == "off" and not replayed.warnings
-    assert common.keeps_warm("claude", replayed.values)
-
-
-def test_a_headless_row_kept_warm_is_told_when_the_install_no_longer_offers_it(
-        work, harness, no_exec):
-    api.launch(request(work))
-    old = row("r1")
-    stored = {**old.values, "keep_warm": "on"}
-    replayed = api._replayed(ReplayRequest(
-        dataclasses.replace(old, target="headless", values_json=json.dumps(stored)),
-        relaunch_of="r1", request_id="r2", actor="ann"))
-    assert "keep_warm" not in replayed.values
-    assert "keep_warm on is not applied: keep_warm needs turns" in replayed.warnings
-    assert not common.keeps_warm("claude", replayed.values)
 
 
 def test_a_fresh_launch_reports_no_base(work, harness, no_exec):

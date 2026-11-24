@@ -156,18 +156,16 @@ def test_a_launch_stamps_the_grant_only_with_turns(harness, extra):
 
 @pytest.mark.parametrize(("values", "warm"), [
     ({"keep_warm": "on"}, True),
-    # A row recorded off on a launch that isn't headless: on all the same.
-    ({"keep_warm": "off"}, True),
+    ({"keep_warm": "off"}, False),
     ({"target": "headless", "keep_warm": "off"}, False),
     ({"target": "headless", "keep_warm": "on"}, True),
-    # The resolver left the row out: the install doesn't offer it.
+    # The resolver left the row out: the install doesn't offer it, and it reads off.
     ({}, False),
 ])
-def test_a_claude_launch_is_stamped_and_told_keep_warm_where_it_keeps_warm(values, warm):
+def test_a_claude_launch_is_stamped_and_told_keep_warm_only_when_made_on(values, warm):
     got = claude.compose({"harness": "claude", "cwd": "/work", **values}, ctx(brief="b"))
     assert (got.env.get(common.KEEP_WARM_ENV) == "on") is warm
     assert ("keep warm:     " + common.KEEP_WARM_LINE in got.prompt_file.text) is warm
-    # A row left out is recorded off, so a headless one is never kept warm on replay.
     assert got.values["keep_warm"] == values.get("keep_warm", "off")
 
 

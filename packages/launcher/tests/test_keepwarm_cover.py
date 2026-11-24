@@ -24,10 +24,9 @@ WAITS = {"kind": "subagents", "count": 2}
 
 
 def off(conn, request_id="r1"):
-    """The launch made headless with its value `off`: the one kind of Claude launch
-    keep-warm is off for by its launch."""
-    conn.execute("UPDATE launches SET values_json = '{\"keep_warm\": \"off\"}', "
-                 "target = 'headless' WHERE request_id = ?", (request_id,))
+    """The launch's value set to `off`, as a launch made with keep-warm off has it."""
+    conn.execute("UPDATE launches SET values_json = '{\"keep_warm\": \"off\"}' "
+                 "WHERE request_id = ?", (request_id,))
 
 
 def row(conn, request_id="r1"):
@@ -123,26 +122,15 @@ def test_a_relaunch_or_a_resume_starts_without_the_cover(conn, link):
     assert keepwarm.cover(conn, row(conn, "r2"), SID) is None
 
 
-def test_an_old_launch_recorded_off_that_is_not_headless_is_on(conn):
-    conn.execute("UPDATE launches SET values_json = '{\"keep_warm\": \"off\"}' "
-                 "WHERE request_id = 'r1'")
-    assert keepwarm.launch_on(row(conn)) and keepwarm.on(conn, row(conn), SID)
-    conn.execute("UPDATE launches SET values_json = '{}' WHERE request_id = 'r1'")
-    assert keepwarm.on(conn, row(conn), SID)
-
-
-def test_a_headless_launch_is_on_only_with_keep_warm_on(conn):
-    conn.execute("UPDATE launches SET target = 'headless' WHERE request_id = 'r1'")
+@pytest.mark.parametrize("target", ["slot", "terminal", "headless"])
+def test_a_launch_is_on_by_itself_only_with_keep_warm_on(conn, target):
+    conn.execute("UPDATE launches SET target = ? WHERE request_id = 'r1'", (target,))
     assert keepwarm.launch_on(row(conn))
     for values in ('{}', '{"keep_warm": "off"}'):
         conn.execute("UPDATE launches SET values_json = ? WHERE request_id = 'r1'",
                      (values,))
         assert not keepwarm.launch_on(row(conn))
-
-
-def test_a_codex_launch_is_never_on_by_its_launch(conn):
-    launched(conn, request_id="r2", session_id=NEW, harness="codex")
-    assert not keepwarm.launch_on(row(conn, "r2"))
+        assert not keepwarm.on(conn, row(conn), SID)
 
 
 def test_on_is_the_launch_or_cover(conn):
@@ -485,11 +473,11 @@ def test_with_a_hold_and_comms_down_the_hold_nudges_and_the_cover_stays(conn):
     assert offs(conn) == [] and keepwarm.cover(conn, row(conn), SID) is not None
 
 
-def test_a_hold_in_the_chain_is_a_signal_for_a_headless_launch_under_cover(conn):
+def test_a_hold_in_the_chain_is_a_signal_for_a_launch_made_off_under_cover(conn):
     store.open_hold(conn, "r1", "port-cache")
     conn.execute("UPDATE launches SET endpoint = NULL WHERE request_id = 'r1'")
     launched(conn, request_id="r2", session_id=NEW, relaunch_of="r1",
-             values={"keep_warm": "off"}, target="headless")
+             values={"keep_warm": "off"})
     keepwarm.cover_on(conn, row(conn, "r2"), NEW, turn_number=4, waits=WAITS)
     main = FakeSession(session_id=NEW, facts_seq=[facts(session_id=NEW)])
     w = SimpleNamespace(main=main, comms=Comms(), turns=Turns({NEW: main}))

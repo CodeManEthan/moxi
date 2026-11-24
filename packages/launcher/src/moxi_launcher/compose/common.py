@@ -309,11 +309,9 @@ class Context:
             return self.posture
         return str(values.get("posture") or "")
 
-    def options(self, values: Mapping[str, object], *, keep_warm: bool = False
-                ) -> dict[str, str]:
-        """The stamps beyond the request's own: the option rows' (`option_stamps`), then
-        the replay's."""
-        return {**option_stamps(values, keep_warm=keep_warm), **self.extra_stamps}
+    def options(self, values: Mapping[str, object]) -> dict[str, str]:
+        """The stamps beyond the request's own: the option rows', then the replay's."""
+        return {**option_stamps(values), **self.extra_stamps}
 
 
 @dataclass(frozen=True)
@@ -368,14 +366,10 @@ class Composition:
 
 def with_defaults(harness: str, values: Mapping[str, object]) -> dict[str, object]:
     """`values` over the shipped default of every row a user may set for a `harness`
-    launch, so a value the resolver left out reads as its default. `keep_warm` left out
-    reads `off`: the resolver leaves it out where the install doesn't offer it, and its
-    shipped `on` recorded there would keep a headless launch warm once replayed."""
+    launch, so a value the resolver left out reads as its default."""
     defaults = {row.name: row.default for row in (*catalog.launcher(),
                                                   *catalog.load(harness))
                 if row.settable}
-    if catalog.KEEP_WARM in defaults:
-        defaults[catalog.KEEP_WARM] = "off"
     return {**defaults, **values}
 
 
@@ -693,26 +687,12 @@ def commands(values: Mapping[str, object]) -> tuple[str, ...]:
     return tuple(granted)
 
 
-def keeps_warm(harness: str, values: Mapping[str, object]) -> bool:
-    """Whether a `harness` launch of `values`, as the resolver or a replay settled them
-    and before `with_defaults`, keeps its session warm by itself (`catalog.keeps_warm`):
-    every Claude launch but a headless one without `keep_warm` on, whatever a replayed
-    row recorded. A launch whose install doesn't offer the row (it needs turns and cache)
-    has no `keep_warm` value, and isn't kept warm."""
-    if catalog.KEEP_WARM not in values:
-        return False
-    return catalog.keeps_warm(harness, str(values.get("target") or "terminal"),
-                              values.get(catalog.KEEP_WARM))
-
-
-def option_stamps(values: Mapping[str, object], *, keep_warm: bool = False
-                  ) -> dict[str, str]:
-    """The stamps a launch's option rows set: keep-warm on when the launch keeps warm
-    (`keep_warm`, read by `keeps_warm` before the defaults are filled in), recycle on
-    expiry's value, and the crossing mark (`limit_mark`) when it recycles at its limit.
-    A row at `off` stamps nothing."""
+def option_stamps(values: Mapping[str, object]) -> dict[str, str]:
+    """The stamps a launch's option rows set: keep-warm on, recycle on expiry's value,
+    and the crossing mark (`limit_mark`) when it recycles at its limit. A row at `off`
+    stamps nothing."""
     env: dict[str, str] = {}
-    if keep_warm:
+    if values.get("keep_warm") == "on":
         env[KEEP_WARM_ENV] = "on"
     if values.get("recycle_on_expiry") in ("clear", "compact"):
         env[RECYCLE_ON_EXPIRY_ENV] = str(values["recycle_on_expiry"])

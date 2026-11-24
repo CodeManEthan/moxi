@@ -108,14 +108,13 @@ def test_with_every_step_passing_the_page_reads_covered_and_the_ask_nudges(case)
 # -- each step false alone --------------------------------------------------------------
 
 
-#: The launch log's change that makes launch r1 headless with keep_warm off, the one kind
-#: of Claude launch keep-warm is off for by its launch.
-HEADLESS_OFF = ("UPDATE launches SET values_json = json_set(values_json, '$.keep_warm', "
-                "'off'), target = 'headless', slot = NULL WHERE request_id = 'r1'")
+#: The launch log's change that makes launch r1 a launch made with keep_warm off.
+MADE_OFF = ("UPDATE launches SET values_json = json_set(values_json, '$.keep_warm', "
+            "'off') WHERE request_id = 'r1'")
 
 
 def test_step_one_a_launch_that_does_not_keep_warm(case):
-    case.conn.execute(HEADLESS_OFF)
+    case.conn.execute(MADE_OFF)
     assert case.would() is False
     assert words(case.asked()) == (None, "off")
 
@@ -351,11 +350,10 @@ NOBODY = waits.Directed()
 
 
 def asking(case, *, value="off"):
-    """The launch made headless with its launch value `value`, its clock record written by
-    a watcher that asks keep-warm about it."""
+    """The launch with its launch value `value`, its clock record written by a watcher
+    that asks keep-warm about it."""
     case.conn.execute("UPDATE launches SET values_json = json_set(values_json, "
-                      "'$.keep_warm', ?), target = 'headless', slot = NULL "
-                      "WHERE request_id = 'r1'", (value,))
+                      "'$.keep_warm', ?) WHERE request_id = 'r1'", (value,))
     case.records[0]["asks"] = [cachetimers.KEEP_WARM]
     return case
 
@@ -368,8 +366,8 @@ def press(case):
 
 @pytest.fixture
 def off(case):
-    """A headless launch made with keep-warm off, waiting on a subagent, in the window,
-    timed by a watcher that asks about it."""
+    """A launch made with keep-warm off, waiting on a subagent, in the window, timed by a
+    watcher that asks about it."""
     return asking(case)
 
 
@@ -382,7 +380,7 @@ def test_reading_names_the_first_step_not_passed_and_would_nudge_is_true_only_wi
         (lambda: setattr(case, "turn_open", True), 5),
         (lambda: setattr(case, "age", case.ttl), 4),
         (lambda: setattr(case, "records", []), 3),
-        (lambda: case.conn.execute(HEADLESS_OFF), 1),
+        (lambda: case.conn.execute(MADE_OFF), 1),
     ]
     for change, step in changes:
         change()

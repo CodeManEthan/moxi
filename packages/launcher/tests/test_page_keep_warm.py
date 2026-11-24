@@ -70,9 +70,8 @@ class Clock(Cache):
 
 @pytest.fixture
 def waiting(wired):
-    """A headless launch made with `keep_warm` off whose live session waits on one
-    subagent, its turn closed, in a warm cache the watcher asks keep-warm about: a press
-    covers it."""
+    """A launch made with `keep_warm` off whose live session waits on one subagent, its
+    turn closed, in a warm cache the watcher asks keep-warm about: a press covers it."""
     sid = seeded(**OFF)
     session = live(sid, entries=[agent("a1")])
     wired.turns = Turns({sid: session})
