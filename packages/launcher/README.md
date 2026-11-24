@@ -911,6 +911,7 @@ A refusal prints one line ending in a short code, such as `[off-posture]`, and a
 | usage | the `warn_at`, `recycle_at_limit` and `limit_at` rows | the rows are not offered |
 | ui | the launcher's page, and its state views on other pages | the command line only |
 | sessions | the latest thing said in each running session, on Home's Sessions row; `Open` and `All sessions` go to the sessions page | the row shows when each session was launched, and its links go to the launcher's page |
+| memory | the `subconscious` row: `--subconscious automatic` or `--subconscious on-demand` (needs turns too) stamps the mode under the variable memory names, `MOXI_MEMORY_SUBCONSCIOUS`, and memory's subconscious runs in that session; a fork drops the row | the row is not offered |
 
 An agent role a preset names is looked for in the harness's own agent folders, the user's
 and the project's.

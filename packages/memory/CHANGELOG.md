@@ -2,6 +2,42 @@
 
 ## Unreleased
 
+- The subconscious, memory's second way to recall: in a session launched with it on (the
+  launcher's `subconscious` row, which stamps `MOXI_MEMORY_SUBCONSCIOUS`, exported as
+  `api.SUBCONSCIOUS_ENV`), a second agent searches past sessions and notes and sends the
+  main agent what it finds, at each prompt `subconscious.trigger` counts (`automatic`)
+  or when the agent runs `moxi memory subconscious recall TOPIC` (`on-demand`, with a
+  start line naming it and at most `subconscious.on_demand_per_prompt` between two
+  counted prompts). For now a recall runs only on Claude Code, as a subagent forked
+  through turns' `fork`; a Codex session, or a Claude Code session whose turns offers no
+  `fork`, has the subconscious off, told by an `off` line in the log at the first try
+  and whenever the reason changes, by the on-demand command's refusal and by the doctor.
+  A recall's detached child runs a first search (none for a prompt with no keyword,
+  never this session's own rows) and reads the notes with notes installed, writes the
+  fork's brief, and streams rounds through `fork` and `fork.continue`, each kept by
+  turns until memory acks it and bounded at `subconscious.limit_s` plus 30 seconds,
+  until `NOTHING`, `End of recall.`, `max_rounds`, `max_tools` or `limit_s`. A line whose
+  child died is taken over by the next recall child or by a taker started at session
+  end. New settings under `subconscious.*` (`limit_s` held to 1 to 3600 by the config
+  check), a log shown by `moxi memory subconscious list`, and `moxi memory subconscious
+  discard`, which refuses every line on the subagent route since the harness brings
+  every answer back itself. Recall records are swept after a day unless their line is
+  still kept.
+- Two turns guards, run only in sessions with the subconscious on, hold a recall's fork
+  to reads: `memory.subconscious-fork` allows Read, Grep, Glob and a foreground shell call
+  that is a plain read of `subconscious.fork_commands` (alone or in a pipeline), counted
+  against `max_tools` over all rounds and refused past `limit_s`;
+  `memory.subconscious-fork-ask` refuses every permission ask of a recall fork, and a
+  fault in its judge refuses the ask too.
+- A session launched as a fork (`moxi launcher fork`) is left out of search, in every
+  tier, unless `--forks` (`forks` in the API and in `search_memory`), and out of both
+  start lists, as a scratch launch is. The state store's list indexes are made again for
+  it (its schema step 4). A subagent that ran as a recall's fork is never indexed, even
+  with `index.include_subagents` on.
+- The doctor's new `subconscious` row names each live session launched with the
+  subconscious on where no route can run, the recalls stopped while memory's config is
+  in error, and recall lines whose child is gone; its `links` row names notes too.
+- A `notes` extra: a recall reads notes files in its first search.
 - `search_memory` cuts every local path in what it shows to its last segment and every
   loopback address to `local`, as `read_session` does: sessions' `cut_local` runs inside
   `chat_redact`, after the whitespace squeeze, for snippets, project labels, notes and

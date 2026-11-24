@@ -10,7 +10,10 @@ from moxi_sessions import api
 from moxi_memory import additions, doctor, ingest, links, module, state, table
 
 T = api.testing
-NAMES = ["index", "ingest", "folders", "sets", "start", "sessions", "links", "retention"]
+#: The doctor's own live check, kept before the fixture below stands one in for it.
+LIVE_SUBCONSCIOUS = doctor.live_subconscious
+NAMES = ["index", "ingest", "folders", "sets", "start", "sessions", "links", "retention",
+         "subconscious"]
 
 
 def write_config(name, text):
@@ -33,6 +36,9 @@ def no_links(monkeypatch):
                                                            reason="comms is not installed"))
     monkeypatch.setattr(links, "launcher", lambda: links.Link(
         links.NONE, reason="launcher is not installed"))
+    monkeypatch.setattr(links, "notes", lambda: links.Link(
+        links.NONE, reason="notes is not installed"))
+    monkeypatch.setattr(doctor, "live_subconscious", lambda: [])
 
 
 def ingest_one():
@@ -221,6 +227,7 @@ def test_the_links_row_says_what_memory_does_without_each(monkeypatch):
     detail = by_name()["links"].detail
     assert "comms not linked" in detail and "no agent list" in detail
     assert "launcher not linked" in detail and "may be listed" in detail
+    assert "notes not linked" in detail and "no notes" in detail
     monkeypatch.setattr(links, "comms", lambda: links.Link(links.READY, object()))
     monkeypatch.setattr(links, "launcher",
                         lambda: links.Link(links.FAILING, reason="it broke"))
@@ -301,3 +308,100 @@ def test_a_state_store_that_cant_be_read_is_a_warn_on_the_sessions_row():
     assert rows["sessions"].state == "warn"
     assert "the check failed" not in rows["sessions"].detail
     assert rows["index"].state == "ok"
+
+
+# -- the subconscious -------------------------------------------------------------------
+
+SID = "0190b000-0000-7000-8000-0000000000d1"
+#: An identity no live process has: this pid with a start time it never had.
+DEAD = {"pid": os.getpid(), "started": 1.0}
+
+
+def recall_line(recall, *, updated, **fields):
+    from moxi_memory import recalls
+
+    with recalls.session_lock(SID):
+        recalls.put_line(SID, {"recall": recall, "harness": "claude", **fields},
+                         now=updated)
+
+
+def test_the_subconscious_row_names_a_live_session_with_no_route_while_it_holds(
+        monkeypatch):
+    assert by_name()["subconscious"].state == "ok"
+    monkeypatch.setattr(doctor, "live_subconscious", lambda: [
+        ("s-off", "automatic", "no turns fork in this session"),
+        ("s-on", "on-demand", None)])
+    row = by_name()["subconscious"]
+    assert row.state == "warn" and row.fix == "moxi memory subconscious list"
+    assert "on in 2 live sessions" in row.detail
+    assert "permission asks are refused" in row.detail
+    assert "off for want of a route in s-off (no turns fork in this session)" in row.detail
+    assert "s-on" not in row.detail
+    monkeypatch.setattr(doctor, "live_subconscious", lambda: [("s-on", "automatic", None)])
+    row = by_name()["subconscious"]
+    assert row.state == "ok" and "off for want" not in row.detail
+
+
+def test_a_recall_stopped_by_the_config_shows_only_while_the_config_is_in_error():
+    import time
+
+    from moxi_memory import recalls
+
+    recall_line("r-config", updated=time.time(), state=recalls.LOST, reason="config",
+                error="limit_s is 0: give 1 to 3600")
+    row = by_name()["subconscious"]
+    assert row.state == "ok" and "r-config" not in row.detail
+    write_config("memory", "this is = = not toml\n")
+    row = by_name()["subconscious"]
+    assert row.state == "warn" and row.fix == "moxi config memory"
+    assert "1 recall stopped while memory's config is in error (r-config)" in row.detail
+    assert "limit_s is 0: give 1 to 3600" in row.detail
+
+
+def test_a_line_whose_child_is_gone_is_listed_with_its_age_until_taken():
+    import time
+
+    from moxi_memory import recall_take, recalls
+
+    now = time.time()
+    recall_line("r-stuck", updated=now - 600, state=recalls.OPEN, child=DEAD,
+                ref="r-stuck:1", kept=True)
+    recall_line("r-young", updated=now, state=recalls.OPEN, child=DEAD)
+    recall_line("r-live", updated=now - 600, state=recalls.OPEN, child=recall_take.me())
+    recall_line("r-done", updated=now - 600, state=recalls.BACK, child=DEAD, kept=False)
+    row = by_name()["subconscious"]
+    assert row.state == "warn"
+    assert "1 recall line not yet taken, child gone: r-stuck (open, 10m old)" in row.detail
+    for other in ("r-young", "r-live", "r-done"):
+        assert other not in row.detail
+
+
+class FakeSession:
+    def __init__(self, sid, harness, stamps, capabilities=("fork",)):
+        self.session_id, self.harness = sid, harness
+        self.stamps, self.capabilities = stamps, frozenset(capabilities)
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        return False
+
+    def env(self, names):
+        return {n: self.stamps.get(n) for n in names}
+
+
+def test_live_sessions_are_checked_as_a_recalls_own_try_checks_them(monkeypatch):
+    from moxi_turns import client
+
+    on = {"MOXI_MEMORY_SUBCONSCIOUS": "automatic"}
+    monkeypatch.setattr(client, "sessions", lambda: [
+        FakeSession("c-fork", "claude", on),
+        FakeSession("c-none", "claude", on, capabilities=()),
+        FakeSession("x-codex", "codex", {"MOXI_MEMORY_SUBCONSCIOUS": "on-demand"}),
+        FakeSession("c-off", "claude", {}),
+        FakeSession("c-bad", "claude", {"MOXI_MEMORY_SUBCONSCIOUS": "sometimes"})])
+    assert LIVE_SUBCONSCIOUS() == [
+        ("c-fork", "automatic", None),
+        ("c-none", "automatic", "no turns fork in this session"),
+        ("x-codex", "on-demand", "Codex: no recall route runs on Codex")]

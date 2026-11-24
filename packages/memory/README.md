@@ -17,6 +17,9 @@ and tells every session at its start that the search is there.
 4. **It keeps up as sessions run.** An ended turn and an ending session each start a
    background read of that session's new lines, and a catch-up walk picks up what no
    trigger saw.
+5. **It can recall for the agent.** In a session launched with the subconscious on, a
+   second agent searches past sessions and notes for each prompt, or for a topic the
+   agent names, and its points come back to the main agent as it finds them (below).
 
 It writes nothing to a transcript, and its index holds nothing the transcripts can't give
 back: it can be deleted and built again from them.
@@ -32,10 +35,13 @@ moxi doctor memory
 
 | Command | Does |
 |---|---|
-| `moxi memory search WORDS [--project P] [--since TIME] [--harness H] [--results] [--subagents] [--scratch] [--limit N] [--json]` | search past sessions, best match first (below) |
+| `moxi memory search WORDS [--project P] [--since TIME] [--harness H] [--results] [--subagents] [--scratch] [--forks] [--limit N] [--json]` | search past sessions, best match first (below) |
 | `moxi memory ingest [--all]` | ask for a catch-up walk in the background, or with `--all` a read of every transcript from its start, and return at once |
 | `moxi memory reindex [--relabel]` | ask for a rebuild of the index in the background, and return at once (below) |
 | `moxi memory status [--json]` | print the index's state (below) |
+| `moxi memory subconscious list [--session ID] [--json]` | print the subconscious's log of recalls (below) |
+| `moxi memory subconscious recall TOPIC [--json]` | start a recall on TOPIC, from an agent's shell in an on-demand session (below) |
+| `moxi memory subconscious discard RECALL_ID` | end a recall's line whose answer memory still holds to send (below) |
 
 Exit codes: 0 a search that ran, with or without a hit, an ingest or rebuild asked for, and a
 status with an index; 1 no index, or one that can't be read; 2 bad arguments or a setting
@@ -60,6 +66,7 @@ query keeps at most 64 tokens of at most 100 characters each.
 - `--subagents`: search subagent sessions too, which are indexed only while
   `index.include_subagents` is on.
 - `--scratch`: search sessions launched as scratch too (below).
+- `--forks`: search sessions launched as forks of another session too (below).
 - `--limit N`: how many hits, 10 by default.
 
 Each hit is two lines: its number, harness, session id, time (local, to the minute),
@@ -222,8 +229,8 @@ recent sessions in <label>:
   needs comms.
 - The second is the five newest in this session's project, leaving out those in the first
   list, each named by the identity that ran it, or by its harness when it had none.
-- Both leave out this session, subagents, sessions launched as scratch, and sessions
-  memory hasn't read a model answer of yet (below). An empty list is left out with its
+- Both leave out this session, subagents, sessions launched as scratch or as forks, and
+  sessions memory hasn't read a model answer of yet (below). An empty list is left out with its
   heading.
 - The time is the newest record memory read of that session, in local time.
 - `moxi sessions read <session>` opens a listed session, whichever harness ran it.
@@ -331,7 +338,10 @@ user messages in Codex and OpenCode are in tier 1, and a program's text submitte
 user turn there can't be told apart from a person's.
 
 Subagents are Claude Code's subagent files, the threads a Codex thread spawned, and
-OpenCode's child sessions.
+OpenCode's child sessions. A subagent that ran as a subconscious recall's fork is never
+indexed, even with `index.include_subagents` on: it holds a copy of its parent's
+conversation. memory knows it by the fork id in its recall log, and takes out any rows
+of it read before that id was written.
 
 ### Project labels
 
@@ -347,7 +357,9 @@ derives it again where the folder still exists.
 
 With the launcher installed, memory asks it how each session was launched. A session the
 launcher launched as `scratch` is left out of search, in every tier, unless you pass
-`--scratch`, and is in neither start list. `project`, `seat` and `one-off` sessions, and
+`--scratch`, and is in neither start list. A session launched as a `fork` (`moxi launcher
+fork`, a copy of another session's whole conversation) is treated the same way, found
+only with `--forks`. `project`, `seat` and `one-off` sessions, and
 sessions with no kind (started by hand, by a script, or before the launcher was
 installed), are searched and listed. The kind is read from the session table at each
 search, so a kind learned later applies at once.
@@ -460,6 +472,84 @@ longer open it.
 
 Setup prints these lines for each harness, and the doctor's `retention` row repeats them.
 
+## The subconscious
+
+The subconscious is memory's second way to recall. Where search waits for the agent to
+ask, a recall runs beside the agent: a second agent reads past sessions and notes for
+what the prompt is about and sends the main agent the points worth knowing, while the
+main agent works. Each recall spends tokens, so it is off unless a launch turns it on.
+
+**Turning it on.** The launcher's `subconscious` row sets it for one launch, or for every
+launch of a preset that sets it:
+
+```sh
+moxi launcher run --subconscious automatic
+moxi launcher run --subconscious on-demand
+```
+
+The launch stamps the mode in the session's environment (`MOXI_MEMORY_SUBCONSCIOUS`). A
+session with no stamp, such as one started by hand, has it off.
+
+- `automatic`: each prompt `subconscious.trigger` counts starts a recall. By default that
+  is the user's own prompts.
+- `on-demand`: the agent starts one with `moxi memory subconscious recall "<topic>"`, at
+  most `subconscious.on_demand_per_prompt` times between two counted prompts. The session
+  gets one line at its start that names the command. The command returns at once; the
+  points come back to the agent as the recall finds them. It exits 3 with the reason
+  when it refuses: the subconscious off or automatic in this session, the count used up,
+  or memory's config file in error.
+
+**Where it runs.** For now a recall runs on Claude Code only, as a subagent forked from
+the session through turns' `fork`, so it starts from the session's own conversation and
+reads its prompt cache. A session where that can't run has the subconscious off: a Codex
+session, and a Claude Code session whose turns offers no `fork`. memory checks this at
+every try, not once. When a try finds no route, it writes an `off` line to its log with
+the reason, at the first such try and again only when the reason changes, the on-demand
+command's refusal says it, and memory's doctor names each live session it holds for.
+
+**One recall.** memory's prompt listener returns at once and starts a detached child,
+so a recall never holds the prompt. The child:
+
+1. reads the prompt's keywords (common words left out) and runs a first search in
+   `subconscious.scope`, keeping the best `subconscious.prefetch_hits` hits, leaving out
+   this session, subagents and fork launches, plus up to three notes files that hold the
+   most of the keywords (with notes installed). A prompt with no keyword gets no first
+   search;
+2. writes the fork's brief with those hits, the rules below and this session's id;
+3. asks turns to fork the session with the brief. The fork answers as soon as it has
+   something, at most `subconscious.max_points` points, or `NOTHING`;
+4. asks for further rounds, each a turn of the same fork, until an answer is `NOTHING`
+   or ends `End of recall.`, `subconscious.max_rounds` rounds have run, the fork has made
+   `subconscious.max_tools` tool calls over all its rounds, or `subconscious.limit_s` has
+   passed. Each round is bounded at `limit_s` plus 30 seconds from its own send.
+
+Each answer reaches the main agent the way any subagent's answer does.
+
+**What the fork may do.** Two turns guards hold every recall fork to reads, and run
+only in sessions with the subconscious on. A fork may call Read, Grep and Glob, and the
+shell only for a plain read: one command, or a pipeline of commands joined by `|`, each
+starting with an entry of `subconscious.fork_commands` word for word, in the foreground
+with no timeout of its own. Anything the guard can't see whole (`;`, `&`, redirection,
+substitution, quoting tricks and the like) is refused. Every permission ask a recall
+fork raises is refused rather than shown to you; a fault in that guard refuses the ask
+too. Once the recall's tool calls or time are used up, every further call is refused
+with a line telling the fork to answer from what it has.
+
+**The log.** `moxi memory subconscious list` prints one line per recall (its id, state,
+start, session, how it started, the head of its prompt or topic, its route, rounds and
+the reason of a `lost` state) and one per stretch a session's subconscious was `off`.
+`--session ID` keeps one session's lines and prints each round's answer. A line is
+`open` while its round runs, `back` once an answer came, `lost` when none did (with
+`denied`, `gone` or `config`), `discarded` or `off`. Each round's end stays with turns
+until memory's line holds it. If a recall's child dies, the next recall child of any
+session, or a taker memory starts when that session ends, finishes its line from what
+turns kept. A recall's working record is removed after a day unless its line still
+waits on turns; the log itself is kept.
+
+`moxi memory subconscious discard RECALL_ID` ends a line whose answer memory still holds
+to send. On Claude Code's subagent route the harness brings every answer back itself,
+so no line there ever waits and the command refuses every one.
+
 ## Setup
 
 `moxi install memory` brings turns, sessions and secrets, which memory requires, runs
@@ -510,14 +600,28 @@ effect at the next read.
 | `redact.sets` | `["credentials", "broad"]` | the secrets sets every stored text is redacted with; at least one |
 | `reminder.enabled` | `true` | send the reminder at each prompt |
 | `ingest.timer.enabled` | `false` | run a catch-up walk every hour, outside sessions |
+| `subconscious.trigger` | `user` | which prompts count as new work: `user`, the user's own; `user-and-comms`, those and comms deliveries. In automatic mode each starts a recall; in on-demand mode each resets the agent's count |
+| `subconscious.scope` | `project-first` | where a recall looks: `project`, `project-first` (everywhere only when the project finds nothing) or `everywhere` |
+| `subconscious.limit_s` | `60` | how long a recall may run, all its rounds, in seconds, 1 to 3600; each round is also bounded at this plus 30 |
+| `subconscious.max_tools` | `8` | the most tool calls a recall's fork may make over all its rounds; at least 1 |
+| `subconscious.max_rounds` | `4` | how many rounds a recall may run, each answer delivered; at least 1 |
+| `subconscious.max_points` | `5` | the most points the brief allows in one answer; at least 1 |
+| `subconscious.prefetch_hits` | `8` | how many hits the first search puts in the brief; 0 runs none |
+| `subconscious.on_demand_per_prompt` | `2` | in on-demand mode, the most recalls between two counted prompts; 0 refuses every one |
+| `subconscious.fork_commands` | `moxi memory search`, `moxi sessions read`, `grep`, `cat`, `head`, `tail`, `ls`, `wc`, `cut` | the shell commands a recall's fork may run; a program you add must not run another from its arguments |
 
 A change to `index.include_subagents`, `index.tail_chars` or `redact.sets` applies to what is read
 after it; `moxi memory reindex` applies it to everything. To turn the start line and
-lists off, take `memory` off turns' `start.order`.
+lists off, take `memory` off turns' `start.order`. A recall runs on the settings memory's
+listener last read cleanly: a config file edited into error leaves running sessions on
+the last good settings, and a recall child that must read the file itself and can't
+stops with its line `lost` (`config`).
 
-memory reads no environment variable of its own. Its folders move with the core's, like
+memory reads one environment variable of its own, `MOXI_MEMORY_SUBCONSCIOUS`, which the
+launcher stamps on a session launched with the subconscious on. Its folders move with the core's, like
 every module's: the session table, the writer lock and the rebuild lock in its state
-folder (`~/.local/state/moxi/memory` by default), the index in the `index` folder of its
+folder (`~/.local/state/moxi/memory` by default), with the subconscious's log and
+records under `subconscious/` there, the index in the `index` folder of its
 cache folder (`~/.cache/moxi/memory/index`). `moxi paths memory` prints both.
 
 ## The optional links
@@ -525,7 +629,8 @@ cache folder (`~/.cache/moxi/memory/index`). `moxi paths memory` prints both.
 | Link | Extra | With it | Without it |
 |---|---|---|---|
 | comms | `comms` (`moxi-comms`) | each session's comms identity (`name`, or `name@scope`), read from comms' local claim socket at start; the agent's own list; agents named in the project list | no identities: no agent list, and the project list names each session's harness |
-| launcher | `launcher` (`moxi-launcher`) | each session's launch kind; scratch sessions searched only with `--scratch`, and in no list | no kinds: every session is searched by default and may be listed |
+| launcher | `launcher` (`moxi-launcher`) | each session's launch kind; scratch sessions searched only with `--scratch` and fork launches only with `--forks`, and neither in a list; the `subconscious` row that turns the subconscious on | no kinds: every session is searched by default and may be listed; no session is launched with the subconscious on |
+| notes | `notes` (`moxi-notes`) | a recall's first search reads notes files too | a recall reads past sessions only |
 
 Two sessions share an identity only when comms' qualified names are the same, so
 `planner@alpha` and `planner@beta` are two agents. memory reaches each link through
@@ -543,8 +648,9 @@ Two sessions share an identity only when comms' qualified names are the same, so
 | `sets` | memory's redaction sets load in secrets | `fail` for a set secrets doesn't have (fix: the `moxi config` line that removes it) or can't run, which stops every ingest; `off` when memory's config can't be read |
 | `start` | memory is on turns' start list for each harness it reads, and its listener rows import | `warn` when it is off the list; `fail` when a row doesn't import |
 | `sessions` | the session table's sessions, with an identity, settled, and by launch kind; or that no session has started or been read yet | `warn` when the table can't be opened or read |
-| `links` | whether comms and the launcher load, and what memory does without each | `warn` when one is installed but fails to load |
+| `links` | whether comms, the launcher and notes load, and what memory does without each | `warn` when one is installed but fails to load |
 | `retention` | each harness's retention, from sessions | `warn` where sessions warns |
+| `subconscious` | how many live sessions have the subconscious on, on Claude Code's subagent route, and that a recall fork's permission asks are refused; or that none has it on | `warn` for a live session launched with it on where no route can run now, with the reason (fix: `moxi memory subconscious list`); while memory's config is in error, for the recalls it stopped, with the error (fix: `moxi config memory`); and for a recall line whose child and taker are gone, with its age, until the next recall child or session end takes it |
 
 A `config` row fails when memory's config can't be read, and a `record ingest` row shows a
 failed ingest child.
@@ -555,7 +661,8 @@ failed ingest child.
 `moxi.modules.load("memory", interface=1)`.
 
 - `search(query, *, project=None, since=None, harness=None, results=False,
-  subagents=False, scratch=False, limit=10) -> Result`. `since` is epoch seconds or a
+  subagents=False, scratch=False, forks=False, limit=10) -> Result`. `since` is epoch
+  seconds or a
   `datetime` (no zone is local time). A `Result` holds `hits` (each a `Hit`: `harness`,
   `session_id`, always the main session's, `agent_id` on a subagent's hit, `time`,
   `project`, `kind`, `tier`, `snippet`, `key`, `score` and `failed`), `rows` (how many rows
@@ -568,6 +675,8 @@ failed ingest child.
 - `status() -> Status`: what `moxi memory status` prints, as fields. It doesn't raise for
   a missing index: `Status.index` is `ok`, `missing` or `unreadable`.
 - `cut(query)`: the tokens a query is searched for.
+- `SUBCONSCIOUS_ENV`: the name of the variable a launch stamps with the session's
+  subconscious mode, which the launcher's `subconscious` row reads here.
 
 A search only reads: it never takes the lock an ingest writes under, and a rebuild that
 switches the index under it leaves the old one for it to read to the end.
@@ -591,8 +700,8 @@ or one of its chat sets can't run (python-stdnum removed, say), the tool refuses
 **`search_memory`** searches past sessions in memory's index. Inputs: `words` (required,
 1 to 500 characters, cut into at most 64 tokens as `moxi memory search` cuts them),
 `project` (a project label), `since` (an age such as `7d` or `12h`, or an ISO 8601 time),
-`harness` (`claude`, `codex` or `opencode`), `results`, `subagents` and `scratch` (each
-off by default, as the flags of `moxi memory search`), and `limit` (1 to 20, default 8).
+`harness` (`claude`, `codex` or `opencode`), `results`, `subagents`, `scratch` and
+`forks` (each off by default, as the flags of `moxi memory search`), and `limit` (1 to 20, default 8).
 Each hit gives `session` (the main session's id, which `read_session` opens), `agent`
 (the subagent's id, or null), `harness`, `at` in UTC, `project`, `kind` (`user`,
 `assistant`, `tool` or `result`), `writer`, `failed` and `snippet`. Beside the hits,
@@ -722,7 +831,7 @@ turns' own setup: see
 `moxi`, Moxi's core; `moxi-turns`, which calls the start line, the lists, the reminder and
 the ingest trigger; `moxi-sessions`, through which memory reads every transcript and each
 harness's retention, and whose `moxi sessions read` opens a session; and `moxi-secrets`,
-the redaction sets. The extras `comms` and `launcher` add the two links above. The extra
+the redaction sets. The extras `comms`, `launcher` and `notes` add the three links above. The extra
 `connector` adds `moxi-connector`, the public MCP host, and python-stdnum, which
 secrets' personal-data set runs with, and serves `search_memory` ("In the Claude apps").
 The extra `secrets` names that set, `moxi-secrets[personal-data]`, and adds nothing

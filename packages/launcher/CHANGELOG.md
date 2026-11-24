@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- The `subconscious` row (`off`, `automatic`, `on-demand`; needs turns and memory) turns
+  memory's subconscious on for one launch, or for every launch of a preset that sets it:
+  a launch with it on stamps the mode under memory's `SUBCONSCIOUS_ENV`, read from
+  memory's API. A fork drops it. memory joins the optional links, with a `memory` extra.
 - After a topic value the page reads its past sessions again through moxi-ui's
   `readLater`, so the page root's `data-reading` mark counts that read from the moment it
   is scheduled until its answer is drawn, and a test's press waits for the list it
