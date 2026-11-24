@@ -39,8 +39,8 @@ from test_live import (ANSWER_S, CLAUDE_OWN, Terminal, flags, launch_row,  # noq
                        live_env, moxi_command, needs, needs_turns, own_slots, pane_text,
                        real_home, words, work)
 
-from moxi_launcher import (api, compose, exits, first, keepwarm, presets, recycle,
-                           relaunch, resume, store)
+from moxi_launcher import (api, compose, exits, first, handoffs, job, keepwarm, presets,
+                           recycle, relaunch, resume, slots, store)
 from moxi_launcher.compose import common
 
 pytestmark = [pytest.mark.live,
@@ -367,6 +367,35 @@ class DirectorComms:
         return self._real.qualify(self.director, self._real.GLOBAL)
 
 
+class JobInHere:
+    """slots as it is installed, but a job the call starts is kept, not run: the test
+    runs it in this process, in the environment and folder slots would have given it, so
+    the job's own cache read can take a stand-in."""
+
+    def __init__(self, real):
+        self._real, self.started = real, []
+
+    def __getattr__(self, name):
+        return getattr(self._real, name)
+
+    def run_job(self, name, argv, *, env, cwd):
+        self.started.append(types.SimpleNamespace(name=name, argv=list(argv), env=dict(env),
+                                                   cwd=cwd))
+        return types.SimpleNamespace(exec="started", exec_line=None)
+
+    def run_kept(self, monkeypatch, **seams) -> str:
+        """Run the one kept job to its end, as `moxi-launcher-job KIND RUN` would."""
+        [kept] = self.started
+        kind, run_id = kept.argv[-2:]
+        with monkeypatch.context() as patched:
+            for name in list(os.environ):
+                patched.delenv(name)
+            for name, value in kept.env.items():
+                patched.setenv(name, value)
+            patched.chdir(kept.cwd)
+            return job.run(kind, run_id, **seams)
+
+
 class Cache:
     """A stand-in for cache's read of a session: its kind, its age and its lifetime."""
 
@@ -378,7 +407,8 @@ class Cache:
                                      ttl_s=self.ttl)
 
 
-def test_a_director_relaunch_of_claude_in_a_slot(live_env, work, own_slots):
+def test_a_director_relaunch_of_claude_in_a_slot(live_env, work, own_slots, tmp_path,
+                                                 monkeypatch):
     """A director relaunches a session that names it. The run ends `relaunched`; the new
     launch is in the same pane, posture `relaunched` with the director's handoff as its
     first turn, and
@@ -386,8 +416,11 @@ def test_a_director_relaunch_of_claude_in_a_slot(live_env, work, own_slots):
     `relaunch.director_pass_env` lists, and none of what the session's own shell
     exported. The caller's comms identity is stood in (`DirectorComms`): proving it takes
     a director session bound on a comms daemon, and no fixture here runs one of the
-    test's own. The cache reads cold through a stand-in, since the session has just
-    answered and a director's relaunch of a warm session is refused."""
+    test's own. The launch has a notes directory and the handoff is in its handoff
+    folder, where a director's handoff must be. The cache reads cold through a stand-in,
+    since the session has just answered and a director's relaunch of a warm session is
+    refused; the job reads the cache again, so the call's job runs in this process with
+    the same stand-in (`JobInHere`), in the environment and folder slots gives a job."""
     needs_claude_with_turns(work, live_env)
     comms = presets.comms_api()
     if comms is None:
@@ -401,8 +434,10 @@ def test_a_director_relaunch_of_claude_in_a_slot(live_env, work, own_slots):
     ask, answer = words()
     brief = (f"Run the shell command `export {shell_var}=1` with your Bash tool, then: "
              f"{ask}")
+    notes_dir = tmp_path / "notes"
+    notes_dir.mkdir()
     result, row = claude_in_slot(work, live_env, brief, director=["boss"],
-                                 **BASH_ALLOWED)
+                                 notes_dir=str(notes_dir), **BASH_ALLOWED)
     new = None
     try:
         assert result.state in ("started", "first-sent"), result.line
@@ -411,15 +446,17 @@ def test_a_director_relaunch_of_claude_in_a_slot(live_env, work, own_slots):
                  what=lambda: f"{answer} in pane {row.pane_id}; saw "
                               f"{pane_text(own_slots, row.pane_id, live_env)[-2000:]}")
         settled(row)
-        handoff = work / "director-handoff.md"
+        handoff = handoffs.handoff_dir_of_row(row, create=True) / "director-handoff.md"
         ask, answer = words()
         handoff.write_text(ask + "\n")
         director_env = {**live_env, director_var: "1", passed: "1"}
+        slots_api = JobInHere(slots.api())
         done = relaunch.call_director(row.session_id, handoff=str(handoff),
-                                      caller_env=director_env,
+                                      caller_env=director_env, slots_api=slots_api,
                                       comms=DirectorComms(comms, "boss"),
                                       cache=Cache("cold", 4000.0), follow=False)
         assert done.exit_code == 0, done.lines
+        slots_api.run_kept(monkeypatch, cache=Cache("cold", 4000.0))
 
         def ended() -> store.Run | None:
             finished = [r for r in runs_of(row.request_id) if r.kind == "relaunch"
