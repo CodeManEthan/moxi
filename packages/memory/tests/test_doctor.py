@@ -333,13 +333,18 @@ def test_the_subconscious_row_names_a_live_session_with_no_route_while_it_holds(
         ("s-on", "on-demand", None)])
     row = by_name()["subconscious"]
     assert row.state == "warn" and row.fix == "moxi memory subconscious list"
-    assert "on in 2 live sessions" in row.detail
+    assert "on in 1 live session, on Claude Code's subagent route" in row.detail
     assert "permission asks are refused" in row.detail
     assert "off for want of a route in s-off (no turns fork in this session)" in row.detail
     assert "s-on" not in row.detail
     monkeypatch.setattr(doctor, "live_subconscious", lambda: [("s-on", "automatic", None)])
     row = by_name()["subconscious"]
     assert row.state == "ok" and "off for want" not in row.detail
+    monkeypatch.setattr(doctor, "live_subconscious", lambda: [
+        ("x-codex", "automatic", "Codex: no recall route runs on Codex")])
+    row = by_name()["subconscious"]
+    assert row.state == "warn" and "on in" not in row.detail
+    assert "off for want of a route in x-codex" in row.detail
 
 
 def test_a_recall_stopped_by_the_config_shows_only_while_the_config_is_in_error():
@@ -356,6 +361,26 @@ def test_a_recall_stopped_by_the_config_shows_only_while_the_config_is_in_error(
     assert row.state == "warn" and row.fix == "moxi config memory"
     assert "1 recall stopped while memory's config is in error (r-config)" in row.detail
     assert "limit_s is 0: give 1 to 3600" in row.detail
+
+
+def test_only_the_recalls_stopped_since_the_config_last_read_cleanly_are_listed():
+    import time
+
+    from moxi_memory import recalls
+
+    now = time.time()
+    recall_line("r-fixed", updated=now - 300, at=now - 300, state=recalls.LOST,
+                reason="config", error="an error fixed since")
+    recall_line("r-good", updated=now - 200, at=now - 200, state=recalls.BACK,
+                prefetch_hits=3)
+    recall_line("r-now", updated=now - 100, at=now - 100, state=recalls.LOST,
+                reason="config", error="limit_s is 0: give 1 to 3600")
+    write_config("memory", "this is = = not toml\n")
+    row = by_name()["subconscious"]
+    assert row.state == "warn"
+    assert ("1 recall stopped while memory's config is in error (r-now): "
+            "limit_s is 0: give 1 to 3600") in row.detail
+    assert "r-fixed" not in row.detail and "an error fixed since" not in row.detail
 
 
 def test_a_line_whose_child_is_gone_is_listed_with_its_age_until_taken():

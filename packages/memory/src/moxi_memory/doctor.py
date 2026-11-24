@@ -512,10 +512,26 @@ def _never_ran(lines: list[dict], *, now: float) -> str | None:
     return "; ".join(said) or None
 
 
+def _config_losses(lines: list[dict]) -> list[dict]:
+    """The lines lost with reason `config` since memory's config last read cleanly for a
+    recall: those opened after the newest line whose child got past its config read (its
+    first search noted on it). A loss to an error fixed since is left out. `lines` are
+    oldest first."""
+    from . import recall_child, recalls
+
+    out: list[dict] = []
+    for line in lines:
+        if line.get("state") == recalls.LOST and line.get("reason") == recall_child.CONFIG:
+            out.append(line)
+        elif line.get("prefetch_hits") is not None:
+            out = []
+    return out
+
+
 def _subconscious(*, config_in_error: bool, now: float | None = None) -> Row:
     import time
 
-    from . import recall_child, recall_take, recalls
+    from . import recall_take, recalls
 
     now = time.time() if now is None else now
     parts: list[str] = []
@@ -525,17 +541,17 @@ def _subconscious(*, config_in_error: bool, now: float | None = None) -> Row:
     except Exception as exc:  # noqa: BLE001 - turns that can't list its sessions
         live = []
         parts.append(f"turns can't list its live sessions ({exc}), so none is checked")
+    on = [sid for sid, _mode, why in live if why is None]
     off = [f"{sid} ({why})" for sid, _mode, why in live if why is not None]
-    if live:
-        parts.append(f"on in {_plural(len(live), 'live session')}, on Claude Code's "
+    if on:
+        parts.append(f"on in {_plural(len(on), 'live session')}, on Claude Code's "
                      "subagent route; a recall fork's permission asks are refused")
     if off:
         warn = True
         parts.append(f"off for want of a route in {_shown(off)}")
     lines = recalls.all_lines()
     if config_in_error:
-        lost = [line for line in lines if line.get("state") == recalls.LOST
-                and line.get("reason") == recall_child.CONFIG]
+        lost = _config_losses(lines)
         if lost:
             warn = True
             newest = lost[-1]
