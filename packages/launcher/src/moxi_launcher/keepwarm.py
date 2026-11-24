@@ -690,12 +690,8 @@ def launch_on(row: store.LaunchRow) -> bool:
     """Whether the launch `row` keeps its session warm by itself: every launch of a
     harness cache times (`catalog.CACHE_TIMED`, Claude Code) that is not headless, with
     no value read, and a headless one launched with `keep_warm` on. A row recorded with
-    `keep_warm` off on any other target is on all the same."""
-    if row.harness not in catalog.CACHE_TIMED:
-        return False
-    if row.target == "headless":
-        return row.values.get("keep_warm") == "on"
-    return True
+    `keep_warm` off on any other target is on all the same (`catalog.keeps_warm`)."""
+    return catalog.keeps_warm(row.harness, row.target, row.values.get(catalog.KEEP_WARM))
 
 
 # -- whether the next ask would nudge -----------------------------------------------------

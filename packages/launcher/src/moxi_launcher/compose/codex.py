@@ -214,7 +214,7 @@ def compose(values: Mapping[str, object], ctx: Context) -> Composition:
                         warn_at=str(values.get("warn_at") or "") or None,
                         notes_dir=str(values.get("notes_dir") or "") or None,
                         granted=common.commands(values),
-                        options=ctx.options(values))
+                        options=ctx.options(values, HARNESS))
     recorded = common.recorded(HARNESS, values, mode_, not_applied)
     if trust is not None:
         recorded[TRUST] = trust.recorded()

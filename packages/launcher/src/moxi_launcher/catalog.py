@@ -198,6 +198,8 @@ WHEN_FIELDS = ("requires", "condition", "target", "refused", "hint")
 #: The harnesses whose sessions cache's timer asks about: it keeps clock records for
 #: Claude sessions only, so a row that rides its asks is offered for Claude alone.
 CACHE_TIMED = ("claude",)
+#: The row keep-warm reads on a headless launch alone.
+KEEP_WARM = "keep_warm"
 SPELLING_FIELDS = ("flag", "value", "join")
 PLACEHOLDERS = ("{value}", "{toml}", "{cwd_toml}")
 #: How long one `--help` (or `--version`) may run, in seconds.
@@ -368,6 +370,17 @@ class NeedsModule(Refused):
 
 
 # -- rows -----------------------------------------------------------------------------
+
+def keeps_warm(harness: str | None, target: str | None, value: object) -> bool:
+    """Whether a launch keeps its session warm by itself: every launch of a harness cache
+    times (`CACHE_TIMED`) that is not headless, with `value` (its `keep_warm`) not read,
+    and a headless one whose `value` is `on`. A target of None is a terminal launch."""
+    if harness not in CACHE_TIMED:
+        return False
+    if (target or "terminal") == "headless":
+        return value == "on"
+    return True
+
 
 def is_set(value: object) -> bool:
     """True when `value` sets its row: anything but None, "", false, [] and {}."""

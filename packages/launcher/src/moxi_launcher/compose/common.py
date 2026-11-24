@@ -49,8 +49,9 @@ COMMANDS = ("exit",)
 KEEP_WARM_ENV = "MOXI_LAUNCHER_KEEP_WARM"
 RECYCLE_ON_EXPIRY_ENV = "MOXI_LAUNCHER_RECYCLE_ON_EXPIRY"
 #: The identity block's line on a keep-warm launch.
-KEEP_WARM_LINE = ('on; open a hold with "moxi launcher keep-warm hold <name>" for each '
-                  "piece of work you hand out, and release it when the work is done")
+KEEP_WARM_LINE = ("on; subagents of yours and agents you direct at work keep you warm; "
+                  'for other work you hand out, open a hold with "moxi launcher keep-warm '
+                  'hold <name>" and release it when the work is done')
 #: What every scrub removes besides the modules' own session stamps: every `CLAUDE*`
 #: name but those in `CLAUDE_KEEP`, and the agent marker. A Claude Code session sets
 #: `CLAUDE*` names in what it starts, and new ones come with new versions, so the scrub
@@ -308,9 +309,10 @@ class Context:
             return self.posture
         return str(values.get("posture") or "")
 
-    def options(self, values: Mapping[str, object]) -> dict[str, str]:
-        """The stamps beyond the request's own: the option rows', then the replay's."""
-        return {**option_stamps(values), **self.extra_stamps}
+    def options(self, values: Mapping[str, object], harness: str) -> dict[str, str]:
+        """The stamps beyond the request's own: the option rows' for a `harness` launch,
+        then the replay's."""
+        return {**option_stamps(values, harness=harness), **self.extra_stamps}
 
 
 @dataclass(frozen=True)
@@ -686,12 +688,20 @@ def commands(values: Mapping[str, object]) -> tuple[str, ...]:
     return tuple(granted)
 
 
-def option_stamps(values: Mapping[str, object]) -> dict[str, str]:
-    """The stamps a launch's option rows set: keep-warm on, recycle on expiry's value,
-    and the crossing mark (`limit_mark`) when it recycles at its limit. A row at `off`
-    stamps nothing."""
+def keeps_warm(harness: str, values: Mapping[str, object]) -> bool:
+    """Whether a `harness` launch of `values` keeps its session warm by itself
+    (`catalog.keeps_warm`): every Claude launch but a headless one without `keep_warm`
+    on, whatever a replayed row recorded."""
+    return catalog.keeps_warm(harness, str(values.get("target") or "terminal"),
+                              values.get(catalog.KEEP_WARM))
+
+
+def option_stamps(values: Mapping[str, object], *, harness: str) -> dict[str, str]:
+    """The stamps a `harness` launch's option rows set: keep-warm on where the launch
+    keeps warm (`keeps_warm`), recycle on expiry's value, and the crossing mark
+    (`limit_mark`) when it recycles at its limit. A row at `off` stamps nothing."""
     env: dict[str, str] = {}
-    if values.get("keep_warm") == "on":
+    if keeps_warm(harness, values):
         env[KEEP_WARM_ENV] = "on"
     if values.get("recycle_on_expiry") in ("clear", "compact"):
         env[RECYCLE_ON_EXPIRY_ENV] = str(values["recycle_on_expiry"])

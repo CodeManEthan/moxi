@@ -192,11 +192,11 @@ label = "Warn at context mark"
 
 [keep_warm]
 type = "enum"
-default = "off"
+default = "on"
 values = ["off", "on"]
 requires = ["turns", "cache"]
 condition = "cache-timer"
-doc = "Nudge the session before its prompt cache expires while it waits on work it handed out."
+doc = "Nudge the session before its prompt cache expires while it waits on work it handed out: on for every launch but a headless one, which takes off (its default) or on."
 fork = "drop"
 group = "lifecycle"
 sub = "Cache"

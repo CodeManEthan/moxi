@@ -1144,6 +1144,7 @@ def resolve(request, *, presets: Presets | None = None,
     target = str(values.get("target") or "terminal")
     mode, turns, more = mode_of(harness, target, identity=identity, available=avail)
     warnings += more
+    _keep_warm_row(harness, target, values, sources, chosen, warnings)
     _headless_rows(harness, target, identity, values, chosen, warnings)
     catalog.refuse_wrapper_flags(harness, identity, values.get(catalog.EXTRA) or ())
 
@@ -1204,6 +1205,38 @@ CACHE_TIMER_ROWS = ("keep_warm", "recycle_on_expiry")
 COLD_GAP = ("headless_exit has idle= or after= and no cold: mail sent once the session's "
             "cache is cold waits for the name's next holder; add cold to end the session "
             "then")
+
+
+#: The refusal of `keep_warm = "off"` on a launch that isn't headless, and the warning
+#: when it came from `[defaults]`.
+KEEP_WARM_OFF = ("keep_warm off is refused: keep-warm is on for every Claude launch that "
+                 "isn't headless, with no value read")
+KEEP_WARM_OFF_HINT = ("drop the keep_warm line, which can go from every launch but a "
+                      "headless one")
+KEEP_WARM_DEFAULT_OFF = ("keep_warm off from [defaults] is left out: keep-warm is on for "
+                         "every Claude launch that isn't headless, so the line can go")
+
+
+def _keep_warm_row(harness: str, target: str, values: dict, sources: dict,
+                   chosen: frozenset[str], warnings: list[str]) -> None:
+    """Settle `keep_warm`, which keep-warm reads on a headless launch alone
+    (`catalog.keeps_warm`). A headless launch takes `on` or `off`, and holds `off` where
+    the row came from its shipped default. Any other launch of a harness cache times
+    takes only `on`: `off` set by the preset or a flag is refused (`BadValue`), and `off`
+    from `[defaults]` goes back to `on` with the `KEEP_WARM_DEFAULT_OFF` warning."""
+    name = catalog.KEEP_WARM
+    if harness not in catalog.CACHE_TIMED or name not in values:
+        return
+    if target == "headless":
+        if sources.get(name) in (SHIPPED, LEFT_OUT):
+            values[name] = "off"
+        return
+    if values.get(name) != "off":
+        return
+    if name in chosen:
+        raise BadValue(name, KEEP_WARM_OFF, KEEP_WARM_OFF_HINT)
+    values[name] = "on"
+    warnings.append(KEEP_WARM_DEFAULT_OFF)
 
 
 def _headless_rows(harness: str, target: str, identity: str | None, values: dict,
