@@ -80,6 +80,9 @@ INTERNAL_ENV = {
                            "slots' API in the slot target",
 }
 SETTINGS = "settings.toml"
+#: The launch defaults, `[defaults]` of the user's `presets.toml`, which `moxi config
+#: launcher` shows and sets as `defaults.<row>` through this hook.
+CONFIG_TABLES = {"defaults": "moxi_launcher.defaults:TABLE"}
 #: Asks the two startup-screen questions when slots is installed.
 SETUP = "moxi_launcher.startup:setup"
 SEGMENT = None
