@@ -14,7 +14,7 @@ from types import SimpleNamespace
 import pytest
 from moxi import modules, paths, proc
 
-from moxi_launcher import cachetimers, job, recycle, store
+from moxi_launcher import cachetimers, catalog, job, recycle, store
 
 SID = "5f6e7d8c-9b0a-4c1d-8e2f-3a4b5c6d7e8f"
 NEW = "0a1b2c3d-4e5f-4a6b-8c7d-9e0f1a2b3c4d"
@@ -134,6 +134,15 @@ class FakeCache:
     def read(self, harness, session_id, **options):
         self.reads.append((harness, session_id, options))
         return SimpleNamespace(kind=self.kind, age_s=self.age, ttl_s=3600)
+
+
+@pytest.fixture(autouse=True)
+def recyclable_here(monkeypatch):
+    """slots runs here and notes is not installed, so a slot launch in a folder has the
+    launcher's own handoff folder and can recycle itself."""
+    monkeypatch.setattr(catalog, "slots_here", lambda: True)
+    real = modules.available
+    monkeypatch.setattr(modules, "available", lambda name: name != "notes" and real(name))
 
 
 @pytest.fixture
@@ -632,8 +641,11 @@ def script(monkeypatch):
 
 
 def limit(conn, value):
+    """Set r1 to recycle at its limit: a relaunch launch told at its warn_at, any other at
+    its limit_at."""
+    mark = "warn_at" if value == "relaunch" else "limit_at"
     conn.execute("UPDATE launches SET values_json = ? WHERE request_id = 'r1'",
-                 (f'{{"recycle_at_limit": "{value}", "limit_at": "1x"}}',))
+                 (f'{{"recycle_at_limit": "{value}", "{mark}": "1x"}}',))
 
 
 def test_a_relaunch_crossing_tells_the_agent_and_records_that_it_was_told(conn):
@@ -668,6 +680,23 @@ def test_a_crossing_of_a_launch_off_unknown_or_claimed_elsewhere_is_none(conn):
     limit(conn, "relaunch")
     assert recycle.crossing_line(conn, crossing(session_id=NEW), pid=os.getpid()) is None
     assert recycle.crossing_line(conn, crossing(), pid=os.getppid()) is None
+
+
+@pytest.mark.parametrize("values", [
+    '{"recycle_at_limit": "relaunch"}',
+    '{"recycle_at_limit": "relaunch", "warn_at": "off"}',
+    '{"recycle_at_limit": "off", "warn_at": "1x", "sources": {"recycle_at_limit": "typed"}}'])
+def test_a_crossing_of_a_launch_that_cannot_recycle_itself_gets_no_line(conn, values):
+    # The handler tells exactly the launches whose self arm would be accepted.
+    conn.execute("UPDATE launches SET values_json = ? WHERE request_id = 'r1'", (values,))
+    assert recycle.crossing_line(conn, crossing(), pid=os.getpid()) is None
+    assert [e for e in store.events(conn, "r1") if e.kind == "recycle-told"] == []
+
+
+def test_a_relaunch_crossing_where_slots_do_not_run_gets_no_line(conn, monkeypatch):
+    monkeypatch.setattr(catalog, "slots_here", lambda: False)
+    limit(conn, "relaunch")
+    assert recycle.crossing_line(conn, crossing(), pid=os.getpid()) is None
 
 
 def test_an_older_scratch_row_set_to_relaunch_gets_no_line(conn, script):

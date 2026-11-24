@@ -698,17 +698,20 @@ def option_stamps(values: Mapping[str, object]) -> dict[str, str]:
     if values.get("recycle_on_expiry") in ("clear", "compact"):
         env[RECYCLE_ON_EXPIRY_ENV] = str(values["recycle_on_expiry"])
     at_limit = values.get("recycle_at_limit")
-    if at_limit == "compact" or (at_limit == "relaunch" and relaunch_holds(values)):
+    if at_limit == "compact" or relaunch_holds(values):
         _stamp(env, "usage", 1, "CROSSING_AT_ENV", limit_mark(values))
     return env
 
 
 def relaunch_holds(values: Mapping[str, object]) -> bool:
     """Whether a launch of `values` (its `harness`, `target`, `cwd` and the rest, as the
-    composer has them) can recycle itself, by `selfrecycle.missing`; a launch not yet
-    placed in a slot counts as in one when its target is a slot."""
+    composer has them) is set to `recycle_at_limit = relaunch` and can recycle itself, by
+    `selfrecycle.missing`; a launch not yet placed in a slot counts as in one when its
+    target is a slot."""
     from .. import selfrecycle
 
+    if values.get("recycle_at_limit") != "relaunch":
+        return False
     target = values.get("target")
     return selfrecycle.missing(
         harness=str(values.get("harness") or "claude"), target=str(target or ""),
@@ -940,8 +943,8 @@ __all__ = ["BASE_NAMES", "BASE_PREFIXES", "CODEX_KEEP", "COMMANDS", "CREDENTIAL"
            "Unreadable", "agent_role", "base_env", "check_sizes", "commands",
            "director_words", "encode",
            "env_class", "child_env", "first_turn", "headless_words", "identity_block",
-           "LIMIT_FALLBACK", "limit_mark", "locator", "no_credentials", "option_stamps", "relaunch_holds",
-           "prompt_path", "read_settings", "usage_default_mark",
+           "LIMIT_FALLBACK", "limit_mark", "locator", "no_credentials", "option_stamps",
+           "prompt_path", "read_settings", "relaunch_holds", "usage_default_mark",
            "replay_env", "scratch_dir", "scratch_name", "scratch_root",
            "scratch_root_problem", "scrub", "seat_text", "settings_file", "settings_path",
            "settings_value", "short_env",

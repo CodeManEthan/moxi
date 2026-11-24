@@ -38,7 +38,9 @@ def claude_values(**values):
 
 
 def codex_values(**values):
-    return {"harness": "codex", "cwd": "/work", **values}
+    # As the resolver gives a Codex launch: the shipped relaunch holds off, since nothing
+    # can relaunch a Codex session.
+    return {"harness": "codex", "cwd": "/work", "recycle_at_limit": "off", **values}
 
 
 # -- Claude ---------------------------------------------------------------------------------

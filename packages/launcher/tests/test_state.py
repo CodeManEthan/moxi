@@ -4,14 +4,15 @@ recycle and keep-warm parts show."""
 
 from __future__ import annotations
 
+import json
 import os
 from types import SimpleNamespace
 
 import pytest
 from moxi import exit as codes
-from moxi import proc
+from moxi import modules, proc
 
-from moxi_launcher import keepwarm, state, store, target
+from moxi_launcher import catalog, keepwarm, state, store, target
 
 SID = "5f6e7d8c-9b0a-4c1d-8e2f-3a4b5c6d7e8f"
 NEW = "0a1b2c3d-4e5f-4a6b-8c7d-9e0f1a2b3c4d"
@@ -249,6 +250,26 @@ def test_a_launch_that_recycles_off_shows_no_stamped_mark(conn):
     conn.execute("UPDATE launches SET values_json = ?, env_json = ? WHERE request_id = 'r1'",
                  ('{"recycle_at_limit": "off"}', '{"MOXI_USAGE_CROSSING_AT": "2x"}'))
     assert read(conn).recycle.limit_at is None
+
+
+@pytest.mark.parametrize("sources, shown", [
+    (None, "relaunch (default)"), ({"recycle_at_limit": "shipped"}, "relaunch (default)"),
+    ({"recycle_at_limit": "typed"}, "off"), ({"recycle_at_limit": "left-out"}, "off")])
+def test_a_launch_left_at_the_shipped_off_shows_it_relaunches_by_default(conn, monkeypatch,
+                                                                         sources, shown):
+    # Made before relaunch was the default, its off was never chosen: its agent may still
+    # recycle itself, and show says so. An off chosen or held by the launcher stays off.
+    monkeypatch.setattr(catalog, "slots_here", lambda: True)
+    real = modules.available
+    monkeypatch.setattr(modules, "available", lambda name: name != "notes" and real(name))
+    values = {"recycle_at_limit": "off", "warn_at": "2x"}
+    if sources is not None:
+        values["sources"] = sources
+    conn.execute("UPDATE launches SET values_json = ? WHERE request_id = 'r1'",
+                 (json.dumps(values),))
+    got = read(conn)
+    assert (got.recycle.at_limit, got.recycle.limit_at) == (shown, None)
+    assert f"at limit {shown}" in got.lines()[2]
 
 
 # -- the keep-warm part ------------------------------------------------------------------
