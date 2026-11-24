@@ -170,6 +170,14 @@ run = [{toml_string(tmp_path / 'missing')}]
     return exe
 
 
+#: Where a process's environment can't be read (Windows), `asking` is None, which
+#: `test_asking_is_none_where_an_env_cannot_be_read` covers on every system.
+READS_ENV = pytest.mark.skipif(not timer.env_checkable(),
+                               reason="Windows: a process's environment can't be read "
+                                      "there, so asking is None")
+
+
+@READS_ENV
 def test_asking_names_what_the_env_meets(subscribed):
     assert api.asking({"MOXI_LAUNCHER_REQUEST": "doctor"}) == ("plain", "stamped")
     assert api.asking({"MOXI_LAUNCHER_REQUEST": "doctor", "V": "on"}) == (
@@ -178,6 +186,7 @@ def test_asking_names_what_the_env_meets(subscribed):
     assert api.asking({}) == ("plain",)
 
 
+@READS_ENV
 def test_asking_reads_the_config_as_it_is_now(subscribed, own_roots):
     assert "stamped" in api.asking({"MOXI_LAUNCHER_REQUEST": "x"})
     write_cache_config(own_roots, "")
@@ -189,6 +198,7 @@ def test_asking_is_none_where_an_env_cannot_be_read(subscribed, monkeypatch):
     assert api.asking({"MOXI_LAUNCHER_REQUEST": "doctor"}) is None
 
 
+@READS_ENV
 def test_asking_starts_no_process_and_writes_no_file(subscribed, monkeypatch, tmp_path):
     def refuse(*a, **k):
         raise AssertionError("asking started a process")

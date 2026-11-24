@@ -275,15 +275,20 @@ class Proc:
 
 
 class Spawner:
+    """Stands in for `timer.spawn`; on Windows the timer also hands it the ask's output
+    file, kept in `outputs`."""
+
     def __init__(self):
         self.argvs: list[list[str]] = []
+        self.outputs: list[Path | None] = []
         self.procs: list[Proc] = []
         self.error: OSError | None = None
 
-    def __call__(self, argv):
+    def __call__(self, argv, output=None):
         if self.error:
             raise self.error
         self.argvs.append(argv)
+        self.outputs.append(output)
         proc = Proc(1000 + len(self.procs))
         self.procs.append(proc)
         return proc
