@@ -6,6 +6,7 @@ acts, crashes inside the step, hand edits, and a file tunnel can't write."""
 from __future__ import annotations
 
 import json
+import sys
 
 import pytest
 
@@ -332,6 +333,7 @@ def test_a_file_left_behind_by_an_earlier_record_reads_missing_with_no_overwrite
     assert_agree(setup)
 
 
+@pytest.mark.skipif(sys.platform == "win32", reason="Windows: no POSIX mode bits, so a mode changed by hand is not seen there")
 def test_a_file_tunnel_cant_write_rolls_the_remove_back_with_the_entry_kept(setup, yes):
     add("alpha/gateway", A, yes)
     add("alpha/connector", B, yes)

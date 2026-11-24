@@ -30,7 +30,7 @@ def test_the_daemon_switch_is_declared_as_the_core_checks_one():
 
 @pytest.mark.parametrize("text", [
     "", "[cloudflare]\ntunnel_id = '6ff42ae2-765d-4adf-8112-31c55c1551ef'\n",
-    "[cloudflare]\nmetrics_port = 1\ncredentials = '/home/me/a #b: c.json'\n",
+    "[cloudflare]\nmetrics_port = 1\ncredentials = '~/a #b: c.json'\n",
 ])
 def test_the_check_passes_what_tunnel_takes(text):
     settings.check(text)

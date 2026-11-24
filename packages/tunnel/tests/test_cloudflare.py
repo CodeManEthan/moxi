@@ -120,13 +120,15 @@ def test_the_credential_is_never_opened(tmp_path, monkeypatch, cf, units):
     assert str(cf) in json.loads(text.splitlines()[2].partition(": ")[2])
     assert cloudflare.setup_problems() == []
     assert opened == []
-    assert stat.S_IMODE(cf.stat().st_mode) == 0  # unreadable, and nothing needed to read it
+    if sys.platform != "win32":  # Windows keeps no POSIX mode bits
+        assert stat.S_IMODE(cf.stat().st_mode) == 0  # unreadable, and nothing needed to read it
 
 
 def test_the_file_is_written_0600_and_replaced_atomically(cf):
     path = cloudflare.config_path()
     cloudflare.write_file("one\n")
-    assert stat.S_IMODE(path.stat().st_mode) == 0o600
+    if sys.platform != "win32":  # Windows keeps no POSIX mode bits
+        assert stat.S_IMODE(path.stat().st_mode) == 0o600
     first = path.stat().st_ino
     cloudflare.write_file("two\n")
     assert path.read_text() == "two\n"
@@ -134,6 +136,7 @@ def test_the_file_is_written_0600_and_replaced_atomically(cf):
     assert sorted(os.listdir(path.parent)) == ["cloudflared.yml"]
 
 
+@pytest.mark.skipif(sys.platform == "win32", reason="Windows: no POSIX mode bits, so a mode changed by hand is not seen there")
 def test_a_file_whose_mode_changed_by_hand_is_not_written(cf):
     path = cloudflare.config_path()
     cloudflare.write_file("one\n")

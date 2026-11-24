@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import json
 import socket
+import sys
 from dataclasses import replace
 
 import pytest
@@ -35,6 +36,12 @@ PUBLIC = {"reach": "public", "port_setting": "other.port",
 """
 SOCK = "/run/user/1000/moxi/ui/gateway.sock"
 GW = "beta/gateway"
+
+
+#: tunnel forwards to a Unix-socket upstream only on Linux, macOS and BSD, and refuses one
+#: on Windows before anything else.
+UNIX_UPSTREAM = pytest.mark.skipif(sys.platform == "win32",
+                                   reason="Windows: tunnel takes no Unix-socket upstream there")
 
 
 class Crash(BaseException):
@@ -119,6 +126,7 @@ def test_not_ready_holds_a_repairs_reapply_and_applies_nothing(beta, tailscale, 
     assert len(tailscale.changes()) == 1
 
 
+@UNIX_UPSTREAM
 def test_a_unix_entry_is_applied_matched_checked_and_answers(beta, tailscale, yes,
                                                              tmp_path):
     got = acts.add(GW, ask=yes).address
@@ -140,6 +148,7 @@ def test_a_unix_entry_is_applied_matched_checked_and_answers(beta, tailscale, ye
         assert answers().state == "ok"
 
 
+@UNIX_UPSTREAM
 def test_a_changed_path_reads_moved_and_repair_follows_it_on_its_port(beta, tailscale,
                                                                       yes):
     acts.add(GW, ask=yes)
@@ -153,19 +162,22 @@ def test_a_changed_path_reads_moved_and_repair_follows_it_on_its_port(beta, tail
     assert states() == {GW: "ok"}
 
 
-@pytest.mark.parametrize("value", ["tcp://x", "unix:relative", "http://127.0.0.1:0"])
+@pytest.mark.parametrize("value", ["tcp://x", pytest.param("unix:relative", marks=UNIX_UPSTREAM),
+                                   "http://127.0.0.1:0"])
 def test_an_upstream_tunnel_cant_apply_is_refused(beta, tailscale, yes, value):
     beta(value)
     with pytest.raises(Refused, match="upstream gave"):
         acts.add(GW, ask=yes)
 
 
+@UNIX_UPSTREAM
 def test_funnel_refuses_a_socket(beta, tailscale, yes):
     with pytest.raises(Refused, match="Funnel"):
         acts.add("beta/public", ask=yes)
     assert tailscale.changes() == []
 
 
+@UNIX_UPSTREAM
 def test_every_cloudflare_rule_sends_its_hostname_as_the_host(beta, alpha, cf, units,
                                                               yes):
     acts.add(GW, provider_name="cloudflare", hostname="gw.example.com", ask=yes)
@@ -217,6 +229,7 @@ def test_retire_first_with_a_crash_in_a_switch(alpha, cf, units, tailscale, yes,
     assert tailscale.changes() == []
 
 
+@UNIX_UPSTREAM
 def test_a_replace_retires_the_foreign_origin_and_says_so(beta, tailscale, yes):
     tailscale.foreign(8470)
     got = acts.add(GW, port=8470, replace_=True, ask=yes).address
@@ -272,6 +285,7 @@ def test_the_list_survives_every_act_and_moves_no_token(alpha, tailscale, units,
     assert record.read().entries == {} and retired() == want
 
 
+@UNIX_UPSTREAM
 def test_fresh_placement_for_a_socket(beta, alpha, tailscale, yes, config_file):
     assert acts.add(GW, ask=yes).address.port == 8461
     acts.remove(GW, ask=yes)
@@ -289,6 +303,7 @@ def test_fresh_placement_for_a_socket(beta, alpha, tailscale, yes, config_file):
     assert str(8461) not in tailscale.serve["TCP"] and states()[GW] == "ok"
 
 
+@UNIX_UPSTREAM
 def test_a_retired_port_or_hostname_the_user_names_is_taken_with_a_line(beta, tailscale,
                                                                         cf, units, yes):
     beta("http://127.0.0.1:8461")
@@ -309,6 +324,7 @@ def test_a_retired_port_or_hostname_the_user_names_is_taken_with_a_line(beta, ta
     assert got.retired and warn.RETIRED_LINE in yes.asked[-1]
 
 
+@UNIX_UPSTREAM
 def test_the_declarations_copy_refills_a_purged_record(beta, tailscale, yes):
     beta(retired=[{"host": HOST, "port": 8461}])
     got = acts.add(GW, ask=yes).address

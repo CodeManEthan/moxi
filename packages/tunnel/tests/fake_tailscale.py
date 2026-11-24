@@ -26,6 +26,10 @@ SCRIPT = r'''
 import json, os, sys, time
 from pathlib import Path
 
+# What the fake prints ends lines in `\n` on every system, as tailscale's own output does.
+sys.stdout.reconfigure(newline="\n")
+sys.stderr.reconfigure(newline="\n")
+
 STATE = Path(__file__).with_name("tailscale-state.json")
 state = json.loads(STATE.read_text())
 args = sys.argv[1:]

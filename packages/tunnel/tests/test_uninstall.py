@@ -12,6 +12,7 @@ for the core's steps around them: its unit removal (the fake unit is taken away)
 from __future__ import annotations
 
 import json
+import sys
 import shutil
 import threading
 
@@ -422,6 +423,7 @@ def test_teardown_with_nothing_recorded_turns_a_switch_left_on_off(alpha, cf, un
     assert_cloudflare_gone(units)
 
 
+@pytest.mark.skipif(sys.platform == "win32", reason="Windows: no POSIX mode bits, so a mode changed by hand is not seen there")
 def test_another_modules_uninstall_keeps_its_cloudflare_entry_while_the_file_cant_be_written(
         three, tailscale, units, yes, capsys):
     acts.add("alpha/gateway", provider_name="cloudflare", hostname="g.example.com", ask=yes)
