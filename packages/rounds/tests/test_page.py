@@ -374,9 +374,9 @@ def _ruling_records(holder: str, *ids: str) -> list[dict]:
     return [sent["record"] for _status, sent in answers]
 
 
-def _fields(ruled, *, actor: str, shown: bool) -> dict:
+def _fields(ruled, *, by: str, shown: bool) -> dict:
     return {"id": ruled.id, "text": ruled.text, "record": ruled.event["record"],
-            "actor": actor, "at": ruled.event["at"], "shown": shown}
+            "actor": by, "at": ruled.event["at"], "shown": shown}
 
 
 def test_a_rulings_record_holds_the_newest_ruling_that_replaces_it_in_any_shown_state(kit):
@@ -389,7 +389,7 @@ def test_a_rulings_record_holds_the_newest_ruling_that_replaces_it_in_any_shown_
     second = ruling.rule(BUSY, text="Exports keep no header row.", supersedes="C1",
                          record="comms:7000001", by="builder-1")
     [record] = _ruling_records(BUSY, "C1")
-    assert record["replaced_by"] == _fields(second, actor="builder-1", shown=False)
+    assert record["replaced_by"] == _fields(second, by="builder-1", shown=False)
     # Read back elsewhere: the replacing ruling no longer waits to be shown, and the
     # record still finds it, shown.
     shown.mark(BUSY, second.id, by="lead", record="comms:7000002")
@@ -397,14 +397,14 @@ def test_a_rulings_record_holds_the_newest_ruling_that_replaces_it_in_any_shown_
     assert second.id not in [row["id"] for back in value["waiting"]["not_shown"]
                              for row in back["rows"] if row["holder"] == BUSY]
     [record] = _ruling_records(BUSY, "C1")
-    assert record["replaced_by"] == _fields(second, actor="builder-1", shown=True)
+    assert record["replaced_by"] == _fields(second, by="builder-1", shown=True)
     assert record["ruling"]["shown"] is False
     # A correction of a ruling replaced already replaces the one in its place, and the
     # first ruling's record follows to the newest.
     third = ruling.rule(BUSY, text="Exports keep a header row, named.", supersedes=second.id,
                         record="comms:7000003", by="atlas")
     first, middle, newest = _ruling_records(BUSY, "C1", second.id, third.id)
-    assert first["replaced_by"] == _fields(third, actor="atlas", shown=False)
+    assert first["replaced_by"] == _fields(third, by="atlas", shown=False)
     assert middle["replaced_by"] == first["replaced_by"]
     assert newest["replaced_by"] is None
 
@@ -421,7 +421,7 @@ def test_a_project_rulings_record_answers_from_the_projects_log(kit):
                          record="comms:7000004", by="builder-1")
     shown.mark("kestrel", second.id, by="lead", record="comms:7000005")
     [record] = _ruling_records("kestrel", first.id)
-    assert record["replaced_by"] == _fields(second, actor="builder-1", shown=True)
+    assert record["replaced_by"] == _fields(second, by="builder-1", shown=True)
 
 
 def test_a_ruling_no_log_holds_is_gone(kit):
