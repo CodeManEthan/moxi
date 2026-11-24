@@ -19,6 +19,11 @@ from playwright.sync_api import expect
 
 import fixture_kit
 
+#: The bound on a test that drives a page in this process, kept by a thread that ends the
+#: test's process past it. A test whose browser work runs in an inner pytest run is
+#: bounded by that run's own timeout instead, which kills the inner run and fails the test.
+IN_PAGE = pytest.mark.timeout(120, method="thread")
+
 
 def test_loading_the_plugin_imports_no_moxi_ui_submodule_and_no_playwright(tmp_path):
     (tmp_path / "test_plain.py").write_text(textwrap.dedent("""
@@ -179,6 +184,7 @@ def test_a_left_out_module_is_not_in_the_snapshot(ui_shells, fixture_site):
 
 
 @pytest.mark.browser
+@IN_PAGE
 def test_the_fixture_components_keep_the_contract_and_fit_a_phone(ui_page, ui_component_check,
                                                                  ui_width_check):
     block = ui_component_check(ui_page, "fixture", "block")
@@ -216,6 +222,7 @@ def _settings_backdrop(page):
 
 
 @pytest.mark.browser
+@IN_PAGE
 def test_the_contract_check_counts_against_a_component_only_the_push_topics_it_adds(
         ui_page, ui_component_check):
     # The push channel is one stream for the page, reopened with every topic the page
@@ -247,6 +254,7 @@ def test_the_contract_check_counts_against_a_component_only_the_push_topics_it_a
 
 
 @pytest.mark.browser
+@IN_PAGE
 def test_the_contract_check_says_when_it_could_not_read_the_held_topics(
         ui_page, ui_component_check, monkeypatch):
     # Without a page's recent requests (Playwright before 1.56), a topic the page held
@@ -264,6 +272,7 @@ def test_the_contract_check_says_when_it_could_not_read_the_held_topics(
 
 
 @pytest.mark.browser
+@IN_PAGE
 def test_the_width_check_names_what_reaches_past_the_edge(ui_page, ui_width_check):
     ui_page.evaluate("""() => {
       const wide = document.createElement("div");
@@ -342,6 +351,7 @@ NOT_HELD = {
 
 
 @pytest.mark.browser
+@IN_PAGE
 @pytest.mark.parametrize("case", list(HELD))
 def test_the_width_check_passes_what_a_scroll_container_inside_the_edge_holds(
         ui_page, ui_width_check, case):
@@ -354,6 +364,7 @@ def test_the_width_check_passes_what_a_scroll_container_inside_the_edge_holds(
 
 
 @pytest.mark.browser
+@IN_PAGE
 @pytest.mark.parametrize("case", list(NOT_HELD))
 def test_the_width_check_names_what_no_scroll_container_inside_the_edge_holds(
         ui_page, ui_width_check, case):
@@ -364,6 +375,7 @@ def test_the_width_check_names_what_no_scroll_container_inside_the_edge_holds(
 
 
 @pytest.mark.browser
+@IN_PAGE
 def test_each_context_is_fresh_from_one_stored_sign_in_and_a_refused_one_signs_in_again(
         ui_shells, fixture_site, ui_contexts):
     shell = ui_shells(site=[fixture_site])
