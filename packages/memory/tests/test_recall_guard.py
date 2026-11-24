@@ -316,6 +316,43 @@ def test_a_slot_forks_calls_are_judged_against_the_record_its_stamp_names():
         recall_guard.TIME_UP)
 
 
+def codex_call(recall_id, tool_name, tool_input):
+    """A Codex slot fork's call as turns' Codex host builds it from Codex's `PreToolUse`
+    hook input: the fields `codex_hooks.hook_fields` forwards, the tool's canonical name
+    as Codex's hook carries it (its shell is `Bash`, the command text under `command`;
+    `apply_patch` the patch under the same key)."""
+    from moxi_turns import codex_hooks
+
+    frame = codex_hooks.hook_fields(
+        {"session_id": "t-fork", "turn_id": "turn-1", "cwd": "/w",
+         "transcript_path": "/r.jsonl", "tool_name": tool_name, "tool_use_id": "exec-1",
+         "tool_input": tool_input, "model": "m", "permission_mode": "default",
+         "hook_event_name": "PreToolUse"}, event="PreToolUse")
+    return ToolCall(harness="codex", session_id="0190b000-0000-7000-8000-0000000000f0",
+                    agent_id=frame.get("agent_id"), tool=frame["tool_name"],
+                    input=dict(frame.get("tool_input") or {}),
+                    env={recall_start.SUBCONSCIOUS_FORK_ENV: recall_id})
+
+
+def test_a_codex_slot_forks_calls_are_judged_by_the_same_rule_as_turns_delivers_them():
+    record = a_fork(route="slot", fork="0190b000-0000-7000-8000-0000000000f0")
+    rid = record["recall"]
+    judge = recall_guard.judge_slot_call
+    assert judge(codex_call(rid, "Bash", {"command": "grep -n lock notes.md"})) is None
+    assert records.read(SESSION, rid)["tools"] == 1
+    refused = [("Bash", {"command": "rm notes.md"}),
+               ("Bash", {"command": "grep lock notes.md > out"}),
+               ("Bash", {"command": ["grep", "lock", "notes.md"]}),
+               ("apply_patch", {"command": "*** Begin Patch\n*** Delete File: a\n"
+                                           "*** End Patch"}),
+               ("spawn_agent", {"message": "dig"}),
+               ("write_stdin", {"session_id": 1, "chars": "q"}),
+               ("mcp__comms__send", {"to": "x", "text": "y"})]
+    for tool, given in refused:
+        assert judge(codex_call(rid, tool, given)) == Deny(recall_guard.READ_ONLY), tool
+    assert records.read(SESSION, rid)["tools"] == 1
+
+
 def test_a_slot_fork_whose_record_is_gone_is_refused_every_call():
     assert recall_guard.judge_slot_call(slot_call("Read", "r-none", file_path="/x")) == \
         Deny(recall_guard.TIME_UP)
