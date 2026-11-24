@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import json
 import shutil
+import sys
 import tempfile
 import time
 from pathlib import Path
@@ -21,6 +22,9 @@ from moxi_turns.codex import CodexHarness
 from moxi_turns.endpoint import Endpoint
 from moxi_turns.listeners import Listener, Registry
 from test_codex_host import FakeAppServer, FakeClient
+
+pytestmark = pytest.mark.skipif(sys.platform == "win32",
+                                reason="Windows: Python has no AF_UNIX there, and the Codex host's sockets are Unix sockets")
 
 
 def _registry():

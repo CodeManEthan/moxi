@@ -24,6 +24,9 @@ from moxi_turns.results import Ended, Lost, Refused, Started, StopFacts
 from conftest import bare, end_endpoint
 from fake_codex import LIMITS
 
+pytestmark = pytest.mark.skipif(sys.platform == "win32",
+                                reason="Windows: Python has no AF_UNIX there, and the Codex host's sockets are Unix sockets")
+
 
 class FakeAppServer:
     def __init__(self, socket_path, **kwargs):

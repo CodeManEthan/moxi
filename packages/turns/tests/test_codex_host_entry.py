@@ -283,6 +283,7 @@ def _checked_host(turns_env, report, *, ran=(), **kwargs):
 OFF = {"type": "workspaceWrite", "networkAccess": False, "writableRoots": []}
 
 
+@pytest.mark.skipif(sys.platform == "win32", reason="Windows: Python has no AF_UNIX there, and the Codex host's sockets are Unix sockets")
 def test_a_resume_whose_answer_reports_other_settings_fails_its_load(turns_env):
     options = _options(turns_env)              # asks for the network on
     endpoint, harness, made = _checked_host(turns_env, OFF, options=options,
@@ -298,6 +299,7 @@ def test_a_resume_whose_answer_reports_other_settings_fails_its_load(turns_env):
         endpoint.stop("the test ended")
 
 
+@pytest.mark.skipif(sys.platform == "win32", reason="Windows: Python has no AF_UNIX there, and the Codex host's sockets are Unix sockets")
 def test_a_new_threads_other_settings_are_logged_and_the_load_stands(turns_env, caplog):
     options = _options(turns_env)
     with caplog.at_level(logging.WARNING, logger="moxi.turns.codex"):
@@ -311,6 +313,7 @@ def test_a_new_threads_other_settings_are_logged_and_the_load_stands(turns_env, 
         endpoint.stop("the test ended")
 
 
+@pytest.mark.skipif(sys.platform == "win32", reason="Windows: Python has no AF_UNIX there, and the Codex host's sockets are Unix sockets")
 def test_a_resume_that_matches_loads_the_named_thread(turns_env):
     options = _options(turns_env)
     report = {"type": "workspaceWrite", "networkAccess": True, "writableRoots": []}
@@ -324,6 +327,7 @@ def test_a_resume_that_matches_loads_the_named_thread(turns_env):
         endpoint.stop("the test ended")
 
 
+@pytest.mark.skipif(sys.platform == "win32", reason="Windows: Python has no AF_UNIX there, and the Codex host's sockets are Unix sockets")
 def test_a_given_verify_replaces_the_default_check(turns_env):
     seen = []
 

@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import json
 import os
+import sys
 import threading
 import time
 from dataclasses import replace
@@ -606,6 +607,7 @@ def leg_rig(turns_env, rig):
         w.close()
 
 
+@pytest.mark.skipif(sys.platform == "win32", reason="Windows: the Claude leg's mod.sock is a Unix socket, which Python can't serve there")
 def test_the_hello_carries_claudes_table_and_the_leg_is_5(leg_rig):
     ep, runner, r = leg_rig(judged("a", lambda c: None, match={"command": "rm"}),
                             data_only("b", "no", calls=("Agent",)))
@@ -620,6 +622,7 @@ def test_the_hello_carries_claudes_table_and_the_leg_is_5(leg_rig):
          "step": "call"}]
 
 
+@pytest.mark.skipif(sys.platform == "win32", reason="Windows: the Claude leg's mod.sock is a Unix socket, which Python can't serve there")
 def test_each_ready_sends_the_table_again_and_names_a_load_failure_once(leg_rig):
     problem = Problem("t.bad", "load", "the file does not load: OSError: gone", on=True)
     ep, runner, r = leg_rig(judged("a", lambda c: None), problems=(problem,))
@@ -635,6 +638,7 @@ def test_each_ready_sends_the_table_again_and_names_a_load_failure_once(leg_rig)
     assert answer["context"] is None
 
 
+@pytest.mark.skipif(sys.platform == "win32", reason="Windows: the Claude leg's mod.sock is a Unix socket, which Python can't serve there")
 def test_ask_guard_builds_the_call_from_the_leg_and_the_endpoint(leg_rig):
     seen = {}
 
@@ -671,6 +675,7 @@ def test_ask_guard_builds_the_call_from_the_leg_and_the_endpoint(leg_rig):
     (7, "/work"),
     (["/x"], "/work"),
 ], ids=["absolute", "root", "none", "empty", "relative", "dot-relative", "number", "list"])
+@pytest.mark.skipif(sys.platform == "win32", reason="Windows: the Claude leg's mod.sock is a Unix socket, which Python can't serve there")
 def test_ask_guard_takes_an_absolute_cwd_from_the_ask_else_the_launch_dir(
         leg_rig, given, want):
     seen = {}
@@ -694,12 +699,14 @@ def test_ask_guard_takes_an_absolute_cwd_from_the_ask_else_the_launch_dir(
     {"call": {"tool": "Bash"}},
     {"call": {"tool": "Bash"}, "guards": ["t.a", 3]},
 ], ids=["no-call", "no-tool", "input-not-object", "no-guards", "bad-id"])
+@pytest.mark.skipif(sys.platform == "win32", reason="Windows: the Claude leg's mod.sock is a Unix socket, which Python can't serve there")
 def test_a_malformed_ask_is_400(leg_rig, body):
     ep, runner, r = leg_rig(judged("a", lambda c: None))
     status, answer = post(runner.mod_sock, leg.PATH_GUARD, body)
     assert status == 400 and answer["ok"] is False
 
 
+@pytest.mark.skipif(sys.platform == "win32", reason="Windows: the Claude leg's mod.sock is a Unix socket, which Python can't serve there")
 def test_an_ask_holds_its_request_thread_no_longer_than_its_deadline(leg_rig, rig):
     gate = rig.gate()
     ep, runner, r = leg_rig(judged("h", lambda c: gate.wait(10), deadline_ms=300))
@@ -787,6 +794,7 @@ def test_decide_matches_by_step():
     assert entries[1].to_leg()["step"] == "ask"
 
 
+@pytest.mark.skipif(sys.platform == "win32", reason="Windows: the Claude leg's mod.sock is a Unix socket, which Python can't serve there")
 def test_ask_guard_at_the_ask_step_carries_the_mode_and_the_record_path(leg_rig):
     seen = {}
 

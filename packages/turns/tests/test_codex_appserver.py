@@ -7,6 +7,9 @@ import pytest
 
 from moxi_turns.codex_appserver import AppServer, AppServerBusy, socket_answers
 
+pytestmark = pytest.mark.skipif(sys.platform == "win32",
+                                reason="Windows: Python has no AF_UNIX there, and the Codex host's sockets are Unix sockets")
+
 
 def test_a_socket_file_is_not_liveness(tmp_path):
     path = tmp_path / "app.sock"

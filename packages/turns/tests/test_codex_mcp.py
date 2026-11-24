@@ -4,6 +4,7 @@ one deadline, joining and queueing, and the doctor records."""
 
 from __future__ import annotations
 
+import sys
 import threading
 import time
 
@@ -369,6 +370,7 @@ def _host(turns_env, app):
     return endpoint, harness, records, thread_ids
 
 
+@pytest.mark.skipif(sys.platform == "win32", reason="Windows: Python has no AF_UNIX there, and the Codex host's sockets are Unix sockets")
 def test_the_host_settles_at_its_load_and_offers_mcp_reload(turns_env):
     app = App(comms="connected")
     endpoint, harness, records, thread_ids = _host(turns_env, app)
@@ -409,6 +411,7 @@ class _Conn:
         self.sent.append(frame)
 
 
+@pytest.mark.skipif(sys.platform == "win32", reason="Windows: Python has no AF_UNIX there, and the Codex host's sockets are Unix sockets")
 def test_a_hook_ready_settles_and_a_loads_session_start_does_not(turns_env):
     app = App(comms="connected")
     endpoint, harness, records, thread_ids = _host(turns_env, app)

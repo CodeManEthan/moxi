@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import sys
 import threading
 
 import pytest
@@ -10,6 +11,9 @@ from websockets.sync.server import unix_serve
 
 from moxi_turns import codex_protocol as proto
 from moxi_turns.codex_ws import AppServerClient
+
+pytestmark = pytest.mark.skipif(sys.platform == "win32",
+                                reason="Windows: Python has no AF_UNIX there, and the Codex host's sockets are Unix sockets")
 
 
 def test_initialize_requests_and_notifications_share_one_connection(tmp_path):

@@ -13,6 +13,7 @@ import io
 import json
 import pathlib
 import signal
+import sys
 import time
 import tomllib
 
@@ -281,6 +282,7 @@ def test_l5_a_body_past_the_bound_returns_default_emits_nothing_and_reports_once
     assert seen.wheres == ["deadline"]
 
 
+@pytest.mark.skipif(sys.platform == "win32", reason="Windows: no SIGALRM, so the hook kit arms no wall there")
 def test_l5_guard_returns_the_default_when_the_wall_fires():
     seen = Collector()
     sentinel = object()
@@ -298,6 +300,7 @@ def test_l5_the_bound_is_off_unless_seconds_is_passed():
     assert inside == [None]
 
 
+@pytest.mark.skipif(sys.platform == "win32", reason="Windows: no SIGALRM, so the hook kit arms no wall there")
 def test_l5_off_the_main_thread_it_installs_nothing_and_says_so():
     """The stated limitation, gauged rather than trusted: `signal.setitimer` binds the
     main thread on POSIX only, so off it the kit installs no deadline and reports that
@@ -318,6 +321,7 @@ def test_l5_off_the_main_thread_it_installs_nothing_and_says_so():
     assert isinstance(seen.calls[0][0], ValueError)
 
 
+@pytest.mark.skipif(sys.platform == "win32", reason="Windows: no SIGALRM, so the hook kit arms no wall there")
 def test_l5_remaining_is_a_share_of_the_hooks_own_wall():
     """The reason the bound is worth owning: a caller derives its per-operation timeout
     from what is left rather than copying the same number into each call site."""
@@ -328,6 +332,7 @@ def test_l5_remaining_is_a_share_of_the_hooks_own_wall():
     assert hooks.run.remaining() is None
 
 
+@pytest.mark.skipif(sys.platform == "win32", reason="Windows: no SIGALRM, so the hook kit arms no wall there")
 def test_l5_a_nested_guard_does_not_cancel_the_outer_wall():
     """The wall is the HOOK's, so an inner bound must hand it back. Without this, a
     caller that guards one subprocess inside the hook silently un-bounds the rest."""
@@ -350,6 +355,7 @@ def test_l5_a_nested_guard_does_not_cancel_the_outer_wall():
 # body, the one step of six where absorbing the wall happens to coincide with law 5's
 # required outcome.
 
+@pytest.mark.skipif(sys.platform == "win32", reason="Windows: no SIGALRM, so the hook kit arms no wall there")
 def test_l5_a_wall_in_the_read_abandons_the_hook_with_nothing_on_stdout():
     """The wall fires while `read_event` is blocked on a slow stream. A read guard that
     ate it would return `{}`, and the hook would walk on and PRINT the payload, with the
@@ -369,6 +375,7 @@ def test_l5_a_wall_in_the_read_abandons_the_hook_with_nothing_on_stdout():
     assert seen.wheres == ["deadline"]
 
 
+@pytest.mark.skipif(sys.platform == "win32", reason="Windows: no SIGALRM, so the hook kit arms no wall there")
 def test_l5_an_inner_guard_never_absorbs_a_wall_it_did_not_arm():
     """A caller's body that wraps a blocking call in `guard`, which is exactly what
     "derive your per-operation timeout from `remaining()`" invites. An inner guard that
@@ -406,6 +413,7 @@ class _SlowStream:
 
 
 @pytest.mark.parametrize("step", ["read", "body", "cap", "render", "emitted"])
+@pytest.mark.skipif(sys.platform == "win32", reason="Windows: no SIGALRM, so the hook kit arms no wall there")
 def test_l5_a_wall_in_any_step_is_reported_once_by_the_guard_that_armed_it(
         step, monkeypatch):
     """Every step of `_once` is its own guard and not one of them arms anything, so
@@ -439,6 +447,7 @@ def test_l5_a_wall_in_any_step_is_reported_once_by_the_guard_that_armed_it(
         assert out.writes == [], f"{step} wrote a payload the wall had killed"
 
 
+@pytest.mark.skipif(sys.platform == "win32", reason="Windows: no SIGALRM, so the hook kit arms no wall there")
 def test_l5_a_failed_arming_leaves_the_process_handler_as_it_found_it():
     """The handler must go in before the timer, there being no other order, so a
     `setitimer` that refuses has to take it straight back out. Left behind, `_fire`
@@ -455,6 +464,7 @@ def test_l5_a_failed_arming_leaves_the_process_handler_as_it_found_it():
 
 
 @pytest.mark.parametrize("seconds", [0, 0.0, -1, -0.5])
+@pytest.mark.skipif(sys.platform == "win32", reason="Windows: no SIGALRM, so the hook kit arms no wall there")
 def test_l5_a_non_positive_bound_is_a_caller_error_and_arms_nothing(seconds):
     """`setitimer(…, 0)` DISARMS, so a bound of zero is a wall that silently is not one.
     Law 5 says the bound is off when `seconds` is NOT passed; passing it and getting
@@ -487,6 +497,7 @@ def test_l5_a_non_positive_bound_through_run_still_returns_zero():
     assert out.text.endswith("\n")
 
 
+@pytest.mark.skipif(sys.platform == "win32", reason="Windows: no SIGALRM, so the hook kit arms no wall there")
 def test_l5_an_inner_wall_hands_the_outer_one_back_intact():
     """The gauge is the law rather than a window a wrong answer also fits.
 
@@ -703,6 +714,7 @@ def test_l7_a_broken_on_error_cannot_break_a_bare_guard_either(fail):
     assert seen.wheres == ["body"]
 
 
+@pytest.mark.skipif(sys.platform == "win32", reason="Windows: no SIGALRM, so the hook kit arms no wall there")
 def test_l7_a_wall_inside_a_broken_logger_still_reaches_the_guard_that_armed_it():
     """`_report` absorbs every `BaseException` EXCEPT the wall, because a wall firing
     inside a logger is not the logger's failure and its owner is still owed it."""
@@ -744,6 +756,7 @@ def test_l8_stdout_sees_exactly_one_write_per_run_or_none():
     assert silent.writes == []
 
 
+@pytest.mark.skipif(sys.platform == "win32", reason="Windows: no SIGALRM, so the hook kit arms no wall there")
 def test_l8_the_wall_is_lifted_across_the_one_write_and_put_back():
     """A wall delivered between `emit`'s write and its flush leaves the line in the
     buffer, and the interpreter flushes it at exit: the hook reports a deadline AND the
@@ -771,6 +784,7 @@ def test_l8_the_wall_is_lifted_across_the_one_write_and_put_back():
     assert after and 4.0 < after[0] <= 5.0, f"the wall was not put back: {after}"
 
 
+@pytest.mark.skipif(sys.platform == "win32", reason="Windows: no SIGALRM, so the hook kit arms no wall there")
 def test_l8_a_callers_own_timer_is_not_touched_by_the_write():
     """The shield lifts the KIT's wall and nothing else: with no kit wall standing, a
     timer the caller installed for its own reasons must survive the emit untouched."""

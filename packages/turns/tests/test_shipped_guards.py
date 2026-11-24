@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import os
 import random
+import sys
 from types import SimpleNamespace
 
 import pytest
@@ -490,6 +491,7 @@ def endpoint(turns_env):
         w.close()
 
 
+@pytest.mark.skipif(sys.platform == "win32", reason="Windows: the Claude leg's mod.sock is a Unix socket, which Python can't serve there")
 def test_end_to_end_the_switched_on_guards_reach_the_table_and_judge(endpoint, argv):
     fake = endpoint("[guards]\nremoval = true\nquestion_mode = true\n")
     table = {e["id"]: e for e in fake.first["guards"]}
@@ -523,6 +525,7 @@ def test_end_to_end_the_switched_on_guards_reach_the_table_and_judge(endpoint, a
     assert reminded["context"] == qm.REMINDER
 
 
+@pytest.mark.skipif(sys.platform == "win32", reason="Windows: the Claude leg's mod.sock is a Unix socket, which Python can't serve there")
 def test_end_to_end_a_subagents_agent_call_is_refused_without_a_trip(endpoint):
     fake = endpoint('[guards]\nrun = ["turns.no-nested-agents"]\n')
     (entry,) = fake.first["guards"]

@@ -17,6 +17,9 @@ from moxi_turns.endpoint import Endpoint
 from moxi_turns.results import StopFacts
 from conftest import end_endpoint, write_config
 
+pytestmark = pytest.mark.skipif(sys.platform == "win32",
+                                reason="Windows: Python has no AF_UNIX there, and the Codex host's sockets are Unix sockets")
+
 
 class HookHarness(FakeHarness):
     name = "codex"

@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import io
 import json
+import sys
 
 import pytest
 
@@ -309,6 +310,7 @@ def test_the_body_is_handed_an_empty_dict_when_the_stream_is_garbage():
     assert errors.wheres == ["read"]
 
 
+@pytest.mark.skipif(sys.platform == "win32", reason="Windows: no SIGALRM, so the hook kit arms no wall there")
 def test_the_body_can_derive_its_own_timeouts_from_what_is_left():
     """In the shape a caller uses it: inside `run`'s deadline, `remaining()` is a
     share of the hook's own wall, so a blocking call on the boot path stops needing its

@@ -23,6 +23,9 @@ from moxi_turns.claude_endpoint import ClaudeHarness
 from moxi_turns.endpoint import Endpoint
 from moxi_turns.listeners import Listener, Registry
 
+pytestmark = pytest.mark.skipif(sys.platform == "win32",
+                                reason="Windows: the Claude leg's mod.sock is a Unix socket, which Python can't serve there")
+
 
 @pytest.fixture
 def claude(turns_env):

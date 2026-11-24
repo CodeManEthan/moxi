@@ -22,6 +22,9 @@ from claude_runner import post
 from conftest import write_config
 from moxi_turns import claude_leg as leg
 
+pytestmark = pytest.mark.skipif(sys.platform == "win32",
+                                reason="Windows: the Claude leg's mod.sock is a Unix socket, which Python can't serve there")
+
 ENDPOINT = [sys.executable, "-m", "moxi_turns.claude_endpoint"]
 
 

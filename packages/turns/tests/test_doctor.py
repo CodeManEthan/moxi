@@ -206,6 +206,7 @@ def test_the_store_lives_in_turns_state(state_home):
     assert path.name == hooktimes.FILE and path.is_relative_to(state_home)
 
 
+@pytest.mark.skipif(sys.platform == "win32", reason="Windows: Python has no AF_UNIX there, and the Codex host's sockets are Unix sockets")
 def test_the_codex_host_times_a_ping_from_its_stamp(monkeypatch, tmp_path):
     from moxi_turns.results import StopFacts
 
@@ -242,6 +243,7 @@ def test_the_codex_host_times_a_ping_from_its_stamp(monkeypatch, tmp_path):
     assert 250 <= got[0].ms < 5000
 
 
+@pytest.mark.skipif(sys.platform == "win32", reason="Windows: the Claude leg's mod.sock is a Unix socket, which Python can't serve there")
 def test_the_claude_leg_takes_hook_times_beside_its_handler(tmp_path):
     from claude_runner import post
 

@@ -133,6 +133,7 @@ def test_the_deadline_bounds_the_whole_process():
     assert err == "(0, ['deadline'])"
 
 
+@pytest.mark.skipif(sys.platform == "win32", reason="Windows: no SIGALRM, so the hook kit arms no wall there")
 def test_a_wall_during_the_read_leaves_the_pipe_empty():
     """As a process: the harness is slow to hand over its JSON, the wall fires inside
     the read, and the payload the body would have produced must never reach the pipe.
@@ -159,6 +160,7 @@ def test_a_wall_during_the_read_leaves_the_pipe_empty():
     assert err == "(0, ['deadline'])"
 
 
+@pytest.mark.skipif(sys.platform == "win32", reason="Windows: no SIGALRM, so the hook kit arms no wall there")
 def test_a_wall_inside_a_nested_guard_still_ends_the_hook():
     """As a process, in the shape a caller writes when it bounds one blocking call
     inside its hook. An inner guard that ate the wall would let the process run to

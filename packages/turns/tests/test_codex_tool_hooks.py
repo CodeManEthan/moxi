@@ -26,6 +26,9 @@ from moxi_turns.guards import Allow, Deny, Found, Guard, Loaded, On, Prompt
 from moxi_turns.guards.run import GuardRunner, break_deny, break_line, glob_regex
 from test_codex_host import FakeAppServer, FakeClient
 
+pytestmark = pytest.mark.skipif(sys.platform == "win32",
+                                reason="Windows: Python has no AF_UNIX there, and the Codex host's sockets are Unix sockets")
+
 CASES = json.loads((Path(moxi_turns.__file__).parent / "claude" / "moxi-turns" / "tests"
                     / "guard-cases.json").read_text())
 ME = __name__
