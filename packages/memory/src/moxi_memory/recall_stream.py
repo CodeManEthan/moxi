@@ -30,7 +30,10 @@ lock before each round is asked); or at an ack turns did not take. Then the reco
 past its limit. A line a person discarded (`moxi_memory.recall_discard`) ends the stream as
 it is: the child asks no further round and leaves the line's state and the record as
 the discard set them. A recall hurried before its first round was asked never starts its
-fork: record and line end `lost`, reason `hurried`.
+fork: record and line end `lost`, reason `hurried`. One hurried after its round's ref
+was written still asks that round, since the lock is not held over turns' call; its
+fork's calls before the fork's id is written are judged by its own record
+(`moxi_memory.recall_guard`, "Knowing its fork").
 
 A route (`Route`) asks turns for the rounds; `moxi_memory.recall_route` holds the
 subagent route's.

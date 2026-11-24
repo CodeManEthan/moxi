@@ -148,9 +148,9 @@ def test_the_budget_fits_inside_the_guards_deadline():
     assert recall_guard.STARTING_WAIT_S < recall_guard.BUDGET_S
 
 
-def a_starting_record(child):
+def a_starting_record(child, **fields):
     """A `starting` record of no fork yet, with no line (`child` None) or a line naming
-    a child that has ended (`dead`) or this process (`live`)."""
+    a child that has ended (`dead`) or this process (`live`), and `fields` set on it."""
     import os
 
     from moxi_memory import recall_take, recalls
@@ -165,6 +165,9 @@ def a_starting_record(child):
         with recalls.session_lock(SESSION):
             recalls.put_line(SESSION, {"recall": record["recall"], "harness": "claude",
                                        "state": "open", "child": identity})
+    if fields:
+        with recalls.session_lock(SESSION):
+            record = records.update(SESSION, record["recall"], **fields)
     return record
 
 
@@ -180,6 +183,31 @@ def test_a_starting_record_whose_child_lives_or_is_not_yet_named_still_counts(ch
     record = a_starting_record(child)
     found = recall_guard.fork_record(SESSION, "agent-9", wait_s=0.1)
     assert found is not None and found["recall"] == record["recall"]
+
+
+@pytest.mark.parametrize("child", ["live", None])
+def test_a_hurried_record_awaiting_its_fork_still_judges_its_calls(child):
+    record = a_starting_record(child, state="hurried", rounds=1)
+    found = recall_guard.fork_record(SESSION, "agent-9", wait_s=0.1)
+    assert found is not None and found["recall"] == record["recall"]
+    assert recall_guard.judge_call(call("Read", agent="agent-9")) == Deny(
+        recall_guard.TIME_UP)
+    assert recall_guard.judge_ask(call("Write", agent="agent-9")) == Deny(
+        recall_guard.ASK_REFUSED)
+
+
+def test_a_hurried_record_whose_child_is_gone_is_no_fork():
+    a_starting_record("dead", state="hurried", rounds=1)
+    assert recall_guard.fork_record(SESSION, "agent-9", wait_s=0.1) is None
+    assert recall_guard.judge_call(call("Write", agent="agent-9")) is None
+
+
+def test_an_unnamed_call_is_judged_as_the_fork_of_the_record_whose_round_was_asked():
+    asked = a_starting_record("live", state="hurried", rounds=1)
+    newer = a_starting_record(None)
+    assert newer["at"] >= asked["at"]
+    found = recall_guard.fork_record(SESSION, "agent-9", wait_s=0.1)
+    assert found["recall"] == asked["recall"]
 
 
 def test_every_ask_of_a_fork_is_refused():

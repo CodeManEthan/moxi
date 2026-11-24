@@ -271,6 +271,44 @@ def test_a_recall_hurried_while_starting_never_starts_its_fork():
     assert record["state"] == "lost" and record["reason"] == "hurried"
 
 
+def test_a_recall_hurried_after_its_round_was_opened_has_its_forks_calls_judged(
+        monkeypatch):
+    from moxi_turns import Deny, ToolCall
+
+    from moxi_memory import recall_guard
+
+    recall = a_recall()
+    seen = {}
+
+    class HurriedInTheCall(FakeRoute):
+        def first(self, text, *, ref, round_timeout_s):
+            # a newer recall begins after open_round let go of the lock, while turns is
+            # still starting the fork; the fork calls before its id is written
+            newer = recall_start.begin(
+                SESSION, "claude", start="prompt", text="x", senders=(),
+                settings=recall_start.default_settings(), cwd=None, notes_dir=None,
+                route_name="subagent", spawn=lambda s, r: None)
+            seen["newer"] = newer["recall"]
+            seen["state"] = records.read(SESSION, recall.recall_id)["state"]
+            fork_call = ToolCall(harness="claude", session_id=SESSION, agent_id="agent-1",
+                                 tool="Read", input={"file_path": "/x"})
+            seen["judged"] = recall_guard.fork_record(SESSION, "agent-1", wait_s=0.1)
+            seen["decision"] = recall_guard.judge_call(fork_call)
+            return super().first(text, ref=ref, round_timeout_s=round_timeout_s)
+
+    monkeypatch.setattr(recall_guard, "STARTING_WAIT_S", 0.1)
+    route = HurriedInTheCall([ended("- a"), ended("- b")])
+    assert run(recall, route) == "ended"
+    assert seen["state"] == "hurried"
+    assert seen["judged"]["recall"] == recall.recall_id != seen["newer"]
+    assert seen["decision"] == Deny(recall_guard.TIME_UP)
+    # the round asked before the hurry still runs; no later round is asked
+    assert len(route.asked) == 1
+    record = records.read(SESSION, recall.recall_id)
+    assert record["fork"] == "agent-1" and record["state"] == "ended"
+    assert records.read(SESSION, seen["newer"])["tools"] == 0
+
+
 def test_a_start_not_read_in_its_wait_is_read_again_once_the_round_ended():
     recall = a_recall()
 

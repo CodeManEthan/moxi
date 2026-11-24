@@ -2,14 +2,19 @@
 read and answer, and nothing else, and asks no one.
 
 **Knowing its fork.** A subagent's call is a recall fork's when its agent id is the
-`fork` of a recall record of the session, in any state (`fork_record`). While the
-session has a `starting` record (its child has not yet written the fork's id), a call
-from an agent id no record names waits up to `STARTING_WAIT_S` for the id, and is judged
-as that recall's fork when it is still unwritten. A `starting` record whose child is
-gone (`moxi.proc.alive` is false for the child its log line names) will never start a
-fork, so it counts as no fork. A `starting` record with no line yet can't be told apart
-from a child still starting up, since only the line names the child, so it still
-counts. Every other subagent's call is left alone.
+`fork` of a recall record of the session, in any state (`fork_record`). From the moment
+a recall's record is written until its child writes the fork's id, the record awaits
+its fork (`awaits_fork`), whether it is `starting` or `hurried`: a newer recall can hurry
+it after its first round was asked and before the fork's id is written, and that
+changes what the fork may still do, not whether its calls are judged. While the session
+has a record that awaits its fork, a call from an agent id no record names waits up to
+`STARTING_WAIT_S` for the id, and is then judged as the fork of the newest such record
+whose first round was asked (the record's `rounds`, written before the round goes to
+turns), or of the newest such record when none was asked: only an asked round can have
+started a fork. A record whose child is gone (`moxi.proc.alive` is false for the child
+its log line names) will never start a fork, so it counts as no fork. A record with no
+line yet can't be told apart from a child still starting up, since only the line names
+the child, so it still counts. Every other subagent's call is left alone.
 
 **A fork's call (`judge_call`).**
 
@@ -28,8 +33,8 @@ counts. Every other subagent's call is left alone.
   more there, and its `Monitor` tool runs a command in the background.
 
 Each call allowed is counted on the record, under the session's lock. A judge has
-`BUDGET_S` from its start, inside its guard's deadline: the wait for a `starting`
-record and the wait for the lock both come out of it. When the lock is still held
+`BUDGET_S` from its start, inside its guard's deadline: the wait for a fork's
+id and the wait for the lock both come out of it. When the lock is still held
 (a child acks a round under it) once the budget is spent, the judge decides from the
 record as it reads without the lock (records are written whole): the call is refused
 as above, or allowed without being counted, so a busy lock never breaks the guard.
@@ -70,7 +75,7 @@ READ_TOOLS = ("Read", "Grep", "Glob")
 SHELL = "Bash"
 #: Characters a plain read never holds, quoted or not.
 REFUSED_CHARS = frozenset(";&<>(){}`$\\!")
-#: How long a call waits for a `starting` record's fork id, in seconds.
+#: How long a call waits for the fork id of a record that awaits it, in seconds.
 STARTING_WAIT_S = 1.0
 #: How long a judge may take, from its start, in seconds: under the guards' deadline
 #: (`moxi_memory.guards`), with room for turns' own wait for a thread.
@@ -101,21 +106,30 @@ def child_gone(session_id: str, record: Mapping[str, object]) -> bool:
     return not moxi.proc.alive(proc)
 
 
-def _starting(session_id: str, record: Mapping[str, object]) -> bool:
-    """Whether `record` is a recall still starting its fork."""
-    return (record.get("state") == records.STARTING and not record.get("fork")
-            and not child_gone(session_id, record))
+def awaits_fork(session_id: str, record: Mapping[str, object]) -> bool:
+    """Whether `record` is a recall whose fork's id is not yet written while its child
+    may still write it: `starting` or `hurried`, no fork, and its child not known gone."""
+    return (record.get("state") in (records.STARTING, records.HURRIED)
+            and not record.get("fork") and not child_gone(session_id, record))
+
+
+def _asked(record: Mapping[str, object]) -> bool:
+    """Whether a round of `record`'s recall was asked, so its fork may have started."""
+    try:
+        return int(record.get("rounds") or 0) > 0
+    except (TypeError, ValueError):
+        return False
 
 
 def _named(session_id: str, agent_id: str) -> tuple[dict | None, bool]:
-    """(the record whose fork is `agent_id`, whether a record is still `starting`)."""
-    starting = False
+    """(the record whose fork is `agent_id`, whether a record awaits its fork)."""
+    awaiting = False
     for record in reversed(records.session_records(session_id)):
         if record.get("fork") == agent_id:
             return record, False
-        if not starting and _starting(session_id, record):
-            starting = True
-    return None, starting
+        if not awaiting and awaits_fork(session_id, record):
+            awaiting = True
+    return None, awaiting
 
 
 def fork_record(session_id: str | None, agent_id: str | None, *,
@@ -124,19 +138,19 @@ def fork_record(session_id: str | None, agent_id: str | None, *,
     is not a recall fork's. See the module's docstring."""
     if not agent_id or not recalls.is_safe(session_id):
         return None
-    record, starting = _named(session_id, agent_id)
-    if record is not None or not starting:
+    record, awaiting = _named(session_id, agent_id)
+    if record is not None or not awaiting:
         return record
     deadline = time.monotonic() + wait_s
     while time.monotonic() < deadline:
         time.sleep(_POLL_S)
-        record, starting = _named(session_id, agent_id)
-        if record is not None or not starting:
+        record, awaiting = _named(session_id, agent_id)
+        if record is not None or not awaiting:
             return record
-    for found in reversed(records.session_records(session_id)):
-        if _starting(session_id, found):
-            return found
-    return None
+    found = [r for r in reversed(records.session_records(session_id))
+             if awaits_fork(session_id, r)]
+    asked = [r for r in found if _asked(r)]
+    return (asked or found or [None])[0]
 
 
 def time_up(record: dict, *, now: float | None = None) -> bool:
@@ -269,5 +283,6 @@ def judge_ask(call):
 
 
 __all__ = ["TIME_UP", "READ_ONLY", "ASK_REFUSED", "READ_TOOLS", "SHELL", "REFUSED_CHARS",
-           "STARTING_WAIT_S", "BUDGET_S", "guarded", "child_gone", "fork_record",
+           "STARTING_WAIT_S", "BUDGET_S", "guarded", "child_gone", "awaits_fork",
+           "fork_record",
            "time_up", "plain_read", "allowed", "judge_call", "judge_ask"]

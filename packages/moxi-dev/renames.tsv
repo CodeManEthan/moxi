@@ -6129,7 +6129,8 @@ memory	packages/memory/src/moxi_memory/recall_discard.py	__all__ = ["Refused", "
 memory	packages/memory/src/moxi_memory/recall_guard.py	if not command.isprintable() or any(c in REFUSED_CHARS for c in command):	keep	any	any
 memory	packages/memory/src/moxi_memory/recall_guard.py	if not any(argv[:len(entry)] == entry for entry in entries):	keep	any	any
 memory	packages/memory/src/moxi_memory/recall_guard.py	"""Whether the child of recall `record` is known to have ended: its log line names a	keep	record	record
-memory	packages/memory/src/moxi_memory/recall_guard.py	"""Whether `record` is a recall still starting its fork."""	keep	record	record
+memory	packages/memory/src/moxi_memory/recall_guard.py	"""Whether `record` is a recall whose fork's id is not yet written while its child	keep	record	record
+memory	packages/memory/src/moxi_memory/recall_guard.py	"""Whether a round of `record`'s recall was asked, so its fork may have started."""	keep	record	record
 memory	packages/memory/src/moxi_memory/recall_stream.py	recall.record = records.read(recall.session_id, recall.recall_id) or recall.record	keep	record	record
 memory	packages/memory/src/moxi_memory/recall_stream.py	rounds.append({"round": round_number, "text": answer, "at": now})	keep	round	round
 memory	packages/memory/src/moxi_memory/recall_stream.py	state = recall.record.get("state")	keep	record	record
