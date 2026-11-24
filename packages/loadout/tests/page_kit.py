@@ -83,19 +83,32 @@ def shell_options(tmp_path_factory) -> dict:
                     "GIT_CONFIG_GLOBAL": str(gitconfig), "GIT_CONFIG_NOSYSTEM": "1"}}
 
 
-def small_options(tmp_path_factory) -> dict:
-    """`shell_options` for the small install, the core, ui and loadout: the shell's snapshot
-    leaves projects and repo out, and a site first on its `PYTHONPATH` holds a
-    distribution of each name that declares no module, so loadout, its page server and
-    every `moxi` command the shell runs find neither, as on a machine without them."""
-    site = tmp_path_factory.mktemp("small-site")
-    for module in SMALL_LEAVES_OUT:
+def without_options(tmp_path_factory, leaves_out) -> dict:
+    """`shell_options` for an install without the modules `leaves_out`: the shell's
+    snapshot leaves them out, and a site first on its `PYTHONPATH` holds a distribution of
+    each name that declares no module, so the shell's page servers and every `moxi`
+    command the shell runs find none of them, as on a machine without them."""
+    site = tmp_path_factory.mktemp("without-site")
+    for module in leaves_out:
         info = site / f"moxi_{module}-0.0.0.dist-info"
         info.mkdir()
         (info / "METADATA").write_text(
             f"Metadata-Version: 2.1\nName: moxi-{module}\nVersion: 0.0.0\n", encoding="utf-8")
-    return {**shell_options(tmp_path_factory), "site": [str(site)],
-            "leave_out": list(SMALL_LEAVES_OUT)}
+    return {**shell_options(tmp_path_factory), "site": [str(site)], "leave_out": list(leaves_out)}
+
+
+def only_options(tmp_path_factory, holds) -> dict:
+    """`without_options` for an install of the core, ui and the modules `holds` only."""
+    from moxi import modules
+
+    return without_options(tmp_path_factory, [found.name for found in modules.scan()
+                                              if found.name not in ("ui", *holds)])
+
+
+def small_options(tmp_path_factory) -> dict:
+    """`shell_options` for the small install, the core, ui and loadout: neither projects
+    nor repo, as on a machine without them."""
+    return without_options(tmp_path_factory, SMALL_LEAVES_OUT)
 
 
 def moxi(shell, *args: str, check: bool = True) -> subprocess.CompletedProcess:
