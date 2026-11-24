@@ -18071,6 +18071,7 @@ launcher	packages/launcher/tests/test_wake.py	got = guards.load(on=["launcher.wa
 launcher	packages/launcher/tests/test_wake.py	path.parent.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
 launcher	packages/launcher/tests/test_wake.py	loaded = guards.load(on=["launcher.wake"], sessions=lambda target: (False, None))	keep	on	on
 launcher	packages/launcher/tests/test_wake.py	loaded = guards.load(on=["launcher.wake"], sessions=lambda target: (False, None))	keep	sessions	sessions
+launcher	packages/launcher/tests/test_wake.py	record=lambda *a: None, clear=lambda key: None)	keep	record	record
 usage	packages/usage/src/moxi_usage/mark.py	if any(name == CROSSING and fired(name, mark) for name, mark in wanted):	keep	any	any
 usage	packages/usage/src/moxi_usage/guards.py	on_error="allow", sessions="moxi_usage.stop:on_for",	keep	sessions	sessions
 usage	packages/usage/src/moxi_usage/stop.py	return text.format_map({"mark": mark, "folder": handoff_dir})	keep	folder	folder

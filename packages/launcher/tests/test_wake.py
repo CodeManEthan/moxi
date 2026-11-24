@@ -8,11 +8,12 @@ import importlib
 import pytest
 from moxi import modules
 from moxi.paths import Layout
-from moxi_turns.guards import ToolCall
-from moxi_turns.guards.run import GuardRunner
 
 from moxi_launcher import wake
 from moxi_launcher.wake import Live, Looked, Proc, Procs
+
+#: turns is optional: its names are read through the core's module loader.
+ToolCall = modules.load("turns").api.ToolCall
 
 MINE, OTHER, THIRD = "mine-0001", "other-0002", "third-0003"
 
@@ -267,8 +268,9 @@ def test_a_broken_judge_lets_the_call_run(monkeypatch):
         raise RuntimeError("judge broke")
 
     monkeypatch.setattr(wake, "decide", broken)
-    runner = GuardRunner("claude", settings=lambda: ([], 3000), load=lambda on: loaded,
-                         record=lambda *a: None, clear=lambda key: None)
+    run = importlib.import_module("moxi_turns.guards.run")
+    runner = run.GuardRunner("claude", settings=lambda: ([], 3000), load=lambda on: loaded,
+                             record=lambda *a: None, clear=lambda key: None)
     try:
         runner.reload()
         answer = runner.ask(bash("kill 211"), ["launcher.wake"])
