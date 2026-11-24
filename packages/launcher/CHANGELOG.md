@@ -2,6 +2,20 @@
 
 ## Unreleased
 
+- Keep-warm is on for every Claude Code launch that isn't headless, whatever its
+  `keep_warm` value, a launch recorded `off` included (`keepwarm.launch_on`); a headless
+  launch keeps the opt-in. Holds and the hold verbs follow it, so they work on any such
+  launch. The director case no longer needs cover: every ask that doesn't nudge for a
+  subagent reads the agents the session directs (the join, within 20 s), and with comms
+  absent nobody is directed. A join or agent list not read whole, with no case found,
+  ends the ask `unreadable`, quietly.
+- A run of nudges counts each case apart, by the word each nudge ended with: the subagent
+  case up to `keep_warm.subagent_cap`, then the director case up to
+  `keep_warm.director_cap`, so a director whose subagent nudges are spent is still nudged
+  while an agent it directs works. A run with every case spent ends `blocked` (`capped`)
+  naming each count (`subagents 3/3, director 10/10`). Each case's texts go by its own
+  count. A director nudge with agents it directs at work and holds open names both: the
+  directing texts, the agents, then `Open holds:`.
 - Keep-warm's subagent case and the agents a session directs count the same entries
   (`waits.live_subagents`): a `subagent` or `teammate` entry not final and pending,
   running or waiting, and not a fork of the session's main loop. A directed Claude agent

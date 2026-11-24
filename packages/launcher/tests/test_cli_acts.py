@@ -806,7 +806,7 @@ def test_state_of_a_quiet_launch_is_ok(conn, capsys):
     assert (status, err) == (codes.OK, "")
     lines = out.splitlines()
     assert lines[0] == f"session {SID} (launch r1): ok"
-    assert lines[1] == "relaunch: none" and lines[3] == "keep warm: off"
+    assert lines[1] == "relaunch: none" and lines[3] == "keep warm: on; holds: none"
 
 
 def test_state_of_a_failed_run_is_red_and_still_exits_0(conn, capsys):

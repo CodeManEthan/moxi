@@ -302,8 +302,8 @@ def read_waits(each: Pass, launch: Launch) -> dict[str, Any]:
     """`waits`, `covered` and `coverable`, while the launch's own turn is closed: the
     session found as an act finds it but without asking slots, its facts, then its live
     subagents counted as keep-warm counts them, else the agents it directs that work
-    (`waits.directed`); whether keep-warm's next ask would nudge it, on the launch value or
-    its cover (`keepwarm.would_nudge`); and, for a launch that waits and is not covered,
+    (`waits.directed`); whether keep-warm's next ask would nudge it, on the launch or its
+    cover (`keepwarm.would_nudge`); and, for a launch that waits and is not covered,
     whether a press would cover it (`coverable`). Nothing without turns; no `waits`,
     `covered` false and `coverable` null for a session not found live, or whose turn is
     open."""

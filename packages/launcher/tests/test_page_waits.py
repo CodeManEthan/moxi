@@ -108,6 +108,11 @@ def wired(monkeypatch):
     return state
 
 
+#: A headless launch made with keep_warm off: the one kind of Claude launch keep-warm is
+#: not on for by its launch, so the one a press covers.
+OFF = {"target": "headless", "values": {"keep_warm": "off"}}
+
+
 def seeded(rid="r1", *, claimed: bool = True, **options) -> str:
     return kit.seed(HERE, rid, live=True, claimed=claimed, **options)
 
@@ -160,10 +165,11 @@ def test_a_launch_not_live_or_not_claimed_has_no_waits(wired):
 # -- agents ----------------------------------------------------------------------------------
 
 
-def agents_case(wired, *workers):
-    """A director with no subagent, and the agents it directs, each `(name, session)`.
-    Returns the director's session id and each agent's, by name."""
-    sid = seeded()
+def agents_case(wired, *workers, **options):
+    """A director with no subagent, and the agents it directs, each `(name, session)`; the
+    director a headless launch made with keep_warm off (`OFF`) unless `options` say how
+    to seed it. Returns the director's session id and each agent's, by name."""
+    sid = seeded(**(options or OFF))
     sessions = {sid: live(sid)}
     bound, ids = [], {}
     for index, (name, session) in enumerate(workers):
@@ -382,7 +388,7 @@ def test_a_waiting_session_keep_warm_will_nudge_is_covered(wired):
 
 @pytest.mark.parametrize("change", ["draft", "not timed", "keep warm off", "no cache"])
 def test_a_waiting_session_keep_warm_will_not_nudge_is_not_covered(wired, change):
-    sid = seeded(values={"keep_warm": "off" if change == "keep warm off" else "on"})
+    sid = seeded(**(OFF if change == "keep warm off" else {"values": {"keep_warm": "on"}}))
     wired.turns = Turns({sid: live(sid, entries=[agent("a1")], draft=change == "draft")})
     wired.cache = None if change == "no cache" else Cache([] if change == "not timed"
                                                          else [sid])
@@ -524,7 +530,7 @@ def pressed(sid, rid="r1"):
 
 
 def test_a_waiting_session_made_with_keep_warm_off_is_coverable_at_the_subagent_cap(wired):
-    sid = seeded()
+    sid = seeded(**OFF)
     wired.turns = Turns({sid: live(sid, entries=[agent("a1")])})
     wired.cache = Cache([sid], asks=ASKS)
     got = joined()
@@ -533,7 +539,7 @@ def test_a_waiting_session_made_with_keep_warm_off_is_coverable_at_the_subagent_
 
 
 def test_once_pressed_it_is_covered_and_not_coverable(wired):
-    sid = seeded()
+    sid = seeded(**OFF)
     wired.turns = Turns({sid: live(sid, entries=[agent("a1")])})
     wired.cache = Cache([sid], asks=ASKS)
     pressed(sid)
@@ -564,8 +570,7 @@ def test_a_record_whose_asks_lacks_the_subscription_gives_neither_with_keep_warm
 @pytest.mark.parametrize("change", ["no waits", "own turn open", "draft", "no cache",
                                     "keep warm on"])
 def test_coverable_is_null_outside_an_uncovered_wait_a_press_would_cover(wired, change):
-    values = {"keep_warm": "on"} if change == "keep warm on" else None
-    sid = seeded(values=values)
+    sid = seeded(**({"values": {"keep_warm": "on"}} if change == "keep warm on" else OFF))
     entries = [] if change == "no waits" else [agent("a1")]
     wired.turns = Turns({sid: live(sid, entries=entries, turn_open=change == "own turn open",
                                    draft=change == "draft")})

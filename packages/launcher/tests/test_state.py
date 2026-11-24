@@ -54,11 +54,20 @@ def conn(tmp_path):
     conn.close()
 
 
-def launched(conn, *, request_id="r1", values=None, session_id=SID, relaunch_of=None):
-    store.insert(conn, request_id=request_id, by="ann", harness="claude", target="slot",
+def launched(conn, *, request_id="r1", values=None, session_id=SID, relaunch_of=None,
+             target="slot"):
+    store.insert(conn, request_id=request_id, by="ann", harness="claude", target=target,
                  cwd="/work", values={"model": "opus", **(values or {})}, argv=["claude"],
-                 env={}, posture="operator", session_id=session_id, slot="3",
-                 relaunch_of=relaunch_of)
+                 env={}, posture="operator", session_id=session_id,
+                 slot="3" if target == "slot" else None, relaunch_of=relaunch_of)
+
+
+def headless_off(conn, request_id="r1"):
+    """The launch made headless with keep_warm off, the one kind of Claude launch
+    keep-warm is off for by its launch."""
+    conn.execute("UPDATE launches SET target = 'headless', slot = NULL, values_json = "
+                 "json_set(values_json, '$.keep_warm', 'off') WHERE request_id = ?",
+                 (request_id,))
 
 
 def ran(conn, outcome, *, kind="keep-warm", mode="ask", word=None, detail=None,
@@ -89,7 +98,9 @@ def test_a_launch_with_no_runs_is_not_red_and_shows_its_options(conn):
     assert got.session_id == SID and got.request_id == "r1"
     assert got.relaunch.state is None
     assert (got.recycle.on_expiry, got.recycle.at_limit) == ("off", "off")
-    assert not got.keep_warm.on and got.keep_warm.said == "off"
+    assert got.keep_warm.on and got.keep_warm.holds == ()
+    headless_off(conn)
+    assert read(conn).keep_warm.said == "off"
 
 
 def test_a_blocked_run_is_red_blocked_since_the_block_began(conn):
@@ -280,7 +291,7 @@ def test_keep_warm_says_a_short_lifetime_leaves_no_window(conn):
 
 def test_keep_warm_under_cover_alone_is_on_with_no_holds_listed(conn):
     store.open_hold(conn, "r1", "port-cache")
-    launched(conn, request_id="r2", session_id=NEW, relaunch_of="r1")
+    launched(conn, request_id="r2", session_id=NEW, relaunch_of="r1", target="headless")
     keepwarm.cover_on(conn, store.get(conn, "r2"), NEW, turn_number=3,
                       waits={"kind": "subagents", "count": 1})
     got = read(conn, NEW).keep_warm
@@ -289,12 +300,14 @@ def test_keep_warm_under_cover_alone_is_on_with_no_holds_listed(conn):
 
 
 def test_cover_for_another_session_id_leaves_keep_warm_off(conn):
+    headless_off(conn)
     keepwarm.cover_on(conn, store.get(conn, "r1"), NEW, turn_number=3,
                       waits={"kind": "subagents", "count": 1})
     assert not read(conn).keep_warm.on
 
 
 def test_keep_warm_off_reads_no_cache(conn):
+    headless_off(conn)
     cache = FakeCache(ttl=300.0)
     assert read(conn, cache=cache).keep_warm.window is None and cache.reads == []
 
@@ -308,7 +321,7 @@ def test_show_prints_the_state_and_its_json_carries_the_outcome(conn):
     assert got.exit_code == codes.OK
     assert got.lines[0].startswith(f"session {SID} (launch r1): red, blocked since ")
     assert got.data["outcome"] == "blocked" and got.data["red"] is True
-    assert got.data["keep_warm"]["on"] is False
+    assert got.data["keep_warm"]["on"] is True
 
 
 def test_show_with_no_session_reads_the_caller_s_own(conn):

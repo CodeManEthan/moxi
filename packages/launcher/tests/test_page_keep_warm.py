@@ -16,8 +16,8 @@ import pytest
 from test_keepwarm import agent, me
 from test_page import _send, loopback, post, served
 from test_page_joiner import fresh, stop, until
-from test_page_waits import (ASKS, Cache, Turns, agents_case, joined, live, pressed, seeded,
-                             wired)
+from test_page_waits import (ASKS, OFF, Cache, Turns, agents_case, joined, live, pressed,
+                             seeded, wired)
 
 from moxi import aio
 from moxi_dev.testing import PROC_WAIT_S
@@ -70,9 +70,10 @@ class Clock(Cache):
 
 @pytest.fixture
 def waiting(wired):
-    """A launch made with `keep_warm` off whose live session waits on one subagent, its
-    turn closed, in a warm cache the watcher asks keep-warm about: a press covers it."""
-    sid = seeded()
+    """A headless launch made with `keep_warm` off whose live session waits on one
+    subagent, its turn closed, in a warm cache the watcher asks keep-warm about: a press
+    covers it."""
+    sid = seeded(**OFF)
     session = live(sid, entries=[agent("a1")])
     wired.turns = Turns({sid: session})
     wired.cache = Clock([sid], asks=ASKS)
@@ -510,9 +511,10 @@ def open_run(conn, sid):
 
 
 def nudges(conn, sid, count):
-    """`count` nudged keep-warm runs in a row, the newest opening turn 4."""
+    """`count` director nudges in a row, the newest opening turn 4."""
     for number in range(4 - count, 4):
         run = store.insert_run(conn, kind="keep-warm", mode="ask", request_id="r1",
                                session_id=sid, by="launcher", state="acting",
                                job=f"proc:{me()}", turn_number=number)
-        store.end_run(conn, run.run_id, "nudged", word="nudged", turn_number=number + 1)
+        store.end_run(conn, run.run_id, "nudged", word=keepwarm.DIRECTOR,
+                      turn_number=number + 1)

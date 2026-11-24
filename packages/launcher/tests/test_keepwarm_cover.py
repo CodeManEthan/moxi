@@ -24,9 +24,10 @@ WAITS = {"kind": "subagents", "count": 2}
 
 
 def off(conn, request_id="r1"):
-    """The launch's value set to `off`, as a launch made with keep-warm off has it."""
-    conn.execute("UPDATE launches SET values_json = '{\"keep_warm\": \"off\"}' "
-                 "WHERE request_id = ?", (request_id,))
+    """The launch made headless with its value `off`: the one kind of Claude launch
+    keep-warm is off for by its launch."""
+    conn.execute("UPDATE launches SET values_json = '{\"keep_warm\": \"off\"}', "
+                 "target = 'headless' WHERE request_id = ?", (request_id,))
 
 
 def row(conn, request_id="r1"):
@@ -122,7 +123,29 @@ def test_a_relaunch_or_a_resume_starts_without_the_cover(conn, link):
     assert keepwarm.cover(conn, row(conn, "r2"), SID) is None
 
 
-def test_on_is_the_launch_value_or_cover(conn):
+def test_an_old_launch_recorded_off_that_is_not_headless_is_on(conn):
+    conn.execute("UPDATE launches SET values_json = '{\"keep_warm\": \"off\"}' "
+                 "WHERE request_id = 'r1'")
+    assert keepwarm.launch_on(row(conn)) and keepwarm.on(conn, row(conn), SID)
+    conn.execute("UPDATE launches SET values_json = '{}' WHERE request_id = 'r1'")
+    assert keepwarm.on(conn, row(conn), SID)
+
+
+def test_a_headless_launch_is_on_only_with_keep_warm_on(conn):
+    conn.execute("UPDATE launches SET target = 'headless' WHERE request_id = 'r1'")
+    assert keepwarm.launch_on(row(conn))
+    for values in ('{}', '{"keep_warm": "off"}'):
+        conn.execute("UPDATE launches SET values_json = ? WHERE request_id = 'r1'",
+                     (values,))
+        assert not keepwarm.launch_on(row(conn))
+
+
+def test_a_codex_launch_is_never_on_by_its_launch(conn):
+    launched(conn, request_id="r2", session_id=NEW, harness="codex")
+    assert not keepwarm.launch_on(row(conn, "r2"))
+
+
+def test_on_is_the_launch_or_cover(conn):
     assert keepwarm.on(conn, row(conn), SID)
     off(conn)
     assert not keepwarm.on(conn, row(conn), SID)
@@ -321,7 +344,8 @@ def test_a_join_past_its_deadline_keeps_the_cover(conn, monkeypatch):
     assert w.comms.calls == [] and offs(conn) == []
 
 
-def test_the_session_s_own_agents_unread_keeps_the_cover_and_without_cover_is_idle(conn):
+def test_the_session_s_own_agents_unread_keeps_the_cover_and_is_unreadable_without_it(
+        conn):
     off(conn)
     covered(conn)
     main = FakeSession()
@@ -334,7 +358,8 @@ def test_the_session_s_own_agents_unread_keeps_the_cover_and_without_cover_is_id
     plain = FakeSession(session_id=NEW, facts_seq=[facts(session_id=NEW)])
     plain.entries = RuntimeError("no list")
     unchanged = ask(conn, session=plain, which=NEW, request_id="r2")
-    assert (unchanged.verdict.outcome, unchanged.verdict.word) == (None, "idle")
+    assert (unchanged.verdict.outcome, unchanged.verdict.word) == (None, "unreadable")
+    assert "cover" not in unchanged.verdict.detail and unchanged.runs == []
 
 
 def test_the_session_s_own_list_incomplete_keeps_the_cover(conn):
@@ -355,18 +380,27 @@ def test_an_open_turn_under_cover_is_busy_and_keeps_the_cover(conn):
     assert w.comms.calls == [] and offs(conn) == []
 
 
-def test_the_ask_loads_comms_itself_only_under_cover(conn, monkeypatch):
+def test_the_ask_loads_comms_itself_for_the_join_cover_or_not(conn, monkeypatch):
     w = world(turn_open=True)
     loads = []
     monkeypatch.setattr(keepwarm, "_comms", lambda: loads.append(1) or w.comms)
-    keepwarm.ask(SID, conn=conn, turns=w.turns, slots_api=FakeSlots(), cache=FakeCache(),
-                 settings=SETTINGS)
-    assert loads == []
-    off(conn)
-    covered(conn)
     verdict = keepwarm.ask(SID, conn=conn, turns=w.turns, slots_api=FakeSlots(),
                            cache=FakeCache(), settings=SETTINGS)
     assert loads == [1] and (verdict.outcome, verdict.word) == ("nudged", "director")
+    off(conn)
+    covered(conn)
+    w.main.facts_seq = [facts(number=5)]
+    verdict = keepwarm.ask(SID, conn=conn, turns=w.turns, slots_api=FakeSlots(),
+                           cache=FakeCache(), settings=SETTINGS)
+    assert loads == [1, 1] and (verdict.outcome, verdict.word) == ("nudged", "director")
+
+
+def test_an_ask_that_nudges_for_a_subagent_loads_no_comms(conn, monkeypatch):
+    loads = []
+    monkeypatch.setattr(keepwarm, "_comms", lambda: loads.append(1))
+    got = ask(conn, comms=keepwarm.LOOK)
+    assert (got.verdict.outcome, got.verdict.word) == ("nudged", "subagents")
+    assert loads == []
 
 
 def test_without_comms_installed_nobody_is_directed_and_the_cover_ends(conn, monkeypatch):
@@ -399,7 +433,7 @@ def test_an_installed_comms_that_does_not_load_keeps_the_cover_and_is_unreadable
 
 def test_with_a_hold_and_nobody_at_work_the_cover_ends_and_the_hold_nudges_as_today(conn):
     store.open_hold(conn, "r1", "port-cache")
-    nudged(conn, number=3)
+    nudged(conn, number=3, word="director")
     covered(conn)
     w = world(main=FakeSession())
     got = ask_in(conn, w)
@@ -410,13 +444,16 @@ def test_with_a_hold_and_nobody_at_work_the_cover_ends_and_the_hold_nudges_as_to
                           "Open holds: port-cache"]
 
 
-def test_with_a_hold_and_a_directed_agent_at_work_the_hold_nudges_and_the_cover_stays(conn):
+def test_with_a_hold_and_a_directed_agent_at_work_both_are_named_and_the_cover_stays(conn):
     store.open_hold(conn, "r1", "port-cache")
     covered(conn)
     got = ask_in(conn, world(turn_open=True))
     assert (got.verdict.outcome, got.verdict.word) == ("nudged", "director")
-    assert lines(got) == ["Keep-warm from launcher", "reply warm"]
-    assert nudge_event(conn, got)["holds"] == ["port-cache"] and offs(conn) == []
+    assert lines(got) == ["Keep-warm from launcher", "directing", f"- {CODER}",
+                          "Open holds: port-cache"]
+    event = nudge_event(conn, got)
+    assert event["holds"] == ["port-cache"] and event["directed"] == [CODER]
+    assert offs(conn) == []
 
 
 def test_with_a_hold_and_comms_down_the_hold_nudges_and_the_cover_stays(conn):
@@ -432,7 +469,7 @@ def test_a_hold_in_the_chain_is_no_signal_for_a_launch_under_cover_alone(conn):
     store.open_hold(conn, "r1", "port-cache")
     conn.execute("UPDATE launches SET endpoint = NULL WHERE request_id = 'r1'")
     launched(conn, request_id="r2", session_id=NEW, relaunch_of="r1",
-             values={"keep_warm": "off"})
+             values={"keep_warm": "off"}, target="headless")
     keepwarm.cover_on(conn, row(conn, "r2"), NEW, turn_number=4, waits=WAITS)
     main = FakeSession(session_id=NEW, facts_seq=[facts(session_id=NEW)])
     w = SimpleNamespace(main=main, comms=Comms(), turns=Turns({NEW: main}))
@@ -442,19 +479,54 @@ def test_a_hold_in_the_chain_is_no_signal_for_a_launch_under_cover_alone(conn):
     assert main.delivered == [] and store.open_holds(conn, "r2") == ["port-cache"]
 
 
-def test_a_launch_value_on_without_cover_reads_no_directed_agent_and_asks_no_comms(conn):
+def test_without_cover_a_directed_agent_at_work_draws_a_director_nudge_naming_it(conn):
     w = world(turn_open=True)
+    got = ask_in(conn, w)
+    assert (got.verdict.outcome, got.verdict.word) == ("nudged", "director")
+    assert lines(got) == ["Keep-warm from launcher", "directing", f"- {CODER}"]
+    assert [name for name, _ in w.comms.calls] == ["owner", "roster", "session_of"]
+    assert cover_events(conn) == []
+
+
+def test_without_cover_a_directed_agent_waiting_on_a_live_subagent_counts(conn):
+    w = world()
+    w.worker.entries = [agent("w1", state="waiting")]
+    got = ask_in(conn, w)
+    assert (got.verdict.outcome, got.verdict.word) == ("nudged", "director")
+
+
+def test_without_cover_a_directed_agent_whose_only_subagent_is_stale_is_idle(conn):
+    # An endpoint with `stale-agents` lists a stale `waiting` subagent `idle`.
+    w = world()
+    w.worker.entries = [agent("w1", state="idle")]
     got = ask_in(conn, w)
     assert (got.verdict.outcome, got.verdict.word) == (None, "idle")
-    assert w.comms.calls == [] and cover_events(conn) == []
+    assert got.session.delivered == [] and got.runs == []
 
 
-def test_a_launch_value_on_with_a_hold_and_no_cover_nudges_as_today(conn):
-    store.open_hold(conn, "r1", "port-cache")
+def test_an_agent_named_only_through_a_name_comms_put_in_its_claim_counts(conn):
+    # comms writes a machine-wide director into the claim's `directors`; the join reads
+    # the claim, so the agent is directed whatever named it there.
     w = world(turn_open=True)
+    bound, _ = directed("helper@proj-c", WORKER, by=CAPTAIN)
+    w.comms = Comms({SID: CAPTAIN}, [bound], {"helper@proj-c": WORKER})
+    got = ask_in(conn, w)
+    assert (got.verdict.outcome, got.verdict.word) == ("nudged", "director")
+    assert lines(got)[-1] == "- helper@proj-c"
+
+
+def test_without_cover_a_join_not_read_whole_with_no_other_signal_is_unreadable(conn):
+    got = ask_in(conn, world(offline=True))
+    assert (got.verdict.outcome, got.verdict.word) == (None, "unreadable")
+    assert "cover" not in got.verdict.detail and got.runs == [] and cover_events(conn) == []
+
+
+def test_a_hold_with_nobody_directed_at_work_uses_the_director_texts(conn):
+    store.open_hold(conn, "r1", "port-cache")
+    w = world()
     got = ask_in(conn, w)
     assert lines(got) == ["Keep-warm from launcher", "reply warm"]
-    assert w.comms.calls == [] and nudge_event(conn, got)["directed"] == []
+    assert nudge_event(conn, got)["directed"] == []
 
 
 # -- the cap under cover ----------------------------------------------------------------------
@@ -472,7 +544,7 @@ def test_under_cover_the_director_cap_counts_from_the_press(conn):
     capped = ask_in(conn, world(turn_open=True, main=FakeSession(
         facts_seq=[facts(number=13)])))
     assert (capped.verdict.outcome, capped.verdict.word) == ("blocked", "capped")
-    assert "10 nudges in a row since the press" in capped.verdict.detail
+    assert capped.verdict.detail.endswith("since the press are spent: director 10/10")
     assert keepwarm.cover(conn, row(conn), SID) is not None and offs(conn) == []
     covered(conn, turn_number=13)
     again = ask_in(conn, world(turn_open=True, main=FakeSession(
