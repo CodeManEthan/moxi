@@ -171,11 +171,18 @@ def test_the_opened_row_has_the_cache_line_and_links_caches_page(full_shell, ui_
 
 
 def test_a_row_turns_cold_at_its_time_with_no_read(full_shell, ui_contexts):
-    _, view, stub = open_with(full_shell, ui_contexts, [record(sid(1), cold_in=4)])
+    # The page's clock is Playwright's, so the record stays warm however slowly the page
+    # opens, and goes cold when the clock is moved past its time.
+    page = ui_contexts(full_shell).pages[0]
+    page.clock.install()
+    LauncherStub(page, [])
+    stub = CacheStub(page, [record(sid(1), cold_in=10 * 60)])
+    view = open_list(page)
     first = row(view, "claude", sid(1))
     expect(first).to_have_attribute("fact", WARM)
     reads = stub.reads
-    expect(first).to_have_attribute("fact", "cold", timeout=15_000)
+    page.clock.fast_forward("10:30")
+    expect(first).to_have_attribute("fact", "cold")
     assert stub.reads == reads
 
 
