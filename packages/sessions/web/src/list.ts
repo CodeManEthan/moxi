@@ -17,6 +17,8 @@ import { countedKinds, factOf, keepWarmOf, lastAt, leadOf, NO_PRESSES, ordered, 
 import type { Presses, RunningEntry, RunningRead } from "./running.ts";
 import { liveOpened, liveRow, pairsOf, unreadRow } from "./live.ts";
 import type { LiveOpened, LiveRead, LiveSession } from "./live.ts";
+import { clockFact, clockLine, clockOf, launchedLine } from "./clocks.ts";
+import type { CacheLine, Clocks } from "./clocks.ts";
 
 // -- days and times -------------------------------------------------------------------------
 
@@ -612,7 +614,9 @@ export interface RowView {
   route: string | null;
   name: string;
   where: string | null;
-  /** The right end of line one: a running launch's cache fact; null on every other row. */
+  /** The right end of line one: the session's cache fact, launcher's on a running launch
+   * that has one, else cache's record's on a running or `Active recently` row; null for
+   * none, and always on the other groups' rows. */
   fact: string | null;
   /** Whether the fact is heavy: a running launch that goes cold with nothing to keep it warm. */
   factHeavy: boolean;
@@ -634,6 +638,8 @@ export interface RowView {
   /** The day the row's times are of where they give a clock time alone: its group's day,
    * and today for a group that is no day. What the opened row shows is worded against it. */
   on: string;
+  /** The opened row's `Cache` line, from the same source as `fact`; null for none. */
+  cache: CacheLine | null;
 }
 
 /**
@@ -669,7 +675,28 @@ export function rowView(row: ListRow, on: string, today: string, open = false, z
     act: lines === 1 ? null : open ? "Close" : "Open",
     open,
     on,
+    cache: null,
   };
+}
+
+/** cache's records where the list reads them, and the time on the server's clock they
+ * are judged at. */
+export interface CacheRead {
+  clocks: Clocks;
+  now: number;
+}
+
+/** A moment as a cache fact words it, beside today: `19:12`, `yesterday 18:35`. */
+const cacheWhen = (today: string, zone: Zone) => (at: number): string => timeWords(at, today, today, zone);
+
+/** A row with what cache's record for its session says: the fact at the right of line one
+ * and the opened row's `Cache` line. A row with no record, or one with no clock time, is
+ * as it was. */
+export function withClock(view: RowView, cache: CacheRead | null, today: string, zone: Zone = LOCAL): RowView {
+  const clock = cache === null ? null : clockOf(cache.clocks, view);
+  if (clock === null || cache === null) return view;
+  const when = cacheWhen(today, zone);
+  return { ...view, fact: clockFact(clock, cache.now, when), cache: clockLine(clock, cache.now, when) };
 }
 
 /** A dim line with one act: `12 more` and `Show`. */
@@ -848,12 +875,20 @@ function runningKey(entry: RunningEntry): string {
  * there is one; its trouble is the dim third line, after a refused press's words; and the
  * opened row takes its lines. A launch with a session id says that turns can't read its
  * state when turns' list could not be read.
+ *
+ * Its cache fact and the opened row's `Cache` line are launcher's; where launcher gives the
+ * launch no cache, they are what cache's record for its session says (`cache`), if any.
  */
 export function runningRowView(entry: RunningEntry, state: ListState, presses: Presses,
-                               { desk = true, zone = LOCAL, turnsPart = null }:
-                               { desk?: boolean; zone?: Zone; turnsPart?: TurnsPart | null } = {}): RunningRowView {
+                               { desk = true, zone = LOCAL, turnsPart = null, cache = null }:
+                               { desk?: boolean; zone?: Zone; turnsPart?: TurnsPart | null; cache?: CacheRead | null } = {})
+  : RunningRowView {
   const key = runningKey(entry);
   const fact = factOf(entry, zone.clock);
+  // Launcher's cache fact wins; cache's record speaks only where launcher gives none.
+  const when = cacheWhen(state.today, zone);
+  const clock = fact === null && cache !== null && entry.session_id !== null
+    ? clockOf(cache.clocks, { harness: entry.harness, session: entry.session_id }) : null;
   const lead = leadOf(entry);
   // Launcher's heavy lead counts the agents a waiting session waits on from turns' own
   // list, so turns' phrases for the kinds it counts are not said twice.
@@ -876,7 +911,7 @@ export function runningRowView(entry: RunningEntry, state: ListState, presses: P
       ? routeOf({ harness: entry.harness, session: entry.session_id as string, agent: null }) : null,
     name: entry.name,
     where: whereText(entry.where) || null,
-    fact: fact?.text ?? null,
+    fact: fact?.text ?? (clock !== null && cache !== null ? clockFact(clock, cache.now, when) : null),
     factHeavy: fact?.heavy ?? false,
     lead: lead ?? words,
     leadHeavy: lead !== null,
@@ -887,6 +922,7 @@ export function runningRowView(entry: RunningEntry, state: ListState, presses: P
     act: !opens ? null : open ? "Close" : "Open",
     open,
     on: state.today,
+    cache: launchedLine(entry, when) ?? (clock !== null && cache !== null ? clockLine(clock, cache.now, when) : null),
     request: entry.request_id,
     keepWarm: keepWarmOf(entry, desk),
     pressing: presses.waiting[entry.request_id] !== undefined,
@@ -922,11 +958,11 @@ function turnsPartOf(entries: readonly RunningEntry[], turnsRead: LiveRead | nul
  * that says so. A list with a filter set holds only the launches whose session the
  * filtered list holds; without one, every launch running. With no launch to draw there is
  * no group at all. `turnsRead` is turns' read, where turns is read: each row then carries what
- * turns says of its session.
+ * turns says of its session. `cache` is cache's records, where the list reads them.
  */
 export function runningGroup(state: ListState, read: RunningRead | null, presses: Presses = NO_PRESSES,
-                             { desk = true, zone = LOCAL, turnsRead = null }:
-                             { desk?: boolean; zone?: Zone; turnsRead?: LiveRead | null } = {})
+                             { desk = true, zone = LOCAL, turnsRead = null, cache = null }:
+                             { desk?: boolean; zone?: Zone; turnsRead?: LiveRead | null; cache?: CacheRead | null } = {})
   : { group: RunningGroupView | null; taken: Set<string> } {
   const taken = new Set<string>();
   if (read === null || state.query.find !== null) return { group: null, taken };
@@ -936,13 +972,14 @@ export function runningGroup(state: ListState, read: RunningRead | null, presses
   const kept = isFiltered(state.query) ? shownKeys(state.groups) : null;
   const entries = ordered(read.value.sessions).filter((entry) => kept === null || kept.has(runningKey(entry)));
   const partOf = turnsPartOf(entries, turnsRead);
-  const rows = entries.map((entry) => runningRowView(entry, state, presses, { desk, zone, turnsPart: partOf(entry) }));
+  const rows = entries.map((entry) => runningRowView(entry, state, presses, { desk, zone, turnsPart: partOf(entry), cache }));
   for (const row of rows) taken.add(row.key);
   if (rows.length === 0) return { group: null, taken };
   return { group: { label: `${fmtCount(rows.length)} running`, rows, line: null, reason: null }, taken };
 }
 
-function groupView(group: GroupState, state: ListState, zone: Zone, taken: Set<string>): GroupView | null {
+function groupView(group: GroupState, state: ListState, zone: Zone, taken: Set<string>,
+                   cache: CacheRead | null): GroupView | null {
   const today = state.today;
   const label = groupLabel(group.key, today);
   if (group.key === "earlier") {
@@ -953,7 +990,11 @@ function groupView(group: GroupState, state: ListState, zone: Zone, taken: Set<s
   if (group.rows.length === 0 && group.count <= 0 && programCount <= 0) return null;
   // The day a time in this group is taken to be of, unless it says otherwise.
   const on = /^\d{4}-\d{2}-\d{2}$/.test(group.key) ? group.key : today;
-  const view = (row: ListRow): RowView => rowView(row, on, today, state.opened.includes(keyOf(row)), zone);
+  // Cache's records speak only on `Active recently`'s rows; a day's, a find's and an
+  // earlier day's rows say nothing of cache, whatever it holds.
+  const clocks = group.key === "recent" ? cache : null;
+  const view = (row: ListRow): RowView =>
+    withClock(rowView(row, on, today, state.opened.includes(keyOf(row)), zone), clocks, today, zone);
   // A session the running group holds is drawn there only. It still counts as shown here,
   // so `N more` stays the group's count less the rows read.
   const free = (row: ListRow): boolean => !taken.has(keyOf(row));
@@ -983,14 +1024,18 @@ function groupView(group: GroupState, state: ListState, zone: Zone, taken: Set<s
  * `No sessions yet.` is drawn only when the machine holds no session and every root was
  * read: with a root unread, an empty list says nothing of what is there. A list that a
  * filter or the find field leaves empty reads `No sessions match.`.
+ *
+ * With `cache`, cache's records where the list reads them, each row of `Active recently`
+ * with a record says what it says (`withClock`), and so does a running launch where
+ * launcher gives it no cache. The rows of the other groups say nothing of cache.
  */
 export function listView(state: ListState, { launcher = false, zone = LOCAL, running = null, presses = NO_PRESSES, desk = true,
-                                            readsTurns = false, turnsRead = null }:
+                                            readsTurns = false, turnsRead = null, cache = null }:
   { launcher?: boolean; zone?: Zone; running?: RunningRead | null; presses?: Presses; desk?: boolean; readsTurns?: boolean;
-    turnsRead?: LiveRead | null } = {}): ListView {
+    turnsRead?: LiveRead | null; cache?: CacheRead | null } = {}): ListView {
   const shown = runningGroup(state, launcher ? running : null, presses,
-                             { desk, zone, turnsRead: readsTurns ? turnsRead : null });
-  const groups = state.groups.map((group) => groupView(group, state, zone, shown.taken))
+                             { desk, zone, turnsRead: readsTurns ? turnsRead : null, cache });
+  const groups = state.groups.map((group) => groupView(group, state, zone, shown.taken, cache))
     .filter((group): group is GroupView => group !== null);
   const notices = state.roots.map(noticeOf);
   let empty: EmptyView | null = null;

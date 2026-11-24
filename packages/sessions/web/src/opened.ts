@@ -1,18 +1,19 @@
 // What a row of the list shows once it is opened in place, worked out with no DOM, no Lit
 // and no request so the Node tests can read it. From `/api/session`'s answer to the lines
 // drawn under the row: the newest typed message, the newest reply, the subagents, the
-// `Session` line, the harness's own command for picking the session up again, and under
-// them the link to the transcript and `Copy id`.
+// `Session` line, the `Cache` line, the harness's own command for picking the session up
+// again, and under them the link to the transcript and `Copy id`.
 //
-// A piece whose fact the answer does not carry is null and is not drawn. The link to the
-// transcript and `Copy id` come from the row itself, so they are there while the answer is
-// on its way and when it does not come.
+// A piece whose fact the answer does not carry is null and is not drawn. The `Cache` line,
+// the link to the transcript and `Copy id` come from the row itself, so they are there
+// while the answer is on its way and when it does not come.
 //
 // Every string here goes into the page as text.
 
 import { charCount, cutAt } from "./views.ts";
 import type { FeedState } from "./views.ts";
 import type { ListRow, Message, Root, SessionAnswer, SessionSubagent } from "./list-feed.ts";
+import { CACHE_LABEL, CACHE_LINK } from "./clocks.ts";
 import { dayWords, folderWords, GONE, LOCAL, noticeOf, timeWords } from "./list.ts";
 import type { RowView, StatusLine, Zone } from "./list.ts";
 
@@ -70,6 +71,17 @@ export interface OpenedView {
     lead: string;
     /** Dim: `today 07:40 to 08:55`. */
     rest: string | null;
+  } | null;
+  /** The row's cache, as its fact at the right of line one says it, with a link to cache's
+   * page where cache's page can be shown. */
+  cache: {
+    label: string;
+    /** `warm until 19:12`, `cold since 18:35`. */
+    value: string;
+    /** Dim, after the value: `kept warm while 1 agent works`. */
+    tail: string | null;
+    /** The link's words; null with no link. */
+    link: string | null;
   } | null;
   resume: {
     label: string;
@@ -167,12 +179,16 @@ export function openedStatus(feed: FeedState<unknown> | null): StatusLine | null
  * all. A row that had one line when closed shows what its answer carries all the same,
  * which is then the reply, the `Session` line and the command.
  *
+ * The `Cache` line is the row's own (`row.cache`), linked to cache's page with
+ * `cacheLink`.
+ *
  * `roots` are the list's harnesses whose sessions were not all read. A Codex session's
  * subagents are found by reading every Codex session, so when part of those could not be
  * read the line that says so stands under the subagents.
  */
 export function openedView(row: RowView, feed: FeedState<SessionAnswer> | null,
-                           { today, roots = [], zone = LOCAL }: { today: string; roots?: Root[]; zone?: Zone }): OpenedView {
+                           { today, roots = [], zone = LOCAL, cacheLink = false }:
+                           { today: string; roots?: Root[]; zone?: Zone; cacheLink?: boolean }): OpenedView {
   const answer = feed?.value ?? null;
   const view: OpenedView = {
     status: openedStatus(feed),
@@ -180,6 +196,8 @@ export function openedView(row: RowView, feed: FeedState<SessionAnswer> | null,
     reply: null,
     subagents: null,
     session: null,
+    cache: row.cache === null ? null
+      : { label: CACHE_LABEL, value: row.cache.value, tail: row.cache.tail, link: cacheLink ? CACHE_LINK : null },
     resume: null,
     transcript: row.route !== null ? { text: READ_TRANSCRIPT, route: row.route } : null,
     copyId: { text: COPY_ID, id: row.session },

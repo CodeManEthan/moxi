@@ -13471,6 +13471,9 @@ sessions	packages/sessions/tests/test_browser_running.py	pytest.mark.skipif(not 
 sessions	packages/sessions/tests/test_browser_running.py	"where": {"target": "slot", "slot": slot, "project_key": project, "folder": project},	keep	folder	folder
 sessions	packages/sessions/tests/test_browser_running.py	self.answer: dict = {"refused": None}	keep	refused	refused
 sessions	packages/sessions/tests/test_browser_running.py	expect(row).to_have_attribute("name", "from-topic", timeout=30_000)	keep	timeout	timeout
+sessions	packages/sessions/tests/test_browser_cache.py	pytest.mark.skipif(not any(found.name == "cache" for found in modules.scan()),	keep	any	any
+sessions	packages/sessions/tests/test_browser_cache.py	pytest.mark.skipif(not any(found.name == "launcher" for found in modules.scan()),	keep	any	any
+sessions	packages/sessions/tests/test_browser_cache.py	expect(first).to_have_attribute("fact", "cold", timeout=15_000)	keep	timeout	timeout
 sessions	packages/sessions/tests/test_browser_transcript.py	-	name	test_a_folder_under_the_home_folder_is_written_with_a_tilde_in_the_list	test_a_dir_under_the_home_dir_is_written_with_a_tilde_in_the_list
 sessions	packages/sessions/tests/test_browser_transcript.py	-	name	test_an_unnamed_session_is_named_by_its_folder_and_when_it_started	test_an_unnamed_session_is_named_by_its_dir_and_when_it_started
 sessions	packages/sessions/tests/test_browser_transcript.py	assert any(SESSION_API.search(url) and f"session={sid(1)}" in url for url in asked)	keep	any	any
@@ -18096,3 +18099,16 @@ moxi-dev	packages/moxi-dev/tests/test_check.py	assert checker.wait(timeout=testi
 moxi-dev	packages/moxi-dev/tests/test_check.py	checker.wait(timeout=1)	keep	timeout	timeout
 moxi-dev	packages/moxi-dev/tests/test_check.py	assert checker.wait(timeout=testing.PROC_WAIT_S) == 128 + signal.SIGTERM	keep	timeout	timeout
 moxi-dev	packages/moxi-dev/tests/test_kit.py	wait_for(lambda: not any(_running(pid) for pid in pids), testing.PROC_WAIT_S,	keep	any	any
+rounds	packages/rounds/src/moxi_rounds/board.py	"""A ruling as a record gives it: its `id`, its sentence, its pointer (`record`),	keep	record	record
+rounds	packages/rounds/src/moxi_rounds/board.py	return {"id": ruling.id, "text": ruling.text or ruling.rules, "record": ruling.record,	keep	record	record
+rounds	packages/rounds/src/moxi_rounds/corrections.py	"KINDS", "kind_of", "item_of", "stands", "live", "find", "newest_replacing",	keep	find	find
+rounds	packages/rounds/src/moxi_rounds/page.py	RULING = lb.Out("table", nullable=True, items={	keep	nullable	nullable
+rounds	packages/rounds/tests/test_browser_page.py	"id": "7000001", "delivery": "delivered"}}}	keep	delivered	delivered
+rounds	packages/rounds/tests/test_page.py	calls += [{"what": what, "round": row["holder"], "id": row["id"]}	keep	round	round
+rounds	packages/rounds/tests/test_page.py	({"what": "ruling", "round": BUSY}, "id"),	keep	round	round
+rounds	packages/rounds/tests/test_page.py	*(("/api/record", {"what": "ruling", "round": holder, "id": one})	keep	round	round
+rounds	packages/rounds/tests/test_page.py	return [sent["record"] for _status, sent in answers]	keep	record	record
+rounds	packages/rounds/tests/test_page.py	return {"id": ruled.id, "text": ruled.text, "record": ruled.event["record"],	keep	record	record
+rounds	packages/rounds/tests/test_page.py	("/api/record", {"what": "ruling", "round": BUSY, "id": "C9"}),	keep	round	round
+rounds	packages/rounds/tests/test_page.py	("/api/record", {"what": "ruling", "round": "kestrel/nowhere", "id": "C1"}))	keep	round	round
+rounds	packages/rounds/tests/test_page.py	assert missing == nowhere == {"gone": True, "record": None}	keep	record	record

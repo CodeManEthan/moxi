@@ -896,10 +896,10 @@ def events_of(part_: Part, column: str | None, stage: str | None) -> list[dict]:
 
 # -- records -----------------------------------------------------------------------------
 
-STEP, CARD, QUESTION, DECISION, WAIT, SHOWN = (
-    "step", "card", "question", "decision", "wait", "shown")
+STEP, CARD, QUESTION, DECISION, WAIT, SHOWN, RULING = (
+    "step", "card", "question", "decision", "wait", "shown", "ruling")
 #: What a record can be of.
-WHATS = (STEP, CARD, QUESTION, DECISION, WAIT, SHOWN)
+WHATS = (STEP, CARD, QUESTION, DECISION, WAIT, SHOWN, RULING)
 
 
 def _by_severity(listed: Iterable[Mapping]) -> dict:
@@ -1174,9 +1174,27 @@ def ruling_of(question: states.Question, state: states.State,
     if found is None:
         return {"id": ruling_id, "text": None, "record": None, "actor": None, "at": None,
                 "shown": False}
-    return {"id": found.id, "text": found.text or found.rules, "record": found.record,
-            "actor": found.actor, "at": found.at,
-            "shown": project_state is not None and shown.is_shown(found, project_state)}
+    return ruling_data(found, project_state)
+
+
+def ruling_data(ruling: states.Ruling, project_state: states.State | None) -> dict:
+    """A ruling as a record gives it: its `id`, its sentence, its pointer (`record`),
+    who recorded it (`actor`) and when, and whether it is `shown`, read against the
+    project's log `project_state`."""
+    return {"id": ruling.id, "text": ruling.text or ruling.rules, "record": ruling.record,
+            "actor": ruling.actor, "at": ruling.at,
+            "shown": project_state is not None and shown.is_shown(ruling, project_state)}
+
+
+def ruling_record(holder: str, ruling: states.Ruling, state: states.State,
+                  project_state: states.State | None) -> dict:
+    """The record of `ruling`, one of `state`, the log `holder` names: the ruling as
+    `ruling_data` gives it, and in `replaced_by` the newest ruling that replaces it
+    (`corrections.newest_replacing`) the same way, in whatever shown state it is; None
+    while nothing has replaced it."""
+    newest = corrections.newest_replacing(state, ruling.id)
+    return {"what": RULING, "holder": holder, "ruling": ruling_data(ruling, project_state),
+            "replaced_by": None if newest is None else ruling_data(newest, project_state)}
 
 
 def card(part_: Part, items: Items, found: Mapping | None = None) -> dict:
@@ -1255,5 +1273,6 @@ __all__ = ["ROUND_PART", "STAGE_PART", "END_PART", "CLOSE", "STATES", "YOURS", "
            "fixes_owed", "columns", "cell", "close_cell", "cells", "lead_stage", "lines",
            "group", "phrase", "round_value", "ordered", "acts", "ACT_WORDS", "act_words",
            "strip", "tenth_act", "EVENT_STEPS", "event_step", "events_of", "record",
-           "item_record", "answer_line", "question_entry", "ruling_of", "card", "passage", "by_of", "design_moved", "design_holds", "last_at", "rev",
+           "item_record", "answer_line", "question_entry", "ruling_of", "ruling_data",
+           "ruling_record", "card", "passage", "by_of", "design_moved", "design_holds", "last_at", "rev",
            "WHATS"]
