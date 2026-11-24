@@ -4,7 +4,7 @@ import test from "node:test";
 import {
   ACT_ID, BODY_MAX_BYTES, bodyOf, chipOf, correctionFound, DRAFT_TEXT_MAX, DRAFTS_MAX, draftOf, EACH, eachLeadWords,
   isAnswerable, kindWords, leadsKnown, messageWords, mintId, overCap, postsOf, recipientWords, noLeadWords, readBackOf, receiptLines, RULE_LINE,
-  RULE_LINE_ALONE, sendable, sendWords, Tray, trayKey,
+  RULE_LINE_ALONE, sameRuling, sendable, sendWords, Tray, trayKey,
 } from "../src/tray.ts";
 
 const UTC = {
@@ -336,29 +336,46 @@ test("a sent own-words draft reads recorded once a ruling with the message's poi
   assert.deepEqual(lines(other).slice(2), ["Ruled as C7 from comms:m9, not from this message"]);
 });
 
-test("a sent correction reads recorded once a ruling that supersedes the corrected one appears", () => {
+test("a sent correction reads recorded, by its actor, once the corrected ruling's record names what replaced it", () => {
   const sent = { ...draft("correct", { text: "the first, not the second" }, "kestrel/billing-export", "C3"), receipt: {
     act: "x", holder: "kestrel/billing-export", item: "C3", kind: "correct", state: "sent",
     command: "moxi rounds rule kestrel/billing-export Q1 --supersedes C3 --record comms:m2",
     message: { to: "atlas", at: AT, id: "m2", delivery: "delivered" } } };
   const lines = (one) => receiptLines(one, { today: TODAY, clock: UTC }).map((line) => line.text);
-  const waiting = (rows) => ({ questions: [], decisions: [], waits: [], parked: 0,
-                               not_shown: [{ project: "kestrel", through: null, rows }] });
-  const row = (more) => ({ holder: "kestrel/billing-export", id: "C4", text: "a, the first", record: "comms:m2",
-                           supersedes: "C3", at: AT, ...more });
-  assert.equal(correctionFound(sent, waiting([row({ supersedes: null }), row({ holder: "kestrel/ledger" })])), null);
+  const ruling = (more) => ({ id: "C5", text: "a, the first", record: "comms:m2", actor: "builder-1", at: AT,
+                              shown: false, ...more });
+  const record = (replaced) => ({ what: "ruling", holder: "kestrel/billing-export", ruling: ruling({ id: "C3" }),
+                                  replaced_by: replaced });
+  // Nothing replaced it yet.
+  assert.equal(correctionFound(sent, record(null)), null);
   assert.deepEqual(lines(sent).slice(2), ["With atlas, not recorded yet",
     "moxi rounds rule kestrel/billing-export Q1 --supersedes C3 --record comms:m2"]);
   assert.equal(readBackOf(sent), null);
-  const found = correctionFound(sent, waiting([row({ id: "C4", at: "2026-11-21T11:41:00Z" }),
-                                               row({ id: "C5", at: "2026-11-21T11:42:00Z" })]));
-  assert.equal(found.id, "C5");
-  const ruled = { ...sent, found };
-  assert.deepEqual(lines(ruled).slice(2), ["Recorded as C5: a, the first"]);
-  assert.equal(readBackOf(ruled), "C5");
-  const other = { ...sent, found: correctionFound(sent, waiting([row({ record: "comms:m9" })])) };
-  assert.deepEqual(lines(other).slice(2), ["Ruled as C4 from comms:m9, not from this message"]);
-  assert.equal(correctionFound(draft("words"), waiting([row({})])), null);
+  // Found whether or not it was read back already, with who recorded it.
+  for (const shown of [false, true]) {
+    const found = correctionFound(sent, record(ruling({ shown })));
+    assert.deepEqual(found, ruling({ shown }));
+    const ruled = { ...sent, found };
+    assert.deepEqual(lines(ruled).slice(2), ["Recorded as C5: a, the first", "by builder-1"]);
+    assert.equal(receiptLines(ruled, { today: TODAY, clock: UTC })[2].offer, "read-back");
+    assert.equal(readBackOf(ruled), "C5");
+  }
+  // Ruled from another pointer: said so, with the read-back.
+  const other = { ...sent, found: correctionFound(sent, record(ruling({ record: "comms:m9" }))) };
+  assert.deepEqual(lines(other).slice(2), ["Ruled as C5 from comms:m9, not from this message"]);
+  assert.equal(receiptLines(other, { today: TODAY, clock: UTC })[2].offer, "read-back");
+  // Only a correction reads it.
+  assert.equal(correctionFound(draft("words"), record(ruling({}))), null);
+});
+
+test("a found ruling is the same only when every field is", () => {
+  const one = { id: "C5", text: "a", record: "comms:m2", actor: "builder-1", at: AT, shown: false };
+  assert.equal(sameRuling(one, { ...one }), true);
+  assert.equal(sameRuling(null, null), true);
+  assert.equal(sameRuling(null, one), false);
+  for (const change of [{ id: "C6" }, { actor: null }, { shown: true }, { record: "comms:m9" }]) {
+    assert.equal(sameRuling(one, { ...one, ...change }), false, JSON.stringify(change));
+  }
 });
 
 test("an explain request's receipt says the question stays open", () => {

@@ -225,8 +225,18 @@ export interface Findings {
   note: number;
 }
 
-/** A record: a step's, a card's or a waiting item's. Each holds only its own kind's
- * keys, so every key is optional. */
+/** A ruling as a record gives it. */
+export interface RulingFields {
+  id: string;
+  text: string | null;
+  record: string | null;
+  actor: string | null;
+  at: string | null;
+  shown: boolean;
+}
+
+/** A record: a step's, a card's, a waiting item's or a ruling's. Each holds only its own
+ * kind's keys, so every key is optional. */
 export interface RecordValue {
   round?: string;
   column?: string;
@@ -287,9 +297,14 @@ export interface RecordValue {
   item?: Entry & Partial<Job> & Partial<Shown> & { project?: string | null; ruling?: string | null; chose?: string | null };
   answer?: string;
   passage?: string | null;
-  /** The ruling that put a question where it is: ruled, parked or withdrawn. */
-  ruling?: { id: string; text: string | null; record: string | null; actor: string | null; at: string | null;
-             shown: boolean } | null;
+  /** The ruling that put a question where it is: ruled, parked or withdrawn; in a ruling's
+   * record, the ruling itself. */
+  ruling?: RulingFields | null;
+  // a ruling's record
+  /** The round or project whose log holds the ruling. */
+  holder?: string;
+  /** The newest ruling that replaces it, shown or not; null while none has. */
+  replaced_by?: RulingFields | null;
   lead?: Lead | null;
 }
 
@@ -389,6 +404,9 @@ export class Feed<V> {
   offset: number | null = null;
   /** When the value was last read, on the server's clock. Null before the first read. */
   readAt: number | null = null;
+  /** How many values the feed has taken, a read's or a topic event's. Each is new, also
+   * when the board's `read_at`, which is to the second, is the same as the last one's. */
+  taken = 0;
 
   #read: () => Promise<ApiResult>;
   #parse: (data: unknown) => V | null;
@@ -447,6 +465,7 @@ export class Feed<V> {
       return;
     }
     this.value = value;
+    this.taken += 1;
     this.readAt = this.now();
     this.#onChange();
   }
@@ -461,6 +480,7 @@ export class Feed<V> {
     const now = data?.now;
     if (value !== null && typeof now === "number" && Number.isFinite(now)) {
       this.value = value;
+      this.taken += 1;
       this.offset = now - at;
       this.readAt = now;
       this.failure = null;
