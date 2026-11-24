@@ -3,8 +3,8 @@ import test from "node:test";
 
 import {
   LOCKED, NOTHING_HERE, blocksOf, changedCount, controlOf, countOf, defaultsOf, drawnKeys, joined, labelOf, linesOf,
-  listEntries, markLine, moduleOrder, moreWords, paneKeys, paneState, readFailed, rowOf, splitMore, terminalLine,
-  totalChanged, unreadableWords, valueWords,
+  listEntries, markLine, moduleOrder, moreWords, ownKeys, paneKeys, paneState, readFailed, readKeys, readonlyKey, rowOf,
+  splitMore, tableFileWords, tablesOf, terminalLine, totalChanged, unreadableWords, valueWords,
 } from "../src/settings-model.ts";
 
 /** A key as `GET /api/settings` gives it: the value and default as JSON. */
@@ -318,4 +318,97 @@ test("a read with no usable answer says why in today's words", () => {
   assert.equal(readFailed(403, { error: "signed out" }), "This browser is signed out.");
   assert.equal(readFailed(500, { error: "the snapshot is broken" }), "the snapshot is broken");
   assert.equal(readFailed(502, "bad gateway"), "The shell answered 502 for the settings.");
+});
+
+// --- a table a module keeps in a file of its own ---------------------------------------------
+
+const APPLIES = "Applies to sessions launched after this. Running sessions keep their own.";
+const TABLE = { table_title: "Launch defaults", table_line: "Every launch starts from these.",
+                table_file: "~/.config/moxi/launcher/presets.toml", mark: APPLIES, warning: null, refused: null,
+                clear_only: false };
+const row = (name, type, value, fallback, extra = {}) => key(`defaults.${name}`, type, value, fallback,
+                                                              { ...TABLE, label: name, ...extra });
+const ROWS = [
+  row("typo_row", "int", 3, null, { group: "needs a fix", source: "file", clear_only: true,
+                                    refused: "typo_row is not a launcher row; moxi launcher catalog lists the rows." }),
+  row("permission_mode", "enum", "plan", "default", { group: "access", source: "file",
+                                                      values: ["default", "plan", "acceptEdits"] }),
+  row("recycle_at_limit", "enum", "relaunch", "compact", { group: "lifecycle", source: "file", values: ["off", "compact"],
+                                                           warning: "A launch with no preset is refused." }),
+];
+const OWN = [key("ready.wait_s", "int", 60, 60, { label: "Ready", common: true }),
+             key("runs.keep_days", "int", 14, 30, { label: "Keep run files for", source: "file" })];
+const ERROR_ITEM = { name: "defaults", table_title: "Launch defaults", table_line: "Every launch starts from these.",
+                     table_file: "~/presets.toml", table_error: "is not valid TOML", table_fix: "correct the file" };
+
+test("a module's table keys stay out of More, in one block per table under its title, line and file", () => {
+  const keys = paneKeys("launcher", [...OWN, ...ROWS]);
+  assert.deepEqual(names(ownKeys(keys)), ["ready.wait_s", "runs.keep_days"]);
+  const { first, more } = splitMore(ownKeys(keys));
+  assert.deepEqual([names(first), names(more)], [["ready.wait_s"], ["runs.keep_days"]]);
+  const [table, ...others] = tablesOf([...OWN, ...ROWS], keys);
+  assert.equal(others.length, 0);
+  assert.deepEqual([table.title, table.line, table.error], ["Launch defaults", "Every launch starts from these.", null]);
+  assert.deepEqual(names(table.keys), ROWS.map((k) => k.name));
+  assert.deepEqual(blocksOf(table.keys).map((block) => block.group), ["needs a fix", "access", "lifecycle"]);
+  assert.equal(tableFileWords(table), "Launch defaults are kept in ~/.config/moxi/launcher/presets.toml");
+  assert.deepEqual(tablesOf(OWN, OWN), []);
+});
+
+test("a table key's mark is its applies words, as a sentence", () => {
+  assert.equal(markLine(APPLIES), APPLIES);
+  assert.deepEqual(linesOf({ ...ROWS[1], line: "Who approves a tool." }), ["Who approves a tool.", APPLIES]);
+});
+
+test("refused and warning lines ride on the row; a clear-only key is its value as a word with Reset alone", () => {
+  const [typo, mode, recycle] = ROWS.map(rowOf);
+  assert.equal(typo.refused, ROWS[0].refused);
+  assert.equal(typo.warning, null);
+  assert.deepEqual(typo.control, { kind: "word", text: "3" });
+  assert.deepEqual(typo.defaults, { words: "not set", reset: true });
+  assert.deepEqual([mode.refused, mode.warning], [null, null]);
+  assert.equal(recycle.warning, "A launch with no preset is refused.");
+  // Locked, a clear-only key has no Reset either.
+  assert.equal(defaultsOf({ ...ROWS[0], locked: true }).reset, false);
+});
+
+test("an enum value its list doesn't offer stays in the list as the chosen one", () => {
+  const control = controlOf(ROWS[2]);
+  assert.equal(control.selected, "relaunch");
+  assert.deepEqual(control.options.map((option) => option.value), ["off", "compact", "relaunch"]);
+  // A value the list offers adds nothing.
+  assert.deepEqual(controlOf(ROWS[1]).options.map((option) => option.value), ["default", "plan", "acceptEdits"]);
+});
+
+test("a text key holding another kind of value shows its spelling", () => {
+  const flag = row("remote_control", "string", true, null, { value: "true" });
+  assert.deepEqual(controlOf(flag), { kind: "text", text: "true", path: false });
+});
+
+test("a table that can't be read is its error in its block, never a row or a count", () => {
+  const keys = [...OWN, ERROR_ITEM];
+  assert.deepEqual(names(drawnKeys("launcher", keys, false)), ["ready.wait_s", "runs.keep_days"]);
+  const [table] = tablesOf(keys, drawnKeys("launcher", keys, false));
+  assert.deepEqual([table.title, table.error, table.fix, table.keys], ["Launch defaults", "is not valid TOML",
+                                                                       "correct the file", []]);
+  assert.equal(changedCount(section("launcher", keys), false), 1);
+  assert.equal(paneState(section("launcher", [ERROR_ITEM])), "rows");
+});
+
+test("a module whose own file can't be read keeps its tables' keys read, counted and editable", () => {
+  const broken = section("launcher", ROWS, { error: "the file is not valid TOML", fix: "correct it", readonly: true,
+                                             count: ROWS.length });
+  assert.deepEqual(names(readKeys(broken)), ROWS.map((k) => k.name));
+  assert.equal(paneState(broken), "rows");
+  assert.equal(readonlyKey(broken, ROWS[1]), false);
+  assert.equal(readonlyKey(broken, OWN[0]), true);
+  assert.equal(readonlyKey(section("launcher", OWN), OWN[0]), false);
+  // Its own keys, were any held, are not read; its table keys count.
+  assert.deepEqual(names(readKeys({ ...broken, keys: [...OWN, ...ROWS] })), ROWS.map((k) => k.name));
+  assert.equal(changedCount(broken, false), 3);
+  assert.equal(totalChanged(["launcher"], new Map([["launcher", broken]]), false), 3);
+  assert.deepEqual(listEntries(["launcher"], new Map([["launcher", broken]]), false)[1],
+                   { module: "launcher", changed: 3, unreadable: true });
+  // With neither, the pane says it can't be read.
+  assert.equal(paneState({ ...broken, keys: [] }), "unreadable");
 });

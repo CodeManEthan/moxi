@@ -734,3 +734,100 @@ def test_a_module_the_listing_does_not_hold_gets_no_section_and_runs_nothing(
         status, data = _request(shell.shell.listeners.port, "GET",
                                 "/m/ui/api/settings?module=moxi", shell.browser)
         assert [s["module"] for s in data["sections"]] == ["moxi"] and read == ["moxi"]
+
+
+# --- a table a module keeps in a file of its own ---------------------------------------------
+
+APPLIES = "Applies to sessions launched after this. Running sessions keep their own."
+
+
+def _table_env(tmp_path):
+    return {"HOME": str(tmp_path), "XDG_CONFIG_HOME": str(tmp_path / ".config")}
+
+
+def _row(name, type_, value, default=None, *, env=None, **extra):
+    """A table key as `show --json` prints it, its file where `env` places the module's
+    config folder."""
+    file = Layout("demo").config_dir(env) / "rows.toml"
+    fields = {"table_title": "Launch defaults", "table_line": "Every launch starts from these.",
+              "table_file": str(file), "applies": APPLIES, "warning": None, "refused": None,
+              "clear_only": False}
+    return _key(f"defaults.{name}", type_, value, default, source="file", **{**fields, **extra})
+
+
+def _table_error(env=None):
+    return {"name": "defaults", "table_title": "Launch defaults",
+            "table_line": "Every launch starts from these.",
+            "table_file": str(Layout("demo").config_dir(env) / "rows.toml"),
+            "table_error": "is not valid TOML", "table_fix": "correct the file"}
+
+
+def test_a_table_key_carries_its_table_fields_its_file_as_a_tilde_and_applies_as_its_mark(
+        tmp_path):
+    from moxi_ui.loopback.routes import project
+
+    env = _table_env(tmp_path)
+    item = _row("mode", "enum", "relaunch", "compact", env=env, values=["off", "compact"],
+                warning="A launch with no preset is refused.")
+    key = settings.descriptor("demo", item, env=env)
+    file = str(Layout("demo").config_dir(env) / "rows.toml")
+    assert key["table_file"] == "~" + file[len(str(tmp_path)):]
+    assert (key["table_title"], key["table_line"]) == ("Launch defaults",
+                                                       "Every launch starts from these.")
+    assert key["mark"] == APPLIES
+    assert (key["warning"], key["refused"], key["clear_only"]) == (
+        "A launch with no preset is refused.", None, False)
+    assert key["value"] == "relaunch" and key["values"] == ["off", "compact"]
+    assert key["table_error"] is None and key["changed"]
+    project(key, settings.KEY_SHAPE, strict=True)
+    typo = settings.descriptor("demo", _row("typo", "int", 3, env=env, clear_only=True,
+                                            refused="typo is not a row."), env=env)
+    assert (typo["clear_only"], typo["refused"], typo["changed"]) == (True, "typo is not a row.",
+                                                                      True)
+    # A key that is no table's carries none of it.
+    plain = settings.descriptor("demo", _key("count", "int", 3, 1))
+    assert [plain[f] for f in ("table_title", "table_file", "warning", "refused",
+                               "clear_only")] == [None, None, None, None, False]
+
+
+def test_a_table_that_cant_be_read_is_no_key_drawn_or_counted(tmp_path):
+    from moxi_ui.loopback.routes import project
+
+    env = _table_env(tmp_path)
+    run = Run(code=1, stdout=json.dumps([_key("count", "int", 3, 1), _table_error(env)]).encode(),
+              schema=None)
+    section = settings.read_section("demo", cwd="/rt", env=env, run=run)
+    assert section["error"] is None and section["count"] == 1
+    item = section["keys"][1]
+    assert (item["table_error"], item["table_fix"]) == ("is not valid TOML", "correct the file")
+    assert item["table_file"].startswith("~") and not item["changed"]
+    assert not settings.is_drawn("demo", item)
+    project(item, settings.KEY_SHAPE, strict=True)
+    assert settings.find_key(section["keys"], "defaults") is None
+
+
+def test_an_unreadable_config_file_keeps_its_tables_keys_read_and_written():
+    rows = [_row("mode", "enum", "a", "b", values=["a", "b"])]
+    broken = {"error": "bad TOML at line 2", "fix": "fix it", "keys": rows}
+    run = Run(code=1, stdout=json.dumps(broken).encode(), schema=None)
+    section = settings.read_section("demo", cwd="/rt", env=None, run=run)
+    assert (section["error"], section["fix"], section["readonly"]) == ("bad TOML at line 2",
+                                                                       "fix it", True)
+    assert [key["name"] for key in section["keys"]] == ["defaults.mode"]
+    assert section["count"] == 1
+    # The set and unset routes write a table key, and refuse the module's own with why.
+    write = Run(code=1, stdout=json.dumps(broken).encode(), schema=None)
+    settings.change("demo", "defaults.mode", value="b", cwd="/rt", env=None, run=write)
+    assert write.calls[-1][0][-3:] == ["demo", "defaults.mode", "b"]
+    with pytest.raises(Refused) as refused:
+        settings.change("demo", "count", value="1", cwd="/rt", env=None, run=write)
+    assert refused.value.text == "bad TOML at line 2; fix: fix it"
+    # An error object with no keys reads as before.
+    bare = Run(code=1, stdout=json.dumps({"error": "bad", "fix": None}).encode(), schema=None)
+    assert settings.read_schema("demo", cwd="/rt", env=None, run=bare).keys is None
+
+
+def test_an_empty_path_value_reads_as_none_like_an_empty_default():
+    assert not settings.is_changed(_key("dir", "path", "", ""))
+    assert not settings.is_changed(_key("dir", "path", None, ""))
+    assert settings.is_changed(_key("dir", "path", "/a", ""))
