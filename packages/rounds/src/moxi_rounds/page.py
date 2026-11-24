@@ -7,7 +7,8 @@
                       item's or one round's card, from the last gather; `gone` is true,
                       and `record` null, for a round no longer open or an item no longer
                       waiting. A question is answered in every state, with the ruling
-                      that put it there
+                      that put it there; a ruling (`what=ruling`) in every shown
+                      state, with the newest ruling that replaces it
     GET /api/events   the stream; its one topic, `rounds`, is the board without `now`, so
                       time passing alone publishes nothing
     GET /api/agents   the names comms gives as bound, for the To picker; none, with
@@ -185,6 +186,12 @@ EVENT = lb.Out("table", items={"n": lb.Out("int", nullable=True), "at": _s(), "b
 FINDINGS = lb.Out("table", items={"blocker": INT, "major": INT, "minor": INT,
                                   "note": INT})
 
+#: A ruling as a record gives it: its sentence, its pointer, who recorded it and when, and
+#: whether it is shown.
+RULING = lb.Out("table", nullable=True, items={
+    "id": TEXT, "text": _s("scrub"), "record": _s("scrub"), "actor": _s(), "at": _s(),
+    "shown": BOOL})
+
 #: A step's record: its head (round, column, stage, the cell's state and word) and each
 #: section, empty or null when it has nothing. Keys of a card and of a waiting item's
 #: record follow; a record holds only its own kind's.
@@ -258,9 +265,12 @@ RECORD = lb.Out("table", nullable=True, items={
         "chose": _s(), "holder": _s(), "round": _s(), "id": TEXT}),
     "answer": lb.Out("string", mark="scrub"),
     "passage": _s("scrub"),
-    "ruling": lb.Out("table", nullable=True, items={
-        "id": TEXT, "text": _s("scrub"), "record": _s("scrub"), "actor": _s(), "at": _s(),
-        "shown": BOOL}),
+    "ruling": RULING,
+    # a ruling's record, read from its log whatever its shown state: the log that holds
+    # it (`holder`), the ruling (`ruling`), and the newest ruling that replaces it
+    # (`replaced_by`, null while none has)
+    "holder": TEXT,
+    "replaced_by": RULING,
 })
 
 #: The longest value the record route's query takes, in characters.

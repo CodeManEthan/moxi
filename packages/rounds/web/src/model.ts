@@ -529,6 +529,12 @@ export function recordQuery(address: Address): string | null {
   }
 }
 
+/** The record route's query for one ruling of a round or project, read whether or not it
+ * was shown, with the newest ruling that replaces it. */
+export function rulingQuery(holder: string, id: string): string {
+  return `api/record?what=ruling&round=${enc(holder)}&id=${enc(id)}`;
+}
+
 const ITEM_NOUNS: Record<ItemKind, string> = {
   question: "Question", decision: "Decision", wait: "Job", shown: "Ruling",
 };
