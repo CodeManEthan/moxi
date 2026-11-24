@@ -10,6 +10,7 @@ import io
 import json
 import os
 import stat
+import sys
 
 import pytest
 
@@ -48,7 +49,8 @@ def test_the_exact_file(tmp_path):
 
 
 def test_every_string_is_quoted_so_a_path_cant_change_the_parse(tmp_path):
-    creds = tmp_path / "a #b: c\\d 'e.json"
+    # Windows forbids `:` in a file name; there the folder above brings the drive's `:`.
+    creds = tmp_path / ("a #b: c\\d 'e.json" if sys.platform != "win32" else "a #b c d 'e.json")
     creds.write_text("{}")
     text = _render(tmp_path, [("a.example.com", 8461)], creds)
     values = {}

@@ -78,8 +78,8 @@ def test_a_missing_cli_is_the_first_and_only_problem(tmp_path, monkeypatch):
 
 
 def test_the_binary_setting_wins_over_path(tailscale, config_file, tmp_path):
-    config_file("tunnel", f"[tailscale]\nbinary = '{tailscale.bin / 'tailscale'}'\n")
-    assert ts.find_binary() == str(tailscale.bin / "tailscale")
+    config_file("tunnel", f"[tailscale]\nbinary = '{tailscale.script}'\n")
+    assert ts.find_binary() == str(tailscale.script)
     config_file("tunnel", f"[tailscale]\nbinary = '{tmp_path / 'nope'}'\n")
     assert ts.find_binary() is None
     assert "tailscale.binary setting" in ts.Tailscale().ready("own-devices")[0].reason

@@ -154,25 +154,28 @@ def units(monkeypatch):
 
 #: The Cloudflare tunnel id the fixture sets.
 TUNNEL_ID = "6ff42ae2-765d-4adf-8112-31c55c1551ef"
+#: A credentials file name that needs quoting: `#`, `: ` and a backslash on POSIX. Windows
+#: forbids `:` in a file name and reads a backslash as a separator, so there the name keeps
+#: `#` and spaces, and the folder above it brings the drive's `:` and the backslashes.
+CREDS_NAME = "a #b: c\\d.json" if sys.platform != "win32" else "a #b c d.json"
 
 
 @pytest.fixture
 def cf(tmp_path, monkeypatch, config_file):
     """Cloudflare set up: a tunnel id, a credentials file the user owns (mode 0000, so
-    opening it would fail) at a path holding `#`, `: ` and a backslash, and a fake
+    opening it would fail) at a path that needs quoting (`CREDS_NAME`), and a fake
     `cloudflared` on PATH. Returns the credentials path."""
     import os
-    import stat
 
-    creds = tmp_path / "cred dir" / "a #b: c\\d.json"
+    from moxi_dev.testing import console_script
+
+    creds = tmp_path / "cred dir" / CREDS_NAME
     creds.parent.mkdir()
     creds.write_text("{}")
     creds.chmod(0)
     bindir = tmp_path / "cfbin"
     bindir.mkdir()
-    binary = bindir / "cloudflared"
-    binary.write_text("#!/bin/sh\nexit 0\n")
-    binary.chmod(stat.S_IRWXU)
+    console_script(bindir, "cloudflared")
     monkeypatch.setenv("PATH", f"{bindir}{os.pathsep}{os.environ.get('PATH', '')}")
     config_file("tunnel", f"""
         [cloudflare]

@@ -14,10 +14,13 @@ never answer. Every call is appended to `calls`.
 
 from __future__ import annotations
 
+import getpass
 import json
 import os
 import sys
 from pathlib import Path
+
+from moxi_dev.testing import console_script
 
 SCRIPT = r'''
 import json, os, sys, time
@@ -103,6 +106,9 @@ def status(host: str = HOST, **over) -> dict:
 
 
 def this_user() -> str:
+    """The account's name, which the fake gives as its operator user."""
+    if sys.platform == "win32":
+        return getpass.getuser()
     import pwd
 
     return pwd.getpwuid(os.geteuid()).pw_name
@@ -115,9 +121,8 @@ class FakeTailscale:
         self.bin = bin_dir
         self.path = bin_dir / "tailscale-state.json"
         bin_dir.mkdir(parents=True, exist_ok=True)
-        script = bin_dir / "tailscale"
-        script.write_text(f"#!{sys.executable} -IS\n" + SCRIPT)
-        script.chmod(0o755)
+        #: The stand-in's path: `tailscale` on POSIX, `tailscale.cmd` on Windows.
+        self.script = console_script(bin_dir, "tailscale", SCRIPT)
         self.save({"status": status(), "prefs": {"OperatorUser": this_user(),
                                                  "ShieldsUp": False, "Hostname": "box"},
                    "serve": {"TCP": {}, "Web": {}, "AllowFunnel": {}}, "fail": {},

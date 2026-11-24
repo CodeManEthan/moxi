@@ -370,9 +370,9 @@ def test_the_cloudflare_row_fails_when_its_setup_is_gone(alpha, cf, tailscale, y
 def test_off_linux_the_cli_is_found_in_the_platforms_place_and_no_operator_is_asked(
         alpha, tailscale, yes, monkeypatch, tmp_path, platform):
     acts.add("alpha/gateway", ask=yes)
-    app = tmp_path / "app" / "Tailscale"
+    app = tmp_path / "app" / f"Tailscale{tailscale.script.suffix}"
     app.parent.mkdir()
-    shutil.copy(tailscale.bin / "tailscale", app)
+    shutil.copy(tailscale.script, app)
     tailscale.edit(lambda st: st.update(calls=[]))
     shutil.copy(tailscale.path, app.parent / tailscale.path.name)
     monkeypatch.setenv("PATH", "/nowhere")
