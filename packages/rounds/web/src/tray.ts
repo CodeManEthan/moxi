@@ -369,6 +369,17 @@ export class Tray {
   }
 }
 
+/** Whether an item's popover offers the form that answers it. A question offers it by
+ * its record's state, whatever the tray holds for it: an open question its answer form,
+ * a parked one `Unpark`. It waits only while its record is older than the last answer
+ * the page took for it (`fresh` false), since that record may not show the answer yet.
+ * Any other item offers it while no answer of its that did something stands in the tray. */
+export function isAnswerable(kind: string, state: string, row: Pick<Draft, "receipt"> | null,
+                             { fresh }: { fresh: boolean }): boolean {
+  if (kind === "question") return fresh && (state === "open" || state === "parked");
+  return !(row?.receipt && !["refused", "kept"].includes(row.receipt.state));
+}
+
 /** A line of a receipt: its text, in mono for a pointer or a command, and the act it
  * offers, if any. */
 export interface ReceiptLine {

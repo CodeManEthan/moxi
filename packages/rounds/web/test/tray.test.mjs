@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
-  ACT_ID, bodyOf, chipOf, correctionFound, draftOf, EACH, kindWords, mintId, noLeadWords, readBackOf, receiptLines, RULE_LINE,
+  ACT_ID, bodyOf, chipOf, correctionFound, draftOf, EACH, isAnswerable, kindWords, mintId, noLeadWords, readBackOf, receiptLines, RULE_LINE,
   RULE_LINE_ALONE, sendable, sendWords, Tray, trayKey,
 } from "../src/tray.ts";
 
@@ -172,6 +172,40 @@ test("Send again gives a not-told draft a tell id, and its taken message moves i
   assert.equal(tray.drafts.length, 0);
   assert.equal(tray.sent[0].receipt.record, "page:rounds/x@t");
   assert.equal(tray.sent[0].receipt.message.id, "m2");
+});
+
+test("a question the page parked offers Unpark, and one open again its form, whatever the tray holds", () => {
+  const tray = new Tray(memory(), "k");
+  const park = draft("park");
+  tray.add(park);
+  const base = { act: park.act, holder: park.holder, item: "Q1", kind: "park" };
+  tray.take([{ ...base, state: "recorded-not-told", ruling: { id: "C9", text: "park:Q1" }, not_told: "down" }]);
+  const row = tray.of(park.holder, "Q1");
+  assert.equal(row.receipt.state, "recorded-not-told");
+  // Read before the park shows, the record still says open: no form until it is read again.
+  assert.equal(isAnswerable("question", "open", row, { fresh: false }), false);
+  assert.equal(isAnswerable("question", "parked", row, { fresh: true }), true);
+  const unpark = draft("unpark");
+  tray.add(unpark);
+  tray.take([{ ...base, act: unpark.act, kind: "unpark", state: "recorded", ruling: { id: "C10", text: "revoke:C9" } }]);
+  assert.equal(tray.of(park.holder, "Q1").act, park.act);
+  assert.equal(isAnswerable("question", "open", tray.of(park.holder, "Q1"), { fresh: true }), true);
+  assert.equal(isAnswerable("question", "open", tray.sent[0], { fresh: true }), true);
+  // Ruled, it offers nothing; a question with no row offers its form.
+  assert.equal(isAnswerable("question", "ruled", tray.sent[0], { fresh: true }), false);
+  assert.equal(isAnswerable("question", "open", null, { fresh: true }), true);
+});
+
+test("an item other than a question offers its form until an answer of its did something", () => {
+  const accept = draft("accept", {}, "kestrel/billing-export", "B1.M1");
+  const as = (state) => ({ ...accept, receipt: { act: accept.act, holder: accept.holder, item: "B1.M1", kind: "accept",
+                                                  state } });
+  assert.equal(isAnswerable("decision", "open", null, { fresh: true }), true);
+  assert.equal(isAnswerable("decision", "open", accept, { fresh: true }), true);
+  for (const state of ["refused", "kept"]) assert.equal(isAnswerable("decision", "open", as(state), { fresh: true }), true);
+  for (const state of ["recorded", "recorded-not-told"]) {
+    assert.equal(isAnswerable("decision", "open", as(state), { fresh: true }), false);
+  }
 });
 
 test("a page-recorded act's receipt reads its record, its telling and what rounds holds", () => {

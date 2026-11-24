@@ -57,8 +57,8 @@ import {
 } from "./model.ts";
 import type { Address, Context, DropFacts, Filter, GroupView, Held, Item, ItemKind, ItemView, Piece, Section } from "./model.ts";
 import {
-  bodyOf, chipOf, correctionFound, draftOf, EACH, isPageKind, kindWords, mintId, readBackOf, receiptLines, RULE_LINE,
-  RULE_LINE_ALONE, sendable, sendWords, Tray, trayKey,
+  bodyOf, chipOf, correctionFound, draftOf, EACH, isAnswerable, isPageKind, kindWords, mintId, readBackOf, receiptLines,
+  RULE_LINE, RULE_LINE_ALONE, sendable, sendWords, Tray, trayKey,
 } from "./tray.ts";
 import type { Draft, Kind, Reach, Receipt, ReceiptLine, Store } from "./tray.ts";
 
@@ -298,7 +298,12 @@ export class RoundsPage extends LitElement {
   #sessions: { key: string; cwd: string | null }[] = [];
   #address: Address | null = null;
   #anchor: Anchor = { kind: "board" };
-  #record: { route: string; read: RecordRead | null; rev: string | null } | null = null;
+  /** The open record: its route, what was read, its round's `rev` then, and `#acts` when
+   * its read began. */
+  #record: { route: string; read: RecordRead | null; rev: string | null; seen: number } | null = null;
+  /** How many times a send answered the open item; a record read before the last of them
+   * may not show that answer yet. */
+  #acts = 0;
   #sequence: Item[] = [];
   #held: Held | null = null;
   #filter: Filter = "all";
@@ -525,9 +530,12 @@ export class RoundsPage extends LitElement {
     const route = this.#recordRoute(address);
     if (route === null) return;
     const rev = this.#feed?.value ? this.#roundOf(address, this.#feed.value)?.rev ?? null : null;
-    this.#record = { route, read: this.#record?.route === route ? this.#record.read : null, rev };
+    const seen = this.#acts;
+    const before = this.#record?.route === route ? this.#record : null;
+    this.#record = { route, read: before?.read ?? null, rev, seen: before?.seen ?? seen };
     const read = await readRecord(() => api(MODULE, route));
-    if (this.#record?.route !== route) return;
+    // A read begun before a later one that has landed already is older than what shows.
+    if (this.#record?.route !== route || (this.#record.read !== null && this.#record.seen > seen)) return;
     if (read.kind === "gone" && this.#record?.read?.kind === "record" && this.#trayHolds(address)) {
       // An item answered from the page keeps its popover, on the record it had, for the receipt.
       this.#record = { ...this.#record, rev };
@@ -541,7 +549,7 @@ export class RoundsPage extends LitElement {
       this.#close({ focus: false });
       return;
     }
-    this.#record = { route, read, rev };
+    this.#record = { route, read, rev, seen };
     this.#placed = false;
     this.requestUpdate();
   }
@@ -1136,9 +1144,17 @@ export class RoundsPage extends LitElement {
     return this.#comms ?? installed("comms");
   }
 
-  /** Whether the open popover is an item's with a form to answer it. */
+  /** Whether the open popover is an item's with a form to answer it; none at phone width. */
   #answering(): boolean {
-    return this.#itemOf(this.#address) !== null && this.#record?.read?.kind === "record";
+    const item = this.#itemOf(this.#address);
+    const read = this.#record?.read;
+    return !this.#phone && item !== null && read?.kind === "record" && this.#answerable(item, read.record);
+  }
+
+  /** Whether the item's popover offers its form now (`isAnswerable`). */
+  #answerable(item: ItemRef, record: RecordValue): boolean {
+    return isAnswerable(item.kind, record.item?.state ?? "open", this.#tray.of(item.holder, item.id),
+                        { fresh: this.#record?.seen === this.#acts });
   }
 
   /** Enter adds the answer to the tray; an option's key, or 1 to 4, picks it. */
@@ -1208,6 +1224,7 @@ export class RoundsPage extends LitElement {
       const receipts = answer.data?.receipts;
       if (answer.status === 200 && Array.isArray(receipts)) {
         this.#tray.take(receipts, Array.isArray(answer.data.messages) ? answer.data.messages : []);
+        this.#readAnswered(going);
       } else {
         this.#sendNote = `Not sent: ${failureWhy(answer.status)}. The answers stay in the tray; Send tries them again.`;
       }
@@ -1215,6 +1232,15 @@ export class RoundsPage extends LitElement {
       this.#sending = false;
       this.requestUpdate();
     }
+  }
+
+  /** When a send answered the open item, reads its record again, and offers its form
+   * only from that read on. */
+  #readAnswered(sent: readonly Draft[]): void {
+    const item = this.#itemOf(this.#address);
+    if (item === null || !sent.some((one) => one.holder === item.holder && one.item === item.id)) return;
+    this.#acts += 1;
+    void this.#readRecord(this.#address!);
   }
 
   async #readAgents(): Promise<void> {
@@ -1362,9 +1388,8 @@ export class RoundsPage extends LitElement {
     const reach = this.#reach(value);
     const comms = reach.comms;
     const row = this.#tray.of(item.holder, item.id);
-    const done = row?.receipt && !["refused", "kept"].includes(row.receipt.state);
     const state = record.item?.state ?? "open";
-    const answerable = !done && (item.kind !== "question" || state === "open" || state === "parked");
+    const answerable = this.#answerable(item, record);
     const choose = (kind: Kind, label: string) => html`<button type="button" class="btn"
         aria-pressed=${this.#form.choice?.kind === kind ? "true" : "false"}
         @click=${() => { this.#form = { ...this.#form, choice: { kind, chose: null } }; this.requestUpdate(); }}>${label}</button>`;

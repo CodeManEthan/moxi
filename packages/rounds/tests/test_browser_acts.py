@@ -1,9 +1,12 @@
 """Acting from rounds' page in a browser, through a real shell whose page server finds
 comms installed with no daemon of its own to send through: the page records its own
 kinds and reads `recorded, not told`, and an answer in the operator's own words, which
-only a message carries, stays a draft with comms' words. One test per act: a pick and
-an own-words answer, each with its receipt; a read-back from a pick's receipt; and a
-parked question opened from the foot and unparked."""
+only a message carries, stays a draft with comms' words. One test per act: a pick with
+its receipt, and an own-words answer kept as a draft with comms' words (the sent receipt,
+which needs a message comms takes, is the in-process and Node tests'); a read-back from a
+pick's receipt; a parked question opened from the foot and unparked; and a question the
+page parked itself, unparked from its popover while the park's row stands, then
+answered."""
 
 from __future__ import annotations
 
@@ -12,7 +15,7 @@ from playwright.sync_api import expect
 
 import page_kit
 from moxi import modules
-from moxi_rounds import asking, opening, ruling
+from moxi_rounds import asking, listing, opening, ruling
 
 pytestmark = pytest.mark.browser
 
@@ -27,7 +30,7 @@ def ui_shell_options():
 
 @pytest.fixture(scope="module")
 def shell(ui_shell):
-    """The shell, with one round of four questions under its home, the fourth parked."""
+    """The shell, with one round of five questions under its home, the fourth parked."""
     with page_kit.under(ui_shell):
         notes = page_kit.shell_home(ui_shell) / "notes"
         page_kit.add_project("kestrel", notes)
@@ -41,6 +44,8 @@ def shell(ui_shell):
         asking.ask(ROUND, "Which header does the export keep?", by="scout", origin=page_kit.PTR,
                    options=("short=the short header", "long=the long header"))
         asking.ask(ROUND, "When does the archive go?", by="scout", origin=page_kit.PTR)
+        asking.ask(ROUND, "Which archive does the export use?", by="scout", origin=page_kit.PTR,
+                   options=("cold=the cold archive", "warm=the warm archive"))
         ruling.rule(ROUND, item="park:Q4", record=page_kit.PTR, by="lead")
     return ui_shell
 
@@ -56,7 +61,14 @@ def tray(panel):
     return panel.get_by_role("region", name="Your answers")
 
 
-def test_a_pick_and_an_own_words_answer_each_read_their_receipt(shell, ui_page, ui_press):
+def open_in_rounds(shell) -> list[str]:
+    """The ids of the round's questions rounds reads as open."""
+    with page_kit.under(shell):
+        found = dict(listing.waiting("kestrel", read_git=False).found)
+    return [one.id for one in found.get("open", ()) if one.holder == ROUND]
+
+
+def test_a_pick_reads_its_receipt_and_refused_own_words_stay_a_draft(shell, ui_page, ui_press):
     panel = open_panel(ui_page, f"question/{ROUND}/Q1")
     pop = panel.locator(".pop")
     ui_press(pop.get_by_role("button", name="old the old name"))
@@ -117,6 +129,36 @@ def test_a_parked_question_opens_from_the_foot_and_is_unparked(shell, ui_page, u
     ui_page.keyboard.press("Escape")
     ui_press(answers.get_by_role("button", name="Send", exact=True))
     expect(answers.locator(".trow", has_text="Unpark")).to_contain_text("Q4 unparked: open again")
-    # Open again, the question waits on the operator once more.
-    expect(panel.locator(".waiting")).to_contain_text("question")
+    # Open again, the question waits on the operator once more: rounds reads it open, and
+    # the waiting line counts what rounds reads.
+    open_now = open_in_rounds(shell)
+    assert "Q4" in open_now
+    expect(panel.locator(".waiting .counts .n").first).to_have_text(str(len(open_now)))
     expect(panel.get_by_role("button", name="1 parked question")).to_have_count(0)
+
+
+def test_a_question_the_page_parked_is_unparked_and_answered_from_its_popover(shell, ui_page, ui_press):
+    panel = open_panel(ui_page, f"question/{ROUND}/Q5")
+    pop = panel.locator(".pop")
+    ui_press(pop.get_by_role("button", name="Park"))
+    answers = tray(panel)
+    park = answers.locator(".trow", has_text=f"{ROUND} Q5")
+    ui_page.keyboard.press("Escape")
+    ui_press(park.get_by_role("button", name="Send now to atlas"))
+    # comms refuses the message, so the park's row stays in the tray, recorded and not told.
+    expect(park).to_contain_text("Not told: ")
+    expect(park).to_contain_text("recorded, not told")
+
+    panel = open_panel(ui_page, f"question/{ROUND}/Q5")
+    pop = panel.locator(".pop")
+    expect(pop).to_contain_text("Parked by C")
+    expect(pop).to_contain_text("Q5 parked")
+    ui_press(pop.get_by_role("button", name="Unpark"))
+    ui_press(pop.get_by_role("button", name="Send now to atlas"))
+    expect(pop).to_contain_text("Q5 unparked: open again")
+    # Open again, it offers its answer form in the same popover, with the rows still there.
+    ui_press(pop.get_by_role("button", name="warm the warm archive"))
+    expect(pop.get_by_role("textbox", name="Or answer in your own words")).to_be_visible()
+    ui_press(pop.get_by_role("button", name="Send now to atlas"))
+    expect(pop).to_contain_text("Recorded as C")
+    expect(pop.get_by_role("button", name="Add to answers")).to_have_count(0)
