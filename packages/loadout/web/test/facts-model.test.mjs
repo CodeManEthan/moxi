@@ -96,6 +96,17 @@ test("a path section at the root alone: its items are the row's", () => {
   assert.deepEqual(texts(report(over)), ["hook fmt", "MCP server docs"]);
 });
 
+test("a path section under the root that projects maps to the project: its items are the row's too", () => {
+  const web = section(`${HOME}/code/atlas-api/web`, "path", `${HOME}/code/atlas-api/web`, "atlas-api");
+  const over = { sections: [section("user", "user"), web, section("atlas-api")],
+                 items: [item("skill", "by-key", "atlas-api"), item("skill", "lint-web", web.name)] };
+  assert.deepEqual(projectSections(ATLAS, listing(over)), ["atlas-api", web.name]);
+  assert.deepEqual(texts(report(over)), ["skill by-key", "skill lint-web"]);
+  // Not mapped (no projects): only the key section's.
+  const unmapped = { ...over, sections: [section("user", "user"), { ...web, project: null }, section("atlas-api")] };
+  assert.deepEqual(texts(report(unmapped)), ["skill by-key"]);
+});
+
 test("a key section and a path section at the root: both count, the key section's items first", () => {
   const at = section(`${HOME}/code/atlas-api`, "path", `${HOME}/code/atlas-api`);
   const over = { sections: [at, section("atlas-api")],

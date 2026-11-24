@@ -732,7 +732,8 @@ export class LoadoutPage extends LitElement {
     </div>`;
   }
 
-  /** The project's own section, `Yours too`, then the skills modules took over. */
+  /** The project's own sections, `Yours too`, then the skills modules took over. The first
+   * draws the harnesses' head row and the link to the project. */
   #filteredItems(filtered: FilteredView, ctx: Ctx) {
     const harnesses = ctx.view.harnesses;
     const own = filtered.own;
@@ -744,9 +745,10 @@ export class LoadoutPage extends LitElement {
         navigate("projects", `open/${encodeURIComponent(key)}`);
       }}>${PROJECT_LINK}</a>`;
     return html`
-      ${own !== null ? this.#group(own.group, harnesses, ctx, { head: true, label: own.label, count: own.count, link }) : nothing}
+      ${own.map((one, at) => this.#group(one.group, harnesses, ctx,
+                                          { head: at === 0, label: one.label, count: one.count, ...(at === 0 ? { link } : {}) }))}
       ${this.#group(filtered.yours.group, harnesses, ctx,
-                    { head: own === null, label: filtered.yours.label, count: filtered.yours.count })}
+                    { head: own.length === 0, label: filtered.yours.label, count: filtered.yours.count })}
       ${filtered.modules.map((group) => this.#group(group, harnesses, ctx, { head: false }))}`;
   }
 
