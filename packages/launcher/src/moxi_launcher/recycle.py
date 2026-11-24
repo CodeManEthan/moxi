@@ -56,9 +56,8 @@ endpoint was replaced is still found. Then it reads the store, writes at most on
 and returns; it never waits on the session.
 `relaunch` writes an event and returns a line that tells the agent its launch lets it
 recycle itself, at its next pause point and only when it is mid-work (`RELAUNCH_LINE`),
-once per session id: a crossing that fires again in the same session id, after a
-compaction, gets no line, and a clear or a resume that names a new id is told afresh. It
-tells only a launch whose session can recycle itself (`selfrecycle.missing_of_row`, the
+once per crossing: each rise past the mark, after a compaction too, is told again, and a
+retried call on one crossing gets no second line. It tells only a launch whose session can recycle itself (`selfrecycle.missing_of_row`, the
 test the self arm reads), so never a scratch launch (`SCRATCH_RECYCLE`). usage appends
 the line to its notice on the same call, so the agent reads one line;
 `compact` writes a compact run and spawns its job, which waits for the session to be idle
@@ -530,7 +529,7 @@ def crossing_line(conn: sqlite3.Connection, crossing: Any, *, pid: int,
     if value == "relaunch":
         if selfrecycle.missing_of_row(row) is not None:
             return None
-        if not _told(conn, row.request_id, session_id):
+        if not _told(conn, row.request_id, key):
             try:
                 store.add_event(conn, "recycle-told", {"crossing_key": key},
                                 request_id=row.request_id, session_id=session_id)
@@ -570,11 +569,12 @@ def is_scratch_relaunch(values: Mapping[str, Any]) -> bool:
     return bool(values.get("scratch")) and values.get("recycle_at_limit") == "relaunch"
 
 
-def _told(conn: sqlite3.Connection, request_id: str, session_id: str) -> bool:
-    """Whether the launch was told it may recycle itself in session `session_id`."""
+def _told(conn: sqlite3.Connection, request_id: str, key: str) -> bool:
+    """Whether the launch was told it may recycle itself at the crossing `key`."""
     return conn.execute(
         "SELECT 1 FROM events WHERE request_id = ? AND kind = 'recycle-told' "
-        "AND session_id = ? LIMIT 1", (request_id, session_id)).fetchone() is not None
+        "AND json_extract(detail_json, '$.crossing_key') = ? LIMIT 1",
+        (request_id, key)).fetchone() is not None
 
 
 def start_compact(conn: sqlite3.Connection, run: store.Run, *, spawn: Any | None = None,

@@ -657,21 +657,22 @@ def test_a_relaunch_crossing_tells_the_agent_and_records_that_it_was_told(conn):
     assert store.runs(conn, request_id="r1") == []
 
 
-def test_a_relaunch_launch_is_told_once_per_session_id(conn):
+def test_a_relaunch_launch_is_told_at_each_rise_in_one_session_id(conn):
+    limit(conn, "relaunch")
+    assert recycle.crossing_line(conn, crossing(), pid=os.getpid()) == recycle.RELAUNCH_LINE
+    # A compaction brought the context below the mark; it climbed back past it.
+    assert recycle.crossing_line(conn, crossing(at="2026-10-31T11:00:00Z"),
+                                 pid=os.getpid()) == recycle.RELAUNCH_LINE
+    told = [e for e in store.events(conn, "r1") if e.kind == "recycle-told"]
+    assert [(e.session_id, e.detail["crossing_key"]) for e in told] == [
+        (SID, f"{SID}|1x|2026-10-31T10:00:00Z"), (SID, f"{SID}|1x|2026-10-31T11:00:00Z")]
+
+
+def test_a_retried_call_on_one_crossing_is_told_once(conn):
     limit(conn, "relaunch")
     assert recycle.crossing_line(conn, crossing(), pid=os.getpid()) == recycle.RELAUNCH_LINE
     assert recycle.crossing_line(conn, crossing(), pid=os.getpid()) is None
-    # The crossing re-armed after a compaction and fired again: same id, no second line.
-    assert recycle.crossing_line(conn, crossing(at="later"), pid=os.getpid()) is None
     assert len([e for e in store.events(conn, "r1") if e.kind == "recycle-told"]) == 1
-    # A clear names a new id, which is told afresh.
-    store.learn_session(conn, "r1", NEW, "clear")
-    assert recycle.crossing_line(conn, crossing(at="after clear", session_id=NEW),
-                                 pid=os.getpid()) == recycle.RELAUNCH_LINE
-    assert recycle.crossing_line(conn, crossing(at="again", session_id=NEW),
-                                 pid=os.getpid()) is None
-    told = [e for e in store.events(conn, "r1") if e.kind == "recycle-told"]
-    assert [e.session_id for e in told] == [SID, NEW]
 
 
 def test_a_crossing_on_a_launch_held_by_a_gone_endpoint_moves_the_claim_and_is_told(
@@ -833,12 +834,14 @@ def test_the_relaunch_line_says_to_hand_off_stop_shells_and_relaunch(conn):
         "the end of a task.")
 
 
-def test_a_relaunch_crossing_reaches_the_launcher_through_usage_s_group_once(usage_group):
+def test_a_relaunch_crossing_reaches_the_launcher_through_usage_s_group_once_a_rise(
+        usage_group):
     limit(usage_group.conn, "relaunch")
     assert recycle.RELAUNCH_LINE in through_usage(usage_group, 1761904800.0)
     assert recycle.RELAUNCH_LINE not in through_usage(usage_group, 1761904800.0)
+    assert recycle.RELAUNCH_LINE in through_usage(usage_group, 1761908400.0)
     told = [e for e in store.events(usage_group.conn, "r1") if e.kind == "recycle-told"]
-    assert len(told) == 1
+    assert len(told) == 2
 
 
 def test_a_compact_crossing_reaches_the_launcher_through_usage_s_group_and_is_recorded(

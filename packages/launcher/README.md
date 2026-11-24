@@ -613,9 +613,8 @@ own reads:
 - `--recycle-at-limit relaunch|compact|off` (needs turns and usage). `relaunch` is the
   shipped default: once the context passes the launch's `warn_at` mark, the agent is told
   it may relaunch itself with a handoff. The line opens "This launch lets you recycle
-  yourself", rides on usage's notice as one line, and comes once per session id: a
-  compaction that brings the context back past the mark gets no second line, and a clear
-  or a resume is told afresh. A launch is told, and its self relaunch accepted, only where
+  yourself", rides on usage's notice as one line, and comes at every rise past the mark:
+  after a compaction, the next rise past it is told again. A launch is told, and its self relaunch accepted, only where
   its session can recycle itself: a Claude launch in a slot, where slots run, not in a
   scratch folder, with a handoff folder (with notes installed, a notes directory for its
   folder), and warned at a mark. `moxi launcher show` reads the same test.

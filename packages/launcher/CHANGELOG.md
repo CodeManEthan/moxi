@@ -46,9 +46,8 @@
   handoff skill, stop your background shells, then run `moxi launcher relaunch --self
   --handoff <file>`". It no longer names the mark (usage's notice, which it is appended
   to, does), so `RELAUNCH_AFTER` and `relaunch_line` are gone; the crossing returns
-  `RELAUNCH_LINE`. A `relaunch` launch is told once per session id: a crossing that fires
-  again in the same id after a compaction gets no line, and a clear or a resume that
-  names a new id is told afresh. A `compact` launch still compacts at every rise.
+  `RELAUNCH_LINE`. A `relaunch` launch is still told at every rise past the mark, a
+  compaction's included, and a `compact` launch still compacts at every rise.
 - The `moxi-handoff` skill's recycle steps stop your background shells before the
   relaunch.
 - With the `ui` extra, a `project-facts` component reports to the Projects page how many
