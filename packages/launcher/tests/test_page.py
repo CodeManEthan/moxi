@@ -364,17 +364,17 @@ def test_the_form_spells_each_value_as_a_presets_value_with_its_source():
     write_presets(FORM_FILE)
     rows = form_rows(form("seat=planner"))
     assert rows["effort"] == {"name": "effort", "value": "high", "items": None,
-                              "source": "preset", "withheld": False, "targets": None}
+                              "source": "preset", "withheld": False}
     assert rows["add_dir"] == {"name": "add_dir", "value": None, "items": ["/a", "/b"],
-                               "source": "preset", "withheld": False, "targets": None}
+                               "source": "preset", "withheld": False}
     assert rows["scratch"]["value"] == "true" and rows["scratch"]["source"] == "preset"
     assert rows["model"] == {"name": "model", "value": "sonnet", "items": None,
-                             "source": "defaults", "withheld": False, "targets": None}
+                             "source": "defaults", "withheld": False}
     # A row no layer sets holds its shipped default: a word for a word enum, else nothing.
     assert (rows["target"]["value"], rows["target"]["source"]) == ("terminal", "shipped")
     assert (rows["agent"]["value"], rows["agent"]["items"]) == (None, None)
     assert rows["harness"] == {"name": "harness", "value": "claude", "items": None,
-                               "source": "preset", "withheld": False, "targets": None}
+                               "source": "preset", "withheld": False}
 
 
 def test_the_form_shows_one_place_whole_from_the_latest_layer():
@@ -393,13 +393,13 @@ def test_a_text_written_inline_comes_withheld_from_either_layer():
     write_presets(FORM_FILE)
     rows = form_rows(form("seat=planner"))
     assert rows["brief"] == {"name": "brief", "value": None, "items": None,
-                             "source": "preset", "withheld": True, "targets": None}
+                             "source": "preset", "withheld": True}
     assert rows["instructions"] == {"name": "instructions", "value": None, "items": None,
-                                    "source": "defaults", "withheld": True, "targets": None}
+                                    "source": "defaults", "withheld": True}
     # A spelling another layer's replaced is at its default, and nothing is withheld.
     rows = form_rows(form("seat=filed"))
     assert rows["instructions"] == {"name": "instructions", "value": None, "items": None,
-                                    "source": "shipped", "withheld": False, "targets": None}
+                                    "source": "shipped", "withheld": False}
     assert (rows["instructions_file"]["value"], rows["instructions_file"]["withheld"]) == (
         "/seat.md", False)
 

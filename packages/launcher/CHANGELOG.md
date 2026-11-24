@@ -2,11 +2,6 @@
 
 ## Unreleased
 
-- The launch form shows `keep_warm` as the launch holds it in the place it runs: `off` for
-  a headless launch no layer sets it on for, and `on` for any other Claude launch, a
-  `[defaults]` `off` included. `/api/form` gives such a row's value for each place
-  (`targets`), Home's box and the launcher's panel fill it again when the place changes,
-  and a page's request compares each row with that fill (`presets.shown_values`).
 - An open hold is work out wherever a live subagent or a directed agent at work is. Home's
   Sessions row reads a session with neither, but holds of its chain open, as waiting on
   them (`waits` kind `holds`, `waiting on 1 open hold`, `kept warm while 1 hold is

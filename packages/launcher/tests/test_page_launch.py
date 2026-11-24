@@ -241,19 +241,6 @@ def filled(preset: dict) -> dict:
     return {**preset, "values": values, "leave_out": leave_out}
 
 
-def at_place(body: dict, preset: dict) -> dict:
-    """`body` with each row whose value differs by place at its value for the place
-    `body` launches in (the target's default where it leaves the target out), as the
-    panel fills it again when the place changes."""
-    where = body["values"].get("target") or catalog.launcher()["target"].default
-    values = dict(body["values"])
-    for found in form_of(preset)["rows"]:
-        if found["targets"] and found["name"] in values:
-            [values[found["name"]]] = [item["value"] for item in found["targets"]
-                                       if item["target"] == where]
-    return {**body, "values": values}
-
-
 def edited(body: dict, change: dict, empty: list) -> dict:
     values = {**body["values"], **change}
     leave_out = [name for name in body["leave_out"] if name not in change]
@@ -576,86 +563,6 @@ remote_control = false
         assert tuple(request.left_out) == () and "--leave-out" not in command, preset
 
 
-# --- keep_warm: the form shows what the launch holds in each place ---
-
-#: Each place a launch may run in, in the `target` row's order.
-PLACES = ("terminal", "headless", "slot")
-
-
-@pytest.fixture
-def warm(monkeypatch):
-    """keep_warm offered: turns, cache and slots read as installed, cache can read a
-    session's environment, and slots run here."""
-    monkeypatch.setattr(slots, "links", lambda name: name in ("turns", "cache", "slots"))
-    monkeypatch.setattr(catalog, "session_env_readable", lambda: True)
-    monkeypatch.setattr(catalog, "slots_here", lambda: True)
-
-
-def keep_warm_row(preset: dict) -> dict:
-    [found] = [r for r in form_of(preset)["rows"] if r["name"] == "keep_warm"]
-    return found
-
-
-def by_place(found: dict) -> dict:
-    return {item["target"]: item["value"] for item in found["targets"]}
-
-
-@pytest.mark.parametrize("text,preset,value,source", [
-    ("", NONE, "on", "shipped"),
-    ('[seat.s]\ntarget = "headless"\n', {"seat": "s"}, "off", "shipped"),
-    ('[defaults]\nkeep_warm = "off"\n', NONE, "on", "defaults"),
-    ('[defaults]\ntarget = "headless"\nkeep_warm = "off"\n', NONE, "off", "defaults"),
-])
-def test_the_form_shows_keep_warm_as_the_launch_holds_it_in_each_place(
-        warm, work, text, preset, value, source):
-    write_presets(f'[defaults]\ncwd = "{work}"\n' + text.replace("[defaults]\n", ""))
-    found = keep_warm_row(preset)
-    # The value is the one the layers' place holds; a headless launch holds off unless a
-    # layer sets on, and any other launch holds on whatever [defaults] says.
-    assert (found["value"], found["source"]) == (value, source)
-    assert by_place(found) == {"terminal": "on", "headless": "off", "slot": "on"}
-
-
-def test_keep_warm_set_on_holds_in_every_place_and_names_none(warm, work):
-    write_presets(f'[defaults]\ncwd = "{work}"\n[seat.s]\ntarget = "headless"\n'
-                  'keep_warm = "on"\n')
-    found = keep_warm_row({"seat": "s"})
-    assert (found["value"], found["source"], found["targets"]) == ("on", "preset", None)
-
-
-@pytest.mark.parametrize("text,preset", [
-    ("", NONE),
-    ('[seat.s]\ntarget = "headless"\n', {"seat": "s"}),
-    ('keep_warm = "off"\n', NONE),
-])
-@pytest.mark.parametrize("place", PLACES)
-def test_a_form_left_as_filled_for_its_place_types_no_keep_warm(warm, work, text, preset,
-                                                                 place):
-    write_presets(f'[defaults]\ncwd = "{work}"\n' + text)
-    shown = by_place(keep_warm_row(preset))
-    # The page fills keep_warm again for the place it launches in, and sends it untouched.
-    body = edited(filled(preset), {"target": place, "keep_warm": shown[place]}, [])
-    request, _ = pagehandlers.launch_request(body, "r1")
-    assert "keep_warm" not in request.typed
-    found = presets.resolve(request, available=slots.links)
-    assert found.values["keep_warm"] == shown[place]
-
-
-def test_keep_warm_picked_off_its_fill_is_typed(warm, work):
-    write_presets(f'[defaults]\ncwd = "{work}"\n[seat.s]\ntarget = "headless"\n')
-    body = filled({"seat": "s"})
-    assert body["values"]["keep_warm"] == "off"
-    request, _ = pagehandlers.launch_request(edited(body, {"keep_warm": "on"}, []), "r1")
-    assert request.typed["keep_warm"] == "on"
-    assert presets.resolve(request, available=slots.links).values["keep_warm"] == "on"
-    # Off picked for a launch in a slot is the launch's to refuse, as the command line's is.
-    request, _ = pagehandlers.launch_request(
-        edited(body, {"target": "slot", "keep_warm": "off"}, []), "r2")
-    assert request.typed["keep_warm"] == "off"
-    with pytest.raises(catalog.BadValue):
-        presets.resolve(request, available=slots.links)
-
-
 # --- every row, set by one layer: as filled, and emptied ---
 
 def _sample(row: catalog.Row, work: Path) -> tuple[object, dict]:
@@ -720,10 +627,8 @@ def test_every_row_a_layer_sets_is_kept_as_filled_and_left_out_when_emptied(
     if row.type == "bool" and row.default is True:
         # The panel has no empty state for it: unticked sends false, ticked true.
         return
-    # Emptied as the panel empties it (a withheld text: its keep box unticked); the panel
-    # fills a row whose value differs by place again for the place the form now holds.
-    request, command = pagehandlers.launch_request(
-        at_place(edited(body, {}, [name]), {"seat": "s"}), "r2")
+    # Emptied as the panel empties it (a withheld text: its keep box unticked).
+    request, command = pagehandlers.launch_request(edited(body, {}, [name]), "r2")
     assert dict(request.typed) == {} and tuple(request.left_out) == (name,)
     assert command[-2:] == ["--leave-out", name]
     line = api.LaunchRequest(seat="s", off_posture=True, left_out=(name,), request_id="r3")
@@ -827,7 +732,7 @@ def test_no_route_or_handler_names_a_writer_of_the_presets_file():
     readers = {"read", "check", "layered", "harness_of", "Request", "Presets", "Preset",
                "Layered", "ERROR", "DEFAULTS", "PRESET", "TWO_SPELLINGS", "mode_of",
                "off_posture_rows", "SHIPPED", "TYPED", "LEFT_OUT", "dir_place", "HOME",
-               "projects_api", "shown_values"}
+               "projects_api"}
     for module in (page, pagehandlers):
         text = Path(module.__file__).read_text(encoding="utf-8")
         assert "presets.toml" not in text and "presets.path" not in text, module.__name__

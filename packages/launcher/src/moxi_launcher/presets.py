@@ -1222,46 +1222,26 @@ KEEP_WARM_DEFAULT_OFF = ("keep_warm off from [defaults] is left out: keep-warm i
                          "every Claude launch that isn't headless, so the line can go")
 
 
-def keep_warm_of(harness: str, target: str, value: object, source: str | None) -> object:
-    """The `keep_warm` a launch of `harness` in `target` holds for the row laid at `value`
-    from `source`, as `resolve` settles it. A headless launch holds `off` where the row
-    came from its shipped default, else its value. Any other launch of a harness cache
-    times holds `on` where `off` came from `[defaults]`; an `off` the preset or a flag set
-    stays `off`, which `resolve` refuses. Another harness's row keeps its value."""
-    if harness not in catalog.CACHE_TIMED:
-        return value
-    if target == "headless":
-        return "off" if source in (SHIPPED, LEFT_OUT) else value
-    return "on" if value == "off" and source not in (PRESET, TYPED) else value
-
-
-def shown_values(laid: Layered, target: str) -> dict[str, object]:
-    """The rows of `laid` as a launch in `target` holds them before any is typed: its
-    `keep_warm` settled by `keep_warm_of`. What the launch form shows for that place, and
-    what a page's request is compared with."""
-    values = dict(laid.values)
-    name = catalog.KEEP_WARM
-    if name in values:
-        values[name] = keep_warm_of(laid.harness, target, values[name], laid.sources.get(name))
-    return values
-
-
 def _keep_warm_row(harness: str, target: str, values: dict, sources: dict,
                    chosen: frozenset[str], warnings: list[str]) -> None:
     """Settle `keep_warm`, which keep-warm reads on a headless launch alone
-    (`catalog.keeps_warm`), by `keep_warm_of`. A headless launch takes `on` or `off`. Any
-    other launch of a harness cache times takes only `on`: `off` set by the preset or a
-    flag is refused (`BadValue`), and `off` from `[defaults]` goes back to `on` with the
-    `KEEP_WARM_DEFAULT_OFF` warning."""
+    (`catalog.keeps_warm`). A headless launch takes `on` or `off`, and holds `off` where
+    the row came from its shipped default. Any other launch of a harness cache times
+    takes only `on`: `off` set by the preset or a flag is refused (`BadValue`), and `off`
+    from `[defaults]` goes back to `on` with the `KEEP_WARM_DEFAULT_OFF` warning."""
     name = catalog.KEEP_WARM
     if harness not in catalog.CACHE_TIMED or name not in values:
         return
-    if target != "headless" and values.get(name) == "off" and name in chosen:
+    if target == "headless":
+        if sources.get(name) in (SHIPPED, LEFT_OUT):
+            values[name] = "off"
+        return
+    if values.get(name) != "off":
+        return
+    if name in chosen:
         raise BadValue(name, KEEP_WARM_OFF, KEEP_WARM_OFF_HINT)
-    settled = keep_warm_of(harness, target, values[name], sources.get(name))
-    if target != "headless" and settled != values[name]:
-        warnings.append(KEEP_WARM_DEFAULT_OFF)
-    values[name] = settled
+    values[name] = "on"
+    warnings.append(KEEP_WARM_DEFAULT_OFF)
 
 
 def _headless_rows(harness: str, target: str, identity: str | None, values: dict,
@@ -1585,7 +1565,7 @@ __all__ = [
     "comms_bind_wait",
     "comms_codex", "comms_codex_resume", "comms_ends_on_bind_timeout", "comms_has_policy",
     "comms_headless", "harness_of",
-    "keep_warm_of", "layered", "mode_of", "needed", "off_posture_rows", "path", "project_agents",
+    "layered", "mode_of", "needed", "off_posture_rows", "path", "project_agents",
     "projects_api", "read",
-    "resolve", "roles", "schema", "shown_values",
+    "resolve", "roles", "schema",
 ]

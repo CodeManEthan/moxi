@@ -4,7 +4,7 @@ import test from "node:test";
 import {
   choiceKey, choiceOf, chosenPreset, commandLine, dropsShown, emptyGroups, fieldsFor, filledFields, followedOf, formPath,
   HARNESS, keepLabel, launchBody, launchesView, leaveOutChoice, NO_PRESET, olderPath, outcomeOf, parseCatalog,
-  parseForm, parsePasts, parsePresets, parsePreview, pastItem, pastView, placeOf, presetLines, presetProblems, presetsOf,
+  parseForm, parsePasts, parsePresets, parsePreview, pastItem, pastView, presetLines, presetProblems, presetsOf,
   quote, refusalLine, requestOf, resumeBody, shownValue, sourceNote, statusOf,
 } from "../src/panel.ts";
 
@@ -70,7 +70,7 @@ const FORM_FIELDS = [
   field("remote_control", { optional_value: true }),
   field("max_turns", { type: "int", default: "" }),
 ];
-const row = (name, value, source = "preset", extra = {}) => ({ name, value, items: null, source, withheld: false, targets: null, ...extra });
+const row = (name, value, source = "preset", extra = {}) => ({ name, value, items: null, source, withheld: false, ...extra });
 const FORM = {
   state: "up", detail: null, harness: "claude", refused: null,
   rows: [row("harness", "claude", "shipped"), row("cwd", null, "shipped"), row("project", "app"),
@@ -99,29 +99,6 @@ test("the form's answer reads whole, and an error, a refusal and a bad body are 
                    { state: "error", detail: "it broke", harness: "", rows: [], refused: null, modes: [] });
   assert.equal(parseForm({ state: "up", detail: null, rows: [] }), null);
   assert.equal(parseForm("nope"), null);
-});
-
-test("a row whose value differs by place shows its value for the place the launch runs in", () => {
-  const warm = field("keep_warm", { type: "enum", default: "on", values: ["off", "on"] });
-  const places = [{ target: "terminal", value: "on" }, { target: "headless", value: "off" }, { target: "slot", value: "on" }];
-  const form = parseForm({ ...FORM, rows: [...FORM.rows, row("keep_warm", "off", "shipped", { targets: places })] });
-  assert.deepEqual(form.rows.find((r) => r.name === "keep_warm").targets, places);
-  const shown = (target) => filledFields([...FORM_FIELDS, warm], form, SEAT, target).find((f) => f.name === "keep_warm").value;
-  // No place: the layers' place, which the row's own value is for.
-  assert.equal(shown(), "off");
-  assert.equal(shown("headless"), "off");
-  assert.equal(shown("terminal"), "on");
-  assert.equal(shown("slot"), "on");
-  // A row with no values by place shows its one value wherever the launch runs.
-  assert.equal(filledFields(FORM_FIELDS, form, SEAT, "headless").find((f) => f.name === "model").value, "opus");
-});
-
-test("the place a form launches in is its target, the default where it is left out", () => {
-  const fields = filledFields(FORM_FIELDS, parseForm(FORM), SEAT);
-  assert.equal(placeOf(fields, { target: "headless" }), "headless");
-  assert.equal(placeOf(fields, { target: leaveOutChoice(fields.find((f) => f.name === "target")) }), "terminal");
-  assert.equal(placeOf(fields, { target: "" }), "terminal");
-  assert.equal(placeOf(fields, {}), "");
 });
 
 test("one preset choice: one select value, one query, and a body naming at most one preset", () => {

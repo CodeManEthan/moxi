@@ -152,17 +152,12 @@ PROBLEM = _table(where=_text(), key=_text(nullable=True), problem=_text(), hint=
 PRESETS = {**STANDING, "presets": Out("list", items=PRESET),
            "problems": Out("list", items=PROBLEM)}
 
-#: A row's value for a launch in one place the `target` row names.
-FORM_PLACE = _table(target=_text(), value=_text(nullable=True))
 #: One row of the launch form as the layers fill it, spelled as a preset's value is:
 #: `source` is `shipped`, `defaults` or `preset`. A brief or standing instructions that
-#: `[defaults]` or the preset writes inline is `withheld`, its text not sent. A row whose
-#: value differs by the place a launch runs in gives it for each place in `targets`,
-#: null for the rest.
+#: `[defaults]` or the preset writes inline is `withheld`, its text not sent.
 FORM_ROW = _table(name=_text(), value=_text(nullable=True),
                   items=Out("list", items=Out("string"), nullable=True),
-                  source=_text(), withheld=Out("bool"),
-                  targets=Out("list", items=FORM_PLACE, nullable=True))
+                  source=_text(), withheld=Out("bool"))
 #: The command a launch of the form's harness composes when it runs in `target`, one of
 #: the names a catalog row's `modes` holds; null where such a launch is refused.
 FORM_MODE = _table(target=_text(), mode=_text(nullable=True))

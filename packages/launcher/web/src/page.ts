@@ -3,8 +3,7 @@
 // - Launch: one preset to start from (a seat, a project preset or none), and the launch
 //   form, the UI shell's form renderer over `/api/catalog`, filled from `/api/form` with
 //   the values the preset and the user's defaults give. Choosing a preset draws a new form;
-//   changing the harness keeps the form and fills the new harness's rows, and changing where
-//   it runs fills again each row whose value differs by place (keep-warm). "Preview" sends
+//   changing the harness keeps the form and fills the new harness's rows. "Preview" sends
 //   the whole form to `/api/preview`: each field with a value, and each field left empty
 //   as a row to leave out. It answers with the argv, the environment stamps, the warnings,
 //   the rows left out and every refusal the launch's check finds. A launch in a slot or headless is then
@@ -36,7 +35,7 @@ import { when } from "./views.ts";
 import {
   choiceKey, choiceOf, dropsShown, chosenPreset, commandLine, emptyGroups, fieldsFor, filledFields, FOLLOW_FOR_MS, FOLLOW_MS,
   followedOf, formPath, HARNESS, keepLabel, launchBody, launchesView, NO_PRESET, olderPath, outcomeOf,
-  parseCatalog, parseForm, parsePasts, parsePresets, parsePreview, pastView, placeOf, presetLines, presetProblems,
+  parseCatalog, parseForm, parsePasts, parsePresets, parsePreview, pastView, presetLines, presetProblems,
   presetsOf, refusalLine, requestOf, resumeBody,
 } from "./panel.ts";
 import type {
@@ -161,8 +160,6 @@ export class LauncherPage extends LitElement {
   /** Counts the form elements drawn: a new preset choice draws a new one. */
   #element = 0;
   #harness = "";
-  /** The place the rows are filled for, as the form last held it; "" for the layers'. */
-  #place = "";
   #fields: FieldDescriptor[] = [];
   #drawn: FieldDescriptor[] | null = null;
   #withheld = new Set<string>();
@@ -262,7 +259,6 @@ export class LauncherPage extends LitElement {
     this.#asking = harness;
     if (fresh) {
       this.#filled = null;
-      this.#place = "";
       this.#formFailure = null;
       this.#refill();
       this.requestUpdate();
@@ -292,8 +288,7 @@ export class LauncherPage extends LitElement {
    * the form keeps what the user left in each row that stays. */
   #refill(): void {
     const catalog = this.#catalog?.value ?? null;
-    this.#fields = this.#filled === null ? []
-      : filledFields(fieldsFor(catalog, this.#harness), this.#filled, this.#choice, this.#place);
+    this.#fields = this.#filled === null ? [] : filledFields(fieldsFor(catalog, this.#harness), this.#filled, this.#choice);
   }
 
   #launchesRead(): void {
@@ -341,15 +336,6 @@ export class LauncherPage extends LitElement {
     } else if (typeof chosen === "string" && chosen !== this.#harness && chosen !== this.#asking
                && catalog?.harnesses.some((item) => item.name === chosen)) {
       void this.#readForm(false, chosen);
-    }
-    // A row whose value differs by place is filled again for the place the form holds now;
-    // `updated` then works the request out from the new fill.
-    const place = placeOf(this.#fields, now);
-    if (place !== this.#place) {
-      this.#place = place;
-      this.#refill();
-      this.requestUpdate();
-      return;
     }
     this.#settle(now);
   }

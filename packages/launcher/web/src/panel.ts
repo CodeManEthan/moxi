@@ -223,15 +223,6 @@ export interface FormRow {
   /** `shipped`, `defaults` or `preset`. */
   source: string;
   withheld: boolean;
-  /** The value in each place a launch may run, for a row whose value differs by place;
-   * null for the rest. */
-  targets: FormPlaceValue[] | null;
-}
-
-/** A row's value for a launch in one place the `target` row names. */
-export interface FormPlaceValue {
-  target: string;
-  value: string | null;
 }
 
 /** The command a launch composes in one place the `target` row names; null where the
@@ -252,12 +243,6 @@ export interface Form {
   modes: FormMode[];
 }
 
-function placeValues(data: unknown): FormPlaceValue[] | null {
-  if (!Array.isArray(data)) return null;
-  return data.filter((item): item is Fields => isTable(item) && typeof item.target === "string")
-    .map((item) => ({ target: item.target as string, value: text(item.value) }));
-}
-
 function formModes(data: unknown): FormMode[] {
   if (!Array.isArray(data)) return [];
   return data.filter((item): item is Fields => isTable(item) && typeof item.target === "string")
@@ -273,8 +258,7 @@ export function parseForm(data: unknown): Form | null {
   const kept = rows.filter((row): row is Fields => isTable(row) && typeof row.name === "string")
     .map((row) => ({ name: row.name as string, value: text(row.value),
                      items: Array.isArray(row.items) ? texts(row.items) : null,
-                     source: text(row.source) ?? "shipped", withheld: row.withheld === true,
-                     targets: placeValues(row.targets) }));
+                     source: text(row.source) ?? "shipped", withheld: row.withheld === true }));
   return { state: "up", detail: null, harness, rows: kept, refused: isRefusal(refused) ? refusal(refused) : null,
            modes: formModes(modes) };
 }
@@ -327,23 +311,6 @@ export function leaveOutChoice(field: FieldDescriptor | undefined): string | nul
   return typeof field.default === "string" && field.default !== "" ? `leave out (launches ${field.default})` : null;
 }
 
-/** A row's value for a launch in `target`: its value there where it differs by place,
- * else its one value. */
-function placeValue(row: FormRow, target: string): string | null {
-  const there = target ? row.targets?.find((item) => item.target === target) : undefined;
-  return there !== undefined ? there.value : row.value;
-}
-
-/** The place a launch of the form runs in: the `target` it holds, the field's default
- * where it is left out, and "" where the form has no `target` yet. */
-export function placeOf(fields: readonly FieldDescriptor[], values: Record<string, FormValue>): string {
-  const field = fields.find((item) => item.name === "target");
-  const value = values.target;
-  if (typeof value !== "string") return "";
-  if (value === "" || value === leaveOutChoice(field)) return typeof field?.default === "string" ? field.default : "";
-  return value;
-}
-
 /** Whether a field is shown off: its module or condition is absent here. */
 function isOff(field: FieldDescriptor): boolean {
   return field.needs_absent === true;
@@ -362,15 +329,13 @@ function noted(field: FieldDescriptor, line: string | null): string | null | und
 
 /**
  * The fields for `harness` filled from `/api/form`: each field's `value` (`value_items`
- * for a list) is the row's layered value, with a note naming its source; a row whose value
- * differs by place shows its value for a launch in `target`, and with no `target` the one
- * for the layers' place. An enum gets its empty state: a blank choice when its shipped
- * default sets nothing, else the "leave out" choice. A withheld text shows empty with its
- * note. A field the answer has no row for (shown off, or every row of a refused answer)
- * keeps the catalog's default.
+ * for a list) is the row's layered value, with a note naming its source. An enum gets its
+ * empty state: a blank choice when its shipped default sets nothing, else the "leave out"
+ * choice. A withheld text shows empty with its note. A field the answer has no row for
+ * (shown off, or every row of a refused answer) keeps the catalog's default.
  */
 export function filledFields(fields: readonly FieldDescriptor[], form: Form | null,
-                             choice: Choice, target = ""): FieldDescriptor[] {
+                             choice: Choice): FieldDescriptor[] {
   const rows = new Map((form?.rows ?? []).map((row) => [row.name, row]));
   return fields.map((field) => {
     const out: FieldDescriptor = { ...field };
@@ -394,7 +359,7 @@ export function filledFields(fields: readonly FieldDescriptor[], form: Form | nu
     }
     if (isListField(field)) out.value_items = row.items ?? [];
     else if (field.optional_value === true) out.value = row.value === null ? null : row.value === "true" ? true : row.value;
-    else out.value = placeValue(row, target) ?? "";
+    else out.value = row.value ?? "";
     out.note = noted(field, sourceNote(row.source, choice));
     return out;
   });

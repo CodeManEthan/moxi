@@ -58,8 +58,7 @@
 // The panel draws a row of the harness's only where the place the button launches in
 // passes its flag, by the command mode `/api/form` names for that place under the comms
 // name the form holds; the form is read again when that name changes. When the button
-// is set to another place, a value set on a row the panel no longer draws is let go of,
-// and a row whose value differs by place (keep-warm) shows its value for the new place.
+// is set to another place, a value set on a row the panel no longer draws is let go of.
 //
 // Tools > Built-in draws the set of built-in tools as its plain list row, then a line for
 // each tool the page names with `allow` and `deny`, the one the rules hold boxed. A press
@@ -603,8 +602,6 @@ export class LauncherPrompt extends LitElement {
   #formIn = false;
   /** The comms name the latest `/api/form` read was asked under; "" for none. */
   #identityAsked = "";
-  /** The place the fields were last filled for; "" for the layers'. */
-  #filledFor = "";
   /** Whether projects is there, worked out once when the piece connects. */
   #withProjects = false;
   /** The user's home folder as the page server names it, drawn as `~`. */
@@ -715,8 +712,6 @@ export class LauncherPrompt extends LitElement {
     if (this.#form !== null && this.fields.length > 0 && this.#identity !== this.#identityAsked) {
       void this.#readForm(this.harness);
     }
-    // A row whose value differs by place (keep-warm) shows its value for the button's place.
-    if (this.#form !== null && this.#place !== this.#filledFor) this.#refill();
     // The name follows what it is rendered for, while the panel that shows it is open.
     if (this.panel && this.fields.length > 0) {
       const query = nameQuery(this.#nameContext, this.draft);
@@ -856,19 +851,12 @@ export class LauncherPrompt extends LitElement {
     if (!this.#presetsRead) void this.#readPresets();
   }
 
-  /** The place the button launches in now; "" until the places a launch may run in are read. */
-  get #place(): string {
-    return this.targets === null ? "" : runOf(this.targets, this.picked).target;
-  }
-
   #refill(): void {
     if (this.#form === null) return;
     if (this.#catalog !== null && this.#catalog.state === "up") this.unread = "";
-    const place = this.#place;
-    this.#filledFor = place;
-    this.fields = filledFields(fieldsFor(this.#catalog, this.#form.harness), this.#form, this.#formChoice, place);
+    this.fields = filledFields(fieldsFor(this.#catalog, this.#form.harness), this.#form, this.#formChoice);
     this.baseFields = this.#base === null ? this.fields
-      : filledFields(fieldsFor(this.#catalog, this.#base.harness), this.#base, NO_PRESET, place);
+      : filledFields(fieldsFor(this.#catalog, this.#base.harness), this.#base, NO_PRESET);
     this.#settle();
   }
 
