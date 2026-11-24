@@ -369,15 +369,11 @@ def test_limit_at_at_its_shipped_default_is_not_refused_for_its_companion(work, 
     monkeypatch.setattr(slots, "links", lambda name: name in ("turns", "usage"))
     write_presets(f'[seat.lead]\ncwd = "{work}"\n')
     body = filled({"seat": "lead"})
-    # The form shows the shipped relaunch, which is not sent: without slots here it holds
-    # off, quietly.
     assert (body["values"].get("limit_at", ""), body["values"]["recycle_at_limit"]) == (
-        "", "relaunch")
+        "", "off")
     request, _ = pagehandlers.launch_request(body, "r1")
-    assert "limit_at" not in request.typed and "recycle_at_limit" not in request.typed
-    placed = job.placed(request)
-    assert (placed.values["limit_at"], placed.values["recycle_at_limit"]) == ("", "off")
-    assert placed.warnings == ()
+    assert "limit_at" not in request.typed
+    assert job.placed(request).values["limit_at"] == ""
     # Typed, the same word would be refused: limit_at needs recycle_at_limit.
     with pytest.raises(catalog.Refused, match="limit_at"):
         job.placed(dataclasses.replace(request, typed={"limit_at": "1x"}))

@@ -10,10 +10,9 @@ Relaunch is offered with turns and slots installed and slots running here; the s
 must be a slot launch, claimed, live, on a harness whose turns session offers `exit`.
 comms is optional: without it there is no director mode, no name to wait for and no
 notices. A self arm needs a launch whose session can recycle itself
-(`selfrecycle.missing`): set to `relaunch` (the shipped default) or, made before that was
-the default, left at the shipped `off`; a Claude slot launch; not in a scratch folder;
-with a handoff folder; warned at a mark. Any other is refused `no-self-recycle`, a dry
-run too, with the item it fails. A director's call and a repair need no such launch.
+(`selfrecycle.missing`): made with `recycle_at_limit = relaunch` (the row ships `off`); a
+Claude slot launch; not in a scratch folder; with a handoff folder; warned at a mark. Any
+other is refused `no-self-recycle`, a dry run too, with the item it fails. A director's call and a repair need no such launch.
 
 A launch that names no model comes back on the model its session last used (`pin`): the
 arm and the call read it and put it in their `--json` (`model`, `model_how`), and the job

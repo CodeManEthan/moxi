@@ -392,9 +392,10 @@ def _value_rules(preset: Preset, values: Mapping[str, object],
     """The rules between rows (`catalog.refuse_values`) over what a launch of the preset
     resolves to with nothing typed: the shipped defaults, `[defaults]`, then the preset,
     whose place, when it names one, replaces the one `[defaults]` names. As `resolve`
-    holds them: a shipped-default relaunch never refuses, so it is checked as `off`; on a
-    scratch launch, or with `warn_at` off, a `[defaults]` relaunch holds `off`; and a
-    `[defaults]` `limit_at` is left out of a relaunch launch."""
+    holds them: a seat or Codex launch that sets no `warn_at` holds none
+    (`_no_default_mark`); on a scratch launch, or with no warn-at mark, a `[defaults]`
+    relaunch holds `off`; and a `[defaults]` `limit_at` is left out of a relaunch
+    launch."""
     harness = preset.harness if preset.harness in catalog.HARNESSES else base_harness
     rows = catalog.offered(harness, avail)
     effective = {name: row.default for name, row in rows.items()}
@@ -402,9 +403,12 @@ def _value_rules(preset: Preset, values: Mapping[str, object],
     if [k for k in PLACE if catalog.is_set(values.get(k))]:
         effective.update({k: rows[k].default for k in PLACE if k in rows})
     effective.update({k: v for k, v in values.items() if k in rows})
-    if RECYCLE_AT_LIMIT not in values and effective.get(RECYCLE_AT_LIMIT) == "relaunch" and (
-            RECYCLE_AT_LIMIT not in defaults or effective.get("scratch")
-            or effective.get(WARN_AT) == "off"):
+    if (WARN_AT in effective and WARN_AT not in values and WARN_AT not in defaults
+            and _no_default_mark(harness, preset, scratch=bool(effective.get("scratch")),
+                                 source=SHIPPED)):
+        effective[WARN_AT] = ""
+    if (RECYCLE_AT_LIMIT not in values and effective.get(RECYCLE_AT_LIMIT) == "relaunch"
+            and (effective.get("scratch") or _no_mark(harness, effective))):
         effective[RECYCLE_AT_LIMIT] = "off"
     if (effective.get(RECYCLE_AT_LIMIT) == "relaunch" and LIMIT_AT not in values
             and LIMIT_AT in effective):
@@ -1091,13 +1095,13 @@ def resolve(request, *, presets: Presets | None = None,
             available: Callable[[str], bool] | None = None) -> Resolved:
     """Resolve one launch's values: shipped defaults, then `[defaults]`, then the one
     preset named, then the flags typed (`layered`), each row the request leaves out
-    holding its shipped default, except that a Codex launch that sets no `warn_at` holds
-    none (`drops_default_mark`). A scratch launch holds `recycle_at_limit = off`, with the
-    `SCRATCH_RECYCLE_OFF` warning, when `relaunch` came from `[defaults]`; typed or set by
-    the preset, the pair is refused (`catalog.ScratchRecycle`). Then `_settle_recycle`:
-    the shipped default never refuses a launch, and a relaunch set for one that can't act
-    on it is warned of. Reads projects when a place needs it.
-    Raises a
+    holding its shipped default, except that a seat or Codex launch that sets no
+    `warn_at` holds none (`_no_default_mark`). A scratch launch holds
+    `recycle_at_limit = off`, with the `SCRATCH_RECYCLE_OFF` warning, when `relaunch` came
+    from `[defaults]`; typed or set by the preset, the pair is refused
+    (`catalog.ScratchRecycle`). Then `_settle_recycle`: a relaunch set for a launch that
+    can't act on it is warned of, or from `[defaults]` with no mark held `off`. Reads
+    projects when a place needs it. Raises a
     `catalog.Refused`: `UnknownPreset`, `BadPreset`, `OffPosture`, `PostureBrief`,
     `NotYet`, `NeedsProjects`, `UnknownProject`, `ProjectsUnreadable`, `ProjectsBusy`, or the
     catalog's `BadValue`; a `moxi.config.ConfigError` when the file can't be read."""
@@ -1123,7 +1127,7 @@ def resolve(request, *, presets: Presets | None = None,
             and sources.get(RECYCLE_AT_LIMIT) == DEFAULTS):
         values[RECYCLE_AT_LIMIT], sources[RECYCLE_AT_LIMIT] = "off", LEFT_OUT
         warnings.append(SCRATCH_RECYCLE_OFF)
-    if drops_default_mark(harness, source=sources.get(WARN_AT)):
+    if _no_default_mark(harness, preset, scratch=scratch, source=sources.get(WARN_AT)):
         values[WARN_AT] = ""
     warnings += _settle_recycle(harness, values, sources, cwd=cwd, available=avail)
 
@@ -1182,10 +1186,12 @@ SCRATCH_RECYCLE_OFF = ("recycle_at_limit relaunch is left out: a scratch launch 
 
 
 #: The warning of a launch whose `recycle_at_limit = relaunch` came from `[defaults]`
-#: while its `warn_at` is off: the relaunch line rides on usage's warning, so it holds off.
-RELAUNCH_NO_MARK_OFF = ("recycle_at_limit relaunch is left out: warn_at is off, and the "
-                        "relaunch line comes with usage's warning, so the default "
-                        "relaunch holds off here")
+#: while it warns at no mark (`warn_at` off, or a seat that sets none): the relaunch line
+#: rides on usage's warning, so it holds off.
+RELAUNCH_NO_MARK_OFF = ("recycle_at_limit relaunch is left out: this launch warns at no "
+                        "warn_at mark, and the relaunch line comes with usage's warning, "
+                        "so the relaunch from [defaults] holds off here; set warn_at to "
+                        "let it relaunch itself")
 #: The warning of a relaunch launch that has a `limit_at` from `[defaults]`.
 LIMIT_AT_LEFT_OUT = ("limit_at is left out: this launch relaunches itself, and the "
                      "relaunch line comes at warn_at; limit_at still acts on a launch that "
@@ -1201,14 +1207,13 @@ LIMIT_AT = "limit_at"
 def _settle_recycle(harness: str, values: dict, sources: dict, *, cwd: str | None,
                     available: Callable[[str], bool]) -> list[str]:
     """Settle `recycle_at_limit = relaunch` before the values are checked, and return
-    the warnings. A shipped default never refuses a launch: where the launch's session
-    can't recycle itself (`selfrecycle.missing`), the shipped default holds `off`, quietly,
-    its source `left-out`, so a terminal, Codex, scratch or native-Windows launch is not
-    refused for a default it never asked for. A `[defaults]` relaunch holds `off`, with a
-    warning, where `warn_at` is off. A relaunch set anywhere else that the launch can't act
-    on is kept, and warned of with the item it fails (`RELAUNCH_NOT_APPLIED`), so a value
-    set for the launch is never silently without effect; `catalog.refuse_values` then
-    refuses the pairs it refuses. A `[defaults]` `limit_at` is left out of a relaunch
+    the warnings. `recycle_at_limit` ships `off`, so a relaunch here was set by a flag,
+    the page, the preset or `[defaults]`. A `[defaults]` relaunch holds `off`, with a
+    warning, where the launch warns at no mark (`_no_mark`). A relaunch the launch can't
+    act on (`selfrecycle.missing`) is kept, and warned of with the item it fails
+    (`RELAUNCH_NOT_APPLIED`), so a value set for the launch is never silently without
+    effect; `catalog.refuse_values` then refuses the pairs it refuses, a typed or preset
+    relaunch with no mark among them. A `[defaults]` `limit_at` is left out of a relaunch
     launch, with a warning, since the same `[defaults]` serves compacting launches, where
     it acts."""
     from . import selfrecycle
@@ -1216,7 +1221,7 @@ def _settle_recycle(harness: str, values: dict, sources: dict, *, cwd: str | Non
     if values.get(RECYCLE_AT_LIMIT) != "relaunch":
         return []
     source = sources.get(RECYCLE_AT_LIMIT)
-    if source == DEFAULTS and values.get(WARN_AT) == "off":
+    if source == DEFAULTS and _no_mark(harness, values):
         values[RECYCLE_AT_LIMIT], sources[RECYCLE_AT_LIMIT] = "off", LEFT_OUT
         return [RELAUNCH_NO_MARK_OFF]
     target = values.get("target")
@@ -1224,9 +1229,6 @@ def _settle_recycle(harness: str, values: dict, sources: dict, *, cwd: str | Non
         harness=harness, target=str(target or ""), in_slot=target == "slot", cwd=cwd,
         values=values, source=source,
         slots_here=lambda: available(slots.MODULE) and catalog.slots_here())
-    if found is not None and source == SHIPPED:
-        values[RECYCLE_AT_LIMIT], sources[RECYCLE_AT_LIMIT] = "off", LEFT_OUT
-        return []
     warnings = []
     if found is not None:
         warnings.append(RELAUNCH_NOT_APPLIED.format(problem=found.problem, hint=found.hint))
@@ -1240,11 +1242,20 @@ def _settle_recycle(harness: str, values: dict, sources: dict, *, cwd: str | Non
 WARN_AT = "warn_at"
 
 
-def drops_default_mark(harness: str, *, source: str | None) -> bool:
-    """Whether the launch drops `warn_at`'s shipped default: a Codex launch warns only at
-    a mark it sets (in `[defaults]`, its preset or a flag), since nothing can relaunch a
-    Codex session. Every other launch keeps the default."""
-    return source in (SHIPPED, LEFT_OUT) and harness == "codex"
+def _no_default_mark(harness: str, preset, *, scratch: bool, source: str | None) -> bool:
+    """Whether the launch drops `warn_at`'s shipped default: a seat launch outside a
+    scratch folder, or a Codex launch, warns only at a mark it sets (in `[defaults]`, its
+    preset or a flag). One-off, project and scratch launches keep the default."""
+    if source not in (SHIPPED, LEFT_OUT):
+        return False
+    seat = preset is not None and preset.kind == "seat" and not scratch
+    return seat or harness == "codex"
+
+
+def _no_mark(harness: str, values: Mapping[str, object]) -> bool:
+    """Whether a relaunch in `values` warns at no mark, the pair `catalog.refuse_relaunch_mark`
+    refuses: `warn_at` off, or none held by a launch other than Codex's."""
+    return catalog.no_relaunch_mark(values, harness=harness) is not None
 
 
 #: The row holding a headless launch's exit rule; each value is one `--exit` of comms'
@@ -1581,7 +1592,7 @@ __all__ = [
     "UnknownPreset", "UnknownProject", "WARNING", "check", "check_resume_brief", "comms_api",
     "comms_bind_wait",
     "comms_codex", "comms_codex_resume", "comms_ends_on_bind_timeout", "comms_has_policy",
-    "comms_headless", "drops_default_mark", "harness_of",
+    "comms_headless", "harness_of",
     "layered", "mode_of", "needed", "off_posture_rows", "path", "project_agents",
     "projects_api", "read",
     "resolve", "roles", "schema",

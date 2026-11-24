@@ -184,7 +184,7 @@ label = "Notes folder"
 type = "string"
 default = "2x"
 requires = "usage"
-doc = "The context mark at which usage warns the session, and a launch that relaunches itself is told it may: 1x, 1.5x, 2x or off; 2x unless set, none for a Codex launch unless set."
+doc = "The context mark at which usage warns the session, and a launch that relaunches itself is told it may: 1x, 1.5x, 2x or off; 2x unless set, none for a seat or Codex launch unless set."
 fork = "drop"
 group = "lifecycle"
 sub = "Context"
@@ -216,10 +216,10 @@ label = "Recycle on cache expiry"
 
 [recycle_at_limit]
 type = "enum"
-default = "relaunch"
+default = "off"
 values = ["off", "relaunch", "compact"]
 requires = ["turns", "usage"]
-doc = "Let the session relaunch itself with its handoff once its context passes warn_at, or compact it once it passes limit_at; off opts out. The default relaunch holds off on a launch that can't relaunch itself."
+doc = "Let the session relaunch itself with its handoff once its context passes warn_at, or compact it once it passes limit_at; off, the default, leaves it out."
 fork = "drop"
 group = "lifecycle"
 sub = "Context"

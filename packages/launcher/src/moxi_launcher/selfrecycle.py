@@ -6,10 +6,9 @@ read, so what a session is told and what its arm accepts can't drift apart.
 
 A launch can finish a self relaunch when it is:
 
-1. **set to relaunch**: `recycle_at_limit = relaunch`, or `off` where that value came
-   from the shipped default or no source was recorded (`opted_in`: a launch made before
-   `relaunch` became the default, which never chose `off`). `off` or `compact` from any
-   other layer opts out.
+1. **set to relaunch**: `recycle_at_limit = relaunch`, set by a flag, the page, its
+   preset or `[defaults]`. The row ships `off`, and `off` or `compact` from any layer
+   opts out, a launch's recorded `off` included.
 2. **a Claude launch**: the relaunch exits the session through turns' `exit`, which only
    Claude's turns session offers.
 3. **a slot launch**, with slots running here.
@@ -21,8 +20,8 @@ A launch can finish a self relaunch when it is:
 
 The composer stamps the relaunch crossing only where this holds (`common.option_stamps`),
 the crossing handler answers only where it holds (`recycle.crossing_line`), and the self
-arm accepts only where it holds (`relaunch.may_recycle`). `presets.resolve` sets the
-shipped default `relaunch` to `off`, quietly, on a launch where it fails.
+arm accepts only where it holds (`relaunch.may_recycle`). `presets.resolve` warns of a
+relaunch set for a launch where it fails.
 """
 
 from __future__ import annotations
@@ -39,9 +38,8 @@ RELAUNCH = "relaunch"
 #: The row holding the mark usage warns the session at, and the marks it takes.
 WARN_AT = "warn_at"
 MARKS = ("1x", "1.5x", "2x")
-#: Where a value came from when the shipped default gave it (`presets.SHIPPED`), and when
-#: the launcher left the value out (`presets.LEFT_OUT`).
-SHIPPED, LEFT_OUT = "shipped", "left-out"
+#: Where a value came from when the launcher left the value out (`presets.LEFT_OUT`).
+LEFT_OUT = "left-out"
 
 #: The items, in the order they are tested.
 OPTED_OUT, HARNESS, SLOT, SLOTS, SCRATCH, HANDOFFS, NO_MARK = (
@@ -56,15 +54,6 @@ class Missing:
     item: str
     problem: str
     hint: str
-
-
-def opted_in(value: object, source: object) -> bool:
-    """Whether `recycle_at_limit`'s `value`, from `source` (a `presets` source, None when
-    none was recorded), lets the launch recycle itself: `relaunch`, or `off` from the
-    shipped default or from no recorded source."""
-    if value == RELAUNCH:
-        return True
-    return value == "off" and source in (SHIPPED, None)
 
 
 def source_of(values: Mapping[str, Any], name: str = RECYCLE_AT_LIMIT) -> str | None:
@@ -83,10 +72,10 @@ def missing(*, harness: str, target: str | None, in_slot: bool, cwd: str | None,
     `in_slot` says the launch runs in a slot (a launch not yet placed: that its target is
     one). `values` are the launch's values; `source` is where `recycle_at_limit` came from
     (None when that was not recorded). `slots_here` stands in for `catalog.slots_here`.
-    An `off` the launcher set itself (source `left-out`, where the default `relaunch`
+    An `off` the launcher set itself (source `left-out`, where a `[defaults]` relaunch
     couldn't act) is named by the item that made it so, when one still fails."""
     value = values.get(RECYCLE_AT_LIMIT)
-    if opted_in(value, source):
+    if value == RELAUNCH:
         return _cannot(harness=harness, target=target, in_slot=in_slot, cwd=cwd,
                        values=values, slots_here=slots_here, env=env)
     if value == "off" and source == LEFT_OUT:
@@ -98,7 +87,7 @@ def missing(*, harness: str, target: str | None, in_slot: bool, cwd: str | None,
     elif value == "compact":
         said = "recycles at its limit by compacting"
     elif value == "off":
-        said = "is set recycle_at_limit off"
+        said = "has recycle_at_limit off"
     else:
         said = "has no recycle_at_limit"
     return Missing(OPTED_OUT, f"{said}, so it can't relaunch itself",
@@ -144,14 +133,6 @@ def missing_of_row(row: Any, *, slots_here: Callable[[], bool] | None = None,
                    env=env)
 
 
-def holds_by_default(row: Any, *, slots_here: Callable[[], bool] | None = None,
-                     env: Mapping[str, str] | None = None) -> bool:
-    """Whether the row recycles itself on the `off` its launch never chose (`opted_in`'s
-    second clause): `show` says `relaunch (default)` for it."""
-    return (row.values.get(RECYCLE_AT_LIMIT) == "off"
-            and missing_of_row(row, slots_here=slots_here, env=env) is None)
-
-
-__all__ = ["HANDOFFS", "HARNESS", "LEFT_OUT", "MARKS", "Missing", "NO_MARK", "OPTED_OUT", "RECYCLE_AT_LIMIT",
-           "RELAUNCH", "SCRATCH", "SHIPPED", "SLOT", "SLOTS", "WARN_AT", "holds_by_default",
-           "missing", "missing_of_row", "opted_in", "source_of"]
+__all__ = ["HANDOFFS", "HARNESS", "LEFT_OUT", "MARKS", "Missing", "NO_MARK", "OPTED_OUT",
+           "RECYCLE_AT_LIMIT", "RELAUNCH", "SCRATCH", "SLOT", "SLOTS", "WARN_AT", "missing",
+           "missing_of_row", "source_of"]

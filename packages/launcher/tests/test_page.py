@@ -11,7 +11,6 @@ fails here.
 from __future__ import annotations
 
 import asyncio
-import dataclasses
 import json
 import os
 import re
@@ -233,18 +232,11 @@ def test_an_enum_value_this_install_does_not_offer_is_left_out_with_a_note(monke
     installed(monkeypatch, "comms", "turns", "usage")
     claude = catalog_answer()["claude"]
     assert claude["director"]["needs_absent"] is False and claude["director"]["note"] is None
-    # The shipped default stays, so a form left at it is valid; it holds off here.
     limit = claude["recycle_at_limit"]
     assert limit["needs_absent"] is False
-    assert limit["values"] == ["off", "relaunch", "compact"]
-    assert limit["note"] == ("relaunch holds off here: relaunch at limit needs slots "
+    assert limit["values"] == ["off", "compact"]
+    assert limit["note"] == ("relaunch is not offered here: relaunch at limit needs slots "
                              "and a slot launch")
-    # A word that is not the default is left out.
-    row = dataclasses.replace(catalog.row("claude", "recycle_at_limit"), default="off")
-    assert pagehandlers._offered_values(row, lambda module: module != "slots",
-                                        "claude") == (
-        ["off", "compact"],
-        ["relaunch is not offered here: relaunch at limit needs slots and a slot launch"])
 
 
 def test_a_failed_catalog_read_says_only_the_class(monkeypatch):

@@ -355,9 +355,13 @@ def set_values(conn, **more):
 
 @pytest.mark.parametrize("value, source, words", [
     (None, None, "launch r1 has no recycle_at_limit, so it can't relaunch itself"),
-    ("off", "typed", "launch r1 is set recycle_at_limit off, so it can't relaunch itself"),
-    ("off", "preset", "launch r1 is set recycle_at_limit off, so it can't relaunch itself"),
-    ("off", "defaults", "launch r1 is set recycle_at_limit off, so it can't relaunch itself"),
+    # The shipped off, recorded by a launch from before relaunch was a setting or since,
+    # opts out as any other off does.
+    ("off", None, "launch r1 has recycle_at_limit off, so it can't relaunch itself"),
+    ("off", "shipped", "launch r1 has recycle_at_limit off, so it can't relaunch itself"),
+    ("off", "typed", "launch r1 has recycle_at_limit off, so it can't relaunch itself"),
+    ("off", "preset", "launch r1 has recycle_at_limit off, so it can't relaunch itself"),
+    ("off", "defaults", "launch r1 has recycle_at_limit off, so it can't relaunch itself"),
     ("off", "left-out", "launch r1 holds recycle_at_limit off, so it can't relaunch itself"),
     ("compact", "preset", "launch r1 recycles at its limit by compacting, so it can't "
                           "relaunch itself")])
@@ -373,14 +377,6 @@ def test_a_launch_that_opted_out_refuses_the_self_arm(conn, tmp_path, value, sou
     assert refused.value.hint == ("finish the work and stop; a launch with recycle_at_limit "
                                   "relaunch can recycle itself")
     nothing_written(conn, slots_api)
-
-
-@pytest.mark.parametrize("source", [None, "shipped"])
-def test_a_launch_left_at_the_shipped_off_may_recycle_itself(conn, tmp_path, source):
-    # A launch made before relaunch was the default holds the shipped off it never chose:
-    # with no source recorded, or the shipped one, its agent may still run the verb.
-    unset_recycle(conn, "off", source)
-    assert arm(conn, handoff(tmp_path)).data["outcome"] == "armed"
 
 
 @pytest.mark.parametrize("dry_run", [False, True])
@@ -399,11 +395,9 @@ def test_an_older_scratch_row_set_to_relaunch_refuses_the_self_arm(conn, tmp_pat
     nothing_written(conn, slots_api)
 
 
-@pytest.mark.parametrize("source", [None, "shipped", "left-out"])
-def test_a_scratch_row_at_off_it_never_chose_is_refused_for_its_scratch(conn, tmp_path,
-                                                                        source):
-    # The shipped off, recorded or held off quietly by the launcher, names the scratch.
-    unset_recycle(conn, "off", source)
+def test_a_scratch_row_held_off_by_the_launcher_is_refused_for_its_scratch(conn, tmp_path):
+    # A [defaults] relaunch the launcher held off on a scratch names the scratch.
+    unset_recycle(conn, "off", "left-out")
     set_values(conn, scratch=True)
     with pytest.raises(relaunch.Refused) as refused:
         arm(conn, handoff(tmp_path))

@@ -35,10 +35,10 @@ def test_a_claude_slot_launch_warned_at_a_mark_can_recycle_itself():
 
 
 @pytest.mark.parametrize("value, sources, expected", [
-    # Made before relaunch was the default: the off it never chose.
-    ("off", None, None),
-    ("off", {"recycle_at_limit": "shipped"}, None),
-    # Chosen off, or compact, from any other layer opts out.
+    # Only relaunch counts: off from any layer, the shipped default and a row from before
+    # this build that recorded off included, opts out, as compact does.
+    ("off", None, selfrecycle.OPTED_OUT),
+    ("off", {"recycle_at_limit": "shipped"}, selfrecycle.OPTED_OUT),
     ("off", {"recycle_at_limit": "typed"}, selfrecycle.OPTED_OUT),
     ("off", {"recycle_at_limit": "preset"}, selfrecycle.OPTED_OUT),
     ("off", {"recycle_at_limit": "defaults"}, selfrecycle.OPTED_OUT),
@@ -86,15 +86,9 @@ def test_the_handoff_dir_is_looked_up_without_being_made(monkeypatch):
 
 
 def test_an_off_the_launcher_held_names_the_item_that_made_it_so():
-    # The shipped relaunch held off on a terminal launch, quietly: the arm names why.
+    # A [defaults] relaunch held off on a launch that can't act on it: the arm names why.
     left = {"recycle_at_limit": "left-out"}
     assert item(row(recycle_at_limit="off", sources=left, target="terminal",
                     slot=None)) == selfrecycle.SLOT
     assert item(row(recycle_at_limit="off", sources=left)) == selfrecycle.OPTED_OUT
 
-
-def test_a_relaunch_launch_holds_by_default_only_on_the_off_it_never_chose():
-    assert selfrecycle.holds_by_default(row(recycle_at_limit="off"), slots_here=lambda: True)
-    assert not selfrecycle.holds_by_default(row(), slots_here=lambda: True)
-    assert not selfrecycle.holds_by_default(row(recycle_at_limit="off", warn_at="off"),
-                                            slots_here=lambda: True)

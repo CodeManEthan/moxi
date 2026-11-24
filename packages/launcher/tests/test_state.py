@@ -252,13 +252,12 @@ def test_a_launch_that_recycles_off_shows_no_stamped_mark(conn):
     assert read(conn).recycle.limit_at is None
 
 
-@pytest.mark.parametrize("sources, shown", [
-    (None, "relaunch (default)"), ({"recycle_at_limit": "shipped"}, "relaunch (default)"),
-    ({"recycle_at_limit": "typed"}, "off"), ({"recycle_at_limit": "left-out"}, "off")])
-def test_a_launch_left_at_the_shipped_off_shows_it_relaunches_by_default(conn, monkeypatch,
-                                                                         sources, shown):
-    # Made before relaunch was the default, its off was never chosen: its agent may still
-    # recycle itself, and show says so. An off chosen or held by the launcher stays off.
+@pytest.mark.parametrize("sources", [None, {"recycle_at_limit": "shipped"},
+                                     {"recycle_at_limit": "typed"},
+                                     {"recycle_at_limit": "left-out"}])
+def test_a_launch_at_off_shows_off_whatever_its_source(conn, monkeypatch, sources):
+    # recycle_at_limit ships off: show names the row's own value, never a shipped
+    # relaunch, even on a launch that could recycle itself had it been set to.
     monkeypatch.setattr(catalog, "slots_here", lambda: True)
     real = modules.available
     monkeypatch.setattr(modules, "available", lambda name: name != "notes" and real(name))
@@ -268,8 +267,8 @@ def test_a_launch_left_at_the_shipped_off_shows_it_relaunches_by_default(conn, m
     conn.execute("UPDATE launches SET values_json = ? WHERE request_id = 'r1'",
                  (json.dumps(values),))
     got = read(conn)
-    assert (got.recycle.at_limit, got.recycle.limit_at) == (shown, None)
-    assert f"at limit {shown}" in got.lines()[2]
+    assert (got.recycle.at_limit, got.recycle.limit_at) == ("off", None)
+    assert "at limit off" in got.lines()[2] and "relaunch" not in got.lines()[2]
 
 
 # -- the keep-warm part ------------------------------------------------------------------

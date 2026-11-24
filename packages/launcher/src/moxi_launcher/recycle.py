@@ -123,9 +123,8 @@ COMPACT_LINE = ("This launch compacts at its limit: the launcher compacts this s
 #: has no notes directory to keep a handoff in. A launch that works in one and is given
 #: `recycle_at_limit = relaunch` by a flag, the page or its preset is refused wherever its
 #: values are checked (`catalog.refuse_scratch_recycle`); one that has it from
-#: `[defaults]` holds `off` with a warning (`presets.resolve`), and from the shipped
-#: default holds `off` quietly. An older such row is refused the self arm and gets no line
-#: at its mark, and a replay of one recycles `off`.
+#: `[defaults]` holds `off` with a warning (`presets.resolve`). An older such row is
+#: refused the self arm and gets no line at its mark, and a replay of one recycles `off`.
 #: `compact` stays open to a scratch.
 SCRATCH_RECYCLE = catalog.SCRATCH_RECYCLE
 

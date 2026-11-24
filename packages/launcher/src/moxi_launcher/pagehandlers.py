@@ -284,9 +284,7 @@ def _offered_values(row: catalog.Row, available: Callable[[str], bool],
     """The words of `row` this install offers, and a note for each it doesn't: an `enum`
     value whose own modules are absent, or whose condition does not hold here. A value
     that needs only another row's value (a target) stays; the launch's check refuses it
-    with its own words. The row's shipped default stays too, noted as holding `off`: a
-    shipped default never refuses a launch (`presets.resolve` sets it off, quietly,
-    where it can't act), so a form left at it must stay valid."""
+    with its own words."""
     if not row.values:
         return None, []
     words, notes = [], []
@@ -296,11 +294,9 @@ def _offered_values(row: catalog.Row, available: Callable[[str], bool],
             not all(available(module) for module in need.requires)
             or (need.condition is not None
                 and catalog.CONDITIONS[need.condition](harness) is not None))
-        if missing and word == row.default:
-            notes.append(f"{word} holds off here: {need.refused}")
-        elif missing:
+        if missing:
             notes.append(f"{word} is not offered here: {need.refused}")
-        if not missing or word == row.default:
+        else:
             words.append(str(word))
     return words, notes
 

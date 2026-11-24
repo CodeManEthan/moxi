@@ -45,12 +45,7 @@ replay keeps its row's name.
 names in `filled`: a value the caller filled in from an earlier launch), and `filled`,
 those rows' names. A row the request leaves out that the launch's harness doesn't offer
 is there as `left-out` too. From them the request can be told from what its preset and
-the defaults gave. A replay takes neither and records no `filled`. Its `sources` hold
-only where `recycle_at_limit` came from, carried from the row it replays
-(`_replayed_recycle`), and `warn_at`'s when the replay gave it the shipped mark
-(`_replayed_mark`). So a replayed row reads as a fresh launch of the same seat with the
-same typed and preset values would, for `warn_at`, `recycle_at_limit` and whether its
-session can recycle itself.
+the defaults gave. A replay takes neither, and records neither.
 
 **A request id is a launch's idempotency key.** A request whose id is already in the
 launch log starts nothing: `launch` returns the stored row's outcome, `duplicate` set. It
@@ -142,7 +137,7 @@ from moxi import files
 from moxi import modules as moxi_modules
 
 from . import (catalog, compose, first, handoffs, identity, live, names, parks, presets, recycle,
-               selfrecycle, slots, store, targets)
+               slots, store, targets)
 from .compose import Composition, common
 from .compose.common import KEEP_WARM_ENV, RECYCLE_ON_EXPIRY_ENV
 from .first import TURNS_ENV
@@ -529,17 +524,13 @@ _NOT_REPLAYED = ("mode", "not_applied", "off_posture", "sources", "filled")
 
 def _recorded(request, resolved, values: Mapping[str, object]) -> Mapping[str, object]:
     """The values a launch's row records: `values` as they are for a replay, the stored
-    model put back over a model pin it applied, with the replay's `sources` when it has
-    any; for a fresh launch, with `sources` and `filled` (see the module's text)."""
+    model put back over a model pin it applied; for a fresh launch, with `sources` and
+    `filled` (see the module's text)."""
     if getattr(request, "replay", False):
-        kept = dict(values)
-        if resolved.sources:
-            # Where `recycle_at_limit` came from (`_replayed_recycle`), so the replay's
-            # session can recycle itself exactly where the replayed one could.
-            kept["sources"] = dict(resolved.sources)
         if getattr(resolved, "model_pin", None) is None:
-            return kept
+            return values
         # The pin is the relaunch's alone: the row keeps the stored model.
+        kept = dict(values)
         stored = request.row.values
         if "model" in stored:
             kept["model"] = stored["model"]
@@ -556,19 +547,19 @@ def _recorded(request, resolved, values: Mapping[str, object]) -> Mapping[str, o
     return {**values, "sources": sources, "filled": filled}
 
 
-#: The option rows a replay sets to the value that sets nothing (`catalog.unset`: `off`),
-#: with a warning, when the install no longer offers them or no longer meets their
-#: value's needs: stamped, they would promise a timer or a crossing that never comes.
+#: The option rows a replay sets back to their default, with a warning, when the
+#: install no longer offers them or no longer meets their value's needs: stamped, they
+#: would promise a timer or a crossing that never comes.
 _OPTION_ROWS = ("keep_warm", "recycle_on_expiry", "recycle_at_limit")
 
 
 def _unoffered_option(harness: str, target: str, values: dict, name: str) -> str | None:
-    """Set the option row `name` in `values` to the value that sets nothing
-    (`catalog.unset`) when it is set and this install doesn't offer it, or doesn't meet
-    what its value needs; return the warning, or None."""
+    """Set the option row `name` in `values` back to its default when it is set and this
+    install doesn't offer it, or doesn't meet what its value needs; return the warning,
+    or None."""
     row_ = catalog.row(harness, name)
     value = values.get(name)
-    if row_ is None or value in (None, "", catalog.unset(row_)):
+    if row_ is None or value in (None, "", row_.default):
         return None
     why = row_.unoffered(slots.links, harness)
     need = row_.when.get(value) if isinstance(value, str) else None
@@ -579,7 +570,7 @@ def _unoffered_option(harness: str, target: str, values: dict, name: str) -> str
             why = (exc.problem, "")
     if why is None:
         return None
-    values[name] = catalog.unset(row_)
+    values[name] = row_.default
     return f"{name} {value} is not applied: {why[0]}"
 
 
@@ -666,20 +657,14 @@ def _replayed(request: ReplayRequest) -> Replayed:
         warnings.append(f"identity {identity} is ignored: comms is not installed")
         identity = scope = None
         values["identity"], values["scope"] = "", ""
-    mark_source = _replayed_mark(harness, values, stored)
-    recycle_source = selfrecycle.source_of(stored)
     for name in _OPTION_ROWS:
         dropped = _unoffered_option(harness, target, values, name)
         if dropped is not None:
             warnings.append(dropped)
-            if name == selfrecycle.RECYCLE_AT_LIMIT:
-                recycle_source = presets.LEFT_OUT
     if recycle.is_scratch_relaunch(values):
         values["recycle_at_limit"] = "off"
-        recycle_source = presets.LEFT_OUT
         warnings.append(f"recycle_at_limit relaunch is not applied: "
                         f"{recycle.SCRATCH_RECYCLE[0]}")
-    recycle_source = _replayed_recycle(row, values, recycle_source)
     mode, turns, more = presets.mode_of(harness, target, identity=identity)
     warnings += more
     if request.posture is not None:
@@ -695,12 +680,9 @@ def _replayed(request: ReplayRequest) -> Replayed:
         ("projects", bool(row.project_key)), ("slots", target == "slot"),
         ("notes", catalog.is_set(values.get("notes_dir"))),
         ("usage", catalog.is_set(values.get("warn_at")))) if on}
-    sources = {name: source for name, source in (
-        (selfrecycle.RECYCLE_AT_LIMIT, recycle_source), (selfrecycle.WARN_AT, mark_source))
-        if source}
     return Replayed(
         harness=harness, mode=mode, values=MappingProxyType(values),
-        sources=MappingProxyType(sources), chosen=frozenset(),
+        sources=MappingProxyType({}), chosen=frozenset(),
         preset_kind=row.preset_kind, preset_name=row.preset_name, cwd=row.cwd,
         scratch=bool(values.get("scratch")), project_key=row.project_key, agents=(),
         identity=identity, scope=scope, posture=str(posture or ""), target=target,
@@ -708,47 +690,6 @@ def _replayed(request: ReplayRequest) -> Replayed:
         warnings=tuple(warnings), hold=request.hold, model_pin=model_pin,
         replacing=request.replacing,
         replacing_pane=row.pane_id if request.replacing else None)
-
-
-def _replayed_mark(harness: str, values: dict, stored: Mapping[str, object]) -> str | None:
-    """Give a replay the `warn_at` a fresh launch would get where its row has none of its
-    own, and return its source (`shipped`), else None. A seat launch made before every
-    Claude seat kept the shipped mark recorded `warn_at` empty when nothing set one (its
-    source the shipped default, left out, or not recorded); a fresh launch of that seat
-    now holds the shipped mark, so the replay does too, and its session is warned and told
-    at it. A Codex launch still warns only at a mark it sets (`presets.resolve`), and a
-    row this install doesn't offer is left alone. `values` is changed in place."""
-    if catalog.is_set(values.get(selfrecycle.WARN_AT)) or selfrecycle.source_of(
-            stored, selfrecycle.WARN_AT) not in (presets.SHIPPED, presets.LEFT_OUT, None):
-        return None
-    row_ = catalog.row(harness, selfrecycle.WARN_AT)
-    if (row_ is None or row_.unoffered(slots.links, harness) is not None
-            or presets.drops_default_mark(harness, source=presets.SHIPPED)):
-        return None
-    values[selfrecycle.WARN_AT] = row_.default
-    return presets.SHIPPED
-
-
-def _replayed_recycle(row, values: dict, source: str | None) -> str | None:
-    """Where a replay's `recycle_at_limit` comes from, so a replay never changes whether
-    its launch's session can recycle itself (`selfrecycle.missing`): `source` as the row
-    recorded it, or `left-out` when the replay set it `off` (`source` is then that). An
-    `off` the launch never chose (made before `relaunch` was the default: the shipped
-    `off`, or no source recorded) becomes `relaunch` with source `shipped` where the
-    install offers the row and the test holds, so the replay's session is told at its
-    mark as well as armed. `values` is changed in place."""
-    if values.get(selfrecycle.RECYCLE_AT_LIMIT) != "off" or source not in (
-            presets.SHIPPED, None):
-        return source
-    row_ = catalog.row(row.harness, selfrecycle.RECYCLE_AT_LIMIT)
-    if row_ is None or row_.unoffered(slots.links, row.harness) is not None:
-        return source
-    if selfrecycle.missing(harness=row.harness, target=row.target,
-                           in_slot=row.target == "slot", cwd=row.cwd, values=values,
-                           source=source) is not None:
-        return source
-    values[selfrecycle.RECYCLE_AT_LIMIT] = selfrecycle.RELAUNCH
-    return presets.SHIPPED
 
 
 def _child_base(request, caller: Mapping[str, str]) -> tuple[dict[str, str], str | None]:
