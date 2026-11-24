@@ -3006,12 +3006,33 @@ comms	packages/comms/tests/turns_endpoint.py	value = {"kind": "refused", "reason
 comms	packages/comms/src/moxi_comms/adapters/respawn.py	self._capped: set[str] = set()	keep	set	set
 comms	packages/comms/src/moxi_comms/adapters/respawn.py	self._busy: set[str] = set()	keep	set	set
 comms	packages/comms/src/moxi_comms/adapters/respawn.py	if not any(now - t < RESPAWN_WINDOW_S for t in times)]:	keep	any	any
+comms	packages/comms/src/moxi_comms/cli.py	help="NAME is a word a module declares for scoped senders: renew the "	keep	help	help
 comms	packages/comms/src/moxi_comms/daemon.py	on_fatal=lambda why: stopping.set(), respawn_adapters=True)	keep	set	set
+comms	packages/comms/src/moxi_comms/daemon.py	named = {identity_of(t) for t in ml.recipients} if ml is not None else set()	keep	set	set
+comms	packages/comms/src/moxi_comms/scoped.py	if not any(r["word"] == word for r in found_rows):	keep	any	any
 comms	packages/comms/tests/test_claude_launch.py	assert wait_until(lambda: not any(t.name == "comms-respawn"	keep	any	any
 comms	packages/comms/tests/test_daemon_respawn.py	r.stopping.set()	keep	set	set
 comms	packages/comms/tests/test_daemon_respawn.py	rig.daemon = Daemon(rig.record, clock=rig.clock, start_trim_thread=False,	keep	record	record
 comms	packages/comms/tests/test_daemon_respawn.py	self.keys.append(set(keys))	keep	set	set
 comms	packages/comms/tests/test_daemon_respawn.py	start=False)	keep	start	start
+comms	packages/comms/tests/test_scoped_api.py	assert (result.outcome, result.refusal.code) == ("refused", "scoped-recipient")	keep	refused	refused
+comms	packages/comms/tests/test_scoped_api.py	assert (result.outcome, result.refusal.code) == ("refused", "scoped-undeclared")	keep	refused	refused
+comms	packages/comms/tests/test_scoped_names.py	client.send("lead-digest", token, machine_line.compose(["lead"], "still mine"))	keep	fail	fail
+comms	packages/comms/tests/test_scoped_names.py	mid = rig.record.post_as_identity(	keep	record	record
+comms	packages/comms/tests/test_scoped_send.py	assert (result.outcome, result.refusal.code) == ("refused", code), result.lines()	keep	refused	refused
+comms	packages/comms/tests/test_scoped_send.py	assert digest.record.get_message(result.message_id).author_id == "lead-digest"	keep	record	record
+comms	packages/comms/tests/test_scoped_send.py	assert wait_until(lambda: any(p["message_id"] == mid for p in shim.queue))	keep	any	any
+comms	packages/comms/tests/test_scoped_send.py	client.send("planner@proj-a", planner, machine_line.compose([FORMED], "x"))	keep	fail	fail
+comms	packages/comms/tests/test_scoped_send.py	client.send(FORMED, "anything", machine_line.compose([PARENT], "x"))	keep	fail	fail
+comms	packages/comms/tests/test_scoped_send.py	client.send(FORMED, held, machine_line.compose([PARENT], "still mine"))	keep	fail	fail
+comms	packages/comms/tests/test_scoped_send.py	client.send(FORMED, planner, machine_line.compose([PARENT], "x"))	keep	fail	fail
+comms	packages/comms/tests/test_scoped_send.py	client.send(FORMED, token(), "no machine line")	keep	fail	fail
+comms	packages/comms/tests/test_scoped_send.py	client.send(FORMED, token(), machine_line.compose(	keep	fail	fail
+comms	packages/comms/tests/test_scoped_send.py	ml = machine_line.parse(digest.record.get_message(result.message_id).content)	keep	record	record
+comms	packages/comms/tests/test_scoped_send.py	msg = digest.record.get_message(mid)	keep	record	record
+comms	packages/comms/tests/test_scoped_send.py	return rig.record.history(rig.names_channel)	keep	record	record
+comms	packages/comms/tests/test_scoped_words.py	assert any(w == "Bad" for w, _m, _why in result.word_conflicts)	keep	any	any
+comms	packages/comms/tests/test_scoped_words.py	assert got.broken == [] and got.kept == set()	keep	set	set
 connector	packages/connector/src/moxi_connector/app.py	"ms": round((time.monotonic() - self.started) * 1000, 1),	keep	round	round
 connector	packages/connector/src/moxi_connector/app.py	None, lambda: log_.write(row, durable=durable, collapse=collapse))	keep	durable	durable
 connector	packages/connector/src/moxi_connector/app.py	Tools.call_tool	name	e	exc
