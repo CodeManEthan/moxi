@@ -137,7 +137,8 @@ records a launch's refusal.
 `/api/keep-warm` is the press of `Keep warm` on Home's Sessions row (`keep_warm`). It finds
 the launch's session as the joiner does, slots never asked, and reads now, through one
 `waits.Reads` whose deadline is `joiner.JOIN_BUDGET_S` from the press, what a join pass
-reads of that launch. A session keep-warm's next ask would already nudge is answered not
+reads of that launch, the directed join made where the ask would make it
+(`keepwarm.joins`). A session keep-warm's next ask would already nudge is answered not
 refused, with nothing written. Else it reads the ask's steps as if cover had just been set
 (`keepwarm.reading` with `pressed`) and answers the first that does not pass as a refusal;
 when every one passes it writes the cover (`keepwarm.cover_on`), the one event a press
@@ -2180,7 +2181,7 @@ def _cover(conn: sqlite3.Connection, found: target.Target, sid: str,
             recycle.cache_read, cache, row, sid, dict(os.environ), now=now)
         facts = reads.call(session.facts)
         closed = getattr(facts, "turn_open", None) is False
-        listed, joined, live_agents = None, None, ()
+        listed, joined, live_agents, held = None, None, (), ()
         if closed:
             try:
                 listed = reads.call(session.agents)
@@ -2192,12 +2193,16 @@ def _cover(conn: sqlite3.Connection, found: target.Target, sid: str,
         records = () if cache is None else reads.call(cache.clock_records)
         tick_s = None if cache is None else reads.call(joiner.cache_tick_s)
         if closed:
-            nudges = reads.call(keepwarm.run_of_nudges, conn, row.request_id,
-                                getattr(facts, "session_id", None) or sid,
+            now_sid = getattr(facts, "session_id", None) or sid
+            nudges = reads.call(keepwarm.run_of_nudges, conn, row.request_id, now_sid,
                                 getattr(facts, "turn_number", None))
-            live_agents = reads.call(keepwarm.signal_now, conn, row, listed, nudges).agents
-            # The join is the last read, so one the deadline cuts short keeps what it found.
-            if not live_agents and reads.comms is not None:
+            signal = reads.call(keepwarm.signal_now, conn, row, listed, nudges,
+                                sid=now_sid, pressed=True)
+            live_agents, held = signal.agents, signal.holds
+            # The join is the last read, so one the deadline cuts short keeps what it
+            # found. It is made where the ask would make it (`keepwarm.joins`).
+            has_room = keepwarm.subagent_room(conn, row, now_sid, nudges, current)
+            if reads.comms is not None and keepwarm.joins(signal, has_room=has_room):
                 joined = waits.directed(reads, sid)
     except waits.Late:
         return _no("unreadable", "the session was not read within "
@@ -2215,11 +2220,12 @@ def _cover(conn: sqlite3.Connection, found: target.Target, sid: str,
     got = keepwarm.reading(*readings, **options, pressed=True)
     names = joined.names if joined is not None else ()
     refused = _press_refused(conn, row, sid, got, clock, facts, listed, joined, tick_s,
-                             current, at_work=bool(live_agents or names))
+                             current, at_work=bool(live_agents or names or held))
     if refused is not None:
         return refused
     fact = ({"kind": "subagents", "count": len(live_agents)} if live_agents
-            else {"kind": "agents", "count": len(names)})
+            else {"kind": "agents", "count": len(names)} if names
+            else {"kind": "holds", "count": len(held)})
     keepwarm.cover_on(conn, row, getattr(facts, "session_id", None) or sid,
                       turn_number=getattr(facts, "turn_number", None), waits=fact)
     feed = _current
@@ -2262,7 +2268,7 @@ def _press_refused(conn: sqlite3.Connection, row: store.LaunchRow, sid: str,
         unread = _unread(listed, joined)
         if not unread:
             return _no("not-waiting", "no subagent of the session and no agent it directs "
-                                      "is at work")
+                                      "is at work, and no hold is open")
         return _no("unreadable", f"nobody was found at work, but {'; '.join(unread)}",
                    TRY_AGAIN)
     if step == 7:

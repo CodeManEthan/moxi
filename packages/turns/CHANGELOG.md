@@ -2,6 +2,21 @@
 
 ## 0.2.8 (unreleased)
 
+- A new capability, `stale-agents`, which Claude Code sessions offer: the endpoint judges
+  each `waiting` subagent Claude Code lists, and one whose transcript's last timestamped
+  line is at least an hour old, whose last turn record is an assistant `end_turn`, and
+  whose own agents and background-task output files wrote nothing within the hour reads
+  `idle`. A transcript the endpoint cannot find or read, a record shape it does not know,
+  and an entry it has no time for within the list's 0.3 s deadline (the search of its
+  whole transcript for output files included, read a piece at a time) keep Claude Code's
+  status. Teammates and forks of the main loop are never judged.
+- The Claude runner's `/live` answer and the gate's readings send the subagent list's
+  entries instead of a count, so a delivery's `refuse_agents`, a session command's
+  subagent check and `facts.agents` count the judged list. The endpoint still reads an
+  older runner's or gate's integer count, unjudged. The gate is version 0.1.1 and the
+  runner 0.3.2, so `moxi install turns` updates an install at user scope.
+- `agents` entries gain `is_fork` (a fork of the main loop, which Claude Code lists as a
+  subagent) and `last_write_at` (the newest write the judgment read).
 - The guard API gains `touched_files(call)`, exported from `moxi_turns`: the files a
   write call touches, in the call's order, each a `TouchedFile(path, kind, text)`.
   Claude Code's `Write` and `Edit` and OpenCode's `write` and `edit` give one `write`

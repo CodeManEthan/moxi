@@ -2,6 +2,48 @@
 
 ## Unreleased
 
+- A headless launch with an identity keeps `keep_warm = "on"`, with no warning, as any
+  other launch does. A nudge is a turn, which starts the exit rule's `idle=` count again,
+  so the session ends by its rule once keep-warm stops nudging. `recycle_on_expiry` is
+  still left out there with its warning.
+- An open hold is work out wherever a live subagent or a directed agent at work is. Home's
+  Sessions row reads a session with neither, but holds of its chain open, as waiting on
+  them (`waits` kind `holds`, `waiting on 1 open hold`, `kept warm while 1 hold is
+  open`), and offers `Keep warm` at its cap; the press counts those holds as work out
+  (read as if cover had just been set) and records cover with that wait. A refused
+  press with nobody at work now says no hold is open either.
+- `moxi launcher show` reads keep-warm off wherever keep-warm can't act on this install
+  (`keepwarm.can_act`: the `keep_warm` row isn't offered, with turns or cache missing or
+  where cache can't read a session's environment), as the stamp and the start text's
+  `keep warm:` line already do.
+- The director case no longer needs cover: every ask about a launch keep-warm is on for
+  that doesn't nudge for a subagent reads the agents the session directs (the join,
+  within 20 s), and with comms absent nobody is directed. A join or agent list not read
+  whole, with no case found, ends the ask `unreadable`, quietly.
+- Holds are taken and read wherever keep-warm is on, cover included: a launch made with
+  `keep_warm` off takes holds while its session is covered, the hold verbs work
+  there, `show` lists them, and an open hold keeps the cover as work out does.
+- Home's Sessions row and the `Keep warm` press read the agents a session directs
+  wherever keep-warm's ask would (`keepwarm.joins`): unless a live subagent's case is
+  under its cap. A session whose subagent nudges are spent while an agent it directs
+  works reads `kept warm`, and a press there is answered, as the ask nudges it.
+- The start text's `keep warm:` line no longer asks for a hold per piece of work: it says
+  subagents and directed agents at work keep the session warm, and that a hold covers
+  other work.
+- A run of nudges counts each case apart, by the word each nudge ended with: the subagent
+  case up to `keep_warm.subagent_cap`, then the director case up to
+  `keep_warm.director_cap`, so a director whose subagent nudges are spent is still nudged
+  while an agent it directs works. A run with every case spent ends `blocked` (`capped`)
+  naming each count (`subagents 3/3, director 10/10`). Each case's texts go by its own
+  count. A director nudge with agents it directs at work and holds open names both: the
+  directing texts, the agents, then `Open holds:`.
+- Keep-warm's subagent case and the agents a session directs count the same entries
+  (`waits.live_subagents`): a `subagent` or `teammate` entry not final and pending,
+  running or waiting, and not a fork of the session's main loop. A directed Claude agent
+  whose turn is closed is at work by the subagents its own agent list holds at work, not
+  by turns' busy count, so a fork, or a subagent turns' `stale-agents` judgment lists
+  `idle`, keeps neither case going. A list turns can't read whole leaves that agent
+  unlisted, as before.
 - A `compact` launch with `limit_at` unset and no `warn_at` mark crosses at `1x`; it no
   longer reads usage's `marks.default`, which usage no longer has, and
   `compose.common.usage_default_mark` is removed.

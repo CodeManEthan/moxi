@@ -806,6 +806,7 @@ def test_state_of_a_quiet_launch_is_ok(conn, capsys):
     assert (status, err) == (codes.OK, "")
     lines = out.splitlines()
     assert lines[0] == f"session {SID} (launch r1): ok"
+    # turns and cache are hidden here, so keep-warm can't act and the launch reads off.
     assert lines[1] == "relaunch: none" and lines[3] == "keep warm: off"
 
 

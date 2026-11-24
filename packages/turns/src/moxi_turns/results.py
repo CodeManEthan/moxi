@@ -24,10 +24,12 @@ from typing import Any, ClassVar
 #: model after the tool. `usage`: the session reports usage (Claude's readings, Codex's
 #: limits). `mcp-token`: the Codex host's `mcp.reload`. `environ`: the `environ` method.
 #: `fork`: the `fork` method, a fork of the session's main loop. `keep`: the `keep` option
-#: of `deliver`, `fork` and `fork.continue`, and the `ack` method.
+#: of `deliver`, `fork` and `fork.continue`, and the `ack` method. `stale-agents`: the
+#: endpoint judges which `waiting` subagents are stale, and every reader of its agent list
+#: (`agents`, `facts.agents`, the busy checks) reads them `idle`.
 CAPABILITIES = ("deliver", "only-if-idle", "steer", "stop-handler", "clear", "exit",
                 "compact", "agents", "stop-shells", "guards", "after-tool", "usage",
-                "mcp-token", "environ", "fork", "keep")
+                "mcp-token", "environ", "fork", "keep", "stale-agents")
 
 #: The most names one `environ` call may ask.
 ENV_MAX_NAMES = 64
@@ -248,6 +250,10 @@ class Agent(_Value):
     `kind` is one of `AGENT_KINDS`, `state` one of `AGENT_STATES`. `final` is True when its
     latest notice is a final one (done, failed or stopped), False when not, and None when
     the harness gives no notice to read. `parent_id` is the agent that spawned it, or None.
+    `is_fork` is True for a fork of the session's main loop (Claude Code lists one as a
+    subagent): the main loop's own work, not a subagent's, which the stale judgment never
+    judges. `last_write_at` is the newest write (Unix seconds) the
+    stale judgment read for a `waiting` subagent it judged, else None.
     """
 
     id: str
@@ -256,6 +262,8 @@ class Agent(_Value):
     final: bool | None
     description: str | None = None
     parent_id: str | None = None
+    is_fork: bool = False
+    last_write_at: float | None = None
 
     @property
     def busy(self) -> bool:

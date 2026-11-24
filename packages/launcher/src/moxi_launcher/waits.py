@@ -8,9 +8,14 @@ of a `Directed`; each caller derives its own answer from them.
 
 The read: comms' `owner` of the session, comms' `roster` (once per `Reads`), its bound
 agents whose `directors` name that owner, comms' `session_of` for each, then turns' `find`
-of that session and its `facts`. An agent is at work as `works` reads it. Each comms
-read may take `COMMS_TIMEOUT_S`. A comms that is installed and does not load stands as
-`UNLOADED`, and a read through it is one that raised.
+of that session, its `facts` and, when its turn is closed and it is not a Codex session,
+its `agents`. An agent is at work as `works` reads it. Each comms read may take
+`COMMS_TIMEOUT_S`. A comms that is installed and does not load stands as `UNLOADED`, and
+a read through it is one that raised.
+
+`live_subagents` is the one count of a session's own subagents at work: keep-warm's
+subagent case counts a session's list with it (`keepwarm.signal_of`), and `works` counts a
+directed agent's list with it, so the two cases count the same entries.
 """
 
 from __future__ import annotations
@@ -24,6 +29,9 @@ from typing import Any
 
 #: Seconds each of comms' reads may take.
 COMMS_TIMEOUT_S = 2.0
+#: The agent kinds and states a session's own subagent at work has; a `shell` never is one.
+SUBAGENT_KINDS = ("subagent", "teammate")
+LIVE_STATES = ("pending", "running", "waiting")
 
 #: Stands for comms' API where comms is installed but does not load: `directed` reads
 #: through it as a read that raised, not as comms not installed.
@@ -152,14 +160,17 @@ def directed(reads: Reads, sid: str) -> Directed:
             session = reads.call(reads.turns.find, session_id=agent_sid)
             if session is None:
                 continue
+            harness = getattr(session, "harness", None)
+            listed = None
             try:
                 facts = reads.call(session.facts)
+                if _lists(facts, harness):
+                    listed = _listed(reads, session)
             finally:
                 session.close()
-            harness = getattr(session, "harness", None)
-            if works(facts, harness):
+            if works(facts, harness, listed):
                 names.append(agent.qualified)
-            elif _unlisted(facts, harness):
+            elif _lists(facts, harness) and not _whole(listed):
                 unlisted = True
     except Late:
         return Directed(tuple(names), late=True, unlisted=unlisted)
@@ -170,21 +181,51 @@ def directed(reads: Reads, sid: str) -> Directed:
     return Directed(tuple(names), unlisted=unlisted)
 
 
-def works(facts: Any, harness: str | None) -> bool:
-    """Whether a directed agent's session works: its turn is open, or it is a Claude
-    session whose closed turn waits on subagents of its own (`facts.agents` above zero;
-    for Codex that count holds background terminals too, so it is not read)."""
+def live_subagents(listed: Any | None) -> tuple[Any, ...]:
+    """The entries of turns' agents value `listed` that are the session's own subagents at
+    work: a `subagent` or `teammate` entry not final and pending, running or waiting, and
+    not a fork of the session's main loop (`is_fork`). None counts none. The age of an
+    entry is never read here: an endpoint that judges stale entries (turns' `stale-agents`)
+    already lists a stale one `idle`, and an older one's list is Claude's own, which errs
+    live."""
+    if listed is None:
+        return ()
+    return tuple(a for a in (getattr(listed, "entries", ()) or ())
+                 if a.kind in SUBAGENT_KINDS and a.final is not True
+                 and a.state in LIVE_STATES and getattr(a, "is_fork", False) is not True)
+
+
+def works(facts: Any, harness: str | None, listed: Any | None = None) -> bool:
+    """Whether a directed agent's session works: its turn is open, or it is not a Codex
+    session and `listed`, its agents value read with its turn closed, holds a subagent at
+    work (`live_subagents`). A Codex session counts by its open turn alone: its list
+    holds background terminals, which are not the agent's own work out."""
     if getattr(facts, "turn_open", None) is True:
         return True
     if harness == "codex":
         return False
-    busy = getattr(facts, "agents", None)
-    return isinstance(busy, int) and not isinstance(busy, bool) and busy > 0
+    return bool(live_subagents(listed))
 
 
-def _unlisted(facts: Any, harness: str | None) -> bool:
-    return (harness != "codex" and getattr(facts, "turn_open", None) is not True
-            and getattr(facts, "agents", None) is None)
+def _lists(facts: Any, harness: str | None) -> bool:
+    """Whether `directed` reads the session's agents: its turn is not open and it is not a
+    Codex session."""
+    return harness != "codex" and getattr(facts, "turn_open", None) is not True
 
 
-__all__ = ["COMMS_TIMEOUT_S", "UNLOADED", "Directed", "Late", "Reads", "directed", "works"]
+def _listed(reads: Reads, session: Any) -> Any | None:
+    """The session's agents value, or None when turns could not read it. `Late` is raised."""
+    try:
+        return reads.call(session.agents)
+    except Late:
+        raise
+    except Exception:  # noqa: BLE001  (a list not read is unlisted, not a failed join)
+        return None
+
+
+def _whole(listed: Any | None) -> bool:
+    return listed is not None and getattr(listed, "complete", True) is not False
+
+
+__all__ = ["COMMS_TIMEOUT_S", "LIVE_STATES", "SUBAGENT_KINDS", "UNLOADED", "Directed",
+           "Late", "Reads", "directed", "live_subagents", "works"]

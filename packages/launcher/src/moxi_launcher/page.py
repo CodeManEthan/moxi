@@ -295,8 +295,9 @@ WHERE = _table(target=_text(), slot=_text(nullable=True), project_key=_text(null
 #: cold, and `estimated` whether that time rests on a lifetime no request named.
 CACHE = _table(nullable=True, state=_text(), until=_text(nullable=True),
                estimated=Out("bool"))
-#: What a running launch waits on while its own turn is closed: `kind` is `agents` or
-#: `subagents`, `count` how many of them work.
+#: What a running launch waits on while its own turn is closed: `kind` is `subagents`,
+#: else `agents` (agents it directs), else `holds` (its chain's open holds), and `count`
+#: how many of them work or are open.
 WAITS = _table(nullable=True, kind=_text(), count=Out("int"))
 #: The latest message in a running launch's session: when, who said it (`you`, `agent`
 #: or null) and its first line, which the gateway cuts.

@@ -419,7 +419,7 @@ describe('the report queue', () => {
     expect(w.got).toEqual([])
     await w.hello()
     expect(w.kinds()).toEqual(['session', 'turn.start', 'turn.complete'])
-    expect(w.reports()[0]).toEqual({ seq: 1, kind: 'session', session_id: 'S-1', mod_version: '0.3.1' })
+    expect(w.reports()[0]).toEqual({ seq: 1, kind: 'session', session_id: 'S-1', mod_version: '0.3.2' })
     expect(w.reports().map(r => r.seq)).toEqual([1, 2, 3])
     expect(w.reports()[2]).toEqual({ seq: 3, kind: 'turn.complete', turn_id: 't1', reason: 'answer', is_aborted: false, answer: 'done.' })
   })
@@ -730,13 +730,21 @@ describe('the tie: one window per submit', () => {
 })
 
 describe('the other lines', () => {
-  test('live: the busy subagents and the box, answered on /live', async ($: E, on) => {
+  test('live: the entries of the list for the endpoint to judge and count, and the box, answered on /live', async ($: E, on) => {
     const w = world(on)
     await attached($, w)
-    w.agents = [{ id: 'a', status: 'running' }, { id: 'b', status: 'completed' }]
+    w.agents = [
+      { id: 'a', type: 'Explore', description: 'look', status: 'running' },
+      { id: 'b', type: 'fork', description: 'subconscious', status: 'waiting', parentId: 'a' },
+      { id: 'c', type: 'teammate', description: 'mate', status: 'idle', teammateId: 'ann@crew' },
+    ]
     w.box = 'half typed'
     await w.line({ op: 'live', ask: 7 })
-    expect(w.got.find(g => g.path === '/live')?.body).toEqual({ ask: 7, agents: 1, draft: true })
+    expect(w.got.find(g => g.path === '/live')?.body).toEqual({ ask: 7, agents: [
+      { id: 'a', type: 'Explore', status: 'running' },
+      { id: 'b', type: 'fork', status: 'waiting', parentId: 'a' },
+      { id: 'c', type: 'teammate', status: 'idle', teammateId: 'ann@crew' },
+    ], draft: true })
   })
 
   test('live: an unreadable subagent list is sent as null, never 0', async ($: E, on) => {

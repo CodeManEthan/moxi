@@ -643,11 +643,20 @@ own reads:
   composes its mark again from the values then.
 
 **Keep-warm.** `--keep-warm on` (needs turns and cache) nudges a session shortly before
-its prompt cache would expire while it waits on work it handed out: running subagents, or
-open named holds. The nudge is a short turn delivered only when the session is idle. A
-run of nudges stops at its cap (`keep_warm.subagent_cap`, `keep_warm.director_cap`) and
-shows `blocked`. A session that hands out work other than subagents names each piece
-with a hold, from its own tool shell:
+its prompt cache would expire while it waits on work it handed out. It is off unless a
+flag, a preset, `[defaults]` or the launch page sets it on, and `off` from any of them
+launches as given. A kept-warm session's start text has a `keep warm:` line saying what
+keeps it warm.
+Work out is one of two cases. The subagent case: its own subagents or teammates at work;
+a fork of its main loop doesn't count. The director case: an agent whose comms claim
+names it as a director at work (its turn open, or its turn closed while subagents of its
+own work), or an open named hold. Where turns judges stale subagents, one that has sat
+waiting an hour with nothing it owns writing counts as idle in both. The nudge is a short
+turn delivered only when the session is idle. A run of nudges counts each case apart:
+the subagent case first, up to `keep_warm.subagent_cap`, then the director case up to
+`keep_warm.director_cap`, then `blocked` (`capped`), naming each spent count. A session
+that hands out work neither case shows names each piece with a hold, from its own tool
+shell:
 
     moxi launcher keep-warm hold NAME
     moxi launcher keep-warm release NAME
@@ -674,25 +683,23 @@ the quiet ends as a run would end them, `blocked` with its word, or `would-clear
 Keep-warm and recycle on expiry are offered where cache can read a session's
 environment: Linux and WSL2 (macOS untested), for Claude Code sessions.
 
-**Cover.** A session launched without `--keep-warm on` can still be kept warm once it
-runs: `Keep warm` on Home's Sessions row (see "The page") puts it under cover. Cover
-belongs to one launch and the session id it has now: a `/clear` gives the session a new
-id, and a relaunch or a resume is a new launch, so each starts without it. A covered
-session is nudged while its subagents run, as a session launched with `--keep-warm on`
-is, and also while agents it directs through comms are at work: an agent whose turn is
-open, or whose closed turn waits on subagents of its own. Those nudges use
-`keep_warm.directing_texts`, name the agents and stop at `keep_warm.director_cap`.
-Under cover the count in a row starts at the press. Holds belong to the launch value
-alone: a launch with cover alone takes no holds, and a hold left open in its chain does
-not keep it warm. `moxi launcher show` reads a covered session as keep-warm on.
+**Cover.** `Keep warm` on Home's Sessions row (see "The page") puts a running session
+under cover: a session past its cap gets a new count, and a session launched without
+`--keep-warm on` is kept warm. Cover belongs to one launch and the session id it has now:
+a `/clear` gives the session a new id, and a relaunch or a resume is a new launch, so
+each starts without it. A covered session is nudged for both cases, and under cover the
+count in a row starts at the press. Holds work wherever keep-warm is on, cover included:
+a covered session takes holds with the verbs above while its cover lasts, and its
+chain's open holds keep it warm. `moxi launcher show` reads a covered session as
+keep-warm on, with its holds. It reads keep-warm off wherever keep-warm can't act on
+this install (turns or cache missing, or a system where cache can't read a session's
+environment), as the launch's stamp and start text do.
 
 Cover lasts until a keep-warm ask reads the session's own subagents and its directed
-agents in full and finds nobody at work. Asks come only near the end of a cache
-lifetime, so a session that goes back to work and then waits again is still covered. A
-director that takes a turn at each report starts its count in a row again each time, so
-pressing on a director is close to having launched it with `--keep-warm on`. If comms or
-turns can't be read, the cover is kept. There is no off short of a `/clear`, a relaunch
-or ending the session.
+agents in full and finds nobody at work and no hold open. Asks come only near the end of
+a cache lifetime, so a session that goes back to work and then waits again is still
+covered. If comms or turns can't be read, the cover is kept. There is no off short of a
+`/clear`, a relaunch or ending the session.
 
 **What keep-warm costs.** Each nudge is a turn: the session reads its whole cached
 context and writes a short reply. It comes about once per cache lifetime while the
@@ -823,8 +830,8 @@ sessions are running (`3 running`), and shows nothing when none is. Click it to 
 list in place: at most four sessions, each with its name, where it runs (the slot,
 `terminal` or `headless`, then the project or the folder's name), its cache when that is
 known, and on the second line the time and first line of the latest thing said in it,
-or when it was launched. A session that waits on agents or subagents while its cache is
-warm, with nothing set to keep it warm, comes first and says in heavy type when its cache
+or when it was launched. A session that waits on agents, subagents or open holds while
+its cache is warm, with nothing set to keep it warm, comes first and says in heavy type when its cache
 goes cold and what it waits on; the row then names it while closed and rises above the
 rows that need nothing. `Open` goes to the session's transcript on the sessions page, and
 `All sessions (N)` to that page's list; without sessions installed both go to the
@@ -839,7 +846,7 @@ keep it warm. Hover it for the cost: it sends a short turn before each cold time
 session waits, at most the cap in a row (see "Acting on launched sessions" for what a
 turn costs and how long cover lasts). A press sends nothing at once. It records cover,
 and cache's timer's next ask sends the first nudge. The row then reads `kept warm while
-1 subagent runs` (or `n agents work`) with `Open` alone, moves down to its place, and
+1 subagent runs` (or `n agents work`, or `n holds are open`) with `Open` alone, moves down to its place, and
 the focus goes to its `Open`. The button isn't offered on a Codex or headless session,
 on a cache too close to cold for an ask to come, with text typed in the prompt box,
 after an ask that failed since the session's last request, or while cache's watcher
@@ -864,14 +871,17 @@ A session waits only while its own turn is closed. With turns, it waits on its s
 and teammates at work, counted as keep-warm counts them; with none, and comms installed,
 on the agents its comms name directs whose turn is open, or whose turn is closed while
 they wait on subagents of their own (a Claude session's; a Codex session counts only by
-its open turn). Each comms read may take 2 seconds, and once comms' daemon is found down
-the pass asks it nothing more. A waiting session reads `kept warm` when every step of
+its open turn); with neither, on the open holds of its launch chain, so a session at its
+director cap with only holds open is offered `Keep warm` too. The directed agents are read wherever keep-warm's ask would read them,
+so a session whose subagent nudges are spent still reads `kept warm` while an agent it
+directs works, as the ask nudges it. Each comms read may take 2 seconds, and once comms'
+daemon is found down the pass asks it nothing more. A waiting session reads `kept warm` when every step of
 keep-warm's next ask that can be read without writing ends in a nudge, with an ask still
 certain to come before its window shuts: its launch keeps warm (made with `keep_warm` on,
-or under cover), cache's watcher says it asks keep-warm about the session, no run open on
-the launch, no turn open, a live subagent, a directed agent at work under cover or an
-open hold with the launch value, the run of nudges under its cap, nothing typed into the
-prompt box, and no ask since the session's last request that ended without a nudge. Any
+or under cover), cache's watcher says it asks keep-warm about the session, no run open on the launch, no turn open, a live
+subagent, a directed agent at work or an open hold, a
+case under its cap, nothing typed into the prompt box, and no ask since the session's
+last request that ended without a nudge. Any
 step it can't read counts against it, so the row says `goes cold` whenever a nudge is
 not certain. These reads write nothing, send nothing to a session and never ask slots.
 
@@ -1002,9 +1012,11 @@ comms' own parser before anything starts, so a bad one is refused (2) in comms' 
 and a rule with `idle=` or `after=` and no `cold` gets a warning: mail sent once the
 session's cache is cold waits for the name's next holder. `headless_exit` set by a
 preset or a flag on any other launch is left out with a warning; set in your `[defaults]`
-it is left out without one, as `director` and `scope` are. `keep_warm` and
-`recycle_on_expiry` are left out with a warning on a headless launch with an identity,
-since nudging or recycling the session would work against its exit rule. The launch
+it is left out without one, as `director` and `scope` are. `recycle_on_expiry`
+is left out with a warning on a headless launch with an identity, since recycling the
+session would work against its exit rule. `keep_warm` stays as set: a nudge is a turn,
+which starts the rule's `idle=` count again, so the session ends by its rule once
+keep-warm stops nudging (nothing at work, or a cap spent). The launch
 returns at once; the deliverer watches the bind and ends the row `failed` as above when
 the name can't be taken, and sends nothing more. When the deliverer can't be started, the
 launcher ends the wrapper (SIGTERM), and its session with it, and the row ends `failed`,
@@ -1074,10 +1086,11 @@ Set with `moxi config set launcher <key> <value>`:
   be idle.
 - `keep_warm.subagent_cap` (3) and `keep_warm.director_cap` (10): how many nudges in a row
   each case gets; `keep_warm.subagent_texts` and `keep_warm.director_texts` are their
-  words. `keep_warm.director_cap` also caps the nudges for the agents a covered director
+  words. `keep_warm.director_cap` also caps the nudges for the agents a director
   directs.
-- `keep_warm.directing_texts`: the nudges for a covered director with no open hold, in
-  order, the last repeating; the agents at work are named after each.
+- `keep_warm.directing_texts`: the nudges for a director while agents it directs are at
+  work, in order, the last repeating; the agents at work are named after each, then the
+  open holds.
 - `records.keep_days` (90): how long ended runs, their events, exits, released holds and
   closed park entries are kept. Open park entries are never deleted by age.
 - `name.template` (`<date>-<time>-<project>-<agent>`) and `name.templates` (empty):

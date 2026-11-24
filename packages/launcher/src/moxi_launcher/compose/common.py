@@ -49,8 +49,9 @@ COMMANDS = ("exit",)
 KEEP_WARM_ENV = "MOXI_LAUNCHER_KEEP_WARM"
 RECYCLE_ON_EXPIRY_ENV = "MOXI_LAUNCHER_RECYCLE_ON_EXPIRY"
 #: The identity block's line on a keep-warm launch.
-KEEP_WARM_LINE = ('on; open a hold with "moxi launcher keep-warm hold <name>" for each '
-                  "piece of work you hand out, and release it when the work is done")
+KEEP_WARM_LINE = ("on; subagents of yours and agents you direct at work keep you warm; "
+                  'for other work you hand out, open a hold with "moxi launcher keep-warm '
+                  'hold <name>" and release it when the work is done')
 #: What every scrub removes besides the modules' own session stamps: every `CLAUDE*`
 #: name but those in `CLAUDE_KEEP`, and the agent marker. A Claude Code session sets
 #: `CLAUDE*` names in what it starts, and new ones come with new versions, so the scrub
