@@ -33,10 +33,10 @@
   finishing would bring into the target holds a private file, a path under one, or a
   file where its folder would be; `check` reads it before it runs and `finish` again
   under its lock. `moxi rounds doctor` gains a private files row.
-- The merge queue acts on a red or cancelled CI reading only once its run has
+- The merge queue acts on a red, cancelled or absent CI reading only once its run has
   finished. Until every run such a read names reads `completed`, the candidate, rerun
-  and main paths read it as pending: they rerun nothing, read no failure log and count
-  nothing toward the failed reads. A reading green on the jobs it reads stands at once,
+  and main paths read it as pending: they rerun nothing, read no failure log, push
+  nothing again and count nothing toward the failed reads. A reading green on the jobs it reads stands at once,
   while other jobs of the run still go. A batch or head `read` event held pending names
   the runs still going in `running`, and the lander's log and `moxi rounds queue` say
   the run is still running.

@@ -380,6 +380,14 @@ def test_a_queue_read_is_pending_while_any_run_it_names_has_not_completed(second
     assert (read.word, read.runs, read.running) == (ci.PENDING, ("7", "8"), ("7",))
 
 
+def test_a_queue_read_absent_while_a_run_it_names_goes_is_pending():
+    # The other workflow's run may start later, so it is not absent yet.
+    going = run(databaseId=7, status="in_progress", conclusion="")
+    read = queue_ci.QueueCi(whole_runs(going), local_log=Path("local.log")).read_full(
+        None, TIP)
+    assert (read.word, read.runs, read.running) == (ci.PENDING, ("7",), ("7",))
+
+
 def test_failures_refuses_a_running_read(monkeypatch):
     ran = []
     monkeypatch.setattr(ci, "run_jobs", lambda *args, **kwargs: ran.append(args))

@@ -14,9 +14,9 @@ takes any object with the same methods, so a test gives it a stand-in.
 - `read(place, commit)` reads a candidate's CI at `commit` as `check` reads it
   (`ci.read_runs`), by the workflows the setting gives candidates
   (`ci.Declared.candidate_workflows`), as one `Read`: the whole reading, `cancelled`
-  when a run it read was cancelled. A reading that would be red or cancelled reads
-  `pending` while any run it read has not completed (their ids in `running`), so a
-  failed job of a run that goes on reads no red; a green reading of the jobs it reads
+  when a run it read was cancelled. A reading that would be red, cancelled or absent
+  reads `pending` while any run it read has not completed (their ids in `running`), so
+  a failed job of a run that goes on reads no red; a green reading of the jobs it reads
   stands at once, while other jobs of the run still go.
   `read_full(place, commit)` reads the target's full run there the same way, by the
   full run's workflows (`ci.Declared.full_workflows`), so a candidate's scoped run at the
@@ -159,9 +159,9 @@ class QueueCi:
         word = reading.whole
         if any(run.get("conclusion") == CANCELLED for run in runs):
             word = CANCELLED
-        # GitHub refuses a rerun and a failure log while a run goes, so a red or
-        # cancelled reading is not final until every run ends; any other stands.
-        running = going if word in (ci.RED, CANCELLED, ci.PENDING) else ()
+        # GitHub refuses a rerun and a failure log while a run goes, and a run not
+        # shown yet may still start, so only a green reading stands while one goes.
+        running = going if word != ci.GREEN else ()
         if running:
             word = ci.PENDING
         return Read(word, tuple(str(run.get("databaseId")) for run in runs

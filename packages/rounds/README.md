@@ -967,9 +967,9 @@ conflicts with, one a commit hook refuses with the hook's output, and one whose 
 moved or whose build ended leaves. It pushes the candidate to its own ref (the `ci.ref`
 template filled with that branch), runs `ci.local` at it, and reads its CI each minute,
 by the `ci.workflows` marked `reads_candidates`, or by all of them where none is.
-A red or cancelled reading counts only once the `status` command reads every run it
-names `completed`: until then the read is pending, nothing is rerun, no failure log is
-read and nothing counts toward the failed reads, and the lander's log and `queue` name
+A red, cancelled or absent reading counts only once the `status` command reads every
+run it names `completed`: until then the read is pending, nothing is rerun or pushed
+again, no failure log is read and nothing counts toward the failed reads, and the lander's log and `queue` name
 the run still running, with its id. A reading green on the jobs it reads stands at
 once, while other jobs of the run still go.
 A push refusal that names a member's tip or path ejects it; one that names none is tried
