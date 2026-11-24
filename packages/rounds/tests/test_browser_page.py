@@ -6,8 +6,8 @@ with its options and passage from its marker; a failed check's red job, run and 
 file; a build in a git repo, on the small flow, with its state and its check failed at
 the tip; a build's verdict; a strip card and its stage's tabs, and the card staying
 open with its build when the strip moves; the folds of a many-stage round; a stage's
-name beside its line's rail, never on it; a round's
-card and the key; an address that opens its popover; a ruling of a round with no
+name beside its line's rail, never on it; a current step's ▼ clear of the line
+above; a round's card and the key; an address that opens its popover; a ruling of a round with no
 docket, under its line; a new question without a reload; the strip's way back to a line
 a filter hides; a closed round's card; and the phone layout at 390 px."""
 
@@ -292,6 +292,53 @@ def test_a_stage_name_sits_beside_the_rail_never_on_its_line(ui_shells, ui_shell
     line_box = panel.locator(".line.unreadable").bounding_box()
     assert reason["y"] >= line_box["y"] and reason["y"] + reason["height"] <= line_box["y"] + line_box["height"] + 0.5
 
+
+#: Each board line's top and bottom, its ▼ boxes and its step words' boxes, through each
+#: mark's shadow root.
+LINE_BOXES = """(lines) => lines.map((line) => {
+  const marks = [...line.querySelectorAll("moxi-ui-mark")].map((mark) => mark.shadowRoot);
+  const boxes = (selector) => marks.flatMap((root) => [...root.querySelectorAll(selector)])
+    .map((one) => one.getBoundingClientRect()).filter((box) => box.height > 0)
+    .map((box) => ({ top: box.top, bottom: box.bottom }));
+  const box = line.getBoundingClientRect();
+  return { top: box.top, bottom: box.bottom, heres: boxes(".here"), words: boxes(".word") };
+})"""
+
+#: The least clear space between a line's ▼ and the step words of the line above.
+CLEAR = 3
+
+
+def test_a_current_steps_mark_stays_clear_of_the_line_above(ui_shells, ui_shell_options,
+                                                            ui_contexts):
+    # A shell of its own: three stages, each with its build open, are three lines in a
+    # row that each mark a current step.
+    own = ui_shells(**ui_shell_options)
+    tally = "kestrel/tally"
+    with page_kit.under(own):
+        rounds_dir = page_kit.seed(page_kit.shell_home(own) / "notes")
+        opening.open_round(tally, description="a round of three builds", by="planner",
+                           flow="staged")
+        page_kit.design(rounds_dir / "tally", tally,
+                        "\n".join(page_kit.stage(f"B{n}") for n in (1, 2, 3)))
+        for n in (1, 2, 3):
+            page_kit.append(rounds_dir / "tally", "build.commissioned", stage=f"B{n}",
+                            repo="kestrel", branch=f"branch-b{n}", base=page_kit.BASE,
+                            target="main", builder="builder-1", build=f"{n:016x}",
+                            worktree=f"/w/tally-B{n}")
+    panel = open_panel(ui_contexts(own).pages[0])
+    expect(panel.locator(f'moxi-ui-rail[data-round="{tally}"]')).to_have_count(3)
+    expect(panel.locator(f'moxi-ui-rail[data-round="{tally}"] .here')).to_have_count(3)
+    lines = panel.locator(".line").evaluate_all(LINE_BOXES)
+    checked = 0
+    for upper, lower in zip(lines, lines[1:]):
+        if abs(upper["bottom"] - lower["top"]) > 0.5 or not upper["words"]:
+            continue
+        lowest = max(word["bottom"] for word in upper["words"])
+        for here in lower["heres"]:
+            assert here["top"] >= lowest + CLEAR, (upper, lower)
+            checked += 1
+    # The tally's three lines alone give two such pairs.
+    assert checked >= 2, lines
 
 def test_a_rounds_card_and_the_key_open(shell, ui_page):
     panel = open_panel(ui_page)

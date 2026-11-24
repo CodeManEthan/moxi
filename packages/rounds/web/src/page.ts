@@ -183,7 +183,7 @@ export class RoundsPage extends LitElement {
                       border: 1px solid var(--moxi-border); border-radius: 6px; padding: 4px 8px; }
     .keybtn { cursor: pointer; }
 
-    .board { overflow-x: auto; }
+    .board { overflow-x: auto; --board-line: 38px; }
     .inner { min-width: max-content; }
     .labels, .line { display: flex; align-items: center; }
     .labels { position: sticky; top: 0; z-index: 2; background: var(--moxi-bg); font-size: 11px;
@@ -199,7 +199,9 @@ export class RoundsPage extends LitElement {
     .age { width: 44px; flex: none; text-align: right; color: var(--moxi-text-dim); padding-right: 4px; }
     .group { font-weight: 600; margin: 18px 0 4px; }
     .group .dim { font-weight: 400; margin-left: 6px; }
-    .line { height: 34px; background: var(--moxi-bg); --moxi-rail-bg: var(--moxi-bg); }
+    /* A board line is 4 px taller than its 34 px rail, which it centres, so a line's ▼ (1 px over its rail)
+       stays 5 px clear of the step words under the rail of the line above. */
+    .line { height: var(--board-line); background: var(--moxi-bg); --moxi-rail-bg: var(--moxi-bg); }
     .line:hover { background: var(--moxi-bg-hover); --moxi-rail-bg: var(--moxi-bg-hover); }
     .line.open { background: var(--moxi-accent-soft); --moxi-rail-bg: var(--moxi-accent-soft); }
     .line .name button { font-size: 15px; }
@@ -213,7 +215,7 @@ export class RoundsPage extends LitElement {
     .w-bad { font-weight: 600; color: var(--moxi-state-failed); }
     .fold { display: flex; align-items: center; gap: 8px; height: 26px; padding-left: 184px; }
     .fold button { background: none; border: 0; cursor: pointer; padding: 0; }
-    .line.unreadable { height: auto; min-height: 34px; padding: 6px 0; box-sizing: border-box; }
+    .line.unreadable { height: auto; min-height: var(--board-line); padding: 6px 0; box-sizing: border-box; }
     .unreadable .phrase { white-space: normal; }
     .closed .name { color: var(--moxi-text-dim); }
     .closedfold { margin-top: 18px; padding-left: 0; }

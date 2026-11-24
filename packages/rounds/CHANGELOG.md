@@ -41,6 +41,9 @@
   `stage` there too. The rail holds only its steps' markers, so its line runs unbroken
   from the round's own steps into the stage's, and no text sits on it. An unreadable
   round's line grows to hold its reason, which no longer spills onto the line above.
+- Board lines are 38 px high, up from 34, around the same 34 px rail, so the ▼ over a
+  line's current step stays 5 px clear of the step words of the line above, where it
+  stood 1 px from them. An unreadable round's line keeps at least that height.
 
 ## 0.1.4 (unreleased)
 
