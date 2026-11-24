@@ -1534,7 +1534,9 @@ Who records each answer:
   `page:rounds/<act id>@<time>`.
 - **The agent the message goes to**: an answer in the operator's own words and a
   correction of a ruling. The page records nothing for them. The message quotes the
-  words and gives the command that records them with that message as the pointer. The
+  words as written, line by line, and gives the command that records the agent's wording
+  of them, `--text TEXT`, with that message as the pointer. The words never go into the
+  command, so it reads the same in any shell it is pasted into. The
   row reads `not recorded yet` until the round holds the agent's ruling, then `Recorded
   as C<n>`, with the read-back.
 - **Nobody**: a request to explain. The question stays open; the reply comes by message.
@@ -1546,7 +1548,8 @@ the tray says which rounds that agent does not lead. A draft with no one to send
 stays in the tray and nothing is recorded for it. A record whose message comms refused
 stays recorded, and its row offers `Send again`. Without comms nothing is sent: the
 button reads `Record <n> answers`, the page records its own kinds, and an own-words
-answer's row shows the command a lead would run to record it.
+answer's row shows the command a lead would run to record it, `TEXT` standing for the
+lead's wording of the words shown above it.
 
 Each receipt says what happened: the record and its pointer, who was told and when, and
 what rounds now holds, such as `Recorded as C4:` with the ruling's sentence. `Sent` lists
@@ -1568,9 +1571,9 @@ what it removes if nothing in it would be lost (the worktree and the scratch fol
 each `will be removed` or `will be kept` with the reason, and CI's own refs), and what it
 keeps: the branch and its commits, and the round's log. `Drop <stage>'s build` records
 the operator's drop with the page as the pointer, and with comms installed tells the
-round's lead what the drop removed and kept. The receipt says what the drop did. A drop
-whose post gets no answer offers `Drop again`, which posts the same act id, so the drop
-runs at most once.
+round's lead what the drop removed and kept, each kept folder by its path with the
+reason. The receipt says what the drop did. A drop whose post gets no answer offers
+`Drop again`, which posts the same act id, so the drop runs at most once.
 
 ## The read API
 

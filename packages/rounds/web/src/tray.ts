@@ -56,7 +56,8 @@ export interface Receipt {
   branch?: string | null;
   tip?: string | null;
   removed?: string[];
-  kept?: string[];
+  /** Each folder the drop kept, and why. */
+  kept?: { path: string; why: string | null }[];
   refs?: string[];
   unscanned?: string[];
 }
@@ -201,13 +202,11 @@ export function noLeadWords(holder: string): string {
 }
 
 /** The command a lead runs to record an own-words answer or a correction, `PTR` its
- * pointer. */
-export function leadCommand(draft: Pick<Draft, "holder" | "item" | "kind" | "text">): string | null {
-  const said = `"${(draft.text ?? "").replace(/\\/g, "\\\\").replace(/"/g, '\\"').replace(/\n/g, " ")}"`;
-  if (draft.kind === "words") return `moxi rounds rule ${draft.holder} ${draft.item} --text ${said} --record PTR`;
-  if (draft.kind === "correct") {
-    return `moxi rounds rule ${draft.holder} --text ${said} --supersedes ${draft.item} --record PTR`;
-  }
+ * pointer and `TEXT` the lead's wording of the operator's words, which the row shows
+ * above it. The words are never put in the command, so it reads the same in any shell. */
+export function leadCommand(draft: Pick<Draft, "holder" | "item" | "kind">): string | null {
+  if (draft.kind === "words") return `moxi rounds rule ${draft.holder} ${draft.item} --text TEXT --record PTR`;
+  if (draft.kind === "correct") return `moxi rounds rule ${draft.holder} --text TEXT --supersedes ${draft.item} --record PTR`;
   return null;
 }
 

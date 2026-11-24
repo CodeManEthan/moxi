@@ -1079,7 +1079,8 @@ export function dropLines(facts: DropFacts, today: string, home: string | null, 
 
 /** The drop's receipt: what the drop did, and whether the lead was told. */
 export function dropReceipt(receipt: { state: string; reason?: string | null; record?: string | null;
-                                       removed?: string[]; kept?: string[]; refs?: string[]; unscanned?: string[];
+                                       removed?: string[]; kept?: { path: string; why: string | null }[];
+                                       refs?: string[]; unscanned?: string[];
                                        message?: { to: string | null; at: string | null; id: string | null } | null;
                                        not_told?: string | null; to?: string | null },
                             today: string, home: string | null, clock: Clock = LOCAL): string[] {
@@ -1088,7 +1089,7 @@ export function dropReceipt(receipt: { state: string; reason?: string | null; re
   }
   const made = ["Dropped.", ...(receipt.record ? [`Recorded with ${receipt.record}`] : [])];
   for (const one of receipt.removed ?? []) made.push(`Removed ${tildePath(one, home)}`);
-  for (const one of receipt.kept ?? []) made.push(`Kept ${one}`);
+  for (const one of receipt.kept ?? []) made.push(`Kept ${tildePath(one.path, home)}: ${one.why ?? "it fails the removal rule"}`);
   for (const one of receipt.refs ?? []) made.push(`Ref ${one}`);
   for (const one of receipt.unscanned ?? []) made.push(`Not scanned: ${one}`);
   if (receipt.message?.id) {

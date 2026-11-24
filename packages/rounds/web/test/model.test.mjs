@@ -503,20 +503,21 @@ test("a stage has an open build to drop while its commission is done and its fin
 test("the drop's confirm names what ends, what goes, what stays and what is recorded", () => {
   const facts = { round: "kestrel/a", stage: "B1", open: true, reason: null, branch: "b1-branch", builder: "builder-1",
                   at: "2026-11-21T10:00:00Z", tip: "0123456789abcdef",
-                  folders: [{ kind: "worktree", path: "/home/u/wt/b1", goes: false, why: "untracked work: notes.txt" },
+                  folders: [{ kind: "worktree", path: "/home/u/wt/b1", goes: false, why: "it holds work that is not committed (notes.txt)" },
                             { kind: "scratch folder", path: "/home/u/scratch/b1", goes: true, why: null }],
                   refs: ["refs/ci/b1"] };
   const made = dropLines(facts, "2026-11-21", "/home/u", UTC);
   assert.deepEqual(made.map((one) => one.head), ["Ends", "Removes, if nothing in them would be lost",
                                                  "Removes from the remote", "Keeps", "Records"]);
   assert.equal(made[0].rows[0], "The open build of B1 on branch b1-branch, commissioned 10:00 by builder-1.");
-  assert.deepEqual(made[1].rows, ["The worktree ~/wt/b1: will be kept: untracked work: notes.txt",
+  assert.deepEqual(made[1].rows, ["The worktree ~/wt/b1: will be kept: it holds work that is not committed (notes.txt)",
                                   "The scratch folder ~/scratch/b1: will be removed"]);
   assert.match(made[3].rows[0], /^The branch b1-branch at 0123456/);
   assert.deepEqual(dropReceipt({ state: "recorded", record: "page:rounds/x@t", removed: ["/home/u/scratch/b1"],
-                                 kept: ["/home/u/wt/b1: untracked work"], not_told: "no lead for kestrel/a, so no one is told" },
+                                 kept: [{ path: "/home/u/wt/b1", why: "it holds work that is not committed (notes.txt)" }],
+                                 not_told: "no lead for kestrel/a, so no one is told" },
                                "2026-11-21", "/home/u", UTC),
-                   ["Dropped.", "Recorded with page:rounds/x@t", "Removed ~/scratch/b1", "Kept /home/u/wt/b1: untracked work",
+                   ["Dropped.", "Recorded with page:rounds/x@t", "Removed ~/scratch/b1", "Kept ~/wt/b1: it holds work that is not committed (notes.txt)",
                     "Not told: no lead for kestrel/a, so no one is told"]);
   assert.deepEqual(dropReceipt({ state: "refused", reason: "no open build of B1" }, "2026-11-21", null, UTC),
                    ["no open build of B1"]);

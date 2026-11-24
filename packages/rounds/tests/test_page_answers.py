@@ -7,6 +7,7 @@ server's store of receipts is emptied as a restart empties it."""
 from __future__ import annotations
 
 import asyncio
+import re
 import secrets
 import threading
 from types import SimpleNamespace
@@ -16,7 +17,8 @@ from test_page_acts import (  # noqa: F401 -- the kit is a fixture
     C1_AT, PROJECT, ROUND, SAID, everything_logged, folded, kit)
 
 from moxi_rounds import (actors, asking, corrections, folders, listing, log, marking,
-                         opening, pageacts, pointers, questions, ruling, write)
+                         opening, pageacts, pointers, questions, ruling, settling, state,
+                         write)
 from moxi_rounds.pageacts import (ACCEPT, CORRECT, DONE, EACH, EXPLAIN, KEPT, NOT_TOLD,
                                   PARK, PICK, READ_BACK, RECORDED, REFUSED, REJECT, SENT,
                                   UNPARK, WORDS, Draft, Receipts)
@@ -152,14 +154,14 @@ def test_a_done_note_is_in_the_message_and_nowhere_in_rounds(rounds, comms):
 
     [event] = by_act(ROUND, one.act)
     assert "checked on two phones" not in str(event)
-    assert '"checked on two phones"' in comms.to("atlas-lead")[0]
+    assert "The operator's note:\n    > checked on two phones" in comms.to("atlas-lead")[0]
 
 
 @pytest.mark.parametrize(("kind", "item", "says"), [
-    (WORDS, "Q1", "moxi rounds rule atlas/billing-export Q1 --text \"nightly, at two\" "
+    (WORDS, "Q1", "moxi rounds rule atlas/billing-export Q1 --text TEXT "
                   "--record comms:<this message>"),
-    (CORRECT, "C1", "--supersedes C1 --record comms:<this message>"),
-    (EXPLAIN, "Q1", '"When does the export run?"'),
+    (CORRECT, "C1", "--text TEXT --supersedes C1 --record comms:<this message>"),
+    (EXPLAIN, "Q1", "- atlas/billing-export Q1: When does the export run?"),
 ])
 def test_the_agents_kinds_write_nothing_and_go_in_the_message(rounds, comms, kind, item,
                                                               says):
@@ -173,8 +175,28 @@ def test_the_agents_kinds_write_nothing_and_go_in_the_message(rounds, comms, kin
     [message] = comms.to("atlas-lead")
     assert says in message
     assert pageacts.NOTHING_TO_RECORD not in message or kind == EXPLAIN
+    assert "    > nightly, at two" in message
     if kind != EXPLAIN:
         assert receipt["command"].endswith(f"--record comms:{receipt['message']['id']}")
+
+
+SHELL_WORDS = 'costs $5 and `date` too, "quoted" and \\ a backslash\nline two'
+
+
+@pytest.mark.parametrize("kind", [WORDS, CORRECT])
+def test_the_operators_words_are_quoted_as_written_and_never_put_in_a_command(rounds, comms,
+                                                                               kind):
+    one = draft(kind, item="Q1" if kind == WORDS else "C1", text=SHELL_WORDS)
+
+    [receipt] = send([one], comms=comms)["receipts"]
+
+    [message] = comms.to("atlas-lead")
+    assert "    > costs $5 and `date` too, \"quoted\" and \\ a backslash\n    > line two" in message
+    commands = [line.strip() for line in message.splitlines() if "moxi rounds rule" in line]
+    # The command holds only names and ids rounds checks, so every shell reads it alike.
+    assert commands and all(re.fullmatch(r"[\w:/<>.= -]+", line) for line in commands)
+    assert re.fullmatch(r"[\w:/.= -]+", receipt["command"])
+    assert "$" not in receipt["command"] and "`" not in receipt["command"]
 
 
 # -- the order ----------------------------------------------------------------------------
@@ -223,6 +245,43 @@ def test_a_held_lock_is_refused_as_the_round_being_busy(rounds, comms, holder,
     assert comms.sent == []
 
 
+def test_a_done_mark_that_closes_its_round_says_so(rounds, comms):
+    name = "atlas/close-out"
+    opening.open_round(name, description="close the books", by="builder-1", flow="fix",
+                       lead="atlas-lead")
+    path = log.round_log(folders.home(PROJECT).round_dir("close-out"))
+    log.append(path, "stage.declared",
+               {"id": "B1", "repo": PROJECT, "branch": "work-close", "after": []},
+               by="atlas-lead")
+    log.append(path, "build.commissioned",
+               {"stage": "B1", "repo": PROJECT, "branch": "work-close", "base": "0" * 40,
+                "target": "main", "builder": "builder-1", "build": "0123456789abcdef"},
+               by="atlas-lead")
+    log.append(path, "verdict.recorded",
+               {"kind": "build", "verdict": "publishable", "pass": "full", "stage": "B1",
+                "head": "1" * 40, "by": "critic",
+                "decisions": [{"id": "M1", "text": "a choice", "weight": "minor",
+                               "forecloses": False}]}, by="critic")
+    log.append(path, "finish.done", {"stage": "B1", "tip": "1" * 40}, by="builder-1")
+    # The lead's reject owes a fix, the one thing that holds the close.
+    settling.settle(name, "B1.M1", "reject", record=SAID, by="atlas-lead")
+    assert state.fold(log.read(path)).status != "closed"
+
+    [receipt] = send([draft(DONE, name, "B1.M1")], comms=comms)["receipts"]
+
+    assert receipt["state"] == RECORDED and receipt["closed"] is True
+    assert state.fold(log.read(path)).status == "closed"
+    assert "The round closed." in comms.to("atlas-lead")[0]
+
+
+def test_a_holder_that_is_not_a_rounds_name_is_refused_and_read_nowhere(rounds, comms):
+    [receipt] = send([draft(PICK, "atlas/../elsewhere/sub", chose="a")],
+                     comms=comms)["receipts"]
+
+    assert receipt["state"] == REFUSED and "is not a round's name" in receipt["reason"]
+    assert comms.sent == []
+
+
 # -- recipients ---------------------------------------------------------------------------
 
 def test_a_batch_over_two_rounds_is_one_message_per_lead(rounds, comms):
@@ -248,9 +307,19 @@ LEADLESS_DRAFTS = [
     (PICK, "Q1", {"chose": "a"}), (PARK, "Q1", {}), (WORDS, "Q1", {"text": "weekly"}),
     (EXPLAIN, "Q1", {}),
 ]
+#: A draft of every kind, for a round with no lead.
+EVERY_LEADLESS_DRAFT = LEADLESS_DRAFTS + [
+    (ACCEPT, "B1.M1", {}), (REJECT, "B1.M1", {}), (READ_BACK, "C1", {}),
+    (DONE, "B1.W1", {"text": "done by hand"}), (UNPARK, "Q1", {}),
+    (CORRECT, "C1", {"text": "monthly, not weekly"}),
+]
 
 
-@pytest.mark.parametrize(("kind", "item", "more"), LEADLESS_DRAFTS)
+def test_every_kind_is_tested_without_a_lead():
+    assert {kind for kind, _item, _more in EVERY_LEADLESS_DRAFT} == set(pageacts.KINDS)
+
+
+@pytest.mark.parametrize(("kind", "item", "more"), EVERY_LEADLESS_DRAFT)
 def test_a_draft_of_a_round_with_no_lead_is_kept_and_writes_nothing(rounds, comms, kind,
                                                                      item, more):
     before = everything_logged(rounds)
@@ -306,8 +375,7 @@ def test_with_no_comms_own_words_are_kept_with_the_command_a_lead_runs(rounds):
     [receipt] = send([draft(WORDS, text="nightly")], comms=None)["receipts"]
 
     assert receipt["state"] == KEPT
-    assert receipt["fix"] == ('moxi rounds rule atlas/billing-export Q1 --text "nightly" '
-                              "--record PTR")
+    assert receipt["fix"] == "moxi rounds rule atlas/billing-export Q1 --text TEXT --record PTR"
     assert everything_logged(rounds) == before
 
 

@@ -7,6 +7,7 @@ comms' roster."""
 from __future__ import annotations
 
 import asyncio
+import re
 import secrets
 from pathlib import Path
 from types import SimpleNamespace
@@ -74,6 +75,8 @@ def test_the_confirm_says_a_worktree_with_untracked_work_will_be_kept(kit):
 @pytest.mark.parametrize(("name", "stage", "says"), [
     (ROUND, "B2", "B2 has no open build"),
     ("atlas/no-such-round", "B1", "no-such-round"),
+    ("atlas/../elsewhere/sub", "B1", "is not a round's name"),
+    ("..", "B1", "is not a round's name"),
 ])
 def test_the_confirm_of_no_open_build_says_why(kit, name, stage, says):
     facts = pageacts.drop_facts(name, stage)
@@ -108,7 +111,21 @@ def test_a_drop_with_a_worktree_holding_work_keeps_it_and_says_so(kit, comms):
 
     assert receipt["removed"] == [event["scratch"]]
     [kept] = receipt["kept"]
-    assert "draft.txt" in kept and f"kept {kept}" in comms.to("atlas-lead")[0]
+    # The kept folder is named by its path, with the removal rule's words and no check id,
+    # alike in the receipt, the lead's message and the confirm.
+    assert kept["path"] == event["worktree"] and "draft.txt" in kept["why"]
+    assert not re.match(r"[AB]\d+: ", kept["why"])
+    assert f"- kept {event['worktree']}: {kept['why']}" in comms.to("atlas-lead")[0]
+
+
+def test_the_confirm_and_the_receipt_say_a_kept_folder_alike(kit, comms):
+    event = commissioned(kit)
+    (Path(event["worktree"]) / "draft.txt").write_text("not committed\n", encoding="utf-8")
+
+    [worktree, _scratch] = pageacts.drop_facts(ROUND, "B1")["folders"]
+    receipt = drop(comms=comms)
+
+    assert receipt["kept"] == [{"path": worktree["path"], "why": worktree["why"]}]
 
 
 def test_a_refused_message_leaves_the_drop_recorded(kit, comms):

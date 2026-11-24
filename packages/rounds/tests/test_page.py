@@ -453,6 +453,39 @@ def test_an_answers_post_fits_its_shape_and_a_repeat_is_answered_from_the_store(
     assert second["receipts"][0]["repeat"]
 
 
+@pytest.fixture
+def stand_in_comms(monkeypatch):
+    """comms' API stood in for, as the answers route loads it."""
+    from test_page_answers import Comms
+
+    comms = Comms(bound=("builder-1",))
+    monkeypatch.setattr(ph, "RECEIPTS", ph.pageacts.Receipts())
+    monkeypatch.setattr(ph, "comms_api", lambda: comms)
+    return comms
+
+
+def test_an_answers_post_with_comms_fits_its_shape_told_sent_and_not_told(
+        kit, stand_in_comms):
+    lb = loopback()
+    route = next(one for one in page.PAGE.routes if one.path == "/api/answers")
+    shape = lb.Out("table", items=route.returns)
+    refused = {"act": ["D" * 43, "E" * 43], "holder": [BUSY, BUSY], "item": ["Q2", "Q2"],
+               "kind": ["park", "explain"], "chose": ["", ""], "text": ["", "why two?"],
+               "tell": ["", ""], "to": "builder-1"}
+
+    [(status, told)] = run_posts(("/api/answers", answers_body(to="builder-1")))
+    stand_in_comms.refuse["builder-1"] = "the daemon is down"
+    [(again, not_told)] = run_posts(("/api/answers", refused))
+
+    assert (status, again) == (200, 200), (told, not_told)
+    assert conforms(told, shape) and conforms(not_told, shape)
+    assert [one["state"] for one in told["receipts"]] == ["recorded", "sent"]
+    assert told["receipts"][0]["message"]["id"] and told["receipts"][1]["command"]
+    assert [one.get("refused") for one in told["messages"]] == [None]
+    assert [one["state"] for one in not_told["receipts"]] == ["recorded-not-told", "refused"]
+    assert "the daemon is down" in not_told["messages"][0]["refused"]
+
+
 def test_an_answers_post_that_cant_be_read_is_refused(kit, no_comms):
     [(status, sent)] = run_posts(("/api/answers", answers_body(kind=["pick", "shout"])))
 
@@ -483,3 +516,19 @@ def test_a_drop_post_fits_its_shape(kit, no_comms):
     assert (status, again) == (200, 200), sent
     assert conforms(sent, lb.Out("table", items=route.returns))
     assert sent["state"] == "recorded" and second["repeat"]
+
+
+def test_a_drop_receipt_that_keeps_a_folder_fits_its_shape(kit, no_comms, monkeypatch):
+    lb = loopback()
+    route = next(one for one in page.PAGE.routes if one.path == "/api/drop/build")
+    kept = {"act": "C" * 43, "holder": BUSY, "item": "B1", "kind": "drop",
+            "state": "recorded", "removed": ["/w/scratch"],
+            "kept": [{"path": "/w/B1", "why": "it holds work that is not committed (a.txt)"}],
+            "refs": [], "unscanned": [], "not_told": "comms is not installed"}
+    monkeypatch.setattr(ph.pageacts, "drop", lambda *args, **kwargs: kept)
+
+    [(status, sent)] = run_posts(("/api/drop/build", {"round": BUSY, "stage": "B1",
+                                                      "act": "C" * 43}))
+
+    assert status == 200 and conforms(sent, lb.Out("table", items=route.returns))
+    assert sent["kept"] == kept["kept"]

@@ -11,7 +11,9 @@ rejected (`ACCEPT`, `REJECT`), a ruling read back (`READ_BACK`), a job marked do
 (`UNPARK`, a ruling of `revoke:` the parking that stands). An answer in the operator's
 own words (`WORDS`), a correction of a ruling (`CORRECT`) and a request to explain
 (`EXPLAIN`) are recorded by nobody here: they go, quoted, in the message to the agent,
-who words and records them with that message as the pointer.
+who words and records them with that message as the pointer. The operator's words are
+quoted once, line by line, and never put in a command: the command the agent runs takes
+its own wording in place of `TEXT`, so no shell it is pasted into reads the words.
 
 **Who is told.** One message per recipient, sent under rounds' send-only name with
 comms' `send_as`. A draft's recipient is its round's lead (its own, else its project's),
@@ -56,7 +58,7 @@ from . import (actors, builds, checking, ci_refs, corrections, dropping, folders
                pointers, questions, removal, ruling, shown, telling, waits, write)
 from . import settings as own
 from . import state as states
-from .errors import Locked, NoLog, NoRound, Refused, RoundsError, UnfencedTest, Unmet
+from .errors import BadName, Locked, NoLog, NoRound, Refused, RoundsError, UnfencedTest, Unmet
 from .gitreads import Git
 
 #: How long a page act waits for a round's lock, in seconds; a lock held longer is a
@@ -88,6 +90,8 @@ _KEPT_ANSWERS = (RECORDED, NOT_TOLD, SENT)
 
 #: Where the command an agent runs names its message, before the message has an id.
 THIS_MESSAGE = "comms:<this message>"
+#: Where the command an agent runs takes the agent's wording of the operator's words.
+TEXT = "TEXT"
 #: The lines a message ends with when it holds nothing for the agent to record.
 NOTHING_TO_RECORD = "Nothing for you to record."
 
@@ -182,9 +186,21 @@ class _Done:
 
 # -- reading what a draft names ------------------------------------------------------------
 
+def _holder(holder: str) -> tuple[str, str]:
+    """The project and the slug of `holder`, a round's name (`<project>/<slug>`), or a
+    project's key with an empty slug. Raises `BadName` for a name that is neither, so no
+    read goes outside the project's rounds folder."""
+    if "/" in holder:
+        return folders.split(holder)
+    if not holder or holder in (".", ".."):
+        raise BadName(holder)
+    return holder, ""
+
+
 def _logs(holder: str, settings) -> tuple[Any, Any]:
-    """The path of `holder`'s log and of its project's log."""
-    project, _, slug = holder.partition("/")
+    """The path of `holder`'s log and of its project's log. Raises `BadName` for a holder
+    that is not a round's name or a project's key."""
+    project, slug = _holder(holder)
     home = folders.home(project, settings)
     if slug:
         return log.round_log(home.round_dir(slug)), log.project_log(home.rounds_dir)
@@ -194,7 +210,7 @@ def _logs(holder: str, settings) -> tuple[Any, Any]:
 def _read(holder: str, settings) -> _Held:
     """`holder`'s log and its project's, as they read now, with the lead to tell.
     Raises what finding them raises."""
-    project, _, slug = holder.partition("/")
+    project, slug = _holder(holder)
     home = folders.home(project, settings)
     own_log, project_log = _logs(holder, settings)
     try:
@@ -352,22 +368,23 @@ def _refusal(exc: RoundsError) -> dict:
 
 # -- the message ---------------------------------------------------------------------------
 
-def quoted(text: str | None) -> str:
-    """`text` as one double-quoted argument of a command line."""
-    said = (text or "").replace("\\", "\\\\").replace('"', '\\"').replace("\n", " ")
-    return f'"{said}"'
+def quoted(text: str | None, indent: str = "    ") -> str:
+    """The operator's `text` quoted as written, each of its lines on a line of its own
+    after `indent` and `> `, for a message to read, never for a command line."""
+    return "\n".join(f"{indent}> {line}" for line in (text or "").splitlines() or [""])
 
 
 def command(draft: Draft, held: _Held | None, record: str) -> str | None:
     """The command that records an own-words answer or a correction, with `record` the
-    pointer; None for any other kind."""
+    pointer and `TEXT` where the agent's wording of the operator's words goes; None for
+    any other kind. It holds only names and ids rounds checks, so it reads the same in
+    every shell."""
     if draft.kind == WORDS:
-        return (f"moxi rounds rule {draft.holder} {draft.item} --text {quoted(draft.text)} "
-                f"--record {record}")
+        return f"moxi rounds rule {draft.holder} {draft.item} --text {TEXT} --record {record}"
     if draft.kind == CORRECT:
         ruled = None if held is None else corrections.find(held.state, draft.item)
         rules = f" {ruled.rules}" if ruled is not None and ruled.rules else ""
-        return (f"moxi rounds rule {draft.holder}{rules} --text {quoted(draft.text)} "
+        return (f"moxi rounds rule {draft.holder}{rules} --text {TEXT} "
                 f"--supersedes {draft.item} --record {record}")
     return None
 
@@ -386,15 +403,16 @@ def _recorded_line(done: _Done) -> str:
                 f"({receipt.get('record')})")
     if draft.kind == READ_BACK:
         return f"- {where}: marked as read back ({receipt.get('record')})"
-    note = f' The operator\'s note: "{draft.text}"' if draft.text else ""
+    note = f"\n  The operator's note:\n{quoted(draft.text)}" if draft.text else ""
     closed = " The round closed." if receipt.get("closed") else ""
     return f"- {where}: marked done ({receipt.get('record')}).{closed}{note}"
 
 
 def message_text(done: Sequence[_Done], helds: Mapping[str, _Held]) -> str:
     """The one message to a recipient: what the page recorded, each by id; each answer
-    in the operator's own words and each correction, quoted, with the command that
-    records it with this message as the pointer; then each request to explain."""
+    in the operator's own words and each correction, quoted line by line, with the
+    command that records the agent's wording of it with this message as the pointer;
+    then each request to explain, with the operator's words quoted the same way."""
     recorded = [one for one in done if one.recorded]
     words = [one for one in done if one.draft.kind in (WORDS, CORRECT)]
     explain = [one for one in done if one.draft.kind == EXPLAIN]
@@ -403,14 +421,16 @@ def message_text(done: Sequence[_Done], helds: Mapping[str, _Held]) -> str:
         lines += ["", "Recorded by the page:"] + [_recorded_line(one) for one in recorded]
     if words:
         lines += ["", "In the operator's own words, for you to word and record, with this "
-                      "message as the pointer:"]
+                      f"message as the pointer; {TEXT} in each command is your wording of "
+                      "the words quoted above it:"]
         for one in words:
             draft = one.draft
             if draft.kind == WORDS:
-                lines.append(f"- {draft.holder} {draft.item}: {quoted(draft.text)}")
+                lines.append(f"- {draft.holder} {draft.item}, in the operator's words:")
             else:
-                lines.append(f"- {draft.holder} {draft.item} is not what the operator said: "
-                             f"{quoted(draft.text)}")
+                lines.append(f"- {draft.holder} {draft.item} is not what the operator said, "
+                             "who said:")
+            lines.append(quoted(draft.text))
             lines.append(f"  {command(draft, helds.get(draft.holder), THIS_MESSAGE)}")
     if explain:
         lines += ["", "The operator asks you to explain:"]
@@ -420,9 +440,10 @@ def message_text(done: Sequence[_Done], helds: Mapping[str, _Held]) -> str:
             held = helds.get(draft.holder)
             if held is not None:
                 question = questions.find(held.state, draft.item)
-            asked = f" {quoted(question.text)}" if question is not None and question.text else ""
-            said = f" The operator adds: {quoted(draft.text)}" if draft.text else ""
-            lines.append(f"- {draft.holder} {draft.item}{asked}.{said}")
+            asked = f": {question.text}" if question is not None and question.text else ""
+            lines.append(f"- {draft.holder} {draft.item}{asked}")
+            if draft.text:
+                lines += ["  The operator adds:", quoted(draft.text)]
     if not words:
         lines += ["", NOTHING_TO_RECORD]
     return "\n".join(lines)
@@ -567,6 +588,13 @@ def _answered(one: _Done, sent: Mapping, held: _Held | None) -> None:
 
 # -- dropping a build ----------------------------------------------------------------------
 
+def kept_why(kept: removal.Kept) -> str:
+    """Why the removal rule keeps a folder, in words, with the paths that are work: what
+    the drop's confirm, its receipt and the lead's message each say beside the path."""
+    listed = ", ".join(kept.work[:10]) + (", ..." if len(kept.work) > 10 else "")
+    return f"{kept.why} ({listed})" if kept.work else kept.why
+
+
 def _judged(name: str, commissioned: Mapping, kind: str, settings) -> dict | None:
     """What the removal rule says now of one folder of a build: `{"kind", "path",
     "goes", "why"}`, or None when the build records none or nothing is at its place."""
@@ -582,7 +610,7 @@ def _judged(name: str, commissioned: Mapping, kind: str, settings) -> dict | Non
                 "why": "nothing is there"}
     if isinstance(found, removal.Kept):
         return {"kind": kind, "path": str(found.place), "goes": False,
-                "why": found.line()}
+                "why": kept_why(found)}
     return {"kind": kind, "path": str(found.place), "goes": True, "why": None}
 
 
@@ -632,7 +660,7 @@ def _drop_text(name: str, stage: str, receipt: Mapping) -> str:
     for path in receipt.get("removed") or ():
         lines.append(f"- removed {path}")
     for one in receipt.get("kept") or ():
-        lines.append(f"- kept {one}")
+        lines.append(f"- kept {one['path']}: {one['why']}")
     for one in receipt.get("refs") or ():
         lines.append(f"- {one}")
     if receipt.get("branch"):
@@ -670,7 +698,8 @@ def drop(name: str, stage: str, act: str, *, receipts: Receipts, comms: Any,
                            "at": dropped.event.get("at"), "dropped": stage,
                            "branch": tips[0].get("branch"), "tip": tips[0].get("tip"),
                            "removed": [str(one) for one in dropped.removed],
-                           "kept": [one.line() for one in dropped.kept],
+                           "kept": [{"path": str(one.place), "why": kept_why(one)}
+                                    for one in dropped.kept],
                            "refs": [one.line() for one in dropped.refs],
                            "unscanned": list(dropped.unscanned)}
         except UnfencedTest:
@@ -743,6 +772,7 @@ def agents(comms: Any) -> dict:
 __all__ = ["WAIT_S", "PAGE_NAME", "ACT_ID", "EACH", "PICK", "ACCEPT", "REJECT", "READ_BACK",
            "DONE", "PARK", "UNPARK", "WORDS", "CORRECT", "EXPLAIN", "PAGE_KINDS",
            "AGENT_KINDS", "KINDS", "RECORDED", "NOT_TOLD", "SENT", "REFUSED", "KEPT",
-           "THIS_MESSAGE", "NOTHING_TO_RECORD", "Draft", "Receipts", "on_record", "pointer",
-           "quoted", "command", "message_text", "tell", "send", "drop_facts", "drop",
+           "THIS_MESSAGE", "TEXT", "NOTHING_TO_RECORD", "Draft", "Receipts", "on_record",
+           "pointer", "quoted", "command", "message_text", "tell", "send", "drop_facts",
+           "kept_why", "drop",
            "drafts_of", "comms_loaded", "agents"]

@@ -281,7 +281,8 @@ RECEIPT = lb.Out("table", items={
                                                      "delivery": _s()}),
     "not_told": _s("scrub"), "command": _s("scrub"),
     "branch": _s(), "tip": _s(), "removed": _list(lb.Out("string", mark="path")),
-    "kept": _list(lb.Out("string", mark="scrub")),
+    "kept": _list(lb.Out("table", items={"path": lb.Out("string", mark="path"),
+                                         "why": _s("scrub")})),
     "refs": _list(lb.Out("string", mark="scrub")),
     "unscanned": _list(lb.Out("string", mark="scrub"))})
 

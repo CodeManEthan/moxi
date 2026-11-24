@@ -115,8 +115,11 @@ test("with no comms the page's kinds say the page records them and own words sho
   const alone = { comms: false, to: EACH, leadOf };
   assert.equal(chipOf(draft("park"), alone), "page records it");
   assert.equal(chipOf(draft("pick", { chose: "a" }, "kestrel/ledger"), alone), "page records it");
-  assert.equal(chipOf(draft("words", { text: 'say "b"' }), alone),
-               'moxi rounds rule kestrel/billing-export Q1 --text "say \\"b\\"" --record PTR');
+  // The words stay out of the command, whatever they hold, so it reads the same in any shell.
+  assert.equal(chipOf(draft("words", { text: 'say "b", costs $5 and `date`\nline two' }), alone),
+               "moxi rounds rule kestrel/billing-export Q1 --text TEXT --record PTR");
+  assert.equal(chipOf(draft("correct", { text: "no" }, "kestrel/billing-export", "C2"), alone),
+               "moxi rounds rule kestrel/billing-export --text TEXT --supersedes C2 --record PTR");
   const mixed = [draft("words", { text: "x" }), draft("park"), draft("pick", { chose: "a" }, "kestrel/ledger")];
   assert.equal(sendable(mixed, alone).length, 2);
   assert.equal(sendWords(mixed, alone), "Record 2 answers");
