@@ -254,7 +254,7 @@ the controller and every worker) that is still running at that time writes every
 thread's stack (`faulthandler`) to `<dir>/<worker or main>-<pid>.txt`, whatever ran
 before in it. pytest's own faulthandler plugin cancels the one timer a process has on
 each failed or errored test and on entering pdb, so the kit arms it again after those
-and after each test; while a test runs under pytest's `faulthandler_timeout` that
+and after each test; while a test runs under pytest's per-test faulthandler timeout that
 setting holds the timer. Each process opens its file at the start, so one that ended in
 time leaves it empty. `moxi-dev check` sets both for each package's run, shortly before
 its bound (`arm_stacks`). It also sets `MOXI_TEST_PARENT_PID` to its own pid: the run's
@@ -939,7 +939,7 @@ def arm_stacks(env: Mapping[str, str]) -> Path | None:
 def _rearm_stacks() -> None:
     """Arm this process's dump again for the time left, since faulthandler keeps one
     timer a process and pytest's own faulthandler plugin cancels it on a failed or
-    errored test, on entering pdb and around each test under `faulthandler_timeout`.
+    errored test, on entering pdb and around each test under its per-test timeout.
     Past the time, a file still empty gets the stacks now: the process is still running."""
     if not _STACKS:
         return
