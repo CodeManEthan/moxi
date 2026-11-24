@@ -92,6 +92,16 @@ def test_a_new_package_gets_the_line_with_its_note_and_skills(root):
                     "folder. Load: layout-review.")
 
 
+def test_each_note_that_ends_without_a_period_gets_one():
+    found = [watching.Match("proj-a", "a/", "first note", ("s",), ()),
+             watching.Match("proj-a", "b", "second note!", ("s",), ()),
+             watching.Match("proj-b", "c", "third note", ("t",), ())]
+
+    assert watching.line(found) == ("rounds: watched path of proj-a: a/ - first note.; "
+                                    "b - second note!; of proj-b: c - third note. "
+                                    "Load: s, t.")
+
+
 def test_a_write_into_a_package_that_was_there_is_not_new(root):
     assert write(root / "packages" / "core" / "README.md") is None
 

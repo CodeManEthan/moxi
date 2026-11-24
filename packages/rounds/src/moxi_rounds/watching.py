@@ -36,7 +36,7 @@ file, and the old path of a moved one, are written by no one.
 Each `(agent, project, entry, path)` is named once in this process; an agent is the main
 loop or one subagent by its id. Every error is caught and logged once per kind, and the
 call runs. rounds' config is read again only when its file's modification time or size
-changed; the projects store is read once per call.
+changed; the projects store is read once per written file.
 """
 
 from __future__ import annotations
@@ -173,15 +173,15 @@ def matches(file: str, settings, *, added: bool = False) -> list[Match]:
 
 
 def line(found: Sequence[Match]) -> str:
-    """The line the agent reads after the call: each matched path with its note, by
-    project, then each skill once, in the order first named."""
+    """The line the agent reads after the call: each matched path with its note, a
+    note that ends without a period given one, by project, then each skill once, in
+    the order first named."""
     by_project: dict[str, list[str]] = {}
     for match in found:
-        by_project.setdefault(match.project, []).append(f"{match.path} - {match.note}")
+        note = match.note if match.note.endswith((".", "!", "?")) else f"{match.note}."
+        by_project.setdefault(match.project, []).append(f"{match.path} - {note}")
     text = "; ".join(f"of {project}: {'; '.join(named)}"
                      for project, named in by_project.items())
-    if not text.endswith((".", "!", "?")):
-        text += "."
     skills = list(dict.fromkeys(skill for match in found for skill in match.skills))
     return f"rounds: watched path {text} Load: {', '.join(skills)}."
 
