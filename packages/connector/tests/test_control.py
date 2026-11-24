@@ -88,7 +88,9 @@ def test_more_methods_join_by_name_and_see_the_peer(make_host):
         assert checks.ask("mint_code", {"label": "phone"}) == {"code": "not-a-real-one"}
         with pytest.raises(ValueError):
             d.daemon.control.register("status", mint_code)
-    assert seen == [(os.getpid(), os.getuid(), {"label": "phone"})]
+    # Windows has no user ids; the pipe's peer carries none there.
+    uid = os.getuid() if hasattr(os, "getuid") else None
+    assert seen == [(os.getpid(), uid, {"label": "phone"})]
 
 
 def test_the_probe_sees_only_a_nonce_it_registered(make_host):

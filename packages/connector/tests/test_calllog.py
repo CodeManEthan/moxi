@@ -53,8 +53,9 @@ def test_the_day_file_is_private_and_holds_one_object_per_line(logdir):
               collapse=None)
     path = logdir / "day" / "2026-11-04.jsonl"
     assert [r["kind"] for r in rows_of(path)] == ["register", "request"]
-    assert stat.S_IMODE(os.stat(logdir / "day").st_mode) == 0o700
-    assert stat.S_IMODE(os.stat(path).st_mode) == 0o600
+    if os.name == "posix":  # Windows keeps no mode bits
+        assert stat.S_IMODE(os.stat(logdir / "day").st_mode) == 0o700
+        assert stat.S_IMODE(os.stat(path).st_mode) == 0o600
 
 
 def test_the_writer_passes_the_refusal_and_durability_to_the_core(logdir, monkeypatch):

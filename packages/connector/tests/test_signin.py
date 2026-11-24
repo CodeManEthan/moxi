@@ -7,6 +7,7 @@ from __future__ import annotations
 import asyncio
 import base64
 import json
+import os
 import time
 from urllib.parse import parse_qs, urlsplit
 
@@ -131,8 +132,8 @@ def test_the_grants_file_keeps_no_token_code_or_secret_in_clear(door):
                        again["access_token"], again["refresh_token"]):
             assert secret not in text
         assert grants.digest(again["refresh_token"]) in text
-        mode = d.oauth.store.path.stat().st_mode & 0o777
-        assert mode == 0o600
+        if os.name == "posix":  # Windows keeps no mode bits
+            assert d.oauth.store.path.stat().st_mode & 0o777 == 0o600
         await d.close()
     run(main())
 

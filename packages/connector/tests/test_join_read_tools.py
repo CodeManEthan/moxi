@@ -51,6 +51,9 @@ if (not all(modules.load(m).ok for m in TOOLS) or not _secrets.ok
         or not callable(getattr(_secrets.api, "chat_redact", None))):
     pytest.skip("memory, sessions, notes and secrets' chat redaction aren't installed "
                 "beside the host; the joins run in the workspace", allow_module_level=True)
+if os.name == "nt":
+    pytest.skip("on Windows memory's index takes no lock (no fcntl), so memory doesn't run "
+                "there and its read tool can't join", allow_module_level=True)
 
 # Memory and sessions are optional beside the host and connector doesn't depend on them,
 # so the test reaches them by name, once the skip above has found them installed:
