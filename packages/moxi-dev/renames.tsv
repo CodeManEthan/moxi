@@ -4232,6 +4232,7 @@ launcher	packages/launcher/tests/test_browser_phone_running.py	return any(entry[
 launcher	packages/launcher/tests/test_browser_phone_running.py	return any(entry["request_id"] == request_id and entry["coverable"]	keep	any	any
 launcher	packages/launcher/tests/test_browser_phone_running.py	shell = gateway_shell(tmp_path_factory.mktemp("gw"), options["site"], env=options["env"])	keep	env	env
 launcher	packages/launcher/tests/test_browser_phone_running.py	turns.script(sessions=sessions)	keep	sessions	sessions
+launcher	packages/launcher/tests/test_browser_project_facts.py	"stale": False, "ready": None, "at": now},	keep	stale	stale
 launcher	packages/launcher/tests/test_browser_project_facts.py	Path(root(shell, project.key)).mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
 launcher	packages/launcher/tests/test_browser_project_facts.py	assert set(kestrel) == {"sections"}, kestrel	keep	set	set
 launcher	packages/launcher/tests/test_browser_project_facts.py	assert set(report["projects"]) == {"atlas-api", "harbor-infra", "kestrel-web"}	keep	set	set

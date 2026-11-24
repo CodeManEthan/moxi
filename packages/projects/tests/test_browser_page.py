@@ -215,8 +215,10 @@ def reads_of(page, path: str) -> list[str]:
 
 def test_the_page_keeps_the_contract(seeded, ui_page, ui_component_check):
     # With services, sessions, launcher and loadout installed, the page places each one's
-    # `project-facts` component, which reads that module's routes.
-    check = ui_component_check(ui_page, "projects", "page", keep=True, allow=("services", "sessions", "launcher", "loadout"))
+    # `project-facts` component, which reads that module's routes; the launcher's also reads
+    # turns' sessions, with turns installed.
+    check = ui_component_check(ui_page, "projects", "page", keep=True,
+                               allow=("services", "sessions", "launcher", "loadout", "turns"))
     assert check.element == "moxi-projects-page"
     for route in ("projects", "kinds"):
         assert any(url.endswith(f"/m/projects/api/{route}") for url in check.requests), check.requests

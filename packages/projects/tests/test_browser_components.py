@@ -136,8 +136,10 @@ def shown(shell, key: str) -> dict | None:
 def test_the_page_keeps_the_contract_and_opens_its_add_in_the_panel(seeded, ui_page,
                                                                     ui_component_check):
     # With services, sessions, launcher and loadout installed, the page places each one's
-    # `project-facts` component, which reads that module's routes.
-    check = ui_component_check(ui_page, "projects", "page", keep=True, allow=("services", "sessions", "launcher", "loadout"))
+    # `project-facts` component, which reads that module's routes; the launcher's also reads
+    # turns' sessions, with turns installed.
+    check = ui_component_check(ui_page, "projects", "page", keep=True,
+                               allow=("services", "sessions", "launcher", "loadout", "turns"))
     assert check.element == "moxi-projects-page"
     # The shell's top line names the page; the page draws no heading of its own.
     expect(check.locator.locator("h1")).to_have_count(0)
