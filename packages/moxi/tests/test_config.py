@@ -245,6 +245,44 @@ def test_a_retired_key_says_what_to_do_now(schema, home):
     assert err.value.fix == "remove it; the record is always local now"
 
 
+LEFT_OUT = SCHEMA + """
+[wait_s]
+retired = "nothing waits now; remove wait_s"
+left_out = true
+"""
+
+
+def test_a_left_out_retired_key_reads_as_unset_and_is_listed(home):
+    env, path = home
+    schema = Schema.parse(LEFT_OUT)
+    assert schema.keys["wait_s"].left_out is True
+    assert schema.keys["gateway_url"].left_out is False
+    write(path, 'wait_s = 1800\nbackend = "remote"\n')
+    s = config.load("demo", schema, env=env)
+    assert s["backend"] == "remote" and "wait_s" not in s
+    assert dict(s.left_out) == {"wait_s": "nothing waits now; remove wait_s"}
+    checked = config.check_text("demo", schema, "wait_s = 1\n")
+    assert dict(checked.left_out) == {"wait_s": "nothing waits now; remove wait_s"}
+    assert dict(config.check_text("demo", schema, "").left_out) == {}
+
+
+def test_a_retired_key_without_left_out_still_refuses_the_file(home):
+    env, path = home
+    write(path, 'wait_s = 1800\ngateway_url = "x"\n')
+    with pytest.raises(ConfigError, match="is retired"):
+        config.load("demo", Schema.parse(LEFT_OUT), env=env)
+
+
+@pytest.mark.parametrize("text, words", [
+    ('[a]\ntype = "int"\ndefault = 1\ndoc = "A."\nread = "use"\nleft_out = true\n',
+     "has left_out but is not retired"),
+    ('[a]\nretired = "remove it"\nleft_out = "yes"\n', "has left_out"),
+])
+def test_left_out_goes_only_on_a_retired_key_as_a_bool(text, words):
+    with pytest.raises(SchemaError, match=words):
+        Schema.parse(text)
+
+
 def test_a_malformed_file_is_refused(schema, home):
     env, path = home
     write(path, "backend = \n")

@@ -97,6 +97,10 @@ read = "start"
 
 [old]
 retired = "use backend instead"
+
+[gone]
+retired = "nothing reads it now; remove gone"
+left_out = true
 """
 
 COMMENTED = textwrap.dedent("""\
@@ -291,6 +295,16 @@ def test_an_unknown_key_is_refused_with_the_nearest_one(demo):
 def test_a_retired_key_says_what_to_do_now(demo):
     exc = refused(config.set_value, "demo", "old", 1, by="cli")
     assert exc.problem == "is retired" and exc.fix == "use backend instead"
+
+
+def test_a_left_out_key_is_still_refused_set_and_left_in_the_file_on_another_set(demo):
+    exc = refused(config.set_value, "demo", "gone", 1, by="cli")
+    assert exc.problem == "is retired" and exc.fix == "nothing reads it now; remove gone"
+    demo.parent.mkdir(parents=True, exist_ok=True)
+    demo.write_text("gone = 1\n")
+    config.set_value("demo", "block", value=True, by="cli")
+    assert read(demo) == {"gone": 1, "block": True}
+    assert dict(settings().left_out) == {"gone": "nothing reads it now; remove gone"}
 
 
 @pytest.mark.parametrize("module, words", [("nothere", "moxi install nothere"),

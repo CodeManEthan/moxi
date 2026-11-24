@@ -47,6 +47,10 @@ and `[local] retain_days = 7`. A key's fields:
     items    optional, on a list or a table: the type of each item (or entry value),
              "str", "int", "bool" or "float"; without it the module checks the contents
     retired  on a key the module has dropped: what to do now. Setting it is an error.
+    left_out optional, a bool on a retired key: true reads a file that still sets the
+             key as though it did not, and lists the key in the `Settings`' `left_out`
+             instead of raising; `moxi config set` still refuses it. For a key in a file
+             every process of the module reads, where one stale line would stop them all.
 
 A `path` expands `~` and is refused when relative. A key holds no keys: declaring one
 under another key's path is refused when the schema is read.
@@ -88,7 +92,9 @@ Reading
 from (`default`, `file` or `env`). An `env` override wins over the file, which wins over
 the default. The file is parsed again only when its size or modification time changes. A
 missing file means every default. A malformed file, an unknown key, a retired key or a
-value of the wrong type raises `ConfigError` naming the file, the key and the fix.
+value of the wrong type raises `ConfigError` naming the file, the key and the fix; a
+retired key marked `left_out` raises nothing, and the `Settings` list it in `left_out`,
+each with its `retired` words.
 `path=` reads that file in place of the module's own.
 
 `check_text(module, schema, text)` is the same reader over a config file's text alone: no
@@ -144,7 +150,7 @@ READS = ("start", "use")
 PAGE_FIELDS = ("label", "line", "common", "group", "unit", "choices", "pick", "hurts",
                "terminal", "elsewhere")
 FIELDS = ("type", "default", "doc", "read", "values", "env", "retired", "needs",
-          "items") + PAGE_FIELDS
+          "items", "left_out") + PAGE_FIELDS
 #: The most keys one schema may mark `common`.
 COMMON_MAX = 7
 #: The item types a `list` or `table` key may declare as its `items`.
@@ -248,16 +254,16 @@ class Key(_Frozen):
     """One declared key. Its page fields are None when the schema does not give them."""
 
     __slots__ = ("name", "type", "default", "doc", "read", "values", "env", "retired",
-                 "needs", "items") + PAGE_FIELDS
+                 "needs", "items") + PAGE_FIELDS + ("left_out",)
 
     def __init__(self, name, value_type, default, doc, read, values=None, env=None,
                  retired=None, needs=None, items=None, *, label=None, line=None,
                  common=None, group=None, unit=None, choices=None, pick=None, hurts=None,
-                 terminal=None, elsewhere=None):
+                 terminal=None, elsewhere=None, left_out=False):
         for field, value in zip(self.__slots__, (name, value_type, default, doc, read, values,
                                                  env, retired, needs, items, label, line,
                                                  common, group, unit, choices, pick, hurts,
-                                                 terminal, elsewhere)):
+                                                 terminal, elsewhere, left_out)):
             object.__setattr__(self, field, value)
 
 
@@ -398,17 +404,21 @@ def _core_schema() -> Schema:
 
 
 class Settings(_Frozen):
-    """A module's settings at one reading: every live key's value and its source.
+    """A module's settings at one reading: every live key's value and its source, and
+    `left_out`, each retired key marked `left_out` that the file still sets, by name, with
+    its `retired` words.
 
     A switch table's entry reads by its name, `settings["rows.backup"]`: its bool, or
     false when the table holds no such entry.
     """
 
-    __slots__ = ("module", "file", "schema", "values", "sources")
+    __slots__ = ("module", "file", "schema", "values", "sources", "left_out")
     __hash__ = None
 
-    def __init__(self, module, file, schema, values, sources):
-        for field, value in zip(self.__slots__, (module, file, schema, values, sources)):
+    def __init__(self, module, file, schema, values, sources, left_out=None):
+        left_out = _MappingProxy(dict(left_out or {}))
+        for field, value in zip(self.__slots__, (module, file, schema, values, sources,
+                                                 left_out)):
             object.__setattr__(self, field, value)
 
     def __getitem__(self, key: str):
@@ -575,8 +585,9 @@ def _parsed(path) -> dict | None:
 def _settings(module, schema, path, data, env) -> Settings:
     schema.check_env(module)
     from_file: dict = {}
+    left_out: dict = {}
     if data is not None:
-        _walk_file(data, "", schema, path, from_file, env)
+        _walk_file(data, "", schema, path, from_file, env, left_out)
     values: dict = {}
     sources: dict = {}
     for key in schema.live():
@@ -590,7 +601,8 @@ def _settings(module, schema, path, data, env) -> Settings:
         else:
             values[key.name] = _default_value(key, env)
             sources[key.name] = DEFAULT
-    return Settings(module, path, schema, _MappingProxy(values), _MappingProxy(sources))
+    return Settings(module, path, schema, _MappingProxy(values), _MappingProxy(sources),
+                    left_out)
 
 
 def _copied(value):
@@ -602,12 +614,15 @@ def _copied(value):
     return value
 
 
-def _walk_file(table, prefix, schema, path, out, env) -> None:
+def _walk_file(table, prefix, schema, path, out, env, left_out) -> None:
     fix_unknown = "remove it, or check its spelling against the module's schema"
     for name, value in table.items():
         dotted = f"{prefix}{name}"
         key = schema.keys.get(dotted)
         if key is not None:
+            if key.retired is not None and key.left_out:
+                left_out[dotted] = key.retired
+                continue
             if key.retired is not None:
                 raise ConfigError(path, dotted, "is retired", key.retired)
             out[dotted] = _check_value(key, value, path, env)
@@ -615,7 +630,7 @@ def _walk_file(table, prefix, schema, path, out, env) -> None:
             if not isinstance(value, dict):
                 raise ConfigError(path, dotted, "is a table of settings, not a value",
                                   f"write it as [{dotted}] with its keys under it")
-            _walk_file(value, f"{dotted}.", schema, path, out, env)
+            _walk_file(value, f"{dotted}.", schema, path, out, env, left_out)
         else:
             raise ConfigError(path, dotted, "is not a setting of this module", fix_unknown)
 
@@ -788,6 +803,9 @@ def _key(name, spec, source) -> Key:
         raise bad(f"has unknown field(s) {', '.join(unknown)}",
                   f"use only {', '.join(FIELDS)}")
     retired = spec.get("retired")
+    left_out = spec.get("left_out", False)
+    if not isinstance(left_out, bool):
+        raise bad(f"has left_out {left_out!r}", "give left_out true or false")
     if retired is not None:
         if not isinstance(retired, str) or not retired.strip():
             raise bad("has an empty retired", "say what to do now instead")
@@ -796,7 +814,11 @@ def _key(name, spec, source) -> Key:
             raise bad(f"is retired but has {', '.join(shown)}",
                       "remove the page fields; a retired key is not shown")
         return Key(name=name, value_type=spec.get("type"), default=spec.get("default"),
-                   doc=spec.get("doc", ""), read=spec.get("read"), retired=retired)
+                   doc=spec.get("doc", ""), read=spec.get("read"), retired=retired,
+                   left_out=left_out)
+    if left_out:
+        raise bad("has left_out but is not retired",
+                  "remove left_out; it goes only on a retired key")
 
     for required in ("type", "default", "doc", "read"):
         if required not in spec:
@@ -1529,19 +1551,20 @@ def _item(value, *, inline=False):
     return tomlkit.item(value)
 
 
-def _check_file(module, schema, check, text, path, key) -> None:
+def _check_file(module, schema, check, text, path, key) -> Settings:
     """The two checks of a config file's text, each given the text alone: `check_text`'s
-    reader, then the module's `CONFIG_CHECK` target `check` when it names one. Raises
-    `ConfigError` naming `path`, the module's config file; `key` is the key being changed
-    (None when the file is checked as it is). A schema the reader refuses is the module's
-    own fault and exits 3, as a schema that cannot be read does."""
+    reader, then the module's `CONFIG_CHECK` target `check` when it names one. Returns the
+    reader's `Settings`, whose `left_out` names each retired key the text still sets that
+    is read as unset. Raises `ConfigError` naming `path`, the module's config file; `key`
+    is the key being changed (None when the file is checked as it is). A schema the reader
+    refuses is the module's own fault and exits 3, as a schema that cannot be read does."""
     try:
-        _read_text(module, schema, text, path)
+        settings = _read_text(module, schema, text, path)
     except SchemaError as exc:
         exc.exit_code = 3
         raise
     if check is None:
-        return
+        return settings
     import importlib
 
     target, _, name = check.partition(":")
@@ -1558,6 +1581,7 @@ def _check_file(module, schema, check, text, path, key) -> None:
     except Exception as exc:
         raise ConfigError(path, key, f"{module} refuses the file: {_first_line(exc)}",
                           "give a value the module accepts") from None
+    return settings
 
 
 def _first_line(exc: BaseException) -> str:
@@ -1575,9 +1599,10 @@ def _naming(exc: ConfigError, path) -> ConfigError:
     return exc
 
 
-def _check_config(module: str, schema: Schema, check) -> None:
+def _check_config(module: str, schema: Schema, check) -> Settings:
     """Module `module`'s config file as it is, through the same two checks a change runs
-    (a missing file is the empty text). Raises `ConfigError` naming the file."""
+    (a missing file is the empty text). Returns the file's `Settings`, whose `left_out`
+    the check prints as warnings. Raises `ConfigError` naming the file."""
     path = _config_file(module)
     try:
         with open(path, encoding="utf-8") as fh:
@@ -1587,7 +1612,7 @@ def _check_config(module: str, schema: Schema, check) -> None:
     except (OSError, UnicodeDecodeError) as exc:
         raise ConfigError(path, None, f"cannot be read ({exc})",
                           "make the file a readable TOML file, or remove it") from None
-    _check_file(module, schema, check, text, path, None)
+    return _check_file(module, schema, check, text, path, None)
 
 
 __all__ = ["TYPES", "READS", "FIELDS", "PAGE_FIELDS", "COMMON_MAX", "ITEMS", "DEFAULT",
