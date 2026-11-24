@@ -1095,7 +1095,8 @@ def resolve(request, *, presets: Presets | None = None,
     none (`_no_default_mark`). A scratch launch holds `recycle_at_limit = off`, with the
     `SCRATCH_RECYCLE_OFF` warning, when `relaunch` came from `[defaults]`; typed or set by
     the preset, the pair is refused (`catalog.ScratchRecycle`). Then `_settle_recycle`:
-    the shipped default never refuses a launch. Reads projects when a place needs it.
+    the shipped default never refuses a launch, and a relaunch set for one that can't act
+    on it is warned of. Reads projects when a place needs it.
     Raises a
     `catalog.Refused`: `UnknownPreset`, `BadPreset`, `OffPosture`, `PostureBrief`,
     `NotYet`, `NeedsProjects`, `UnknownProject`, `ProjectsUnreadable`, `ProjectsBusy`, or the
@@ -1189,6 +1190,10 @@ RELAUNCH_NO_MARK_OFF = ("recycle_at_limit relaunch is left out: warn_at is off, 
 LIMIT_AT_LEFT_OUT = ("limit_at is left out: this launch relaunches itself, and the "
                      "relaunch line comes at warn_at; limit_at still acts on a launch that "
                      "compacts")
+#: The warning of a launch set to relaunch itself by a flag, its preset or `[defaults]`
+#: whose session can't (`selfrecycle.missing`): what it fails, and what would let it.
+RELAUNCH_NOT_APPLIED = ("recycle_at_limit relaunch does nothing on this launch: it "
+                        "{problem}; {hint}")
 #: The row holding the mark a compacting launch compacts at.
 LIMIT_AT = "limit_at"
 
@@ -1200,30 +1205,35 @@ def _settle_recycle(harness: str, values: dict, sources: dict, *, cwd: str | Non
     can't recycle itself (`selfrecycle.missing`), the shipped default holds `off`, quietly,
     its source `left-out`, so a terminal, Codex, scratch or native-Windows launch is not
     refused for a default it never asked for. A `[defaults]` relaunch holds `off`, with a
-    warning, where `warn_at` is off. A `[defaults]` `limit_at` is left out of a relaunch
+    warning, where `warn_at` is off. A relaunch set anywhere else that the launch can't act
+    on is kept, and warned of with the item it fails (`RELAUNCH_NOT_APPLIED`), so a value
+    set for the launch is never silently without effect; `catalog.refuse_values` then
+    refuses the pairs it refuses. A `[defaults]` `limit_at` is left out of a relaunch
     launch, with a warning, since the same `[defaults]` serves compacting launches, where
-    it acts. Typed and preset values are left as they are, for `catalog.refuse_values`."""
+    it acts."""
     from . import selfrecycle
 
     if values.get(RECYCLE_AT_LIMIT) != "relaunch":
         return []
     source = sources.get(RECYCLE_AT_LIMIT)
-    if source == SHIPPED:
-        target = values.get("target")
-        if selfrecycle.missing(
-                harness=harness, target=str(target or ""), in_slot=target == "slot",
-                cwd=cwd, values=values, source=source,
-                slots_here=lambda: available(slots.MODULE) and catalog.slots_here(),
-        ) is not None:
-            values[RECYCLE_AT_LIMIT], sources[RECYCLE_AT_LIMIT] = "off", LEFT_OUT
-            return []
-    elif source == DEFAULTS and values.get(WARN_AT) == "off":
+    if source == DEFAULTS and values.get(WARN_AT) == "off":
         values[RECYCLE_AT_LIMIT], sources[RECYCLE_AT_LIMIT] = "off", LEFT_OUT
         return [RELAUNCH_NO_MARK_OFF]
+    target = values.get("target")
+    found = selfrecycle.missing(
+        harness=harness, target=str(target or ""), in_slot=target == "slot", cwd=cwd,
+        values=values, source=source,
+        slots_here=lambda: available(slots.MODULE) and catalog.slots_here())
+    if found is not None and source == SHIPPED:
+        values[RECYCLE_AT_LIMIT], sources[RECYCLE_AT_LIMIT] = "off", LEFT_OUT
+        return []
+    warnings = []
+    if found is not None:
+        warnings.append(RELAUNCH_NOT_APPLIED.format(problem=found.problem, hint=found.hint))
     if catalog.is_set(values.get(LIMIT_AT)) and sources.get(LIMIT_AT) == DEFAULTS:
         values[LIMIT_AT], sources[LIMIT_AT] = "", LEFT_OUT
-        return [LIMIT_AT_LEFT_OUT]
-    return []
+        warnings.append(LIMIT_AT_LEFT_OUT)
+    return warnings
 
 
 #: The row holding the context mark usage warns at.

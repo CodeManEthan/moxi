@@ -1649,3 +1649,36 @@ def test_the_presets_check_flags_a_limit_at_set_beside_relaunch(recyclable):
     assert [(p.where, p.key, p.code) for p in found] == [("seat.s", "limit_at",
                                                           "relaunch-mark")]
     assert not errors('[defaults]\nlimit_at = "1x"\n' + seat, SLOTTED)
+
+@pytest.mark.parametrize("text, asked", [
+    ("", {"typed": {"recycle_at_limit": "relaunch", "harness": "codex", **IN_SLOT}}),
+    ('[seat.s]\nharness = "codex"\ntarget = "slot"\nrecycle_at_limit = "relaunch"\n',
+     {"seat": "s"}),
+    ('[defaults]\nrecycle_at_limit = "relaunch"\n',
+     {"typed": {"harness": "codex", **IN_SLOT}}),
+])
+def test_a_relaunch_set_for_a_launch_that_cannot_act_on_it_is_kept_with_a_warning(
+        recyclable, text, asked):
+    # Not refused, not stamped and not armed; the warning names what it fails.
+    got = resolve(text, SLOTTED, **asked)
+    assert got.values["recycle_at_limit"] == "relaunch"
+    [said] = [w for w in got.warnings if w.startswith("recycle_at_limit relaunch does")]
+    assert said == ("recycle_at_limit relaunch does nothing on this launch: it is a codex "
+                    "launch, and only a Claude session can be exited and relaunched; launch "
+                    "the seat on Claude")
+
+
+def test_a_typed_relaunch_with_no_handoff_folder_is_warned_of(recyclable, monkeypatch):
+    no_notes_dir(monkeypatch)
+    got = resolve("", SLOTTED, typed={"recycle_at_limit": "relaunch", **IN_SLOT})
+    assert got.values["recycle_at_limit"] == "relaunch"
+    assert presets.RELAUNCH_NOT_APPLIED.format(
+        problem="has no notes directory (no notes_dir and none for /work), so it has no "
+                "handoffs/ to read from",
+        hint="launch it with notes_dir set, or in a folder notes keeps notes for",
+    ) in got.warnings
+
+
+def test_a_relaunch_that_can_act_says_nothing(recyclable):
+    got = resolve("", SLOTTED, typed={"recycle_at_limit": "relaunch", **IN_SLOT})
+    assert got.warnings == ()

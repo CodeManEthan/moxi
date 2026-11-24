@@ -365,10 +365,11 @@ class Composition:
 
 def with_defaults(harness: str, values: Mapping[str, object]) -> dict[str, object]:
     """`values` over the shipped default of every row a user may set for a `harness`
-    launch, so a value the resolver left out reads as its default."""
-    defaults = {row.name: row.default for row in (*catalog.launcher(),
-                                                  *catalog.load(harness))
-                if row.settable}
+    launch, so a value the resolver left out reads as its default. An `enum` row that
+    takes `off` reads `off` (`catalog.unset`): `recycle_at_limit`'s shipped `relaunch`
+    stands only where the resolver settled it, so a row it left out sets nothing."""
+    defaults = {row.name: (catalog.unset(row) if row.type == "enum" else row.default)
+                for row in (*catalog.launcher(), *catalog.load(harness)) if row.settable}
     return {**defaults, **values}
 
 

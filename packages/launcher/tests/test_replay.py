@@ -795,6 +795,126 @@ def test_a_replay_of_an_older_scratch_row_set_to_relaunch_recycles_off(
     assert not any("recycle_at_limit" in said for said in replayed.warnings)
 
 
+# -- whether a replay can recycle itself ---------------------------------------------------
+
+
+@pytest.fixture
+def recyclable(monkeypatch):
+    """turns, usage and slots offered, slots running here and notes not installed, so a
+    Claude slot launch in a folder warned at a mark can recycle itself."""
+    from moxi import modules
+
+    monkeypatch.setattr(slots, "links", lambda module: True)
+    monkeypatch.setattr(catalog, "slots_here", lambda: True)
+    real = modules.available
+    monkeypatch.setattr(modules, "available", lambda name: name != "notes" and real(name))
+
+
+def slot_row(work, **values):
+    """r1 made again as a Claude slot launch in `work` warned at 2x, with `values` over
+    its stored ones (a value None is left out)."""
+    api.launch(request(work))
+    old = row("r1")
+    stored = {k: v for k, v in {**old.values, "warn_at": "2x", "target": "slot",
+                                **values}.items() if v is not None}
+    stored.pop("sources", None) if "sources" not in values else None
+    return dataclasses.replace(old, target="slot", slot="3", values_json=json.dumps(stored))
+
+
+def replayed_row(old):
+    """The replay of `old` as its row records it: its values (`api._recorded`), on the
+    same launch."""
+    replay = ReplayRequest(old, relaunch_of="r1", request_id="r2", actor="ann")
+    replayed = api._replayed(replay)
+    values = api._recorded(replay, replayed, dict(replayed.values))
+    return replayed, dataclasses.replace(old, values_json=json.dumps(values))
+
+
+def can(found_row) -> bool:
+    from moxi_launcher import selfrecycle
+
+    return selfrecycle.missing_of_row(found_row) is None
+
+
+@pytest.mark.parametrize("recycle, sources, holds", [
+    ("relaunch", {"recycle_at_limit": "preset"}, True),
+    ("relaunch", {"recycle_at_limit": "shipped"}, True),
+    ("relaunch", None, True),
+    # Opted out: it stays out after its relaunch.
+    ("off", {"recycle_at_limit": "typed"}, False),
+    ("off", {"recycle_at_limit": "preset"}, False),
+    ("off", {"recycle_at_limit": "defaults"}, False),
+    ("off", {"recycle_at_limit": "left-out"}, False),
+    ("compact", {"recycle_at_limit": "preset"}, False),
+    # Made before relaunch was the default: the off it never chose.
+    ("off", {"recycle_at_limit": "shipped"}, True),
+    ("off", None, True),
+])
+def test_a_replay_never_changes_whether_the_launch_can_recycle_itself(
+        work, harness, no_exec, recyclable, recycle, sources, holds):
+    old = slot_row(work, recycle_at_limit=recycle, sources=sources)
+    assert can(old) is holds
+    _, new = replayed_row(old)
+    assert can(new) is holds
+    # And again, from the replay's own row.
+    _, newer = replayed_row(new)
+    assert can(newer) is holds
+
+
+@pytest.mark.parametrize("change", [{"warn_at": ""}, {"scratch": True},
+                                    {"recycle_at_limit": None}])
+def test_a_replay_of_a_launch_that_could_not_recycle_itself_still_cannot(
+        work, harness, no_exec, recyclable, change):
+    old = slot_row(work, **{"recycle_at_limit": "off", **change})
+    assert not can(old)
+    replayed, new = replayed_row(old)
+    assert not can(new)
+    assert replayed.values.get("recycle_at_limit") == old.values.get("recycle_at_limit")
+
+
+def test_an_opted_out_seat_stays_off_after_its_relaunch(work, harness, no_exec, recyclable):
+    old = slot_row(work, recycle_at_limit="off", sources={"recycle_at_limit": "preset"})
+    replayed, new = replayed_row(old)
+    assert replayed.values["recycle_at_limit"] == "off"
+    assert new.values["sources"] == {"recycle_at_limit": "preset"}
+    assert common.option_stamps(replayed.values) == {}
+
+
+@pytest.mark.parametrize("sources", [None, {"recycle_at_limit": "shipped"}])
+def test_a_pre_default_off_is_told_after_its_relaunch(work, harness, no_exec, recyclable,
+                                                      sources):
+    # Its own session was never told (its stamps were fixed at launch); its relaunch is
+    # stamped to cross at warn_at, so it is.
+    old = slot_row(work, recycle_at_limit="off", sources=sources)
+    replayed, new = replayed_row(old)
+    assert replayed.values["recycle_at_limit"] == "relaunch"
+    assert new.values["sources"] == {"recycle_at_limit": "shipped"}
+    assert not any("recycle_at_limit" in said for said in replayed.warnings)
+    assert common.option_stamps(replayed.values) == {"MOXI_USAGE_CROSSING_AT": "2x"}
+
+
+def test_a_pre_default_off_stays_off_where_the_install_no_longer_offers_relaunch(
+        work, harness, no_exec, recyclable, monkeypatch):
+    old = slot_row(work, recycle_at_limit="off")
+    monkeypatch.setattr(slots, "links", lambda module: module != "turns")
+    replayed, _ = replayed_row(old)
+    assert replayed.values["recycle_at_limit"] == "off"
+
+
+def test_a_relaunch_the_install_can_no_longer_run_is_replayed_off(work, harness, no_exec,
+                                                                  recyclable, monkeypatch):
+    old = slot_row(work, recycle_at_limit="relaunch",
+                   sources={"recycle_at_limit": "preset"})
+    monkeypatch.setattr(catalog, "slots_here", lambda: False)
+    assert not can(old)
+    replayed, new = replayed_row(old)
+    assert replayed.values["recycle_at_limit"] == "off"
+    assert new.values["sources"] == {"recycle_at_limit": "left-out"}
+    assert any(said.startswith("recycle_at_limit relaunch is not applied")
+               for said in replayed.warnings)
+    assert not can(new)
+
+
 # -- the model pin ------------------------------------------------------------------------
 
 

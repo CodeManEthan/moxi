@@ -143,9 +143,7 @@ def test_a_value_for_a_module_that_cannot_load_is_not_stamped_and_the_launch_goe
 
 @pytest.mark.parametrize("harness, extra", [("claude", {}), ("codex", {})])
 def test_a_launch_stamps_the_grant_only_with_turns(harness, extra):
-    # recycle_at_limit off: the resolver settles the shipped relaunch, which widens the
-    # grant (test_option_rows), before a launch is composed.
-    values = {"harness": harness, "cwd": "/work", "recycle_at_limit": "off"}
+    values = {"harness": harness, "cwd": "/work"}
     sid = SID if harness == "claude" else None
     warn = {"MOXI_USAGE_WARN_AT": "2x"}
     without = compose.compose(values, ctx(session_id=sid))
