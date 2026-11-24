@@ -1754,3 +1754,40 @@ def test_a_note_to_an_endpoint_that_ended_goes_to_the_new_one(conn):
     assert old.deliveries == [] and len(new.deliveries) == 1
     [moved] = moves(conn, run)
     assert moved["why"] == "the endpoint ended before the note"
+
+
+def test_a_find_of_the_old_endpoint_still_claimed_is_no_move(conn):
+    claude_runs(conn)
+    old, new = FakeSession([Result("refused", "gone")]), moved_session()
+    # The old endpoint found live under its own claim, then the claim moves to the new.
+    turns = MovingTurns(old, old, moving(conn, new), new)
+    run = arm(conn)
+    got = go(conn, run, session=old, turns=turns)
+    assert got.outcome == "relaunched" and turns.asked == 4
+    [moved] = moves(conn, run)
+    assert moved["from"] == me() and moved["to"] == ident_text(os.getppid())
+    assert old.commands == [("exit", 4)] and new.commands == [("exit", 0)]
+
+
+def test_claude_ending_during_the_lookup_stops_it(conn):
+    child = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(60)"])
+    try:
+        ident = proc.identity(child.pid)
+        store.set_facts(conn, "r1", pid=ident.pid, pid_started=ident.started)
+        old, new = FakeSession([Result("refused", "gone")]), moved_session()
+
+        def claude_ends():
+            # The new endpoint claims the launch and `claude` ends before the next find.
+            take(conn, ident_text(new.endpoint_pid))
+            child.kill()
+            child.wait(PROC_WAIT_S)
+
+        turns = MovingTurns(old, claude_ends, new)
+        run = arm(conn)
+        got = go(conn, run, session=old, turns=turns)
+    finally:
+        child.kill()
+        child.wait(PROC_WAIT_S)
+    assert got.outcome == "relaunched" and "pane-ended" in got.events
+    assert moves(conn, run) == [] and turns.asked == 2
+    assert old.commands == [("exit", 4)] and new.commands == []
