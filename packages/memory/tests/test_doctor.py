@@ -414,15 +414,24 @@ def test_recalls_whose_child_never_ran_are_listed():
     with recalls.session_lock(SID):
         for recall_id, state, age in (("r-silent", "starting", 600),
                                       ("r-stuck", "hurried", 10800),
-                                      ("r-new", "starting", 1), ("r-hurried", "hurried", 1)):
+                                      ("r-new", "starting", 1), ("r-hurried", "hurried", 1),
+                                      ("r-nameless", "starting", 120),
+                                      ("r-forked", "starting", 120)):
             records.write({"recall": recall_id, "session": SID, "state": state,
                            "settings": recall_start.default_settings()}, now=now - age)
+        records.update(SID, "r-forked", fork="agent-1")
+    recall_line("r-nameless", updated=now - 120, at=now - 120, state=recalls.OPEN,
+                child=None)
+    recall_line("r-forked", updated=now - 120, at=now - 120, state=recalls.OPEN,
+                child=None)
     row = by_name()["subconscious"]
     assert row.state == "warn" and row.fix == "moxi memory subconscious list"
     assert ("1 recall in the last day whose child could not start (r-spawn): "
             "FileNotFoundError: moxi-memory-subconscious") in row.detail
-    assert ("2 recalls with no log line, the child gone before it wrote one: "
-            "r-silent (starting, 10m old), r-stuck (hurried, 3h old)") in row.detail
+    assert ("3 recalls with no log line naming its child (gone before it wrote one, or "
+            "with no identity to write): r-nameless (starting, 2m old), r-silent (starting, "
+            "10m old), r-stuck (hurried, 3h old)") in row.detail
+    assert "r-forked (starting" not in row.detail
     for other in ("r-old-spawn", "r-new", "r-hurried"):
         assert other not in row.detail
 

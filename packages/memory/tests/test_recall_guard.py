@@ -149,8 +149,9 @@ def test_the_budget_fits_inside_the_guards_deadline():
 
 
 def a_starting_record(child, **fields):
-    """A `starting` record of no fork yet, with no line (`child` None) or a line naming
-    a child that has ended (`dead`) or this process (`live`), and `fields` set on it."""
+    """A `starting` record of no fork yet, with no line (`child` None), a line naming
+    no child (`nameless`), or a line naming a child that has ended (`dead`) or this
+    process (`live`), and `fields` set on it."""
     import os
 
     from moxi_memory import recall_take, recalls
@@ -160,8 +161,8 @@ def a_starting_record(child, **fields):
                                 notes_dir=None, route_name="subagent",
                                 spawn=lambda s, r: None)
     if child is not None:
-        identity = ({"pid": os.getpid(), "started": 1.0} if child == "dead"
-                    else recall_take.me())
+        identity = {"dead": {"pid": os.getpid(), "started": 1.0},
+                    "nameless": None}.get(child) if child != "live" else recall_take.me()
         with recalls.session_lock(SESSION):
             recalls.put_line(SESSION, {"recall": record["recall"], "harness": "claude",
                                        "state": "open", "child": identity})
@@ -217,6 +218,31 @@ def test_a_record_with_no_line_awaits_its_fork_only_for_the_grace(state):
     assert recall_guard.fork_record(SESSION, "agent-9", wait_s=0.1) is None
     assert recall_guard.judge_call(call("Write", agent="agent-9")) is None
     assert recall_guard.judge_ask(call("Write", agent="agent-9")) is None
+
+
+@pytest.mark.parametrize("state", ["starting", "hurried"])
+def test_a_record_whose_line_names_no_child_awaits_its_fork_only_for_the_grace(state):
+    import time
+
+    from moxi_memory import recalls
+
+    grace = records.STARTING_GRACE_S
+    record = a_starting_record("nameless", state=state, rounds=1,
+                               at=time.time() - grace + 5)
+    assert recalls.find_line(SESSION, record["recall"])["child"] is None
+    found = recall_guard.fork_record(SESSION, "agent-9", wait_s=0.1)
+    assert found is not None and found["recall"] == record["recall"]
+    with recalls.session_lock(SESSION):
+        records.update(SESSION, record["recall"], at=time.time() - grace - 1)
+    assert recall_guard.fork_record(SESSION, "agent-9", wait_s=0.1) is None
+    assert recall_guard.judge_call(call("Write", agent="agent-9")) is None
+    assert recall_guard.judge_ask(call("Write", agent="agent-9")) is None
+
+
+@pytest.mark.parametrize("child", [None, {"pid": "x", "started": 1.0}, {"pid": 1}])
+def test_a_line_that_names_no_child_gives_none(child):
+    assert recall_guard.line_child(None) is None
+    assert recall_guard.line_child({"recall": "r", "child": child}) is None
 
 
 @pytest.mark.parametrize("state", ["starting", "hurried"])

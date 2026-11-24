@@ -486,10 +486,11 @@ def live_subconscious() -> list[tuple[str, str, str | None]]:
 
 def _never_ran(lines: list[dict], *, now: float) -> str | None:
     """The recalls whose child never ran: lines lost with reason `spawn` in the last day
-    (the child could not be started), and records `starting` or `hurried` with no line
-    past `records.STARTING_GRACE_S` (the child ended before it wrote one). None when
-    there are none."""
-    from . import recall_start, recalls, records
+    (the child could not be started), and records `starting` or `hurried` with no fork
+    and no line naming a child past `records.STARTING_GRACE_S` (the child ended before
+    it wrote its line, or found no identity of its own to write), which the recall
+    guards no longer wait on. None when there are none."""
+    from . import recall_guard, recall_start, recalls, records
 
     said = []
     spawn = [line for line in lines if line.get("state") == recalls.LOST
@@ -499,17 +500,18 @@ def _never_ran(lines: list[dict], *, now: float) -> str | None:
         said.append(f"{_plural(len(spawn), 'recall')} in the last day whose child could "
                     f"not start ({_shown([str(x.get('recall')) for x in spawn[::-1]])}): "
                     f"{spawn[-1].get('error') or 'no error recorded'}")
-    named = {line.get("recall") for line in lines}
+    named = {line.get("recall") for line in lines if recall_guard.line_child(line)}
     silent = [record for session_id in records.session_ids()
               for record in records.session_records(session_id)
               if record.get("state") in (records.STARTING, records.HURRIED)
-              and record.get("recall") not in named
+              and not record.get("fork") and record.get("recall") not in named
               and now - float(record.get("at") or now) >= records.STARTING_GRACE_S]
     if silent:
         ages = [f"{r.get('recall')} ({r.get('state')}, "
                 f"{_age(now - float(r.get('at') or now))} old)" for r in silent[::-1]]
-        said.append(f"{_plural(len(silent), 'recall')} with no log line, the child gone "
-                    f"before it wrote one: {_shown(ages)}")
+        said.append(f"{_plural(len(silent), 'recall')} with no log line naming its child "
+                    f"(gone before it wrote one, or with no identity to write): "
+                    f"{_shown(ages)}")
     return "; ".join(said) or None
 
 

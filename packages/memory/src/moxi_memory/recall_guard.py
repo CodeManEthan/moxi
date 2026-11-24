@@ -11,12 +11,13 @@ has a record that awaits its fork, a call from an agent id no record names waits
 `STARTING_WAIT_S` for the id, and is then judged as the fork of the newest such record
 whose first round was asked (the record's `rounds`, written before the round goes to
 turns), or of the newest such record when none was asked: only an asked round can have
-started a fork. A record whose child is gone (`moxi.proc.alive` is false for the child
-its log line names) will never start a fork, so it counts as no fork. Only the line
-names the child, so a record with no line can't be told apart from a child still
-starting up: it awaits its fork only until `records.STARTING_GRACE_S` after its `at`,
-by when a living child has written its line, whether it is `starting` or `hurried`;
-past that it counts as no fork. Every other subagent's call is left alone.
+started a fork. The guard knows a recall's child only from a log line that names it
+(`line_child`). A record whose child is gone (`moxi.proc.alive` is false for that child)
+will never start a fork, so it counts as no fork. A record with no line, or a line that
+names no child (the child found no identity of its own), can't be told apart from a
+child still starting up: it awaits its fork only until `records.STARTING_GRACE_S` after
+its `at`, by when a living child has written its line, whether it is `starting` or
+`hurried`; past that it counts as no fork. Every other subagent's call is left alone.
 
 **A fork's call (`judge_call`).**
 
@@ -91,39 +92,40 @@ def guarded(env: Mapping[str, str]) -> bool:
     return mode(env) is not None
 
 
-def child_gone(session_id: str, record: Mapping[str, object]) -> bool:
-    """Whether the child of recall `record` is known to have ended: its log line names a
-    child, and `moxi.proc.alive` is false for it. False with no line, or a line that
-    names no child, since then nothing tells."""
+def line_child(line: Mapping[str, object] | None):
+    """The child (`moxi.proc.ProcId`) recall line `line` names, or None when there is no
+    line or it names none (`child` null, as when `moxi.proc.identity` found no start
+    time, or not a pid and a start time)."""
     import moxi.proc
 
-    line = recalls.find_line(session_id, str(record.get("recall")))
     child = line.get("child") if line is not None else None
     if not isinstance(child, dict):
-        return False
+        return None
     try:
-        proc = moxi.proc.ProcId(int(child["pid"]), float(child["started"]))
+        return moxi.proc.ProcId(int(child["pid"]), float(child["started"]))
     except (TypeError, KeyError, ValueError):
-        return False
-    return not moxi.proc.alive(proc)
+        return None
 
 
 def awaits_fork(session_id: str, record: Mapping[str, object], *,
                 now: float | None = None) -> bool:
     """Whether `record` is a recall whose fork's id is not yet written while its child
-    may still write it: `starting` or `hurried`, no fork, and either a log line whose
-    child is not known gone, or no line while the record is under
+    may still write it: `starting` or `hurried`, no fork, and either a log line naming a
+    child not known gone, or no line naming a child while the record is under
     `records.STARTING_GRACE_S` old."""
+    import moxi.proc
+
     if record.get("state") not in (records.STARTING, records.HURRIED) or record.get("fork"):
         return False
-    if recalls.find_line(session_id, str(record.get("recall"))) is None:
-        now = time.time() if now is None else now
-        try:
-            at = float(record.get("at") or 0)
-        except (TypeError, ValueError):
-            at = 0.0
-        return now - at < records.STARTING_GRACE_S
-    return not child_gone(session_id, record)
+    child = line_child(recalls.find_line(session_id, str(record.get("recall"))))
+    if child is not None:
+        return moxi.proc.alive(child)
+    now = time.time() if now is None else now
+    try:
+        at = float(record.get("at") or 0)
+    except (TypeError, ValueError):
+        at = 0.0
+    return now - at < records.STARTING_GRACE_S
 
 
 def _asked(record: Mapping[str, object]) -> bool:
@@ -296,6 +298,6 @@ def judge_ask(call):
 
 
 __all__ = ["TIME_UP", "READ_ONLY", "ASK_REFUSED", "READ_TOOLS", "SHELL", "REFUSED_CHARS",
-           "STARTING_WAIT_S", "BUDGET_S", "guarded", "child_gone", "awaits_fork",
+           "STARTING_WAIT_S", "BUDGET_S", "guarded", "line_child", "awaits_fork",
            "fork_record",
            "time_up", "plain_read", "allowed", "judge_call", "judge_ask"]
