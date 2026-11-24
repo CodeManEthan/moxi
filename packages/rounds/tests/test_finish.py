@@ -27,6 +27,10 @@ ROUND = "proj-a/a-round"
 CHECK = shlex.join([sys.executable, "-c", "print('the check passed')"])
 POINTER = "comms:1234567"
 LOCK = "refs/rounds/finishing/main"
+# A process that uses its working folder until its stdin closes, printing its own pid
+# first: on Windows a venv's python.exe runs the interpreter as its child, and the child
+# is the one using the folder.
+USES_ITS_FOLDER = "import os, sys; print(os.getpid(), flush=True); sys.stdin.read()"
 
 @pytest.fixture
 def repo(git_repo, tmp_path):
@@ -507,8 +511,9 @@ def test_a_process_in_the_builds_scratch_refuses_the_finish_with_nothing_written
     scratch = placed(checking.commission_of(states.fold(events(path)), build_of(path)),
                  "scratch")
     before = events(path)
-    proc = subprocess.Popen([sys.executable, "-c", "import sys; sys.stdin.read()"],
-                            cwd=scratch, stdin=subprocess.PIPE)
+    proc = subprocess.Popen([sys.executable, "-c", USES_ITS_FOLDER], cwd=scratch,
+                            stdin=subprocess.PIPE, stdout=subprocess.PIPE, text=True)
+    own_pid = int(proc.stdout.readline())
     try:
         with pytest.raises(Refused) as caught:
             finishing.finish(ROUND, "B1", by="coder")
@@ -517,7 +522,7 @@ def test_a_process_in_the_builds_scratch_refuses_the_finish_with_nothing_written
 
     [unmet] = caught.value.unmet
     assert unmet.reason.startswith(
-        f"B1's scratch folder {scratch} is in use by pid {proc.pid} (")
+        f"B1's scratch folder {scratch} is in use by pid {own_pid} (")
     assert unmet.fix == ("end that process or leave the folder, then: moxi rounds "
                          f"finish {ROUND} B1")
     assert events(path) == before and lock_ref(repo) is None
@@ -535,9 +540,10 @@ def test_a_scratch_that_came_into_use_after_the_gate_stays_for_the_sweep(
 
     def gate_then_use(*args, **kwargs):
         found = gate(*args, **kwargs)
-        started.append(subprocess.Popen(
-            [sys.executable, "-c", "import sys; sys.stdin.read()"], cwd=scratch,
-            stdin=subprocess.PIPE))
+        proc = subprocess.Popen([sys.executable, "-c", USES_ITS_FOLDER], cwd=scratch,
+                                stdin=subprocess.PIPE, stdout=subprocess.PIPE, text=True)
+        proc.own_pid = int(proc.stdout.readline())
+        started.append(proc)
         return found
 
     monkeypatch.setattr(sweeping, "scratch_gate", gate_then_use)
@@ -553,7 +559,7 @@ def test_a_scratch_that_came_into_use_after_the_gate_stays_for_the_sweep(
     [line] = [one for one in capsys.readouterr().out.splitlines()
               if one.startswith(f"kept {scratch}:")]
     assert line.startswith(f"kept {scratch}: D: a running process came to use it after "
-                           f"the scratch gate (pid {proc.pid} (")
+                           f"the scratch gate (pid {proc.own_pid} (")
 
 
 def test_the_cleanup_writes_the_scratch_dirs_trash_entry_to_the_sweeps_log(ready):
@@ -613,9 +619,9 @@ def test_the_command_says_what_the_cleanup_removed_and_kept(ready, repo, capsys)
     assert main(["finish", ROUND, "B1", "--as", "coder"]) == 0
     lines = capsys.readouterr().out.splitlines()
 
-    assert f"removed {made['scratch']}" in lines
+    assert f"removed {placed(made, 'scratch')}" in lines
     (kept,) = [line for line in lines if line.startswith("kept ")]
-    assert kept.startswith(f"kept {made['worktree']}: B3: ") and "(.env)" in kept
+    assert kept.startswith(f"kept {placed(made, 'worktree')}: B3: ") and "(.env)" in kept
     assert (tree.root / ".env").is_file()
     assert [line for line in lines if line.startswith("branch: ")] == [
         "branch: kept: its worktree was kept, and git deletes no branch a worktree has "

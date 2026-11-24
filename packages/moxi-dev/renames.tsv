@@ -18133,3 +18133,8 @@ moxi-dev	packages/moxi-dev/src/moxi_dev/check.py	parser.add_argument("--leave-ou
 moxi-dev	packages/moxi-dev/src/moxi_dev/check.py	parser.add_argument("--leave-out", metavar="NAME", action="append", default=[],	keep	default	default
 moxi-dev	packages/moxi-dev/src/moxi_dev/check.py	help="check every package the check would otherwise take but "	keep	help	help
 rounds	packages/rounds/tests/test_lander.py	log.parent.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
+rounds	packages/rounds/tests/test_home_paths.py	assert any(one.startswith(f"pid {proc.own_pid} (") for one in found.users)	keep	any	any
+rounds	packages/rounds/tests/test_home_paths.py	assert any(one.startswith(f"pid {proc.own_pid} (") for one in kept.work)	keep	any	any
+rounds	packages/rounds/tests/test_removal.py	assert any(line.startswith(f"pid {own_pid} (") for line in kept.work)	keep	any	any
+rounds	packages/rounds/tests/test_removal.py	shown = set(os.stat_result.__match_args__)	keep	set	set
+rounds	packages/rounds/tests/test_sweep.py	assert any(line.startswith(f"pid {own_pid} ") for line in scratch.kept.work)	keep	any	any

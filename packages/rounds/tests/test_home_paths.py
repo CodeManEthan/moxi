@@ -23,6 +23,10 @@ from moxi_rounds.errors import Refused
 
 ROUND = "proj-a/a-round"
 PY = sys.executable
+# A process that uses its working folder until its stdin closes, printing its own pid
+# first: on Windows a venv's python.exe runs the interpreter as its child, and the child
+# is the one using the folder.
+USES_ITS_FOLDER = "import os, sys; print(os.getpid(), flush=True); sys.stdin.read()"
 
 
 def set_home(monkeypatch, home: Path) -> Path:
@@ -340,8 +344,9 @@ def in_scratch(rewritten):
     """The rewritten record's B1, with a process whose working folder is its scratch
     folder. Returns `(log, the commission, the process)`."""
     path, made = rewritten
-    proc = subprocess.Popen([PY, "-c", "import sys; sys.stdin.read()"],
-                            cwd=made.scratch, stdin=subprocess.PIPE)
+    proc = subprocess.Popen([PY, "-c", USES_ITS_FOLDER], cwd=made.scratch,
+                            stdin=subprocess.PIPE, stdout=subprocess.PIPE, text=True)
+    proc.own_pid = int(proc.stdout.readline())
     try:
         yield path, made, proc
     finally:
@@ -355,7 +360,7 @@ def test_a_process_in_a_rewritten_records_scratch_is_found(in_scratch):
 
     assert found is not None and found.unread is None
     assert found.place == made.scratch
-    assert any(one.startswith(f"pid {proc.pid} (") for one in found.users)
+    assert any(one.startswith(f"pid {proc.own_pid} (") for one in found.users)
 
 
 def test_the_finish_gate_refuses_for_a_rewritten_records_scratch_in_use(in_scratch):
@@ -367,7 +372,7 @@ def test_the_finish_gate_refuses_for_a_rewritten_records_scratch_in_use(in_scrat
 
     assert unread == () and unmet is not None
     assert unmet.reason.startswith(
-        f"B1's scratch folder {made.scratch} is in use by pid {proc.pid} (")
+        f"B1's scratch folder {made.scratch} is in use by pid {proc.own_pid} (")
 
 
 def test_a_drop_leaves_a_rewritten_records_scratch_in_use(in_scratch):
@@ -379,7 +384,7 @@ def test_a_drop_leaves_a_rewritten_records_scratch_in_use(in_scratch):
     assert not made.worktree.exists() and made.scratch.is_dir()
     [kept] = done.kept
     assert kept.place == made.scratch and kept.check == "D"
-    assert any(one.startswith(f"pid {proc.pid} (") for one in kept.work)
+    assert any(one.startswith(f"pid {proc.own_pid} (") for one in kept.work)
 
 
 def test_a_tilde_word_of_a_command_step_runs_as_the_path_under_home(

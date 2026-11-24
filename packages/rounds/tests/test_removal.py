@@ -229,7 +229,11 @@ def test_a_worktree_whose_git_file_names_another_repos_dir_is_kept(made, repo,
     (named / places.WORKTREE_MARKER).write_text(
         (places.worktree_git_dir(tree.root) / places.WORKTREE_MARKER).read_text(
             encoding="utf-8"), encoding="utf-8")
-    (tree.root / ".git").write_text(f"gitdir: {named}\n", encoding="utf-8")
+    # Rewritten in place: git on Windows marks the file hidden, and a hidden file can't be
+    # created over there.
+    with open(tree.root / ".git", "r+", encoding="utf-8") as git_file:
+        git_file.write(f"gitdir: {named}\n")
+        git_file.truncate()
 
     assert kept_by(remove(event)) == "A4"
     assert (tree.root / "work.txt").is_file()
@@ -351,7 +355,7 @@ def test_the_branch_the_same_act_deletes_holds_no_commit(made, repo):
 @pytest.mark.parametrize("kind", [removal.WORKTREE, removal.SCRATCH])
 def test_a_mount_inside_keeps_the_dir(made, monkeypatch, kind):
     _path, tree, event = made
-    place = Path(os.path.realpath(event[kind]))
+    place = Path(os.path.realpath(placed(event, kind)))
     (place / "node_modules").mkdir()
     monkeypatch.setattr(removal, "_mount_table",
                         lambda: [str(place / "node_modules"), "/"])
@@ -396,7 +400,7 @@ def test_a_build_drop_writes_its_trash_entry_to_the_sweeps_log_proving_a_and_b(m
 
     assert [(one["act"], one["kind"], one["entry"]) for one in found] == [
         ("renamed", "scratch", event["build"]), ("deleted", "scratch", event["build"])]
-    assert found[0]["place"] == event["scratch"] and found[1]["gone"] is True
+    assert Path(found[0]["place"]) == placed(event, "scratch") and found[1]["gone"] is True
     for one in found:
         assert (one["round"], one["stage"], one["repo"], one["branch"], one["build"]) == (
             ROUND, "B1", "proj-a", "work", event["build"])
@@ -409,8 +413,12 @@ def test_a_drop_leaves_a_scratch_a_process_uses_and_moves_the_rest(made, whole):
     # moved and stayed for the sweep, and the worktree went as before.
     _path, _tree, event = made
     scratch = placed(event, "scratch")
-    proc = subprocess.Popen([sys.executable, "-c", "import sys; sys.stdin.read()"],
-                            cwd=scratch, stdin=subprocess.PIPE)
+    # The child prints its own pid: on Windows a venv's python.exe is not the interpreter.
+    proc = subprocess.Popen(
+        [sys.executable, "-c", "import os, sys; print(os.getpid(), flush=True); "
+         "sys.stdin.read()"], cwd=scratch, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+        text=True)
+    own_pid = int(proc.stdout.readline())
     try:
         if whole:
             dropped = dropping.drop(ROUND, by="operator", record=POINTER,
@@ -424,7 +432,7 @@ def test_a_drop_leaves_a_scratch_a_process_uses_and_moves_the_rest(made, whole):
     assert dropped.removed == (placed(event, "worktree"),)
     [kept] = dropped.kept
     assert (kept.kind, kept.place, kept.check) == ("scratch", scratch, "D")
-    assert len(kept.work) == 1 and kept.work[0].startswith(f"pid {proc.pid} (")
+    assert any(line.startswith(f"pid {own_pid} (") for line in kept.work)
     assert scratch.is_dir() and files.read_records(sweeping.log_file()) == []
 
 
@@ -472,7 +480,10 @@ def test_the_mount_table_reads_escaped_mount_points():
 def _on_another_device(found: os.stat_result) -> os.stat_result:
     fields = list(found)
     fields[2] = found.st_dev + 1
-    return os.stat_result(fields)
+    # The fields past the sequence (Windows' file attributes among them) by name.
+    shown = set(os.stat_result.__match_args__)
+    return os.stat_result(fields, {name: getattr(found, name) for name in dir(found)
+                                   if name.startswith("st_") and name not in shown})
 
 
 def test_a_part_below_the_root_on_another_device_keeps_the_dir(made, monkeypatch):
@@ -495,34 +506,17 @@ def test_a_part_below_the_root_on_another_device_keeps_the_dir(made, monkeypatch
 @pytest.mark.parametrize("kind", [removal.WORKTREE, removal.SCRATCH])
 def test_an_entry_on_another_device_inside_keeps_the_dir(made, monkeypatch, kind):
     _path, _tree, event = made
-    place = Path(os.path.realpath(event[kind]))
+    place = Path(os.path.realpath(placed(event, kind)))
     # Ignored and disposable, so only the walk can keep it.
     (place / "node_modules").mkdir()
     (place / "node_modules" / "data.bin").write_bytes(b"\0")
-    real_scandir = removal.os.scandir
+    real_entry_stat = removal._entry_stat
 
-    class Entry:
-        def __init__(self, real):
-            self._real, self.path, self.name = real, real.path, real.name
+    def entry_stat(entry):
+        found = real_entry_stat(entry)
+        return _on_another_device(found) if entry.name == "node_modules" else found
 
-        def __getattr__(self, name):
-            return getattr(self._real, name)
-
-        def stat(self, *, follow_symlinks=True):
-            found = self._real.stat(follow_symlinks=follow_symlinks)
-            return _on_another_device(found) if self.name == "node_modules" else found
-
-    class Listing:
-        def __init__(self, path):
-            self._real = real_scandir(path)
-
-        def __enter__(self):
-            return [Entry(one) for one in self._real.__enter__()]
-
-        def __exit__(self, *exc):
-            return self._real.__exit__(*exc)
-
-    monkeypatch.setattr(removal.os, "scandir", Listing)
+    monkeypatch.setattr(removal, "_entry_stat", entry_stat)
     found = remove(event, kind)
     monkeypatch.undo()
 

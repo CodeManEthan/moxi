@@ -233,19 +233,22 @@ def test_a_log_that_cant_be_read_keeps_every_dir_and_is_named(ended, tmp_path,
     assert placed(event, "worktree").is_dir() and placed(event, "scratch").is_dir()
 
 
+# Each user prints its own pid: on Windows a venv's python.exe runs the interpreter as its
+# child, so the process using the folder is not the one `Popen` started.
 _USERS = {
     "working folder": ("import os, sys, time; os.chdir(sys.argv[1]); print('up', "
-                       "flush=True); time.sleep(60)", {}),
-    "open file": ("import sys, time; held = open(sys.argv[1] + '/held.txt', 'w'); "
-                  "print('up', flush=True); time.sleep(60)", {}),
-    "argument word": ("import time; print('up', flush=True); time.sleep(60)", {}),
-    "environment value": ("import time; print('up', flush=True); time.sleep(60)",
-                          {"PLACE_FOR_TEST": "{place}/bin"}),
+                       "os.getpid(), flush=True); time.sleep(60)", {}),
+    "open file": ("import os, sys, time; held = open(sys.argv[1] + '/held.txt', 'w'); "
+                  "print('up', os.getpid(), flush=True); time.sleep(60)", {}),
+    "argument word": ("import os, time; print('up', os.getpid(), flush=True); "
+                      "time.sleep(60)", {}),
+    "environment value": ("import os, time; print('up', os.getpid(), flush=True); "
+                          "time.sleep(60)", {"PLACE_FOR_TEST": "{place}/bin"}),
 }
 _LINUX_USERS = {
-    "mapped file": ("import mmap, sys, time; f = open(sys.argv[1] + '/mapped.bin', 'r+b'); "
-                    "m = mmap.mmap(f.fileno(), 0); f.close(); print('up', flush=True); "
-                    "time.sleep(60)", {}),
+    "mapped file": ("import mmap, os, sys, time; f = open(sys.argv[1] + '/mapped.bin', "
+                    "'r+b'); m = mmap.mmap(f.fileno(), 0); f.close(); print('up', "
+                    "os.getpid(), flush=True); time.sleep(60)", {}),
 }
 
 
@@ -262,13 +265,14 @@ def test_a_process_using_the_dir_keeps_it(ended, use):
         argv = argv[:3]
     process = subprocess.Popen(argv, env=env, stdout=subprocess.PIPE, text=True)
     try:
-        assert process.stdout.readline().strip() == "up"
+        said, own_pid = process.stdout.readline().split()
+        assert said == "up"
         [scratch] = [one for one in dry().leftovers if one.candidate.kind == "scratch"]
     finally:
         process.kill()
         process.communicate(timeout=30)
     assert (scratch.fate, scratch.kept.check) == ("kept", "D")
-    assert f"pid {process.pid}" in scratch.kept.work[0]
+    assert any(line.startswith(f"pid {own_pid} ") for line in scratch.kept.work)
 
 
 def test_a_file_changed_within_the_grace_keeps_the_dir(ended):
@@ -327,14 +331,14 @@ def test_unarmed_remove_prints_the_dry_run_and_refuses_and_the_doctor_lists_the_
 
     said = capsys.readouterr()
     assert "dry run: sweep.armed is false" in said.out
-    assert f"would go {event['worktree']}" in said.out
-    assert f"would go {event['scratch']}" in said.out
+    assert f"would go {placed(event, 'worktree')}" in said.out
+    assert f"would go {placed(event, 'scratch')}" in said.out
     assert "sweep.armed is false" in said.err and "armed = true" in said.err
     assert placed(event, "worktree").is_dir() and placed(event, "scratch").is_dir()
     row = next(row for row in doctor.rows() if row.name == "leftovers")
     assert row.state == "warn"
-    assert f"would go {event['worktree']}" in row.detail
-    assert f"would go {event['scratch']}" in row.detail
+    assert f"would go {placed(event, 'worktree')}" in row.detail
+    assert f"would go {placed(event, 'scratch')}" in row.detail
     assert "armed = true" in row.fix and sweeping.REMOVE in row.fix
 
 
@@ -375,7 +379,8 @@ def test_the_command_removes_and_prints_json(ended, write_config, capsys):
     found = json.loads(capsys.readouterr().out)
     assert (found["armed"], found["removing"]) == (True, True)
     assert {(one["kind"], one["fate"], one["place"]) for one in found["leftovers"]} == {
-        ("worktree", "removed", event["worktree"]), ("scratch", "removed", event["scratch"])}
+        ("worktree", "removed", str(placed(event, "worktree"))),
+        ("scratch", "removed", str(placed(event, "scratch")))}
 
 
 def test_a_rename_into_a_trash_on_another_disk_keeps_the_dir(ended, write_config,
@@ -421,7 +426,7 @@ def test_a_second_run_while_one_holds_the_lock_stops(ended, holder, capsys):
 
     assert cli.main(["drop", "--leftovers"]) == 3
 
-    assert f"pid {held.pid}" in capsys.readouterr().err
+    assert f"pid {held.own_pid}" in capsys.readouterr().err
 
 
 def test_a_run_starts_no_removal_after_its_time_limit(ended, write_config, monkeypatch):
