@@ -20,6 +20,7 @@ from conftest import bare, end_endpoint, opener, write_config
 from moxi_turns import claude_leg as leg
 from moxi_turns import client, listeners, protocol
 from moxi_turns.claude_endpoint import ClaudeHarness
+from moxi_turns import endpoint as endpoint_mod
 from moxi_turns.endpoint import Endpoint
 from moxi_turns.listeners import Listener, Registry
 
@@ -357,36 +358,87 @@ def test_agents_maps_the_runners_list(claude):
     assert a.busy() == 3
 
 
-def test_agents_judges_the_waiting_subagents_beside_the_ready_transcript(claude, tmp_path):
+def _stale_transcripts(runner, root, *agent_ids):
+    """A record under `root`, named at a ready, with a transcript two hours silent for each
+    of `agent_ids`, its last record an `end_turn`."""
     import json
     from datetime import datetime, timezone
-    ep, runner = claude()
-    s = turns.find(session_id="s-1")
-    record = tmp_path / "s-1.jsonl"
+    record = root / "s-1.jsonl"
     record.write_text("")
-    sub_dir = tmp_path / "s-1" / "subagents"
+    sub_dir = root / "s-1" / "subagents"
     sub_dir.mkdir(parents=True)
     old = time.time() - 2 * 3600
-    for agent_id in ("old", "fork"):
+    for agent_id in agent_ids:
         path = sub_dir / f"agent-{agent_id}.jsonl"
         path.write_text(json.dumps({
             "type": "assistant",
             "timestamp": datetime.fromtimestamp(old, timezone.utc).isoformat(),
             "message": {"stop_reason": "end_turn", "content": []}}) + "\n")
         os.utime(path, (old, old))
+    runner.post(leg.PATH_CONTEXT, {"event": "ready", "source": "startup",
+                                   "session_id": "s-1", "transcript_path": str(record)})
+    return old
+
+
+def test_agents_judges_the_waiting_subagents_beside_the_ready_transcript(claude, tmp_path):
+    ep, runner = claude()
+    s = turns.find(session_id="s-1")
     runner.agent_list = [
         {"id": "old", "type": "general-purpose", "description": "d", "status": "waiting"},
         {"id": "fork", "type": "fork", "description": "subconscious", "status": "waiting"},
         {"id": "new", "type": "general-purpose", "description": "d", "status": "running"}]
     a = s.agents()                               # no transcript path yet: none judged
     assert [e.state for e in a.entries] == ["waiting", "waiting", "running"]
-    runner.post(leg.PATH_CONTEXT, {"event": "ready", "source": "startup",
-                                   "session_id": "s-1", "transcript_path": str(record)})
+    old = _stale_transcripts(runner, tmp_path, "old", "fork")
     a = s.agents()
     assert [(e.id, e.state, e.is_fork) for e in a.entries] == [
         ("old", "idle", False), ("fork", "waiting", True), ("new", "running", False)]
     assert abs(a.entries[0].last_write_at - old) < 1 and a.entries[1].last_write_at is None
     assert a.busy() == 2
+
+
+def test_live_and_the_gate_count_the_judged_entries_and_an_integer_unjudged(
+        claude, tmp_path, monkeypatch):
+    monkeypatch.setenv("MOXI_TURNS_COMMANDS", "clear")
+    ep, runner = claude()
+    s = turns.find(session_id="s-1")
+    _stale_transcripts(runner, tmp_path, "old")
+    stale = {"id": "old", "type": "general-purpose", "status": "waiting"}
+    unseen = {"id": "unseen", "type": "general-purpose", "status": "waiting"}
+    runner.agents = [stale, {"id": "done", "type": "x", "status": "completed"}]
+    assert s.facts().agents == 0
+    runner.agents = [stale, unseen]              # no transcript: Claude's status holds
+    assert s.facts().agents == 1
+    runner.agents = 1                            # an older runner's own count
+    assert s.facts().agents == 1
+    for agents, verdict in (([stale], "pass"), ([unseen], "drop"), (0, "pass"), (2, "drop")):
+        d = s.deliver("x", only_if_idle=True, refuse_agents=True)
+        line = runner.next_line()
+        answer = runner.enter(line["nonce"], agents=agents)
+        assert answer["verdict"] == verdict, agents
+        if verdict == "pass":
+            runner.close(d.id, leg.END_RESOLVE)
+            runner.turn_start(f"T-{d.id}")
+            runner.turn_complete(f"T-{d.id}")
+        else:
+            assert answer["reason"] == "busy-agents"
+            runner.close(d.id, leg.END_DROP, answer["text"])
+        d.wait_started(2)
+    runner.agents = [stale]                      # the command's own check, before the gate
+    monkeypatch.setattr(endpoint_mod, "COMMAND_RATE_S", 0.0)
+    for agents, verdict in ((1, "drop"), ([stale], "pass")):
+        out: queue.Queue = queue.Queue()
+        threading.Thread(target=_command, args=(s, "clear", out), daemon=True).start()
+        line = runner.next_line()
+        answer = runner.post(leg.PATH_GATE_COMMAND, {"request": line["request"],
+                                                     "agents": agents, "draft": False})
+        assert answer["verdict"] == verdict, agents
+        if verdict == "pass":
+            runner.post(leg.PATH_CONTEXT, {"event": "ready", "source": "clear",
+                                           "session_id": "s-1"})
+            assert out.get(timeout=3) == turns.Ran("s-1")
+        else:
+            assert out.get(timeout=3) == turns.Refused("busy-agents")
 
 
 def test_an_unread_or_late_agent_list_is_not_complete(claude):

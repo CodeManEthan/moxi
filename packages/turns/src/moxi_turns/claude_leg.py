@@ -193,6 +193,9 @@ was lost: the endpoint fails the open submit window (its delivery reads `Lost`, 
 `{"ok": true}`.
 
 `/live` — `{ask, agents, draft}` (or `{ask, error}`), the answer to a `live` line.
+`agents` is `$.agent.list()` unmapped, each `{id, type, status, parentId?, teammateId?}`:
+the endpoint maps it, judges the `waiting` subagents (`claude_stale`) and counts the busy
+entries. An integer is an older runner's own count of busy entries, read unjudged.
 `agents` is null when `$.agent.list()` could not be read: unknown, which counts as busy
 and never as 0. An unreadable box is sent as `draft: true`. Answer `{"ok": true}`.
 
@@ -231,8 +234,9 @@ queue; the endpoint tells the `usage` rows with the time it arrived. Answer
 
 `/gate/entry` — `{nonce, draft, agents}` from the gate, for every runner prompt as it
 enters. `nonce` is the window nonce the gate read off the prompt's first
-line; `draft` (bool) and `agents` (int, or true when the list could not be read) are the
-gate's readings. The endpoint admits the prompt only if the nonce names the window now
+line; `draft` (bool) and `agents` are the gate's readings. `agents` is the list's
+entries, as `/live` sends them, which the endpoint judges and counts; an integer, an
+older gate's own count, is read unjudged; true is a list that could not be read. The endpoint admits the prompt only if the nonce names the window now
 open and that window has admitted nothing yet; for a start it then re-checks the ledger
 and the refusals the start asked for, with the readings. It records its answer before it
 sends it. Answer `{"ok": true, "verdict": "pass"}` (the gate takes the nonce line off and

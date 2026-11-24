@@ -730,13 +730,21 @@ describe('the tie: one window per submit', () => {
 })
 
 describe('the other lines', () => {
-  test('live: the busy subagents and the box, answered on /live', async ($: E, on) => {
+  test('live: the entries of the list for the endpoint to judge and count, and the box, answered on /live', async ($: E, on) => {
     const w = world(on)
     await attached($, w)
-    w.agents = [{ id: 'a', status: 'running' }, { id: 'b', status: 'completed' }]
+    w.agents = [
+      { id: 'a', type: 'Explore', description: 'look', status: 'running' },
+      { id: 'b', type: 'fork', description: 'subconscious', status: 'waiting', parentId: 'a' },
+      { id: 'c', type: 'teammate', description: 'mate', status: 'idle', teammateId: 'ann@crew' },
+    ]
     w.box = 'half typed'
     await w.line({ op: 'live', ask: 7 })
-    expect(w.got.find(g => g.path === '/live')?.body).toEqual({ ask: 7, agents: 1, draft: true })
+    expect(w.got.find(g => g.path === '/live')?.body).toEqual({ ask: 7, agents: [
+      { id: 'a', type: 'Explore', status: 'running' },
+      { id: 'b', type: 'fork', status: 'waiting', parentId: 'a' },
+      { id: 'c', type: 'teammate', status: 'idle', teammateId: 'ann@crew' },
+    ], draft: true })
   })
 
   test('live: an unreadable subagent list is sent as null, never 0', async ($: E, on) => {

@@ -44,7 +44,6 @@ type Json = Record<string, unknown>
 const RUNNER = 'moxi-turns'
 const GATE = 'moxi-turns-gate'
 const ASK_MS = 1000
-const BUSY_AGENT = new Set(['pending', 'running', 'waiting'])
 const ENDPOINT = { plugin: 'moxi-turns', key: 'endpoint' } as const
 const COMMAND = { plugin: 'moxi-turns', key: 'command' } as const
 /** The runner prompt's first line: the window nonce, 128 bits in hex. */
@@ -74,16 +73,24 @@ const gateDrop = ($: Dollar, why: string) => {
   return { drop: dropLine('gone') }
 }
 
-type Readings = { draft: boolean | null; agents: number | true | null }
+/** One subagent as the gate sends it; the endpoint judges the waiting ones and counts. */
+type Listed = { id: string; type: string; status: string; parentId?: string; teammateId?: string }
+type Readings = { draft: boolean | null; agents: Listed[] | true | null }
 
 /** The live facts the endpoint decides with, read only where asked: the box (an unreadable
- *  one reads as a draft) and the subagents pending, running or waiting (an unreadable list
- *  reads `true`, busy). */
+ *  one reads as a draft) and the subagent list's entries (an unreadable list reads `true`,
+ *  busy). */
 async function readings($: Dollar, draft: boolean, agents: boolean): Promise<Readings> {
   const out: Readings = { draft: null, agents: null }
   if (agents) {
     try {
-      out.agents = (await $.agent.list()).filter(a => BUSY_AGENT.has(String(a.status))).length
+      out.agents = (await $.agent.list()).map(a => ({
+        id: a.id,
+        type: a.type,
+        status: a.status,
+        ...(a.parentId !== undefined ? { parentId: a.parentId } : {}),
+        ...(a.teammateId !== undefined ? { teammateId: a.teammateId } : {}),
+      }))
     } catch {
       out.agents = true
     }

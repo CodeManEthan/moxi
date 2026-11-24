@@ -9,6 +9,10 @@
   `idle`. A transcript the endpoint cannot find or read, a record shape it does not know,
   and an entry it has no time for within the list's 0.3 s deadline keep Claude Code's
   status. Teammates and forks of the main loop are never judged.
+- The Claude runner's `/live` answer and the gate's readings send the subagent list's
+  entries instead of a count, so a delivery's `refuse_agents`, a session command's
+  subagent check and `facts.agents` count the judged list. The endpoint still reads an
+  older runner's or gate's integer count, unjudged. The gate is version 0.1.1.
 - `agents` entries gain `is_fork` (a fork of the main loop, which Claude Code lists as a
   subagent) and `last_write_at` (the newest write the judgment read).
 - A new request, `fork {text, by, ref?}` (the client's `fork(text, by=, ref=)`), and a new
