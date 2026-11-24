@@ -13460,6 +13460,9 @@ sessions	packages/sessions/tests/test_browser_running.py	pytest.mark.skipif(not 
 sessions	packages/sessions/tests/test_browser_running.py	"where": {"target": "slot", "slot": slot, "project_key": project, "folder": project},	keep	folder	folder
 sessions	packages/sessions/tests/test_browser_running.py	self.answer: dict = {"refused": None}	keep	refused	refused
 sessions	packages/sessions/tests/test_browser_running.py	expect(row).to_have_attribute("name", "from-topic", timeout=30_000)	keep	timeout	timeout
+sessions	packages/sessions/tests/test_browser_cache.py	pytest.mark.skipif(not any(found.name == "cache" for found in modules.scan()),	keep	any	any
+sessions	packages/sessions/tests/test_browser_cache.py	pytest.mark.skipif(not any(found.name == "launcher" for found in modules.scan()),	keep	any	any
+sessions	packages/sessions/tests/test_browser_cache.py	expect(first).to_have_attribute("fact", "cold", timeout=15_000)	keep	timeout	timeout
 sessions	packages/sessions/tests/test_browser_transcript.py	-	name	test_a_folder_under_the_home_folder_is_written_with_a_tilde_in_the_list	test_a_dir_under_the_home_dir_is_written_with_a_tilde_in_the_list
 sessions	packages/sessions/tests/test_browser_transcript.py	-	name	test_an_unnamed_session_is_named_by_its_folder_and_when_it_started	test_an_unnamed_session_is_named_by_its_dir_and_when_it_started
 sessions	packages/sessions/tests/test_browser_transcript.py	assert any(SESSION_API.search(url) and f"session={sid(1)}" in url for url in asked)	keep	any	any
