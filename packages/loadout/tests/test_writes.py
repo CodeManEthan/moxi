@@ -219,3 +219,86 @@ def test_writes_go_to_the_configured_loadout_dir(loadout_dir):
     assert writes.add("skill", "review")
     assert manifest.load().user.names("skill") == ("review",)
     assert (loadout_dir / "loadout.toml").exists()
+
+
+# -- add for named harnesses ----------------------------------------------------------------
+
+TABLE = ["claude", "codex", "opencode"]
+
+
+def test_add_for_harnesses_gives_an_item_no_section_lists_its_own_list(loadout_dir):
+    start(loadout_dir)
+    assert writes.add("agent", "lead", harnesses=["codex", "claude", "codex"], table=TABLE,
+                      loadout_dir=loadout_dir)
+    m = read(loadout_dir)
+    assert m.user.names("agent") == ("lead",)
+    assert m.harnesses("agent", "lead") == ("codex", "claude")
+    assert m.user.disabled == ()
+    assert "# My loadout. Keep this comment." in (loadout_dir / "loadout.toml").read_text()
+
+
+def test_add_for_harnesses_switches_the_rest_off_in_its_section_when_another_lists_it(
+        loadout_dir):
+    start(loadout_dir)
+    assert writes.add("skill", "review", project="/srv/atlas", harnesses=["claude"],
+                      table=TABLE, loadout_dir=loadout_dir)
+    m = read(loadout_dir)
+    section = m.section("/srv/atlas")
+    assert section.names("skill") == ("review",)
+    assert [str(i) for i in section.disabled] == ["skill:review@codex", "skill:review@opencode"]
+    # The item's own list, which the user section and project web share, is untouched.
+    assert m.harnesses("skill", "review") is None
+    assert m.user.disabled == () and m.section("web").disabled == ()
+
+
+def test_add_for_harnesses_narrows_within_the_items_own_list(loadout_dir):
+    start(loadout_dir, COMMENTED + "[skill.review]\nharnesses = ['claude', 'codex']\n")
+    assert writes.add("skill", "review", project="/srv/atlas", harnesses=["codex"],
+                      table=TABLE, loadout_dir=loadout_dir)
+    section = read(loadout_dir).section("/srv/atlas")
+    assert [str(i) for i in section.disabled] == ["skill:review@claude"]
+
+
+def test_add_for_a_harness_outside_the_items_list_is_refused_and_writes_nothing(loadout_dir):
+    path = start(loadout_dir, COMMENTED + "[skill.review]\nharnesses = ['claude']\n")
+    before = path.read_bytes()
+    with pytest.raises(ManifestError, match="listed for claude only"):
+        writes.add("skill", "review", project="/srv/atlas", harnesses=["opencode"],
+                   table=TABLE, loadout_dir=loadout_dir)
+    assert path.read_bytes() == before
+
+
+def test_add_for_a_harness_the_table_has_no_row_for_is_refused(loadout_dir):
+    path = start(loadout_dir)
+    before = path.read_bytes()
+    with pytest.raises(ManifestError, match="has no row kestrel; its rows: claude, codex"):
+        writes.add("skill", "lint", harnesses=["kestrel"], table=["claude", "codex"],
+                   loadout_dir=loadout_dir)
+    assert path.read_bytes() == before
+
+
+def test_add_for_harnesses_takes_out_a_switch_its_section_still_held(loadout_dir):
+    start(loadout_dir, COMMENTED + '[project."/srv/atlas"]\n'
+                                   'disabled = ["skill:review@*", "agent:lead@codex"]\n')
+    assert writes.add("skill", "review", project="/srv/atlas", harnesses=["codex"],
+                      table=TABLE, loadout_dir=loadout_dir)
+    section = read(loadout_dir).section("/srv/atlas")
+    assert [str(i) for i in section.disabled] == [
+        "agent:lead@codex", "skill:review@claude", "skill:review@opencode"]
+
+
+def test_add_for_harnesses_leaves_an_item_its_section_lists_already(loadout_dir):
+    path = start(loadout_dir)
+    before = path.read_bytes()
+    assert not writes.add("skill", "review", harnesses=["claude"], table=TABLE,
+                          loadout_dir=loadout_dir)
+    assert path.read_bytes() == before
+
+
+def test_add_without_harnesses_reads_no_harness_table(loadout_dir, monkeypatch):
+    from moxi import place
+
+    monkeypatch.setattr(place, "harnesses", lambda *a, **k: pytest.fail("read the table"))
+    start(loadout_dir)
+    assert writes.add("skill", "lint", loadout_dir=loadout_dir)
+    assert read(loadout_dir).harnesses("skill", "lint") is None

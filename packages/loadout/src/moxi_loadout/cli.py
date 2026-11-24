@@ -2,7 +2,8 @@
 
     moxi loadout install [--user] [--project P]... [--replace ID]... [--dry-run] [--json]
     moxi loadout status [--user] [--project P]... [--json]
-    moxi loadout add|remove KIND NAME [--user | --project P] [--json]
+    moxi loadout add KIND NAME [--user | --project P] [--harness H]... [--json]
+    moxi loadout remove KIND NAME [--user | --project P] [--json]
     moxi loadout enable|disable ID [--user | --project P] [--json]
     moxi loadout list [--json]
     moxi loadout global show [--diff] | global mode MODE | global remove
@@ -14,7 +15,8 @@ whatever a write goes over that isn't loadout's (what `--replace` replaces, an e
 a removal takes away) is kept under the core's `displaced/` folder first, until you delete
 it, and the run names each copy with the command that puts it back (`BACK`).
 `status` prints one line per item that is not `ok`, then notes, then a count. `add` and
-`remove` write a section's list, `enable` and `disable` its `disabled` ids, then each
+`remove` write a section's list (`add --harness` lists the item for those harnesses only:
+the item's own `harnesses`, or the section's `disabled` when another section lists it), `enable` and `disable` its `disabled` ids, then each
 installs with that item's steps as the scope. `list` prints every item with its kind,
 scope, harnesses and source. `global show` prints, for each harness, the files it reads
 through loadout (the shared file, then its part or "no part"), its global file and what
@@ -95,6 +97,10 @@ def _parser(prog: str) -> argparse.ArgumentParser:
         p.add_argument("kind", metavar="KIND", choices=KINDS)
         p.add_argument("name", metavar="NAME")
         scopes(p, many=False)
+        if name == "add":
+            p.add_argument("--harness", action="append", default=[], metavar="H",
+                           help="list it for harness H only, a row of the core's harness "
+                                "table; may repeat (default: every harness)")
     for name, verb_help in (("enable", "switch an item back on, then install it"),
                        ("disable", "switch an item off for a harness, then install")):
         p = verb(name, verb_help)
@@ -222,9 +228,14 @@ def _add(args) -> int:
     from moxi_loadout import writes
 
     where = "user" if args.project is None else f"project {args.project}"
-    changed = writes.add(args.kind, args.name, project=args.project)
-    line = (f"listed {args.kind} {args.name} in {where}" if changed
-            else f"{where} lists {args.kind} {args.name} already")
+    named = list(dict.fromkeys(args.harness))
+    changed = writes.add(args.kind, args.name, project=args.project, harnesses=named)
+    if changed:
+        line = f"listed {args.kind} {args.name} in {where}" + (
+            f" for {', '.join(named)}" if named else "")
+    else:
+        line = f"{where} lists {args.kind} {args.name} already" + (
+            "; enable and disable change its harnesses" if named else "")
     return _write_then_install(args, [line], (args.kind, args.name))
 
 

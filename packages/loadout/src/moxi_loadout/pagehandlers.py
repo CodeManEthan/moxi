@@ -108,7 +108,8 @@ def status(call: Any) -> dict[str, Any]:
 
 def listing(call: Any) -> dict[str, Any]:
     """`GET /api/list`: every item each section lists (`moxi loadout list --json`), and
-    the sections with the names an act takes."""
+    the sections with the names an act takes, each path section with the project it is
+    in."""
     from moxi_loadout import listing as listing_mod
     from moxi_loadout import manifest, settings
 
@@ -173,7 +174,19 @@ def _items(found) -> list[dict[str, Any]]:
 
 
 def _sections_of(found) -> list[dict[str, Any]]:
-    return [{"name": s.name, "where": s.where, "root": s.root} for s in found.sections()]
+    return _mapped([{"name": s.name, "where": s.where, "root": s.root}
+                    for s in found.sections()])
+
+
+def _mapped(sections: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """`sections` each with `project`: for a path section, the key of the project its root
+    is in, as projects maps it; null for the rest, and for every one without projects."""
+    from moxi_loadout import projects_link
+
+    roots = [s["root"] for s in sections if s["where"] == "path" and s["root"]]
+    keys = projects_link.project_keys(roots)
+    return [{**s, "project": keys.get(s["root"]) if s["where"] == "path" else None}
+            for s in sections]
 
 
 def _home() -> str | None:
@@ -189,9 +202,10 @@ def view(call: Any) -> dict[str, Any]:
     """`GET /api/view`: everything the page's items draw, from the one plan `status`
     builds: `status`'s outcome (its rows, with `moxi_loadout.view`'s facts on each, its
     lines, notes and counts), whether every section resolved, the note, the home,
-    loadout and manifest paths, the harness table's names, the sections, the items as
-    `/api/list` gives them, and the global file as `/api/global` does."""
-    from moxi_loadout import doctor, homes, install
+    loadout and manifest paths, the harness table's names and those on this machine
+    (`harness.present`), the sections (each path section with the project it is in), the
+    items as `/api/list` gives them, and the global file as `/api/global` does."""
+    from moxi_loadout import doctor, harness, homes, install
     from moxi_loadout import view as view_mod
 
     try:
@@ -210,8 +224,9 @@ def view(call: Any) -> dict[str, Any]:
             "folder": os.fspath(plan.loadout_dir),
             "manifest": os.fspath(found.path),
             "harnesses": list(plan.harnesses),
+            "present": harness.present(plan.harnesses),
             "resolved_all": plan.resolved_all,
-            "sections": view_mod.sections(plan),
+            "sections": _mapped(view_mod.sections(plan)),
             "items": [{**e, **view_mod.item_facts(plan, e["kind"], e["name"])}
                       for e in _items(found)],
             "rows": [{**r, **facts} for r, facts in zip(outcome["rows"],
@@ -222,7 +237,8 @@ def view(call: Any) -> dict[str, Any]:
     except Exception as exc:  # noqa: BLE001 - a read says what failed, it never raises
         return {"problem": _problem(exc, "the status"), "lines": [], "notes": [],
                 "counts": {}, "note": None, "home": None, "folder": None, "manifest": None,
-                "harnesses": [], "resolved_all": False, "sections": [], "items": [], "rows": [],
+                "harnesses": [], "present": [], "resolved_all": False, "sections": [], "items": [],
+                "rows": [],
                 "item_notes": [],
                 "global": {"source": None, "mode": "off", "chosen": False, "files": []}}
     return answer
@@ -405,7 +421,9 @@ def _item(verb: str, body: Mapping[str, Any]) -> Any:
     if problem is not None:
         raise lb.Refused(f"loadout: the page {problem}")
     project = body.get("project")
-    return _start([verb, kind, name, *([] if project is None else [_section(project)])])
+    flags = [] if project is None else [_section(project)]
+    flags += [f"--harness={h}" for h in dict.fromkeys(body.get("harnesses") or ())]
+    return _start([verb, kind, name, *flags])
 
 
 def _toggle(verb: str, body: Mapping[str, Any]) -> Any:
@@ -426,7 +444,8 @@ def _toggle(verb: str, body: Mapping[str, Any]) -> Any:
 
 
 def add(call: Any) -> Any:
-    """`POST /api/add`: `moxi loadout add KIND NAME [--project P]`, as a job."""
+    """`POST /api/add`: `moxi loadout add KIND NAME [--project P] [--harness H]...`, as a
+    job."""
     return _item("add", call.body)
 
 

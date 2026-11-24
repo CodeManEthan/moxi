@@ -87,6 +87,21 @@ def test_add_writes_the_manifest_then_installs_only_that_item(lo, capsys):
     assert "# my loadout" in (lo / "loadout.toml").read_text()
 
 
+def test_add_for_a_harness_lists_and_places_it_for_that_harness_only(lo, capsys):
+    assert main(["add", "skill", "review", "--harness", "claude"]) == 0
+    assert "listed skill review in user for claude" in capsys.readouterr().out
+    assert (kit.claude() / "review").is_symlink()
+    assert not os.path.lexists(kit.codex_skills() / "review")
+    assert 'harnesses = ["claude"]' in (lo / "loadout.toml").read_text()
+
+
+def test_add_for_a_harness_with_no_row_is_a_usage_error(lo, capsys):
+    before = (lo / "loadout.toml").read_bytes()
+    assert main(["add", "skill", "review", "--harness", "kestrel"]) == 2
+    assert "has no row kestrel" in capsys.readouterr().err
+    assert (lo / "loadout.toml").read_bytes() == before
+
+
 def test_disable_and_remove_install_their_item_and_leave_no_lock_file(lo, capsys):
     main(["install"])
     assert main(["disable", "skill:other@codex"]) == 0

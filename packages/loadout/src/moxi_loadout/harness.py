@@ -41,7 +41,7 @@ it points at. A missing parent folder is made with the ordinary mode.
 from __future__ import annotations
 
 import os
-from collections.abc import Mapping
+from collections.abc import Iterable, Mapping
 from pathlib import Path
 
 from moxi import harnessfile
@@ -81,6 +81,26 @@ def opencode_xdg_home(env: Mapping[str, str] | None = None) -> Path:
 def home(harness: str, env: Mapping[str, str] | None = None) -> Path:
     return {"claude": claude_home, "codex": codex_home,
             "opencode": opencode_home}[harness](env)
+
+
+def present(names: Iterable[str], env: Mapping[str, str] | None = None) -> list[str]:
+    """Which of `names` (the core harness table's) are on this machine, in their order.
+
+    A harness loadout knows is on it when its home above is a folder, as the sessions
+    catalog skips a harness whose home is absent. A row loadout knows no home for is
+    counted as present, since nothing here can tell. `harness_row.present` is another
+    fact: whether the table has an opencode row at all."""
+    out = []
+    for name in names:
+        if name not in HARNESSES:
+            out.append(name)
+            continue
+        try:
+            if home(name, env).is_dir():
+                out.append(name)
+        except (OSError, ValueError, LookupError):
+            continue
+    return out
 
 
 def settings_file(harness: str) -> Path | None:
@@ -160,6 +180,6 @@ def _backups(harness: str) -> Path:
     return stores.backups_dir() / harness
 
 
-__all__ = ["HARNESSES", "GLOBAL_NAMES", "claude_home", "claude_json", "codex_home",
+__all__ = ["HARNESSES", "GLOBAL_NAMES", "present", "claude_home", "claude_json", "codex_home",
            "opencode_home", "opencode_xdg_home", "home", "settings_file", "global_file", "rules_file", "Refused",
            "Doc", "write", "backup"]

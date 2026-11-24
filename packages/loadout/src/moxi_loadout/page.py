@@ -16,7 +16,8 @@
     GET  /api/projects    the projects a project section can name by key
     GET  /api/drift       how many items aren't `ok` or `off`
     GET  /api/job         one page job: running, done (with its outcome) or interrupted
-    POST /api/add         `moxi loadout add KIND NAME [--project P]`, as a job (202)
+    POST /api/add         `moxi loadout add KIND NAME [--project P] [--harness H]...`, as a
+                          job (202)
     POST /api/remove      `moxi loadout remove KIND NAME [--project P]`, as a job (202)
     POST /api/enable      `moxi loadout enable ID [--user | --project P]`, as a job (202)
     POST /api/disable     `moxi loadout disable ID [--user | --project P]`, as a job (202)
@@ -165,11 +166,14 @@ ITEM = lb.Out("table", items={
 })
 
 #: One section of the manifest: `where` is `user`, `path` or `key`; `root` a path
-#: section's absolute root, else null. A section is named to an act by `name`.
+#: section's absolute root, else null; `project` the key of the project a path section's
+#: root is in (at its root or under it), as projects maps it, else null (always null
+#: without projects). A section is named to an act by `name`.
 SECTION = lb.Out("table", items={
     "name": _SAYS,
     "where": _TEXT,
     "root": _MAYBE_PATH,
+    "project": _MAYBE,
 })
 
 #: One global file: the `harness` that reads it and the `parts` it reads through loadout
@@ -252,7 +256,7 @@ VIEW_GLOBAL = lb.Out("table", items={
 #: Everything the page's items draw, from the one plan `status` builds: `status`'s
 #: `rows`, `lines`, `notes` and `counts`; `note`, the drift block's; the `home` folder,
 #: the loadout `folder` and its `manifest`; `harnesses`, the harness table's names in its
-#: order; `resolved_all`, whether every section resolved; the `sections` and `items` as
+#: order; `present`, those on this machine, in that order; `resolved_all`, whether every section resolved; the `sections` and `items` as
 #: `/api/list` gives them, with what the view adds; the notes on each item for each
 #: harness (`item_notes`); and `global` as `/api/global` gives it, with its source and
 #: forms. The paths are null only with `problem` set, and `home` when nothing places a
@@ -267,6 +271,7 @@ VIEW = {
     "folder": _MAYBE_PATH,
     "manifest": _MAYBE_PATH,
     "harnesses": lb.Out("list", items=_TEXT),
+    "present": lb.Out("list", items=_TEXT),
     "resolved_all": lb.Out("bool"),
     "sections": lb.Out("list", items=VIEW_SECTION),
     "items": lb.Out("list", items=VIEW_ITEM),
@@ -339,6 +344,9 @@ _SECTIONS = lb.Field("list", required=False, max=LIST_MAX,
                      items=lb.Field("string", max=PATH_MAX))
 _USER = lb.Field("bool", required=False)
 _ITEM_BODY = {"kind": lb.Field("enum", values=KINDS), "name": _NAME, "project": _SECTION}
+#: Add's body: an item's, and the `harnesses` it is listed for (every one when absent).
+_ADD_BODY = {**_ITEM_BODY, "harnesses": lb.Field("list", required=False, max=LIST_MAX,
+                                                 items=lb.Field("string", max=NAME_MAX))}
 _ID_BODY = {"id": _NAME, "user": _USER, "project": _SECTION}
 #: The id the page mints for one press of an act: 32 hex characters.
 _JOB = lb.Field("string", max=JOB_ID_CHARS)
@@ -376,7 +384,7 @@ PAGE = lb.Page(
         lb.Route("/api/drift", "read", _target("drift"), returns=DRIFT),
         lb.Route(JOB_ROUTE, "read", _target("job"),
                  query={"job": lb.Field("string", max=64)}, returns=JOB),
-        _act("/api/add", "add", _ITEM_BODY),
+        _act("/api/add", "add", _ADD_BODY),
         _act("/api/remove", "remove", _ITEM_BODY),
         _act("/api/enable", "enable", _ID_BODY),
         _act("/api/disable", "disable", _ID_BODY),
