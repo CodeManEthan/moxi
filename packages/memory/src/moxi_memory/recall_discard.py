@@ -8,8 +8,11 @@ late text (an answer that came after its round's bound), whose record keeps the 
 the bound set; when the line still carries the kept mark, it then acks the round's end
 to turns and clears the mark, in the order every settled round follows. It stops no
 process: the line's owner reads the line under the lock before each step, leaves a
-`discarded` line's state alone and gives the recall no further round. memory never
-discards on its own.
+`discarded` line's state alone and gives the recall no further round, and on the slot
+route then ends the slot fork. When the line's owner is gone at the discard (no taker has
+claimed it yet), the discard ends a slot fork the line names itself, under the same lock,
+asking the launcher once (`recall_route.Slot.exit`), and notes how on the line
+(`fork_exit`). memory never discards on its own.
 
 Standard library at import; turns' client is imported at use.
 """
@@ -51,10 +54,25 @@ def late(line: dict) -> bool:
     return bool(texts) and bool(texts[-1].get("late"))
 
 
-def discard(recall_id: str, *, by: str | None = None, ack=None,
+def _end_slot_fork(session_id: str, recall_id: str, line: dict, launcher) -> str | None:
+    """End the slot fork `line` names when its owner is gone; how it came out, or None
+    when the line names no slot fork or its owner still runs (the owner ends it)."""
+    from . import recall_route, recall_start, recall_take
+
+    if line.get("route") != recall_start.SLOT or not line.get("fork"):
+        return None
+    if not recall_take.owner_gone(line):
+        return None
+    fork = recall_route.Slot(session_id, recall_id, fork=str(line["fork"]),
+                             launcher=launcher)
+    return fork.exit(held_s=0)
+
+
+def discard(recall_id: str, *, by: str | None = None, ack=None, launcher=None,
             now: float | None = None) -> dict:
     """Discard recall `recall_id`'s line and return it as written. Raises `Refused`
-    for a recall with no line or a line in a state no discard ends."""
+    for a recall with no line or a line in a state no discard ends. `launcher` stands in
+    for the launcher's API when a slot fork is ended."""
     now = time.time() if now is None else now
     line = find(recall_id)
     if line is None:
@@ -75,8 +93,13 @@ def discard(recall_id: str, *, by: str | None = None, ack=None,
             try:
                 (ack or _ack)(session_id, str(ref))
             except Exception:  # noqa: BLE001 - an ack not taken leaves the mark for a taker
-                return line
-            line["kept"] = False
+                pass
+            else:
+                line["kept"] = False
+                line = recalls.put_line(session_id, line, now=now)
+        ended = _end_slot_fork(session_id, recall_id, line, launcher)
+        if ended is not None:
+            line["fork_exit"] = ended
             line = recalls.put_line(session_id, line, now=now)
     return line
 

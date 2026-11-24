@@ -560,8 +560,8 @@ def _subconscious(*, config_in_error: bool, now: float | None = None) -> Row:
     on = [sid for sid, _mode, why in live if why is None]
     off = [f"{sid} ({why})" for sid, _mode, why in live if why is not None]
     if on:
-        parts.append(f"on in {_plural(len(on), 'live session')}, on Claude Code's "
-                     "subagent route; a recall fork's permission asks are refused")
+        parts.append(f"on in {_plural(len(on), 'live session')}; a recall fork's "
+                     "permission asks are refused")
     if off:
         warn = True
         parts.append(f"off for want of a route in {_shown(off)}")
@@ -577,6 +577,16 @@ def _subconscious(*, config_in_error: bool, now: float | None = None) -> Row:
     untaken = [line for line in lines
                if now - float(line.get("updated") or line.get("at") or 0) >= UNTAKEN_GRACE_S
                and recall_take.takeable(line)]
+    at_limit = [line for line in untaken if line.get("past_bound") and line.get("kept")]
+    untaken = [line for line in untaken if line not in at_limit]
+    if at_limit:
+        warn = True
+        named = [f"{line.get('recall')} ({line.get('state')}, fork {line.get('fork')}, "
+                 f"{_age(now - float(line.get('updated') or line.get('at') or now))} old)"
+                 for line in at_limit[::-1]]
+        parts.append(f"{_plural(len(at_limit), 'recall line')} left at the late wait's "
+                     f"last limit, its fork's round still open: {_shown(named)}; the "
+                     "first taker after that round ends settles it and ends the fork")
     if untaken:
         warn = True
         named = [f"{line.get('recall')} ({line.get('state')}, "

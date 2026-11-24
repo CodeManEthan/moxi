@@ -334,7 +334,7 @@ def test_the_subconscious_row_names_a_live_session_with_no_route_while_it_holds(
         ("s-on", "on-demand", None)])
     row = by_name()["subconscious"]
     assert row.state == "warn" and row.fix == "moxi memory subconscious list"
-    assert "on in 1 live session, on Claude Code's subagent route" in row.detail
+    assert "on in 1 live session; a recall fork's" in row.detail
     assert "permission asks are refused" in row.detail
     assert "off for want of a route in s-off (no turns fork in this session)" in row.detail
     assert "s-on" not in row.detail

@@ -17,7 +17,12 @@ fork. The fork's id is its session id, known once the launcher returns, so a for
 child started is named even when its first round never comes back. Each round's end,
 with the fork's last text as its answer, is read from the delivery, and acked by ref
 in the fork's session. Its answers go back to the main agent by comms, sent by the
-child (`recall_stream`).
+child (`recall_stream`). Once the recall's last round is settled, its owner ends the
+fork (`Slot.exit`, through the launcher's `exit_session`), which the launcher does once
+the fork's turn has ended: the child after the stream's end, a taker after it settles
+the line, and a discard of a line whose owner is gone (`end_fork`). A fork whose round is
+still open at the late wait's last limit is not exited: its turn has not ended, and the
+taker that settles the line ends it.
 
 Each route names the session its rounds are delivered to (`turns_session`), where a
 taker reads and acks a round's end by its ref.
@@ -30,12 +35,21 @@ Standard library at import; turns' client is imported at use.
 
 from __future__ import annotations
 
+import time
 from typing import Any
 
 from .recall_start import SLOT, SUBAGENT, SUBCONSCIOUS_FORK_ENV
 
 #: The module name memory asks turns as.
 BY = "memory"
+#: How a slot fork's exit came out when the launcher ended it (the line's `fork_exit`).
+EXITED = "exited"
+#: The launcher's verdict while something still holds a session (a turn, a person).
+HELD = "held"
+#: An exit the launcher held is asked again every `EXIT_RETRY_S` seconds for at most
+#: `EXIT_HELD_S` seconds by the recall's owner; a discard asks once.
+EXIT_RETRY_S = 5
+EXIT_HELD_S = 60
 
 
 class _Known:
@@ -215,6 +229,45 @@ class Slot:
             self._session_obj.close()
             self._session_obj = None
 
+    def exit(self, *, held_s: float = EXIT_HELD_S, sleep=time.sleep,
+             clock=time.monotonic) -> str | None:
+        """End the slot fork through the launcher's `exit_session`, and return how it
+        came out: `exited`, `held: <what holds it>` once `held_s` has passed with the
+        launcher still holding it, another verdict, or the refusal; None when the recall
+        has no fork. Never raises."""
+        if self.fork is None:
+            return None
+        began = clock()
+        while True:
+            try:
+                result = self._api().exit_session(self.fork)
+            except Exception as exc:  # noqa: BLE001 - a refusal is noted, never raised
+                code = getattr(exc, "code", None) or type(exc).__name__
+                return f"refused ({code}): {getattr(exc, 'problem', None) or exc}"
+            data = getattr(result, "data", None) or {}
+            outcome = str(data.get("outcome") or "unknown")
+            if outcome != HELD:
+                return outcome
+            if clock() - began + EXIT_RETRY_S > held_s:
+                return f"{HELD}: {data.get('word') or 'no word'}"
+            sleep(EXIT_RETRY_S)
+
+
+def end_fork(recall, route, *, held_s: float = EXIT_HELD_S, sleep=time.sleep) -> str | None:
+    """End `route`'s fork when it is a slot fork, and note how on recall `recall`'s line
+    (`fork_exit`). None, writing nothing, on a route with no fork of its own to end.
+    Never raises."""
+    leave = getattr(route, "exit", None)
+    if leave is None:
+        return None
+    outcome = leave(held_s=held_s, sleep=sleep)
+    if outcome is not None:
+        try:
+            recall.put(fork_exit=outcome)
+        except Exception:  # noqa: BLE001 - a line not written leaves the outcome unsaid
+            pass
+    return outcome
+
 
 def for_recall(recall) -> Subagent | Slot:
     """The route recall `recall`'s record names, else its log line."""
@@ -227,4 +280,5 @@ def for_recall(recall) -> Subagent | Slot:
     return Subagent(recall.session_id)
 
 
-__all__ = ["BY", "Subagent", "Slot", "for_recall"]
+__all__ = ["BY", "EXITED", "HELD", "EXIT_RETRY_S", "EXIT_HELD_S", "Subagent", "Slot",
+           "end_fork", "for_recall"]

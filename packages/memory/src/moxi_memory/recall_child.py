@@ -26,7 +26,10 @@ record holds, never on a fresh read of memory's config:
    the brief on the record.
 4. It runs the recall's stream through its route (`moxi_memory.recall_stream`): the
    brief as the first round, later rounds while the stream lasts, each round settled
-   on the line and acked to turns, and the record ended.
+   on the line and acked to turns, and the record ended. On the slot route it then
+   ends the slot fork (`recall_route.end_fork`), unless a round's end never came within
+   the late wait (`unsettled`): that fork's turn still runs, and the taker that settles
+   the line ends it.
 
 From its start, beside these steps, a thread takes over every session's lines whose
 owner is gone (`moxi_memory.recall_take.take_all`) and then sweeps the records a day
@@ -183,11 +186,15 @@ def run(session_id: str, recall_id: str, *, route=None) -> int:
 
             route = recall_route.for_recall(recall)
         try:
-            recall_stream.run(recall, route, text_brief)
+            ended = recall_stream.run(recall, route, text_brief)
         finally:
             close = getattr(route, "close", None)
             if close is not None:
                 close()
+        if ended != recall_stream.UNSETTLED:
+            from . import recall_route
+
+            recall_route.end_fork(recall, route)
         return 0
     finally:
         taking.join()

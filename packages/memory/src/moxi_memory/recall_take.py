@@ -48,6 +48,9 @@ line and the other leaves it. A line a taker left is free again once that taker 
   turns: a first round ends the recall `lost` (`gone`), a later one ends the stream with
   the line `back` and the round's loss noted. A taker gives no further round, and ends
   the record as the stream's end does.
+- On the slot route, every path above that settles the line (all but `none` and a line
+  left for turns' end) then ends the slot fork (`recall_route.end_fork`), the recall
+  getting no further round.
 
 Standard library at import; the core and turns are imported at use.
 """
@@ -206,8 +209,9 @@ def take(session_id: str, recall_id: str, *, identity: dict | None = None,
     """Take recall `recall_id`'s line over when its owner is gone, and finish what its
     owner left. Returns `none` (not taken), `left` (turns holds no end for its round
     yet, or the ack was not taken), `acked` or `settled`. `send` and `sleep` are
-    `recall_stream.deliver`'s. See the module's docstring."""
-    from . import recall_child, recall_stream
+    `recall_stream.deliver`'s, and `sleep` the slot fork's exit's. See the module's
+    docstring."""
+    from . import recall_child, recall_route
 
     sleep = time.sleep if sleep is None else sleep
     line = claim(session_id, recall_id, me() if identity is None else identity)
@@ -218,9 +222,26 @@ def take(session_id: str, recall_id: str, *, identity: dict | None = None,
         "harness": line.get("harness"), "start": line.get("start")}
     recall = recall_child.Recall(record, line=line)
     if route is None:
-        from . import recall_route
-
         route = recall_route.for_recall(recall)
+    outcome = _finish(recall, line, route, read_end=read_end, read_start=read_start,
+                      send=send, sleep=sleep)
+    if outcome != NONE and not awaits_end(recall.line):
+        recall_route.end_fork(recall, route, sleep=sleep)
+    return outcome
+
+
+def awaits_end(line: dict) -> bool:
+    """Whether `line` still waits for turns' end of its round: kept, and `open` or noted
+    past its round's bound. Its fork's turn may still run, so no one ends that fork."""
+    return line.get("kept") is True and (line.get("state") == recalls.OPEN
+                                         or bool(line.get("past_bound")))
+
+
+def _finish(recall, line: dict, route, *, read_end, read_start, send, sleep) -> str:
+    """What `take` does with a line it claimed."""
+    from . import recall_child, recall_stream
+
+    session_id = recall.session_id
     ref = line.get("ref")
     if line.get("state") == recalls.SENDING:
         if ref and line.get("kept") is True:
@@ -302,5 +323,5 @@ def start_taker(session_id: str) -> int:
 
 
 __all__ = ["TAKER", "NONE", "LEFT", "ACKED", "SETTLED", "GONE", "UNKNOWN_DELIVERY", "me",
-           "owner", "owner_gone", "needs_taking", "takeable", "claim", "round_number", "take", "take_all",
-           "session_needs_taking", "start_taker"]
+           "owner", "owner_gone", "needs_taking", "takeable", "claim", "round_number", "take",
+           "awaits_end", "take_all", "session_needs_taking", "start_taker"]
