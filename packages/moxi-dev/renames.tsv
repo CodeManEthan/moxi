@@ -18111,6 +18111,8 @@ launcher	packages/launcher/tests/test_replay.py	now = {"HOME": "/elsewhere", BUS
 launcher	packages/launcher/tests/test_replay.py	assert common.replay_env(base, now) == {"HOME": "/h", BUS: "unix:path=/run/user/7/now"}	keep	HOME	HOME
 launcher	packages/launcher/tests/test_replay.py	assert common.replay_env(base, {"HOME": "/elsewhere"}) == base	keep	HOME	HOME
 launcher	packages/launcher/tests/test_replay.py	assert common.replay_env({"HOME": "/h"}, {"HOME": "/elsewhere"}) == {"HOME": "/h"}	keep	HOME	HOME
+launcher	packages/launcher/tests/test_exits.py	old, new = FakeSession(exits=(Result("refused", "gone"),)), FakeSession()	keep	refused	refused
+launcher	packages/launcher/tests/test_exits.py	assert old.commands == [("exit", 4)] and new.commands == [] and old.closed == 1	keep	closed	closed
 rounds	packages/rounds/src/moxi_rounds/board.py	"""A ruling as a record gives it: its `id`, its sentence, its pointer (`record`),	keep	record	record
 rounds	packages/rounds/src/moxi_rounds/board.py	return {"id": ruling.id, "text": ruling.text or ruling.rules, "record": ruling.record,	keep	record	record
 rounds	packages/rounds/src/moxi_rounds/corrections.py	"KINDS", "kind_of", "item_of", "stands", "live", "find", "newest_replacing",	keep	find	find
