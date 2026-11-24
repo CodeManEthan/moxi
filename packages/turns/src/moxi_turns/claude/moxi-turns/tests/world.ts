@@ -72,6 +72,10 @@ export function world(on: On, options: { surfaces?: string[]; endpointJson?: str
     order: [] as string[],
     wake: () => {},
     childDone: false,
+    /** What `$.session.messages({as: 'api'})` answers; a throw when null. */
+    messages: [] as unknown[] | null,
+    /** How many times the runner read `$.session.messages`. */
+    messageReads: 0,
     /** What `$.session.usage()` answers; a throw when null. */
     usage: { startedAt: 500, context: { tokens: 1200, window: 200_000, percent: 1 }, rateLimits: [] } as Record<string, unknown> | null,
     /** When set, a prompt's `next(e)` calls it beneath, as the engine runs the prompt's
@@ -144,6 +148,11 @@ export function world(on: On, options: { surfaces?: string[]; endpointJson?: str
   on('session.usage', async () => {
     if (w.usage === null) throw new Error('no usage')
     return { value: w.usage as never }
+  })
+  on('session.messages', async () => {
+    w.messageReads += 1
+    if (w.messages === null) throw new Error('no messages')
+    return { value: w.messages as never }
   })
   on('session.measure', async ($, e) => ({ changed: e.changed }))
   on('session.end', async ($, e) => ({ sessionId: e.sessionId }))
