@@ -16,7 +16,7 @@ from test_reply_enforcement import REVIEWER, R
 #: The shell's modules view, which places the roster block.
 MODULES = "/m/ui/modules"
 
-pytestmark = [pytest.mark.browser,
+pytestmark = [pytest.mark.browser, pytest.mark.timeout(120, method="thread"),
               pytest.mark.skipif(not sys.platform.startswith("linux"),
                                  reason="comms runs on Linux only")]
 

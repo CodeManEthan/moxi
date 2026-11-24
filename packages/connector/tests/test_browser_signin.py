@@ -34,7 +34,7 @@ from moxi_connector.oauth import OAuth
 from moxi_connector.origin import Origin
 from moxi_connector.provider import Gate
 
-pytestmark = pytest.mark.browser
+pytestmark = [pytest.mark.browser, pytest.mark.timeout(120, method="thread")]
 
 DOOR = "door.example.net"
 BACK = "callback.example.net"
