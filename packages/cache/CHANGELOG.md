@@ -2,6 +2,11 @@
 
 ## 0.1.7 (unreleased)
 
+- A Claude or Codex clock carries `response_s`: the clock request's stamp minus the
+  stamp of the input it answered, the newest prompt or tool result written before it.
+  The input is written before the request is sent, so `response_s` is never shorter than
+  the response; adding it to `age_s` gives the cache's age from the request's start.
+  None where the read finds no such input. `kind`, `age_s` and `ttl_s` read as before.
 - The render audit hook moved to the core as `moxi.render`; `moxi_cache.render` is
   gone. `moxi cache segment` installs the core's hook, which refuses the same things.
 - cache needs moxi 0.1.11 or later, for that hook.
