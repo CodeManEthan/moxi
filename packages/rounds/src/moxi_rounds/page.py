@@ -6,13 +6,21 @@
     GET /api/record   `?what=&round=&column=&stage=&id=`: one marker's record, one waiting
                       item's or one round's card, from the last gather; `gone` is true,
                       and `record` null, for a round no longer open or an item no longer
-                      waiting
+                      waiting. A question is answered in every state, with the ruling
+                      that put it there
     GET /api/events   the stream; its one topic, `rounds`, is the board without `now`, so
                       time passing alone publishes nothing
+    GET /api/agents   the names comms gives as bound, for the To picker; none, with
+                      comms' reason, when comms is not installed or can't be read; and
+                      whether comms is installed
+    GET /api/drop     `?round=&stage=`: what the drop's confirm says of one open build,
+                      read now
+    POST /api/answers     the tray's drafts sent: a receipt per draft and the messages
+    POST /api/drop/build  the operator's drop of one open build: its receipt
 
-Every route is a read and writes nothing, and none is the gateway's. A path is marked
-`path` and free text that may hold one is marked `scrub`, so a later gateway route is a
-change of flags alone.
+The reads write nothing; the two acts are the operator's, at the desk. None is the
+gateway's. A path is marked `path` and free text that may hold one is marked `scrub`,
+so a later gateway route is a change of flags alone.
 
 `/api/record` answers 200 with `gone` for a round it holds no part of: loopback has no
 handler-level 404, and the page says the round is no longer open.
@@ -68,9 +76,25 @@ COLUMN = lb.Out("table", items={"id": TEXT, "label": TEXT, "part": TEXT})
 
 OPTION = lb.Out("table", items={"key": TEXT, "text": lb.Out("string", mark="scrub")})
 
+#: A round's lead, its own or its project's (`from`: `round` or `project`).
+LEAD = lb.Out("table", nullable=True, items={"name": TEXT, "from": TEXT})
+
+#: The newest answer prepared for a question: who prepared it with which model, the
+#: option it recommends, how sure it is and why, what would flip it, what it read, each
+#: option's costs and what it forecloses, who recorded it and when, and whether it is
+#: `current` (prepared for the options the question offers now).
+PREPARED = lb.Out("table", nullable=True, items={
+    "by": _s(), "model": _s(), "recommend": _s(), "sure": _s(), "why": _s("scrub"),
+    "flips": _s("scrub"), "read": _list(lb.Out("string", mark="scrub")),
+    "options": _list(lb.Out("table", items={"key": TEXT, "text": _s("scrub"),
+                                            "costs": _s("scrub"),
+                                            "forecloses": _s("scrub")})),
+    "actor": _s(), "at": _s(), "current": BOOL,
+})
+
 #: A question or a decision as what waits on the operator gives it. `blocks` is the
 #: stages it holds; `blocks_word` is `all` or `none` where the item says that in place of
-#: a list.
+#: a list; `prepared` is a question's newest prepared answer, null when it has none.
 #: The keys after `at` are present only where the item has them.
 ENTRY = lb.Out("table", items={
     "holder": TEXT, "id": TEXT, "text": _s("scrub"), "from": _s("scrub"),
@@ -78,7 +102,7 @@ ENTRY = lb.Out("table", items={
     "builder": _s(), "left_as": _s(), "until": _s(), "options": _list(OPTION),
     "moved_from": _s(), "stage": _s(), "weight": _s(),
     "forecloses": lb.Out("bool", nullable=True), "alone": lb.Out("bool", nullable=True),
-    "not_put": _s(),
+    "not_put": _s(), "prepared": PREPARED,
 })
 
 #: A job for the operator: the round that holds it, its id (`B<n>.W<k>`), its stage and
@@ -94,8 +118,11 @@ SHOWN = lb.Out("table", items={
     "supersedes": _s(), "revokes": _s(), "at": _s(),
 })
 
+#: What waits on the operator. Parked questions are not put to the operator: they are
+#: listed apart, in `parked_questions`, and counted in `parked`.
 WAITING = lb.Out("table", items={
-    "questions": _list(ENTRY), "decisions": _list(ENTRY), "waits": _list(WAIT),
+    "questions": _list(ENTRY), "parked_questions": _list(ENTRY), "decisions": _list(ENTRY),
+    "waits": _list(WAIT),
     "not_shown": _list(lb.Out("table", items={"project": TEXT, "through": _s(),
                                               "rows": _list(SHOWN)})),
     "parked": INT,
@@ -122,7 +149,7 @@ FOLDS = lb.Out("table", items={
                                           "child": INT}),
 })
 
-#: One open round: what its show says of it, the step `next` reads for it and the
+#: One open round: what its show says of it, its lead, the step `next` reads for it and the
 #: rounds listing's counts, its group, phrase, how many of the operator's items it holds,
 #: its newest event, a short hash of the whole (`rev`), its lines and its folds.
 ROUND = lb.Out("table", items={
@@ -133,7 +160,7 @@ ROUND = lb.Out("table", items={
     "counts": lb.Out("table", items={"open": lb.Out("int", nullable=True),
                                      "parked": lb.Out("int", nullable=True),
                                      "not_shown": lb.Out("int", nullable=True)}),
-    "group": TEXT, "phrase": PHRASE, "mine": INT, "last_at": _s(), "rev": TEXT,
+    "lead": LEAD, "group": TEXT, "phrase": PHRASE, "mine": INT, "last_at": _s(), "rev": TEXT,
     "lines": _list(LINE), "folds": FOLDS,
 })
 
@@ -211,7 +238,7 @@ RECORD = lb.Out("table", nullable=True, items={
     "events": _list(EVENT),
     "rev": _s(),
     # a round's card
-    "name": TEXT, "project": TEXT, "description": _s("scrub"), "flow": _s(),
+    "name": TEXT, "project": TEXT, "lead": LEAD, "description": _s("scrub"), "flow": _s(),
     "opened": _s(), "standing": _s(),
     "stages": lb.Out("table", items={"finished": INT, "building": INT,
                                      "not_started": INT}),
@@ -222,17 +249,78 @@ RECORD = lb.Out("table", nullable=True, items={
     "ended": lb.Out("table", nullable=True, items={"how": _s(), "at": _s()}),
     "ends": _list(lb.Out("table", items={"stage": TEXT, "how": TEXT})),
     # a waiting item's record: the item as what waits on the operator has it, the command
-    # that records an answer today, and a question's passage
+    # that records an answer today, and a question's passage; a question's record is
+    # answered in every state, with the ruling that put it there (`ruling`, null when
+    # none did)
     "what": TEXT,
     "item": lb.Out("table", items={
         **ENTRY.items, **WAIT.items, **SHOWN.items, "project": _s(), "ruling": _s("scrub"),
         "chose": _s(), "holder": _s(), "round": _s(), "id": TEXT}),
     "answer": lb.Out("string", mark="scrub"),
     "passage": _s("scrub"),
+    "ruling": lb.Out("table", nullable=True, items={
+        "id": TEXT, "text": _s("scrub"), "record": _s("scrub"), "actor": _s(), "at": _s(),
+        "shown": BOOL}),
 })
 
 #: The longest value the record route's query takes, in characters.
 QUERY_MAX = 200
+
+#: What one act did: the draft it answers, its state (`recorded`,
+#: `recorded-not-told`, `sent`, `refused` or `kept`), why it was refused or kept, what
+#: rounds holds after it, the message that told of it, and for a drop what the drop
+#: removed and kept.
+RECEIPT = lb.Out("table", items={
+    "act": TEXT, "tell": _s(), "holder": TEXT, "item": TEXT, "kind": TEXT, "state": TEXT,
+    "reason": _s("scrub"), "fix": _s("scrub"), "busy": BOOL, "to": _s(),
+    "record": _s(), "at": _s(),
+    "ruling": lb.Out("table", nullable=True, items={"id": _s(), "text": _s("scrub")}),
+    "marked": WORDS, "already": BOOL, "done": _s(), "closed": BOOL, "dropped": _s(),
+    "again": BOOL, "repeat": BOOL, "left": lb.Out("int", nullable=True), "freed": WORDS,
+    "message": lb.Out("table", nullable=True, items={"to": _s(), "at": _s(), "id": _s(),
+                                                     "delivery": _s()}),
+    "not_told": _s("scrub"), "command": _s("scrub"),
+    "branch": _s(), "tip": _s(), "removed": _list(lb.Out("string", mark="path")),
+    "kept": _list(lb.Out("table", items={"path": lb.Out("string", mark="path"),
+                                         "why": _s("scrub")})),
+    "refs": _list(lb.Out("string", mark="scrub")),
+    "unscanned": _list(lb.Out("string", mark="scrub"))})
+
+#: One message a send made, or comms' refusal of it.
+MESSAGE = lb.Out("table", items={"to": TEXT, "at": _s(), "id": _s(), "delivery": _s(),
+                                 "refused": _s("scrub")})
+
+#: What the drop's confirm says of one open build.
+DROP_FACTS = {
+    "round": TEXT, "stage": TEXT, "open": BOOL, "reason": _s("scrub"), "branch": _s(),
+    "builder": _s(), "at": _s(), "tip": _s(),
+    "folders": _list(lb.Out("table", items={"kind": TEXT, "path": lb.Out("string",
+                                                                         mark="path"),
+                                            "goes": BOOL, "why": _s("scrub")})),
+    "refs": _list(lb.Out("string", mark="scrub")),
+}
+
+#: The most drafts one send carries.
+DRAFTS_MAX = 200
+#: The longest words one draft carries, in characters.
+DRAFT_TEXT_MAX = 20000
+
+
+def _drafts(*, required: bool = True, max_chars: int = QUERY_MAX) -> Any:
+    return lb.Field("list", required=required, max=DRAFTS_MAX,
+                    items=lb.Field("string", max=max_chars))
+
+
+#: The answers route's body: the drafts as lists of one length, a draft per place (an
+#: empty string for none), and the To choice, `each` or one agent's name.
+ANSWERS_BODY = {
+    "act": _drafts(), "holder": _drafts(), "item": _drafts(),
+    "kind": _drafts(), "chose": _drafts(required=False),
+    "text": _drafts(required=False, max_chars=DRAFT_TEXT_MAX),
+    "tell": _drafts(required=False),
+    "to": lb.Field("string", max=QUERY_MAX),
+}
+
 
 #: The record route's query: what the record is of (`step`, `card`, `question`,
 #: `decision`, `wait` or `shown`), the round (`<project>/<slug>`, or the project alone
@@ -249,8 +337,21 @@ PAGE = lb.Page(
                  query=RECORD_QUERY, returns={"gone": BOOL, "record": RECORD}),
         lb.Route("/api/events", "read", "moxi_rounds.pagehandlers:events", stream=True,
                  topics={"rounds": lb.Out("table", items=BOARD)}),
+        lb.Route("/api/agents", "read", "moxi_rounds.pagehandlers:agents",
+                 returns={"agents": WORDS, "reason": _s("scrub"), "comms": BOOL}),
+        lb.Route("/api/drop", "read", "moxi_rounds.pagehandlers:drop_confirm",
+                 query={key: lb.Field("string", max=QUERY_MAX) for key in ("round", "stage")},
+                 returns=DROP_FACTS),
+        lb.Route("/api/answers", "act", "moxi_rounds.pagehandlers:answers",
+                 body=ANSWERS_BODY, body_cap=1024 * 1024,
+                 returns={"receipts": _list(RECEIPT), "messages": _list(MESSAGE)}),
+        lb.Route("/api/drop/build", "act", "moxi_rounds.pagehandlers:drop",
+                 body={key: lb.Field("string", max=QUERY_MAX)
+                       for key in ("round", "stage", "act")},
+                 returns=RECEIPT.items),
     ),
     assets="web",
 )
 
-__all__ = ["BOARD", "CELL", "PAGE", "QUERY_MAX", "RECORD", "RECORD_QUERY"]
+__all__ = ["ANSWERS_BODY", "BOARD", "CELL", "DRAFTS_MAX", "DRAFT_TEXT_MAX", "DROP_FACTS",
+           "MESSAGE", "PAGE", "QUERY_MAX", "RECEIPT", "RECORD", "RECORD_QUERY"]

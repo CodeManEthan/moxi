@@ -274,3 +274,261 @@ def test_a_record_query_too_long_is_refused(kit):
     [(status, _sent)] = run(("/api/record", {"what": "card",
                                              "round": "k/" + "x" * page.QUERY_MAX}))
     assert status == 400
+
+
+# -- what acting on the page reads -------------------------------------------------------
+
+def _answer_file(tmp_path, question: str = "Q1") -> str:
+    """An answer prepared for `question`, recommending `new`."""
+    path = tmp_path / "answer.md"
+    options = "\n\n".join(f'[[option]]\nkey = "{key}"\ncosts = "a rename"\n'
+                          'forecloses = "nothing"' for key in ("old", "new"))
+    path.write_text(
+        '# An answer\n\n```toml rounds\nkind = "answer"\n'
+        f'question = "{question}"\nby = "scout"\nmodel = "a-model"\nrecommend = "new"\n'
+        'sure = "medium"\nwhy = "the old name is read nowhere"\n'
+        'flips = "a reader of the old name"\nread = ["file:design.md#which-name"]\n\n'
+        f"{options}\n```\n", encoding="utf-8")
+    return str(path)
+
+
+def _round(value: dict, name: str) -> dict:
+    return next(one for one in value["rounds"] if one["name"] == name)
+
+
+def test_each_round_and_its_card_name_its_lead(kit):
+    from moxi_rounds import leads
+
+    value = board_value(kit)
+    assert _round(value, BUSY)["lead"] is None
+    leads.mark(BUSY, "kestrel-lead", by="planner")
+    [(_, value), (_, card)] = run(("/api/rounds", None),
+                                  ("/api/record", {"what": "card", "round": BUSY}))
+    assert _round(value, BUSY)["lead"] == {"name": "kestrel-lead", "from": "round"}
+    assert _round(value, FRESH)["lead"] is None
+    assert card["record"]["lead"] == {"name": "kestrel-lead", "from": "round"}
+
+
+def test_parked_questions_are_listed_apart_and_not_put_to_the_operator(kit):
+    from moxi_rounds import ruling
+
+    ruling.rule(BUSY, item="park:Q2", record=page_kit.PTR, by="lead")
+    waiting = board_value(kit)["waiting"]
+    assert [one["id"] for one in waiting["parked_questions"]] == ["Q2"]
+    assert waiting["parked_questions"][0]["state"] == "parked"
+    assert "until" not in waiting["parked_questions"][0]
+    assert "Q2" not in [one["id"] for one in waiting["questions"] if one["holder"] == BUSY]
+    assert waiting["parked"] == 1
+
+
+def test_a_questions_record_holds_the_ruling_that_put_it_where_it_is(kit):
+    from moxi_rounds import ruling
+
+    ruled = ruling.rule(BUSY, item="Q1", chose="new", record=page_kit.PTR, by="lead")
+    parked = ruling.rule(BUSY, item="park:Q2", record=page_kit.PTR, by="lead")
+    [_, (_, q1), (_, q2), (_, project)] = run(
+        ("/api/rounds", None),
+        ("/api/record", {"what": "question", "round": BUSY, "id": "Q1"}),
+        ("/api/record", {"what": "question", "round": BUSY, "id": "Q2"}),
+        ("/api/record", {"what": "question", "round": "kestrel", "id": "P1"}))
+    lb = loopback()
+    shape = lb.Out("table", items={"gone": lb.Out("bool"), "record": page.RECORD})
+    assert all(conforms(one, shape) for one in (q1, q2, project))
+    assert q1["record"]["item"]["state"] == "ruled"
+    assert q1["record"]["ruling"] == {"id": ruled.id, "text": ruled.text,
+                                      "record": page_kit.PTR, "actor": "lead",
+                                      "at": ruled.event["at"], "shown": False}
+    assert (q2["record"]["item"]["state"], q2["record"]["ruling"]["id"]) == ("parked",
+                                                                            parked.id)
+    assert project["gone"] is False
+    assert (project["record"]["item"]["state"], project["record"]["ruling"]) == ("open", None)
+
+
+def test_a_ruled_project_question_answers_from_the_projects_log(kit):
+    from moxi_rounds import ruling
+
+    ruled = ruling.rule("kestrel", item="P1", text="The ledgers stay in kestrel.",
+                        record=page_kit.PTR, by="lead")
+    [_, (_, sent)] = run(("/api/rounds", None),
+                         ("/api/record", {"what": "question", "round": "kestrel", "id": "P1"}))
+    assert sent["record"]["item"]["state"] == "ruled"
+    assert sent["record"]["ruling"]["id"] == ruled.id
+
+
+def test_a_question_no_log_holds_is_gone(kit):
+    [_, (_, sent)] = run(("/api/rounds", None),
+                         ("/api/record", {"what": "question", "round": BUSY, "id": "Q9"}))
+    assert sent == {"gone": True, "record": None}
+
+
+def test_a_prepared_answer_rides_on_the_question_and_its_record(kit, tmp_path):
+    from moxi_rounds import preparing
+
+    assert all(one["prepared"] is None for one in board_value(kit)["waiting"]["questions"])
+    preparing.prepare(BUSY, "Q1", _answer_file(tmp_path), by="scout")
+    [(_, value), (_, record)] = run(("/api/rounds", None),
+                                    ("/api/record", {"what": "question", "round": BUSY,
+                                                     "id": "Q1"}))
+    [q1] = [one for one in value["waiting"]["questions"]
+            if one["holder"] == BUSY and one["id"] == "Q1"]
+    assert (q1["prepared"]["recommend"], q1["prepared"]["current"]) == ("new", True)
+    assert record["record"]["item"]["prepared"]["why"] == "the old name is read nowhere"
+
+
+# -- the acts ----------------------------------------------------------------------------
+
+ACTS = {"/api/answers", "/api/drop/build"}
+READS = {"/api/agents", "/api/drop"}
+
+
+def test_the_act_routes_are_acts_at_the_desk_and_none_is_the_gateways():
+    routes = {one.path: one for one in page.PAGE.routes}
+
+    assert {path for path, one in routes.items() if one.kind == "act"} == ACTS
+    assert READS <= {path for path, one in routes.items() if one.kind == "read"}
+    assert not any(one.gateway for one in page.PAGE.routes)
+    receipt = page.RECEIPT.items
+    assert receipt["removed"].items.mark == "path"
+    assert {receipt[key].mark for key in ("reason", "fix", "not_told", "command")} == {
+        "scrub"}
+    assert page.DROP_FACTS["folders"].items.items["path"].mark == "path"
+
+
+async def post(app, path: str, body: dict) -> tuple[int, dict | None]:
+    sent = {"status": 0, "body": b""}
+    data = json.dumps(body).encode()
+    asked = [False]
+
+    async def receive():
+        if not asked[0]:
+            asked[0] = True
+            return {"type": "http.request", "body": data, "more_body": False}
+        await asyncio.sleep(3600)
+
+    async def send(message):
+        if message["type"] == "http.response.start":
+            sent["status"] = message["status"]
+        elif message["type"] == "http.response.body":
+            sent["body"] += message.get("body", b"")
+
+    asked_scope = {**scope(path), "method": "POST"}
+    asked_scope["headers"] = [*asked_scope["headers"], (b"content-type", b"application/json"),
+                              (b"content-length", str(len(data)).encode())]
+    await app(asked_scope, receive, send)
+    return sent["status"], json.loads(sent["body"]) if sent["body"] else None
+
+
+def run_posts(*calls) -> list[tuple[int, dict | None]]:
+    async def main():
+        app = served()
+        return [await post(app, path, body) for path, body in calls]
+    return asyncio.run(main())
+
+
+@pytest.fixture
+def no_comms(monkeypatch):
+    monkeypatch.setattr(ph, "RECEIPTS", ph.pageacts.Receipts())
+    monkeypatch.setattr(ph, "comms_api", lambda: None)
+
+
+def answers_body(**more) -> dict:
+    return {"act": ["A" * 43, "B" * 43], "holder": [BUSY, BUSY], "item": ["Q1", "Q2"],
+            "kind": ["pick", "words"], "chose": ["new", ""], "text": ["", "keep both"],
+            "tell": ["", ""], "to": "each", **more}
+
+
+def test_an_answers_post_fits_its_shape_and_a_repeat_is_answered_from_the_store(
+        kit, no_comms):
+    lb = loopback()
+    route = next(one for one in page.PAGE.routes if one.path == "/api/answers")
+    shape = lb.Out("table", items=route.returns)
+
+    [(status, first), (again, second)] = run_posts(("/api/answers", answers_body()),
+                                                   ("/api/answers", answers_body()))
+
+    assert (status, again) == (200, 200), first
+    assert conforms(first, shape) and conforms(second, shape)
+    assert [one["state"] for one in first["receipts"]] == ["recorded", "kept"]
+    assert first["receipts"][1]["fix"].startswith("moxi rounds rule kestrel/billing-export Q2")
+    assert second["receipts"][0]["repeat"]
+
+
+@pytest.fixture
+def stand_in_comms(monkeypatch):
+    """comms' API stood in for, as the answers route loads it."""
+    from test_page_answers import Comms
+
+    comms = Comms(bound=("builder-1",))
+    monkeypatch.setattr(ph, "RECEIPTS", ph.pageacts.Receipts())
+    monkeypatch.setattr(ph, "comms_api", lambda: comms)
+    return comms
+
+
+def test_an_answers_post_with_comms_fits_its_shape_told_sent_and_not_told(
+        kit, stand_in_comms):
+    lb = loopback()
+    route = next(one for one in page.PAGE.routes if one.path == "/api/answers")
+    shape = lb.Out("table", items=route.returns)
+    refused = {"act": ["D" * 43, "E" * 43], "holder": [BUSY, BUSY], "item": ["Q2", "Q2"],
+               "kind": ["park", "explain"], "chose": ["", ""], "text": ["", "why two?"],
+               "tell": ["", ""], "to": "builder-1"}
+
+    [(status, told)] = run_posts(("/api/answers", answers_body(to="builder-1")))
+    stand_in_comms.refuse["builder-1"] = "the daemon is down"
+    [(again, not_told)] = run_posts(("/api/answers", refused))
+
+    assert (status, again) == (200, 200), (told, not_told)
+    assert conforms(told, shape) and conforms(not_told, shape)
+    assert [one["state"] for one in told["receipts"]] == ["recorded", "sent"]
+    assert told["receipts"][0]["message"]["id"] and told["receipts"][1]["command"]
+    assert [one.get("refused") for one in told["messages"]] == [None]
+    assert [one["state"] for one in not_told["receipts"]] == ["recorded-not-told", "refused"]
+    assert "the daemon is down" in not_told["messages"][0]["refused"]
+
+
+def test_an_answers_post_that_cant_be_read_is_refused(kit, no_comms):
+    [(status, sent)] = run_posts(("/api/answers", answers_body(kind=["pick", "shout"])))
+
+    assert status == 400, sent
+
+
+def test_the_agents_and_the_drop_reads_fit_their_shapes(kit, no_comms):
+    lb = loopback()
+    routes = {one.path: one for one in page.PAGE.routes}
+
+    [(status, agents), (dropped, facts)] = run(
+        ("/api/agents", None), ("/api/drop", {"round": BUSY, "stage": "B1"}))
+
+    assert (status, dropped) == (200, 200)
+    assert agents == {"agents": [], "reason": "comms is not installed", "comms": False}
+    assert conforms(facts, lb.Out("table", items=routes["/api/drop"].returns))
+    assert facts["open"] and facts["branch"] == "branch-b1"
+
+
+def test_a_drop_post_fits_its_shape(kit, no_comms):
+    lb = loopback()
+    route = next(one for one in page.PAGE.routes if one.path == "/api/drop/build")
+    body = {"round": BUSY, "stage": "B1", "act": "C" * 43}
+
+    [(status, sent), (again, second)] = run_posts(("/api/drop/build", body),
+                                                  ("/api/drop/build", body))
+
+    assert (status, again) == (200, 200), sent
+    assert conforms(sent, lb.Out("table", items=route.returns))
+    assert sent["state"] == "recorded" and second["repeat"]
+
+
+def test_a_drop_receipt_that_keeps_a_worktree_fits_its_shape(kit, no_comms, monkeypatch):
+    lb = loopback()
+    route = next(one for one in page.PAGE.routes if one.path == "/api/drop/build")
+    kept = {"act": "C" * 43, "holder": BUSY, "item": "B1", "kind": "drop",
+            "state": "recorded", "removed": ["/w/scratch"],
+            "kept": [{"path": "/w/B1", "why": "it holds work that is not committed (a.txt)"}],
+            "refs": [], "unscanned": [], "not_told": "comms is not installed"}
+    monkeypatch.setattr(ph.pageacts, "drop", lambda *args, **kwargs: kept)
+
+    [(status, sent)] = run_posts(("/api/drop/build", {"round": BUSY, "stage": "B1",
+                                                      "act": "C" * 43}))
+
+    assert status == 200 and conforms(sent, lb.Out("table", items=route.returns))
+    assert sent["kept"] == kept["kept"]
