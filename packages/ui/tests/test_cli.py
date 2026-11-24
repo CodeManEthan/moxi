@@ -381,7 +381,8 @@ def test_the_shell_is_spawned_as_python_dash_p_from_its_runtime_dir(monkeypatch)
     ((argv, kw),) = seen
     assert argv == [str(python()), "-P", "-m", "moxi_ui.serve"]
     assert kw["cwd"] == Layout("ui").runtime_dir()
-    assert stat.S_IMODE(kw["cwd"].stat().st_mode) == 0o700
+    if os.name == "posix":  # Windows keeps no mode bits
+        assert stat.S_IMODE(kw["cwd"].stat().st_mode) == 0o700
     assert kw["output"] == log and kw["env"]["MOXI_LOG_FILE"] == str(log)
 
 
@@ -399,8 +400,9 @@ def test_off_linux_the_browser_gets_a_redirect_file_with_no_ticket(monkeypatch, 
     assert opened.startswith("file://") and "s" * 43 not in opened
     assert not stale.exists()
     (page,) = redirect_dir.iterdir()
-    assert stat.S_IMODE(page.stat().st_mode) == 0o600
-    assert stat.S_IMODE(redirect_dir.stat().st_mode) == 0o700
+    if os.name == "posix":  # Windows keeps no mode bits
+        assert stat.S_IMODE(page.stat().st_mode) == 0o600
+        assert stat.S_IMODE(redirect_dir.stat().st_mode) == 0o700
     assert url in page.read_text()
 
 

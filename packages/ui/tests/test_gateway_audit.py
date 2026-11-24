@@ -118,8 +118,10 @@ def test_a_class_past_ten_rows_a_minute_becomes_one_summary(tmp_path: Path) -> N
     assert [row["count"] for row in rows if row["kind"] == "summary"] == [15]
     assert sum(1 for row in rows if row["kind"] == "request") == 3
     audit_dir = audit_mod.audit_dir(tmp_path)
-    assert oct(os.stat(audit_dir).st_mode & 0o777) == "0o700"
-    assert all(oct(os.stat(p).st_mode & 0o777) == "0o600" for p in audit_dir.glob("*.jsonl"))
+    if os.name == "posix":  # Windows keeps no mode bits
+        assert oct(os.stat(audit_dir).st_mode & 0o777) == "0o700"
+        assert all(oct(os.stat(p).st_mode & 0o777) == "0o600"
+                   for p in audit_dir.glob("*.jsonl"))
 
 
 def test_past_the_day_cap_a_class_writes_one_summary_an_hour(tmp_path: Path, monkeypatch) -> None:
@@ -157,7 +159,8 @@ def test_the_key_is_made_once_and_kept(tmp_path: Path) -> None:
     first = audit_mod.key(tmp_path)
     assert len(first) == 32 and audit_mod.key(tmp_path) == first
     path = tmp_path / "gateway" / "key"
-    assert oct(path.stat().st_mode & 0o777) == "0o600"
+    if os.name == "posix":  # Windows keeps no mode bits
+        assert oct(path.stat().st_mode & 0o777) == "0o600"
     path.unlink()
     assert audit_mod.key(tmp_path) != first
 

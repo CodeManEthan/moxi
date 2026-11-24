@@ -46,6 +46,10 @@ class Address:
         return f"https://{self.host}:{self.port}/"
 
 
+#: A Unix socket's path walk reads user ids; Windows has none, and its gateway takes TCP.
+UNIX_SOCKET = pytest.mark.skipif(os.name != "posix",
+                                 reason="Windows: the gateway takes TCP, never a socket")
+
 def _not_ready() -> type:
     return modules.load("tunnel", interface=2).api.NotReady
 
@@ -88,6 +92,7 @@ def test_upstream_refuses_with_the_locator_text_when_the_runtime_dir_moves(env, 
     assert decl.upstream(env=env, kind="tcp") == "http://127.0.0.1:8471"
 
 
+@UNIX_SOCKET
 def test_upstream_on_a_socket_gives_its_path_only_when_the_path_passes(env, monkeypatch):
     path = endpoint.socket_path(Layout("ui"), env)
     with pytest.raises(_not_ready()) as err:
@@ -123,7 +128,8 @@ def test_the_listener_keeps_every_persistent_origin_and_never_takes_one_out(tmp_
     assert decl.read_retired(state) == [{"host": "box.example.ts.net", "port": 8461},
                                         {"host": "box.example.ts.net", "port": 8462}]
     path = decl.retired_path(state)
-    assert stat.S_IMODE(path.stat().st_mode) == 0o600
+    if os.name == "posix":  # Windows keeps no mode bits
+        assert stat.S_IMODE(path.stat().st_mode) == 0o600
     decl.on_change("ui/gateway", new, None, state_dir=state)
     assert len(decl.read_retired(state)) == 2
 
@@ -283,10 +289,11 @@ def test_on_checks_in_order_and_names_each_fix(env, tmp_path, monkeypatch):
     World(monkeypatch, env, state=("absent", "tunnel isn't installed"))
     with pytest.raises(cli.Refused, match="moxi install ui --with tunnel"):
         verbs.cmd_enable(_ns(), print, env=env)
-    world = World(monkeypatch, env, kind="unix")
-    with pytest.raises(cli.Refused, match="the gateway's socket"):
-        verbs.cmd_enable(_ns(), print, env=env)
-    assert world.ran == []  # nothing set, nothing started
+    if os.name == "posix":  # Windows' gateway takes TCP, never a socket path
+        world = World(monkeypatch, env, kind="unix")
+        with pytest.raises(cli.Refused, match="the gateway's socket"):
+            verbs.cmd_enable(_ns(), print, env=env)
+        assert world.ran == []  # nothing set, nothing started
 
 
 def test_on_sets_the_switch_starts_the_shell_waits_for_the_hold_then_adds_the_entry(
@@ -463,6 +470,8 @@ def test_the_login_row_follows_the_resolved_start_and_the_unit(tmp_path):
     assert row.state == "ok" and "every logon" in row.detail
 
 
+@pytest.mark.skipif(os.name != "posix", reason="Windows keeps no mode bits, so its audit "
+                    "row reads none")
 def test_the_audit_row_checks_modes(tmp_path):
     facts = _facts(tmp_path, switch=False)
     assert doctor.audit_row(facts).state == "off"

@@ -95,6 +95,10 @@ def _with_own_page(shell):
 
 
 _POSTED = {session.STOP_PATH, session.SIGNOUT_API}
+#: The owner check reads a Unix socket's peer user; Windows has no user ids, and its shell
+#: takes TCP, never a socket, so no owner check runs there.
+OWNER_CHECK = pytest.mark.skipif(not hasattr(os, "getuid"),
+                                 reason="Windows: no user ids and no Unix socket")
 
 
 @pytest.mark.parametrize("path", sorted(session.TOKEN_PATHS))
@@ -214,9 +218,11 @@ def test_a_ticket_is_spent_once_under_racing_redemptions(tmp_path):
 def test_ticket_files_are_private_and_hold_no_ticket(tmp_path):
     tickets = Tickets(tmp_path / "tickets")
     ticket = tickets.mint()
-    assert stat.S_IMODE(os.stat(tmp_path / "tickets").st_mode) == 0o700
+    if os.name == "posix":  # Windows keeps no mode bits
+        assert stat.S_IMODE(os.stat(tmp_path / "tickets").st_mode) == 0o700
     (path,) = (tmp_path / "tickets").iterdir()
-    assert stat.S_IMODE(path.stat().st_mode) == 0o600
+    if os.name == "posix":  # Windows keeps no mode bits
+        assert stat.S_IMODE(path.stat().st_mode) == 0o600
     assert path.name == hashlib.sha256(ticket.encode()).hexdigest()[:32]
     assert ticket.encode() not in path.read_bytes()
 
@@ -246,6 +252,7 @@ def _owned(tmp_path, uid, *, client=CLIENT, server=SERVER, six=False):
     return OwnerCheck(enabled=True, uid=os.getuid(), root=str(root))
 
 
+@OWNER_CHECK
 def test_socket_owner_reads_the_client_row(tmp_path):
     root = record_proc(tmp_path / "proc", tcp=connection_rows(CLIENT, SERVER, 4242),
                        tcp6=connection_rows(("::1", 50001), ("::1", PORT), 4343))
@@ -255,6 +262,7 @@ def test_socket_owner_reads_the_client_row(tmp_path):
     assert session.socket_owner(None, SERVER, root=root) is None
 
 
+@OWNER_CHECK
 @pytest.mark.parametrize("six", [False, True])
 def test_a_ticket_redeemed_over_another_users_socket_is_refused_and_kept(tmp_path, six):
     client, server = (("::1", 50001), ("::1", PORT)) if six else (CLIENT, SERVER)
@@ -277,6 +285,7 @@ def test_a_ticket_redeemed_over_another_users_socket_is_refused_and_kept(tmp_pat
         assert len(left) == (0 if expected == 200 else 1)
 
 
+@OWNER_CHECK
 def test_a_session_on_another_users_socket_is_refused(tmp_path):
     theirs = Harness(tmp_path / "a", owner=_owned(tmp_path / "a", os.getuid() + 1))
     cookie, key = theirs.sign_in()
@@ -309,6 +318,7 @@ def test_wsl_is_read_from_osrelease_or_interop(tmp_path, release, interop, expec
     assert session.is_wsl(tmp_path) is expected
 
 
+@OWNER_CHECK
 def test_under_wsl_there_is_no_owner_check(tmp_path, monkeypatch):
     monkeypatch.setattr(session.sys, "platform", "linux")
     monkeypatch.setattr(session, "is_wsl", lambda root="/proc": True)
@@ -342,7 +352,8 @@ def test_the_file_holds_only_hashes_and_is_private(tmp_path):
     path = tmp_path / "sessions.json"
     data = path.read_bytes()
     assert session_id.encode() not in data and key.encode() not in data
-    assert stat.S_IMODE(path.stat().st_mode) == 0o600
+    if os.name == "posix":  # Windows keeps no mode bits
+        assert stat.S_IMODE(path.stat().st_mode) == 0o600
     record = json.loads(data)
     assert record["epoch"] == "ui-shell.socket=abc"
     assert list(record["sessions"]) == [hashlib.sha256(session_id.encode()).hexdigest()]

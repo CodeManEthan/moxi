@@ -862,7 +862,8 @@ def _reaped_or_zombie(pid: int) -> bool:
 def _kill_and_wait(pid: int) -> None:
     """SIGKILL `pid` and block, without yielding to the loop, until it is dead, so the
     shell has not yet seen the exit when the next request runs."""
-    os.kill(pid, signal.SIGKILL)
+    # Windows has no SIGKILL: there os.kill ends the process for any signal number.
+    os.kill(pid, getattr(signal, "SIGKILL", signal.SIGTERM))
     deadline = time.monotonic() + PROC_WAIT_S
     while not _reaped_or_zombie(pid):
         assert time.monotonic() < deadline, "the child did not die"

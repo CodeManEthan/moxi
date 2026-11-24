@@ -212,7 +212,8 @@ def test_on_windows_the_logon_tasks_stored_env_counts(plain, tmp_path):
 def test_the_hold_file_names_a_running_shell_and_its_port(tmp_path):
     assert endpoint.hold_port(tmp_path) is None
     endpoint.write_hold(tmp_path, 8461)
-    assert stat.S_IMODE(os.stat(tmp_path / endpoint.HOLD_FILE).st_mode) == 0o600
+    if os.name == "posix":  # Windows keeps no mode bits
+        assert stat.S_IMODE(os.stat(tmp_path / endpoint.HOLD_FILE).st_mode) == 0o600
     assert endpoint.hold_port(tmp_path) == 8461
     assert endpoint.hold_port(tmp_path, running=lambda pid: False) is None
     endpoint.remove_hold(tmp_path, pid=os.getpid() + 1)
@@ -348,7 +349,8 @@ def test_the_mount_and_its_reasons_in_order():
 def test_gateway_acts_holds_the_pid_the_value_and_the_reason(tmp_path):
     write_acts(tmp_path, Mount(mounted=False, reason="tcp"))
     assert read_acts(tmp_path) == {"pid": os.getpid(), "acts": False, "reason": "tcp"}
-    assert stat.S_IMODE(os.stat(tmp_path / "gateway.acts").st_mode) == 0o600
+    if os.name == "posix":  # Windows keeps no mode bits
+        assert stat.S_IMODE(os.stat(tmp_path / "gateway.acts").st_mode) == 0o600
     write_acts(tmp_path, Mount(mounted=False, reason="tcp"), refusals={"fixture": "why"})
     assert read_acts(tmp_path)["refusals"] == {"fixture": "why"}
     write_acts(tmp_path, Mount(mounted=False, reason="tcp"), refusals={})

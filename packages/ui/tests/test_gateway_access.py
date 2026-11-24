@@ -58,7 +58,8 @@ def test_a_pairing_with_a_passkey_writes_the_device_and_signs_in(phone):
     assert (device.name, device.host, device.provider, device.change) == (
         "Pixel", HOST, "cloudflare", "r1.1")
     assert device.credential == b64(authenticator.credential_id) and device.public_key
-    assert stat.S_IMODE(os.stat(devices_path(phone.state_dir)).st_mode) == 0o600
+    if os.name == "posix":  # Windows keeps no mode bits
+        assert stat.S_IMODE(os.stat(devices_path(phone.state_dir)).st_mode) == 0o600
     assert phone.audit.codes() == ["pair", "signin"]
     phone.keep(done)
     assert phone.request("GET", "/m/fixture/api/read").status == 200
