@@ -356,7 +356,7 @@ import type { EngineInterface, Register } from 'claude-code'
 
 type Dollar = EngineInterface
 
-const MOD_VERSION = '0.3.1'
+const MOD_VERSION = '0.3.2'
 const GATE = 'moxi-turns-gate'
 const MARGIN_MS = 1000
 const REPORT_WAIT_MS = 1000

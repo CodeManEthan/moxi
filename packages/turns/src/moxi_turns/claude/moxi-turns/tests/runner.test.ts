@@ -419,7 +419,7 @@ describe('the report queue', () => {
     expect(w.got).toEqual([])
     await w.hello()
     expect(w.kinds()).toEqual(['session', 'turn.start', 'turn.complete'])
-    expect(w.reports()[0]).toEqual({ seq: 1, kind: 'session', session_id: 'S-1', mod_version: '0.3.1' })
+    expect(w.reports()[0]).toEqual({ seq: 1, kind: 'session', session_id: 'S-1', mod_version: '0.3.2' })
     expect(w.reports().map(r => r.seq)).toEqual([1, 2, 3])
     expect(w.reports()[2]).toEqual({ seq: 3, kind: 'turn.complete', turn_id: 't1', reason: 'answer', is_aborted: false, answer: 'done.' })
   })
