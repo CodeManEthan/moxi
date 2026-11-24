@@ -2,6 +2,9 @@
 
 ## 0.1.11 (unreleased)
 
+- On Windows a child `spawn(..., detached=True)` starts appends to `output` instead of
+  writing over it from the start. The C runtime's append mode is its own and doesn't reach
+  the handle a child gets, so the file is now opened at its end.
 - On Windows a `moxi.ipc` pipe is named for the module's runtime folder as well as the
   user: `\\.\pipe\moxi-<module>-<name>-<user>-<home>`, `<home>` a hash of the folder's
   real path, case-folded. Two Moxi homes under one account no longer share a daemon's

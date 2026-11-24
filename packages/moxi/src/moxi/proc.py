@@ -139,8 +139,13 @@ def _output_file(output: str | os.PathLike) -> int:
 
     path = Path(output)
     files._make_dirs(path.parent)
-    return os.open(path, os.O_WRONLY | os.O_CREAT | os.O_APPEND | getattr(os, "O_BINARY", 0),
-                   0o600)
+    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_APPEND | getattr(os, "O_BINARY", 0),
+                 0o600)
+    if _WINDOWS:
+        # The C runtime appends by seeking before each of its own writes; a child is
+        # handed the bare handle, so it starts where this descriptor stands: the end.
+        os.lseek(fd, 0, os.SEEK_END)
+    return fd
 
 
 def _end_tree(proc: subprocess.Popen, job, *, first_signal: str = "SIGTERM",
