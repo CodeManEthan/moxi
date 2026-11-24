@@ -271,8 +271,8 @@ _WAITER = textwrap.dedent("""
 def waiters(fenced, tmp_path):
     """`waiters.start(name)`: a real process that waits in the check lock's line as the
     round `name`, writes `name` to `waiters.order` once it holds the lock, and lets it
-    go; it returns once the process's ticket is in the line. Every process left is
-    killed when the test ends."""
+    go; it returns once the process's ticket is in the line, or it has taken the lock.
+    Every process left is killed when the test ends."""
     from moxi_dev.testing import PROC_WAIT_S, wait_for
 
     class Waiters:
@@ -283,8 +283,8 @@ def waiters(fenced, tmp_path):
             before = len(check_line.tickets(checking.lock_file()))
             proc = subprocess.Popen([PY, "-c", _WAITER, str(self.order), name])
             self.procs.append(proc)
-            wait_for(lambda: len(check_line.tickets(checking.lock_file())) > before,
-                     PROC_WAIT_S, what=f"the ticket of {name}")
+            wait_for(lambda: len(check_line.tickets(checking.lock_file())) > before
+                     or name in self.taken(), PROC_WAIT_S, what=f"the ticket of {name}")
             return proc
 
         def taken(self) -> list[str]:
@@ -318,6 +318,22 @@ def test_check_lock_waiters_take_the_lock_in_the_order_they_asked(holder, waiter
         assert proc.wait(timeout=PROC_WAIT_S) == 0
 
     assert waiters.taken() == ["first", "second", "third"]
+    assert check_line.tickets(checking.lock_file()) == []
+
+
+def test_a_live_ticket_ahead_holds_a_waiter_back_from_a_free_lock(waiters):
+    import time
+
+    from moxi_dev.testing import PROC_WAIT_S
+
+    ahead = _ticket({**check_line.me(), "round": "proj-a/ahead"})
+    behind = waiters.start("behind")
+    time.sleep(6 * check_line.LINE_POLL_S)
+
+    assert behind.poll() is None and waiters.taken() == []
+    check_line.remove(ahead)
+    assert behind.wait(timeout=PROC_WAIT_S) == 0
+    assert waiters.taken() == ["behind"]
     assert check_line.tickets(checking.lock_file()) == []
 
 
