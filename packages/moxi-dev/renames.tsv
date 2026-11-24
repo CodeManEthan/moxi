@@ -17761,3 +17761,29 @@ rounds	packages/rounds/tests/test_private_files.py	path.parent.mkdir(parents=Tru
 rounds	packages/rounds/tests/test_private_files.py	assert not any(one.startswith("brought in") for one in made.block.lines)	keep	any	any
 rounds	packages/rounds/tests/test_private_files.py	assert any(all(part in one for part in said) for one in reasons), reasons	keep	any	any
 rounds	packages/rounds/tests/test_private_files.py	tree.commit("notes/readme.md", "changed")	keep	changed	changed
+launcher	packages/launcher/tests/test_live.py	return env.get("HOME") or pwd.getpwuid(os.getuid()).pw_dir	keep	HOME	HOME
+moxi-dev	packages/moxi-dev/conftest.py	if not any(getattr(item, "originalname", item.name) == _SEARCHES	keep	any	any
+moxi-dev	packages/moxi-dev/src/moxi_dev/testing.py	temp directory and `HOME` it lacks, and on Windows each folder of `WINDOWS_HOMES` it	keep	HOME	HOME
+moxi-dev	packages/moxi-dev/src/moxi_dev/testing.py	lacks, laid out under its own home where it names one (`USERPROFILE`, else `HOME`), else	keep	HOME	HOME
+moxi-dev	packages/moxi-dev/src/moxi_dev/testing.py	own = _value(env, "USERPROFILE") or _value(env, "HOME")	keep	HOME	HOME
+moxi-dev	packages/moxi-dev/src/moxi_dev/testing.py	if not _holds(env, "HOME") and os.environ.get("HOME"):	keep	HOME	HOME
+moxi-dev	packages/moxi-dev/src/moxi_dev/testing.py	env["HOME"] = os.environ["HOME"]	keep	HOME	HOME
+moxi-dev	packages/moxi-dev/src/moxi_dev/testing.py	home = env.get("HOME") or os.path.expanduser("~")	keep	HOME	HOME
+moxi-dev	packages/moxi-dev/src/moxi_dev/testing.py	cache.mkdir(exist_ok=True)	keep	exist_ok	exist_ok
+moxi-dev	packages/moxi-dev/src/moxi_dev/testing.py	home.mkdir(exist_ok=True)	keep	exist_ok	exist_ok
+moxi-dev	packages/moxi-dev/src/moxi_dev/testing.py	pycache.mkdir(exist_ok=True)	keep	exist_ok	exist_ok
+moxi-dev	packages/moxi-dev/tests/test_check_e2e.py	assert not (Path(os.environ["HOME"]) / ".cache" / "uv").exists()  # the run's cache served	keep	HOME	HOME
+moxi-dev	packages/moxi-dev/tests/test_child_seam.py	assert env["HOME"] == os.environ["HOME"]	keep	HOME	HOME
+moxi-dev	packages/moxi-dev/tests/test_child_seam.py	own = {"HOME": str(tmp_path / "h"), "TMPDIR": str(tmp_path / "t"),	keep	HOME	HOME
+moxi-dev	packages/moxi-dev/tests/test_child_seam.py	for own_key in ("USERPROFILE", "HOME"):	keep	HOME	HOME
+moxi-dev	packages/moxi-dev/tests/test_child_seam.py	@pytest.mark.parametrize("key", ["HOME", "XDG_CONFIG_HOME", "XDG_RUNTIME_DIR", "TMPDIR",	keep	HOME	HOME
+moxi-dev	packages/moxi-dev/tests/test_child_seam.py	env = testing._child_env({"HOME": nowhere, "MOXI_HOME": nowhere})	keep	HOME	HOME
+moxi-dev	packages/moxi-dev/tests/test_child_seam.py	assert env["HOME"] == env["MOXI_HOME"] == nowhere	keep	HOME	HOME
+moxi-dev	packages/moxi-dev/tests/test_child_seam.py	assert testing._child_env({"HOME": outside})["HOME"] == outside	keep	HOME	HOME
+moxi-dev	packages/moxi-dev/tests/test_child_seam.py	refused(lambda: testing._child_env({"HOME": outside}))	keep	HOME	HOME
+moxi-dev	packages/moxi-dev/tests/test_child_seam.py	assert "outside the run's roots" in refused(lambda: _start({**full, "HOME": outside}))	keep	HOME	HOME
+moxi-dev	packages/moxi-dev/tests/test_run_fence.py	"a_home": {**_system_env(), "HOME": str(own_home)}}[kind]	keep	HOME	HOME
+moxi-dev	packages/moxi-dev/tests/test_run_fence.py	for folder in said["folders"]:	keep	folders	folders
+moxi-dev	packages/moxi-dev/tests/test_run_fence.py	assert json.loads(_ask([sys.executable, "-c", WHERE], env, cwd))["folders"][1] \	keep	folders	folders
+moxi-dev	packages/moxi-dev/tests/test_run_fence.py	(sentinel / key.lower()).mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
+moxi-dev	packages/moxi-dev/tests/test_run_fence.py	"-s", timeout=900)	keep	timeout	timeout
