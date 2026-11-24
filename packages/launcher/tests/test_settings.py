@@ -28,6 +28,7 @@ DEFAULTS = {
     "relaunch.pass_env": [],
     "relaunch.director_pass_env": [],
     "relaunch.notice_retry_s": 30,
+    "wake_guard.enabled": True,
     "recycle.limit_wait_s": 1800,
     "keep_warm.subagent_cap": 3,
     "keep_warm.director_cap": 10,
@@ -86,7 +87,7 @@ GROUPS = {
               "page.launch_wait_s", "park.wait_s"],
     "Relaunch": ["relaunch.wait_s", "relaunch.person_s", "relaunch.dialog_s",
                  "relaunch.name_wait_s", "relaunch.follow_s", "relaunch.director_pass_env",
-                 "relaunch.notice_retry_s"],
+                 "relaunch.notice_retry_s", "wake_guard.enabled"],
     "Keep warm": ["keep_warm.subagent_cap", "keep_warm.director_cap",
                   "keep_warm.subagent_texts", "keep_warm.director_texts",
                   "keep_warm.directing_texts"],
@@ -141,12 +142,12 @@ def test_show_json_gives_each_wait_and_count_its_unit(capsys):
             assert key["unit"] is None, name
 
 
-def test_show_json_marks_the_five_changes_that_can_hurt(capsys):
+def test_show_json_marks_the_six_changes_that_can_hurt(capsys):
     keys = show_json(capsys)
     hurts = {name: key["hurts"] for name, key in keys.items() if key["hurts"]}
     assert set(hurts) == {"startup.trust_dialog", "startup.dev_channels_dialog",
                           "startup.bypass_warning", "relaunch.pass_env",
-                          "relaunch.director_pass_env"}
+                          "relaunch.director_pass_env", "wake_guard.enabled"}
     trust = hurts["startup.trust_dialog"]
     assert (trust["when"], trust["stays"]) == ("on", True)
     assert trust["says"] == "trusts the folder of every slot launch"
@@ -158,6 +159,7 @@ def test_show_json_marks_the_five_changes_that_can_hurt(capsys):
             hurts["startup.dev_channels_dialog"]["stays"]) == ("on", False)
     assert hurts["relaunch.pass_env"]["when"] == "add"
     assert hurts["relaunch.director_pass_env"]["when"] == "add"
+    assert hurts["wake_guard.enabled"]["when"] == "off"
     assert all(hurt["confirm"] for hurt in hurts.values())
 
 

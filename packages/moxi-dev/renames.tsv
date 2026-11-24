@@ -5190,6 +5190,8 @@ launcher	packages/launcher/tests/test_waits.py	assert coder.closed == 1	keep	clo
 launcher	packages/launcher/tests/test_waits.py	monkeypatch.setattr(waits, "_logged", set())	keep	set	set
 launcher	packages/launcher/src/moxi_launcher/fork.py	result = (launch or api.launch)(request, env=caller_env, warn=warn)	keep	env	env
 launcher	packages/launcher/src/moxi_launcher/fork.py	return any(key == name or (key.endswith("_") and name.startswith(key))	keep	any	any
+launcher	packages/launcher/src/moxi_launcher/guards.py	name=NAME, calls=CALLS, who="any", match=MATCH, match_flags="i",	keep	any	any
+launcher	packages/launcher/src/moxi_launcher/guards.py	sessions="moxi_launcher.wake:on_for",	keep	sessions	sessions
 launcher	packages/launcher/src/moxi_launcher/keepwarm.py	directed join. With `dry_run` the ask writes nothing and ends, where it would nudge,	keep	dry_run	dry_run
 launcher	packages/launcher/tests/test_fork.py	assert calls == [((SID,), {"dry_run": True, "caller_env": {"A": "1"}})]	keep	dry_run	dry_run
 launcher	packages/launcher/tests/test_keepwarm.py	assert got.verdict.word == "off" and not got.session.delivered	keep	delivered	delivered
@@ -18042,6 +18044,18 @@ launcher	packages/launcher/src/moxi_launcher/target.py	and `find` does not wait.
 launcher	packages/launcher/src/moxi_launcher/target.py	For the callers that read a launch before `find`, so they find the launch `find`	keep	find	find
 launcher	packages/launcher/src/moxi_launcher/target.py	return turns.find(session_id=session_id)	keep	find	find
 launcher	packages/launcher/src/moxi_launcher/target.py	"Unclaimed", "by_process", "caller", "check_claim", "claims", "find", "replaces",	keep	find	find
+launcher	packages/launcher/src/moxi_launcher/wake.py	if any(n in (p.name, _base(p.cmdline[0]) if p.cmdline else "")	keep	any	any
+launcher	packages/launcher/src/moxi_launcher/wake.py	flags: set[str] = set()	keep	set	set
+launcher	packages/launcher/src/moxi_launcher/wake.py	if flags & _PGREP_UNREAD or set(values) - _PGREP_READ:	keep	set	set
+launcher	packages/launcher/src/moxi_launcher/wake.py	if pattern is None and not set(values) - {"d"}:	keep	set	set
+launcher	packages/launcher/src/moxi_launcher/wake.py	hit = any(re.search(name, n, re.IGNORECASE if ignore else 0)	keep	any	any
+launcher	packages/launcher/src/moxi_launcher/wake.py	hit = any(name.lower() == n.lower() if ignore else name == n for n in own)	keep	any	any
+launcher	packages/launcher/src/moxi_launcher/wake.py	if any(_wild(n, bare) for n in names):	keep	any	any
+launcher	packages/launcher/src/moxi_launcher/wake.py	j = text.find("'", i + 1)	keep	find	find
+launcher	packages/launcher/src/moxi_launcher/wake.py	j = text.find("\n", i)	keep	find	find
+launcher	packages/launcher/src/moxi_launcher/wake.py	j = text.find("`", i + 1)	keep	find	find
+launcher	packages/launcher/src/moxi_launcher/wake.py	j = text.find('"', i + 1)	keep	find	find
+launcher	packages/launcher/src/moxi_launcher/wake.py	__all__ = ["CALLS", "GUARD_ID", "Live", "Looked", "MATCH", "NAME", "Proc", "Procs",	keep	NAME	NAME
 launcher	packages/launcher/tests/test_recycle.py	store.end_run(conn, first.run_id, "compacted")	keep	compacted	compacted
 launcher	packages/launcher/tests/test_relaunch.py	"""sessions' `find` and `records`: the id's main transcript, whose first records have	keep	find	find
 launcher	packages/launcher/tests/test_relaunch.py	assert "stale" in caught.value.problem and later.asked == [CLEARED]	keep	stale	stale
@@ -18049,6 +18063,12 @@ launcher	packages/launcher/tests/test_replay.py	assert any(said.startswith("recy
 launcher	packages/launcher/tests/test_target.py	assert session.closed == 0	keep	closed	closed
 launcher	packages/launcher/tests/test_target.py	# `find` of the live id resolves the same way, asking turns for that id.	keep	find	find
 launcher	packages/launcher/tests/test_target.py	assert asked.closed == 1	keep	closed	closed
+launcher	packages/launcher/tests/test_wake.py	"wake", "any", "moxi_launcher.wake:judge", "moxi_launcher.wake:on_for", "allow",	keep	any	any
+launcher	packages/launcher/tests/test_wake.py	got = guards.load(on=["launcher.wake"], sessions=lambda target: (False, None))	keep	on	on
+launcher	packages/launcher/tests/test_wake.py	got = guards.load(on=["launcher.wake"], sessions=lambda target: (False, None))	keep	sessions	sessions
+launcher	packages/launcher/tests/test_wake.py	path.parent.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
+launcher	packages/launcher/tests/test_wake.py	loaded = guards.load(on=["launcher.wake"], sessions=lambda target: (False, None))	keep	on	on
+launcher	packages/launcher/tests/test_wake.py	loaded = guards.load(on=["launcher.wake"], sessions=lambda target: (False, None))	keep	sessions	sessions
 usage	packages/usage/src/moxi_usage/mark.py	if any(name == CROSSING and fired(name, mark) for name, mark in wanted):	keep	any	any
 rounds	packages/rounds/src/moxi_rounds/brake.py	was, now = (set(entry.get("checklist") or ()) for entry in (before, current))	keep	set	set
 rounds	packages/rounds/src/moxi_rounds/checklist.py	seen = set()	keep	set	set
