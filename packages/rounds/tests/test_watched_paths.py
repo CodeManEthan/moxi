@@ -160,6 +160,15 @@ def test_a_codex_patch_names_each_written_file_once_and_never_a_deleted_one(root
     assert "gone" not in said
 
 
+def test_a_moved_file_s_old_path_is_written_by_no_one(root):
+    text = ("*** Begin Patch\n"
+            "*** Update File: packages/core/pyproject.toml\n"
+            "*** Move to: packages/core/pyproject.old\n@@\n+y\n"
+            "*** End Patch\n")
+
+    assert patch(text, cwd=root) is None
+
+
 def test_an_add_file_section_is_new_by_its_own_word(root):
     text = ("*** Begin Patch\n*** Add File: packages/core/src/old.py\n+x\n"
             "*** End Patch\n")
