@@ -247,6 +247,22 @@ def test_a_program_name_of_the_form_puts_that_parent_in_conflict(rig):
     assert "send-only name" in refused(send("lead", parent="lead"), "scoped-conflict")
 
 
+def test_the_daemon_checks_a_held_name_against_its_holder(rig, client):
+    """With the verb bypassed, the module's token under a name a session or a program
+    holds goes the holder's path and is refused `credential`; the verb refuses it
+    `scoped-conflict` from the read-back first."""
+    client.bind(name="main-digest", scope="proj-a")
+    reserved.register("lead-digest", chain=secrets.from_config())
+    declare(rig)
+    for name in (FORMED, "lead-digest"):
+        before = len(history(rig))
+        with pytest.raises(DaemonError) as e:
+            client.send(name, token(), machine_line.compose(
+                [name.replace("-digest", "")], "x", posture=machine_line.POSTURE_NONE))
+        assert e.value.code == wire.CREDENTIAL, name
+        assert len(history(rig)) == before
+
+
 # --------------------------------------------------------------------------- an older daemon
 
 def test_a_daemon_without_scoped_senders_is_told_before_the_post(digest, monkeypatch):

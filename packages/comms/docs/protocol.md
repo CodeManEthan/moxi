@@ -474,8 +474,12 @@ the reads `resolve`, `agents`, `session`, `owner`, `asks`, `owed`, `readable`,
 identity, the operator's credential for `operator`, or a send-only name's token for a
 send-only name: a module's, or the one a program registered it with. A send under a
 scoped sender presents the declaring module's token for its word; the daemon refuses it
-`scoped-conflict` when the word is in conflict or something holds the name, and
-`scoped-recipient` unless line zero names the parent alone. A client sends under a scoped
+`scoped-conflict` when the word is in conflict, and `scoped-recipient` unless line zero
+names the parent alone. A name of the form that a live session binds, or that is a
+send-only name, is its holder's: the daemon checks the send against the holder's
+credential, so the module's token under it is refused `credential`. The verbs and the
+API read the store first and refuse a send under a held name `scoped-conflict` before
+it reaches the daemon. A client sends under a scoped
 sender only to a daemon whose hello lists `scoped-senders`.
 
 An adapter's methods, on the connection that holds its binding: `bind` (answers the
