@@ -33,10 +33,13 @@ as above, or allowed without being counted, so a busy lock never breaks the guar
 
 **A plain read (`plain_read`).** The test allows what it can see whole and refuses the
 rest: every character prints (`str.isprintable`) and none is one of `REFUSED_CHARS`; the
-text splits by POSIX quoting with `|` as a word of its own and `#` read as a plain
-character, so a comment hides no command from the test; a word of only `|` is a pipe
-when it is exactly `|`; no command of the pipeline is empty; and in each command the
-first word holds no `=` and the leading words match an entry of the list word for word.
+text splits into words as a POSIX shell splits it with those characters gone (`_words`):
+a space ends a word outside quotes, single and double quotes hold their text as it is
+and are dropped, an unclosed quote is refused, and `#` is a plain character, so a
+comment hides no command from the test; a `|` outside quotes is a pipe and one inside
+quotes is a character of its word, as it is to the shell; no command of the pipeline is
+empty (so `||` is refused); and in each command the first word holds no `=` and the
+leading words match an entry of the list word for word.
 
 **A fork's permission ask (`judge_ask`).** Refused with `ASK_REFUSED`, so the person
 never sees a dialog for it; every other subagent's ask is left to the person.
@@ -49,7 +52,6 @@ Standard library at import; the core is imported at use.
 
 from __future__ import annotations
 
-import shlex
 import time
 from collections.abc import Mapping
 
@@ -148,25 +150,55 @@ def time_up(record: dict, *, now: float | None = None) -> bool:
         return True
 
 
+#: The pipe among `_words`' words.
+_PIPE = None
+
+
+def _words(command: str) -> list[str | None] | None:
+    """`command`'s words as a POSIX shell splits text that holds none of
+    `REFUSED_CHARS`, with `_PIPE` for each `|` outside quotes; None for an unclosed
+    quote."""
+    words: list[str | None] = []
+    word: list[str] = []
+    in_word = False
+    quote = None
+    for char in command:
+        if quote is not None:
+            if char == quote:
+                quote = None
+            else:
+                word.append(char)
+        elif char in "'\"":
+            quote, in_word = char, True
+        elif char == " " or char == "|":
+            if in_word:
+                words.append("".join(word))
+                word, in_word = [], False
+            if char == "|":
+                words.append(_PIPE)
+        else:
+            word.append(char)
+            in_word = True
+    if quote is not None:
+        return None
+    if in_word:
+        words.append("".join(word))
+    return words
+
+
 def plain_read(command: object, fork_commands) -> bool:
     """Whether shell text `command` is a plain read of the listed commands."""
     if not isinstance(command, str) or not command.strip():
         return False
     if not command.isprintable() or any(c in REFUSED_CHARS for c in command):
         return False
-    lexer = shlex.shlex(command, posix=True, punctuation_chars="|")
-    lexer.whitespace_split = True
-    lexer.commenters = ""  # a `#` hides nothing from the test
-    try:
-        words = list(lexer)
-    except ValueError:
+    words = _words(command)
+    if words is None:
         return False
     entries = [e.split() for e in fork_commands or () if isinstance(e, str) and e.split()]
     commands: list[list[str]] = [[]]
     for word in words:
-        if word and set(word) == {"|"}:
-            if word != "|":
-                return False
+        if word is _PIPE:
             commands.append([])
         else:
             commands[-1].append(word)

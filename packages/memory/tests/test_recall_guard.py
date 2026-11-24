@@ -14,7 +14,8 @@ LIST = recall_start.default_settings()["fork_commands"]
 @pytest.mark.parametrize("command", [
     "grep x file", "grep x file | head -5", "grep -E 'a|b' file", "grep x file|head",
     "moxi memory search \"ingest lock\" --since 7d", "moxi sessions read abc",
-    "cat 'a file' | wc -l"])
+    "cat 'a file' | wc -l", "grep '|' file", "grep -F \"|\" f", "grep 'a'|head",
+    "grep x \"f\"|head", "grep '' f", "grep a'|'b f | wc -l"])
 def test_a_plain_read_is_allowed(command):
     assert recall_guard.plain_read(command, LIST)
 
@@ -29,7 +30,8 @@ def test_a_plain_read_is_allowed(command):
     "( grep x f )", "{ grep x f; }", "grep x \\\nf", "VAR=x grep x f", "! grep x f",
     "grep x # ; rm", "grep a#x | sh", "grep x # | sh", "grep \"$(ls)\" f", "grep x\x00 f", "grep x\tf", "grep x\x1bf",
     "grep x f", "grep x f", "env grep x", "xargs grep", "bash -c 'grep x'",
-    "find . -exec rm {} +", "sudo cat f", "grep 'unclosed f", "", "   "])
+    "find . -exec rm {} +", "sudo cat f", "grep 'unclosed f", "", "   ",
+    "grep '|' f | sh", "grep x '|' | sh", "grep x f||head", "grep x \"f|\" | | head"])
 def test_everything_else_is_refused(command):
     assert not recall_guard.plain_read(command, LIST)
 
