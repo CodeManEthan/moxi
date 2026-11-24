@@ -1009,8 +1009,12 @@ def _name(key: str) -> str:
 def _value(env: Mapping[str, str], key: str) -> str | None:
     """`key`'s value in `env`, on Windows in whatever case `env` spells it; None when
     unset."""
+    value = env.get(key)
+    if value is not None or not WINDOWS:
+        return value
+    wanted = key.upper()
     for name, value in env.items():
-        if _name(name) == _name(key):
+        if name.upper() == wanted:
             return value
     return None
 
@@ -1106,8 +1110,14 @@ def _is_python(program: str) -> bool:
     starts with `python`."""
     if os.path.basename(program).lower().startswith("python"):
         return True
-    return bool(sys.executable) and os.path.realpath(program) == os.path.realpath(
-        sys.executable)
+    suite = _suite_python()
+    return bool(suite) and os.path.realpath(program) == suite
+
+
+@functools.cache
+def _suite_python() -> str:
+    """The suite's interpreter, resolved once; empty when Python can't tell it."""
+    return os.path.realpath(sys.executable) if sys.executable else ""
 
 
 def _with_prefix(argv: Any) -> list[Any] | None:
