@@ -2,7 +2,10 @@
 resolved over the flag catalog.
 
 The file is `CONFIG/presets.toml` (`moxi.paths.Layout("launcher").config_dir()`), read in
-place by `moxi.config` and edited by the user. Moxi ships no presets.
+place by `moxi.config` and edited by the user. Moxi ships no presets. Its `[defaults]` is
+also written one key at a time, keeping every other byte, by `moxi config set launcher
+defaults.<row>` and `unset`, which the Settings page runs: the table hook in `defaults.py`
+checks each change by the rules here. Nothing else writes the file.
 
     [defaults]                 # the user's per-row defaults; posture rows live here
     permission_mode = "bypassPermissions"

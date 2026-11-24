@@ -72,6 +72,11 @@ config`.
   its type, and a dim line where it needs one. A module's schema can mark a few settings to
   show first; the rest wait behind `More`. A changed setting says its default, with `Reset`
   where the file holds it. The foot names the module's config file.
+- **A module's table.** A table a module keeps in a file of its own (the launcher's
+  `Launch defaults`) is one open block after the module's other settings and their
+  `More`, under its title and one line, and the foot names its file too. A row may carry
+  the module's words for what its value meets, and a row the module can only remove shows
+  its value with `Reset` alone. A file that can't be read locks only its own rows.
 - **Save.** Nothing is written until Save, which writes the shown module's changes, each
   as its own `moxi config set` or `unset`, and says what was saved and when each change
   applies. A change that can hurt is asked about first. A setting changed since the page

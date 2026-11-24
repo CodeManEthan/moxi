@@ -6,16 +6,20 @@ the lines each row carries, and the writer's key placement over files shaped lik
 from __future__ import annotations
 
 import dataclasses
+import json
 import os
 import sys
 from types import MappingProxyType
 
 import pytest
-from moxi import config
+from moxi import cli, config
 from moxi.config import ConfigError
 from moxi.paths import Layout
 
-from moxi_launcher import catalog, defaults, presets
+import launcher_fake_turns as fake_turns
+from launcher_fake_harness import Harness
+from moxi_launcher import api, catalog, defaults, presets, store, targets
+from moxi_launcher.api import LaunchRequest, ReplayRequest
 from moxi_launcher.defaults import Table
 
 
@@ -436,3 +440,50 @@ def test_a_broken_config_toml_leaves_the_table_listed_and_written():
                                by="test") == (True, [])
     assert presets.read().defaults == {"effort": "high"}
     assert config_file.read_text(encoding="utf-8") == "this is [not toml\n"
+
+
+# -- end to end: the page's command, then a launch and a replay -----------------------------
+
+def _row(rid: str) -> store.LaunchRow:
+    conn = store.connect(create=False)
+    try:
+        found = store.get(conn, rid)
+    finally:
+        conn.close()
+    assert found is not None
+    return found
+
+
+def test_the_pages_set_reaches_the_next_launch_and_not_a_replay(tmp_path, monkeypatch,
+                                                                 capsys):
+    fake_turns.hide(monkeypatch)
+    Harness.on_path(tmp_path, monkeypatch)
+    monkeypatch.setattr(targets, "_execve", lambda command, argv, env: None)
+    monkeypatch.chdir(tmp_path)
+    work = tmp_path / "work"
+    work.mkdir()
+
+    def launch(rid: str) -> None:
+        api.launch(LaunchRequest(typed={}, cwd=str(work), request_id=rid, session_id=None,
+                                 actor="ann"))
+
+    launch("r1")
+    before = _row("r1").values
+    assert (before["permission_mode"], before["sources"]["permission_mode"]) == \
+        ("default", presets.SHIPPED)
+    # The command the Settings page runs for a save.
+    code = cli.main(["config", "set", "launcher", "defaults.permission_mode", "plan",
+                     "--by", "ui", "--json"])
+    answer = json.loads(capsys.readouterr().out)
+    assert (code, answer["changed"], answer["problem"]) == (0, True, None)
+    assert text() == '[defaults]\npermission_mode = "plan"\n'
+    records = config.history("launcher", "defaults.permission_mode")
+    assert [(r["op"], r["by"]) for r in records] == [("set", "ui")]
+    # A launch with no preset takes it from the defaults.
+    launch("r2")
+    fresh = _row("r2").values
+    assert (fresh["permission_mode"], fresh["sources"]["permission_mode"]) == \
+        ("plan", presets.DEFAULTS)
+    # A replay of the row made before the change keeps what that launch had.
+    api.launch(ReplayRequest(_row("r1"), relaunch_of="r1", request_id="r3", actor="ann"))
+    assert _row("r3").values["permission_mode"] == "default"

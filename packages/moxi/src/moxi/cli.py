@@ -754,15 +754,17 @@ usage: moxi config <module> [show [--json]|path|check|init]
 def _config(argv: list[str]) -> int:
     if argv and argv[0] in ("set", "unset"):
         return _config_change(argv[0], argv[1:])
-    parser = _parser("config", "A module's settings and its config file. `moxi config "
-                     "set` and `moxi config unset` change one key; `moxi` names the "
-                     "core's own settings.")
+    parser = _parser("config", "A module's settings and its config file, and any table "
+                     "the module keeps in a file of its own (its rows named "
+                     "<table>.<row>). `moxi config set` and `moxi config unset` change "
+                     "one key or row; `moxi` names the core's own settings.")
     parser.usage = _CONFIG_USAGE.removeprefix("usage: ")
     parser.add_argument("module")
     parser.add_argument("action", nargs="?", default="show",
                         choices=("show", "path", "check", "init"),
                         help="show (the default): every key with its value, source, doc, "
-                             "when it is read and who last set it; path: the file's path; "
+                             "when it is read and who last set it, then each table's rows; "
+                             "path: the file's path; "
                              "check: exit non-zero when the file cannot be read or the "
                              "module refuses it; init: "
                              "write the file with every key commented out at its default")
@@ -1126,14 +1128,17 @@ def _last_set(records: list[dict], keys) -> dict[str, dict]:
 def _config_change(op: str, argv: list[str]) -> int:
     """`moxi config set` and `moxi config unset`."""
     if op == "set":
-        description = ("Set one key of a module's config file. The value is read by the "
-                       "key's type; a list or a table is one TOML value. --add and "
-                       "--remove change one item of a list.")
+        description = ("Set one key of a module's config file, or one row of a table "
+                       "the module keeps in a file of its own (<table>.<row>, which the "
+                       "module checks and writes). The value is read by the key's type; a "
+                       "list or a table is one TOML value. --add and --remove change one "
+                       "item of a list, and not a table's row.")
     else:
-        description = "Remove one key from a module's config file, so it reads its default."
+        description = ("Remove one key from a module's config file, or one row from a "
+                       "table it keeps in a file of its own, so it reads its default.")
     parser = _parser(f"config {op}", description)
     parser.add_argument("module", help="the module, or moxi for the core's own settings")
-    parser.add_argument("key", help="the setting's dotted name")
+    parser.add_argument("key", help="the setting's dotted name, or <table>.<row>")
     if op == "set":
         parser.add_argument("value", nargs="?", help="the new value")
         group = parser.add_mutually_exclusive_group()

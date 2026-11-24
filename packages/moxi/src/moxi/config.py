@@ -9,7 +9,9 @@ Every value a user may set lives in its module's one config file,
 `<config root>/<module>/config.toml` (see `moxi.paths`), and every key in that file is
 declared in the module's schema: a `settings.toml` shipped in the module's package and
 named by its announcement's `SETTINGS`. The core's own settings are declared the same
-way, in `moxi/settings.toml`, and read and set as module `moxi`.
+way, in `moxi/settings.toml`, and read and set as module `moxi`. The one exception is a
+table a module keeps in a file of its own and reads and checks itself (Tables, below):
+`moxi config` shows and changes it through the module's hook.
 
 The schema
 ----------

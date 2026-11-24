@@ -32,8 +32,9 @@ alone: `presets.defaults_problems` of that one key, `catalog.Row.check` of every
 name names (so a retired name or value is refused whatever `[defaults]` makes of it), and
 the values offered here. Nothing else in the file is read to refuse it, so the order of a
 Save's changes never matters; what the value meets is returned as warning lines. `unset`
-removes the key and returns the lines every row the table still holds carries. A key `keys` doesn't list is refused with the row's own words, so a clear
-of a key `keys` lists is refused only by a file that can't be read or a held lock.
+removes the key and returns the lines every row the table still holds carries. A key
+`keys` doesn't list is refused with the row's own words, so a clear of a key `keys` lists
+is refused only by a file that can't be read or a held lock.
 
 The write is one `moxi.files.edit_toml` block on `presets.path(env)`, under
 `presets.toml.lock`, which reads the file again inside the lock and keeps every other byte:
