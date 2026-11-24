@@ -458,7 +458,7 @@ def test_a_drop_waits_for_both_locks(rounds, holder, which):
     with pytest.raises(Locked) as stopped:
         drop(wait_s=0.2)
 
-    assert (stopped.value.file, stopped.value.holder) == (path, busy.pid)
+    assert (stopped.value.file, stopped.value.holder) == (path, busy.own_pid)
     assert logs(rounds) == before
 
 

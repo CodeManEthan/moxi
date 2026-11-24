@@ -4,6 +4,7 @@ else at the ref left alone, `lock_ref` honoured, and the doctor's row for an old
 
 from __future__ import annotations
 
+import os
 import subprocess
 import sys
 import textwrap
@@ -16,6 +17,12 @@ from moxi_rounds.errors import Refused
 
 REF = "refs/rounds/finishing/main"
 ROUND = "proj-a/a-round"
+
+#: The finish lock clears a holder that died on this machine only on POSIX; on Windows it
+#: refuses, naming the command that clears the lock.
+CLEARS_DEAD = pytest.mark.skipif(os.name != "posix",
+                                 reason="Windows: the finish lock never reads a holder "
+                                        "as dead there")
 
 
 def points_at(repo, ref: str) -> str | None:
@@ -46,7 +53,9 @@ def dead_line(pid: int | None = None, host: str | None = None) -> str:
 
 
 _TAKER = textwrap.dedent("""
+    import os
     import sys
+    print(os.getpid(), flush=True)
     from moxi_rounds import finish_lock
     from moxi_rounds.errors import Refused
     try:
@@ -63,7 +72,9 @@ _TAKER = textwrap.dedent("""
 @pytest.fixture
 def taker():
     """`taker(root, ref, actor)`: a real process that tries to take the lock and stays
-    alive until the test ends. Returns what it printed: `taken <cleared>` or `refused
+    alive until the test ends, with `own_pid` the pid it reports itself (on Windows a
+    venv's python.exe starts the interpreter as its child, so `Popen.pid` is not the
+    lock's holder). `taker.said(proc)`: what it printed, `taken <cleared>` or `refused
     <reason>`."""
     procs = []
 
@@ -71,6 +82,7 @@ def taker():
         proc = subprocess.Popen([sys.executable, "-c", _TAKER, str(root), ref, by],
                                 stdin=subprocess.PIPE, stdout=subprocess.PIPE, text=True)
         procs.append(proc)
+        proc.own_pid = int(proc.stdout.readline())
         return proc
 
     def said(proc) -> str:
@@ -165,9 +177,9 @@ def test_two_finishes_at_once_one_takes_the_lock_and_the_other_names_it(git_repo
     assert taker.said(first) == "taken False"
     second = taker(git_repo.root, REF, "pilot")
     said = taker.said(second)
-    assert said.startswith("refused") and f"coder pid={first.pid} " in said
+    assert said.startswith("refused") and f"coder pid={first.own_pid} " in said
     assert git_repo.git("cat-file", "blob", points_at(git_repo, REF)).startswith(
-        f"coder pid={first.pid} ")
+        f"coder pid={first.own_pid} ")
 
 
 def test_the_command_a_refusal_prints_clears_that_lock(git_repo):
@@ -182,6 +194,7 @@ def test_the_command_a_refusal_prints_clears_that_lock(git_repo):
 
 # -- a dead holder -----------------------------------------------------------------------------
 
+@CLEARS_DEAD
 def test_a_dead_holder_on_this_machine_is_cleared_in_one_swap_and_recorded(git_repo):
     line = dead_line()
     dead = blob_of(git_repo, line)
@@ -196,17 +209,19 @@ def test_a_dead_holder_on_this_machine_is_cleared_in_one_swap_and_recorded(git_r
     events.check(entry.type, entry.fields)
 
 
+@CLEARS_DEAD
 def test_of_two_finishes_that_find_a_dead_holder_one_clears_it(git_repo, taker):
     git_repo.git("update-ref", REF, blob_of(git_repo, dead_line()))
     procs = [taker(git_repo.root, REF, actor) for actor in ("coder", "pilot")]
     said = {proc: taker.said(proc) for proc in procs}
     (winner,) = [proc for proc in procs if said[proc] == "taken True"]
     (loser,) = [proc for proc in procs if said[proc].startswith("refused")]
-    assert f"pid={winner.pid} " in said[loser]
+    assert f"pid={winner.own_pid} " in said[loser]
     assert git_repo.git("cat-file", "blob", points_at(git_repo, REF)).split()[1] \
-        == f"pid={winner.pid}"
+        == f"pid={winner.own_pid}"
 
 
+@CLEARS_DEAD
 def test_a_swap_git_refuses_because_another_finish_cleared_first_reads_the_new_holder(
         git_repo, taker, monkeypatch):
     git_repo.git("update-ref", REF, blob_of(git_repo, dead_line()))
@@ -224,7 +239,7 @@ def test_a_swap_git_refuses_because_another_finish_cleared_first_reads_the_new_h
     monkeypatch.setattr(finish_lock, "_dead", first_another_clears)
     with pytest.raises(Refused) as refused:
         finish_lock.take(git_repo.root, REF, by="coder", name=ROUND, stage="B1")
-    assert f"pilot pid={other[0].pid} " in refused.value.unmet[0].reason
+    assert f"pilot pid={other[0].own_pid} " in refused.value.unmet[0].reason
 
 
 def test_a_holder_of_another_machine_is_not_cleared_even_with_a_dead_pid(git_repo):

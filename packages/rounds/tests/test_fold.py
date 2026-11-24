@@ -52,11 +52,12 @@ def stage(id_, *, after="[]", round_=None, branch=None, slices=()) -> str:
 
 
 def design(round_dir, *entries, prose="What the round builds.") -> bytes:
-    """Write `design.md` with a block of `entries`, and return its bytes."""
-    text = (f"# A design\n\n{prose}\n\n```toml rounds\n" + "\n\n".join(entries)
-            + "\n```\n\nMore prose.\n")
-    (round_dir / "design.md").write_text(text, encoding="utf-8")
-    return text.encode("utf-8")
+    """Write `design.md` with a block of `entries`, and return its bytes: written as
+    bytes, so its line ends are `\n` on every system."""
+    data = (f"# A design\n\n{prose}\n\n```toml rounds\n" + "\n\n".join(entries)
+            + "\n```\n\nMore prose.\n").encode("utf-8")
+    (round_dir / "design.md").write_bytes(data)
+    return data
 
 
 def fold(**more):

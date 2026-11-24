@@ -60,6 +60,12 @@ def events(path: Path, kind: str) -> list[dict]:
     return [one for one in log.read(path) if one["type"] == kind]
 
 
+def placed(event: dict, key: str) -> Path:
+    """The place `event` records under `key`, read as rounds reads it: a record holds a
+    place under the home folder from `~` (on Windows rounds' own folders are under it)."""
+    return Path(places.expand_home(event[key]))
+
+
 def refused(name=ROUND, stage="B1", **given) -> list[str]:
     with pytest.raises(Refused) as caught:
         commissioning.commission(name, stage, builder="coder", by="planner", **given)
@@ -84,10 +90,10 @@ def test_a_commission_cuts_the_branch_from_the_target_and_records_the_build(
         "host": places.host()}
     assert places.is_build_id(event["build"])
     assert repo.rev("work") == base
-    worktree = Path(event["worktree"])
+    worktree = placed(event, "worktree")
     assert worktree == places.worktree_dir({"worktree_dir": None}) / "proj-a" / "work"
     assert repo.git("-C", str(worktree), "branch", "--show-current") == "work"
-    scratch = Path(event["scratch"])
+    scratch = placed(event, "scratch")
     assert scratch == places.scratch_root() / "proj-a" / "work" / event["build"]
     assert os.listdir(scratch) == [places.SCRATCH_MARKER]
     said = capsys.readouterr().out
@@ -395,7 +401,7 @@ def test_a_rerun_after_a_stop_keeps_its_own_worktree_and_records_one_build(
     assert event["build"] == stopped.build
     assert "kept: the worktree a stopped run" in capsys.readouterr().out
     assert repo.git("worktree", "list", "--porcelain").count("branch refs/heads/work") == 1
-    assert os.listdir(Path(event["scratch"])) == [places.SCRATCH_MARKER]
+    assert os.listdir(placed(event, "scratch")) == [places.SCRATCH_MARKER]
 
 
 def test_a_rerun_keeps_the_base_its_stopped_run_cut_the_branch_from_when_the_target_moved(

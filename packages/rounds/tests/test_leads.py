@@ -226,5 +226,5 @@ def test_a_held_lock_stops_the_mark(rounds, holder):
     with pytest.raises(Locked) as stopped:
         leads.mark(ROUND, "atlas-lead", by="builder-1", wait_s=0.2)
 
-    assert stopped.value.holder == held.pid
+    assert stopped.value.holder == held.own_pid
     assert path.read_bytes() == before

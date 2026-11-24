@@ -4,6 +4,8 @@ what each is recorded with, and what is refused."""
 
 from __future__ import annotations
 
+import os
+
 import pytest
 from moxi import cli
 
@@ -121,7 +123,8 @@ def test_a_ruling_on_a_round_is_recorded_under_the_projects_stored_key(rounds, c
     assert run("PROJ-A/a-round") == 0
 
     assert len(rulings(round_log(rounds))) == 1
-    assert not write.round_lock("PROJ-A", "a-round").exists()
+    # By name: on Windows and macOS a folder name is matched without case.
+    assert "PROJ-A" not in os.listdir(write.round_lock("PROJ-A", "a-round").parent.parent)
 
 
 def test_the_one_named_with_as_records_it_else_the_os_user(rounds, monkeypatch):
@@ -749,7 +752,7 @@ def test_a_standing_ruling_from_a_round_is_written_under_both_locks(rounds, hold
                     standing=True, wait_s=0.2)
 
     assert stopped.value.file == write.project_lock("proj-a")
-    assert stopped.value.holder == held.pid
+    assert stopped.value.holder == held.own_pid
     assert logs(rounds) == before
     # The round's lock was let go when the project's could not be had.
     assert not write.round_lock("proj-a", "a-round").read_bytes()
@@ -764,7 +767,7 @@ def test_a_standing_ruling_from_a_round_waits_for_the_rounds_lock_too(rounds, ho
                     standing=True, wait_s=0.2)
 
     assert stopped.value.file == write.round_lock("proj-a", "a-round")
-    assert stopped.value.holder == held.pid
+    assert stopped.value.holder == held.own_pid
     assert logs(rounds) == before
 
 

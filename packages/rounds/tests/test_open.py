@@ -4,6 +4,7 @@ from then on, who it is recorded as done by, and each thing it refuses."""
 from __future__ import annotations
 
 import json
+import os
 
 import pytest
 from moxi import cli
@@ -42,7 +43,7 @@ def folded(round_dir):
 
 
 def files_under(root_dir):
-    return sorted(str(path.relative_to(root_dir)) for path in root_dir.rglob("*"))
+    return sorted(path.relative_to(root_dir).as_posix() for path in root_dir.rglob("*"))
 
 
 # -- what an opening leaves --------------------------------------------------------------
@@ -94,7 +95,8 @@ def test_a_round_is_opened_under_the_projects_key_as_the_projects_list_stores_it
 
     assert capsys.readouterr().out.startswith("opened proj-a/a-round ")
     assert write.round_lock("proj-a", "a-round").is_file()
-    assert not write.round_lock("PROJ-A", "a-round").exists()
+    # By name: on Windows and macOS a folder name is matched without case.
+    assert "PROJ-A" not in os.listdir(write.round_lock("PROJ-A", "a-round").parent.parent)
 
 
 def test_a_round_opens_in_a_dir_that_is_already_there(rounds):

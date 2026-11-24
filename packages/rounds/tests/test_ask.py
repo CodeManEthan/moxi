@@ -4,6 +4,7 @@ recorded with, and what is refused."""
 from __future__ import annotations
 
 import json
+import os
 
 import pytest
 from moxi import cli
@@ -97,7 +98,8 @@ def test_a_question_is_asked_under_the_projects_stored_key(rounds):
     assert run("PROJ-A/a-round") == 0
 
     assert len(asked(round_log(rounds))) == 1
-    assert not write.round_lock("PROJ-A", "a-round").exists()
+    # By name: on Windows and macOS a folder name is matched without case.
+    assert "PROJ-A" not in os.listdir(write.round_lock("PROJ-A", "a-round").parent.parent)
 
 
 def test_help_says_what_ask_does(capsys):

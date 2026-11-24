@@ -28,6 +28,12 @@ CHECK = shlex.join([sys.executable, "-c", "print('the check passed')"])
 POINTER = "comms:1234567"
 LOCK = "refs/rounds/finishing/main"
 
+#: The finish lock clears a holder that died on this machine only on POSIX; on Windows it
+#: refuses, naming the command that clears the lock.
+CLEARS_DEAD = pytest.mark.skipif(os.name != "posix",
+                                 reason="Windows: the finish lock never reads a holder "
+                                        "as dead there")
+
 
 @pytest.fixture
 def repo(git_repo, tmp_path):
@@ -98,6 +104,12 @@ def lock_ref(repo) -> str | None:
 
 def build_of(path: Path) -> builds.Build:
     return builds.current(states.fold(events(path)), "B1")
+
+
+def placed(event: dict, key: str) -> Path:
+    """The place `event` records under `key`, read as rounds reads it: a record holds a
+    place under the home folder from `~` (on Windows rounds' own folders are under it)."""
+    return Path(places.expand_home(event[key]))
 
 
 # -- a finish ------------------------------------------------------------------------------
@@ -327,6 +339,7 @@ def test_a_repos_lock_ref_is_the_lock_finish_takes(ready, repo, configure):
     assert of_type(path, "finish.action") == []
 
 
+@CLEARS_DEAD
 def test_a_dead_holders_lock_is_cleared_and_recorded_before_the_merge(ready, repo):
     path, _tree = ready
     line = finish_lock.holder("pilot", ROUND, "B1", at="2026-01-02T03:04:05Z",
@@ -459,6 +472,7 @@ def test_a_refusal_after_the_merge_names_what_was_done_and_that_it_reads_merged(
     assert "Q1" in err.split("refused because:")[1]
 
 
+@CLEARS_DEAD
 def test_a_refusal_after_a_dead_holder_was_cleared_names_the_clearing(ready, repo,
                                                                       monkeypatch):
     path, tree = ready
@@ -485,7 +499,7 @@ def test_a_refusal_after_a_dead_holder_was_cleared_names_the_clearing(ready, rep
 def test_the_cleanup_removes_both_dirs_and_deletes_the_merged_branch(ready, repo):
     path, tree = ready
     made = checking.commission_of(states.fold(events(path)), build_of(path))
-    worktree, scratch = Path(made["worktree"]), Path(made["scratch"])
+    worktree, scratch = placed(made, "worktree"), placed(made, "scratch")
 
     done = finishing.finish(ROUND, "B1", by="coder")
 
@@ -499,8 +513,8 @@ def test_a_process_in_the_builds_scratch_refuses_the_finish_with_nothing_written
         ready, repo):
     # Core refused to land a build while a live process used its scratch folder.
     path, _tree = ready
-    scratch = Path(checking.commission_of(states.fold(events(path)),
-                                          build_of(path))["scratch"])
+    scratch = placed(checking.commission_of(states.fold(events(path)), build_of(path)),
+                 "scratch")
     before = events(path)
     proc = subprocess.Popen([sys.executable, "-c", "import sys; sys.stdin.read()"],
                             cwd=scratch, stdin=subprocess.PIPE)
@@ -525,7 +539,7 @@ def test_a_scratch_that_came_into_use_after_the_gate_stays_for_the_sweep(
     # sweep and said so; the worktree and the branch went as before.
     path, _tree = ready
     made = checking.commission_of(states.fold(events(path)), build_of(path))
-    worktree, scratch = Path(made["worktree"]), Path(made["scratch"])
+    worktree, scratch = placed(made, "worktree"), placed(made, "scratch")
     gate, started = sweeping.scratch_gate, []
 
     def gate_then_use(*args, **kwargs):
@@ -579,7 +593,7 @@ def test_a_trash_entry_a_stopped_finish_left_is_deleted_by_the_next_armed_sweep(
         with pytest.raises(_Stopped):
             finishing.finish(ROUND, "B1", by="coder")
     entry = removal.trash_dir() / made["build"]
-    assert entry.is_dir() and not Path(made["scratch"]).exists()
+    assert entry.is_dir() and not placed(made, "scratch").exists()
     assert len(of_type(path, "finish.done")) == 1
 
     configure("\n[sweep]\narmed = true")

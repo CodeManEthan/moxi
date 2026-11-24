@@ -71,6 +71,12 @@ def ran(path: Path) -> list[dict]:
     return [one for one in log.read(path) if one["type"] == "check.ran"]
 
 
+def placed(event: dict, key: str) -> Path:
+    """The place `event` records under `key`, read as rounds reads it: a record holds a
+    place under the home folder from `~` (on Windows rounds' own folders are under it)."""
+    return Path(places.expand_home(event[key]))
+
+
 PASS = "print('the check passed')"
 
 
@@ -88,7 +94,7 @@ def test_a_check_runs_in_the_worktree_and_records_the_run(build, declare, repo):
         "stage": "B1", "step": "check", "commit": tree.rev(),
         "merge_base": repo.rev("main"), "argv": [PY, str(script)], "exit_code": 0}
     assert isinstance(event["duration_s"], float)
-    output = Path(event["output"])
+    output = placed(event, "output")
     assert output == made.scratch / "check-1.log"
     assert output.read_text().strip() == str(made.worktree)
     assert done.passed and done.output == output
@@ -117,7 +123,7 @@ def test_the_run_has_stdin_closed_and_no_git_variable(build, declare, monkeypatc
 
     checking.check(ROUND, "B1", by="coder")
 
-    assert Path(ran(path)[0]["output"]).read_text().split("\n")[:2] == ["''", "[]"]
+    assert placed(ran(path)[0], "output").read_text().split("\n")[:2] == ["''", "[]"]
 
 
 def test_each_run_writes_a_new_output_file(build, declare):
@@ -127,7 +133,7 @@ def test_each_run_writes_a_new_output_file(build, declare):
     checking.check(ROUND, "B1", by="coder")
     checking.check(ROUND, "B1", by="coder")
 
-    assert [Path(one["output"]).name for one in ran(path)] == ["check-1.log",
+    assert [placed(one, "output").name for one in ran(path)] == ["check-1.log",
                                                                 "check-2.log"]
     assert sorted(os.listdir(made.scratch)) == sorted([
         "check-1.log", "check-2.log", places.SCRATCH_MARKER])
@@ -226,7 +232,7 @@ def test_with_no_wait_a_held_check_lock_refuses_with_nothing_run(
 
     [unmet] = caught.value.unmet
     assert unmet.reason == (f"another check holds the machine's check lock "
-                            f"{checking.lock_file()}: pid {held.pid}")
+                            f"{checking.lock_file()}: pid {held.own_pid}")
     assert ran(path) == [] and not list(made.scratch.glob("check-*.log"))
 
 
@@ -244,7 +250,7 @@ def test_a_run_waits_for_the_check_lock_and_says_who_holds_it(build, declare, ho
 
     assert done.passed and len(ran(path)) == 1
     assert said[0] == (f"waiting for the machine's check lock {checking.lock_file()}, "
-                       f"held by pid {held.pid}")
+                       f"held by pid {held.own_pid}")
     assert said[1].startswith("got the check lock after ")
     assert done.duration_s < 2.0
 
@@ -608,8 +614,8 @@ def test_a_command_step_runs_its_argv_in_the_worktree_recorded_under_its_name(st
     [event] = ran(path)
     assert (event["step"], event["commit"], event["argv"], event["exit_code"]) == (
         "staging", tree.rev(), [PY, str(script), tree.rev(), "B1"], 0)
-    assert Path(event["output"]) == made.scratch / "check-1.log"
-    assert Path(event["output"]).read_text().strip() == str(made.worktree)
+    assert placed(event, "output") == made.scratch / "check-1.log"
+    assert placed(event, "output").read_text().strip() == str(made.worktree)
     assert (done.step, done.passed) == ("staging", True)
 
 
@@ -651,7 +657,7 @@ def test_a_step_name_with_a_dot_is_refused(stepped, name):
 
 
 def test_the_repo_s_check_named_as_a_step_is_refused(stepped):
-    path, _tree, _made, _script = stepped(PASS, check=f"{PY} -c pass")
+    path, _tree, _made, _script = stepped(PASS, check=shlex.join([PY, "-c", "pass"]))
     before = path.read_bytes()
 
     assert main(["check", ROUND, "B1", "--step", "check"]) == 2
@@ -717,7 +723,7 @@ def test_the_command_step_waits_for_a_clean_worktree_as_its_run_refuses_one(step
 
 
 def test_a_run_of_one_step_is_never_read_for_another(stepped):
-    path, _tree, _made, _script = stepped(PASS, check=f"{PY} -c pass")
+    path, _tree, _made, _script = stepped(PASS, check=shlex.join([PY, "-c", "pass"]))
 
     checking.check(ROUND, "B1", by="coder")
     assert (stepped_step(path).state, stepped_step(path, "check").state) == (

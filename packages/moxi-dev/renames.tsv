@@ -17796,3 +17796,4 @@ comms	packages/comms/tests/test_reserved_refusals.py	list(view.ancestry(39, limi
 notes	packages/notes/src/moxi_notes/connector/pathrules.py	device and inode judged, still a regular file with one link (`changed` otherwise). This	keep	changed	changed
 moxi-dev	packages/moxi-dev/tests/test_console_script.py	assert child.wait(timeout=30) == 0	keep	timeout	timeout
 turns	packages/turns/tests/test_listeners.py	assert any(m.startswith(f"start list entry run:{plain} adds nothing: it cannot start")	keep	any	any
+rounds	packages/rounds/tests/test_finish_lock.py	assert said.startswith("refused") and f"coder pid={first.own_pid} " in said	keep	refused	refused

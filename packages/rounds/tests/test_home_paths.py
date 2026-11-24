@@ -158,12 +158,20 @@ def commissioned(path: Path) -> dict:
     return checking.commission_of(state, builds.current(state, "B1"))
 
 
+def away(monkeypatch, tmp_path) -> Path:
+    """Make the home folder one that holds none of rounds' folders. The fence's own home
+    holds them on Windows, where a user's data folders are inside the profile."""
+    return set_home(monkeypatch, tmp_path / "ann")
+
+
 @pytest.fixture(params=["tilde", "whole"])
 def built(request, repo, tmp_path, monkeypatch, rounds_home, script):
     """B1 commissioned with its folders recorded from `~` (rounds' folder is under the
     home folder) or as whole paths (it is not). Returns `(log, the commission, form)`."""
     if request.param == "tilde":
         set_home(monkeypatch, rounds_home)
+    else:
+        away(monkeypatch, tmp_path)
     path, made = commission(repo, tmp_path)
     return path, made, request.param
 
@@ -262,6 +270,7 @@ def rewritten(repo, tmp_path, monkeypatch, rounds_home, script):
     """B1 commissioned and checked with whole paths recorded, then the log rewritten
     with `~` for rounds' folder, now under the home folder. Returns `(log, the
     commission)`."""
+    away(monkeypatch, tmp_path)
     path, made = commission(repo, tmp_path)
     assert checking.check(ROUND, "B1", by="coder").passed
     set_home(monkeypatch, rounds_home)
@@ -397,10 +406,10 @@ def test_a_tilde_word_of_a_command_step_runs_as_the_path_under_home(
 
     done = checking.check(ROUND, "B1", by="coder", step="staging")
 
-    assert done.passed and done.argv == (PY, str(script))
+    assert done.passed and done.argv[0] == PY and Path(done.argv[1]) == script
     assert done.output.read_text().strip() == "staged"
     run = checking.newest(folded(path), "B1", "staging")
-    assert run["argv"] == [PY, "~" + os.sep + "staging.py"]
+    assert run["argv"] == [PY, "~/staging.py"]
 
 
 def staged(write_config, script: Path) -> None:

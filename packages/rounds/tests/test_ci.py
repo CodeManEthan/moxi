@@ -14,9 +14,10 @@ from pathlib import Path
 
 import pytest
 from moxi.config import ConfigError
+from moxi_dev.testing import console_script
 
 from moxi_rounds import (checking, ci, commissioning, doctor, log, opening, paths,
-                         settings, showing, steps)
+                         places, settings, showing, steps)
 from moxi_rounds import state as states
 from moxi_rounds.cli import main
 from moxi_rounds.errors import Refused
@@ -662,6 +663,12 @@ def events(path: Path, kind: str) -> list[dict]:
     return [one for one in log.read(path) if one["type"] == kind]
 
 
+def placed(event: dict, key: str) -> Path:
+    """The place `event` records under `key`, read as rounds reads it: a record holds a
+    place under the home folder from `~` (on Windows rounds' own folders are under it)."""
+    return Path(places.expand_home(event[key]))
+
+
 def green_at(stub: Stub, tip: str, **fields) -> None:
     stub.runs([run(**{"headSha": tip, **fields})])
 
@@ -684,7 +691,7 @@ def test_a_check_by_ci_runs_the_local_part_and_records_the_read(setup, stub, rep
     [read] = events(path, ci.READ)
     assert (local["step"], local["commit"], local["exit_code"]) == (
         ci.LOCAL, tree.rev(), 0)
-    assert Path(local["output"]).read_text().strip() == "local ran"
+    assert placed(local, "output").read_text().strip() == "local ran"
     assert (read["commit"], read["merge_base"], read["reading"]) == (
         tree.rev(), repo.rev("main"), ci.GREEN)
     assert read["status_argv"] == stub.argv("status", tree.rev())
@@ -824,7 +831,7 @@ def test_the_check_pushes_to_the_remote_first_and_the_pre_push_hook_runs(
     hook = Path(repo.git("rev-parse", "--git-common-dir"))
     hook = (hook if hook.is_absolute() else repo.root / hook) / "hooks" / "pre-push"
     hook.parent.mkdir(exist_ok=True)
-    hook.write_text(f"#!/bin/sh\necho pushed >> {tmp_path / 'hook-ran'}\n")
+    hook.write_text(f"#!/bin/sh\necho pushed >> {sh_path(tmp_path / 'hook-ran')}\n")
     hook.chmod(hook.stat().st_mode | stat.S_IXUSR)
     _path, tree, _made = setup(remote="origin")
     green_at(stub, tree.rev())
@@ -885,6 +892,12 @@ def test_a_failed_job_read_records_nothing(setup, stub):
     assert path.read_bytes() == before
 
 
+def sh_path(path: Path) -> str:
+    """`path` as a hook's shell reads it, quoted: git runs a hook with its own sh on every
+    system, which on Windows takes a backslash as an escape and `/` as a separator."""
+    return shlex.quote(path.as_posix())
+
+
 def bare_remote(repo, tmp_path, hook: str = "") -> Path:
     bare = tmp_path / "remote.git"
     repo.git("init", "-q", "--bare", str(bare))
@@ -901,7 +914,7 @@ def bare_remote(repo, tmp_path, hook: str = "") -> Path:
 def test_with_a_ref_the_tip_is_forced_to_ci_s_own_branch_and_recorded(
         setup, stub, repo, tmp_path, capsys):
     bare = bare_remote(repo, tmp_path,
-                       f"#!/bin/sh\ncat >> {tmp_path / 'hook-read'}\n")
+                       f"#!/bin/sh\ncat >> {sh_path(tmp_path / 'hook-read')}\n")
     path, tree, _made = setup(remote="origin", ref="ci/{branch}")
     green_at(stub, tree.rev())
 
@@ -924,7 +937,7 @@ def test_with_a_ref_the_tip_is_forced_to_ci_s_own_branch_and_recorded(
 def test_the_check_never_pushes_the_name_full_ref_gives(setup, stub, repo, tmp_path,
                                                         capsys):
     bare = bare_remote(repo, tmp_path,
-                       f"#!/bin/sh\ncat >> {tmp_path / 'hook-read'}\n")
+                       f"#!/bin/sh\ncat >> {sh_path(tmp_path / 'hook-read')}\n")
     path, tree, _made = setup(remote="origin", ref="ci/{branch}",
                               full_ref="ci-full/{branch}")
     green_at(stub, tree.rev())
@@ -949,7 +962,7 @@ NEEDS_A_LINE = ("#!/bin/sh\nread line || {{ echo 'no ref lines' >&2; exit 1; }}\
 def test_a_check_again_at_a_tip_the_ref_already_holds_pushes_nothing_and_reads_ci(
         setup, stub, repo, tmp_path, capsys):
     read = tmp_path / "hook-read"
-    bare = bare_remote(repo, tmp_path, NEEDS_A_LINE.format(read))
+    bare = bare_remote(repo, tmp_path, NEEDS_A_LINE.format(sh_path(read)))
     path, tree, _made = setup(remote="origin", ref="ci/{branch}")
     green_at(stub, tree.rev())
     assert main(["check", ROUND, "B1"]) == 0
@@ -968,7 +981,7 @@ def test_a_check_again_at_a_tip_the_ref_already_holds_pushes_nothing_and_reads_c
 
 def test_a_ref_at_another_commit_is_pushed_again(setup, stub, repo, tmp_path):
     read = tmp_path / "hook-read"
-    bare = bare_remote(repo, tmp_path, NEEDS_A_LINE.format(read))
+    bare = bare_remote(repo, tmp_path, NEEDS_A_LINE.format(sh_path(read)))
     _path, tree, _made = setup(remote="origin", ref="ci/{branch}")
     repo.git("push", "-q", "--no-verify", "origin", "main:refs/heads/ci/work")
     green_at(stub, tree.rev())
@@ -994,7 +1007,7 @@ def test_a_branch_ls_remote_lists_by_its_tail_alone_is_not_taken_for_the_ref(
 def test_without_a_ref_a_branch_already_at_the_tip_is_not_pushed_again(
         setup, stub, repo, tmp_path):
     read = tmp_path / "hook-read"
-    bare_remote(repo, tmp_path, NEEDS_A_LINE.format(read))
+    bare_remote(repo, tmp_path, NEEDS_A_LINE.format(sh_path(read)))
     _path, tree, _made = setup(remote="origin")
     green_at(stub, tree.rev())
     assert checking.check(ROUND, "B1", by="coder").already is False
@@ -1022,7 +1035,7 @@ def test_a_push_url_apart_from_the_fetch_url_is_pushed_though_the_fetch_url_is_a
 def test_a_push_is_skipped_only_when_every_push_url_is_at_the_tip(
         setup, stub, repo, tmp_path):
     read = tmp_path / "hook-read"
-    bare = bare_remote(repo, tmp_path, f"#!/bin/sh\ncat >> {read}\n")
+    bare = bare_remote(repo, tmp_path, f"#!/bin/sh\ncat >> {sh_path(read)}\n")
     _path, tree, _made = setup(remote="origin", ref="ci/{branch}")
     second = tmp_path / "second.git"
     repo.git("init", "-q", "--bare", str(second))
@@ -1141,9 +1154,7 @@ def ci_rows() -> list:
 def gh_on_path(tmp_path, monkeypatch, auth_exit: int) -> None:
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
-    gh = bin_dir / "gh"
-    gh.write_text(f"#!/bin/sh\nexit {auth_exit}\n")
-    gh.chmod(0o755)
+    console_script(bin_dir, "gh", f"raise SystemExit({auth_exit})\n")
     monkeypatch.setenv("PATH", f"{bin_dir}{os.pathsep}{os.environ['PATH']}")
 
 
@@ -1211,9 +1222,8 @@ def test_the_doctor_asks_gh_with_no_git_variable_of_the_caller(repo, write_confi
     default_ci(write_config)
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
-    gh = bin_dir / "gh"
-    gh.write_text('#!/bin/sh\n[ -z "$GIT_DIR" ] || exit 1\nexit 0\n')
-    gh.chmod(0o755)
+    console_script(bin_dir, "gh",
+                   "import os\nraise SystemExit(1 if os.environ.get('GIT_DIR') else 0)\n")
     monkeypatch.setenv("PATH", f"{bin_dir}{os.pathsep}{os.environ['PATH']}")
     monkeypatch.setenv("GIT_DIR", str(tmp_path / "elsewhere"))
 

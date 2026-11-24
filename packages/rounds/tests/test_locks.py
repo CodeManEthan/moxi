@@ -36,7 +36,7 @@ def shown(view, result):
 
 
 def files_under(root_dir):
-    return sorted(str(path.relative_to(root_dir)) for path in root_dir.rglob("*")
+    return sorted(path.relative_to(root_dir).as_posix() for path in root_dir.rglob("*")
                   if path.is_file())
 
 
@@ -49,7 +49,7 @@ def test_the_cores_lock_locks_the_file_it_is_given_and_writes_the_holders_pid(
     proc = holder(path)
 
     assert files_under(locks_dir) == ["a.lock"]
-    assert path.read_text().split() == [str(proc.pid)]
+    assert path.read_text().split() == [str(proc.own_pid)]
     with files.lock(locks_dir / "another.lock", timeout_s=0):
         pass  # only the file given is locked, not its folder
 
@@ -64,8 +64,8 @@ def test_the_cores_lock_names_the_holders_pid_when_the_wait_runs_out(tmp_path, h
             pass
 
     assert time.monotonic() - started >= 0.2
-    assert caught.value.holder == proc.pid and caught.value.path == path
-    assert f"pid {proc.pid}" in str(caught.value)
+    assert caught.value.holder == proc.own_pid and caught.value.path == path
+    assert f"pid {proc.own_pid}" in str(caught.value)
 
 
 def test_the_cores_lock_is_free_again_once_its_holder_is_gone(tmp_path, holder):
@@ -74,7 +74,7 @@ def test_the_cores_lock_is_free_again_once_its_holder_is_gone(tmp_path, holder):
     proc.communicate(timeout=30)
 
     with files.lock(path, timeout_s=0):
-        assert path.read_text().split() != [str(proc.pid)]
+        assert path.read_text().split() != [str(proc.own_pid)]
 
 
 # -- where the lock files are ------------------------------------------------------------
@@ -102,7 +102,7 @@ def test_no_projects_key_puts_one_lock_at_or_inside_another(holder):
 
     held = [holder(path) for path in locks]
 
-    assert all(path.is_file() and path.read_text().split() == [str(proc.pid)]
+    assert all(path.is_file() and path.read_text().split() == [str(proc.own_pid)]
                for path, proc in zip(locks, held, strict=True))
 
 
@@ -209,9 +209,9 @@ def test_a_verb_that_finds_the_lock_held_refuses_after_its_wait_and_names_the_pi
 
     error = caught.value
     assert 0.2 <= waited < 10
-    assert error.holder == proc.pid and error.waited_s == 0.2
+    assert error.holder == proc.own_pid and error.waited_s == 0.2
     assert error.file == write.round_lock("proj-a", "a-round")
-    assert f"pid {proc.pid}" in error.reason and f"pid {proc.pid}" in error.fix
+    assert f"pid {proc.own_pid}" in error.reason and f"pid {proc.own_pid}" in error.fix
     assert isinstance(error, RoundsError) and error.exit_code == exits.REFUSED == 3
     assert where.round_log.read_bytes() == before
 
@@ -248,7 +248,7 @@ def test_a_held_project_lock_stops_a_verb_on_the_project(where, holder):
         write.record(write.Where("proj-a", where.rounds_dir), by="planner", event=shown,
                      wait_s=0)
 
-    assert caught.value.holder == proc.pid
+    assert caught.value.holder == proc.own_pid
     assert not where.project_log.exists()
 
 

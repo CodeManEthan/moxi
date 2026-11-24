@@ -59,7 +59,7 @@ def made(repo, tmp_path, write_config):
                by="planner")
     commissioning.commission(ROUND, "B1", builder="coder", by="planner")
     event = commission(path)
-    tree = type(repo)(Path(event["worktree"]))
+    tree = type(repo)(placed(event, "worktree"))
     tree.commit("work.txt", "the work")
     return path, tree, event
 
@@ -77,6 +77,13 @@ def ended(made, later):
 def commission(path: Path) -> dict:
     state = states.fold(log.read_round(path))
     return checking.commission_of(state, builds.current(state, "B1"))
+
+
+def placed(event: dict, kind: str) -> Path:
+    """The place B1's commission `event` records for `kind`, read as rounds reads it: a
+    record holds a place under the home folder from `~` (on Windows rounds' own folders
+    are under it)."""
+    return Path(places.expand_home(event[kind]))
 
 
 def dry():
@@ -101,7 +108,7 @@ def test_the_dry_run_names_both_dirs_of_an_ended_build_and_changes_nothing(ended
     swept = dry()
 
     assert fates(swept) == {"worktree": ("would go", None), "scratch": ("would go", None)}
-    assert Path(event["worktree"]).is_dir() and Path(event["scratch"]).is_dir()
+    assert placed(event, "worktree").is_dir() and placed(event, "scratch").is_dir()
     assert not sweeping.log_file().exists() and not sweeping.lock_file().exists()
 
 
@@ -109,7 +116,7 @@ def test_an_open_build_is_never_a_candidate(made, later, write_config):
     write_config(ARMED)
     swept = sweeping.run(remove=True)
     assert swept.leftovers == () and swept.clear
-    assert Path(made[2]["worktree"]).is_dir() and Path(made[2]["scratch"]).is_dir()
+    assert placed(made[2], "worktree").is_dir() and placed(made[2], "scratch").is_dir()
 
 
 def test_an_open_build_recording_the_same_place_keeps_an_ended_ones_dir(ended,
@@ -135,16 +142,16 @@ def test_a_record_from_another_host_is_kept_and_named(ended, monkeypatch):
 def test_a_dir_no_record_names_is_never_a_candidate(ended, write_config):
     _path, _tree, event = ended
     write_config(ARMED)
-    stray = Path(event["worktree"]).parent / "not-recorded"
+    stray = placed(event, "worktree").parent / "not-recorded"
     stray.mkdir()
     (stray / ".rounds-build").write_text(
-        (Path(event["scratch"]) / ".rounds-build").read_text(encoding="utf-8"),
+        (placed(event, "scratch") / ".rounds-build").read_text(encoding="utf-8"),
         encoding="utf-8")
 
     swept = sweeping.run(remove=True)
 
-    assert {one.place for one in swept.leftovers} == {Path(event["worktree"]),
-                                                      Path(event["scratch"])}
+    assert {one.place for one in swept.leftovers} == {placed(event, "worktree"),
+                                                      placed(event, "scratch")}
     assert (stray / ".rounds-build").is_file()
 
 
@@ -152,7 +159,7 @@ def test_the_lander_s_queue_worktree_is_never_a_candidate(ended, repo, write_con
     _path, _tree, event = ended
     write_config(ARMED)
     place = batching.place_of(own.load(), "proj-a")
-    assert place.parent == Path(event["worktree"]).parent
+    assert place.parent == placed(event, "worktree").parent
     repo.git("worktree", "add", "--quiet", "--detach", str(place))
 
     swept = sweeping.run(remove=True)
@@ -164,7 +171,7 @@ def test_the_lander_s_queue_worktree_is_never_a_candidate(ended, repo, write_con
 
 def test_a_dir_already_gone_is_not_in_the_account(ended):
     _path, _tree, event = ended
-    removal.delete(Path(event["scratch"]))
+    removal.delete(placed(event, "scratch"))
     assert set(fates(dry())) == {"worktree"}
 
 
@@ -173,14 +180,14 @@ def test_a_dir_already_gone_is_not_in_the_account(ended):
 def test_an_unmarked_dir_is_named_and_never_removed(ended, write_config):
     _path, _tree, event = ended
     write_config(ARMED)
-    (Path(event["scratch"]) / ".rounds-build").unlink()
+    (placed(event, "scratch") / ".rounds-build").unlink()
 
     swept = sweeping.run(remove=True)
 
     [scratch] = [one for one in swept.leftovers if one.candidate.kind == "scratch"]
     assert (scratch.fate, scratch.kept.check) == ("kept", "A4")
     assert "unmarked" in scratch.line()
-    assert Path(event["scratch"]).is_dir()
+    assert placed(event, "scratch").is_dir()
 
 
 def test_a_worktree_holding_an_ignored_env_is_kept_and_its_paths_named(ended,
@@ -223,7 +230,7 @@ def test_a_log_that_cant_be_read_keeps_every_dir_and_is_named(ended, tmp_path,
 
     assert fates(swept) == {"worktree": ("kept", "C"), "scratch": ("kept", "C")}
     assert len(swept.unreadable) == 1 and "b-round" in swept.unreadable[0]
-    assert Path(event["worktree"]).is_dir() and Path(event["scratch"]).is_dir()
+    assert placed(event, "worktree").is_dir() and placed(event, "scratch").is_dir()
 
 
 _USERS = {
@@ -246,7 +253,7 @@ _LINUX_USERS = {
                                              else {})])
 def test_a_process_using_the_dir_keeps_it(ended, use):
     _path, _tree, event = ended
-    place = Path(event["scratch"])
+    place = placed(event, "scratch")
     (place / "mapped.bin").write_bytes(b"\0" * 4096)
     code, more = {**_USERS, **_LINUX_USERS}[use]
     env = {**os.environ, **{key: value.format(place=place) for key, value in more.items()}}
@@ -266,7 +273,7 @@ def test_a_process_using_the_dir_keeps_it(ended, use):
 
 def test_a_file_changed_within_the_grace_keeps_the_dir(ended):
     _path, _tree, event = ended
-    written = Path(event["scratch"]) / "out.log"
+    written = placed(event, "scratch") / "out.log"
     written.write_text("still being written\n", encoding="utf-8")
     soon = time.time() + 2.5 * 3600
     os.utime(written, (soon, soon))
@@ -279,7 +286,7 @@ def test_a_file_changed_within_the_grace_keeps_the_dir(ended):
 
 def test_a_marker_written_within_the_grace_keeps_the_dir(ended):
     _path, _tree, event = ended
-    marker = Path(event["scratch"]) / ".rounds-build"
+    marker = placed(event, "scratch") / ".rounds-build"
     data = json.loads(marker.read_text(encoding="utf-8"))
     data["at"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(time.time() + 2.5 * 3600))
     marker.write_text(json.dumps(data) + "\n", encoding="utf-8")
@@ -294,7 +301,7 @@ def test_a_modified_time_set_back_still_reads_by_the_change_time(made, monkeypat
     path, _tree, event = made
     log.append(path, "build.dropped", {"stage": "B1", "by": "lead", "record": POINTER},
                by="planner")
-    place = Path(event["scratch"])
+    place = placed(event, "scratch")
     marker = place / ".rounds-build"
     data = json.loads(marker.read_text(encoding="utf-8"))
     data["at"] = "2020-01-01T00:00:00Z"
@@ -323,7 +330,7 @@ def test_unarmed_remove_prints_the_dry_run_and_refuses_and_the_doctor_lists_the_
     assert f"would go {event['worktree']}" in said.out
     assert f"would go {event['scratch']}" in said.out
     assert "sweep.armed is false" in said.err and "armed = true" in said.err
-    assert Path(event["worktree"]).is_dir() and Path(event["scratch"]).is_dir()
+    assert placed(event, "worktree").is_dir() and placed(event, "scratch").is_dir()
     row = next(row for row in doctor.rows() if row.name == "leftovers")
     assert row.state == "warn"
     assert f"would go {event['worktree']}" in row.detail
@@ -344,7 +351,7 @@ def test_armed_a_worktree_goes_by_git_its_branch_stays_and_scratch_goes_through_
     swept = sweeping.run(remove=True)
 
     assert fates(swept) == {"worktree": ("removed", None), "scratch": ("removed", None)}
-    assert not os.path.lexists(event["worktree"]) and not os.path.lexists(event["scratch"])
+    assert not os.path.lexists(placed(event, "worktree")) and not os.path.lexists(placed(event, "scratch"))
     assert "work" in repo.git("branch", "--list", "work")
     assert repo.git("worktree", "list", "--porcelain").count("worktree ") == 1
     assert os.listdir(removal.trash_dir()) == []
@@ -383,7 +390,7 @@ def test_a_rename_into_a_trash_on_another_disk_keeps_the_dir(ended, write_config
     swept = sweeping.run(remove=True)
 
     assert fates(swept)["scratch"] == ("kept", "removal")
-    assert Path(event["scratch"]).is_dir()
+    assert placed(event, "scratch").is_dir()
 
 
 def test_a_trash_entry_a_stopped_run_left_is_deleted_by_the_next_and_others_are_left(
@@ -427,7 +434,7 @@ def test_a_run_starts_no_removal_after_its_time_limit(ended, write_config, monke
 
     assert swept.timed_out
     assert fates(swept) == {"worktree": ("left", None), "scratch": ("left", None)}
-    assert Path(event["worktree"]).is_dir() and Path(event["scratch"]).is_dir()
+    assert placed(event, "worktree").is_dir() and placed(event, "scratch").is_dir()
 
 
 def test_the_sweep_takes_no_round_and_no_pointer(capsys):

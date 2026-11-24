@@ -4,6 +4,9 @@ every harness, and nothing is noted when the question can't be answered."""
 
 from __future__ import annotations
 
+import itertools
+import os
+
 import pytest
 
 from moxi_rounds import flows, model_tiers, next_step, settings
@@ -31,10 +34,15 @@ WEAKEST_FIRST = """\
 @pytest.fixture
 def models(write_config):
     """`models(text)`: the `models` table as the settings read it from a config file
-    whose text is `text`."""
+    whose text is `text`. Each write moves the file's time a second on: two texts of
+    one size written within one tick of the file clock (on Windows a few milliseconds)
+    read as one file to the settings' cache, which is keyed by size and time."""
+    later = itertools.count(1)
 
     def read(text: str):
-        write_config(text)
+        path = write_config(text)
+        when = path.stat().st_mtime_ns + next(later) * 1_000_000_000
+        os.utime(path, ns=(when, when))
         return settings.load()["models"]
 
     return read

@@ -61,6 +61,13 @@ def commission(path: Path) -> dict:
     return checking.commission_of(state, builds.current(state, "B1"))
 
 
+def placed(event: dict, kind: str) -> Path:
+    """The place B1's commission `event` records for `kind`, read as rounds reads it: a
+    record holds a place under the home folder from `~` (on Windows rounds' own folders
+    are under it)."""
+    return Path(places.expand_home(event[kind]))
+
+
 def remove(event: dict, kind: str = removal.WORKTREE, **given):
     return removal.remove(ROUND, event, kind, settings=own.load(), **given)
 
@@ -79,7 +86,7 @@ def test_a_worktree_holding_only_disposable_paths_goes_and_its_branch_stays(made
     (tree.root / "__pycache__").mkdir()
     (tree.root / "__pycache__" / "work.pyc").write_bytes(b"\0")
 
-    assert remove(event) == Path(event["worktree"])
+    assert remove(event) == placed(event, "worktree")
 
     assert not tree.root.exists()
     assert repo.git("branch", "--list", "work").strip().endswith("work")
@@ -87,7 +94,7 @@ def test_a_worktree_holding_only_disposable_paths_goes_and_its_branch_stays(made
 
 def test_a_scratch_dir_goes_whole_through_the_trash(made):
     _path, _tree, event = made
-    scratch = Path(event["scratch"])
+    scratch = placed(event, "scratch")
     (scratch / "check-1.log").write_text("output\n", encoding="utf-8")
 
     assert remove(event, removal.SCRATCH) == scratch
@@ -159,7 +166,7 @@ def test_a_worktree_dir_the_config_moved_from_is_outside_the_roots(made, write_c
 
 def test_a_link_at_the_place_keeps_what_it_points_at(made, tmp_path):
     _path, _tree, event = made
-    scratch = Path(event["scratch"])
+    scratch = placed(event, "scratch")
     elsewhere = tmp_path / "elsewhere"
     shutil.move(scratch, elsewhere)
     scratch.symlink_to(elsewhere)
@@ -170,7 +177,7 @@ def test_a_link_at_the_place_keeps_what_it_points_at(made, tmp_path):
 
 def test_a_link_to_a_dir_above_the_place_keeps_it(made, tmp_path):
     _path, _tree, event = made
-    scratch = Path(event["scratch"])
+    scratch = placed(event, "scratch")
     above = scratch.parent
     moved = tmp_path / "moved-branch"
     shutil.move(above, moved)
@@ -182,7 +189,7 @@ def test_a_link_to_a_dir_above_the_place_keeps_it(made, tmp_path):
 
 def test_a_dir_with_no_marker_is_unmarked_and_kept(made):
     _path, _tree, event = made
-    scratch = Path(event["scratch"])
+    scratch = placed(event, "scratch")
     (scratch / places.SCRATCH_MARKER).unlink()
 
     found = remove(event, removal.SCRATCH)
@@ -376,7 +383,7 @@ def test_a_build_drop_removes_its_dirs_and_keeps_its_branch(made, repo):
     _path, tree, event = made
     dropped = dropping.drop_build(ROUND, "B1", by="operator", record=POINTER,
                                   run_by="planner")
-    assert dropped.removed == (Path(event["worktree"]), Path(event["scratch"]))
+    assert dropped.removed == (placed(event, "worktree"), placed(event, "scratch"))
     assert dropped.kept == ()
     assert repo.git("branch", "--list", "work").strip().endswith("work")
 
@@ -401,7 +408,7 @@ def test_a_drop_leaves_a_scratch_a_process_uses_and_moves_the_rest(made, whole):
     # Core's abandon was not refused for its scratch folder: the folder in use was not
     # moved and stayed for the sweep, and the worktree went as before.
     _path, _tree, event = made
-    scratch = Path(event["scratch"])
+    scratch = placed(event, "scratch")
     proc = subprocess.Popen([sys.executable, "-c", "import sys; sys.stdin.read()"],
                             cwd=scratch, stdin=subprocess.PIPE)
     try:
@@ -414,7 +421,7 @@ def test_a_drop_leaves_a_scratch_a_process_uses_and_moves_the_rest(made, whole):
     finally:
         proc.communicate(timeout=30)
 
-    assert dropped.removed == (Path(event["worktree"]),)
+    assert dropped.removed == (placed(event, "worktree"),)
     [kept] = dropped.kept
     assert (kept.kind, kept.place, kept.check) == ("scratch", scratch, "D")
     assert len(kept.work) == 1 and kept.work[0].startswith(f"pid {proc.pid} (")
@@ -427,7 +434,7 @@ def test_a_round_drop_keeps_a_worktree_holding_an_ignored_env_and_says_b3(made):
 
     dropped = dropping.drop(ROUND, by="operator", record=POINTER, run_by="planner")
 
-    assert dropped.removed == (Path(event["scratch"]),)
+    assert dropped.removed == (placed(event, "scratch"),)
     assert [(one.check, one.work) for one in dropped.kept] == [("B3", (".env",))]
     assert (tree.root / ".env").is_file()
 
@@ -452,7 +459,7 @@ def test_a_project_disposable_list_is_read_for_its_builds(made, write_config):
     (tree.root / ".env").write_text("TOKEN=disposable here\n", encoding="utf-8")
     write_config('[projects.proj-a]\ndisposable = [".env"]\n')
 
-    assert remove(event) == Path(event["worktree"])
+    assert remove(event) == placed(event, "worktree")
 
 
 @pytest.mark.skipif(sys.platform == "win32", reason="the mount table is read on Linux")
@@ -470,7 +477,7 @@ def _on_another_device(found: os.stat_result) -> os.stat_result:
 
 def test_a_part_below_the_root_on_another_device_keeps_the_dir(made, monkeypatch):
     _path, tree, event = made
-    place = Path(os.path.realpath(event["worktree"]))
+    place = Path(os.path.realpath(placed(event, "worktree")))
     real_lstat = os.lstat
 
     def lstat(path, *args, **kwargs):

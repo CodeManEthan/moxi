@@ -881,7 +881,7 @@ def test_a_move_and_an_adoption_wait_for_both_locks(rounds, holder, which):
                  lambda: moving.adopt(A, "P1", by="curator", wait_s=0.2)):
         with pytest.raises(Locked) as stopped:
             call()
-        assert (stopped.value.file, stopped.value.holder) == (path, busy.pid)
+        assert (stopped.value.file, stopped.value.holder) == (path, busy.own_pid)
 
     assert logs(rounds) == before
     if which == "project":

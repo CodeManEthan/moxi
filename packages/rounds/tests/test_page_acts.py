@@ -13,7 +13,8 @@ import pytest
 from moxi import cli
 
 from moxi_rounds import (actors, asking, builds, commissioning, decisions, dropping, log,
-                         moving, opening, ruling, shown, state, verdicts, waits, write)
+                         moving, opening, places, ruling, shown, state, verdicts, waits,
+                         write)
 from moxi_rounds import options as choices
 from moxi_rounds.errors import BadArgument, Locked, NoRound, Refused, UnknownProject
 
@@ -109,6 +110,12 @@ def last(round_dir) -> dict:
 
 def raw(round_dir) -> bytes:
     return log.round_log(round_dir).read_bytes()
+
+
+def placed(event: dict, key: str) -> Path:
+    """The place `event` records under `key`, read as rounds reads it: a record holds a
+    place under the home folder from `~` (on Windows rounds' own folders are under it)."""
+    return Path(places.expand_home(event[key]))
 
 
 def own(event: dict) -> dict:
@@ -456,7 +463,7 @@ def test_a_drop_is_the_operators_drop_with_the_pages_pointer_and_removes_the_kit
         "actor": actors.default(), "type": "build.dropped", "stage": "B1",
         "by": "operator", "record": pointer,
         "tips": [{"stage": "B1", "repo": PROJECT, "branch": "work-b1", "tip": tip}]}
-    assert dropped.removed == (Path(event["worktree"]), Path(event["scratch"]))
+    assert dropped.removed == (placed(event, "worktree"), placed(event, "scratch"))
     assert dropped.kept == ()
     assert git_repo.rev("work-b1") == tip
     assert builds.current(folded(kit), "B1").ended == builds.DROPPED
@@ -466,15 +473,15 @@ def test_a_drop_is_the_operators_drop_with_the_pages_pointer_and_removes_the_kit
 def test_a_drop_keeps_a_worktree_with_work_in_it_and_says_why(kit):
     event = next(one for one in log.read(log.round_log(kit))
                  if one["type"] == "build.commissioned")
-    (Path(event["worktree"]) / "draft.txt").write_text("not committed\n",
+    (placed(event, "worktree") / "draft.txt").write_text("not committed\n",
                                                         encoding="utf-8")
 
     dropped = drop()
 
-    assert dropped.removed == (Path(event["scratch"]),)
+    assert dropped.removed == (placed(event, "scratch"),)
     [kept] = dropped.kept
-    assert kept.place == Path(event["worktree"]) and "draft.txt" in kept.work
-    assert (Path(event["worktree"]) / "draft.txt").is_file()
+    assert kept.place == placed(event, "worktree") and "draft.txt" in kept.work
+    assert (placed(event, "worktree") / "draft.txt").is_file()
 
 
 def test_a_drop_the_round_cant_take_is_refused(kit):
@@ -514,7 +521,7 @@ def test_a_round_held_by_another_verb_gives_locked_and_writes_nothing(kit, holde
     with pytest.raises(Locked) as stopped:
         calls[act]()
 
-    assert stopped.value.holder == held.pid
+    assert stopped.value.holder == held.own_pid
     assert everything_logged(kit) == before
 
 

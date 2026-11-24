@@ -134,10 +134,11 @@ def without_notes(fenced, monkeypatch):
 
 
 _HOLDER = textwrap.dedent("""
+    import os
     import sys
     from moxi import files
     with files.lock(sys.argv[1]):
-        print("held", flush=True)
+        print("held", os.getpid(), flush=True)
         sys.stdin.read()
 """)
 
@@ -145,7 +146,9 @@ _HOLDER = textwrap.dedent("""
 @pytest.fixture
 def holder(fenced):
     """`holder(path)`: a real process that holds the lock on `path` until the test ends.
-    Returns the process. A thread can't stand in: the lock refuses a second taker in
+    Returns the process, with `own_pid` the pid it reports itself, which is the pid the
+    lock records: on Windows a venv's python.exe starts the interpreter as its child, so
+    `Popen.pid` is not it. A thread can't stand in: the lock refuses a second taker in
     its own process outright."""
     procs = []
 
@@ -153,7 +156,9 @@ def holder(fenced):
         proc = subprocess.Popen([sys.executable, "-c", _HOLDER, str(path)],
                                 stdin=subprocess.PIPE, stdout=subprocess.PIPE, text=True)
         procs.append(proc)
-        assert proc.stdout.readline().strip() == "held"
+        said, _, pid = proc.stdout.readline().strip().partition(" ")
+        assert said == "held"
+        proc.own_pid = int(pid)
         return proc
 
     yield start
