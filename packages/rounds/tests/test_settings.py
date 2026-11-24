@@ -6,6 +6,7 @@ from __future__ import annotations
 import json
 
 import pytest
+from moxi_dev.testing import toml_string
 from moxi import cli, config
 
 from moxi_rounds import settings
@@ -167,7 +168,7 @@ def test_moxi_config_shows_each_key_with_a_label_and_the_words_of_each_enum_valu
 def test_the_file_sets_the_plain_keys(write_config, tmp_path):
     write_config(f"""\
         tiers = ["fix", "full"]
-        worktree_dir = "{tmp_path / 'trees'}"
+        worktree_dir = {toml_string(tmp_path / 'trees')}
 
         [models]
         second = {{ claude = "model-two", codex = "model-b" }}

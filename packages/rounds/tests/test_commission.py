@@ -9,6 +9,7 @@ import os
 from pathlib import Path
 
 import pytest
+from moxi_dev.testing import toml_string
 
 from moxi_rounds import by_branch, commissioning, log, opening, places, steps, write
 from moxi_rounds import state as states
@@ -127,7 +128,7 @@ def test_a_branch_with_a_slash_or_a_percent_is_encoded_in_both_paths(repo, opene
 
 def test_the_worktree_dir_setting_says_where_worktrees_go(repo, opened, write_config,
                                                            tmp_path):
-    write_config(f'worktree_dir = "{tmp_path / "trees"}"\n')
+    write_config(f'worktree_dir = {toml_string(tmp_path / "trees")}\n')
     opened()
 
     made = commissioning.commission(ROUND, "B1", builder="coder", by="planner")

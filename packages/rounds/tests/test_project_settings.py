@@ -6,6 +6,7 @@ from __future__ import annotations
 import json
 
 import pytest
+from moxi_dev.testing import toml_string
 from moxi import config
 
 from moxi_rounds import settings
@@ -439,7 +440,7 @@ def test_an_absolute_dir_is_accepted_for_a_project_with_no_notes_dir(
         add_project, without_notes, tmp_path):
     add_project("proj-a")
     assert settings.has_notes_dir("proj-a") is False
-    assert settings.check_text(project(f'dir = "{tmp_path / "rounds"}"')) is None
+    assert settings.check_text(project(f'dir = {toml_string(tmp_path / "rounds")}')) is None
     assert settings.check_text(project('dir = "~/rounds"')) is None
 
 
@@ -452,8 +453,8 @@ def test_a_relative_dir_is_not_judged_for_a_project_the_list_does_not_hold(
 def test_two_tables_whose_dirs_reach_one_dir_are_refused(tmp_path):
     (tmp_path / "rounds").mkdir()
     (tmp_path / "link").symlink_to(tmp_path / "rounds")
-    error = refusal(f'[projects.proj-a]\ndir = "{tmp_path / "rounds"}"\n\n'
-                    f'[projects.proj-b]\ndir = "{tmp_path / "link"}"\n')
+    error = refusal(f'[projects.proj-a]\ndir = {toml_string(tmp_path / "rounds")}\n\n'
+                    f'[projects.proj-b]\ndir = {toml_string(tmp_path / "link")}\n')
     assert error.key == "projects.proj-b.dir"
     assert "projects.proj-a.dir is that folder too" in error.problem
     assert str(tmp_path / "rounds") in error.problem
@@ -470,8 +471,8 @@ def test_two_relative_dirs_in_one_notes_dir_are_refused(
 
 
 def test_two_tables_with_a_dir_each_pass_the_check(tmp_path):
-    assert settings.check_text(f'[projects.proj-a]\ndir = "{tmp_path / "one"}"\n\n'
-                               f'[projects.proj-b]\ndir = "{tmp_path / "two"}"\n'
+    assert settings.check_text(f'[projects.proj-a]\ndir = {toml_string(tmp_path / "one")}\n\n'
+                               f'[projects.proj-b]\ndir = {toml_string(tmp_path / "two")}\n'
                                ) is None
 
 

@@ -7,6 +7,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
+from moxi_dev.testing import toml_string
 from moxi import exit as exits
 from moxi import modules
 
@@ -93,7 +94,7 @@ def test_an_absolute_dir_is_the_dir_and_needs_no_notes_dir(
     add_project("proj-a")
     write_config(f"""
         [projects.proj-a]
-        dir = "{tmp_path / 'elsewhere'}"
+        dir = {toml_string(tmp_path / 'elsewhere')}
     """)
     assert folders.home("proj-a").rounds_dir == tmp_path / "elsewhere"
 
@@ -123,7 +124,7 @@ def test_a_table_named_in_another_case_than_the_stored_key_places_the_dir(
     add_project("proj-a")
     write_config(f"""
         [projects.PROJ-A]
-        dir = "{tmp_path / 'elsewhere'}"
+        dir = {toml_string(tmp_path / 'elsewhere')}
     """)
     assert folders.home("proj-a") == folders.Home("proj-a", tmp_path / "elsewhere")
 
@@ -250,7 +251,7 @@ def test_a_verb_writes_nothing_into_a_dir_two_projects_reach(linked, capsys):
 def test_a_dir_of_its_own_ends_the_refusal(linked, write_config, tmp_path):
     write_config(f"""
         [projects.proj-b]
-        dir = "{tmp_path / 'own'}"
+        dir = {toml_string(tmp_path / 'own')}
     """)
     assert folders.home("proj-a").rounds_dir == linked
     assert folders.home("proj-b").rounds_dir == tmp_path / "own"

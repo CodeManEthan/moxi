@@ -9,6 +9,7 @@ import stat
 from pathlib import Path
 
 import pytest
+from moxi_dev.testing import toml_string
 from moxi import cli, modules
 from moxi.doctor import Row
 
@@ -197,7 +198,7 @@ def test_a_dir_given_by_the_setting_is_fine(rounds, add_project, without_notes,
     add_project("proj-b")
     write_config(f"""
         [projects.proj-b]
-        dir = "{tmp_path / 'elsewhere'}"
+        dir = {toml_string(tmp_path / 'elsewhere')}
         """)
 
     row = by_name()["rounds folders"]
