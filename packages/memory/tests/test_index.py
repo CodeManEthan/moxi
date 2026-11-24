@@ -13,6 +13,9 @@ from moxi import files
 
 from moxi_memory import index, state
 
+pytestmark = pytest.mark.skipif(sys.platform == "win32",
+                                reason="Windows: memory's index locks with fcntl, so memory doesn't run there")
+
 # -- helpers --------------------------------------------------------------------------
 
 

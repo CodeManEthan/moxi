@@ -15,6 +15,9 @@ from moxi_sessions import api as sessions
 
 from moxi_memory import api, index, ingest, links, search, state, table
 
+pytestmark = pytest.mark.skipif(sys.platform == "win32",
+                                reason="Windows: memory's index locks with fcntl, so memory doesn't run there")
+
 T = sessions.testing
 
 #: Queries measured to crash FTS5 when passed to MATCH as typed.

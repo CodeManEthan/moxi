@@ -5,6 +5,7 @@ the rebuild and the relabel, and the starters that return at once."""
 import json
 import os
 import re
+import sys
 import time
 
 import pytest
@@ -13,6 +14,9 @@ from moxi_secrets import REDACT_VERSION
 from moxi_sessions import api
 
 from moxi_memory import index, ingest, links, rows, start, state, table
+
+pytestmark = pytest.mark.skipif(sys.platform == "win32",
+                                reason="Windows: memory's index locks with fcntl, so memory doesn't run there")
 
 T = api.testing
 TOKEN = "ghp_" + "aB3dE5fG7hJ9kL1mN3pQ5rS7tU9vW1xY3z5A"     # a 40-character token

@@ -3,6 +3,7 @@ incomplete-answer lines, `ingest` and `reindex` returning at once, and `status`.
 
 import json
 import os
+import sys
 import time
 
 import pytest
@@ -11,6 +12,9 @@ from moxi_dev.testing import PROC_WAIT_S, wait_for
 from moxi_sessions import api as sessions
 
 from moxi_memory import clock, cli, index, ingest, links, start, state
+
+pytestmark = pytest.mark.skipif(sys.platform == "win32",
+                                reason="Windows: memory's index locks with fcntl, so memory doesn't run there")
 
 T = sessions.testing
 START = 1_700_000_000.0

@@ -10,6 +10,7 @@ import errno
 import json
 import os
 import shutil
+import sys
 from pathlib import Path
 
 import pytest
@@ -18,6 +19,9 @@ from test_ingest import NO_LAUNCHER, TOKEN, claude, config, run, texts
 
 from moxi_memory import (cli, connector, doctor, index, ingest, roots, search, state,
                          status, table)
+
+pytestmark = pytest.mark.skipif(sys.platform == "win32",
+                                reason="Windows: memory's index locks with fcntl, so memory doesn't run there")
 
 T = api.testing
 ONE = "0190b000-0000-7000-8000-0000000000b1"

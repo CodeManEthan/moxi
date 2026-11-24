@@ -1,6 +1,7 @@
 """The doctor's rows, the announcement, and the additions contribution."""
 
 import os
+import sys
 
 import pytest
 from moxi.doctor import Row
@@ -8,6 +9,9 @@ from moxi_secrets import REDACT_VERSION
 from moxi_sessions import api
 
 from moxi_memory import additions, doctor, ingest, links, module, state, table
+
+pytestmark = pytest.mark.skipif(sys.platform == "win32",
+                                reason="Windows: memory's index locks with fcntl, so memory doesn't run there")
 
 T = api.testing
 NAMES = ["index", "ingest", "folders", "sets", "start", "sessions", "links", "retention"]

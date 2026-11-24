@@ -7,6 +7,7 @@ import io
 import json
 import os
 import stat
+import sys
 
 import pytest
 from moxi_sessions import api
@@ -194,7 +195,8 @@ def test_a_yes_changes_only_auto_memory_and_keeps_the_mode(spawned, settings_fil
     assert code == 0
     written = json.load(open(settings_file))
     assert written == dict(data, autoMemoryEnabled=False)
-    assert stat.S_IMODE(os.stat(settings_file).st_mode) == 0o644
+    if sys.platform != "win32":  # Windows keeps no POSIX mode bits
+        assert stat.S_IMODE(os.stat(settings_file).st_mode) == 0o644
     assert "auto memory is off" in said
     # Setup said that the key order may change before it asked.
     assert "key order" in ask.said[0] and "auto memory" in ask.questions[0]

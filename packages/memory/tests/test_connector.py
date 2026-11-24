@@ -9,6 +9,7 @@ import asyncio
 import itertools
 import json
 import os
+import sys
 from importlib import metadata
 from pathlib import Path
 
@@ -19,6 +20,9 @@ from moxi_sessions import api as sessions_api
 from moxi_memory import connector, index, ingest, rows, state
 from moxi_memory.connector import tool, walk
 from moxi_memory.connector.redaction import Gate
+
+pytestmark = pytest.mark.skipif(sys.platform == "win32",
+                                reason="Windows: memory's index locks with fcntl, so memory doesn't run there")
 
 PACKAGE = Path(connector.__file__).parent
 HOST = modules.load("connector", interface=1).api

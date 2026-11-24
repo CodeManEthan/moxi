@@ -1,6 +1,8 @@
 """memory's config: the keys and their defaults, the checks the schema can't make, a read
 at each use, and the folders memory keeps its files in."""
 
+from pathlib import Path
+
 import pytest
 from moxi.config import ConfigError
 from moxi.paths import Layout
@@ -65,8 +67,8 @@ def test_the_dirs_are_the_cores_for_memory():
     assert settings.state_dir() == layout.state_dir()
     assert settings.cache_dir() == layout.cache_dir()
     env = {"MOXI_HOME": "/somewhere"}
-    assert str(settings.state_dir(env)) == "/somewhere/state/memory"
-    assert str(settings.cache_dir(env)) == "/somewhere/cache/memory"
+    assert settings.state_dir(env) == Path("/somewhere/state/memory")
+    assert settings.cache_dir(env) == Path("/somewhere/cache/memory")
 
 
 def test_the_announcement_names_the_schema_and_its_check():
