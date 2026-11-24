@@ -118,7 +118,7 @@ def test_a_drop_with_a_worktree_holding_work_keeps_it_and_says_so(kit, comms):
     assert f"- kept {event['worktree']}: {kept['why']}" in comms.to("atlas-lead")[0]
 
 
-def test_the_confirm_and_the_receipt_say_a_kept_folder_alike(kit, comms):
+def test_the_confirm_and_the_receipt_say_a_kept_worktree_alike(kit, comms):
     event = commissioned(kit)
     (Path(event["worktree"]) / "draft.txt").write_text("not committed\n", encoding="utf-8")
 

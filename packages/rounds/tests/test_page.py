@@ -518,7 +518,7 @@ def test_a_drop_post_fits_its_shape(kit, no_comms):
     assert sent["state"] == "recorded" and second["repeat"]
 
 
-def test_a_drop_receipt_that_keeps_a_folder_fits_its_shape(kit, no_comms, monkeypatch):
+def test_a_drop_receipt_that_keeps_a_worktree_fits_its_shape(kit, no_comms, monkeypatch):
     lb = loopback()
     route = next(one for one in page.PAGE.routes if one.path == "/api/drop/build")
     kept = {"act": "C" * 43, "holder": BUSY, "item": "B1", "kind": "drop",

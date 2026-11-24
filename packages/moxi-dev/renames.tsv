@@ -11538,6 +11538,10 @@ rounds	packages/rounds/tests/test_page.py	assert sent == {"gone": True, "record"
 rounds	packages/rounds/tests/test_page.py	assert sent["record"]["item"]["state"] == "ruled"	keep	record	record
 rounds	packages/rounds/tests/test_page.py	assert sent["record"]["ruling"]["id"] == ruled.id	keep	record	record
 rounds	packages/rounds/tests/test_page.py	body = {"round": BUSY, "stage": "B1", "act": "C" * 43}	keep	round	round
+rounds	packages/rounds/tests/test_page.py	assert [one.get("refused") for one in told["messages"]] == [None]	keep	refused	refused
+rounds	packages/rounds/tests/test_page.py	assert [one["state"] for one in not_told["receipts"]] == ["recorded-not-told", "refused"]	keep	refused	refused
+rounds	packages/rounds/tests/test_page.py	assert "the daemon is down" in not_told["messages"][0]["refused"]	keep	refused	refused
+rounds	packages/rounds/tests/test_page.py	[(status, sent)] = run_posts(("/api/drop/build", {"round": BUSY, "stage": "B1",	keep	round	round
 rounds	packages/rounds/tests/test_page_answers.py	assert cli.main(["projects", "set", PROJECT, "--lead", "kestrel"]) == 0	keep	set	set
 rounds	packages/rounds/tests/test_page_answers.py	assert f"{holder} {item}" in message and event["record"] in message	keep	record	record
 rounds	packages/rounds/tests/test_page_answers.py	assert one["ruling"]["id"] in message and one["record"] in message	keep	record	record
@@ -11547,6 +11551,10 @@ rounds	packages/rounds/tests/test_page_answers.py	assert receipt["state"] == REC
 rounds	packages/rounds/tests/test_page_answers.py	release.set()	keep	set	set
 rounds	packages/rounds/tests/test_page_answers.py	return [one for one in events_of(holder) if pointers.page_act(one.get("record")) == act_id]	keep	record	record
 rounds	packages/rounds/tests/test_page_answers.py	started.set()	keep	set	set
+rounds	packages/rounds/tests/test_page_answers.py	assert state.fold(log.read(path)).status != "closed"	keep	closed	closed
+rounds	packages/rounds/tests/test_page_answers.py	assert receipt["state"] == RECORDED and receipt["closed"] is True	keep	closed	closed
+rounds	packages/rounds/tests/test_page_answers.py	assert state.fold(log.read(path)).status == "closed"	keep	closed	closed
+rounds	packages/rounds/tests/test_page_answers.py	assert {kind for kind, _item, _more in EVERY_LEADLESS_DRAFT} == set(pageacts.KINDS)	keep	set	set
 rounds	packages/rounds/tests/test_page_drop.py	SimpleNamespace(query={"round": ROUND, "stage": "B1"})))	keep	round	round
 rounds	packages/rounds/tests/test_page_drop.py	assert [(one["kind"], one["path"], one["goes"]) for one in facts["folders"]] == [	keep	folders	folders
 rounds	packages/rounds/tests/test_page_drop.py	assert again["record"] == first["record"]	keep	record	record
@@ -11554,6 +11562,7 @@ rounds	packages/rounds/tests/test_page_drop.py	assert dropped["by"] == "operator
 rounds	packages/rounds/tests/test_page_drop.py	assert receipt["state"] == RECORDED and receipt["record"] == dropped["record"]	keep	record	record
 rounds	packages/rounds/tests/test_page_drop.py	body = {"round": ROUND, "stage": "B1", "act": act()}	keep	round	round
 rounds	packages/rounds/tests/test_page_drop.py	worktree = facts["folders"][0]	keep	folders	folders
+rounds	packages/rounds/tests/test_page_drop.py	[worktree, _scratch] = pageacts.drop_facts(ROUND, "B1")["folders"]	keep	folders	folders
 rounds	packages/rounds/tests/test_page_gather.py	assert board_.record("card", QUIET)["name"] == QUIET	keep	record	record
 rounds	packages/rounds/tests/test_page_gather.py	assert board_.record("step", BUSY, column="design") is None	keep	record	record
 rounds	packages/rounds/tests/test_page_gather.py	assert found["ended"]["how"] == "closed"	keep	closed	closed
