@@ -5,8 +5,10 @@ push of `main` that waits for its check on a standing branch."""
 from __future__ import annotations
 
 import json
+import shlex
 
 import pytest
+from moxi_dev.testing import console_script
 from conftest import CHECK_TOML, commit, git, public_repo, write
 
 from moxi_publishing import push as piece
@@ -426,21 +428,21 @@ def test_a_standing_push_with_no_word_is_still_scanned(worded, monkeypatch):
 
 # -- main moves only to a commit whose check passed on a standing branch -------------------
 
-SSH = """#!/bin/sh
-# git's ssh (GIT_SSH_VARIANT=simple: the host, then the command): run the command asked of
-# github.com against the bare remote instead.
-cmd=${2%% *}
-exec git "${cmd#git-}" "$BARE"
+#: git's ssh (GIT_SSH_VARIANT=simple: the host, then the command): runs the command asked
+#: of github.com against the bare remote instead.
+SSH = """\
+import subprocess, sys
+cmd = sys.argv[2].split(" ")[0]
+sys.exit(subprocess.call(["git", cmd.removeprefix("git-"), BARE]))
 """
 
 
 def at_github(repo, remote, monkeypatch, url=URL):
     """`repo`'s `origin` at the GitHub URL `url`, which git reaches through a stand-in ssh
     that serves `remote`; git hands the hook `url`."""
-    ssh = remote.parent / "ssh"
-    ssh.write_text(SSH.replace("$BARE", str(remote)), encoding="utf-8")
-    ssh.chmod(0o755)
-    monkeypatch.setenv("GIT_SSH_COMMAND", str(ssh))
+    ssh = console_script(remote.parent, "ssh", SSH.replace("BARE", repr(str(remote))))
+    # git runs the command through its shell, which reads a backslash as an escape.
+    monkeypatch.setenv("GIT_SSH_COMMAND", shlex.quote(ssh.as_posix()))
     monkeypatch.setenv("GIT_SSH_VARIANT", "simple")
     git(repo, "remote", "set-url", "origin", url)
     return repo
