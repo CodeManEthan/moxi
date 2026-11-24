@@ -4,9 +4,11 @@ candidate's, the halves of a split, and `QueueCi.failures` reading them with gh.
 from __future__ import annotations
 
 import json
+import os
 import sys
 from pathlib import Path
 
+from moxi_dev.testing import console_script
 from moxi_rounds import ci, failures, queue_ci
 
 SCOPED_ONE = {"job": "scoped", "test": "tests/test_a.py::test_one"}
@@ -106,12 +108,10 @@ def test_queue_ci_reads_failures_from_the_jobs_and_the_failed_log(tmp_path, monk
     jobs = [{"name": "scoped", "status": "completed", "conclusion": "failure"},
             {"name": "lint", "status": "completed", "conclusion": "success"}]
     log = "scoped\tTest\t2026-11-22T10:00:00Z FAILED tests/test_a.py::test_one - boom\n"
-    gh = bin_dir / "gh"
-    gh.write_text(f"#!{sys.executable}\nimport sys\n"
-                  f"if '--log-failed' in sys.argv: print({log!r})\n"
-                  f"else: print({json.dumps(json.dumps(jobs))})\n", encoding="utf-8")
-    gh.chmod(0o755)
-    monkeypatch.setenv("PATH", f"{bin_dir}:{Path(sys.executable).parent}")
+    console_script(bin_dir, "gh", "import sys\n"
+                   f"if '--log-failed' in sys.argv: print({log!r})\n"
+                   f"else: print({json.dumps(json.dumps(jobs))})\n")
+    monkeypatch.setenv("PATH", f"{bin_dir}{os.pathsep}{Path(sys.executable).parent}")
     found = ci.Declared(workflows=(ci.Workflow("ci.yml"),), local=None,
                         local_timeout_s=None, remote="origin", status=ci.STATUS,
                         ids=ci.IDS, status_timeout_s=10)
@@ -127,14 +127,11 @@ def test_queue_ci_gives_the_rerun_and_the_failed_log_the_settings_repo(tmp_path,
     bin_dir.mkdir()
     calls = tmp_path / "calls.jsonl"
     jobs = [{"name": "linux", "status": "completed", "conclusion": "failure"}]
-    gh = bin_dir / "gh"
-    gh.write_text(f"#!{sys.executable}\nimport json, sys\n"
-                  f"open({str(calls)!r}, 'a').write(json.dumps(sys.argv[1:]) + '\\n')\n"
-                  f"if '--log-failed' in sys.argv: print('')\n"
-                  f"elif 'rerun' not in sys.argv: print({json.dumps(json.dumps(jobs))})\n",
-                  encoding="utf-8")
-    gh.chmod(0o755)
-    monkeypatch.setenv("PATH", f"{bin_dir}:{Path(sys.executable).parent}")
+    console_script(bin_dir, "gh", "import json, sys\n"
+                   f"open({str(calls)!r}, 'a').write(json.dumps(sys.argv[1:]) + '\\n')\n"
+                   f"if '--log-failed' in sys.argv: print('')\n"
+                   f"elif 'rerun' not in sys.argv: print({json.dumps(json.dumps(jobs))})\n")
+    monkeypatch.setenv("PATH", f"{bin_dir}{os.pathsep}{Path(sys.executable).parent}")
     found = ci.Declared(workflows=(ci.Workflow("ci.yml"),), local=None,
                         local_timeout_s=None, remote="origin",
                         status=(*ci.STATUS, "--repo", "owner/name"), ids=ci.IDS,

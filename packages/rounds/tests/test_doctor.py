@@ -5,11 +5,10 @@ from __future__ import annotations
 
 import os
 import sqlite3
-import stat
 from pathlib import Path
 
 import pytest
-from moxi_dev.testing import toml_string
+from moxi_dev.testing import console_script, toml_string
 from moxi import cli, modules
 from moxi.doctor import Row
 
@@ -44,10 +43,7 @@ def git_says(tmp_path, monkeypatch):
         bin_dir = tmp_path / "bin"
         bin_dir.mkdir(exist_ok=True)
         if line is not None:
-            script = bin_dir / "git"
-            script.write_text(f"#!/bin/sh\necho '{line}'\nexit {code}\n",
-                              encoding="utf-8")
-            script.chmod(script.stat().st_mode | stat.S_IXUSR)
+            console_script(bin_dir, "git", f"print({line!r})\nraise SystemExit({code})\n")
         monkeypatch.setenv("PATH", str(bin_dir))
 
     return stand_in
@@ -152,8 +148,7 @@ def test_a_git_that_gives_no_version_fails(git_says, line, code):
 
 def test_a_git_that_does_not_answer_fails(git_says, tmp_path, monkeypatch):
     git_says("unused")
-    (tmp_path / "bin" / "git").write_text("#!/bin/sh\nexec /bin/sleep 30\n",
-                                          encoding="utf-8")
+    console_script(tmp_path / "bin", "git", "import time\ntime.sleep(30)\n")
     monkeypatch.setattr(doctor, "GIT_TIMEOUT_S", 0.2)
 
     row = by_name()["git"]
@@ -163,9 +158,9 @@ def test_a_git_that_does_not_answer_fails(git_says, tmp_path, monkeypatch):
 
 def test_the_git_that_is_asked_sees_no_git_variable(git_says, tmp_path, monkeypatch):
     git_says("unused")
-    (tmp_path / "bin" / "git").write_text(
-        "#!/bin/sh\necho \"git version 2.50.0 ${GIT_DIR:-unset} $KEPT\"\n",
-        encoding="utf-8")
+    console_script(tmp_path / "bin", "git",
+                   "import os\nprint('git version 2.50.0', os.environ.get('GIT_DIR', 'unset'),"
+                   " os.environ.get('KEPT', ''))\n")
     monkeypatch.setenv("GIT_DIR", "/a/placeholder/dir")
     monkeypatch.setenv("KEPT", "kept")
 

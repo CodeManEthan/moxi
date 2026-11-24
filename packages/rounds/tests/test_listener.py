@@ -12,6 +12,7 @@ import time
 from importlib.metadata import entry_points
 
 import pytest
+from moxi_dev.testing import console_script
 
 from moxi_rounds import listener, listeners, sweeping
 
@@ -59,13 +60,12 @@ def test_ready_returns_before_the_sweep_ends_and_passes_no_git_variable(
         write_config, monkeypatch, tmp_path):
     write_config("[sweep]\nat_start = true\narmed = true\n")
     out = tmp_path / "stand-in.out"
-    stand_in = tmp_path / "moxi"
-    stand_in.write_text(
-        f"#!{sys.executable}\nimport os, sys, time\n"
+    stand_in = console_script(
+        tmp_path, "moxi",
+        "import os, sys, time\n"
         f"open({str(out)!r}, 'w').write(' '.join(sys.argv[1:]) + '\\n' + "
         "' '.join(sorted(name for name in os.environ if name.startswith('GIT_'))) + "
-        "'\\n' + str(os.getpid()) + '\\n')\ntime.sleep(60)\n", encoding="utf-8")
-    stand_in.chmod(0o755)
+        "'\\n' + str(os.getpid()) + '\\n')\ntime.sleep(60)\n")
     import moxi.paths
 
     monkeypatch.setattr(moxi.paths, "script", lambda name: stand_in)

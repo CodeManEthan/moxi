@@ -361,13 +361,13 @@ def test_a_skip_of_the_check_meets_the_check_gate(opened):
     assert gates(path) == ()
 
 
-USER_FLOW = """
+USER_FLOW = f"""
 [flows.gated]
 steps = [
-  { step = "build", by = "builder" },
-  { step = "verify-build", by = "checker" },
-  { step = "staging", does = "command", before = "finish", argv = ["true"] },
-  { step = "finish", by = "builder" },
+  {{ step = "build", by = "builder" }},
+  {{ step = "verify-build", by = "checker" }},
+  {{ step = "staging", does = "command", before = "finish", argv = {json.dumps([sys.executable, "-c", "pass"])} }},
+  {{ step = "finish", by = "builder" }},
 ]
 """
 
