@@ -15,10 +15,10 @@ whatever a write goes over that isn't loadout's (what `--replace` replaces, an e
 a removal takes away) is kept under the core's `displaced/` folder first, until you delete
 it, and the run names each copy with the command that puts it back (`BACK`).
 `status` prints one line per item that is not `ok`, then notes, then a count. `add` and
-`remove` write a section's list (`add --harness` lists the item for those harnesses only:
-the item's own `harnesses`, or the section's `disabled` when another section lists it), `enable` and `disable` its `disabled` ids, then each
-installs with that item's steps as the scope. `list` prints every item with its kind,
-scope, harnesses and source. `global show` prints, for each harness, the files it reads
+`remove` write a section's list (`add --harness` lists the item for those harnesses only,
+through that section's `disabled`, and `remove` takes the item's ids there out with it),
+`enable` and `disable` its `disabled` ids, then each installs with that item's steps as
+the scope. `list` prints every item with its kind, scope, harnesses and source. `global show` prints, for each harness, the files it reads
 through loadout (the shared file, then its part or "no part"), its global file and what
 the next install makes of it (`--diff` as a diff); `global mode MODE` writes the mode
 (off, managed or if-absent) and installs the global file alone; `global remove` sets `off`
@@ -230,13 +230,30 @@ def _add(args) -> int:
     where = "user" if args.project is None else f"project {args.project}"
     named = list(dict.fromkeys(args.harness))
     changed = writes.add(args.kind, args.name, project=args.project, harnesses=named)
+    on = _listed_for(args.kind, args.name, args.project)
     if changed:
-        line = f"listed {args.kind} {args.name} in {where}" + (
-            f" for {', '.join(named)}" if named else "")
+        line = f"listed {args.kind} {args.name} in {where} for {on}"
     else:
-        line = f"{where} lists {args.kind} {args.name} already" + (
-            "; enable and disable change its harnesses" if named else "")
+        line = (f"{where} lists {args.kind} {args.name} already, for {on}; enable and "
+                "disable change its harnesses")
     return _write_then_install(args, [line], (args.kind, args.name))
+
+
+def _listed_for(kind: str, name: str, project: str | None) -> str:
+    """Which harnesses section `project` (the user section when None) has `kind` `name`
+    on for, as a line says it: `every harness`, the names, or `no harness`."""
+    from moxi import place
+
+    from moxi_loadout import manifest
+
+    found = manifest.load()
+    section = found.section(project)
+    own = found.harnesses(kind, name)
+    rows = list(place.harnesses()[0]) if own is None else list(own)
+    on = [h for h in rows if section is None or not section.is_disabled(kind, name, h)]
+    if own is None and on == rows:
+        return "every harness"
+    return ", ".join(on) or "no harness"
 
 
 def _remove(args) -> int:

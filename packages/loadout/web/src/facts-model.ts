@@ -7,8 +7,8 @@
 // a section when its `scope` is the section's name. A section is the project's when it is
 // the key section named by the project's key ignoring case, or a path section at the
 // project's root or under it, as projects maps the section's root (or, without that map,
-// at its root exactly); loadout places each into the project's folder, so the row names
-// the items of each, the key section's first.
+// at its root exactly). A section under the root is placed into that subfolder, which only
+// sessions there load; the row names the items of each, the key section's first.
 // Loadout's judgment is the answer's `problem`: set, the list can't be read, and nothing is
 // reported, as on a failed read.
 

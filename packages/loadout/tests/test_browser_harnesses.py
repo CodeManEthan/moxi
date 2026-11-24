@@ -3,7 +3,7 @@ project's, through a real shell that starts the real page servers, on the seeded
 `page_kit` describes:
 
 - Add for one harness: `For` offers every harness and each harness on this machine;
-  picking Codex lists the skill for Codex only, and its other cells are blank.
+  picking Codex lists the skill for Codex only, and its other cells read `off`.
 - A harness not on this machine, with nothing of loadout's left there, has no column,
   isn't offered in Add, and nothing in Placed names it.
 - A project with a key section and a path section under its root: the filtered view
@@ -80,9 +80,11 @@ def test_add_for_one_harness_lists_it_for_that_harness_only(world):
     kit.job_line(panel, "moxi loadout add skill bump-version --harness=codex: done")
     expect(kit.cell(panel, "skill", "bump-version", "codex")).to_have_text("placed")
     for other in ("claude", "opencode"):
-        expect(kit.cell(panel, "skill", "bump-version", other)).to_have_text("")
+        expect(kit.cell(panel, "skill", "bump-version", other)).to_have_text("off")
     toml = tomllib.loads((world.dir / "loadout.toml").read_text(encoding="utf-8"))
-    assert toml["skill"]["bump-version"]["harnesses"] == ["codex"], toml
+    assert "bump-version" not in toml.get("skill", {}), toml
+    assert [d for d in toml["user"]["disabled"] if d.startswith("skill:bump-version@")] == [
+        "skill:bump-version@claude", "skill:bump-version@opencode"], toml
 
 
 def test_a_harness_not_on_this_machine_has_no_column_and_isnt_offered(world):

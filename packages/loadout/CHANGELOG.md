@@ -2,11 +2,12 @@
 
 ## Unreleased
 
-- `moxi loadout add --harness H` (it may repeat) lists an item for those harnesses only:
-  an item no section lists yet gets its own `harnesses`, and one another section lists
-  is switched off in the new section's `disabled` for each harness not named. The page's
-  Add has a `For` choice, every harness or one on this machine, and `/api/add` takes
-  `harnesses`.
+- `moxi loadout add --harness H` (it may repeat) lists an item for those harnesses only,
+  in that section alone: the section's `disabled` switches it off for each harness not
+  named, and its line names the harnesses it is on for. The page's Add has a `For`
+  choice, every harness or one on this machine, and `/api/add` takes `harnesses`.
+- `moxi loadout remove` takes the item's switches in that section's `disabled` out with
+  it, so adding it again starts from every harness.
 - The page draws a column only for the harnesses on this machine (a harness's home
   folder is there), and for one that isn't while something of loadout's, or in its way,
   still stands there; one it doesn't draw isn't counted, on the page or in the drift

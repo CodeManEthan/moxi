@@ -198,6 +198,6 @@ def _backups(harness: str) -> Path:
     return stores.backups_dir() / harness
 
 
-__all__ = ["HARNESSES", "GLOBAL_NAMES", "present", "claude_home", "claude_json", "codex_home",
-           "opencode_home", "opencode_xdg_home", "home", "settings_file", "global_file", "rules_file", "Refused",
-           "Doc", "write", "backup"]
+__all__ = ["HARNESSES", "GLOBAL_NAMES", "STANDING", "present", "shown", "claude_home",
+           "claude_json", "codex_home", "opencode_home", "opencode_xdg_home", "home",
+           "settings_file", "global_file", "rules_file", "Refused", "Doc", "write", "backup"]

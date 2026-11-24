@@ -226,29 +226,76 @@ def test_writes_go_to_the_configured_loadout_dir(loadout_dir):
 TABLE = ["claude", "codex", "opencode"]
 
 
-def test_add_for_harnesses_gives_an_item_no_section_lists_its_own_list(loadout_dir):
+def disabled(m, project=None):
+    return [str(i) for i in m.section(project).disabled]
+
+
+def test_add_for_harnesses_narrows_the_item_in_its_section_alone(loadout_dir):
     start(loadout_dir)
     assert writes.add("agent", "lead", harnesses=["codex", "claude", "codex"], table=TABLE,
                       loadout_dir=loadout_dir)
     m = read(loadout_dir)
     assert m.user.names("agent") == ("lead",)
-    assert m.harnesses("agent", "lead") == ("codex", "claude")
-    assert m.user.disabled == ()
+    assert disabled(m) == ["agent:lead@opencode"]
+    # No list of the item's own: the narrowing binds no other section.
+    assert m.harnesses("agent", "lead") is None
+    assert "[agent" not in (loadout_dir / "loadout.toml").read_text()
     assert "# My loadout. Keep this comment." in (loadout_dir / "loadout.toml").read_text()
 
 
-def test_add_for_harnesses_switches_the_rest_off_in_its_section_when_another_lists_it(
-        loadout_dir):
+def test_add_for_harnesses_leaves_the_other_sections_that_list_it(loadout_dir):
     start(loadout_dir)
     assert writes.add("skill", "review", project="/srv/atlas", harnesses=["claude"],
                       table=TABLE, loadout_dir=loadout_dir)
     m = read(loadout_dir)
     section = m.section("/srv/atlas")
     assert section.names("skill") == ("review",)
-    assert [str(i) for i in section.disabled] == ["skill:review@codex", "skill:review@opencode"]
-    # The item's own list, which the user section and project web share, is untouched.
+    assert disabled(m, "/srv/atlas") == ["skill:review@codex", "skill:review@opencode"]
     assert m.harnesses("skill", "review") is None
     assert m.user.disabled == () and m.section("web").disabled == ()
+
+
+def test_remove_takes_the_narrowing_out_with_the_item(loadout_dir):
+    start(loadout_dir, COMMENTED + '[project."/srv/atlas"]\ndisabled = ["agent:lead@codex"]\n')
+    assert writes.add("skill", "lint", project="/srv/atlas", harnesses=["codex"],
+                      table=TABLE, loadout_dir=loadout_dir)
+    assert writes.remove("skill", "lint", project="/srv/atlas", loadout_dir=loadout_dir)
+    m = read(loadout_dir)
+    assert m.section("/srv/atlas").names("skill") == ()
+    # Only the removed item's switches go.
+    assert disabled(m, "/srv/atlas") == ["agent:lead@codex"]
+    assert m.harnesses("skill", "lint") is None
+
+
+def test_remove_takes_a_disabled_items_switches_too(loadout_dir):
+    start(loadout_dir, COMMENTED.replace('[project.web]\n',
+                                         '[project.web]\ndisabled = ["skill:review@*"]\n'))
+    assert writes.remove("skill", "review", project="web", loadout_dir=loadout_dir)
+    m = read(loadout_dir)
+    assert m.section("web").disabled == ()
+    assert m.user.names("skill") == ("review",) and m.user.disabled == ()
+
+
+def test_a_later_add_for_every_harness_gives_every_harness(loadout_dir):
+    start(loadout_dir)
+    writes.add("skill", "atlas", harnesses=["codex"], table=TABLE, loadout_dir=loadout_dir)
+    writes.remove("skill", "atlas", loadout_dir=loadout_dir)
+    assert writes.add("skill", "atlas", loadout_dir=loadout_dir)
+    assert writes.add("skill", "atlas", project="/srv/atlas", loadout_dir=loadout_dir)
+    m = read(loadout_dir)
+    assert m.user.names("skill") == ("review", "atlas")
+    assert m.user.disabled == () and m.section("/srv/atlas").disabled == ()
+    assert m.harnesses("skill", "atlas") is None
+
+
+def test_an_add_for_another_harness_in_another_section_is_accepted(loadout_dir):
+    start(loadout_dir)
+    writes.add("skill", "atlas", harnesses=["codex"], table=TABLE, loadout_dir=loadout_dir)
+    assert writes.add("skill", "atlas", project="/srv/atlas", harnesses=["claude"],
+                      table=TABLE, loadout_dir=loadout_dir)
+    m = read(loadout_dir)
+    assert disabled(m) == ["skill:atlas@claude", "skill:atlas@opencode"]
+    assert disabled(m, "/srv/atlas") == ["skill:atlas@codex", "skill:atlas@opencode"]
 
 
 def test_add_for_harnesses_narrows_within_the_items_own_list(loadout_dir):
@@ -277,14 +324,17 @@ def test_add_for_a_harness_the_table_has_no_row_for_is_refused(loadout_dir):
     assert path.read_bytes() == before
 
 
-def test_add_for_harnesses_takes_out_a_switch_its_section_still_held(loadout_dir):
-    start(loadout_dir, COMMENTED + '[project."/srv/atlas"]\n'
-                                   'disabled = ["skill:review@*", "agent:lead@codex"]\n')
+def test_add_replaces_the_switches_its_section_still_held_for_the_item(loadout_dir):
+    held = COMMENTED + ('[project."/srv/atlas"]\n'
+                        'disabled = ["skill:review@*", "agent:lead@codex"]\n')
+    start(loadout_dir, held)
     assert writes.add("skill", "review", project="/srv/atlas", harnesses=["codex"],
                       table=TABLE, loadout_dir=loadout_dir)
-    section = read(loadout_dir).section("/srv/atlas")
-    assert [str(i) for i in section.disabled] == [
+    assert disabled(read(loadout_dir), "/srv/atlas") == [
         "agent:lead@codex", "skill:review@claude", "skill:review@opencode"]
+    start(loadout_dir, held)
+    assert writes.add("skill", "review", project="/srv/atlas", loadout_dir=loadout_dir)
+    assert disabled(read(loadout_dir), "/srv/atlas") == ["agent:lead@codex"]
 
 
 def test_add_for_harnesses_leaves_an_item_its_section_lists_already(loadout_dir):

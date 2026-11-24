@@ -1098,7 +1098,7 @@ def test_a_job_read_through_to_its_end_does_what_the_verb_does(
     assert pagejob.run(job, verb_of(spawned[0])) == 0
     body = read("/api/job", f"job={job}")
     assert (body["state"], body["exit"], body["argv"]) == ("done", 0, ["add", "skill", "lint"])
-    assert "listed skill lint in user" in body["outcome"]["lines"]
+    assert "listed skill lint in user for every harness" in body["outcome"]["lines"]
     assert body["outcome"]["counts"] == {"ok": 2}     # lint for claude and codex
     assert os.readlink(kit.claude() / "lint") == str(lo / "skills" / "lint")
     assert 'skills = ["review", "lint"]' in (lo / "loadout.toml").read_text()

@@ -77,10 +77,11 @@ and `moxi loadout status` says what has drifted.
     each with `--json`, and `moxi doctor` shows loadout's rows: the manifest, entries
     not ok, the global file, hook programs, the projects link, the git hook pieces and
     Codex's switches. `add --harness H` (it may repeat) lists the item for those harnesses
-    only, where the manifest already keeps per-harness choices: an item no section lists
-    yet gets its own `harnesses`; one another section lists keeps its list, and the new
-    section's `disabled` switches it off for each harness not named. A harness the core's
-    table has no row for is refused.
+    only, in that section alone: the section's `disabled` switches it off for each other
+    harness, so `enable` and `disable` change it later, and `remove` takes those switches
+    out with the item. A plain `add` is for every harness. The line `add` prints names the
+    harnesses the item is on for. A harness the core's table has no row for is refused,
+    and so is one an item's own `harnesses` leaves out.
 
 ## Install
 
@@ -199,10 +200,11 @@ the items its own section lists, in the manifest's order and with each kind in t
 page's words (`skill release-checklist · permission rule git-push`; past eight, the first
 seven and how many more), and a `Loadout` link to
 `/m/loadout/project/<key>`. A project's sections are the one named by its key and each
-one whose path is its folder or a folder under it, as projects places that path, since
-loadout places each into the project's folder: the row names the items of each, the key
-section's first, and an item two list once; that address shows the same sections, the
-one at the folder under the project's key and one under it by its path. An item switched
+one whose path is its folder or a folder under it, as projects places that path. Loadout
+places a section under the folder into that subfolder, which only sessions there load, so
+the row names the items of each, the key section's first, and an item two list once; that
+address shows the same sections, the one at the folder under the project's key and one
+under it by its path, which says where its items load. An item switched
 off for every harness there reads `off` after its name, as its cells do on this page. A
 project loadout lists nothing for has no row. The row comes from loadout's `project-facts`
 component, which reads only `/api/list`, from the manifest alone: when the Projects page
