@@ -40,6 +40,8 @@ COLUMNS = {
     "denied": ["principal_id", "channel_id"],
     "mcp_tokens": ["token_hash", "claim_key", "identity", "adapter", "binding_id",
                    "created_at", "revoked_at", "revoked_why"],
+    "scoped": ["word", "module", "declared_by", "description", "token_hash", "state",
+               "declared_at", "freed_at", "note"],
 }
 
 
@@ -74,7 +76,7 @@ def test_a_new_store_has_every_table_at_the_current_version():
         assert tables == set(COLUMNS) == set(schema.TABLES)
         for table, columns in COLUMNS.items():
             assert [r[1] for r in conn.execute(f"PRAGMA table_info({table})")] == columns
-        assert conn.execute("PRAGMA user_version").fetchone()[0] == len(schema.STEPS) == 4
+        assert conn.execute("PRAGMA user_version").fetchone()[0] == len(schema.STEPS) == 5
         assert conn.execute("SELECT value FROM meta WHERE key = 'next_id'"
                             ).fetchone()[0] == str(2 ** 62)
         assert conn.execute("PRAGMA journal_mode").fetchone()[0] == "wal"
@@ -104,7 +106,7 @@ def test_a_version_one_store_renames_the_operators_kind_at_its_next_open():
         conn.close()
     conn = store.open_write()
     try:
-        assert conn.execute("PRAGMA user_version").fetchone()[0] == 4
+        assert conn.execute("PRAGMA user_version").fetchone()[0] == 5
         assert conn.execute("SELECT id, author_kind FROM messages ORDER BY id").fetchall() \
             == [(1, "operator"), (2, "identity"), (3, "webhook")]
     finally:
@@ -128,7 +130,7 @@ def test_a_version_two_store_gains_the_tool_tokens_table_at_its_next_open():
         conn.close()
     conn = store.open_write()
     try:
-        assert conn.execute("PRAGMA user_version").fetchone()[0] == 4
+        assert conn.execute("PRAGMA user_version").fetchone()[0] == 5
         assert [r[1] for r in conn.execute("PRAGMA table_info(mcp_tokens)")] \
             == COLUMNS["mcp_tokens"]
         assert conn.execute("SELECT COUNT(*) FROM mcp_tokens").fetchone()[0] == 0
@@ -158,7 +160,7 @@ def test_a_version_three_store_says_who_holds_each_reserved_name_at_its_next_ope
         conn.close()
     conn = store.open_write()
     try:
-        assert conn.execute("PRAGMA user_version").fetchone()[0] == 4
+        assert conn.execute("PRAGMA user_version").fetchone()[0] == 5
         assert conn.execute("SELECT name, module, state, holder FROM reserved "
                             "ORDER BY name").fetchall() == [
             ("console", "launcher", "active", "module"),

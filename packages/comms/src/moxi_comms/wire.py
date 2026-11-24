@@ -48,8 +48,10 @@ VERSIONS = (1, 1)
 #: `connector` is the read `replies_to`, the replies one identity can read to one message,
 #: which comms' connector provider asks only when the hello lists it. `remove` is the
 #: method that withdraws a message, so a daemon that lists `delete` instead is older.
+#: `scoped-senders` is a `send` under a module's scoped sender (`scoped.py`), held to its
+#: parent alone; a client sends under one only when the hello lists it.
 CAPABILITIES = frozenset({"remove", "expiry", "interrupt", "reserved-names", "mcp",
-                          "connector"})
+                          "connector", "scoped-senders"})
 
 # -- error codes -------------------------------------------------------------------------
 NAME_HELD = 1101
@@ -66,6 +68,8 @@ UNKNOWN_ADAPTER = 1111
 NOT_BOUND = 1112
 MCP_TOKEN_TAKEN = 1113
 MCP_TOKEN_REVOKED = 1114
+SCOPED_CONFLICT = 1115
+SCOPED_RECIPIENT = 1116
 STOPPING = 1150
 FAILED = 1151
 BUSY = 1152
@@ -78,7 +82,8 @@ CODE_NAMES = {
     TOO_LONG: "too-long", NOT_SENDER: "not-sender", ALREADY_DELIVERED: "already-delivered",
     UNKNOWN_MESSAGE: "unknown-message", UNKNOWN_ADAPTER: "unknown-adapter",
     NOT_BOUND: "not-bound", MCP_TOKEN_TAKEN: "mcp-token-taken",
-    MCP_TOKEN_REVOKED: "mcp-token-revoked", STOPPING: "stopping", FAILED: "failed",
+    MCP_TOKEN_REVOKED: "mcp-token-revoked", SCOPED_CONFLICT: "scoped-conflict",
+    SCOPED_RECIPIENT: "scoped-recipient", STOPPING: "stopping", FAILED: "failed",
     BUSY: "busy", STORE_BUSY: "store-busy",
 }
 

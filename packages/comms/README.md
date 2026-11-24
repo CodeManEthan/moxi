@@ -174,7 +174,7 @@ meets.
 | `moxi comms send --as <name> <to> "text"` | send under a send-only name a program registered, from outside every session, with no reply |
 | `moxi comms send-only add\|renew\|remove <name>` | register a send-only name for a program (any program or service, not only a module), replace its token, or free it; inside a session, only a plain `add` of an unused name |
 | `moxi comms exit-session <name> [--scope S \| --global]` | end a headless session by its name, and wait for the name to be released |
-| `moxi comms reserved renew <name>` | mint a fresh token for a send-only name a module reserved, into this process's credential chain |
+| `moxi comms reserved renew <name>` | mint a fresh token for a send-only name a module reserved, into this process's credential chain; with `--word`, `<name>` is a word a module declares for scoped senders |
 | `moxi comms migrate [--dry-run]` | move an older comms' files into `comms.db` now (the daemon's start does it too) |
 | `moxi comms claude` | launch a named Claude Code session (also `"$(uv tool dir)/moxi/bin/moxi-comms-claude"`) |
 | `moxi comms codex` | launch a named Codex session through Moxi turns' Codex host (experimental) |
@@ -191,6 +191,16 @@ its path: `"$(uv tool dir)/moxi/bin/<script>"`.
 callers `[policy] cache_callers` names) and `moxi comms owner <session-id>` (which
 identity owns a session, for a program that nudges idle sessions; left out of the help
 list) are read-only: they ask the daemon or read local files and post nothing.
+
+A module may send a session something of its own under that session's **scoped
+sender**, a send-only name comms forms from the session's name and a word the module
+declares (`builder-digest@acme` for `builder@acme`). It reaches that session alone,
+nobody mails it, no session binds it and no roster lists it; its messages read
+`(send-only)` and `[no reply]`. A module declares the word by an entry point in
+`moxi.comms.scoped_senders` and sends with `moxi_comms.api.send_scoped` (comms' API,
+interface 3);
+[docs/adapters.md](https://github.com/CodeManEthan/moxi/blob/moxi-comms-v0.3.1/packages/comms/docs/adapters.md#scoped-senders)
+says how, with the refusals and the read-back.
 
 Every new `moxi comms send` says what it wants back with `--posture`: `none` (no reply; a
 reply to it is refused), `optional` (a reply only if the recipient has something to add;

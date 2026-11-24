@@ -2,6 +2,25 @@
 
 ## Unreleased
 
+- Scoped senders, under a new interface of comms' API, 3 (interface 2 plus them): a
+  send-only name comms forms from one parent comms name and a word a module declares by
+  an entry point in the group `moxi.comms.scoped_senders` (`builder-digest@acme` for
+  the parent `builder@acme` and the word `digest`). Only the declaring module's code
+  sends under it, with the token comms mints for the word, from outside every session,
+  and to its parent alone (`api.send_scoped`); its messages carry `[no reply]`, read
+  `(send-only)` and are delivered as any message is. Nobody mails it, no session binds
+  and no program registers a name of a declared word's form, and no roster, snapshot,
+  join or leave notice or page lists it. A name of the form held before its word was
+  declared stays its holder's, and that parent's scoped sender is in conflict.
+  `api.scoped_sender(name)` and `api.scoped_state(module, parent)` read one back from
+  comms' store without the daemon, and only an active one reads back as a scoped
+  sender. New refusals `scoped-undeclared`, `scoped-conflict` (wire code 1115),
+  `scoped-recipient` (1116) and `scoped-unreadable`; the daemon's hello lists
+  `scoped-senders`. `moxi doctor` reports a word in conflict, a held name and a word
+  token it can't read, and `moxi comms reserved renew --word WORD` mints a fresh one.
+  comms.db gains the table `scoped` and moves to schema step 5 at its next write; a
+  comms older than this one can't open it afterwards, so a downgrade needs the store's
+  backup.
 - comms' config gains `[policy] directors`, by default the plain name `fleet-lead`:
   names that direct every comms session on the box that doesn't opt out, after its
   launch's own directors. Each directs only while its name holds a standing row
