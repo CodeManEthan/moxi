@@ -63,7 +63,8 @@ PROGRESS_STEPS = 1000
 #: row. `written` is the time of the row's last write of any kind; a rebuild keeps a
 #: row written after it started. `settled` is 1 once a child has read a model answer and
 #: asked the launcher for the session's kind (or found no launcher to ask). The two
-#: partial indexes hold only the rows the start lists may show, ordered by `newest`.
+#: partial indexes hold only the rows the start lists may show, ordered by `newest`;
+#: the fourth step remakes them to leave out the `fork` kind as well as `scratch`.
 SCHEMA = (
     """
     CREATE TABLE sessions (
@@ -110,6 +111,13 @@ SCHEMA = (
         since REAL NOT NULL,
         PRIMARY KEY (harness, source)
     ) WITHOUT ROWID;
+    """,    """
+    DROP INDEX sessions_by_identity;
+    DROP INDEX sessions_by_label;
+    CREATE INDEX sessions_by_identity ON sessions (identity, newest)
+        WHERE settled = 1 AND kind IS NOT 'scratch' AND kind IS NOT 'fork';
+    CREATE INDEX sessions_by_label ON sessions (label, newest)
+        WHERE settled = 1 AND kind IS NOT 'scratch' AND kind IS NOT 'fork';
     """,
 )
 

@@ -1,11 +1,11 @@
 """memory's interface 1, the module other Moxi modules reach (`moxi_memory.api`).
 
 * `search(query, *, project=None, since=None, harness=None, results=False,
-  subagents=False, scratch=False, limit=10) -> Result`: search past sessions. A `Result`
-  holds `hits` (each a `Hit`), `rows` (how many rows were searched), `filling` (a
-  `Filling` while the first full read hasn't finished, else None), `rebuilding` (the
-  start time of a running rebuild, else None) and `unread` (the archive folders no walk
-  has listed whole yet, whose sessions are not in the results).
+  subagents=False, scratch=False, forks=False, limit=10) -> Result`: search past
+  sessions. A `Result` holds `hits` (each a `Hit`), `rows` (how many rows were
+  searched), `filling` (a `Filling` while the first full read hasn't finished, else
+  None), `rebuilding` (the start time of a running rebuild, else None) and `unread` (the
+  archive folders no walk has listed whole yet, whose sessions are not in the results).
 * `status() -> Status`: the index, its reads, a running rebuild, the session table, and
   each folder of each harness as the last run found it.
 * `IndexMissing` and `IndexUnreadable`: what `search` raises when there is no index to

@@ -151,6 +151,13 @@ def all_lines(session_id: str | None = None) -> list[dict]:
     return sorted(lines, key=lambda line: line.get("at") or 0)
 
 
+def fork_ids() -> frozenset[tuple[str, str]]:
+    """The `(harness, fork id)` of every recall fork the log names: the agent ids of
+    the subagent forks, whose transcripts memory's index leaves out."""
+    return frozenset((str(line.get("harness") or ""), str(line["fork"]))
+                     for line in all_lines() if line.get("fork"))
+
+
 def _write(session_id: str, lines: list[dict]) -> None:
     from moxi import files
 
@@ -217,4 +224,4 @@ def head(text: str) -> str:
 __all__ = ["DIR_NAME", "LOG", "LOCKS", "OPEN", "BACK", "LOST", "DISCARDED", "OFF",
            "LINE_STATES", "DISCARDABLE", "PROMPT", "ASKED", "HEAD_CHARS", "LINE_FIELDS", "is_safe",
            "subconscious_dir", "log_path", "session_lock", "read_lines", "logged_sessions",
-           "all_lines", "find_line", "put_line", "note_off", "head"]
+           "all_lines", "fork_ids", "find_line", "put_line", "note_off", "head"]

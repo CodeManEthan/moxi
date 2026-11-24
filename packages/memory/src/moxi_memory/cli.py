@@ -1,7 +1,7 @@
 """`moxi memory`: search past sessions, start an ingest or a rebuild, and see the index.
 
     moxi memory search "WORDS" [--project P] [--since TIME] [--harness H] [--results]
-                               [--subagents] [--scratch] [--limit N] [--json]
+                               [--subagents] [--scratch] [--forks] [--limit N] [--json]
     moxi memory ingest [--all]
     moxi memory reindex [--relabel]
     moxi memory status [--json]
@@ -161,7 +161,7 @@ def _search(args, out, prog: str) -> int:
         result = searching.search(args.words, project=args.project, since=since,
                                   harness=args.harness, results=args.results,
                                   subagents=args.subagents, scratch=args.scratch,
-                                  limit=args.limit)
+                                  forks=args.forks, limit=args.limit)
     except (searching.IndexMissing, searching.IndexUnreadable) as exc:
         message = _missing_message(exc, searching.rebuilding())
         state = "missing" if isinstance(exc, searching.IndexMissing) else "unreadable"
@@ -415,6 +415,8 @@ def _parser(prog: str) -> argparse.ArgumentParser:
                         "index.include_subagents is on)")
     p.add_argument("--scratch", action="store_true",
                    help="search sessions launched as scratch too")
+    p.add_argument("--forks", action="store_true",
+                   help="search sessions launched as forks of another session too")
     p.add_argument("--limit", type=_positive, default=10, metavar="N",
                    help="how many hits (default 10)")
     p.add_argument("--json", action="store_true", help="print one JSON object")

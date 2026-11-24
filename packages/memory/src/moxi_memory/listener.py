@@ -29,8 +29,8 @@ never raises.
 
 `lists(event)` answers a `start` with two lists of recent sessions, read from memory's
 session table and nothing else: this agent's own recent sessions from any project, then
-the project's, each leaving out this session, subagents, scratch launches and sessions
-whose launch kind isn't settled. It works to one deadline, `DEADLINE` seconds after its
+the project's, each leaving out this session, subagents, scratch and fork launches and
+sessions whose launch kind isn't settled. It works to one deadline, `DEADLINE` seconds after its
 first line runs, and every wait in it has its own cap and is cut to the time left:
 
 1. It writes this session's row (the harness, the id, and the label when the row has
