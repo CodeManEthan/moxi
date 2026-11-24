@@ -13,11 +13,6 @@
   (398,112) for <model>`. A crossing handler's line on the same call is appended to the
   notice after `. `, so the model sees one line; a crossing on a call with no notice keeps
   its line on its own. `notice_line` takes `(tokens, mark, model)` and `thousands` is new.
-- A fired notice stays fired for the rest of its session id. A reading below the mark
-  armed it again, so a compaction brought a second warning; now only a clear or a resume
-  that names a new id starts afresh. The crossing still re-arms on a reading below its
-  mark, so a launch that compacts at its limit compacts at every rise. The floor counts a
-  fired notice for nothing, and reads `NEVER` when nothing armed is left.
 - `Find a model` sends its search through moxi-ui's `readLater`, so the page root's
   `data-reading` mark counts the search from the keystroke until its matches are drawn,
   and a test's press waits for them. A user sees no change. The `ui` extra asks for

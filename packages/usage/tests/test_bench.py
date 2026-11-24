@@ -962,11 +962,10 @@ def test_the_warn_at_listener_takes_under_1_ms_a_call_when_marked(hook, timed_re
     past = LongSession(last=160_000)
     main = past.event(env=marked)
     assert mark.on_tool(main) == mark.notice_line(160_000, "1x", HOOK_MODEL)
-    assert mark.on_tool(main) is None                    # fired: said once
+    assert mark.on_tool(main) is None                    # fired: said once per rise
     fired = per_call_ms(lambda: mark.on_tool(main))
     fired_floor = per_call_ms(lambda: mark.floor(main))
-    # The fired notice counts for nothing; the armed crossing holds the floor.
-    assert mark.floor(main) == thresholds.threshold(HOOK_MODEL, "1.5x", thresholds.MAIN).tokens
+    assert mark.floor(main) == 0                         # its re-arm must be seen
     print(f"\nwarn-at listener over a {below.bytes / 1e6:.0f} MB transcript, both marks "
           f"stamped: {armed:.3f} ms a call below the mark, {fired:.3f} ms past it "
           f"(fired); an agent's call over its {below.agent_bytes / 1e6:.0f} MB file "

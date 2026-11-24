@@ -31,11 +31,10 @@ session and `subagent` for an agent; thresholds are kept per (model, mark, popul
 and worked out again when the measure, the model table or usage's config changes.
 
 **Firing.** A purpose fires the first time its reader's context is at or above its
-threshold while it is armed, and is then fired. A fired notice stays fired for the rest of
-the session id, so a compaction never brings it back; a clear or a resume that names a new
-session id starts afresh. A fired crossing is armed again by a later reading of the main
-session below the threshold (after a compaction, or a clear that keeps the session id), so
-a crossing fires once per rise past its threshold.
+threshold while it is armed, and is then fired. It is armed again by a later reading of
+the same reader below the threshold (after a compaction, or a clear that keeps the
+session id). So a mark fires once per rise past its threshold, not once per session: a
+session that compacts and climbs past the mark again is warned again.
 
 **Delivery.** The notice is one line, `context 412k: past the 1x mark for <model>` (the
 context in thousands, halves up). The lines crossing handlers return on the same call are
@@ -53,13 +52,12 @@ doctor's `marks` row sweeps any older than `marks.max_age_days`.
 
 **The floor.** For an event with an `agent_id` it is 0: turns gates only the main loop by
 it, and after an agent's call the parent's next call must come, to take its line. For
-the main session it is 0 while a line waits or the crossing is fired (so the reading
+the main session it is 0 while a line waits or a main purpose is fired (so the reading
 that re-arms it is seen); otherwise the smallest threshold among the main session's armed
 purposes for the models it has used, or over every model the measure has a row for when
-it has used none yet. A fired notice counts for nothing, since nothing can arm it again.
-With no threshold known it is 0; with both purposes off, or the notice fired and the
-crossing off, it is `NEVER`, since the listener has nothing to do. turns reads the floor
-again at each `ready` and after each call.
+it has used none yet. With no threshold known it is 0; with both purposes off it is
+`NEVER`, since the listener has nothing to do. turns reads the floor again at each
+`ready` and after each call.
 
 **Fail open.** Every error is logged once per kind and the listener answers None. A
 crossing handler's error, or one that runs past `marks.handler_wait_ms`, costs only its
@@ -553,7 +551,7 @@ def observe(event, *, notice: str | None, crossing: str | None,
                         else:
                             crossed = Crossing(harness, session_id, mark, tokens, limit,
                                                shown, when)
-                elif held.fired_at is not None and name == CROSSING:
+                elif held.fired_at is not None:
                     held.fired_at = held.tokens = held.threshold = held.model = None
                     changed = True
             if own is not None and agent_id is not None:
@@ -597,17 +595,11 @@ def floor(event) -> int:
             if session.pending:
                 return 0
             main = session.readers.get(None)
-
-            def fired(name: str, mark: str) -> bool:
-                held = main.purposes.get(name) if main is not None else None
-                return held is not None and held.mark == mark and held.fired_at is not None
-
-            if any(name == CROSSING and fired(name, mark) for name, mark in wanted):
+            if main is not None and any(
+                    (p := main.purposes.get(name)) is not None and p.mark == mark
+                    and p.fired_at is not None for name, mark in wanted):
                 return 0
-            wanted = [(name, mark) for name, mark in wanted if not fired(name, mark)]
             models = set(session.models)
-        if not wanted:
-            return NEVER
         _fresh_thresholds()
         known = [t for t in (_lowest(mark, models) for _name, mark in wanted)
                  if t is not None]

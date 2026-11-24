@@ -285,8 +285,8 @@ never guessed. Turn on `restart_point.measure_weekly` to measure once a week on 
 
 ## The warn-at mark
 
-With turns installed, usage's after-tool listener tells the model, once, when a context
-passes its mark: `context 120k: past the 1x mark for <model>` (the context in thousands,
+With turns installed, usage's after-tool listener tells the model when a context passes
+its mark: `context 120k: past the 1x mark for <model>` (the context in thousands,
 halves up). The
 mark is the launch's `MOXI_USAGE_WARN_AT` (`1x`, `1.5x`, `2x`, `off`); a session with no
 stamp gets no notice, and no config setting stands in for one. The launcher stamps its
@@ -294,8 +294,8 @@ stamp gets no notice, and no config setting stands in for one. The launcher stam
 mark it sets, so set `warn_at` on a Codex launch, its preset or `[defaults]` to be
 warned. The main session and each of its agents are measured against
 their own context; an agent's line also reaches its parent at the parent's next tool
-call. The notice fires once per session id: a compaction never brings it back, and a
-clear or a resume that names a new id starts afresh. A floor tells turns the context below which the main session's calls
+call. A mark fires once per rise past it: after a compaction brings the context below it,
+the next rise past it warns again. A floor tells turns the context below which the main session's calls
 have nothing for usage to do, so they skip the listener. The mark reads Claude Code,
 Codex and OpenCode sessions alike, and a Codex or OpenCode subagent's own record; on
 OpenCode, turns hears tool calls but has no way to hand the model a line, so there the
