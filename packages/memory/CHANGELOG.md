@@ -46,8 +46,7 @@
   records `project_hits` and `beyond_hits` in place of `widened`; older lines keep
   `widened`.
 - A recall's fork gives its first answer as soon as it has one useful point, from the
-  first search alone when that holds one, and the stream goes on after it while the fork
-  has tool calls and time left: only a later answer's `End of recall.` ends it. The
+  first search alone when that holds one, and later answers with only what is new. The
   brief says a backslash, `(`, `)`, `$` or `!` in a shell call is refused, even quoted,
   and points to `grep -E "one|other"` or the Grep tool.
 - Two turns guards, run only in sessions with the subconscious on, hold a recall's fork

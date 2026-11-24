@@ -129,11 +129,10 @@ NOTES_LINE = ("- Notes: the files under {notes_dirs}. Search them with grep and 
               "files that match.\n")
 FIRST = ("Give a first answer as soon as you have one useful point: when the first search "
          "above already holds one, answer from it at once, before any tool call.")
-STREAM = (" Your first answer never ends the recall: after each answer you are asked to keep "
-          "digging while you have tool calls and time left, and you answer again each time "
-          "you find something new, with only what is new since your last answer. End a "
-          "later answer with the line End of recall. when you have what is needed or "
-          "nothing more is worth looking for, and you are not asked again.")
+STREAM = (" After each answer you are asked to keep digging: then answer again each time "
+          "you find something new, with only what is new since your last answer. End an "
+          "answer with the line End of recall. when you have what is needed or nothing "
+          "more is worth looking for, and you are not asked again.")
 PROJECT_LINE = ("These search past this project too. This project is {project}: its hits "
                 "are this project's own record, and --project {project_arg} searches its "
                 "sessions alone.")

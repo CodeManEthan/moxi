@@ -411,10 +411,10 @@ def test_the_brief_asks_for_a_first_answer_at_once_and_a_stream_after_it():
     assert ("Give a first answer as soon as you have one useful point: when the first "
             "search above already holds one, answer from it at once, before any tool "
             "call.") in text
-    assert "Your first answer never ends the recall" in text
-    assert "keep digging while you have tool calls and time left" in text
+    assert "After each answer you are asked to keep digging" in text
     assert "with only what is new since your last answer" in text
-    assert "End a later answer with the line End of recall." in text
+    assert "End an answer with the line End of recall." in text
+    assert "never ends the recall" not in text
 
 
 def test_the_brief_says_a_backslash_is_refused():
