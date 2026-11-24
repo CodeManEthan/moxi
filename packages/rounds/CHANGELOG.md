@@ -2,6 +2,9 @@
 
 ## 0.1.4 (unreleased)
 
+- On Windows a sweep or drop removes a build's folders again. The removal's walk read each
+  entry's device from its folder listing, which on Windows holds none, so every folder
+  read as holding another device and was kept.
 - Where `systemd-run` can't start the lander, it starts detached through the core's
   `moxi.proc.spawn`, with no shell, its output appended to `lander.log`. It started
   through `sh -c`, so `finish` in a queue project failed on Windows.

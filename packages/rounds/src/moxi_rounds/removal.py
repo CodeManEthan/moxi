@@ -542,7 +542,10 @@ def _walk(place: Path) -> Kept | None:
             return Kept(place, "B7", f"{walked_dir} can't be read: {exc.strerror}")
         for entry in listed:
             try:
-                found = entry.stat(follow_symlinks=False)
+                # On Windows a folder entry's stat holds no device (0), so the entry is
+                # read again whole.
+                found = (os.lstat(entry.path) if sys.platform == "win32"
+                         else entry.stat(follow_symlinks=False))
             except OSError as exc:
                 return Kept(place, "B7", f"{entry.path} can't be read: {exc.strerror}")
             if found.st_dev != device:
