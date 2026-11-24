@@ -14,13 +14,20 @@ Each poll (`LINE_POLL_S`) a waiter removes every dead ticket (no live process ha
 (`remove_dead`). It is first when no ticket ahead of it is live and fresh: a ticket not
 touched for `TICKET_STALE_S` belongs to a waiter that lives but does not run, and is
 passed over, not removed, until it is touched again. Only the first tries the check
-lock, which stays what keeps two runs apart and still dies with its process.
+lock, which stays what keeps two runs apart and still dies with its process. A run
+removes its own ticket under the line's lock too (`leave`), so no waiter reads it then.
 
 The run that holds the lock writes `check.holder.json` beside it (`write_holder`): the
 ticket's fields less `since`, then `output` (the run's output file) and `since`, the
 time it took the lock; it removes the record when it releases. A reader trusts it only
 while its `pid` and `created` name a live process (`holder`). The doctor's check lock
 row reads all of this without taking any lock (`tickets`, `holder`, `lock_pid`).
+
+A removal never ends the run (`remove`). Where another process has the file open, as
+the doctor may, Windows refuses to remove it for a moment: it is tried again for
+`REMOVE_RETRY_S`, then left. A ticket left is removed by the next poll of any waiter
+once its process has ended, and a holder record left is trusted only while its
+process lives, and is replaced by the next run's.
 """
 
 from __future__ import annotations
@@ -50,6 +57,8 @@ TICKET_STALE_S = 60.0
 #: How long the holder's output may go unwritten before the doctor warns it may be hung,
 #: in seconds.
 QUIET_S = 1800.0
+#: How long a removal another process's open handle refuses is tried again, in seconds.
+REMOVE_RETRY_S = 1.0
 #: How many digits a ticket's number is padded to.
 _DIGITS = 12
 
@@ -138,12 +147,29 @@ def take(lock_path: Path, fields: Mapping) -> Path:
     return path
 
 
-def remove(path: Path) -> None:
-    """Remove a ticket; one already gone is no matter."""
-    try:
-        path.unlink()
-    except FileNotFoundError:
-        pass
+def remove(path: Path) -> bool:
+    """Remove a ticket or the holder record; whether it is gone. One already gone is no
+    matter. A removal refused (Windows refuses one while another process has the file
+    open) is tried again for `REMOVE_RETRY_S`, then left where it is: it never raises."""
+    deadline = time.monotonic() + REMOVE_RETRY_S
+    while True:
+        try:
+            path.unlink()
+            return True
+        except FileNotFoundError:
+            return True
+        except PermissionError:
+            if time.monotonic() >= deadline:
+                return False
+            time.sleep(files.POLL)
+        except OSError:
+            return False
+
+
+def leave(lock_path: Path, own: Path) -> None:
+    """Under the line's lock, remove this run's own ticket `own`."""
+    with changing(lock_path):
+        remove(own)
 
 
 def remove_dead(lock_path: Path, *, own: Path | None = None) -> list[Ticket]:
@@ -236,6 +262,7 @@ def held_by(found: Mapping | None, pid: int | None) -> str:
 
 
 __all__ = ["LINE_DIR", "LINE_LOCK", "HOLDER_FILE", "LINE_POLL_S", "TICKET_STALE_S",
-           "QUIET_S", "Ticket", "line_dir", "holder_file", "me", "changing", "tickets",
-           "take", "remove", "remove_dead", "write_holder", "update_holder",
-           "remove_holder", "holder", "lock_pid", "seconds", "age", "held_by"]
+           "QUIET_S", "REMOVE_RETRY_S", "Ticket", "line_dir", "holder_file", "me",
+           "changing", "tickets", "take", "remove", "leave", "remove_dead",
+           "write_holder", "update_holder", "remove_holder", "holder", "lock_pid",
+           "seconds", "age", "held_by"]

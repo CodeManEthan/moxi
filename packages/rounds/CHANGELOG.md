@@ -62,7 +62,9 @@
   `check.holder.json` beside the lock, and `moxi doctor`'s new `check lock` row shows the
   holder, its output's size and last write and the line in order, and warns of a holder
   whose output has been quiet for 30 minutes, of a stale ticket and of a lock held with no
-  holder record.
+  holder record. A ticket or holder record that can't be removed while another process
+  has it open, as on Windows, is tried again for a second and then left, so a removal
+  never ends a check or loses its record.
 
 ## 0.1.3 (2026-11-23)
 

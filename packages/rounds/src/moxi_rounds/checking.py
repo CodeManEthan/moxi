@@ -667,7 +667,7 @@ def _wait_in_line(stack: ExitStack, path: Path, fields: Mapping, say) -> None:
                 said = True
             time.sleep(check_line.LINE_POLL_S)
     finally:
-        check_line.remove(ticket)
+        check_line.leave(path, ticket)
     if said:
         say(f"got the check lock after {time.monotonic() - started:.1f} s")
 

@@ -388,6 +388,55 @@ def test_an_interrupted_waiter_removes_its_ticket(holder):
     assert check_line.tickets(checking.lock_file()) == []
 
 
+@pytest.fixture
+def refused_removal(monkeypatch):
+    """`refused_removal(times=None)`: removing a ticket or the holder record raises
+    `PermissionError`, as Windows does while another process has the file open, `times`
+    times, or every time with None. Returns the list each refused path is added to."""
+    real = Path.unlink
+
+    def start(times: int | None = None) -> list[Path]:
+        lock = checking.lock_file()
+        refused: list[Path] = []
+
+        def unlink(self, *args, **kwargs):
+            if ((self.parent == check_line.line_dir(lock)
+                 or self == check_line.holder_file(lock))
+                    and (times is None or len(refused) < times)):
+                refused.append(self)
+                raise PermissionError(13, "the file is open in another process", str(self))
+            return real(self, *args, **kwargs)
+
+        monkeypatch.setattr(Path, "unlink", unlink)
+        return refused
+
+    return start
+
+
+def test_a_removal_refused_for_a_moment_is_tried_again(refused_removal):
+    path = _ticket({**check_line.me(), "round": "proj-a/x"})
+    refused = refused_removal(times=2)
+
+    assert check_line.remove(path)
+    assert refused == [path, path] and not path.exists()
+
+
+def test_a_removal_refused_past_its_retry_never_ends_the_check(
+        build, declare, refused_removal, monkeypatch):
+    path, _tree, _made = build
+    declare(PASS)
+    monkeypatch.setattr(check_line, "REMOVE_RETRY_S", 0.1)
+    refused = refused_removal()
+    lock = checking.lock_file()
+
+    done = checking.check(ROUND, "B1", by="coder")
+
+    assert done.passed and len(ran(path)) == 1
+    assert {one.parent for one in refused} == {check_line.line_dir(lock), lock.parent}
+    assert check_line.holder_file(lock).exists()
+    assert [one.path for one in check_line.tickets(lock)] == [refused[0]]
+
+
 def test_the_holder_record_names_the_run_and_its_output(build, declare):
     path, _tree, made = build
     declare(f"""
