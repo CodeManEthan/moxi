@@ -47,8 +47,9 @@ import re
 from collections.abc import Sequence
 from dataclasses import dataclass
 
-from . import paths
+from . import folders, paths
 from . import settings as own
+from .errors import UnfencedTest
 
 log = logging.getLogger(__name__)
 
@@ -91,6 +92,8 @@ def judge(call):
         line = said(call)
         if line is not None:
             return _turns().Allow(line)
+    except UnfencedTest:
+        raise
     except Exception as exc:  # noqa: BLE001 - the guard fails open, by design
         kind = type(exc).__name__
         if kind not in _said:
@@ -127,13 +130,14 @@ def matches(file: str, settings, *, added: bool = False) -> list[Match]:
     """Each entry of the `watched_paths` of the project `file` is in that counts for it,
     `file` absolute and normalized. `added` says the call makes the file new by its own
     word."""
-    project = _project_of(file)
-    if project is None:
+    found = _project_of(file)
+    if found is None:
         return []
-    entries = own.project_setting(settings, project.key, "watched_paths")
+    key, root = found
+    entries = own.project_setting(settings, key, "watched_paths")
     if not entries:
         return []
-    root = os.path.normpath(os.path.expanduser(project.root))
+    root = os.path.normpath(os.fspath(root))
     base = base_of(file, root)
     if base is None:
         return []
@@ -159,8 +163,8 @@ def matches(file: str, settings, *, added: bool = False) -> list[Match]:
             new = added or not os.path.lexists(file)
         if entry.get("only_new") and not new:
             continue
-        out.append(Match(project.key, named, entry["note"], tuple(entry["skills"]),
-                         (project.key, pattern, entry["note"], named)))
+        out.append(Match(key, named, entry["note"], tuple(entry["skills"]),
+                         (key, pattern, entry["note"], named)))
     return out
 
 
@@ -292,16 +296,12 @@ def _part(pattern: str) -> re.Pattern:
 # -- what it reads ----------------------------------------------------------------------
 
 def _absolute(path: str, cwd: str) -> str:
-    return os.path.normpath(os.path.join(cwd, os.path.expanduser(path)))
+    return os.path.normpath(os.path.join(cwd, path))
 
 
 def _project_of(file: str):
-    from moxi import modules
-
-    projects = modules.load("projects")
-    if not projects.ok or projects.api is None:
-        return None
-    return projects.api.for_path(file)
+    """The key and root of the project `file` is in, or None."""
+    return folders.project_root_at(file)
 
 
 def _settings():
