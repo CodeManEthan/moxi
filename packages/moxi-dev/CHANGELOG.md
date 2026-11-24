@@ -17,7 +17,8 @@
   Windows) ends the run's tree as Ctrl-C does, and exits 128 plus the signal's number;
   for a check killed outright, the test kit ends the run and every process under it
   once the process `MOXI_TEST_PARENT_PID` names is gone (`watch_parent`).
-- moxi-dev requires moxi 0.1.7 or later.
+- moxi-dev requires moxi 0.1.7 or later, and psutil 5.9 or later, which the test kit's
+  parent watch uses.
 - `MOXI_TEST_TEMP` (`disk` or `ram`, unset meaning `disk`) decides where a test run keeps
   its temp: on Linux `/var/tmp` or `/dev/shm`, elsewhere the system's own, where `ram`
   runs as `disk` and says so. The kit's short directories leave `/tmp` for the same root,
