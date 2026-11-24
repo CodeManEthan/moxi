@@ -3,7 +3,9 @@
 # instead, and this workflow ignores those branches; it runs on every other one.
 # Linux runs on every push to any of them; Windows and macOS run on pushes to main,
 # after the merge, and to a ci-full/ branch, and gate nothing while the packages are
-# Linux-only. secrets' tests also run in a Windows job of their own, on the same terms:
+# Linux-only. On Windows the check is split over two jobs, each inside its time limit:
+# rounds-windows checks rounds, and other's Windows leg every other package; macOS's leg
+# checks every package. secrets' tests also run in a Windows job of their own, on the same terms:
 # on pushes to main and to a ci-full/ branch, gating nothing, with only secrets and what
 # it needs installed and line-ending conversion on.
 # The web job runs on all three systems on every push but one to a ci/ branch: the web
@@ -91,7 +93,30 @@ jobs:
         if: runner.os == 'macOS'
         run: echo "TMPDIR=/tmp" >> "$GITHUB_ENV"
       - run: uv sync --locked
-      - run: uv run --locked moxi-dev check --full
+      - name: check every package but rounds, which rounds-windows checks
+        if: runner.os == 'Windows'
+        run: uv run --locked moxi-dev check --full --leave-out rounds
+      - name: check every package
+        if: runner.os == 'macOS'
+        run: uv run --locked moxi-dev check --full
+
+  rounds-windows:
+    # rounds' Windows check, out of other's Windows leg so each finishes inside its
+    # limit; on other's terms: pushes to main and to a ci-full/ branch, gating nothing.
+    if: (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/ci-full/')) && !github.event.deleted
+    continue-on-error: true
+    runs-on: windows-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          fetch-depth: 0
+      - uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9  # v9.0.0
+        with:
+          version: "0.12.19"
+          python-version: "3.12"
+      - run: uv sync --locked
+      - run: uv run --locked moxi-dev check --full --package rounds
 
   web:
     if: ${{ !github.event.deleted }}

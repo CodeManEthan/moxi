@@ -317,8 +317,8 @@ def package_dir(root: Path, name: str) -> str:
         raise ShowError(f"--package reads the workspace of the tree it runs in; {root} is "
                         f"under no uv workspace root")
     try:
-        (package,) = timed.chosen_packages(check.load_workspace(workspace), [name])
-    except (check.CheckError, timed.TimedError) as exc:
+        (package,) = check.chosen_packages(check.load_workspace(workspace), [name])
+    except check.CheckError as exc:
         raise ShowError(str(exc)) from exc
     return package.dir
 

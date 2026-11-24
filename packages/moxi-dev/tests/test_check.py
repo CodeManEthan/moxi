@@ -1355,6 +1355,138 @@ def test_static_takes_no_other_mode(repo, monkeypatch, args):
     assert stop.value.code == 2
 
 
+# --- --package and --leave-out: a selection by hand ---------------------------------------
+
+def suite_dirs(runs):
+    return [name for name, _ in runs.suites()]
+
+
+def test_package_checks_exactly_the_named_packages_by_either_name_in_workspace_order(repo):
+    commit_file(repo, "packages/sessions/x.py")      # picks sessions, cache and comms
+    runs = Runs()
+    result = run_check(repo, runs, named=["moxi-comms", "turns"])
+    assert result.code == 0
+    assert suite_dirs(runs) == ["turns", "comms"], "no dependent, no picked package added"
+    assert result.packages == ["turns", "comms"]
+    assert "| packages: turns, comms |" in result.line()
+
+
+def test_package_without_full_runs_the_changed_paths_touches_tests(repo):
+    commit_file(repo, "packages/sessions/x.py")
+    runs = Runs()
+    run_check(repo, runs, named=["moxi"])
+    (env,) = [env for cmd, _, env in runs.calls if "pytest" in cmd]
+    assert testing.TIERS_ENV not in env
+    assert Path(env[testing.CHANGED_ENV]).read_text() == "packages/sessions/x.py\0"
+
+
+def test_package_under_full_runs_every_tier_in_the_named_packages_alone(repo):
+    runs = Runs()
+    result = run_check(repo, runs, full=True, named=["cache"])
+    assert suite_dirs(runs) == ["cache"] and result.packages == ["cache"]
+    (env,) = [env for cmd, _, env in runs.calls if "pytest" in cmd]
+    assert env[testing.TIERS_ENV] == "all" and testing.CHANGED_ENV not in env
+
+
+def test_leave_out_under_full_checks_every_package_but_the_named(repo):
+    runs = Runs()
+    result = run_check(repo, runs, full=True, left_out=["moxi-comms", "moxi-dev"])
+    assert suite_dirs(runs) == ["moxi", "sessions", "turns", "cache"]
+    assert "| packages: moxi, sessions, turns, cache |" in result.line()
+    for cmd, _, env in runs.calls:
+        if "pytest" in cmd:
+            assert env[testing.TIERS_ENV] == "all"
+
+
+def test_leave_out_without_full_takes_the_named_out_of_the_pick(repo):
+    commit_file(repo, "packages/sessions/x.py")      # picks sessions, cache and comms
+    runs = Runs()
+    result = run_check(repo, runs, left_out=["cache", "turns"])
+    assert suite_dirs(runs) == ["sessions", "comms"] and result.code == 0
+    for cmd, _, env in runs.calls:
+        if "pytest" in cmd:
+            assert Path(env[testing.CHANGED_ENV]).read_text() == "packages/sessions/x.py\0"
+
+
+def test_a_leave_out_that_leaves_nothing_checks_as_an_empty_pick(repo):
+    commit_file(repo, "packages/sessions/x.py")
+    runs = Runs()
+    result = run_check(repo, runs, left_out=["sessions", "cache", "comms"])
+    assert result.code == 0 and runs.suites() == []
+    assert [cmd for cmd, _, _ in runs.calls] == [["uv", "lock", "--check"]]
+    assert (result.stamps, result.web, result.sync) == ("skipped",) * 3
+    assert "| packages: none |" in result.line()
+
+
+@pytest.mark.parametrize("given", [{"named": ["cache"]}, {"left_out": ["cache"]}])
+def test_the_static_steps_run_whatever_the_selection(repo, monkeypatch, given):
+    scanned = []
+    for module in (check.tags, check.refs, check.naming, check.ruff_check,
+                   check.release, check.pronouns, check.machine_text):
+        real = module.scan
+        monkeypatch.setattr(module, "scan", lambda root, real=real, name=module.__name__:
+                            scanned.append(name) or real(root))
+    runs = Runs()
+    result = run_check(repo, runs, full=True, **given)
+    assert result.code == 0 and runs.calls[0][0] == ["uv", "lock", "--check"]
+    assert len(scanned) == 7
+    assert ("| lock pass | tags pass | refs pass | names pass | ruff pass | renames none "
+            "| release pass | pronouns pass | machine pass |") in result.line()
+
+
+@pytest.mark.parametrize("option, args", [("--package", ["--package", "nope"]),
+                                          ("--package", ["--package", "cache",
+                                                         "--package", "nope",
+                                                         "--package", "moxi-gone"]),
+                                          ("--leave-out", ["--leave-out", "nope"])])
+def test_a_name_naming_no_package_stops_the_check_before_any_step(repo, monkeypatch,
+                                                                  capsys, option, args):
+    runs = Runs()
+    monkeypatch.setattr(check, "_run", runs)
+    monkeypatch.setattr(check.tags, "scan", lambda root: pytest.fail("a step ran"))
+    monkeypatch.chdir(repo)
+    assert check.main(["--full", *args]) == 2
+    out, err = capsys.readouterr()
+    names = [one for one in args[1::2] if one != "cache"]
+    assert err.strip() == f"moxi-dev check: {option} names no workspace package: " \
+                          f"{', '.join(names)}"
+    line = out.splitlines()[-1]
+    assert LINE.match(line), line
+    assert ("| packages: unknown | lock not run | tags not run | refs not run | names not "
+            "run | ruff not run | renames not run | release not run | pronouns not run | "
+            "machine not run | stamps not run | web not run | sync not run | lint not run "
+            "| no suites run |") in line
+    assert line.endswith("exit 2") and runs.calls == []
+
+
+@pytest.mark.parametrize("args", [["--package", "cache", "--leave-out", "turns"],
+                                  ["--package", "cache", "--static"],
+                                  ["--package", "cache", "--only", "refs"],
+                                  ["--package", "cache", "--pick"],
+                                  ["--leave-out", "cache", "--static"],
+                                  ["--leave-out", "cache", "--only", "refs"],
+                                  ["--leave-out", "cache", "--pick"]])
+def test_a_selection_takes_no_other_selection_or_mode(repo, monkeypatch, capsys, args):
+    monkeypatch.setattr(check, "check", lambda *a, **kw: pytest.fail("the check ran"))
+    monkeypatch.chdir(repo)
+    with pytest.raises(SystemExit) as stop:
+        check.main(args)
+    assert stop.value.code == 2
+    assert "cannot be combined with" in capsys.readouterr().err
+
+
+def test_main_reads_each_selection_with_full_base_and_finding(repo, monkeypatch):
+    seen = []
+    monkeypatch.setattr(check, "check", lambda root, **kw: seen.append(kw) or check.Result())
+    monkeypatch.chdir(repo)
+    check.main(["--full", "--base", "HEAD", "--finding", "L1",
+                "--package", "cache", "--package", "moxi-turns"])
+    check.main(["--leave-out", "rounds", "--leave-out", "cache"])
+    assert (seen[0]["named"], seen[0]["left_out"]) == (["cache", "moxi-turns"], [])
+    assert seen[0]["full"] and seen[0]["base"] == "HEAD" and seen[0]["finding"] == ["L1"]
+    assert (seen[1]["named"], seen[1]["left_out"]) == ([], ["rounds", "cache"])
+
+
 # --- the summary line -------------------------------------------------------------------
 
 LINE = re.compile(

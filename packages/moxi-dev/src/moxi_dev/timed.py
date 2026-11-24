@@ -408,7 +408,10 @@ class _Run:
                   file=sys.stderr, flush=True)
 
     def choose(self, packages: Sequence[check.Package]) -> list[check.Package]:
-        return chosen_packages(packages, self.opts.packages)
+        try:
+            return check.chosen_packages(packages, self.opts.packages)
+        except check.CheckError as exc:
+            raise TimedError(str(exc)) from exc
 
     def sessions(self, chosen: Sequence[check.Package], venv: Path,
                  base: Mapping[str, str]) -> dict[str, tuple[int, dict | None, dict | None]]:
@@ -442,22 +445,6 @@ class _Run:
             gate = body.get("gate") if isinstance(body.get("gate"), dict) else None
             out[package.dir] = (code, tests, gate)
         return out
-
-
-def chosen_packages(packages: Sequence[check.Package], names: Sequence[str]
-                    ) -> list[check.Package]:
-    """The workspace packages `names` names, each by its directory under `packages/` or
-    its distribution name, in workspace order; every package when `names` is empty.
-    Raises `TimedError` naming each name that names none."""
-    if not names:
-        return list(packages)
-    known = {name: package for package in packages
-             for name in (package.dir, package.dist)}
-    unknown = [name for name in names if name not in known]
-    if unknown:
-        raise TimedError(f"--package names no workspace package: {', '.join(unknown)}")
-    wanted = {known[name].dist for name in names}
-    return [package for package in packages if package.dist in wanted]
 
 
 def _read_json(path: Path) -> dict:

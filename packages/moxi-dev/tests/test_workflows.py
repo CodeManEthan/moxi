@@ -14,6 +14,8 @@ from pathlib import Path
 
 import pytest
 
+from moxi_dev import check
+
 REPO = Path(__file__).resolve().parents[3]
 WORKFLOWS = REPO / ".github" / "workflows"
 
@@ -161,3 +163,75 @@ def test_a_candidate_s_run_does_not_let_main_move(monkeypatch):
     assert "has linux concluded success" in why
     # The same run with ci.yml's linux job lets it move: the gate reads the job alone.
     assert _main_ci(monkeypatch, [*names, "linux"]) == []
+
+
+# --- the Windows check, split over two jobs -----------------------------------------------
+
+def steps(block: str) -> list[str]:
+    """A job's steps, each its lines as written, comments between them left out."""
+    body = block.split("\n    steps:\n", 1)[1]
+    found: list[list[str]] = []
+    for line in body.splitlines():
+        if line.startswith("      - "):
+            found.append([line])
+        elif found and line.startswith("        "):
+            found[-1].append(line)
+    return ["\n".join(one) for one in found]
+
+
+def check_args(step: str) -> list[str] | None:
+    """The arguments a step gives `moxi-dev check`, or None when it runs no check."""
+    run = re.search(r"run: uv run --locked moxi-dev check(.*)$", step, re.MULTILINE)
+    return None if run is None else run.group(1).split()
+
+
+def runner_os(step: str) -> str | None:
+    named = re.search(r"if: runner\.os == '(\w+)'", step)
+    return None if named is None else named.group(1)
+
+
+def setting(block: str, key: str) -> str:
+    return re.search(rf"^    {key}: (.*)$", block, re.MULTILINE).group(1)
+
+
+def values(args: list[str], option: str) -> list[str]:
+    return [args[at + 1] for at, one in enumerate(args) if one == option]
+
+
+def test_each_package_s_windows_check_runs_in_exactly_one_of_two_jobs():
+    ci = jobs("ci.yml")
+    other = {runner_os(step): check_args(step) for step in steps(ci["other"])
+             if check_args(step) is not None}
+    assert other == {"Windows": ["--full", "--leave-out", "rounds"], "macOS": ["--full"]}
+    *before, last = steps(ci["rounds-windows"])
+    assert check_args(last) == ["--full", "--package", "rounds"]
+    assert all(check_args(step) is None for step in before)
+    selected = values(check_args(last), "--package")
+    assert selected == values(other["Windows"], "--leave-out")
+    workspace = check.load_workspace(REPO)
+    assert [package.dir for package in check.chosen_packages(workspace, selected)] \
+        == selected, "each name is a workspace package's folder"
+
+
+def test_rounds_windows_runs_on_other_s_terms():
+    ci = jobs("ci.yml")
+    other, rounds = ci["other"], ci["rounds-windows"]
+    for key in ("if", "continue-on-error", "timeout-minutes"):
+        assert setting(rounds, key) == setting(other, key)
+    assert setting(rounds, "runs-on") == "windows-latest"
+    windows_before_check = [step for step in steps(other)
+                            if runner_os(step) != "macOS" and check_args(step) is None]
+    assert steps(rounds)[:-1] == windows_before_check
+
+
+def test_other_s_matrix_is_its_os_alone():
+    """GitHub names a leg by its matrix values, and the release gate reads names exactly."""
+    matrix = re.search(r"^      matrix:\n((?:        .*\n)+)", jobs("ci.yml")["other"] + "\n",
+                       re.MULTILINE).group(1)
+    assert matrix == "        os: [windows-latest, macos-latest]\n"
+
+
+def test_the_release_gate_reads_both_windows_check_jobs():
+    settings = tomllib.loads((REPO / "pyproject.toml").read_text(encoding="utf-8"))
+    full_jobs = settings["tool"]["moxi-publishing"]["full-jobs"]
+    assert "other (windows-latest)" in full_jobs and "rounds-windows" in full_jobs

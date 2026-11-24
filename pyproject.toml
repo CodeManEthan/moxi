@@ -99,6 +99,7 @@ check-workflow = "ci.yml"
 check-job = "linux"
 full-jobs = [
     "other (windows-latest)",
+    "rounds-windows",
     "other (macos-latest)",
     "web (macos-latest)",
     "web (windows-latest)",

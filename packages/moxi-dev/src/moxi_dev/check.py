@@ -1,12 +1,14 @@
 """`moxi-dev check`: the checks a change must pass before it merges.
 
 Run from the repository's root as
-`uv run --locked moxi-dev check [--full] [--base REV] [--finding L<n>]`, or as
+`uv run --locked moxi-dev check [--full] [--base REV] [--finding L<n>]
+[--package NAME... | --leave-out NAME...]`, or as
 `uv run --locked moxi-dev check --static` for step 2 alone, or as
 `uv run --locked moxi-dev check --pick [--base REV]` to print what step 3 picks (see
 the end).
 It first reads the workspace, the worker count and the changed paths; a bad workspace,
-worker count or base stops it there, before any step runs. Then, in order:
+worker count, base or package name stops it there, before any step runs. Then, in
+order:
 
 1. `uv lock --check`: the committed `uv.lock` matches every package's declarations. A
    stale lock stops the check here.
@@ -51,6 +53,21 @@ worker count or base stops it there, before any step runs. Then, in order:
    until nothing is added: a plain path filter would skip a dependent's tests and its
    contract check. An edge to `moxi-dev` is left out of that, since every package lists
    it in its dev group. `--full` picks every package.
+
+   `--package NAME` and `--leave-out NAME` select packages by hand, each given once for
+   each package it names; a NAME is a package's folder under `packages/` or its
+   distribution name (`chosen_packages`, which `moxi-dev timed --package` reads too).
+   `--package` checks exactly the named packages, in the workspace's order, and adds no
+   dependent; it replaces the pick, or `--full`'s every package. `--leave-out` checks
+   every package the check would otherwise take but the named ones: every package but
+   them under `--full`, the pick less them without it. Either way the changed paths
+   still choose the `touches` tests below, and `--full` still runs every tier but
+   `live`. A name that names no workspace package stops the check with exit 2, the
+   names on stderr (`--package names no workspace package: <names>`, or
+   `--leave-out`). A selection that leaves nothing checks as an empty pick does. The
+   lock and the whole-tree static steps run whatever the selection; the steps below
+   run for the selected packages only, and the summary's `packages:` names them. A
+   Windows CI job runs a part of the workspace this way, each inside its own time limit.
 4. Check the build stamps of the picked packages that have a web page
    (`moxi-dev stamp`, on the working tree): built files that lag their sources fail here,
    with no Node.
@@ -142,7 +159,7 @@ run shows every failure.
 The exit code is 0 only when every step passed, 1 when one failed, and 2 when the check
 could not start or a step could not be run (not in a workspace, a member with no readable
 `pyproject.toml` or no project name, no merge base, a bad `MOXI_TEST_WORKERS`,
-`MOXI_TEST_TEMP` or `--finding`, `uv` not on PATH, a private-names list secrets can't
+`MOXI_TEST_TEMP`, `--finding`, `--package` or `--leave-out`, `uv` not on PATH, a private-names list secrets can't
 read). The summary line is printed in every case.
 
 `--static` reads the workspace and runs step 2 alone, over the whole repository: the
@@ -157,6 +174,9 @@ the JSON object `{"packages": [...]}` with the picked packages' folders under
 `packages/` in the workspace's order, and runs no step: a workflow reads it to run
 only the picked packages' jobs. It exits 0, or 2 with the reason on stderr and nothing
 on stdout when the workspace or the base can't be read.
+
+`--package` and `--leave-out` refuse each other, `--static`, `--only` and `--pick` (a
+usage error, exit 2); they combine with `--full`, `--base` and `--finding`.
 """
 
 from __future__ import annotations
@@ -346,6 +366,22 @@ READ_BY = {"README.md": "memory",
            ".github/workflows/release.yml": "publishing",
            ".github/workflows/ci.yml": "moxi-dev",
            ".github/workflows/queue.yml": "moxi-dev"}
+
+
+def chosen_packages(packages: Sequence[Package], names: Sequence[str],
+                    option: str = "--package") -> list[Package]:
+    """The workspace packages `names` names, each by its directory under `packages/` or
+    its distribution name, in workspace order; every package when `names` is empty.
+    Raises CheckError naming each name that names none, as `option` was given it."""
+    if not names:
+        return list(packages)
+    known = {name: package for package in packages
+             for name in (package.dir, package.dist)}
+    unknown = [name for name in names if name not in known]
+    if unknown:
+        raise CheckError(f"{option} names no workspace package: {', '.join(unknown)}")
+    wanted = {known[name].dist for name in names}
+    return [package for package in packages if package.dist in wanted]
 
 
 def pick(packages: Sequence[Package], paths: Sequence[str]) -> list[Package]:
@@ -682,12 +718,15 @@ def _signals_end_the_check() -> Iterator[None]:
 
 def check(root: Path, *, full: bool = False, base: str | None = None,
           finding: Sequence[str] = (), static: bool = False,
+          named: Sequence[str] = (), left_out: Sequence[str] = (),
           env: Mapping[str, str] | None = None, run: Run | None = None,
           plan: Plan | None = None, probe: Probe | None = None,
           sweep: Sweep | None = None) -> Result:
     """Run the check's steps on the workspace at `root`; the result holds the exit code.
     With `static`, run only the whole-tree static steps (`_Steps.static`), which start no
-    test, so it chooses no temp and sweeps nothing."""
+    test, so it chooses no temp and sweeps nothing. `named` checks exactly those
+    packages (`--package`), `left_out` every package it would otherwise take but those
+    (`--leave-out`); give at most one of them."""
     env = os.environ if env is None else env
     run = run or _run
     plan = plan or lint.plan
@@ -709,10 +748,19 @@ def check(root: Path, *, full: bool = False, base: str | None = None,
                 result.code = 0 if steps.static() else 1
                 result.seconds = time.monotonic() - started
                 return result
+            given = chosen_packages(packages, named) if named else None
+            dropped = set()
+            if left_out:
+                dropped = {package.dist for package
+                           in chosen_packages(packages, left_out, "--leave-out")}
             workers = worker_args(env)
             bound_s = suite_bound(env)
             changed = None if full else changed_paths(root, base or "main")
-            chosen = list(packages) if changed is None else pick(packages, changed)
+            if given is not None:
+                chosen = given
+            else:
+                chosen = list(packages) if changed is None else pick(packages, changed)
+                chosen = [package for package in chosen if package.dist not in dropped]
             result.packages = [package.dir for package in chosen]
             steps = _Steps(root, packages, workers, env, run, plan, result,
                            changed=changed, findings=findings, base=base or "main",
@@ -1131,7 +1179,8 @@ def _parser() -> argparse.ArgumentParser:
                     "the release step, the pronoun step and the machine-text step, "
                     "then the import rules and the tests "
                     "of every package the change touches and of every package that "
-                    "depends on one, in an environment of the check's own. Run it from "
+                    "depends on one (or of the packages --package or --leave-out "
+                    "select), in an environment of the check's own. Run it from "
                     "the repository's root.")
     parser.add_argument("--full", action="store_true",
                         help="check every package, whatever changed, and run every "
@@ -1142,6 +1191,13 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--finding", metavar="L<n>", action="append", default=[],
                         help="run only the tests marked with this finding; may be given "
                              "more than once")
+    parser.add_argument("--package", metavar="NAME", action="append", default=[],
+                        help="check exactly this package, by its folder under packages/ "
+                             "or its distribution name, and no dependent of it; give it "
+                             "once for each package")
+    parser.add_argument("--leave-out", metavar="NAME", action="append", default=[],
+                        help="check every package the check would otherwise take but "
+                             "this one; give it once for each package")
     parser.add_argument("--static", action="store_true",
                         help="run only the tag, comment-reference, naming, Ruff, renames, "
                              "release, pronoun and machine-text steps, over the whole "
@@ -1200,6 +1256,11 @@ def main(argv: list[str]) -> int:
     args = _parser().parse_args(argv)
     if args.paths and not args.only:
         _parser().error("PATH may be given only with --only")
+    if args.package and args.leave_out:
+        _parser().error("--package cannot be combined with --leave-out")
+    selecting = "--package" if args.package else "--leave-out" if args.leave_out else None
+    if selecting and (args.static or args.only or args.pick):
+        _parser().error(f"{selecting} cannot be combined with --static, --only or --pick")
     if args.only and (args.full or args.base or args.finding):
         _parser().error("--only cannot be combined with --full, --base or --finding")
     if args.static and (args.only or args.full or args.base or args.finding):
@@ -1220,6 +1281,6 @@ def main(argv: list[str]) -> int:
     if args.pick:
         return print_pick(root, args.base or "main")
     result = check(root, full=args.full, base=args.base, finding=args.finding,
-                   static=args.static)
+                   static=args.static, named=args.package, left_out=args.leave_out)
     print(result.line(), flush=True)
     return result.code

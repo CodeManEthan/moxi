@@ -337,8 +337,10 @@ counts as passed, and one that passed and then failed on a re-run counts as fail
 the check passes, each `full-jobs` job's conclusion goes in the gate's notes, which
 `moxi publishing tag` and `ci gate` print; when it refuses, the notes name each one too.
 
-Only the names in `full-jobs` are read. Moxi's own list names its eight Windows and macOS
-legs, so of the Linux jobs the gate reads `check-job` alone: not the `web` matrix's
+Only the names in `full-jobs` are read. Moxi's own list names its nine Windows and macOS
+jobs, seven matrix legs and two jobs of their own (`secrets-windows`, and
+`rounds-windows`, which checks rounds on Windows apart from `other (windows-latest)`),
+so of the Linux jobs the gate reads `check-job` alone: not the `web` matrix's
 `web (ubuntu-latest)` leg, and not the `browser` matrix (`browser (<module>, <browser>)`).
 Moxi's PyPI publishers are set up only once every job of main's run is green, those two
 included, which covers them.

@@ -12,7 +12,8 @@ repository's `uv sync` installs it, and no Moxi module depends on it at run time
   runs every package and every tier but `live`; `--finding L<n>` runs only the tests
   marked with that finding (see "The tag check" below); `--static` runs only the
   whole-tree static steps (see "The code checks" below); `--pick` prints the packages
-  the change picks and runs nothing (see below). It runs no `timed` test, in any
+  the change picks and runs nothing (see below); `--package NAME` checks exactly the
+  named packages and `--leave-out NAME` every package but them (see below). It runs no `timed` test, in any
   form: it holds each one back and its last line counts them as `timed held <n>`;
   `moxi-dev timed` runs them. A finding whose tests are all timed counts as found, with
   a line that says so. Its last line also gives the tests' seconds, the slowest 5 %'s
@@ -164,6 +165,20 @@ workspace's order, and runs no step. It exits 0, or 2 with the reason on stderr 
 nothing on stdout when the workspace or the base can't be read. The repository's
 `queue.yml` workflow reads it to check a merge queue's candidate: its browser jobs run
 only for the picked packages.
+
+`moxi-dev check --package NAME` checks exactly the packages named, and `--leave-out
+NAME` every package the check would otherwise take but them; each is given once for
+each package, by its folder under `packages/` or its distribution name, as `moxi-dev
+timed --package` takes it. `--package` adds no dependent and replaces the pick (or,
+with `--full`, every package); `--leave-out` takes the named out of the pick, or out of
+every package with `--full`. The changed paths still choose the `touches` tests, and
+`--full` still runs every tier but `live`. The lock and the whole-tree static steps run
+whatever the selection, and the summary's `packages:` names the packages checked. A
+name that names no workspace package stops the check with exit 2 before any step. The
+two refuse each other, `--static`, `--only` and `--pick`. The repository's `ci.yml`
+splits the Windows check this way, so each of its two jobs finishes inside its limit:
+`rounds-windows` runs `--full --package rounds`, and `other (windows-latest)` runs
+`--full --leave-out rounds`.
 
 Run one step without the lock, release, package, lint or test steps with
 `moxi-dev check --only refs [PATH...]`, `moxi-dev check --only names [PATH...]`,

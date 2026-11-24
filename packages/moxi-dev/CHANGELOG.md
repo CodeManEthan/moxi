@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- `moxi-dev check --package NAME` checks exactly the named packages, with no dependent
+  added, and `--leave-out NAME` every package the check would otherwise take but the
+  named ones; each is given once per package, by its folder or distribution name. The
+  lock and the whole-tree static steps still run, and the summary's `packages:` names
+  what was checked. A name that names no workspace package stops the check with exit 2
+  before any step. The two refuse each other, `--static`, `--only` and `--pick`.
 - `console_script` on Windows writes `name.exe`, a copy of the launcher uv writes for a
   console script, in place of a `.cmd` file. Its source gets the arguments exactly as
   the program that started it passed them (cmd.exe cut one at a newline and read `&`,
