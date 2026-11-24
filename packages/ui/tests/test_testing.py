@@ -453,3 +453,86 @@ def test_a_failed_browser_test_keeps_its_trace_where_ui_traces_says(tmp_path, ui
     summary = done.stdout.strip().splitlines()[-1]
     assert "1 failed" in summary and "error" not in summary, done.stdout
     assert [p.suffix for p in traces_dir.iterdir()] == [".zip"]
+
+
+#: The inner run's bound on the fixtures' own calls, in seconds: `CALL_S`, shortened.
+_INNER_CALL_S = 5
+#: Seconds the inner run may take in all; past it the run is taken to hang.
+_INNER_RUN_S = 90
+
+
+@pytest.mark.browser
+def test_a_teardown_whose_browser_stops_answering_ends_at_the_bound(tmp_path, ui_browser):
+    # The inner test stops every process of its browser and fails, so its teardown keeps
+    # the trace and closes the context: calls to a browser that never answers, which
+    # Playwright gives no timeout. The plugin ends the browser's processes at the bound.
+    import psutil
+
+    stopped = tmp_path / "stopped"
+    (tmp_path / "test_stops_answering.py").write_text(textwrap.dedent(f"""
+        from types import SimpleNamespace
+
+        import psutil
+
+        import moxi_ui.testing
+
+        moxi_ui.testing.CALL_S = {_INNER_CALL_S}
+
+        def test_a_page_whose_browser_stops_answering(ui_contexts):
+            context = ui_contexts(SimpleNamespace(url="http://127.0.0.1:9/"), sign_in=False)
+            context.new_page().set_content("<p>here</p>")
+            # This process's one child is Playwright's driver; every process under it is
+            # the browser's.
+            browser = [found for driver in psutil.Process().children()
+                       for found in driver.children(recursive=True)]
+            with open({str(stopped)!r}, "w") as fh:
+                fh.write("\\n".join(f"{{p.pid}} {{p.create_time()}}" for p in browser))
+            for found in browser:
+                found.suspend()
+            assert False, "fails on purpose"
+    """))
+    browsers_dir = _browsers_dir(ui_browser.browser_type.executable_path)
+    try:
+        done = subprocess.run([sys.executable, "-m", "pytest", "-q", "-p", "no:cacheprovider",
+                               "--ui-browser", ui_browser.browser_type.name, str(tmp_path)],
+                              cwd=tmp_path, capture_output=True, text=True,
+                              timeout=_INNER_RUN_S,
+                              env={**os.environ, "PLAYWRIGHT_BROWSERS_PATH": str(browsers_dir)})
+        left = [found for found in _stopped(stopped) if found.is_running()
+                and found.status() != psutil.STATUS_ZOMBIE]
+    finally:
+        for found in _stopped(stopped):
+            try:
+                found.kill()
+            except psutil.Error:
+                pass
+    out = done.stdout + done.stderr
+    assert stopped.read_text().split(), f"the inner test stopped no browser process:\n{out}"
+    assert done.returncode == 1, out
+    assert re.search(f"the browser stopped answering: (stopping a failed test's trace|closing a "
+                     f"context) took more than {_INNER_CALL_S} s, so its processes were ended",
+                     out), out
+    took = re.search(r"1 failed, 1 error in ([\d.]+)s", done.stdout)
+    assert took is not None and float(took.group(1)) >= _INNER_CALL_S, out
+    assert left == [], f"the plugin left stopped processes running: {left}"
+
+
+def _stopped(listed: Path) -> list:
+    """The processes `listed` names (`<pid> <start time>` a line) that are still the ones
+    it named."""
+    import psutil
+
+    if not listed.exists():
+        return []
+    found = []
+    for entry in listed.read_text().split("\n"):
+        if not entry:
+            continue
+        pid, made = entry.split()
+        try:
+            process = psutil.Process(int(pid))
+            if process.create_time() == float(made):
+                found.append(process)
+        except psutil.Error:
+            pass
+    return found

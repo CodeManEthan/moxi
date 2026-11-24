@@ -17,6 +17,12 @@
   wait (a list read again after a topic value, a field read once typing stops): the
   page root's `data-reading` mark counts it from the moment it is scheduled until its
   answer has been drawn, and the function it gives cancels it. A user sees no change.
+- For module authors, `moxi_ui.testing`'s browser fixtures bound each of their own calls
+  to Playwright that takes no timeout of its own (a context opened or closed, a trace
+  started or stopped, the browser closed) at `CALL_S`, 60 s. Past it the fixture ends
+  the Playwright driver and browser it started, and the call fails saying which call it
+  was, so a browser that stops answering fails a test's teardown rather than holding the
+  run with no end.
 
 ## 0.2.7 (2026-11-22)
 
