@@ -18,6 +18,7 @@ from moxi_cache import api, claude, clock, module, timer
 from moxi_sessions import api as sessions_api
 
 from conftest import claude_config, write_cache_config
+from moxi_dev.testing import toml_string
 
 SRC = Path(api.__file__).parent
 
@@ -147,24 +148,24 @@ def subscribed(own_roots, tmp_path):
 [[timer.subscriber]]
 name = "plain"
 at = 0
-run = ["{exe}"]
+run = [{toml_string(exe)}]
 
 [[timer.subscriber]]
 name = "stamped"
 at = -900
 requires_env = {{ MOXI_LAUNCHER_REQUEST = "*" }}
-run = ["{exe}", "{{session}}"]
+run = [{toml_string(exe)}, "{{session}}"]
 
 [[timer.subscriber]]
 name = "valued"
 at = 0
 requires_env = {{ V = "on" }}
-run = ["{exe}"]
+run = [{toml_string(exe)}]
 
 [[timer.subscriber]]
 name = "refused"
 at = 0
-run = ["{tmp_path / 'missing'}"]
+run = [{toml_string(tmp_path / 'missing')}]
 """)
     return exe
 

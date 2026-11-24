@@ -9,6 +9,7 @@ import threading
 from pathlib import Path
 
 import pytest
+from moxi_dev.testing import console_script
 from conftest import (add_lines, assistant_line, claude_config, transcript,
                       write_cache_config, write_transcript)
 
@@ -128,16 +129,18 @@ def test_run_agents_with_no_claude(monkeypatch):
 
 
 def test_run_agents_runs_claude_agents_json(tmp_path, monkeypatch):
-    exe = tmp_path / "claude"
-    exe.write_text('#!/bin/sh\n[ "$1 $2" = "agents --json" ] || exit 9\n'
-                   f"echo '{json.dumps([entry(1, A)])}'\n")
-    exe.chmod(0o755)
+    exe = console_script(tmp_path, "claude", (
+        "import sys\n"
+        "if sys.argv[1:] != ['agents', '--json']:\n"
+        "    sys.exit(9)\n"
+        f"print({json.dumps([entry(1, A)])!r})\n"))
     monkeypatch.setattr(watch, "claude_binary", lambda: str(exe))
     assert watch.run_agents() == [entry(1, A)]
-    exe.write_text("#!/bin/sh\necho broken >&2\nexit 3\n")
+    console_script(tmp_path, "claude",
+                   "import sys\nprint('broken', file=sys.stderr)\nsys.exit(3)\n")
     with pytest.raises(watch.AgentsUnreadable, match="exited 3: broken"):
         watch.run_agents()
-    exe.write_text("#!/bin/sh\necho not json\n")
+    console_script(tmp_path, "claude", "print('not json')\n")
     with pytest.raises(watch.AgentsUnreadable, match="printed no JSON"):
         watch.run_agents()
 

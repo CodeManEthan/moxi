@@ -16,7 +16,7 @@ from conftest import POSIX_MODES, claude_config, write_cache_config
 
 from moxi_cache import cli, timer, watch
 from moxi_cache.timer import Refusal, Subscription, Timer
-from moxi_dev.testing import PROC_WAIT_S
+from moxi_dev.testing import PROC_WAIT_S, console_script, toml_string
 
 A = "aaaaaaaa-1111-4111-8111-111111111111"
 B = "bbbbbbbb-2222-4222-8222-222222222222"
@@ -618,6 +618,9 @@ def test_the_log_is_under_caches_state_dir(own_roots):
 
 # --- a real start -------------------------------------------------------------------------------
 
+@pytest.mark.skipif(sys.platform != "linux",
+                    reason="reads the child's session and descriptors through /proc, "
+                           "which only Linux has; Windows starts it through moxi.proc")
 def test_the_run_starts_detached_with_no_shell(tmp_path):
     out = tmp_path / "out.json"
     probe = tmp_path / "probe"
@@ -957,12 +960,14 @@ def test_a_module_installed_while_the_watcher_runs_is_taken_up(tmp_path, exe):
 def test_the_watcher_and_timers_judge_by_the_same_check(own_roots, tmp_path):
     """After each tick, the watcher's timer runs what `moxi cache timers` lists, refused
     or not, at the same config and files."""
-    late = tmp_path / "late-bin" / "verb"
+    (tmp_path / "made").mkdir()
+    made = console_script(tmp_path / "made", "verb")
+    late = tmp_path / "late-bin" / made.name
     write_cache_config(own_roots, f"""
 [[timer.subscriber]]
 name = "late"
 at = 0
-run = ["{late}", "{{session}}"]
+run = [{toml_string(late)}, "{{session}}"]
 """)
     t = Timer(config_entries=lambda: cli._config_entries()[0], spawn=Spawner(),
               log_file=tmp_path / "timer.jsonl")
@@ -977,8 +982,7 @@ run = ["{late}", "{{session}}"]
     t.tick({}, T0)
     assert both() == ([], ["late"], [], ["late"])
     late.parent.mkdir()
-    late.write_text("#!/bin/sh\nexit 0\n")
-    late.chmod(0o755)
+    made.rename(late)
     t.tick({}, T0 + 1)
     assert both() == (["late"], [], ["late"], [])
 
@@ -992,7 +996,7 @@ name = "on-expiry"
 at = 0
 every = 120
 requires_env = {{ RECYCLE_ON_EXPIRY = "on" }}
-run = ["{exe}", "clear-expired", "--session", "{{session}}"]
+run = [{toml_string(exe)}, "clear-expired", "--session", "{{session}}"]
 """)
     (entry,) = current()["timer.subscriber"]
     s = checked(entry)
@@ -1117,14 +1121,14 @@ name = "on-expiry"
 at = 0
 every = 120
 requires_env = {{ MOXI_TEST_UNSET_VAR = "on" }}
-run = ["{exe}", "clear-expired", "--session", "{{session}}"]
+run = [{toml_string(exe)}, "clear-expired", "--session", "{{session}}"]
 
 [[timer.subscriber]]
 name = "before-expiry"
 at = -900
 until = 0
 every = 120
-run = ["{exe}", "refresh", "--session", "{{session}}"]
+run = [{toml_string(exe)}, "refresh", "--session", "{{session}}"]
 
 [[timer.subscriber]]
 name = "tilde"
@@ -1190,7 +1194,7 @@ def test_doctor_lists_the_subscriptions_and_the_refused(own_roots, exe, capsys):
 [[timer.subscriber]]
 name = "ok"
 at = 0
-run = ["{exe}"]
+run = [{toml_string(exe)}]
 
 [[timer.subscriber]]
 name = "rel"
@@ -1213,13 +1217,13 @@ def test_the_doctor_warns_where_requires_env_cannot_be_checked(own_roots, exe, m
 [[timer.subscriber]]
 name = "warm"
 at = 0
-run = ["{exe}"]
+run = [{toml_string(exe)}]
 requires_env = {{ V = "on" }}
 
 [[timer.subscriber]]
 name = "plain"
 at = 0
-run = ["{exe}"]
+run = [{toml_string(exe)}]
 """)
     monkeypatch.setattr(timer, "env_checkable", lambda: True)
     assert list(doctor.rows()) == []

@@ -12,6 +12,7 @@ import pytest
 from conftest import write_cache_config
 
 from moxi_cache import api, cli, records
+from moxi_dev.testing import toml_string
 
 NOW = 1_800_000_000.0
 A = "aaaaaaaa-1111-4111-8111-111111111111"
@@ -174,7 +175,7 @@ name = "before"
 at = -900
 until = 0
 every = 120
-run = ["{exe}", "--session", "{{session}}"]
+run = [{toml_string(exe)}, "--session", "{{session}}"]
 """)
     zone = os.environ.get("TZ")
     os.environ["TZ"] = "UTC"

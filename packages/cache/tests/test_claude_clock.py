@@ -13,6 +13,7 @@ from conftest import (HOUR, POSIX_MODES, assistant_line, claude_config, user_lin
 
 from moxi_cache import api, claude, clock
 from moxi_sessions.api import Request
+from moxi_dev.testing import toml_string
 
 SESS_A = "aaaaaaaa-1111-4111-8111-111111111111"
 SESS_B = "bbbbbbbb-2222-4222-8222-222222222222"
@@ -70,14 +71,14 @@ def test_new_session_with_an_id_reads_the_transcript(tmp_path):
 def test_an_id_from_someones_record_is_read_from_its_transcript(tmp_path, age, kind):
     """An id taken from a kind's evidence (a record of a session someone ran) is passed
     with `projects_root=None` and `turned=True`: read under the reader's root."""
-    write_sessions_config(tmp_path, f'[claude]\nprojects = "{tmp_path}"\n')
+    write_sessions_config(tmp_path, f'[claude]\nprojects = {toml_string(tmp_path)}\n')
     write_transcript(SESS_B, age, root=tmp_path)
     clock = api.read("claude", SESS_B, projects_root=None, turned=True)
     assert clock.kind == kind and clock.age_s >= age - 1
 
 
 def test_an_id_from_someones_record_with_no_transcript_is_unknown(tmp_path):
-    write_sessions_config(tmp_path, f'[claude]\nprojects = "{tmp_path}"\n')
+    write_sessions_config(tmp_path, f'[claude]\nprojects = {toml_string(tmp_path)}\n')
     clock = api.read("claude", SESS_B, projects_root=None, turned=True)
     assert (clock.kind, clock.code) == ("unknown", "no-record")
 
@@ -90,7 +91,7 @@ def test_no_transcript_without_the_sessions_own_evidence_is_unknown(tmp_path, ca
     root.mkdir()
     kw = dict(projects_root=str(root), turned=False)
     if case == "no root reported":
-        write_sessions_config(tmp_path, f'[claude]\nprojects = "{root}"\n')
+        write_sessions_config(tmp_path, f'[claude]\nprojects = {toml_string(root)}\n')
         kw = dict(turned=False)
     elif case == "root missing":
         kw["projects_root"] = str(tmp_path / "nowhere")
@@ -120,7 +121,7 @@ def test_a_session_that_stated_no_root_reads_under_sessions_root(tmp_path):
     assert api.read("claude", SESS_A).kind == "warm"
     other = tmp_path / "elsewhere"
     write_transcript(SESS_A, 2 * HOUR, root=other)
-    write_sessions_config(tmp_path, f'[claude]\nprojects = "{other}"\n')
+    write_sessions_config(tmp_path, f'[claude]\nprojects = {toml_string(other)}\n')
     assert api.read("claude", SESS_A).kind == "cold"
 
 
