@@ -603,14 +603,29 @@ session, and `moxi launcher unpark --all` every one. The session stays resumable
 session park left running that the reboot ended) is settled, so it is not reserved
 again.
 
-**Recycle.** Two launch options let a session be cleared or compacted on the launcher's
-own reads:
+**Recycle.** Two launch options recycle a session on the launcher's own reads. The
+launcher never clears or compacts a session at a context limit.
 
-- `--recycle-on-expiry clear|compact` (needs turns and cache): once the session's prompt
-  cache has gone cold and the session is quiet, clear or compact it. A clear waits while
-  a named hold is open (below). A session idle for an hour has its background shells
-  stopped by the clear.
-- `--recycle-at-limit off|relaunch|compact` (needs turns and usage), `off` unless set: a
+- `--recycle-on-expiry clear|compact` (needs turns and cache): clear the session once
+  idle after its prompt cache has expired, or compact it shortly before, once per idle
+  stretch, while it is idle and its cache still warm.
+  - `clear`: once the cache reads cold and the session is quiet. A clear waits while a
+    named hold is open (below). A session idle for an hour has its background shells
+    stopped by the clear.
+  - `compact`: inside a window that opens where keep-warm's shuts, 360 s before the
+    cache expires, and shuts 60 s before it, counted on cache's age of the last request
+    plus the length of the last response (cache's age runs from a response's end, the
+    lifetime from its request's start). cache's timer asks every 60 s through the
+    window. The compact acts only while cache reads the session warm, the session is
+    quiet, and nothing is at work by keep-warm's reading (no live subagent, no open hold
+    of the launch chain, no directed agent at work), whether or not keep-warm is on for
+    the launch. It reads cache again right before it acts. It compacts at most once in
+    an idle stretch: after a compaction, the launcher doesn't compact the session again
+    until a request the compaction didn't make, so an idle session is compacted once
+    and then expires. A lifetime of 360 s or less (Claude's five-minute cache) has no
+    window, and a window missed (busy, held or at work through every ask) is not made up
+    after the expiry.
+- `--recycle-at-limit off|relaunch` (needs turns and usage), `off` unless set: a
   flag, a preset, `[defaults]` or the launch page turns it on. With `relaunch`, once the
   context passes the launch's `warn_at` mark, the agent is told it may relaunch itself
   with a handoff. The line opens "This launch lets you recycle yourself", rides on
@@ -618,12 +633,13 @@ own reads:
   the next rise past it is told again. A launch's self relaunch is accepted only where
   it is set to `relaunch` and its session can recycle itself: a Claude launch in a slot,
   where slots run, not in a scratch folder, with a handoff folder (with notes installed,
-  a notes directory for its folder). It is told only where it is also warned at a mark.
+  a notes directory for its folder). It is told only where it is also warned at a mark,
+  and `moxi launcher show` and Home name that mark (`at limit relaunch (2x)`).
   A `relaunch` launch with no warn-at mark (`warn_at = off`, or a seat that sets no
   `warn_at`, since a seat holds none unless set) launches with no refusal and no
   warning: it is never told, and its agent may still relaunch itself; `moxi launcher
-  show` and Home say `at limit relaunch (armed, no warning)`. `off` or `compact` from
-  any layer, the shipped `off` included, leaves it out.
+  show` and Home say `at limit relaunch (armed, no warning)`. `off` from any layer, the
+  shipped `off` included, leaves it out.
   - A `relaunch` typed or set by the preset needs slots and a slot launch. A scratch
     launch has no notes directory to keep a handoff in, so it can't take `relaunch`
     (`scratch-recycle`, exit 3): the launch and its preview, on the command line and the
@@ -631,16 +647,14 @@ own reads:
     launches in a scratch. A `relaunch` from `[defaults]` holds `off`, with a warning, on
     a scratch launch. Where else a `relaunch` set for the launch can't act (a Codex
     launch, no handoff folder), it is kept and the launch warns, naming what it fails.
-  - `relaunch` takes no `--limit-at`: its line comes at `warn_at`. A `limit_at` typed or
-    set by the preset of a `relaunch` launch is refused (`relaunch-mark`, exit 3, hint
-    "set warn_at"); one from `[defaults]` is left out, with a warning.
 
-  `compact` compacts the session once it is idle, waiting up to `recycle.limit_wait_s`,
-  each time the context climbs past `--limit-at 1x|1.5x|2x`, and it is open to a scratch
-  launch. With `--limit-at` unset, the mark is the one usage warns this launch at, its
-  `warn_at`, when that is a mark; otherwise (`warn_at` is `off` or unset, so usage warns
-  it at none) `1x`. The mark is fixed when the launch is composed, and a relaunch
-  composes its mark again from the values then.
+  **Retired.** `recycle_at_limit = compact` and the `limit_at` row are retired. Typed
+  or set by a preset, each is refused (`retired`, exit 2) with what to do instead; from
+  `[defaults]`, each is left out of the launch with a warning naming the fix
+  (`recycle_at_limit` holds `off`). `recycle.limit_wait_s` in the launcher's config file
+  is left out with a warning too, and `moxi config launcher check` warns of it. A launch
+  recorded with `compact` shows `compact (no longer acts)`, and its relaunch, resume or
+  fork runs `off`, with a warning; a recorded `limit_at` is dropped.
 
 **Keep-warm.** `--keep-warm on` (needs turns and cache) nudges a session shortly before
 its prompt cache would expire while it waits on work it handed out. It is off unless a
@@ -974,7 +988,7 @@ A refusal prints one line ending in a short code, such as `[off-posture]`, and a
 | cache | the `keep_warm` and `recycle_on_expiry` rows, and a director's relaunch refused while the session's cache is warm; each running session's cache and `Keep warm` on Home's Sessions row; the doctor row `keep-warm.timer` | neither row is offered; no session reads as kept warm, and no `Keep warm` |
 | projects | `project` keys, a project's agent listing, a directory's project key; with ui, the launcher's facts on the Projects page | `cwd` paths and scratch launches only |
 | notes | the `notes_dir` row, and notes' handoff folder; a launch notes gives no notes directory has none | the launcher's own handoff folder |
-| usage | the `warn_at`, `recycle_at_limit` and `limit_at` rows | the rows are not offered |
+| usage | the `warn_at` and `recycle_at_limit` rows | the rows are not offered |
 | ui | the launcher's page, and its state views on other pages | the command line only |
 | sessions | the latest thing said in each running session, on Home's Sessions row; `Open` and `All sessions` go to the sessions page | the row shows when each session was launched, and its links go to the launcher's page |
 | memory | the `subconscious` row: `--subconscious automatic` or `--subconscious on-demand` (needs turns too) stamps the mode under the variable memory names, `MOXI_MEMORY_SUBCONSCIOUS`, and memory's subconscious runs in that session; for now a recall runs on Claude Code only, so a Codex launch with the row on has it off at run time (memory's log and doctor say so); a fork drops the row | the row is not offered |
@@ -1083,8 +1097,6 @@ Set with `moxi config set launcher <key> <value>`:
 - `relaunch.director_pass_env` (empty): the same for a director's relaunch, read from
   the director's environment. Empty, nothing of the director's reaches the session.
 - `relaunch.notice_retry_s` (30): how long a refused notice is tried again.
-- `recycle.limit_wait_s` (1800): how long a compact at the limit waits for the session to
-  be idle.
 - `keep_warm.subagent_cap` (3) and `keep_warm.director_cap` (10): how many nudges in a row
   each case gets; `keep_warm.subagent_texts` and `keep_warm.director_texts` are their
   words. `keep_warm.director_cap` also caps the nudges for the agents a director

@@ -38,7 +38,7 @@ ui = ["moxi-ui>=0.2.8,<0.3"]
 notes = ["moxi-notes>=0.1,<0.2"]
 # cache's timer, for keep-warm and recycle on expiry.
 cache = ["moxi-cache>=0.1.6,<0.2"]
-# usage's context warning: the warn_at, limit_at and recycle_at_limit rows.
+# usage's context warning: the warn_at and recycle_at_limit rows.
 usage = ["moxi-usage>=0.2,<0.3"]
 # The latest thing said in each running session, on Home's Sessions row.
 sessions = ["moxi-sessions>=0.2.8,<0.3"]
@@ -59,20 +59,21 @@ launcher = "moxi_launcher.module"
 [project.entry-points."moxi.turns.listeners"]
 launcher = "moxi_launcher.listeners"
 
-# The launcher's subscriptions to cache's timer (recycle on expiry, keep-warm), read by
-# cache's watcher.
+# The launcher's subscriptions to cache's timer (clear on expiry, compact before it,
+# keep-warm), read by cache's watcher.
 [project.entry-points."moxi.cache.timers"]
 launcher = "moxi_launcher.cachetimers"
 
 # The crossing handler, called by usage in a session's endpoint process when the session
-# passes its launch's `limit_at` mark: the relaunch line once, or the limit compact.
+# passes its launch's `warn_at` mark: the relaunch line, once a rise.
 [project.entry-points."moxi.usage.crossings"]
 launcher = "moxi_launcher.recycle:on_crossing"
 
 # The launcher's commands run as `moxi launcher <verb>` (only the core declares `moxi`),
 # the detached first-turn sender (`moxi launcher deliver`) among them. One console script
-# of its own: the detached runs (a relaunch, a repair, an expiry or keep-warm ask, a limit
-# compact), spawned and never typed, found through `moxi.paths.script`.
+# of its own: the detached runs (a relaunch, a repair, an expiry or keep-warm ask, and the
+# retired limit compact's stub), spawned and never typed, found through
+# `moxi.paths.script`.
 [project.scripts]
 moxi-launcher-job = "moxi_launcher.job:main"
 
