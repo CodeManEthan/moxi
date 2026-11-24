@@ -15,7 +15,7 @@ from __future__ import annotations
 import dataclasses
 
 import pytest
-from conftest import wait_for_queue, wait_until
+from conftest import CHECKS_MODE_BITS, wait_for_queue, wait_until
 
 from moxi import exit as moxi_exit
 from moxi_comms import tokens
@@ -49,7 +49,8 @@ def test_provision_gives_the_operator_a_holder_and_the_record_only_its_hash(rig)
     path = rig.store.path_for(owner)
     assert token, "provision minted no operator credential"
     assert path.name == "operator", "the operator is a holder like any other"
-    assert oct(path.stat().st_mode & 0o777) == "0o600"
+    if CHECKS_MODE_BITS:
+        assert oct(path.stat().st_mode & 0o777) == "0o600"
     assert rig.store.secret_ids(owner) == [tokens.OPERATOR_SECRET_ID]
     assert rig.record.meta_get(META_OPERATOR_TOKEN_HASH) == token_hash(token)
 

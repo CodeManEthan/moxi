@@ -11,7 +11,7 @@ import sys
 
 import pytest
 
-from conftest import cache_absent
+from conftest import LAUNCHES, cache_absent
 from moxi_comms.adapters import headless
 from moxi_comms.adapters.headless import ExitRule, ExitWatch, parse_exit
 from moxi_comms.adapters.terminal import pidfd_open
@@ -480,6 +480,7 @@ def test_the_first_cause_to_fire_wins():
 
 # --------------------------------------------------------------------------- the end
 
+@LAUNCHES
 def test_end_logs_the_cause_and_signals_the_host_through_its_pidfd():
     host = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(60)"])
     said: list = []

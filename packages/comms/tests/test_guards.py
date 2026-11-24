@@ -3,12 +3,13 @@
 import itertools
 import shutil
 import socket
+import sys
 import tempfile
 from pathlib import Path
 
 import pytest
-from conftest import (cursor_of, put_cursor, queued, raw_connection, send_turn, settle,
-                      wait_for_queue, wait_until, write_config)
+from conftest import (UNIX_SOCKETS, cursor_of, put_cursor, queued, raw_connection, send_turn,
+                      settle, wait_for_queue, wait_until, write_config)
 
 from moxi_comms import constants, daemon as daemon_mod
 from moxi_comms.daemon import Daemon
@@ -235,6 +236,7 @@ def test_backoff_shape_is_bounded_and_jittered():
 
 # --------------------------------------------------------------------------- posture
 
+@UNIX_SOCKETS
 def test_socket_posture_is_0600_in_a_0700_dir(rig):
     import os
     from moxi_comms.paths import daemon_socket
@@ -287,19 +289,25 @@ def test_a_start_against_a_live_daemon_refuses_and_leaves_it_serving(rig):
     """The incident, run forwards: a second daemon on the live one's path. It must
     refuse, and neither the refusal nor its `stop()` may touch what is already there."""
     path = daemon_socket()
-    inode = path.stat().st_ino
+    # On Windows the address is a named pipe: no file to compare, and a stat would take
+    # one of its instances. The refusal and the live daemon's answer are checked there.
+    has_file = sys.platform != "win32"
+    inode = path.stat().st_ino if has_file else None
     intruder = Daemon(rig.record, clock=rig.clock, start_trim_thread=False)
 
     with pytest.raises(RuntimeError, match="live comms daemon"):
         intruder.start()
-    assert path.stat().st_ino == inode, "the live socket file is untouched"
+    if has_file:
+        assert path.stat().st_ino == inode, "the live socket file is untouched"
 
     intruder.stop()
-    assert path.stat().st_ino == inode, "and the refused daemon's stop takes nothing"
+    if has_file:
+        assert path.stat().st_ino == inode, "and the refused daemon's stop takes nothing"
     assert says_ping(path), "the live daemon is still serving through its own name"
     assert rig.shim(name="planner", scope="proj-a").identity == "planner@proj-a"
 
 
+@UNIX_SOCKETS
 def test_a_stale_socket_file_is_cleared_and_the_daemon_serves(rig, shortdir):
     """Unattended recovery still works: the file a dead daemon left behind answers
     ECONNREFUSED, which is the allowlist saying `nothing is here`."""
@@ -314,6 +322,7 @@ def test_a_stale_socket_file_is_cleared_and_the_daemon_serves(rig, shortdir):
     assert not path.exists()
 
 
+@UNIX_SOCKETS
 def test_a_clean_stop_removes_the_socket_and_a_second_stop_does_not(rig, shortdir):
     """The regression, and the flag's reset: once the file is gone the daemon no
     longer claims it, so a second `stop()` cannot take a successor's socket with it."""

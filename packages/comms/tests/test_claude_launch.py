@@ -20,7 +20,7 @@ import textwrap
 import time
 
 import pytest
-from conftest import wait_until
+from conftest import LAUNCHES, UNIX_SOCKETS, wait_until
 
 import bind_kit
 from moxi import exit as moxi_exit
@@ -53,6 +53,7 @@ def fake_claude(tmp_path):
     return script, out, tmp_path / "release"
 
 
+@LAUNCHES
 def test_the_launch_forks_a_bound_adapter_before_claude_and_it_ends_with_claude(
         rig, fake_claude, turns_plugins):
     from conftest import ADDITIONS_COMMS_ONLY_PATCH, files_under
@@ -98,6 +99,7 @@ def test_the_launch_forks_a_bound_adapter_before_claude_and_it_ends_with_claude(
     assert "claude pid" in log.read_text()
 
 
+@LAUNCHES
 def test_a_word_that_never_comes_ends_the_launch_and_starts_no_claude(tmp_path):
     """An adapter that never gives its word holds the launch up by `ready_wait`, then
     the wrapper ends it with `TEMPFAIL` and never execs `claude`. It says once that it
@@ -119,6 +121,7 @@ def test_a_word_that_never_comes_ends_the_launch_and_starts_no_claude(tmp_path):
     assert session.READY_WAIT == 15.0
 
 
+@LAUNCHES
 def test_the_wrapper_reads_the_adapters_word_in_a_bounded_time():
     """A refusal comes with its reason, an adapter that ended without a word reads as
     failed, and only the first word is said. A word the wrapper's end can't take any
@@ -146,6 +149,7 @@ def test_the_wrapper_reads_the_adapters_word_in_a_bounded_time():
     assert word.teller(w)(word.BOUND) is False
 
 
+@LAUNCHES
 def test_the_waiting_notice_comes_once_and_only_when_the_word_is_late():
     notices = []
     r, w = os.pipe()
@@ -361,6 +365,7 @@ def test_an_uppercase_own_id_is_named_and_stated_in_lowercase(capsys):
     assert (code, sid, argv) == (0, SID, ["--continue"]), "the session dir, in lowercase"
 
 
+@UNIX_SOCKETS
 def test_a_second_launch_of_a_running_session_id_is_refused(capsys):
     """Two launches of one id would share one session dir and one claim socket. A
     claim socket that answers refuses the second; a stale socket file does not."""
@@ -660,6 +665,7 @@ def test_a_look_releases_held_mail_on_a_passing_read_and_is_no_turn(rig, monkeyp
 
 # ------------------------------------------------------------- nobody waits for the word
 
+@LAUNCHES
 def test_an_adapter_whose_bound_cant_be_delivered_lets_the_name_go(rig):
     """The wrapper gave up waiting and ended: `BOUND` reaches nobody, so the adapter
     unbinds, removes its claim file and ends with `TEMPFAIL`."""
@@ -692,6 +698,7 @@ def test_an_adapter_whose_bound_cant_be_delivered_lets_the_name_go(rig):
     assert claimfile.read(shim.claims.key) is None
 
 
+@LAUNCHES
 def test_an_adapter_whose_wrapper_is_gone_before_it_starts_never_binds(rig, monkeypatch):
     from moxi_comms.adapters import claude_adapter
 

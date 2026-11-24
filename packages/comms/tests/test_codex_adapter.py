@@ -13,7 +13,7 @@ import time
 
 import pytest
 
-from conftest import clock_reads_warm, cursor_of, frame_kinds, wait_until
+from conftest import LAUNCHES, clock_reads_warm, cursor_of, frame_kinds, wait_until
 from moxi_comms import claimfile, codex_threads, owed, paths
 from moxi_comms.adapters.codex import CodexAdapter, HostGone, layer_one_hash
 from moxi_comms.adapters.codex_roster import CodexAgent
@@ -997,6 +997,7 @@ def served(headless, caplog):
         os.close(handle)
 
 
+@LAUNCHES
 def test_a_host_that_ends_before_its_session_is_found_logs_host_ended(rig, served):
     def find(pid, timeout):
         raise TimeoutError("not ready")
@@ -1010,6 +1011,7 @@ def test_a_host_that_ends_before_its_session_is_found_logs_host_ended(rig, serve
                               "waiting for the name"]
 
 
+@LAUNCHES
 def test_a_host_that_ends_on_its_own_logs_host_ended(rig, served):
     adapter = served()
     assert wait_until(lambda: adapter.exit_watch is not None and adapter.exit_watch.found)
@@ -1020,6 +1022,7 @@ def test_a_host_that_ends_on_its_own_logs_host_ended(rig, served):
                               "waiting for the name"]
 
 
+@LAUNCHES
 def test_a_session_a_cause_ended_writes_no_second_end_line(rig, served):
     adapter = served("after=2h")
     assert wait_until(lambda: adapter.exit_watch is not None and adapter.exit_watch.found)

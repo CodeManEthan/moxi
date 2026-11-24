@@ -17,7 +17,7 @@ import inspect
 import re
 
 import pytest
-from conftest import wait_for_queue, wait_until, write_config
+from conftest import LAUNCHES, wait_for_queue, wait_until, write_config
 
 import bind_kit
 from moxi import modules
@@ -53,6 +53,7 @@ def test_the_codex_wrapper_takes_a_resume():
     assert parsed.resume == "thread-old"
 
 
+@LAUNCHES
 @pytest.mark.parametrize("harness", bind_kit.HARNESSES)
 def test_the_set_of_wrappers_that_end_on_a_bind_timeout_is_what_they_do(
         harness, tmp_path):

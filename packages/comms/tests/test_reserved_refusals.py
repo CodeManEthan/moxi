@@ -5,7 +5,6 @@ any process inside a live session, or one it can't place."""
 from __future__ import annotations
 
 import os
-import socket as sock
 import sys
 from types import SimpleNamespace
 
@@ -72,14 +71,17 @@ def claim_file(key, *roots, socket=None):
 
 
 @pytest.fixture
-def listening(tmp_path):
-    """A socket that answers, as a claim holder's does."""
-    path = tmp_path / "c.sock"
-    s = sock.socket(sock.AF_UNIX, sock.SOCK_STREAM)
-    s.bind(str(path))
-    s.listen()
-    yield str(path)
-    s.close()
+def listening():
+    """A claim socket that answers: a holder's, served where comms serves one (a named
+    pipe on Windows)."""
+    from moxi_comms.claimhold import ClaimHolder
+    from moxi_comms.paths import claim_socket
+
+    holder = ClaimHolder(kind="codex", key="listening", keying="pid",
+                         socket_path=claim_socket("listening"))
+    holder.listen()
+    yield str(holder.socket_path)
+    holder.close()
 
 
 def history(rig):
@@ -209,7 +211,8 @@ def test_a_peer_that_has_gone_is_refused_as_unplaceable(console):
     from moxi.proc import ProcId
 
     with pytest.raises(Refusal) as e:
-        _send_from(console, Peer(os.getpid(), os.getuid(), ProcId(os.getpid(), 1.0)))
+        _send_from(console, Peer(os.getpid(), getattr(os, "getuid", lambda: None)(),
+                                 ProcId(os.getpid(), 1.0)))
     assert "can't tell" in str(e.value)
 
 

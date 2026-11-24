@@ -30,6 +30,14 @@ from moxi_comms.constants import NAME_ENV
 from moxi_comms.membership import DEFAULT_PROC, TREE
 from moxi_dev.testing import PROC_WAIT_S
 
+#: The mark of a test of a respawn's start: comms replaces a dead adapter only where it can
+#: watch `claude` through a pidfd and read its environment from its `/proc` entry, and on
+#: Windows it starts none (`CannotRespawn`); the stand-in adapters there are Unix sockets.
+RESPAWNS = pytest.mark.skipif(
+    sys.platform == "win32",
+    reason="Windows: comms starts no new adapter there (no pidfd to watch claude with, no "
+           "/proc to read its environment from), and the stand-in adapters are Unix sockets")
+
 KEY = "5e55a1d0-0000-4000-8000-0000000000c9"
 
 
@@ -92,6 +100,7 @@ def test_a_dropped_claude_adapter_whose_socket_answers_no_one_is_replaced(starts
     assert call["env"] == {"stand-in": "1"} and call["systemd_run"] is None
 
 
+@RESPAWNS
 def test_a_dying_adapter_that_still_answers_a_moment_is_waited_for(starts):
     """The connection's end can come before the dying adapter's claim socket closes:
     the drop reads the socket until it stops answering."""
@@ -104,6 +113,7 @@ def test_a_dying_adapter_that_still_answers_a_moment_is_waited_for(starts):
     assert len(starts.calls) == 1
 
 
+@RESPAWNS
 def test_an_adapter_that_keeps_answering_is_left_to_bind_again_itself(starts):
     held = Listening(paths.claim_socket(KEY))
     try:
@@ -170,12 +180,14 @@ def stand_in_claude():
     end(proc)
 
 
+@RESPAWNS
 def test_the_sessions_env_is_its_claudes_own(stand_in_claude):
     proc, env = stand_in_claude
     got = respawn.session_env(record_for(proc.pid))
     assert {k: got.get(k) for k in env} == env
 
 
+@RESPAWNS
 @pytest.mark.parametrize("change,says", [
     ({NAME_ENV: None}, "no comms identity stamp"),
     ({CLAIM_SOCKET_ENV: "/elsewhere/claim-x.sock"}, "another claim socket"),
@@ -271,6 +283,7 @@ def test_the_scopes_env_reaches_the_user_manager(monkeypatch):
     assert respawn.with_user_manager(own)["XDG_RUNTIME_DIR"] == "/run/user/8"
 
 
+@RESPAWNS
 def test_a_scoped_respawn_runs_the_starter_under_systemd_run_with_the_session_env(
         monkeypatch, tmp_path):
     from types import SimpleNamespace
@@ -322,6 +335,7 @@ def stand_in_popen(monkeypatch, tmp_path, scope_argv):
     return seen
 
 
+@RESPAWNS
 def test_a_failed_systemd_run_is_logged_with_its_reason_and_the_starter_is_forked(
         monkeypatch, tmp_path, caplog):
     seen = stand_in_popen(monkeypatch, tmp_path, [
@@ -341,6 +355,7 @@ def test_a_failed_systemd_run_is_logged_with_its_reason_and_the_starter_is_forke
     assert "secret-token-value" not in caplog.text
 
 
+@RESPAWNS
 def test_a_systemd_runs_long_stderr_is_cut(monkeypatch, tmp_path, caplog):
     stand_in_popen(monkeypatch, tmp_path, [
         "sh", "-c", "head -c 5000 /dev/zero | tr '\\0' x >&2; exit 3"])
@@ -352,6 +367,7 @@ def test_a_systemd_runs_long_stderr_is_cut(monkeypatch, tmp_path, caplog):
     assert "x" * respawn.SYSTEMD_RUN_STDERR_CHARS not in line
 
 
+@RESPAWNS
 def test_a_systemd_run_that_cannot_be_run_falls_back_to_a_fork(
         monkeypatch, tmp_path, caplog):
     seen = stand_in_popen(monkeypatch, tmp_path, None)
@@ -363,6 +379,7 @@ def test_a_systemd_run_that_cannot_be_run_falls_back_to_a_fork(
     assert "(it could not be run: No such file or directory)" in caplog.text
 
 
+@RESPAWNS
 def test_a_scoped_starter_that_ran_is_not_forked_again(monkeypatch, tmp_path, caplog):
     """A starter that ran under the scope and said its word, or ended with a word
     unsaid but exit 0, is not a failed systemd-run."""
@@ -399,6 +416,7 @@ def test_at_most_three_respawns_per_claim_in_ten_minutes_and_one_line_past_it(
 
 # ------------------------------------------------------------------ the start sweep
 
+@RESPAWNS
 def test_the_start_sweep_replaces_each_gone_claude_adapter_once(starts):
     claimfile.write(KEY, record_for())
     claimfile.write("codex-1", record_for(kind="codex"))

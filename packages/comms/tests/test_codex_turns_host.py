@@ -13,6 +13,11 @@ from conftest import LIVE_S, clock_reads_warm, cursor_of, wait_until
 
 from fake_codex import calls, control_call, events, install
 
+pytestmark = pytest.mark.skipif(
+    sys.platform == "win32",
+    reason="Windows: the Codex wrapper forks its adapter, and turns' Codex host serves "
+           "Unix sockets, which Python has none of there")
+
 
 IDENTITY = "hosted@proj-a"
 #: How long a wrapper gets to stop on SIGTERM before it is killed.

@@ -94,6 +94,23 @@ POSIX_MODES = pytest.mark.skipif(
 #: mode-bit assertion there and runs the rest.
 CHECKS_MODE_BITS = sys.platform != "win32"
 
+#: The mark of a test that runs a wrapper's launch or an adapter's watch of its harness.
+#: The Claude and Codex wrappers fork their adapter (`os.fork`) and watch the harness
+#: through a pidfd, so neither launches on Windows.
+LAUNCHES = pytest.mark.skipif(
+    sys.platform == "win32",
+    reason="Windows: the wrappers fork their adapter and watch the harness through a "
+           "pidfd (os.fork, pidfd_open, select.poll), which Windows lacks, so no launch "
+           "runs there")
+
+#: The mark of a test that makes a Unix socket of its own (a 0.2 daemon or holder, a
+#: stale socket file). Python has no `AF_UNIX` on Windows, where comms' sockets are
+#: named pipes.
+UNIX_SOCKETS = pytest.mark.skipif(
+    sys.platform == "win32",
+    reason="Windows: Python has no AF_UNIX there, and comms' sockets there are named "
+           "pipes, which leave no file")
+
 
 @pytest.fixture
 def profile(fence) -> Path:

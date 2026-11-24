@@ -20,6 +20,11 @@ from moxi_comms.adapters import opencode_roster
 from moxi_dev.testing import PROC_WAIT_S
 from pty_kit import PtyWrapper, alive
 
+pytestmark = pytest.mark.skipif(
+    sys.platform == "win32",
+    reason="Windows: these run the wrapper on a pseudo-terminal (os.openpty, fcntl), "
+           "and the wrapper itself hangs up on SIGHUP, neither of which Windows has")
+
 IDENTITY = "coder@proj-a"
 
 

@@ -69,10 +69,17 @@ def blocker() -> socket.socket:
     return sock
 
 
+#: Why a test of a passed socket skips on Windows.
+DESCRIPTORS = ("Windows: a socket there is a handle, not a file descriptor, so no supervisor "
+               "passes one by number as systemd and launchd do")
+
+
 @pytest.fixture
 def passed(monkeypatch):
     """Put sockets where systemd would pass them, and give the environment that names
     them to this process."""
+    if sys.platform == "win32":
+        pytest.skip(DESCRIPTORS)
     placed: list[int] = []
     monkeypatch.setattr(listen, "_FIRST_FD", FIRST)
 
@@ -422,6 +429,7 @@ def test_a_passed_socket_that_isnt_one_loopback_listener_is_failed(passed, kind)
             os.fstat(FIRST + k)                        # every passed descriptor closed
 
 
+@pytest.mark.skipif(sys.platform == "win32", reason=DESCRIPTORS)
 def test_launchds_listeners_key_is_taken_on_macos():
     with listener() as job:
         fd = os.dup(job.fileno())

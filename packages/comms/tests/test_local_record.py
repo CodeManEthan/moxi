@@ -697,7 +697,10 @@ def test_the_daemon_takes_a_flag_that_agrees_and_mock_with_a_scratch_store(monke
         assert reached, f"{argv} should have got past the flag check"
 
 
-@pytest.mark.parametrize("has_sighup", [True, False])
+@pytest.mark.parametrize("has_sighup", [
+    pytest.param(True, marks=pytest.mark.skipif(sys.platform == "win32",
+                                                 reason="Windows has no SIGHUP to install")),
+    False])
 def test_the_daemon_stops_on_sigterm_and_on_sighup_where_there_is_one(monkeypatch, tmp_path,
                                                                     has_sighup):
     """Windows has no SIGHUP; the daemon starts there all the same."""

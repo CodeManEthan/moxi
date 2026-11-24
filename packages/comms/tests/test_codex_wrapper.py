@@ -18,7 +18,7 @@ import textwrap
 from types import SimpleNamespace
 
 import pytest
-from conftest import wait_until
+from conftest import LAUNCHES, wait_until
 
 import bind_kit
 from moxi import exit as moxi_exit
@@ -282,6 +282,7 @@ def run_wrapper(fake_host, *argv, env=None):
                             stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
 
 
+@LAUNCHES
 def test_the_launch_binds_then_execs_the_host_which_keeps_the_pid(
         rig, fake_host, tmp_path):
     proc = run_wrapper(fake_host, "--name", NAME, "--scope", "proj-a", "--no-window")
@@ -318,6 +319,7 @@ def test_the_launch_binds_then_execs_the_host_which_keeps_the_pid(
                       PROC_WAIT_S)
 
 
+@LAUNCHES
 def test_a_launch_told_to_resume_binds_the_name_to_that_thread(rig, fake_host):
     """The host gets `--resume`, and the adapter bound the name to the thread before the
     host started, as a resume and not a new session. A host that ends before its
@@ -386,6 +388,7 @@ def codex_adapter(rig, tmp_path):
                         status_sink=lambda text: None, exit_hook=lambda: None)
 
 
+@LAUNCHES
 def test_an_adapter_whose_bound_cant_be_delivered_lets_the_name_go(rig, tmp_path):
     """The wrapper gave up waiting and ended: `BOUND` reaches nobody, so the adapter
     unbinds, removes its claim file and ends with `TEMPFAIL`, before it looks for a
@@ -419,6 +422,7 @@ def test_an_adapter_whose_bound_cant_be_delivered_lets_the_name_go(rig, tmp_path
     assert claimfile.read(adapter.claims.key) is None
 
 
+@LAUNCHES
 def test_an_adapter_whose_wrapper_is_gone_before_it_starts_never_binds(rig, tmp_path):
     adapter = codex_adapter(rig, tmp_path)
     started = []
@@ -434,6 +438,7 @@ def test_an_adapter_whose_wrapper_is_gone_before_it_starts_never_binds(rig, tmp_
     assert "planner@proj-a" not in rig.daemon.bindings
 
 
+@LAUNCHES
 def test_a_bind_the_daemon_never_answers_ends_the_codex_launch(tmp_path):
     """The Codex wrapper's wait runs out: 75, no host, the waiting line once."""
     ran = bind_kit.silent_launch("codex", tmp_path, ready_wait=0.5, notice_after=0.1)
@@ -477,8 +482,9 @@ def test_a_headless_launch_the_wrapper_refuses_exits_2_before_any_fork(
     with pytest.raises(Refused) as refused:
         plan(args(*argv), cwd=str(tmp_path))
     assert says in str(refused.value)
-    monkeypatch.setattr(codex_wrapper.os, "fork",
-                        lambda: pytest.fail("nothing is forked for a refused launch"))
+    monkeypatch.setattr(codex_wrapper.os, "fork",                 # none on Windows
+                        lambda: pytest.fail("nothing is forked for a refused launch"),
+                        raising=False)
     assert codex_wrapper.main(argv) == moxi_exit.USAGE
     assert says in capsys.readouterr().err
     assert not codex_wrapper.sessions_dir().exists() or not any(
@@ -489,8 +495,9 @@ def test_cold_without_the_cache_module_is_refused(tmp_path, monkeypatch, capsys)
     from conftest import cache_absent
 
     cache_absent(monkeypatch)
-    monkeypatch.setattr(codex_wrapper.os, "fork",
-                        lambda: pytest.fail("nothing is forked for a refused launch"))
+    monkeypatch.setattr(codex_wrapper.os, "fork",                 # none on Windows
+                        lambda: pytest.fail("nothing is forked for a refused launch"),
+                        raising=False)
     assert codex_wrapper.main([*HEADLESS, "--exit", "cold"]) == moxi_exit.USAGE
     assert "cold needs the cache module" in capsys.readouterr().err
 
@@ -563,6 +570,7 @@ def _pipe_of(pid, fd) -> str:
     return os.readlink(f"/proc/{pid}/fd/{fd}")
 
 
+@LAUNCHES
 def test_the_host_holds_the_lifeline_and_ends_when_the_adapter_dies(
         rig, headless_host):
     import signal
@@ -602,6 +610,7 @@ def test_the_host_holds_the_lifeline_and_ends_when_the_adapter_dies(
     assert wait_until(lambda: "coder@proj-a" not in rig.daemon.bindings, PROC_WAIT_S)
 
 
+@LAUNCHES
 def test_exit_session_ends_the_host_through_its_pidfd_and_releases_the_name(
         rig, headless_host, capsys):
     proc = run_wrapper(headless_host, *HEADLESS, "--exit", "after=2h")

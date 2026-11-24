@@ -14,7 +14,7 @@ import threading
 from types import SimpleNamespace
 
 import pytest
-from conftest import clock_reads_warm, wait_until
+from conftest import LAUNCHES, clock_reads_warm, wait_until
 
 from fake_app_server import FakeAppServer
 from fake_turns import CODEX, CODEX_RELOAD, FakeSession, fake_find
@@ -162,6 +162,7 @@ def test_a_codex_adapter_names_its_claim_on_every_bind(rig, launch):
 
 # --------------------------------------------------------------------------- registering
 
+@LAUNCHES
 def test_the_claude_adapter_registers_before_it_says_bound(rig, monkeypatch):
     """`serve` reads the token from the process's environment, and the first
     registration is in the daemon's table when the wrapper is told bound."""
@@ -191,6 +192,7 @@ def test_the_claude_adapter_registers_before_it_says_bound(rig, monkeypatch):
     assert shim.layer_form == context.TOOLS
 
 
+@LAUNCHES
 def test_a_claude_adapter_that_fails_while_claude_runs_keeps_its_claim_file(
         rig, monkeypatch):
     """The claim file is what tells the session and doctor that mail has stopped, so an

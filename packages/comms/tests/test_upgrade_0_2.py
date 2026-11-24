@@ -18,7 +18,7 @@ from pathlib import Path
 
 import pytest
 
-from conftest import CHECKS_MODE_BITS
+from conftest import CHECKS_MODE_BITS, UNIX_SOCKETS
 from moxi_comms import cli, paths, provision, store, tokens
 from moxi_comms.local_record import LocalRecord, META_OPERATOR_TOKEN_HASH, token_hash
 from moxi_comms.store import upgrade_0_2
@@ -344,6 +344,7 @@ def test_a_bad_cursor_is_refused():
     _refused("doesn't read as a cursor")
 
 
+@UNIX_SOCKETS
 def test_a_live_0_2_daemon_is_refused():
     zero_two_home()
     s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
@@ -425,6 +426,7 @@ def test_setup_fails_the_install_when_the_move_refuses(capsys):
     assert contents() == before
 
 
+@UNIX_SOCKETS
 def test_setup_leaves_the_move_to_the_daemon_while_0_2s_daemon_answers(capsys):
     zero_two_home()
     s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)

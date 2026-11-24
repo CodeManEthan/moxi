@@ -15,7 +15,7 @@ import threading
 
 import pytest
 from claim_kit import World
-from conftest import wait_until
+from conftest import UNIX_SOCKETS, wait_until
 
 from moxi import exit as moxi_exit
 from moxi import ipc
@@ -88,6 +88,7 @@ def zero_two_holder():
     path.unlink(missing_ok=True)
 
 
+@UNIX_SOCKETS
 def test_a_0_2_claim_holder_is_answered_relaunch_the_session(rig, zero_two_holder):
     path, seen = zero_two_holder
     with pytest.raises(AdapterMismatch) as e:
@@ -96,6 +97,7 @@ def test_a_0_2_claim_holder_is_answered_relaunch_the_session(rig, zero_two_holde
     assert "relaunch the session" in OLD_ADAPTER
 
 
+@UNIX_SOCKETS
 def test_a_send_through_a_0_2_claim_holder_exits_error_and_sends_nothing(
         rig, zero_two_holder):
     path, _seen = zero_two_holder
@@ -108,6 +110,7 @@ def test_a_send_through_a_0_2_claim_holder_exits_error_and_sends_nothing(
     assert rig.record.max_message_id(rig.names_channel) == before
 
 
+@UNIX_SOCKETS
 def test_whoami_through_a_0_2_claim_holder_exits_error(rig, zero_two_holder, capsys):
     path, _seen = zero_two_holder
     assert claimhold.whoami({CLAIM_SOCKET_ENV: str(path)}) == moxi_exit.ERROR
@@ -120,6 +123,7 @@ def test_whoami_through_a_0_2_claim_holder_exits_error(rig, zero_two_holder, cap
     {"op": "claim", "protocol": 2},
     {"op": "state"},
 ], ids=["claim", "state"])
+@UNIX_SOCKETS
 def test_a_0_2_claim_frame_at_a_new_claim_socket_is_an_error_that_closes(rig, world,
                                                                          frame):
     s = world.session("planner")
