@@ -19,6 +19,7 @@ import sys
 from pathlib import Path
 
 import pytest
+from moxi_dev.testing import console_script
 from playwright.sync_api import expect
 
 pytestmark = [pytest.mark.browser,
@@ -30,7 +31,9 @@ DRIFT = "/m/loadout/api/drift"
 FINE = {"ok", "off"}
 #: The event loadout's page sends on the document when an act has ended.
 CHANGED = "moxi-loadout-changed"
-FAKE_CLI = "#!/bin/sh\necho \"fake $(basename \"$0\"): no test here runs it\" >&2\nexit 1\n"
+FAKE_CLI = ("import os, sys\n"
+            "name = os.path.splitext(os.path.basename(sys.argv[0]))[0]\n"
+            "sys.exit(f'fake {name}: no test here runs it')\n")
 
 
 @pytest.fixture(scope="module")
@@ -39,9 +42,7 @@ def ui_shell_options(tmp_path_factory) -> dict:
     inherit, and git with the test's own global config and no system config."""
     bin_dir = tmp_path_factory.mktemp("fake-clis")
     for name in ("claude", "codex"):
-        path = bin_dir / name
-        path.write_text(FAKE_CLI, encoding="utf-8")
-        path.chmod(0o755)
+        console_script(bin_dir, name, FAKE_CLI)
     gitconfig = tmp_path_factory.mktemp("git") / "gitconfig"
     gitconfig.write_text("[user]\n\tname = sample-bot\n\temail = bot@example.invalid\n",
                          encoding="utf-8")

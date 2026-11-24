@@ -23,6 +23,7 @@ import textwrap
 from pathlib import Path
 
 import pytest
+from moxi_dev.testing import console_script
 
 import moxi.modules
 
@@ -62,12 +63,10 @@ def fake_cli(bin_dir: Path, name: str) -> Path:
     """A program `name` in `bin_dir` that appends its name and arguments to
     `bin_dir/calls.log` and exits 0."""
     log = bin_dir / "calls.log"
-    path = bin_dir / name
-    path.write_text(f'#!/bin/sh\nprintf "%s" "{name}" >> "{log}"\n'
-                    f'for a in "$@"; do printf " %s" "$a" >> "{log}"; done\n'
-                    f'printf "\\n" >> "{log}"\n', encoding="utf-8")
-    path.chmod(0o755)
-    return path
+    return console_script(bin_dir, name, (
+        "import sys\n"
+        f"with open({str(log)!r}, 'a', encoding='utf-8') as log:\n"
+        f"    log.write(' '.join([{name!r}, *sys.argv[1:]]) + '\\n')\n"))
 
 
 @pytest.fixture

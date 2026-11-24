@@ -11,6 +11,7 @@ from types import SimpleNamespace
 
 import loadout_kit as kit
 import pytest
+from moxi_dev.testing import toml_string
 
 from moxi_loadout import harness, install, stores, view
 from moxi_loadout.planner import Resolution, Scope
@@ -166,7 +167,7 @@ def changed(before: dict, after: dict, key) -> bool:
 def test_a_section_row_is_applied_by_a_run_naming_its_section(lo, tmp_path):
     root = project(tmp_path)
     kit.manifest(lo, f'[user]\nskills = ["review"]\nhooks = ["guard-rm"]\n'
-                     f'[project."{root}"]\nagents = ["helper"]\n' + HOOK)
+                     f'[project.{toml_string(root)}]\nagents = ["helper"]\n' + HOOK)
     before = rows()
     user = ("skill", "review", "claude", "user")
     hook = ("hook", "guard-rm", "claude", "user")
@@ -210,7 +211,7 @@ def test_a_removal_is_applied_under_its_section_or_by_a_whole_run(lo, tmp_path):
     root = project(tmp_path)
     kit.skill(lo / "skills", "other")
     kit.manifest(lo, f'[user]\nskills = ["review", "other"]\n'
-                     f'[project."{root}"]\nskills = ["other"]\n')
+                     f'[project.{toml_string(root)}]\nskills = ["other"]\n')
     assert install.install().code == 0
     # Dropped from the user section, which the manifest still has: its section's run.
     # The project section dropped whole: only a whole run removes what it placed.
@@ -261,7 +262,7 @@ def test_a_would_commit_row_install_covers_reads_ignores(lo, tmp_path):
     root = tmp_path / "app"
     root.mkdir()
     subprocess.run(["git", "-C", str(root), "init", "-q"], check=True, capture_output=True)
-    kit.manifest(lo, f'[project."{root}"]\nskills = ["review"]\n')
+    kit.manifest(lo, f'[project.{toml_string(root)}]\nskills = ["review"]\n')
     assert install.install().code == 0
     (root / ".claude" / "skills" / ".gitignore").unlink()
     row = rows()[("skill", "review", "claude", str(root))]

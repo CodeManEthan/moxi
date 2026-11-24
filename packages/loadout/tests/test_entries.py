@@ -6,12 +6,12 @@ from __future__ import annotations
 import json
 import os
 import stat
-import sys
 import textwrap
 from pathlib import Path
 
 import loadout_kit as kit
 import pytest
+from moxi_dev.testing import console_script, toml_string
 
 from moxi_loadout import entries, harness, install, ledger, stores
 from moxi_loadout.planner import Scope
@@ -90,9 +90,7 @@ def lo(loadout_dir, tmp_path, monkeypatch):
     bin_dir = tmp_path / "fake-mcp-bin"
     bin_dir.mkdir()
     for name, body in (("claude", FAKE_CLAUDE), ("codex", FAKE_CODEX)):
-        path = bin_dir / name
-        path.write_text(f"#!{sys.executable}\n" + body, encoding="utf-8")
-        path.chmod(0o755)
+        console_script(bin_dir, name, body)
     monkeypatch.setenv("PATH", str(bin_dir) + os.pathsep + os.environ["PATH"])
     return loadout_dir
 
@@ -425,7 +423,7 @@ def test_scoped_runs_apply_only_their_entries(lo, tmp_path):
     root = tmp_path / "app"
     root.mkdir()
     write(lo, f'[user]\nhooks = ["guard-rm"]\npermissions = ["git-reads"]\n'
-              f'[project."{root}"]\n' + HOOK + PERMS)
+              f'[project.{toml_string(root)}]\n' + HOOK + PERMS)
     assert install.install(Scope(projects=(str(root),))).code == 0
     assert not settings().exists()
     assert install.install(Scope(item=("hook", "guard-rm"))).code == 0

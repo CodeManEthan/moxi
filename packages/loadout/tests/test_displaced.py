@@ -7,21 +7,20 @@ from __future__ import annotations
 
 import json
 import os
+import shlex
 import stat
 import subprocess
-import sys
 import textwrap
 from pathlib import Path
 
 import loadout_kit as kit
 import pytest
+from moxi_dev.testing import console_script, toml_string
 from test_entries import FAKE_CLAUDE, FAKE_CODEX, HOOK, PERMS
 
 from moxi_loadout import cli, displaced, harness, install, ledger, stores, teardown
 from moxi_loadout.planner import Scope
 
-pytestmark = pytest.mark.skipif(sys.platform == "win32",
-                                reason="the fake harness CLIs are POSIX scripts")
 
 
 @pytest.fixture
@@ -33,9 +32,7 @@ def lo(loadout_dir, tmp_path, monkeypatch):
     bin_dir = tmp_path / "fake-mcp-bin"
     bin_dir.mkdir()
     for name, body in (("claude", FAKE_CLAUDE), ("codex", FAKE_CODEX)):
-        path = bin_dir / name
-        path.write_text(f"#!{sys.executable}\n" + body, encoding="utf-8")
-        path.chmod(0o755)
+        console_script(bin_dir, name, body)
     monkeypatch.setenv("PATH", str(bin_dir) + os.pathsep + os.environ["PATH"])
     return loadout_dir
 
@@ -62,6 +59,21 @@ def copies() -> list[Path]:
     return sorted(p for p in root.rglob("*") if p.is_file()) if root.exists() else []
 
 
+#: How the way back moves a copy, as this system's shell spells it.
+MOVE = "move /y" if os.name == "nt" else "mv"
+
+
+def quoted(path) -> str:
+    """`path` quoted as the way back quotes it on this system."""
+    text = os.fspath(path)
+    return '"' + text.replace('"', '""') + '"' if os.name == "nt" else shlex.quote(text)
+
+
+def spelled_mv(copy, target) -> str:
+    """The move the way back names, as this system's shell spells it."""
+    return f"{MOVE} {quoted(copy)} {quoted(target)}"
+
+
 def states(outcome) -> dict:
     return {(r.kind, r.name, r.harness): r.state for r in outcome.rows}
 
@@ -77,8 +89,9 @@ def assert_kept(out, target: Path, before: bytes, *, how="copied", ident=None) -
     assert len(stamp) == 16 and stamp.endswith("Z")
     assert name == target.name or name.startswith(target.name + "-")
     assert harness_name in ("claude", "codex", "opencode")
-    assert stat.S_IMODE(copy.stat().st_mode) == 0o600
-    assert stat.S_IMODE(copy.parent.stat().st_mode) == 0o700
+    if os.name == "posix":  # Windows keeps no mode bits
+        assert stat.S_IMODE(copy.stat().st_mode) == 0o600
+        assert stat.S_IMODE(copy.parent.stat().st_mode) == 0o700
     if how == "copied":
         assert f"kept a copy of {target} at {copy}" in out.lines
     return kept
@@ -94,7 +107,7 @@ def test_a_header_less_generated_file_reads_modified_and_every_other_run_leaves_
         lo, tmp_path):
     proj = tmp_path / "proj"
     proj.mkdir()
-    write(lo, f'[user]\nagents = ["helper"]\nskills = ["review"]\n[project."{proj}"]\n'
+    write(lo, f'[user]\nagents = ["helper"]\nskills = ["review"]\n[project.{toml_string(proj)}]\n'
               'skills = ["review"]\n')
     assert install.install().code == 0
     generated().write_text("name = 'mine'\n")   # rewritten by hand, no header
@@ -173,6 +186,7 @@ def test_a_generated_file_that_is_a_link_is_left_and_refused(lo, tmp_path):
     assert row.state == "modified" and "is a link" in row.reason
 
 
+@pytest.mark.skipif(os.name != "posix", reason="Windows takes no write away by a folder's mode")
 def test_no_copy_no_write(lo, monkeypatch):
     write(lo, '[user]\nagents = ["helper"]\nhooks = ["guard-rm"]\n' + HOOK)
     assert install.install().code == 0
@@ -360,8 +374,8 @@ def test_an_occupant_moved_aside_is_named_replaced_with_its_way_back(lo):
     copy = Path(kept["copy"])
     assert (copy / "SKILL.md").read_text().endswith("mine\n")
     assert f"moved {target} to {copy}" in out.lines
-    assert kept["back"] == (f"moxi loadout disable skill:review@claude --user && "
-                            f"mv {copy} {target}")
+    assert kept["back"] == (f"moxi loadout disable {quoted('skill:review@claude')} --user && "
+                            f"{spelled_mv(copy, target)}")
 
 
 def test_a_file_saved_over_loadouts_link_is_moved_aside_on_replace(lo):
@@ -398,14 +412,14 @@ def test_an_edited_copy_is_moved_aside_on_replace_and_on_removal(lo):
     [kept] = [k for k in out.kept if k["target"] == str(target)]
     assert (kept["how"], kept["id"]) == ("moved", "skill:review@claude")
     assert (Path(kept["copy"]) / "SKILL.md").read_text() == "mine again\n"
-    assert kept["back"] == f"mv {kept['copy']} {target}"
+    assert kept["back"] == spelled_mv(kept["copy"], target)
     assert not target.exists()
 
 
 def test_moves_of_one_name_pair_with_their_own_targets(lo, tmp_path):
     proj = tmp_path / "proj"
     proj.mkdir()
-    write(lo, f'[user]\nskills = ["review"]\n[project."{proj}"]\nskills = ["review"]\n')
+    write(lo, f'[user]\nskills = ["review"]\n[project.{toml_string(proj)}]\nskills = ["review"]\n')
     user_target = kit.claude() / "review"
     proj_target = proj / ".claude" / "skills" / "review"
     codex_target = kit.codex_skills() / "review"
@@ -419,12 +433,12 @@ def test_moves_of_one_name_pair_with_their_own_targets(lo, tmp_path):
     assert out.code == 0, out.text()
     by_target = {k["target"]: k for k in out.kept}
     for target, words, section in ((user_target, "user's\n", "--user"),
-                                   (proj_target, "project's\n", f"--project={proj}"),
+                                   (proj_target, "project's\n", f"--project={quoted(proj)}"),
                                    (codex_target, "codex's\n", "--user")):
         kept = by_target[str(target)]
         copy = Path(kept["copy"])
         assert (copy / "SKILL.md" if copy.is_dir() else copy).read_text().endswith(words)
-        assert f" {section} && mv " in kept["back"]
+        assert f" {section} && {MOVE} " in kept["back"]
     assert sorted(Path(k["copy"]).name for k in out.kept
                   if "/claude/" in k["copy"]) == ["review", "review-2"]
 
@@ -458,12 +472,13 @@ def test_back_run_as_given_puts_the_bytes_back(lo):
     before = path.read_bytes()
     out = install.install(replace=[ident])
     [kept] = out.kept
-    assert kept["back"].startswith("cp ")
+    assert kept["back"].startswith("copy /y " if os.name == "nt" else "cp ")
     subprocess.run(kept["back"], shell=True, check=True)
     assert path.read_bytes() == before
 
 
 def test_back_quotes_its_paths_and_speaks_windows_there(monkeypatch):
+    monkeypatch.setattr(displaced, "_windows", lambda: False)
     copy, target = "/data/displaced/x/claude/my file", "/home/me/my file"
     assert displaced.back("copied", copy, target) == (
         "cp '/data/displaced/x/claude/my file' '/home/me/my file'")
@@ -531,14 +546,14 @@ def test_writing_loadouts_ignore_file_keeps_no_copy(lo, tmp_path):
     from test_would_commit import work_tree
 
     app = work_tree(tmp_path / "app")
-    write(lo, f'[project."{app}"]\nskills = ["review"]\n')
+    write(lo, f'[project.{toml_string(app)}]\nskills = ["review"]\n')
     out = install.install()                        # written
     assert out.code == 0, out.text()
     ignore = app / ".claude" / "skills" / ".gitignore"
     assert ignores.state(ignore) == "ours"
     assert out.kept == [] and copies() == []
     kit.skill(lo / "skills", "deploy")
-    write(lo, f'[project."{app}"]\nskills = ["review", "deploy"]\n')
+    write(lo, f'[project.{toml_string(app)}]\nskills = ["review", "deploy"]\n')
     out = install.install()                        # written again, for two placements
     assert out.code == 0, out.text()
     assert ignores.listed(ignore) == {"review", "deploy"}

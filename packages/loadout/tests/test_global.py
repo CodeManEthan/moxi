@@ -9,6 +9,7 @@ from pathlib import Path
 
 import loadout_kit as kit
 import pytest
+from moxi_dev.testing import toml_string
 
 from moxi_loadout import cli, displaced, harness, install
 from moxi_loadout.planner import Scope
@@ -544,7 +545,7 @@ def test_a_scoped_replace_of_the_generated_file_is_refused_and_keeps_the_edit(
 
     app = tmp_path / "app"
     app.mkdir()
-    edited = _edited_generated_claude(lo, f'\n[project."{app}"]\nskills = []\n')
+    edited = _edited_generated_claude(lo, f'\n[project.{toml_string(app)}]\nskills = []\n')
     scoped = [s.replace("app", str(app)) for s in scoped]
     claude = harness.global_file("claude")
     assert cli.main(["install", "--replace=global:global@claude", *scoped]) == 3

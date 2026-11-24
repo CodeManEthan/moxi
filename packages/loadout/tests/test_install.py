@@ -8,6 +8,7 @@ from pathlib import Path
 
 import loadout_kit as kit
 import pytest
+from moxi_dev.testing import toml_string
 
 from moxi_loadout import install, ledger, planner
 from moxi_loadout.planner import Resolution, Scope
@@ -71,7 +72,7 @@ def test_harness_list_and_disabled_choose_the_harnesses(lo):
 def test_install_user_leaves_project_placements_as_they_are(lo, tmp_path):
     root = project(tmp_path)
     kit.skill(lo / "skills", "deploy")
-    kit.manifest(lo, f'[user]\nskills = ["review"]\n[project."{root}"]\nskills = ["deploy"]\n')
+    kit.manifest(lo, f'[user]\nskills = ["review"]\n[project.{toml_string(root)}]\nskills = ["deploy"]\n')
     out = install.install(Scope(user=True))
     assert out.code == 0
     assert (kit.claude() / "review").is_symlink()
@@ -97,7 +98,7 @@ def test_a_dropped_item_is_removed_and_a_remove_outside_the_scope_waits(lo, tmp_
     install.install()
     kit.manifest(lo, '[user]\nskills = ["review"]\n')
     root = project(tmp_path)
-    kit.manifest(lo, f'[user]\nskills = ["review"]\n[project."{root}"]\n')
+    kit.manifest(lo, f'[user]\nskills = ["review"]\n[project.{toml_string(root)}]\n')
     assert install.install(Scope(projects=(str(root),))).code == 0
     assert (kit.claude() / "other").is_symlink()
     status = install.status()
@@ -125,7 +126,7 @@ def test_a_bad_source_is_carried_with_its_placement_kept(lo, tmp_path, break_it)
 
     root = project(tmp_path)
     kit.skill(lo / "skills", "deploy")
-    kit.manifest(lo, f'[user]\nskills = ["review"]\n[project."{root}"]\nskills = ["deploy"]\n')
+    kit.manifest(lo, f'[user]\nskills = ["review"]\n[project.{toml_string(root)}]\nskills = ["deploy"]\n')
     assert install.install().code == 0
     if break_it == "delete":
         shutil.rmtree(lo / "skills" / "review")
@@ -148,7 +149,7 @@ def test_a_held_item_is_kept_in_place_and_linked_relatively(lo, tmp_path):
     root = project(tmp_path)
     held = kit.skill(root / ".claude" / "skills", "own")
     kit.agent(root / ".claude" / "agents" / "lead.md", "lead")
-    kit.manifest(lo, f'[project."{root}"]\nskills = ["own"]\nagents = ["lead"]\n')
+    kit.manifest(lo, f'[project.{toml_string(root)}]\nskills = ["own"]\nagents = ["lead"]\n')
     out = install.install()
     assert out.code == 0, out.text()
     assert held.is_dir() and not held.is_symlink()
@@ -163,7 +164,7 @@ def test_a_project_item_from_the_loadout_dir_is_not_the_projects_own(lo, tmp_pat
 
     config.set_value("moxi", "skills.form", "copy", by="test")
     root = project(tmp_path)
-    kit.manifest(lo, f'[project."{root}"]\nskills = ["review"]\nagents = ["helper"]\n')
+    kit.manifest(lo, f'[project.{toml_string(root)}]\nskills = ["review"]\nagents = ["helper"]\n')
     assert install.install().code == 0
     copied = root / ".claude" / "skills" / "review"
     assert copied.is_dir() and not copied.is_symlink()
@@ -179,7 +180,7 @@ def test_a_project_item_from_the_loadout_dir_is_not_the_projects_own(lo, tmp_pat
 
 def test_a_hook_listed_in_a_project_section_is_refused_with_a_line(lo, tmp_path):
     root = project(tmp_path)
-    kit.manifest(lo, f'[project."{root}"]\nhooks = ["guard"]\npermissions = ["reads"]\n'
+    kit.manifest(lo, f'[project.{toml_string(root)}]\nhooks = ["guard"]\npermissions = ["reads"]\n'
                      'mcp = ["docs"]\n'
                      '[hook.guard]\nevent = "PreToolUse"\ncommand = "true"\n'
                      '[permissions.reads]\nallow = [{ shell = ["git", "status"] }]\n'
@@ -192,8 +193,8 @@ def test_a_hook_listed_in_a_project_section_is_refused_with_a_line(lo, tmp_path)
 
 def test_two_project_sections_place_one_name_each(lo, tmp_path):
     a, b = project(tmp_path, "a"), project(tmp_path, "b")
-    kit.manifest(lo, f'[project."{a}"]\nskills = ["review"]\n'
-                     f'[project."{b}"]\nskills = ["review"]\n')
+    kit.manifest(lo, f'[project.{toml_string(a)}]\nskills = ["review"]\n'
+                     f'[project.{toml_string(b)}]\nskills = ["review"]\n')
     assert install.install().code == 0
     assert (a / ".claude" / "skills" / "review").is_symlink()
     assert (b / ".claude" / "skills" / "review").is_symlink()

@@ -9,6 +9,7 @@ import subprocess
 
 import loadout_kit as kit
 import pytest
+from moxi_dev.testing import toml_string
 
 from moxi_loadout import install, projects_link
 
@@ -140,7 +141,7 @@ def test_a_store_error_refuses_every_key_section_once(lo, projects, tmp_path, er
     app, web, here = root(tmp_path, "app"), root(tmp_path, "web"), root(tmp_path, "here")
     projects.roots(app=app, web=web)
     kit.manifest(lo, f'[project.app]\nskills = ["review"]\n[project.web]\nskills = ["review"]\n'
-                     f'[project."{here}"]\nskills = ["review"]\n')
+                     f'[project.{toml_string(here)}]\nskills = ["review"]\n')
     assert install.install().code == 0
     projects.fail(error)
     before = len(projects.calls())

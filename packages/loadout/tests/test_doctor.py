@@ -8,7 +8,7 @@ import time
 
 import loadout_kit as kit
 import pytest
-from moxi_dev.testing import timed_slack
+from moxi_dev.testing import timed_slack, toml_string
 
 from moxi_loadout import doctor, install
 
@@ -106,7 +106,7 @@ def test_a_hook_command_the_shell_runs_does_not_warn(lo, command):
         fh.write("#!/bin/sh\n")
     os.chmod(script, 0o755)
     kit.manifest(lo, '[user]\nhooks = ["guard"]\n[hook.guard]\nevent = "PreToolUse"\n'
-                     f'command = "{command}"\n')
+                     f'command = {toml_string(command)}\n')
     row = by_name(doctor.rows())["hooks"]
     assert row.state == "ok", row.detail
 

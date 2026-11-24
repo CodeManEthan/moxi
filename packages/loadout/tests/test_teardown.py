@@ -6,12 +6,12 @@ from __future__ import annotations
 import json
 import os
 import subprocess
-import sys
 import tomllib
 from pathlib import Path
 
 import loadout_kit as kit
 import pytest
+from moxi_dev.testing import console_script, toml_string
 from test_entries import FAKE_CLAUDE, FAKE_CODEX
 
 from moxi_loadout import harness, harness_row, ignores, install, ledger, stores, teardown
@@ -36,10 +36,6 @@ EVERYTHING = ('[user]\nskills = ["review"]\nagents = ["helper"]\nhooks = ["guard
               'permissions = ["git-reads"]\nmcp = ["docs"]\n[global]\nmode = "managed"\n'
               + HOOK + PERMS + MCP)
 MINE = "# My rules\n"
-#: The fake harness CLIs here and in the shared fence are POSIX scripts.
-posix = pytest.mark.skipif(sys.platform == "win32",
-                           reason="the fake harness CLIs are POSIX scripts")
-pytestmark = posix
 
 
 @pytest.fixture
@@ -53,9 +49,7 @@ def lo(loadout_dir, tmp_path, monkeypatch):
     bin_dir = tmp_path / "fake-mcp-bin"
     bin_dir.mkdir()
     for name, body in (("claude", FAKE_CLAUDE), ("codex", FAKE_CODEX)):
-        path = bin_dir / name
-        path.write_text(f"#!{sys.executable}\n" + body, encoding="utf-8")
-        path.chmod(0o755)
+        console_script(bin_dir, name, body)
     monkeypatch.setenv("PATH", str(bin_dir) + os.pathsep + os.environ["PATH"])
     harness_row.add(say=lambda line: None)
     return loadout_dir
@@ -434,7 +428,7 @@ def app(loadout_dir, tmp_path):
     root = tmp_path / "app"
     root.mkdir()
     subprocess.run(["git", "-C", str(root), "init", "-q"], check=True)
-    kit.manifest(loadout_dir, f'[project."{root}"]\nskills = ["review"]\n')
+    kit.manifest(loadout_dir, f'[project.{toml_string(root)}]\nskills = ["review"]\n')
     assert install.install().code == 0
     return root
 

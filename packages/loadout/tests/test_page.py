@@ -23,7 +23,8 @@ from pathlib import Path
 
 import loadout_kit as kit
 import pytest
-from moxi_dev.testing import timed_slack
+from moxi_dev.testing import timed_slack, toml_string
+from test_displaced import spelled_mv
 
 from moxi import modules
 from moxi_loadout import cli, homes, install, ledger, page, pagehandlers, pagejob
@@ -318,7 +319,7 @@ def test_status_answers_what_status_json_prints(lo):
 def test_list_answers_the_items_list_json_prints_and_the_sections(lo, tmp_path):
     proj = tmp_path / "proj"
     proj.mkdir()
-    kit.manifest(lo, f'[user]\nskills = ["review"]\n[project."{proj}"]\nagents = []\n')
+    kit.manifest(lo, f'[user]\nskills = ["review"]\n[project.{toml_string(proj)}]\nagents = []\n')
     body = read("/api/list")
     assert body["problem"] is None
     assert body["items"] == printed(["list", "--json"])
@@ -371,7 +372,7 @@ def test_view_answers_from_the_one_plan_status_builds(lo, tmp_path, monkeypatch,
     (lo / "global.md").write_text("Be kind.\n")
     kit.agent(lo / "agents" / "helper.md", "helper")
     kit.manifest(lo, '[global]\nmode = "managed"\n[user]\nskills = ["review"]\n'
-                     f'[project."{proj}"]\nagents = ["helper"]\n')
+                     f'[project.{toml_string(proj)}]\nagents = ["helper"]\n')
     built = []
     real = install._plan
 
@@ -606,7 +607,7 @@ def test_source_dir_names_the_skills_and_agents_no_section_lists(site, lo, tmp_p
     kit.agent(lo / "agents" / "helper.md", "helper")
     kit.agent(lo / "agents" / "loose.md", "loose")
     (lo / "agents" / "readme.txt").write_text("not an agent\n")
-    kit.manifest(lo, f'[user]\nskills = ["review"]\n[project."{proj}"]\n'
+    kit.manifest(lo, f'[user]\nskills = ["review"]\n[project.{toml_string(proj)}]\n'
                      'skills = ["held"]\nagents = ["helper"]\n')
     assert read("/api/folder")["unlisted"] == [
         {"kind": "skill", "name": "spare", "source": str(lo / "skills" / "spare")},
@@ -998,7 +999,7 @@ def test_a_job_names_what_its_run_kept_and_how_to_put_it_back(lo, spawned, termi
     [kept] = read("/api/job", f"job={job}")["outcome"]["kept"]
     assert (kept["target"], kept["how"], kept["id"]) == (str(target), "replaced",
                                                          "skill:review@claude")
-    assert kept["back"].endswith(f"mv {kept['copy']} {target}")
+    assert kept["back"].endswith(spelled_mv(kept["copy"], target))
     assert read("/api/status")["kept"] == []
 
 

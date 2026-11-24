@@ -9,6 +9,7 @@ import subprocess
 
 import loadout_kit as kit
 import pytest
+from moxi_dev.testing import toml_string
 
 from moxi_loadout import ignores, install, ledger
 from moxi_loadout.planner import Scope
@@ -49,7 +50,7 @@ def lo(loadout_dir):
 @pytest.fixture
 def app(lo, tmp_path):
     root = work_tree(tmp_path / "app")
-    kit.manifest(lo, f'[project."{root}"]\nskills = ["review"]\n')
+    kit.manifest(lo, f'[project.{toml_string(root)}]\nskills = ["review"]\n')
     return root
 
 
@@ -74,7 +75,7 @@ def test_the_ignore_file_ignores_itself_and_reads_back(tmp_path):
 def test_outside_a_work_tree_nothing_is_written(lo, tmp_path):
     root = tmp_path / "plain"
     root.mkdir()
-    kit.manifest(lo, f'[project."{root}"]\nskills = ["review"]\n')
+    kit.manifest(lo, f'[project.{toml_string(root)}]\nskills = ["review"]\n')
     assert install.install().code == 0
     assert not (root / ".claude" / "skills" / ".gitignore").exists()
     assert ignores.records(ledger.read()) == {}
@@ -121,11 +122,11 @@ def test_the_ignore_file_is_written_before_the_placement(app):
 @pytest.mark.touches(*GLOBS)
 def test_the_last_placement_takes_its_ignore_file_with_it(app, lo):
     kit.skill(lo / "skills", "deploy")
-    kit.manifest(lo, f'[project."{app}"]\nskills = ["review", "deploy"]\n')
+    kit.manifest(lo, f'[project.{toml_string(app)}]\nskills = ["review", "deploy"]\n')
     assert install.install().code == 0
     skills_dir = app / ".claude" / "skills"
     assert ignores.listed(skills_dir / ".gitignore") == {"review", "deploy"}
-    kit.manifest(lo, f'[project."{app}"]\nskills = ["deploy"]\n')
+    kit.manifest(lo, f'[project.{toml_string(app)}]\nskills = ["deploy"]\n')
     assert install.install().code == 0
     assert ignores.listed(skills_dir / ".gitignore") == {"deploy"}
     assert ignores.state(skills_dir / ".gitignore") == "ours"
@@ -179,7 +180,7 @@ def test_an_edited_ignore_file_of_loadouts_is_left(app, lo):
     # Restoring the file is the fix; --replace doesn't touch it.
     assert not any(r.replaceable for r in out.rows if r.kind == "ignore")
     kit.skill(lo / "skills", "deploy")
-    kit.manifest(lo, f'[project."{app}"]\nskills = ["review", "deploy"]\n')
+    kit.manifest(lo, f'[project.{toml_string(app)}]\nskills = ["review", "deploy"]\n')
     out = install.install()
     assert out.code == 3
     assert states(out)[("skill", "deploy", "claude")][0] == "would-commit"
@@ -210,7 +211,7 @@ def test_a_leaked_git_dir_does_not_aim_the_check_elsewhere(app, tmp_path, monkey
 @pytest.mark.touches(*GLOBS)
 def test_a_tracked_occupant_reads_would_commit_then_replace_places_over_it(lo, tmp_path):
     root = work_tree(tmp_path / "app")
-    kit.manifest(lo, f'[project."{root}"]\nskills = ["review"]\n'
+    kit.manifest(lo, f'[project.{toml_string(root)}]\nskills = ["review"]\n'
                      f'[skill.review]\nharnesses = ["codex"]\n')
     skill_dir = root / ".agents" / "skills" / "review"
     skill_dir.mkdir(parents=True)
@@ -237,7 +238,7 @@ def test_a_held_item_in_place_is_never_would_commit(lo, tmp_path):
     kit.skill(root / ".claude" / "skills", "own")
     git(root, "add", ".")
     git(root, "commit", "-q", "-m", "the project's own skill")
-    kit.manifest(lo, f'[project."{root}"]\nskills = ["own"]\n')
+    kit.manifest(lo, f'[project.{toml_string(root)}]\nskills = ["own"]\n')
     out = install.install()
     assert out.code == 0, out.text()
     assert not (root / ".claude" / "skills" / ".gitignore").exists()

@@ -12,6 +12,7 @@ from pathlib import Path
 
 import loadout_kit as kit
 import pytest
+from moxi_dev.testing import toml_string
 
 from moxi_loadout import cli, harness, homes, install, ledger, pagejob
 
@@ -60,7 +61,7 @@ def test_a_job_with_no_git_places_nothing_in_a_project_work_tree(
     root = tmp_path / "app"
     root.mkdir()
     subprocess.run(["git", "-C", str(root), "init", "-q"], check=True, capture_output=True)
-    kit.manifest(lo, f'[user]\n[project."{root}"]\nskills = []\n')
+    kit.manifest(lo, f'[user]\n[project.{toml_string(root)}]\nskills = []\n')
     before = manifest_bytes(lo)
     before_ledger = ledger.read()
     # The job's PATH holds the fake CLIs and nothing else: no git.

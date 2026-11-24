@@ -7,6 +7,7 @@ import textwrap
 from pathlib import Path
 
 import pytest
+from moxi_dev.testing import toml_string
 
 from moxi_loadout import manifest
 from moxi_loadout.manifest import Id, ManifestError
@@ -169,7 +170,7 @@ def test_a_relative_path_section_is_read_from_the_loadout_dir(loadout_dir):
 
 def test_two_sections_for_one_project_are_refused(loadout_dir):
     home = os.path.expanduser("~")
-    lines = problems(f'[project."~/app"]\n[project."{home}/app/"]\n', loadout_dir)
+    lines = problems(f'[project."~/app"]\n[project.{toml_string(home + "/app/")}]\n', loadout_dir)
     assert any("name one project" in line for line in lines)
     lines = problems("[project.App]\n[project.app]\n", loadout_dir)
     assert any("name one project" in line for line in lines)

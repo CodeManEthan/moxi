@@ -14,6 +14,7 @@ from pathlib import Path
 
 import loadout_kit as kit
 import pytest
+from moxi_dev.testing import toml_string
 from test_displaced import EDITS, generated, lo, opencode_row, settings  # noqa: F401
 from test_entries import HOOK
 from test_would_commit import git, work_tree
@@ -21,8 +22,6 @@ from test_would_commit import git, work_tree
 from moxi_loadout import displaced, harness, install, preview
 from moxi_loadout.planner import Scope
 
-pytestmark = pytest.mark.skipif(sys.platform == "win32",
-                                reason="the fake harness CLIs are POSIX scripts")
 
 
 def write(loadout_dir: Path, text: str) -> None:
@@ -84,6 +83,8 @@ def test_a_generated_file_the_act_cant_read_has_no_case(lo, tmp_path, how):
     if how == "a folder":
         path.mkdir()
     elif how == "unreadable":
+        if os.name != "posix":
+            pytest.skip("Windows takes no read away by a file's mode")
         if os.geteuid() == 0:
             pytest.skip("root reads a file whatever its mode")
         path.write_text("name = 'mine'\n")
@@ -218,7 +219,7 @@ def test_an_edited_copy_moves(lo):
 @pytest.mark.slow
 def test_a_tracked_occupant_in_a_project_moves_under_its_section(lo, tmp_path):
     root = work_tree(tmp_path / "app")
-    write(lo, f'[user]\nskills = ["other"]\n[project."{root}"]\nskills = ["review", "more"]\n'
+    write(lo, f'[user]\nskills = ["other"]\n[project.{toml_string(root)}]\nskills = ["review", "more"]\n'
               f'[skill.review]\nharnesses = ["codex"]\n[skill.more]\nharnesses = ["codex"]\n'
               f'[skill.other]\nharnesses = ["codex"]\n')
     kit.skill(lo / "skills", "more")
@@ -240,11 +241,11 @@ def test_others_counts_the_changes_waiting_in_the_acts_scope(lo, tmp_path):
     proj = tmp_path / "proj"
     proj.mkdir()
     kit.skill(lo / "skills", "lint")
-    write(lo, f'[user]\nagents = ["helper"]\n[project."{proj}"]\nskills = ["lint"]\n')
+    write(lo, f'[user]\nagents = ["helper"]\n[project.{toml_string(proj)}]\nskills = ["lint"]\n')
     assert install.install().code == 0
     with open(generated(), "a") as fh:
         fh.write("# mine\n")
-    write(lo, f'[user]\nagents = ["helper"]\nskills = ["lint"]\n[project."{proj}"]\n'
+    write(lo, f'[user]\nagents = ["helper"]\nskills = ["lint"]\n[project.{toml_string(proj)}]\n'
               'skills = ["lint"]\n[skill.lint]\nharnesses = ["claude"]\n')
     (proj / ".claude" / "skills" / "lint").unlink()
     shown = preview.replace_preview("agent:helper@codex", "user")
