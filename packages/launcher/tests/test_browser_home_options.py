@@ -3,8 +3,9 @@ launcher's real page server: the word that opens it, the panel at the window's r
 with Home's column moved aside, its groups and their subgroups, the find field, a row
 changed there reaching the harness's command line, the line under the box that names the
 changed rows with its `Reset`, a value that can do harm turned on and launched or copied
-once, the rows the button's place draws, a tool denied in Tools > Built-in reaching the
-command line beside the rules the defaults hold, and the panel on a narrow page.
+once, the rows the button's place draws, keep-warm shown as the button's place holds it, a
+tool denied in Tools > Built-in reaching the command line beside the rules the defaults
+hold, and the panel on a narrow page.
 
 The shell runs the fake slots in slots' place and a fake `claude` first on its `PATH`, so
 a launch from Home starts no real session.
@@ -647,6 +648,23 @@ def test_a_row_drawn_for_one_places_mode_is_gone_once_the_button_launches_in_ano
     piece.locator('[data-menu="run"] button[data-run="Slot 2"]').click()
     expect(group(panel, "runs-in")).to_have_attribute("aria-expanded", "true")
     expect(panel.get_by_label("Remote Control", exact=True)).not_to_be_checked()
+
+
+def test_keep_warm_shows_what_the_launch_holds_in_the_buttons_place(fake, ui_page):
+    piece = home_at(ui_page, 1400)
+    expect(piece.locator(".go")).to_have_text("Launch in slot 2")
+    panel = open_options(piece)
+    panel.get_by_label("Find an option").fill("prompt cache expires")
+    warm = row(panel, "keep_warm")
+    # In a slot keep-warm is on; a headless launch holds off unless it is set on.
+    expect(warm).to_have_value("on")
+    headless(piece)
+    expect(warm).to_have_value("off")
+    expect(changed_line(piece)).to_have_count(0)
+    piece.locator("textarea").fill("say the word warm")
+    body = press(ui_page, piece)
+    assert body["values"]["keep_warm"] == "off" and body["values"]["target"] == "headless", body
+    expect(piece.locator('.said [data-line="started"]')).to_be_visible()
 
 
 def test_a_tool_denied_launches_with_the_defaults_scoped_rule_beside_it(fake, ui_page, ui_shell, harness):

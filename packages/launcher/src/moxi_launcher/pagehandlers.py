@@ -43,7 +43,8 @@ page server that has just started answers with the joined facts when that pass i
 
 **The launch form** is filled from `/api/form`: the value each row offered for a harness
 takes from the shipped defaults, `[defaults]` and at most one preset, as `presets.layered`
-lays them for `resolve`, so the form and the launch can't disagree. Beside the rows it names the command a
+lays them for `resolve`, with `keep_warm` as the launch settles it in each place it may
+run (`presets.shown_values`), so the form and the launch can't disagree. Beside the rows it names the command a
 launch of that harness composes in each place it may run (`presets.mode_of`), which is
 what a row's `modes` are matched with. A brief or standing
 instructions that `[defaults]` or the preset writes inline is named `withheld`, and its
@@ -390,19 +391,30 @@ def read_presets(call: Any) -> dict[str, Any]:
 
 def form_rows(laid: presets.Layered) -> list[dict[str, Any]]:
     """Each row offered for the harness `laid` was laid for, the launcher's then the
-    harness's, in catalog order, at its layered value spelled as a preset's value is, with
-    its source. A brief or standing instructions that `[defaults]` or the preset writes
-    inline is withheld: no text."""
+    harness's, in catalog order, at the value a launch in the layers' place holds before
+    any row is typed (`presets.shown_values`), spelled as a preset's value is, with its
+    source. A row whose value differs by the place a launch runs in names it for each
+    place the `target` row names in `targets`, as `{"target", "value"}`; null for the
+    rest. A brief or standing instructions that `[defaults]` or the preset writes inline
+    is withheld: no text."""
+    target = catalog.launcher()["target"]
+    places = [str(where) for where in target.values or ()]
+    by_place = {where: presets.shown_values(laid, where) for where in places}
+    here = presets.shown_values(laid, str(laid.values.get("target") or target.default))
     out = []
     for row in (*catalog.launcher(), *catalog.load(laid.harness)):
         if not row.settable or row.name not in laid.values:
             continue
-        value, source = laid.values[row.name], laid.sources[row.name]
+        value, source = here[row.name], laid.sources[row.name]
         withheld = (row.name in WITHHELD and source in (presets.DEFAULTS, presets.PRESET)
                     and catalog.is_set(value))
         shown, items = (None, None) if withheld else _value_of(row, value)
+        targets = None
+        if not withheld and any(by_place[where][row.name] != value for where in places):
+            targets = [{"target": where, "value": _value_of(row, by_place[where][row.name])[0]}
+                       for where in places]
         out.append({"name": row.name, "value": shown, "items": items, "source": source,
-                    "withheld": withheld})
+                    "withheld": withheld, "targets": targets})
     return out
 
 
@@ -439,7 +451,7 @@ def form(seat: str | None = None, project_preset: str | None = None,
          harness: str | None = None, identity: str | None = None) -> dict[str, Any]:
     """`/api/form`'s answer: the harness the form is drawn for (`harness`, else the one the
     layers give) and each of its rows as the shipped defaults, `[defaults]` and the one
-    preset named lay them. A request the resolver refuses (both presets named, a preset
+    preset named lay them, as `form_rows` shows them. A request the resolver refuses (both presets named, a preset
     unknown or not laid for `harness`, a presets file that can't be read) is answered
     with no rows and its refusal. The `harness` row holds the layers' harness, which is
     `harness` only when none is asked or the layers name the one asked. `modes` is for
@@ -1286,8 +1298,9 @@ def launch_request(body: Mapping[str, Any], request_id: str):
     `bad-value`. An emptied list, and a switch with an optional value set off, read as
     left out. Each value is read as typed, as the command line reads it: its words go
     through `catalog.parse` for the launch's harness (`values["harness"]`, else the
-    layers'). Then each row is compared with what `presets.layered` gives it for the same
-    preset and harness: a value equal to it is dropped, and the rest are typed. A
+    layers'). Then each row is compared with what the launch form shows it at for the same
+    preset and harness and the place the launch runs in (`presets.shown_values`): a value
+    equal to it is dropped, and the rest are typed. A
     leave-out is kept when `[defaults]` or the preset names the row itself, the place and
     one-spelling rules kept that layer's value, and the value is set; else it is dropped,
     since no layer's choice is there to remove. Who set the row counts, not its value: a
@@ -1335,10 +1348,6 @@ def launch_request(body: Mapping[str, Any], request_id: str):
                            presets=found, available=available)
     layered = laid.values
 
-    typed = {name: value for name, value in sent.items() if value != layered[name]}
-    for group in _GROUPS:
-        if any(name in typed for name in group):
-            typed.update({name: sent[name] for name in group if name in sent})
     preset = _named_preset(found, seat, project_preset)
     # A row this harness doesn't offer has no layered value: its leave-out stays while a
     # layer names it, since the preset is laid for this harness only without it.
@@ -1348,6 +1357,15 @@ def launch_request(body: Mapping[str, Any], request_id: str):
         if (name in named if name not in offered
             else laid.sources[name] in (presets.DEFAULTS, presets.PRESET)
             and catalog.is_set(layered[name])))
+    # Each row is compared with what the form shows for the place the launch runs in.
+    where = catalog.launcher()["target"]
+    target = sent.get("target") or (where.default if "target" in left_out
+                                    else layered.get("target")) or where.default
+    shown = presets.shown_values(laid, str(target))
+    typed = {name: value for name, value in sent.items() if value != shown[name]}
+    for group in _GROUPS:
+        if any(name in typed for name in group):
+            typed.update({name: sent[name] for name in group if name in sent})
 
     extra = typed.pop(catalog.EXTRA, ())
     off_posture = bool(body.get("off_posture", False))

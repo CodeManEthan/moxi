@@ -621,8 +621,9 @@ out, the launcher nudges it. A headless launch is kept warm only with `--keep-wa
 The `keep_warm` row is read on a headless launch alone, where it takes `off` (its
 default there) or `on`. On any other launch it takes only `on`: `off` set by a preset or a
 flag is refused, and `off` from `[defaults]` is left out with a warning, so the line can
-go. A launch recorded `off` before keep-warm was on for every launch is kept warm all the
-same, and so is its relaunch. Where turns or cache is missing the row isn't offered and
+go. The launch form on Home and in the panel shows the row as the launch holds it in the
+place it runs, and fills it again when that place changes. A launch recorded `off` before
+keep-warm was on for every launch is kept warm all the same, and so is its relaunch. Where turns or cache is missing the row isn't offered and
 no launch is kept warm. A kept-warm session's start text has a `keep warm:` line saying
 what keeps it warm.
 Work out is one of two cases. The subagent case: its own subagents or teammates at work;
