@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- `toml_string(value)` gives a path, or any text, as a TOML basic string that reads back
+  as it is. A test writes a path into a TOML file through it, so a Windows path's
+  backslashes don't read as escapes.
 - The test fence holds every process the tests start, from a fixture of any scope, to
   the run's own folders. When the test loop starts, the kit puts a run's environment in
   place (its homes in the run's temp root, its runtime and temp directory in one

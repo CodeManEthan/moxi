@@ -2454,6 +2454,24 @@ def console_script(script_dir: str | os.PathLike[str], name: str,
     return path
 
 
+def toml_string(value: str | os.PathLike[str]) -> str:
+    """`value`, a path or any text, as a TOML basic string, quotes included, that reads
+    back as `value`. A test that writes a path into TOML writes it through this: a path
+    put between quotes as it is breaks on Windows, where its backslashes read as escapes
+    (C:\\Users holds the escape \\U), so the file doesn't parse or names another path."""
+    text = os.fspath(value)
+    out = ['"']
+    for char in text:
+        if char in ('"', "\\"):
+            out.append("\\" + char)
+        elif char == "\t" or (" " <= char and char != "\x7f"):
+            out.append(char)
+        else:
+            out.append(f"\\u{ord(char):04X}")
+    out.append('"')
+    return "".join(out)
+
+
 def write_sqlite(path: str | os.PathLike[str], schema: str = "",
                  rows: Mapping[str, Iterable[Sequence[Any]]] | None = None) -> Path:
     """Write a SQLite database for a test, fast: one transaction, no syncing.
@@ -2513,4 +2531,4 @@ __all__ = ["ANCHOR_HOME_ENV", "BROWSERS_ENV", "CHANGED_ENV", "CHILD_ENV", "DURAT
            "UV_PYTHON_ENV", "WINDOWS_HOMES", "WINDOWS_KEPT_ENV", "console_script", "fence",
            "findings_of", "idle", "param_id", "selection", "served", "short_dir",
            "started_env", "stat_counts", "terminal_record", "timed_reading", "timed_slack",
-           "touches_match", "uv_env", "wait_for", "write_sqlite"]
+           "toml_string", "touches_match", "uv_env", "wait_for", "write_sqlite"]
