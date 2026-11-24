@@ -94,8 +94,9 @@ round's log with the batch and why it ended.
 ejected, left) goes to its round's lead (`leads.of`: the round's own, else the
 project's), and to its builder, the name its commission recorded, only while comms reads
 that name held by a running session; with no lead recorded, that is recorded. A notice
-that reached no name (no lead, the builder not held, each send refused or failed) goes
-to the project's director once, naming who it could not reach and why. When a member
+that reached no name (no lead, the builder not held, each send refused, failed or, once
+it is no longer tried, unsent) goes to the project's director once, naming who it could
+not reach and why. When a member
 ends, each member ejected for a conflict with it is told too, with what to do now: after
 a landing, merge the target and finish again; after an ejection or a leave, finish again
 as it is. A pause, and a
