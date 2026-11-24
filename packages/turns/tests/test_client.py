@@ -10,6 +10,7 @@ import contextlib
 import json
 import os
 import socket
+import stat
 import sys
 import threading
 import time
@@ -560,11 +561,38 @@ def _open_fds() -> list[int]:
 
 def _names_of(fd: int) -> list[str]:
     """What descriptor `fd` names: a Unix socket's own address and its peer's, or a file's
-    path. Empty for anything else, and for a descriptor closed meanwhile."""
+    path. Empty for anything else, and for a descriptor closed meanwhile.
+
+    It leaves no descriptor open. `socket.fromfd` duplicates `fd` before it checks that
+    `fd` is a socket, and keeps the copy when it is not; a copy of the write end of a
+    child's stdin keeps that pipe open after its owner closes it, so the child never
+    reads its end and a wait on it never returns (Playwright's driver at the session's
+    end, say). So only a socket is read as one, through a copy closed on every path."""
     names: list[str] = []
     try:
-        sock = socket.fromfd(fd, socket.AF_UNIX, socket.SOCK_STREAM)
+        is_socket = stat.S_ISSOCK(os.fstat(fd).st_mode)
     except OSError:
+        return names
+    if is_socket:
+        names += _socket_names(fd)
+    path = _path_of(fd)
+    if path is not None:
+        names.append(path)
+    return names
+
+
+def _socket_names(fd: int) -> list[str]:
+    """The Unix socket `fd`'s own address and its peer's, read through a copy of `fd`
+    that is closed before this returns."""
+    names: list[str] = []
+    try:
+        copy = os.dup(fd)
+    except OSError:
+        return names
+    try:
+        sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM, 0, copy)
+    except OSError:
+        os.close(copy)
         return names
     with sock:
         for read in (sock.getsockname, sock.getpeername):
@@ -574,9 +602,6 @@ def _names_of(fd: int) -> list[str]:
                 break
             if isinstance(name, str) and name:
                 names.append(name)
-    path = _path_of(fd)
-    if path is not None:
-        names.append(path)
     return names
 
 
@@ -602,6 +627,33 @@ def _settles_to(count: int, within: float = 3.0) -> bool:
             return False
         time.sleep(0.05)
     return True
+
+
+def test_counting_this_tests_descriptors_leaves_no_copy_of_any_open(turns_env, tmp_path):
+    """`_fds` reads what every descriptor of this process names. A copy it left of a
+    pipe's write end would keep that pipe open after its owner closed it, and the reader
+    at its other end would wait for an end of file that never comes."""
+    read_end, write_end = os.pipe()
+    near, far = socket.socketpair(socket.AF_UNIX)
+    opened = (tmp_path / "file").open("w")
+    try:
+        before = sorted(_open_fds())
+        for fd in (read_end, write_end, near.fileno(), opened.fileno()):
+            _names_of(fd)
+        _fds()
+        assert sorted(_open_fds()) == before
+        os.close(write_end)
+        write_end = None
+        os.set_blocking(read_end, False)
+        # The end of file comes at once: no copy of the write end is left open.
+        assert os.read(read_end, 1) == b""
+    finally:
+        os.close(read_end)
+        if write_end is not None:
+            os.close(write_end)
+        near.close()
+        far.close()
+        opened.close()
 
 
 def test_mute_endpoints_cost_a_list_one_bound_and_the_order_holds(make_endpoint, mute):
