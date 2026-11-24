@@ -26,8 +26,9 @@ dependencies = ["moxi>=0.1.11,<0.2", "moxi-projects>=0.1.4,<0.2", "psutil>=5.9"]
 # rounds folder may be relative.
 notes = ["moxi-notes>=0.1,<0.2"]
 # turns: with it, a session's start runs the sweep of leftover folders when
-# sweep.at_start is on.
-turns = ["moxi-turns>=0.2,<0.3"]
+# sweep.at_start is on, and the watched-paths guard runs while its switch is on; the
+# guard reads the files a call writes with touched_files, new in turns 0.2.8.
+turns = ["moxi-turns>=0.2.8,<0.3"]
 # comms: with it, the merge queue's lander sends its news to builders, leads and the
 # project's director.
 comms = ["moxi-comms>=0.3,<0.4"]
@@ -50,6 +51,10 @@ rounds = "moxi_rounds.projects_link"
 # The sweep at a session's start, called by turns in a session's endpoint process.
 [project.entry-points."moxi.turns.listeners"]
 rounds = "moxi_rounds.listeners"
+
+# The watched-paths guard, run by turns before a covered write while its switch is on.
+[project.entry-points."moxi.turns.guards"]
+rounds = "moxi_rounds.guards"
 
 [dependency-groups]
 # moxi-ui's pytest plugin runs rounds' page in a real shell; its testing extra brings

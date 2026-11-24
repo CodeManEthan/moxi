@@ -31,6 +31,7 @@ DEFAULTS = {
     "sweep.armed": False,
     "sweep.at_start": False,
     "sweep.grace_hours": 2,
+    "watched_paths_guard.enabled": False,
     "projects": {},
 }
 
@@ -41,7 +42,8 @@ TYPES = {
     "defaults.idle_days": "int",
     "defaults.dormant_days": "int", "defaults.slice_minutes": "int",
     "defaults.sitting_at": "int", "defaults.disposable": "list", "sweep.armed": "bool",
-    "sweep.at_start": "bool", "sweep.grace_hours": "int", "projects": "table",
+    "sweep.at_start": "bool", "sweep.grace_hours": "int",
+    "watched_paths_guard.enabled": "bool", "projects": "table",
 }
 
 FLOWS = """\
@@ -158,6 +160,8 @@ def test_moxi_config_shows_each_key_with_a_label_and_the_words_of_each_enum_valu
         ("majors", "the major ones"), ("majors+minors", "major and minor"), ("off", "none")]
     assert [choice["value"] for choice in rows["defaults.check_on"]["choices"]] == [
         "merged", "tip"]
+    switch = rows.pop("watched_paths_guard.enabled")
+    assert switch["common"] is True and switch["hurts"]["when"] == "off"
     for row in rows.values():
         assert row["common"] is False and row["group"] is None and row["hurts"] is None
         assert row["elsewhere"] is None

@@ -16,13 +16,21 @@ OPTIONAL = {
           "steps.",
     "notes": "Gives the default notes folder of a project that names none, for a "
              "relative rounds folder.",
-    "turns": "Runs the leftover sweep at a session's start, when sweep.at_start is on.",
+    "turns": "Runs the leftover sweep at a session's start, when sweep.at_start is on, "
+             "and the watched-paths guard, when watched_paths_guard.enabled is on.",
     "comms": "The merge queue's lander tells builders, leads and the project's director "
              "what became of their builds and of main, under the send-only name rounds. "
              "Without it, moxi rounds next and moxi rounds queue are the only places "
              "that news shows.",
 }
 GATED = {}
+#: The install's question: whether to turn on the watched-paths guard.
+QUESTIONS = {
+    "watched_paths_guard.enabled": "the watched-paths guard (one line after an agent "
+                                   "writes a file a project's watched_paths name, with "
+                                   "the skills to load; it never refuses, and turns "
+                                   "enforces it)",
+}
 #: The send-only comms name the lander's messages go out under.
 RESERVED_NAMES = ["rounds"]
 #: rounds reads its root locators through `moxi.paths` and no other variable.
