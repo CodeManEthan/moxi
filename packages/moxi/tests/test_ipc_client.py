@@ -344,7 +344,7 @@ class Opened:
     close = shutdown
 
 
-PIPE = r"\\.\pipe\moxi-demo-a-0123abcd"
+PIPE = r"\\.\pipe\moxi-demo-a-0123abcd-4567cdef"
 
 
 @pytest.mark.parametrize("code", [2, 3])
@@ -488,6 +488,7 @@ def test_on_windows_a_pipe_whose_server_pid_cant_be_read_is_refused_and_closed(o
 
 
 @pytest.mark.parametrize("address", [r"\\.\pipe\other", r"\\.\pipe\moxi-demo-a",
+                                     r"\\.\pipe\moxi-demo-a-0123abcd",
                                      rf"\\.\pipe\moxi-test-pair-{'0' * 32}"])
 def test_on_windows_a_pipe_name_moxi_doesnt_make_is_not_checked(opens, address):
     end = Opened(pid=AssertionError("the server was checked"))

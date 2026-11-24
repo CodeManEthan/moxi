@@ -2,6 +2,11 @@
 
 ## 0.1.11 (unreleased)
 
+- On Windows a `moxi.ipc` pipe is named for the module's runtime folder as well as the
+  user: `\\.\pipe\moxi-<module>-<name>-<user>-<home>`, `<home>` a hash of the folder's
+  real path, case-folded. Two Moxi homes under one account no longer share a daemon's
+  pipe, and two spellings of one home (a short 8.3 name, another case, a junction)
+  still do. A client and a server of different versions don't meet across this change.
 - The start mark names a module run as `python -X <option> -m <module>` (or with `-W`)
   `python -m <module>`, as it does without the option, where it named the script's file.
 - New `moxi install <module> --setup-only`: runs an installed module's `SETUP` again in a

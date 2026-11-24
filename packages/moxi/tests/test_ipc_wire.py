@@ -478,21 +478,75 @@ def test_a_posix_address_is_the_socket_path(monkeypatch):
         ipc.address("turns", "a/b")
 
 
-def test_a_windows_address_is_a_pipe_named_for_the_user(monkeypatch):
+def _home_hash_of(path) -> str:
+    import os
+
+    real = os.path.normcase(os.path.realpath(path))
+    return hashlib.sha256(real.encode("utf-8")).hexdigest()[:8]
+
+
+@pytest.fixture
+def windows_names(monkeypatch, tmp_path):
+    """Pipe addresses on any system: the platform flag set, a fixed SID, and comms'
+    runtime root in the test's tmp. Gives the SID's hash."""
     from moxi import _win
 
     monkeypatch.setattr(ipc, "_WINDOWS", True)
     monkeypatch.setattr(_win, "user_sid", lambda: "S-1-5-21-1-2-3-1001")
-    u = hashlib.sha256(b"S-1-5-21-1-2-3-1001").hexdigest()[:8]
-    assert ipc.address("comms", "daemon") == f"\\\\.\\pipe\\moxi-comms-daemon-{u}"
+    monkeypatch.setenv("MOXI_COMMS_RUNTIME_DIR", str(tmp_path / "rt"))
+    return hashlib.sha256(b"S-1-5-21-1-2-3-1001").hexdigest()[:8]
+
+
+def test_a_windows_address_is_a_pipe_named_for_the_user_and_the_home(windows_names,
+                                                                      tmp_path):
+    u, h = windows_names, _home_hash_of(tmp_path / "rt" / "comms")
+    assert ipc.address("comms", "daemon") == f"\\\\.\\pipe\\moxi-comms-daemon-{u}-{h}"
     assert ipc._pipe_parts(ipc.address("comms", "my-page")) == ("comms", "my-page")
     for module, name in (("Comms", "daemon"), ("comms", ""), ("comms", "a\\b"),
                          ("comms", "a/b"), ("comms", "..")):
         with pytest.raises(ValueError):
             ipc.address(module, name)
-    for bad in ("/tmp/x.sock", "\\\\.\\pipe\\other", "\\\\.\\pipe\\moxi-comms-daemon-xyz"):
+    for bad in ("/tmp/x.sock", "\\\\.\\pipe\\other", "\\\\.\\pipe\\moxi-comms-daemon-xyz",
+                f"\\\\.\\pipe\\moxi-comms-daemon-{u}", f"\\\\.\\pipe\\moxi-comms-daemon-{u}-xyz",
+                f"\\\\.\\pipe\\moxi-comms-{u}-{h}"):
         with pytest.raises(ValueError):
             ipc._pipe_parts(bad)
+
+
+def test_two_homes_of_one_user_never_share_a_pipe(windows_names, tmp_path, monkeypatch):
+    first = ipc.address("comms", "daemon")
+    monkeypatch.setenv("MOXI_COMMS_RUNTIME_DIR", str(tmp_path / "other"))
+    second = ipc.address("comms", "daemon")
+    assert first != second
+    assert ipc._pipe_parts(first) == ipc._pipe_parts(second) == ("comms", "daemon")
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="on Windows a symbolic link needs a "
+                    "privilege the test's user may not have")
+def test_two_spellings_of_one_home_share_its_pipe(windows_names, tmp_path, monkeypatch):
+    (tmp_path / "rt").mkdir()
+    (tmp_path / "link").symlink_to(tmp_path / "rt")
+    first = ipc.address("comms", "daemon")
+    for spelling in (tmp_path / "link", f"{tmp_path / 'rt'}/", tmp_path / "x" / ".." / "rt"):
+        monkeypatch.setenv("MOXI_COMMS_RUNTIME_DIR", str(spelling))
+        assert ipc.address("comms", "daemon") == first, spelling
+
+
+@WINDOWS
+def test_on_windows_a_homes_case_and_short_name_spell_one_pipe(tmp_path, monkeypatch):
+    import ctypes
+
+    home = tmp_path / "A Long Runtime Folder"
+    home.mkdir()
+    monkeypatch.setenv("MOXI_COMMS_RUNTIME_DIR", str(home))
+    first = ipc.address("comms", "daemon")
+    monkeypatch.setenv("MOXI_COMMS_RUNTIME_DIR", str(home).upper())
+    assert ipc.address("comms", "daemon") == first
+    buffer = ctypes.create_unicode_buffer(1024)
+    if ctypes.windll.kernel32.GetShortPathNameW(str(home), buffer, 1024) and (
+            buffer.value != str(home)):
+        monkeypatch.setenv("MOXI_COMMS_RUNTIME_DIR", buffer.value)
+        assert ipc.address("comms", "daemon") == first
 
 
 @WINDOWS

@@ -55,8 +55,10 @@ def address(module: str, name: str) -> str:
 
     Linux and macOS: `moxi.paths.socket_path(module, name)`, a socket in the module's
     runtime directory (or a short hashed path when that is too long). Windows:
-    `\\\\.\\pipe\\moxi-<module>-<name>-<u>`, `u` the first 8 hex digits of the SHA-256
-    of the user's SID, since every user on the machine shares the pipe namespace.
+    `\\\\.\\pipe\\moxi-<module>-<name>-<u>-<h>`, `u` the first 8 hex digits of the
+    SHA-256 of the user's SID, since every user on the machine shares the pipe namespace,
+    and `h` the same of the module's runtime directory spelled one way (`_home_hash`), so
+    two Moxi homes of one user never share a pipe and two spellings of one home always do.
     """
     if not _WINDOWS:
         from .. import paths
@@ -66,7 +68,7 @@ def address(module: str, name: str) -> str:
         raise ValueError(f"{module!r} is not a Moxi module name")
     if not name or name in (".", "..") or any(c in name for c in "/\\\0"):
         raise ValueError(f"{name!r} is not an endpoint name")
-    return f"{_PIPE_PREFIX}{module}-{name}-{_user_hash()}"
+    return f"{_PIPE_PREFIX}{module}-{name}-{_user_hash()}-{_home_hash(module)}"
 
 
 def _user_hash() -> str:
@@ -77,14 +79,31 @@ def _user_hash() -> str:
     return hashlib.sha256(_win.user_sid().encode()).hexdigest()[:8]
 
 
+def _home_hash(module: str) -> str:
+    """The first 8 hex digits of the SHA-256 of `module`'s runtime directory in its one
+    spelling: its real path (links resolved, each name in its long form), case-folded,
+    with no trailing separator."""
+    import hashlib
+    import os
+
+    from .. import paths
+
+    real = os.path.normcase(os.path.realpath(paths._layout(module).runtime_dir()))
+    return hashlib.sha256(real.encode("utf-8")).hexdigest()[:8]
+
+
+def _hex8(text: str) -> bool:
+    return len(text) == 8 and all(c in "0123456789abcdef" for c in text)
+
+
 def _pipe_parts(address: str) -> tuple[str, str]:
     """The module and endpoint name of a pipe address `address(module, name)` made.
     Raises `ValueError` for any other string."""
     rest = address[len(_PIPE_PREFIX):] if address.startswith(_PIPE_PREFIX) else ""
     module, _, tail = rest.partition("-")
-    name, _, user = tail.rpartition("-")
-    if (not names.is_module_name(module) or not name or len(user) != 8
-            or any(c not in "0123456789abcdef" for c in user)):
+    name, user, home = (tail.rsplit("-", 2) + ["", "", ""])[:3]
+    if (not names.is_module_name(module) or not name or not _hex8(user)
+            or not _hex8(home)):
         raise ValueError(f"{address!r} is not a moxi.ipc pipe address")
     return module, name
 

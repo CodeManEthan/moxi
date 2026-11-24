@@ -67,6 +67,7 @@ def fake_windows(monkeypatch):
     and the user hash fixed."""
     monkeypatch.setattr(ipc, "_WINDOWS", True)
     monkeypatch.setattr(ipc, "_user_hash", lambda: "0123abcd")
+    monkeypatch.setattr(ipc, "_home_hash", lambda module: "4567cdef")
     monkeypatch.setattr(_sweep, "_WINDOWS", True)
 
 
@@ -74,7 +75,7 @@ def fake_windows(monkeypatch):
 
 def test_a_pipes_lock_is_its_name_in_the_modules_runtime_dir(fake_windows, runtime):
     address = ipc.address("demo", "a-b")
-    assert address == r"\\.\pipe\moxi-demo-a-b-0123abcd"
+    assert address == r"\\.\pipe\moxi-demo-a-b-0123abcd-4567cdef"
     assert _sweep.lock_path(address) == str(runtime / "demo" / "a-b.lock")
 
 

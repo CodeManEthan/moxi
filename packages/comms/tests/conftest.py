@@ -586,6 +586,24 @@ def threads_end():
     join_threads(before)
 
 
+@pytest.fixture(autouse=True)
+def no_daemon_outlives_its_test(env):
+    """No comms daemon still serves the test's own address when the test comes down.
+
+    It is up around every test, inside the `env` roots and outside the rig, as
+    `threads_end` is: a daemon the test started, in this process or a child, has been
+    told to stop by then. One that still holds its address fails the test it belongs to,
+    so a leak shows where it is made, not as a collision in a later test. The address is
+    read before the test, from the roots `env` gives it."""
+    from moxi import ipc
+
+    address = str(daemon_socket())
+    yield
+    assert ipc.sweep(address) != "live", (
+        f"a comms daemon still serves {address} after the test; stop it in the test's "
+        "teardown")
+
+
 @pytest.fixture
 def rig(backend, threads_end):
     clock = FakeClock()
