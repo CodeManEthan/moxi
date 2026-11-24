@@ -6120,8 +6120,9 @@ memory	packages/memory/src/moxi_memory/recall_child.py	parser.add_argument("--re
 memory	packages/memory/src/moxi_memory/recall_child.py	help="take over the session's lines whose owner is gone, and exit")	keep	help	help
 memory	packages/memory/src/moxi_memory/recall_discard.py	__all__ = ["Refused", "find", "discard"]	keep	find	find
 memory	packages/memory/src/moxi_memory/recall_guard.py	if not command.isprintable() or any(c in REFUSED_CHARS for c in command):	keep	any	any
-memory	packages/memory/src/moxi_memory/recall_guard.py	if word and set(word) == {"|"}:	keep	set	set
 memory	packages/memory/src/moxi_memory/recall_guard.py	if not any(argv[:len(entry)] == entry for entry in entries):	keep	any	any
+memory	packages/memory/src/moxi_memory/recall_guard.py	"""Whether the child of recall `record` is known to have ended: its log line names a	keep	record	record
+memory	packages/memory/src/moxi_memory/recall_guard.py	"""Whether `record` is a recall still starting its fork."""	keep	record	record
 memory	packages/memory/src/moxi_memory/recall_stream.py	recall.record = records.read(recall.session_id, recall.recall_id) or recall.record	keep	record	record
 memory	packages/memory/src/moxi_memory/recall_stream.py	rounds.append({"round": round_number, "text": answer, "at": now})	keep	round	round
 memory	packages/memory/src/moxi_memory/recall_stream.py	state = recall.record.get("state")	keep	record	record
@@ -6137,15 +6138,24 @@ memory	packages/memory/src/moxi_memory/recall_stream.py	if recall.record.get("st
 memory	packages/memory/src/moxi_memory/recall_stream.py	current = records.read(recall.session_id, recall.recall_id) or recall.record	keep	record	record
 memory	packages/memory/src/moxi_memory/recall_stream.py	recall.record = current	keep	record	record
 memory	packages/memory/src/moxi_memory/recall_stream.py	recall.put(record={"state": records.ENDED},	keep	record	record
+memory	packages/memory/src/moxi_memory/recall_stream.py	record = records.read(recall.session_id, recall.recall_id) or recall.record	keep	record	record
+memory	packages/memory/src/moxi_memory/recall_stream.py	recall.record = record	keep	record	record
+memory	packages/memory/src/moxi_memory/recall_stream.py	recall.put(record={"state": records.LOST, "reason": records.HURRIED, "error": error},	keep	record	record
 memory	packages/memory/src/moxi_memory/recall_take.py	current = records.read(recall.session_id, recall.recall_id) or recall.record	keep	record	record
-memory	packages/memory/src/moxi_memory/recall_take.py	recall.put(record={"state": records.ENDED},	keep	record	record
 memory	packages/memory/src/moxi_memory/recall_take.py	return recalls.is_safe(session_id) and any(	keep	any	any
+memory	packages/memory/src/moxi_memory/recall_take.py	recall.put(record={"state": records.LOST, "reason": recall.line.get("reason"),	keep	record	record
+memory	packages/memory/src/moxi_memory/recall_take.py	recall.put(record={"state": records.ENDED}, hurried=hurried)	keep	record	record
 memory	packages/memory/src/moxi_memory/records.py	"""Write `record` whole and return it as written. The caller holds the session's	keep	record	record
 memory	packages/memory/tests/test_recall_ends.py	records.write(dict(records.read(SESSION, recall.recall_id), at=1000.0))	keep	at	at
 memory	packages/memory/tests/test_recall_ends.py	records.write(dict(records.read(SESSION, young.recall_id), at=now - 10))	keep	at	at
 memory	packages/memory/tests/test_recall_take.py	rounds=[{"round": 1, "text": "- a", "at": 1.0}])	keep	round	round
 memory	packages/memory/tests/test_recall_take.py	assert line["rounds"][-1]["round"] == 2 and line["rounds"][-1]["lost"] == "gone"	keep	round	round
 memory	packages/memory/tests/test_recall_take.py	assert line["rounds"] == [{"round": 1, "text": "- a", "at": 1.0}]	keep	round	round
+memory	packages/memory/tests/test_recall_guard.py	held.set()	keep	set	set
+memory	packages/memory/tests/test_recall_guard.py	done.set()	keep	set	set
+memory	packages/memory/tests/test_recall_stream.py	self.held = set()	keep	set	set
+memory	packages/memory/tests/test_recall_stream.py	self.refuse = set(refuse)	keep	set	set
+memory	packages/memory/tests/test_recall_stream.py	assert route.held == set()	keep	set	set
 moxi	packages/moxi/src/moxi/_mark.py	-	name	NAME	STARTED_BY_ENV
 moxi	packages/moxi/src/moxi/_mark.py	for at, part in enumerate(orig[1:], start=1):	keep	start	start
 moxi	packages/moxi/src/moxi/_mark.py	if not any(name.upper() == STARTED_BY_ENV for name in child):	keep	any	any
