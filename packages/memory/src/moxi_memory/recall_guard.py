@@ -5,8 +5,11 @@ read and answer, and nothing else, and asks no one.
 `fork` of a recall record of the session, in any state (`fork_record`). While the
 session has a `starting` record (its child has not yet written the fork's id), a call
 from an agent id no record names waits up to `STARTING_WAIT_S` for the id, and is judged
-as that recall's fork when it is still unwritten. Every other subagent's call is left
-alone.
+as that recall's fork when it is still unwritten. A `starting` record whose child is
+gone (`moxi.proc.alive` is false for the child its log line names) will never start a
+fork, so it counts as no fork. A `starting` record with no line yet can't be told apart
+from a child still starting up, since only the line names the child, so it still
+counts. Every other subagent's call is left alone.
 
 **A fork's call (`judge_call`).**
 
@@ -76,13 +79,36 @@ def guarded(env: Mapping[str, str]) -> bool:
     return mode(env) is not None
 
 
+def child_gone(session_id: str, record: Mapping[str, object]) -> bool:
+    """Whether the child of recall `record` is known to have ended: its log line names a
+    child, and `moxi.proc.alive` is false for it. False with no line, or a line that
+    names no child, since then nothing tells."""
+    import moxi.proc
+
+    line = recalls.find_line(session_id, str(record.get("recall")))
+    child = line.get("child") if line is not None else None
+    if not isinstance(child, dict):
+        return False
+    try:
+        proc = moxi.proc.ProcId(int(child["pid"]), float(child["started"]))
+    except (TypeError, KeyError, ValueError):
+        return False
+    return not moxi.proc.alive(proc)
+
+
+def _starting(session_id: str, record: Mapping[str, object]) -> bool:
+    """Whether `record` is a recall still starting its fork."""
+    return (record.get("state") == records.STARTING and not record.get("fork")
+            and not child_gone(session_id, record))
+
+
 def _named(session_id: str, agent_id: str) -> tuple[dict | None, bool]:
     """(the record whose fork is `agent_id`, whether a record is still `starting`)."""
     starting = False
     for record in reversed(records.session_records(session_id)):
         if record.get("fork") == agent_id:
             return record, False
-        if record.get("state") == records.STARTING and not record.get("fork"):
+        if not starting and _starting(session_id, record):
             starting = True
     return None, starting
 
@@ -103,7 +129,7 @@ def fork_record(session_id: str | None, agent_id: str | None, *,
         if record is not None or not starting:
             return record
     for found in reversed(records.session_records(session_id)):
-        if found.get("state") == records.STARTING and not found.get("fork"):
+        if _starting(session_id, found):
             return found
     return None
 
@@ -208,5 +234,5 @@ def judge_ask(call):
 
 
 __all__ = ["TIME_UP", "READ_ONLY", "ASK_REFUSED", "READ_TOOLS", "SHELL", "REFUSED_CHARS",
-           "STARTING_WAIT_S", "BUDGET_S", "guarded", "fork_record",
+           "STARTING_WAIT_S", "BUDGET_S", "guarded", "child_gone", "fork_record",
            "time_up", "plain_read", "allowed", "judge_call", "judge_ask"]

@@ -137,6 +137,40 @@ def test_the_budget_fits_inside_the_guards_deadline():
     assert recall_guard.STARTING_WAIT_S < recall_guard.BUDGET_S
 
 
+def a_starting_record(child):
+    """A `starting` record of no fork yet, with no line (`child` None) or a line naming
+    a child that has ended (`dead`) or this process (`live`)."""
+    import os
+
+    from moxi_memory import recall_take, recalls
+
+    record = recall_start.begin(SESSION, "claude", start="prompt", text="x", senders=(),
+                                settings=recall_start.default_settings(), cwd=None,
+                                notes_dir=None, route_name="subagent",
+                                spawn=lambda s, r: None)
+    if child is not None:
+        identity = ({"pid": os.getpid(), "started": 1.0} if child == "dead"
+                    else recall_take.me())
+        with recalls.session_lock(SESSION):
+            recalls.put_line(SESSION, {"recall": record["recall"], "harness": "claude",
+                                       "state": "open", "child": identity})
+    return record
+
+
+def test_a_starting_record_whose_child_is_gone_is_no_fork():
+    a_starting_record("dead")
+    assert recall_guard.fork_record(SESSION, "agent-9", wait_s=0.1) is None
+    assert recall_guard.judge_call(call("Write", agent="agent-9")) is None
+    assert recall_guard.judge_ask(call("Write", agent="agent-9")) is None
+
+
+@pytest.mark.parametrize("child", ["live", None])
+def test_a_starting_record_whose_child_lives_or_is_not_yet_named_still_counts(child):
+    record = a_starting_record(child)
+    found = recall_guard.fork_record(SESSION, "agent-9", wait_s=0.1)
+    assert found is not None and found["recall"] == record["recall"]
+
+
 def test_every_ask_of_a_fork_is_refused():
     a_fork(state="ended")
     assert recall_guard.judge_ask(call("Bash", command="moxi sessions read x")) == Deny(

@@ -376,6 +376,30 @@ def test_a_line_whose_child_is_gone_is_listed_with_its_age_until_taken():
         assert other not in row.detail
 
 
+def test_recalls_whose_child_never_ran_are_listed():
+    import time
+
+    from moxi_memory import recall_start, recalls, records
+
+    now = time.time()
+    recall_line("r-spawn", updated=now, at=now - 60, state=recalls.LOST, reason="spawn",
+                error="FileNotFoundError: moxi-memory-subconscious")
+    recall_line("r-old-spawn", updated=now, at=now - 2 * 86400, state=recalls.LOST,
+                reason="spawn", error="an older error")
+    with recalls.session_lock(SID):
+        for recall_id, age in (("r-silent", 600), ("r-new", 1)):
+            records.write({"recall": recall_id, "session": SID, "state": "starting",
+                           "settings": recall_start.default_settings()}, now=now - age)
+    row = by_name()["subconscious"]
+    assert row.state == "warn" and row.fix == "moxi memory subconscious list"
+    assert ("1 recall in the last day whose child could not start (r-spawn): "
+            "FileNotFoundError: moxi-memory-subconscious") in row.detail
+    assert "1 recall still starting with no log line" in row.detail
+    assert "r-silent (10m old)" in row.detail
+    for other in ("r-old-spawn", "r-new"):
+        assert other not in row.detail
+
+
 class FakeSession:
     def __init__(self, sid, harness, stamps, capabilities=("fork",)):
         self.session_id, self.harness = sid, harness

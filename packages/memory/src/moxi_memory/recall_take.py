@@ -26,7 +26,9 @@ line and the other leaves it. A line a taker left is free again once that taker 
   line and the record end `lost` (`gone`).
 - An `open` line with a ref: it reads the round's end by the ref without waiting. When
   turns has none yet (the fork's turn still runs), it leaves the line as it is, kept,
-  for the next taker. When turns has it, it settles the round as the child would
+  for the next taker. When turns has it and the line names no fork yet (its child died
+  before it read the fork's start), it first reads the round's start the same way and
+  writes the fork's id. Then it settles the round as the child would
   (`recall_stream.settle`): the line's state first, then the ack, then the mark. On
   Claude Code's subagent route the harness has already brought the answer back to the
   main agent, so the taker writes the text on the line and sends nothing. When turns
@@ -114,13 +116,31 @@ def round_number(ref: str) -> int | None:
         return None
 
 
-def _read_end(session_id: str) -> Callable[[str], object]:
+def _read_end(session_id: str, until: str = "ended") -> Callable[[str], object]:
     def read(ref: str):
         import moxi_turns as client
 
-        return client.wait_ref(ref, session_id=session_id, until="ended", timeout_s=0)
+        return client.wait_ref(ref, session_id=session_id, until=until, timeout_s=0)
 
     return read
+
+
+def _note_fork(recall, ref: str, read_start: Callable[[str], object]) -> None:
+    """Write the fork's id on a line that names none, read from the round's start
+    before its end is acked (turns drops the kept start with the end). A start that
+    can't be read leaves the line as it is."""
+    from moxi_turns import Started
+
+    from . import recall_stream
+
+    if recall.line.get("fork") is not None:
+        return
+    try:
+        start = read_start(ref)
+    except Exception:  # noqa: BLE001 - a start not read leaves the id unknown
+        return
+    if isinstance(start, Started):
+        recall_stream.note_fork(recall, start.agent_id)
 
 
 def _as_gone(end):
@@ -161,7 +181,8 @@ def _end_record(recall) -> None:
 
 
 def take(session_id: str, recall_id: str, *, identity: dict | None = None,
-         read_end: Callable[[str], object] | None = None, route=None) -> str:
+         read_end: Callable[[str], object] | None = None,
+         read_start: Callable[[str], object] | None = None, route=None) -> str:
     """Take recall `recall_id`'s line over when its owner is gone, and finish what its
     owner left. Returns `none` (not taken), `left` (turns holds no end for its round
     yet, or the ack was not taken), `acked` or `settled`. See the module's docstring."""
@@ -193,13 +214,15 @@ def take(session_id: str, recall_id: str, *, identity: dict | None = None,
         end = (read_end or _read_end(session_id))(str(ref))
     except Exception:  # noqa: BLE001 - no end yet, or turns can't be asked: left for later
         return LEFT
+    _note_fork(recall, str(ref), read_start or _read_end(session_id, "started"))
     recall_stream.settle(recall, number or 1, _as_gone(end), route)
     _end_record(recall)
     return SETTLED
 
 
 def take_all(*, sessions: list[str] | None = None, identity: dict | None = None,
-             skip: str | None = None, read_end=None, route=None) -> dict[str, str]:
+             skip: str | None = None, read_end=None, read_start=None,
+             route=None) -> dict[str, str]:
     """Take every takeable line of `sessions` (every session with a log when None),
     leaving out recall `skip`. Returns what was done with each line taken, by recall."""
     identity = me() if identity is None else identity
@@ -213,7 +236,7 @@ def take_all(*, sessions: list[str] | None = None, identity: dict | None = None,
                 continue
             try:
                 outcome = take(session_id, str(recall_id), identity=identity,
-                               read_end=read_end, route=route)
+                               read_end=read_end, read_start=read_start, route=route)
             except Exception:  # noqa: BLE001 - one line that fails leaves the others
                 outcome = LEFT
             if outcome != NONE:

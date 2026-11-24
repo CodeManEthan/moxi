@@ -144,17 +144,22 @@ def hurry_running(session_id: str, *, now: float | None = None) -> list[str]:
     return hurried
 
 
+def session_ids() -> list[str]:
+    """Every session that has a records directory."""
+    try:
+        return sorted(p.name for p in (recalls.subconscious_dir() / RECORDS).iterdir()
+                      if p.is_dir() and recalls.is_safe(p.name))
+    except OSError:
+        return []
+
+
 def sweep_old(*, sessions: list[str] | None = None, now: float | None = None) -> list[str]:
     """Remove every record older than `SWEEP_AFTER_S` whose log line does not carry the
     kept mark, in `sessions` (every session with records when None), each session under
     its lock, and return the ids removed."""
     now = time.time() if now is None else now
     if sessions is None:
-        try:
-            sessions = sorted(p.name for p in (recalls.subconscious_dir() / RECORDS).iterdir()
-                              if p.is_dir())
-        except OSError:
-            sessions = []
+        sessions = session_ids()
     removed = []
     for session_id in sessions:
         if not recalls.is_safe(session_id):
@@ -185,4 +190,4 @@ def sweep_old(*, sessions: list[str] | None = None, now: float | None = None) ->
 __all__ = ["RECORDS", "STARTING", "RUNNING", "HURRIED", "BACK", "ENDED", "LOST",
            "RECORD_STATES", "DONE", "RECORD_FIELDS", "records_dir", "record_path", "read",
            "session_records", "write", "update", "hurry_running", "SWEEP_AFTER_S",
-           "sweep_old"]
+           "session_ids", "sweep_old"]

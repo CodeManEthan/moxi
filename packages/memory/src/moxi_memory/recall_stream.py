@@ -198,6 +198,20 @@ def open_round(recall, round_number: int, round_ref: str) -> str | None:
     return None
 
 
+def note_fork(recall, fork_id: str | None) -> None:
+    """Write the fork's id on the record and the line, the record `running` when it was
+    still `starting`, unless the line already names a fork or `fork_id` is None. The
+    log's fork ids are what keep a fork's own transcript out of memory's index."""
+    if fork_id is None or recall.line.get("fork") is not None:
+        return
+    with recalls.session_lock(recall.session_id):
+        state = records.read(recall.session_id, recall.recall_id) or recall.record
+        fields: dict = {"fork": fork_id}
+        if state.get("state") == records.STARTING:
+            fields["state"] = records.RUNNING
+        recall.write(record=fields, fork=fork_id)
+
+
 def lose_hurried(recall) -> None:
     """End a recall hurried before its first round was asked: no fork was started, so
     record and line end `lost`, reason `hurried`, with nothing to ack."""
@@ -233,18 +247,14 @@ def run(recall, route: Route, brief: str, *, clock=time.time) -> str:
         else:
             text = continue_text(recall.record, settings, now=clock())
             handle = route.next(handle, text, ref=round_ref, round_timeout_s=bound)
-        fork_id = route.started(handle)
-        if fork_id is not None and recall.line.get("fork") is None:
-            with recalls.session_lock(recall.session_id):
-                state = records.read(recall.session_id, recall.recall_id) or recall.record
-                fields: dict = {"fork": fork_id}
-                if state.get("state") == records.STARTING:
-                    fields["state"] = records.RUNNING
-                recall.write(record=fields, fork=fork_id)
+        note_fork(recall, route.started(handle))
         try:
             end = route.ended(handle, bound + END_WAIT_MARGIN_S)
         except TimeoutError:
             return "unsettled"
+        if recall.line.get("fork") is None:
+            # the start was not read in its wait; once the round has ended it is known
+            note_fork(recall, route.started(handle))
         got = settle(recall, round_number, end, route, now=clock())
         if recall.line.get("state") == recalls.DISCARDED:
             return recalls.DISCARDED
@@ -269,4 +279,4 @@ def run(recall, route: Route, brief: str, *, clock=time.time) -> str:
 
 __all__ = ["ROUND_MARGIN_S", "END_WAIT_MARGIN_S", "NOTHING", "END_LINE", "CONTINUE", "Route",
            "ref", "round_bound_s", "ends_stream", "continue_text", "why_stop", "settle",
-           "KEPT", "open_round", "lose_hurried", "run"]
+           "KEPT", "open_round", "note_fork", "lose_hurried", "run"]

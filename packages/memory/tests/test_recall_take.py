@@ -93,6 +93,25 @@ def test_an_open_line_whose_round_turns_settled_is_finished_by_the_taker():
     assert record["state"] == "ended" and record["answered"] is True
 
 
+def test_a_taker_logs_the_fork_id_its_dead_child_never_read():
+    from moxi_turns import Started
+
+    rid = a_line(ref=None, kept=False)
+    with recalls.session_lock(SESSION):
+        line = recalls.find_line(SESSION, rid)
+        line.update(ref=f"{rid}:1", kept=True)
+        recalls.put_line(SESSION, line)
+    route = AckRoute()
+    start = ends(Started(turn_id=None, agent_id="agent-5"))
+    assert recall_take.take(SESSION, rid, identity=live(), read_end=ends(ended("- a")),
+                            read_start=start, route=route) == "settled"
+    assert start.calls == [f"{rid}:1"]
+    line = recalls.find_line(SESSION, rid)
+    assert line["fork"] == "agent-5" and line["kept"] is False
+    assert records.read(SESSION, rid)["fork"] == "agent-5"
+    assert ("claude", "agent-5") in recalls.fork_ids()
+
+
 def test_a_round_turns_has_not_settled_is_left_kept_for_the_next_taker():
     rid = a_line(ref="r", kept=True)
     with recalls.session_lock(SESSION):

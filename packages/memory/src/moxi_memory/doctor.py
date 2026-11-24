@@ -484,6 +484,34 @@ def live_subconscious() -> list[tuple[str, str, str | None]]:
     return out
 
 
+def _never_ran(lines: list[dict], *, now: float) -> str | None:
+    """The recalls whose child never ran: lines lost with reason `spawn` in the last day
+    (the child could not be started), and records still `starting` past the grace with
+    no line (the child ended before it wrote one). None when there are none."""
+    from . import recall_start, recalls, records
+
+    said = []
+    spawn = [line for line in lines if line.get("state") == recalls.LOST
+             and line.get("reason") == recall_start.SPAWN
+             and now - float(line.get("at") or 0) < records.SWEEP_AFTER_S]
+    if spawn:
+        said.append(f"{_plural(len(spawn), 'recall')} in the last day whose child could "
+                    f"not start ({_shown([str(x.get('recall')) for x in spawn[::-1]])}): "
+                    f"{spawn[-1].get('error') or 'no error recorded'}")
+    named = {line.get("recall") for line in lines}
+    silent = [record for session_id in records.session_ids()
+              for record in records.session_records(session_id)
+              if record.get("state") == records.STARTING
+              and record.get("recall") not in named
+              and now - float(record.get("at") or now) >= UNTAKEN_GRACE_S]
+    if silent:
+        ages = [f"{r.get('recall')} ({_age(now - float(r.get('at') or now))} old)"
+                for r in silent[::-1]]
+        said.append(f"{_plural(len(silent), 'recall')} still starting with no log line, "
+                    f"its child gone before it wrote one: {_shown(ages)}")
+    return "; ".join(said) or None
+
+
 def _subconscious(*, config_in_error: bool, now: float | None = None) -> Row:
     import time
 
@@ -524,6 +552,10 @@ def _subconscious(*, config_in_error: bool, now: float | None = None) -> Row:
                  for line in untaken[::-1]]
         parts.append(f"{_plural(len(untaken), 'recall line')} not yet taken, child gone: "
                      f"{_shown(named)}; the next recall child or session end takes it")
+    never_ran = _never_ran(lines, now=now)
+    if never_ran:
+        warn = True
+        parts.append(never_ran)
     if not parts:
         parts.append("on in no live session")
     fix = CONFIG if config_in_error and warn else (SUBCONSCIOUS_LIST if warn else None)

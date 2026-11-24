@@ -271,6 +271,23 @@ def test_a_recall_hurried_while_starting_never_starts_its_fork():
     assert record["state"] == "lost" and record["reason"] == "hurried"
 
 
+def test_a_start_not_read_in_its_wait_is_read_again_once_the_round_ended():
+    recall = a_recall()
+
+    class LateStart(FakeRoute):
+        def __init__(self, ends):
+            super().__init__(ends)
+            self.starts = [None, "agent-7"]
+
+        def started(self, handle):
+            return self.starts.pop(0) if self.starts else "agent-7"
+
+    route = LateStart([ended("NOTHING")])
+    assert run(recall, route) == "ended"
+    assert recalls.find_line(SESSION, recall.recall_id)["fork"] == "agent-7"
+    assert records.read(SESSION, recall.recall_id)["fork"] == "agent-7"
+
+
 def test_the_subagent_route_with_no_endpoint_loses_the_first_round():
     from moxi_memory import recall_route
 
