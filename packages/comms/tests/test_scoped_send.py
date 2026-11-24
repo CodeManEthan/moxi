@@ -210,8 +210,8 @@ def test_a_wrong_token_is_refused_credential(digest):
 
 
 def test_another_modules_send_is_refused_undeclared(digest):
-    text = refused(send(PARENT, module="memory"), "scoped-undeclared")
-    assert "memory declares no word" in text
+    text = refused(send(PARENT, module="ledger"), "scoped-undeclared")
+    assert "ledger declares no word" in text
 
 
 def test_a_missing_token_is_refused_credential(digest):
@@ -222,7 +222,7 @@ def test_a_missing_token_is_refused_credential(digest):
 # --------------------------------------------------------------------------- in conflict
 
 def test_a_word_two_modules_declare_sends_nothing(digest, client):
-    declare(digest, {**DIGEST, "memory": {"digest": "x"}})
+    declare(digest, {**DIGEST, "ledger": {"digest": "x"}})
     assert "in conflict" in refused(send(PARENT), "scoped-conflict")
     with pytest.raises(DaemonError) as e:
         client.send(FORMED, "anything", machine_line.compose([PARENT], "x"))

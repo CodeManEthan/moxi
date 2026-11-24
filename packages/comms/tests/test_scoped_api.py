@@ -47,7 +47,7 @@ def test_send_scoped_to_anyone_but_the_parent_is_refused(digest, to):  # noqa: F
 
 
 def test_send_scoped_for_a_module_that_declares_no_word_is_refused(digest):  # noqa: F811
-    result = api.send_scoped("memory", PARENT, PARENT, "x")
+    result = api.send_scoped("ledger", PARENT, PARENT, "x")
     assert (result.outcome, result.refusal.code) == ("refused", "scoped-undeclared")
 
 
@@ -90,7 +90,7 @@ def test_a_token_this_process_cant_read_leaves_a_record_for_the_doctor(
 
 def test_a_send_refused_before_the_token_leaves_no_record(digest):  # noqa: F811
     TokenStore().delete_secret(reserved.owner("pager"), scoped.secret_id("digest"))
-    assert api.send_scoped("memory", PARENT, PARENT, "x").refusal.code == \
+    assert api.send_scoped("ledger", PARENT, PARENT, "x").refusal.code == \
         "scoped-undeclared"
     assert api.send_scoped("pager", PARENT, "other@proj-a", "x").refusal.code == \
         "scoped-recipient"
@@ -132,7 +132,7 @@ def test_a_name_of_a_word_no_module_declares_reads_back_as_none(rig):
 
 
 def test_a_word_in_conflict_reads_back_as_none(digest):  # noqa: F811
-    declare(digest, {**DIGEST, "memory": {"digest": "x"}})
+    declare(digest, {**DIGEST, "ledger": {"digest": "x"}})
     assert api.scoped_sender(FORMED) is None
 
 
@@ -173,17 +173,17 @@ def test_an_active_scoped_sender_can_send(digest):  # noqa: F811
 
 
 def test_a_module_that_declares_no_word_cant_send(digest):  # noqa: F811
-    got = api.scoped_state("memory", PARENT)
+    got = api.scoped_state("ledger", PARENT)
     assert (got.can_send, got.reason) == (False, "undeclared")
-    assert got.why == "memory declares no word for scoped senders"
+    assert got.why == "ledger declares no word for scoped senders"
     got = api.scoped_state("pager", PARENT, word="other")
     assert (got.can_send, got.reason, got.qualified) == \
         (False, "undeclared", "main-other@proj-a")
 
 
 def test_a_word_in_conflict_cant_send_for_either_module(digest):  # noqa: F811
-    declare(digest, {**DIGEST, "memory": {"digest": "x"}})
-    for module in ("pager", "memory"):
+    declare(digest, {**DIGEST, "ledger": {"digest": "x"}})
+    for module in ("pager", "ledger"):
         got = api.scoped_state(module, PARENT)
         assert (got.can_send, got.reason) == (False, "conflict"), module
 

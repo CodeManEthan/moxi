@@ -56,10 +56,10 @@ def found(name, state=modules.PRESENT, dist=None):
 
 def test_the_group_gives_each_word_to_the_module_whose_distribution_carries_it():
     got = scoped.load(entries=[entry("digest", "the nightly digest"),
-                               entry("recall", "recalls", dist="moxi_memory")],
-                      found=[found("pager"), found("memory")])
+                               entry("night", "nightly notes", dist="moxi_ledger")],
+                      found=[found("pager"), found("ledger")])
     assert got.words == {"pager": {"digest": "the nightly digest"},
-                         "memory": {"recall": "recalls"}}
+                         "ledger": {"night": "nightly notes"}}
     assert got.broken == [] and got.kept == set()
 
 
@@ -143,19 +143,19 @@ def test_an_uninstall_frees_the_gone_modules_words(chain, store):
 
 def test_a_word_two_modules_declare_is_in_conflict_for_both(chain, store):
     reserved.reconcile(declared={}, words=DIGEST, chain=chain)
-    both = {**DIGEST, "memory": {"digest": "another digest"}}
+    both = {**DIGEST, "ledger": {"digest": "another digest"}}
     result = reserved.reconcile(declared={}, words=both, chain=chain)
-    assert result.word_conflicts == [("digest", None, "memory and pager each declare it")]
+    assert result.word_conflicts == [("digest", None, "ledger and pager each declare it")]
     r = word_row("digest")
     assert (r["state"], r["module"], r["declared_by"], r["token_hash"]) == \
-        ("conflict", None, "memory pager", None)
+        ("conflict", None, "ledger pager", None)
     assert token_of(store, "pager", "digest") is None
     # Once one of them stops declaring it, the other's word is active.
-    reserved.reconcile(declared={}, words={"memory": {"digest": "another digest"}},
+    reserved.reconcile(declared={}, words={"ledger": {"digest": "another digest"}},
                        chain=chain)
     r = word_row("digest")
-    assert (r["state"], r["module"]) == ("active", "memory")
-    assert token_of(store, "memory", "digest")
+    assert (r["state"], r["module"]) == ("active", "ledger")
+    assert token_of(store, "ledger", "digest")
 
 
 def test_a_word_whose_declaration_doesnt_load_keeps_its_row(chain, monkeypatch):
@@ -187,18 +187,18 @@ def test_renew_word_replaces_the_token(chain, store):
 # --------------------------------------------------------------------------- the doctor
 
 def test_a_reconcile_names_a_word_in_conflict_and_a_bad_declaration(chain):
-    both = {**DIGEST, "memory": {"digest": "x"}, "notes": {"Bad": "x"}}
+    both = {**DIGEST, "ledger": {"digest": "x"}, "notes": {"Bad": "x"}}
     result = reserved.reconcile(declared={}, words=both, chain=chain)
-    assert ("digest", None, "memory and pager each declare it") in result.word_conflicts
+    assert ("digest", None, "ledger and pager each declare it") in result.word_conflicts
     assert any(w == "Bad" for w, _m, _why in result.word_conflicts)
 
 
 def test_the_doctor_rows_say_the_word_conflict(chain, monkeypatch):
-    both = {**DIGEST, "memory": {"digest": "x"}}
+    both = {**DIGEST, "ledger": {"digest": "x"}}
     monkeypatch.setattr(scoped, "load", lambda gone=None: scoped.from_mapping(both))
     rows = reserved.doctor_rows(declared={}, chain=chain)
     texts = [r.detail for r in rows if r.name == "scoped"]
-    assert "a module: the scoped sender word digest isn't declared: memory and pager " \
+    assert "a module: the scoped sender word digest isn't declared: ledger and pager " \
            "each declare it" in texts
 
 

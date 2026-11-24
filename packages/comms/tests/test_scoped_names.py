@@ -86,7 +86,7 @@ def test_no_session_binds_a_name_of_a_declared_words_form(rig):
 
 
 def test_a_word_in_conflict_still_refuses_binds(rig):
-    declare(rig, {**DIGEST, "memory": {"digest": "x"}})
+    declare(rig, {**DIGEST, "ledger": {"digest": "x"}})
     with pytest.raises(DaemonError) as e:
         bind(name="lead-digest", global_=True)
     assert e.value.code == wire.NAME_RESERVED
