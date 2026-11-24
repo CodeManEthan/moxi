@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
-  FACTS_COMPONENT, FACTS_EVENT, isAbsolutePath, LINES_MAX, ORDER_DEFAULT, PARTS_MAX, readReport,
+  FACTS_COMPONENT, FACTS_EVENT, isAbsolutePath, LINES_MAX, LIVE_MAX, ORDER_DEFAULT, PARTS_MAX, readReport,
   TEXT_MAX_CHARS, VERSION,
 } from "../src/facts.ts";
 
@@ -13,7 +13,7 @@ const GIVEN = [
 const report = (over) => ({ version: 1, order: 30, ...over });
 const read = (detail, open = null) => readReport(detail, GIVEN, open);
 const part = (text, over = {}) => ({ text, heavy: false, warn: false, rank: null, claims: [], count: null,
-                                     ...over });
+                                     idle_only: false, ...over });
 
 test("the contract's names", () => {
   assert.equal(FACTS_COMPONENT, "project-facts");
@@ -22,6 +22,7 @@ test("the contract's names", () => {
   assert.equal(TEXT_MAX_CHARS, 200);
   assert.equal(PARTS_MAX, 8);
   assert.equal(LINES_MAX, 6);
+  assert.equal(LIVE_MAX, 100);
 });
 
 test("null and undefined are nothing to say, refusing nothing", () => {
@@ -80,7 +81,7 @@ test("a full report reads with every field kept", () => {
   ]);
   assert.deepEqual(alpha.sections, [{
     label: "Sessions", rank: 30,
-    lines: [{ parts: [part("planner, slot 1")], claims: ["claude/a1"] }],
+    lines: [{ parts: [part("planner, slot 1")], claims: ["claude/a1"], runs: false }],
     link: { text: "Sessions", module: "sessions", route: "" },
   }]);
   assert.deepEqual([...alpha.agents], [
@@ -93,10 +94,57 @@ test("a full report reads with every field kept", () => {
   assert.deepEqual(kept.folders, [{ folder: "/w/finch", at: 1763100000, parts: [part("2 sessions this week")] }]);
 });
 
+test("a running line's runs, a part's idle_only and the report's live are read", () => {
+  const got = read(report({
+    projects: { alpha: { sections: [{ label: "Sessions", lines: [
+      { parts: [{ text: "planner" }, { text: "last active 18:40", idle_only: true }], claims: ["claude/a1"], runs: true },
+      { parts: [{ text: "2 more" }], claims: ["claude/a2", "claude/a3"] }] }] } },
+    live: { "claude/a1": { in_turn: true, state: "working" }, "codex/b1": { in_turn: false, state: "idle" } },
+  }), "alpha");
+  assert.deepEqual(got.refused, []);
+  const [first, more] = got.report.projects.get("alpha").sections[0].lines;
+  assert.deepEqual(first, { parts: [part("planner"), part("last active 18:40", { idle_only: true })],
+                            claims: ["claude/a1"], runs: true });
+  assert.equal(more.runs, false);
+  assert.deepEqual([...got.report.live], [["claude/a1", { in_turn: true, state: "working" }],
+                                          ["codex/b1", { in_turn: false, state: "idle" }]]);
+});
+
+test("runs, idle_only and live entries of the wrong type are refused, the rest kept", () => {
+  const got = read(report({
+    projects: { alpha: { sections: [{ label: "Sessions", lines: [
+      { parts: [{ text: "planner" }, { text: "last active 18:40", idle_only: "yes" }], claims: ["claude/a1"], runs: 1 }] }] } },
+    live: { "claude/a1": { in_turn: "true", state: "working" }, "claude/a2": { in_turn: true, state: "" },
+            "claude/a3": "working", [`claude/${"x".repeat(200)}`]: { in_turn: true, state: "working" },
+            "claude/a4": { in_turn: true, state: "working" } },
+  }), "alpha");
+  const [line] = got.report.projects.get("alpha").sections[0].lines;
+  assert.deepEqual(line, { parts: [part("planner"), part("last active 18:40")], claims: ["claude/a1"], runs: false });
+  assert.deepEqual([...got.report.live], [["claude/a4", { in_turn: true, state: "working" }]]);
+  assert.deepEqual(got.refused, [
+    'projects["alpha"].sections[0].lines[0].parts[1].idle_only: not true or false',
+    'projects["alpha"].sections[0].lines[0].runs: not true or false',
+    'live["claude/a1"].in_turn: not true or false',
+    'live["claude/a2"].state: empty',
+    'live["claude/a3"]: not an object',
+    `live[${JSON.stringify(`claude/${"x".repeat(200)}`)}]: not a claim of 1 to 200 characters`,
+  ]);
+  assert.deepEqual(read(report({ live: ["claude/a1"] })).refused, ["live: not an object"]);
+});
+
+test("a live of more than 100 sessions is refused whole", () => {
+  const many = (n) => Object.fromEntries(Array.from({ length: n }, (_, i) => [`claude/s${i}`, { in_turn: true, state: "working" }]));
+  assert.equal(read(report({ live: many(LIVE_MAX) })).report.live.size, LIVE_MAX);
+  const over = read(report({ live: many(LIVE_MAX + 1) }));
+  assert.equal(over.report.live.size, 0);
+  assert.deepEqual(over.refused, ["live: more than 100 sessions"]);
+});
+
 test("a bare report has its defaults", () => {
   const got = read(report({}));
   assert.deepEqual(got, {
-    report: { order: 30, activity: null, gathers: null, projects: new Map(), folders: [], more_folders: 0 },
+    report: { order: 30, activity: null, gathers: null, projects: new Map(), folders: [], more_folders: 0,
+              live: new Map() },
     refused: [],
   });
 });
@@ -262,7 +310,7 @@ test("a section with no label, no lines or none left to draw is dropped", () => 
                     { label: "Kept", lines: [{ parts: [{ text: "k" }] }], rank: "high", link: { text: "Go" } }];
   const got = read(report({ projects: { alpha: { sections } } }), "alpha");
   assert.deepEqual(got.report.projects.get("alpha").sections,
-                   [{ label: "Kept", rank: null, lines: [{ parts: [part("k")], claims: [] }], link: null }]);
+                   [{ label: "Kept", rank: null, lines: [{ parts: [part("k")], claims: [], runs: false }], link: null }]);
   assert.deepEqual(got.refused, [
     'projects["alpha"].sections[0].label: not a string',
     'projects["alpha"].sections[1].lines: not a list',

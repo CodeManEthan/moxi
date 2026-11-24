@@ -2,7 +2,7 @@
 // folders that are not projects, worked out with no DOM so the Node tests can read them.
 // Every string here goes into the page as text.
 
-import { claimedBelow, inOrder, partText } from "./claims.ts";
+import { claimedBelow, inOrder, inTurn, partText, turnWord } from "./claims.ts";
 import type { Link, Report, Say } from "./facts.ts";
 import type { Listed, Refusal, RemoveStatus } from "./feed.ts";
 import { JOIN } from "./list-model.ts";
@@ -117,11 +117,14 @@ interface Merged {
  * order whose module is installed, the lowest rank. A counted part counts the sessions no
  * lower order claimed, with its after-lines words once a line is drawn above it; a line
  * with nothing left to draw is left out, and so is a section. A line of counts after
- * lines, and a line under one that leads with heavy words, is dim.
+ * lines, and a line under one that leads with heavy words, is dim. A running line whose
+ * session another report says is in a turn (`turnWord`) is drawn without its parts that
+ * hold only while idle, and ends with that report's word: `planner · headless · working`.
  */
 export function mergedSections(reports: readonly Report[], key: string,
                                installed: ReadonlySet<string>): Merged[] {
   const byLabel = new Map<string, Merged>();
+  const words = inTurn(reports);
   let seq = 0;
   for (const report of inOrder(reports)) {
     const facts = report.projects.get(key);
@@ -139,12 +142,18 @@ export function mergedSections(reports: readonly Report[], key: string,
       }
       for (const raw of section.lines) {
         const parts: Shown[] = [];
+        const word = turnWord(raw, report, reports, key, words);
         let counts = true;
         for (const part of raw.parts) {
+          if (word !== null && part.idle_only) continue;
           const text = partText(part, claimed, { afterLines: merged.lines.length > 0 });
           if (text === null) continue;
           parts.push({ text, heavy: part.heavy });
           counts &&= part.count !== null;
+        }
+        if (word !== null && parts.length > 0) {
+          parts.push({ text: word, heavy: false });
+          counts = false;
         }
         if (parts.length === 0) continue;
         const above = merged.lines.at(-1);
