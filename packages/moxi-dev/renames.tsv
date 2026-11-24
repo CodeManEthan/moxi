@@ -18121,6 +18121,10 @@ moxi-dev	packages/moxi-dev/tests/test_check.py	assert checker.wait(timeout=testi
 moxi-dev	packages/moxi-dev/tests/test_check.py	checker.wait(timeout=1)	keep	timeout	timeout
 moxi-dev	packages/moxi-dev/tests/test_check.py	assert checker.wait(timeout=testing.PROC_WAIT_S) == 128 + signal.SIGTERM	keep	timeout	timeout
 moxi-dev	packages/moxi-dev/tests/test_kit.py	wait_for(lambda: not any(_running(pid) for pid in pids), testing.PROC_WAIT_S,	keep	any	any
+launcher	packages/launcher/tests/launcher_starts.py	"""Stand in for the terminal target's start on this system; `record` gets each one."""	keep	record	record
+launcher	packages/launcher/tests/launcher_starts.py	record(command, list(argv), env, os.getcwd())	keep	record	record
+launcher	packages/launcher/tests/launcher_starts.py	record(argv[0], list(argv), env, str(cwd))	keep	record	record
+launcher	packages/launcher/tests/launcher_starts.py	"""A `record` that keeps nothing."""	keep	record	record
 moxi-dev	packages/moxi-dev/src/moxi_dev/check.py	dropped = set()	keep	set	set
 moxi-dev	packages/moxi-dev/src/moxi_dev/check.py	parser.add_argument("--package", metavar="NAME", action="append", default=[],	keep	NAME	NAME
 moxi-dev	packages/moxi-dev/src/moxi_dev/check.py	parser.add_argument("--package", metavar="NAME", action="append", default=[],	keep	default	default
@@ -18128,3 +18132,4 @@ moxi-dev	packages/moxi-dev/src/moxi_dev/check.py	help="check exactly this packag
 moxi-dev	packages/moxi-dev/src/moxi_dev/check.py	parser.add_argument("--leave-out", metavar="NAME", action="append", default=[],	keep	NAME	NAME
 moxi-dev	packages/moxi-dev/src/moxi_dev/check.py	parser.add_argument("--leave-out", metavar="NAME", action="append", default=[],	keep	default	default
 moxi-dev	packages/moxi-dev/src/moxi_dev/check.py	help="check every package the check would otherwise take but "	keep	help	help
+rounds	packages/rounds/tests/test_lander.py	log.parent.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok

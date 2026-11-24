@@ -2694,8 +2694,8 @@ def _write_launcher(path: Path, python: str, script: str) -> None:
     # Python finds the script as the last zip in the file; the update leaves the old one
     # in a later section, so the zip goes at the end as well, where the loader reads
     # nothing.
-    with open(path, "ab") as out:
-        out.write(data.getvalue())
+    with open(path, "ab") as exe_fh:
+        exe_fh.write(data.getvalue())
 
 
 @functools.cache
