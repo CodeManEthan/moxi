@@ -56,6 +56,9 @@ RECORD_STATES = (STARTING, RUNNING, HURRIED, BACK, ENDED, LOST)
 DONE = (ENDED, LOST)
 #: How old a record is, in seconds, when the day sweep removes it.
 SWEEP_AFTER_S = 86400.0
+#: How long a recall's child has, in seconds from its record's `at`, to write its log
+#: line. A record still with no line past it has a child that never ran or ended first.
+STARTING_GRACE_S = 30.0
 #: The fields of a record.
 RECORD_FIELDS = ("recall", "session", "harness", "state", "reason", "error", "start",
                  "text", "senders", "settings", "cwd", "notes_dir", "route", "fork",
@@ -190,4 +193,4 @@ def sweep_old(*, sessions: list[str] | None = None, now: float | None = None) ->
 __all__ = ["RECORDS", "STARTING", "RUNNING", "HURRIED", "BACK", "ENDED", "LOST",
            "RECORD_STATES", "DONE", "RECORD_FIELDS", "records_dir", "record_path", "read",
            "session_records", "write", "update", "hurry_running", "SWEEP_AFTER_S",
-           "session_ids", "sweep_old"]
+           "STARTING_GRACE_S", "session_ids", "sweep_old"]

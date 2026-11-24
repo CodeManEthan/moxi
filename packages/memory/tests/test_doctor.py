@@ -412,16 +412,18 @@ def test_recalls_whose_child_never_ran_are_listed():
     recall_line("r-old-spawn", updated=now, at=now - 2 * 86400, state=recalls.LOST,
                 reason="spawn", error="an older error")
     with recalls.session_lock(SID):
-        for recall_id, age in (("r-silent", 600), ("r-new", 1)):
-            records.write({"recall": recall_id, "session": SID, "state": "starting",
+        for recall_id, state, age in (("r-silent", "starting", 600),
+                                      ("r-stuck", "hurried", 10800),
+                                      ("r-new", "starting", 1), ("r-hurried", "hurried", 1)):
+            records.write({"recall": recall_id, "session": SID, "state": state,
                            "settings": recall_start.default_settings()}, now=now - age)
     row = by_name()["subconscious"]
     assert row.state == "warn" and row.fix == "moxi memory subconscious list"
     assert ("1 recall in the last day whose child could not start (r-spawn): "
             "FileNotFoundError: moxi-memory-subconscious") in row.detail
-    assert "1 recall still starting with no log line" in row.detail
-    assert "r-silent (10m old)" in row.detail
-    for other in ("r-old-spawn", "r-new"):
+    assert ("2 recalls with no log line, the child gone before it wrote one: "
+            "r-silent (starting, 10m old), r-stuck (hurried, 3h old)") in row.detail
+    for other in ("r-old-spawn", "r-new", "r-hurried"):
         assert other not in row.detail
 
 

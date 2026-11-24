@@ -12,9 +12,11 @@ has a record that awaits its fork, a call from an agent id no record names waits
 whose first round was asked (the record's `rounds`, written before the round goes to
 turns), or of the newest such record when none was asked: only an asked round can have
 started a fork. A record whose child is gone (`moxi.proc.alive` is false for the child
-its log line names) will never start a fork, so it counts as no fork. A record with no
-line yet can't be told apart from a child still starting up, since only the line names
-the child, so it still counts. Every other subagent's call is left alone.
+its log line names) will never start a fork, so it counts as no fork. Only the line
+names the child, so a record with no line can't be told apart from a child still
+starting up: it awaits its fork only until `records.STARTING_GRACE_S` after its `at`,
+by when a living child has written its line, whether it is `starting` or `hurried`;
+past that it counts as no fork. Every other subagent's call is left alone.
 
 **A fork's call (`judge_call`).**
 
@@ -106,11 +108,22 @@ def child_gone(session_id: str, record: Mapping[str, object]) -> bool:
     return not moxi.proc.alive(proc)
 
 
-def awaits_fork(session_id: str, record: Mapping[str, object]) -> bool:
+def awaits_fork(session_id: str, record: Mapping[str, object], *,
+                now: float | None = None) -> bool:
     """Whether `record` is a recall whose fork's id is not yet written while its child
-    may still write it: `starting` or `hurried`, no fork, and its child not known gone."""
-    return (record.get("state") in (records.STARTING, records.HURRIED)
-            and not record.get("fork") and not child_gone(session_id, record))
+    may still write it: `starting` or `hurried`, no fork, and either a log line whose
+    child is not known gone, or no line while the record is under
+    `records.STARTING_GRACE_S` old."""
+    if record.get("state") not in (records.STARTING, records.HURRIED) or record.get("fork"):
+        return False
+    if recalls.find_line(session_id, str(record.get("recall"))) is None:
+        now = time.time() if now is None else now
+        try:
+            at = float(record.get("at") or 0)
+        except (TypeError, ValueError):
+            at = 0.0
+        return now - at < records.STARTING_GRACE_S
+    return not child_gone(session_id, record)
 
 
 def _asked(record: Mapping[str, object]) -> bool:

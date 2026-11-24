@@ -202,6 +202,33 @@ def test_a_hurried_record_whose_child_is_gone_is_no_fork():
     assert recall_guard.judge_call(call("Write", agent="agent-9")) is None
 
 
+@pytest.mark.parametrize("state", ["starting", "hurried"])
+def test_a_record_with_no_line_awaits_its_fork_only_for_the_grace(state):
+    import time
+
+    from moxi_memory import recalls
+
+    grace = records.STARTING_GRACE_S
+    record = a_starting_record(None, state=state, rounds=1, at=time.time() - grace + 5)
+    found = recall_guard.fork_record(SESSION, "agent-9", wait_s=0.1)
+    assert found is not None and found["recall"] == record["recall"]
+    with recalls.session_lock(SESSION):
+        records.update(SESSION, record["recall"], at=time.time() - grace - 1)
+    assert recall_guard.fork_record(SESSION, "agent-9", wait_s=0.1) is None
+    assert recall_guard.judge_call(call("Write", agent="agent-9")) is None
+    assert recall_guard.judge_ask(call("Write", agent="agent-9")) is None
+
+
+@pytest.mark.parametrize("state", ["starting", "hurried"])
+def test_a_record_whose_line_names_a_live_child_awaits_past_the_grace(state):
+    import time
+
+    record = a_starting_record("live", state=state, rounds=1,
+                               at=time.time() - records.STARTING_GRACE_S - 60)
+    found = recall_guard.fork_record(SESSION, "agent-9", wait_s=0.1)
+    assert found is not None and found["recall"] == record["recall"]
+
+
 def test_an_unnamed_call_is_judged_as_the_fork_of_the_record_whose_round_was_asked():
     asked = a_starting_record("live", state="hurried", rounds=1)
     newer = a_starting_record(None)

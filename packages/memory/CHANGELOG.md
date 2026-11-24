@@ -37,8 +37,8 @@
 - The doctor's new `subconscious` row names each live session launched with the
   subconscious on where no route can run, the recalls stopped since memory's config last
   read cleanly while it is in error, recall lines whose child is gone, recalls whose
-  child could not start, and records still starting with no line; its `links` row names
-  notes too.
+  child could not start, and records starting or hurried with no line; its `links` row
+  names notes too.
 - A `notes` extra: a recall reads notes files in its first search.
 - `search_memory` cuts every local path in what it shows to its last segment and every
   loopback address to `local`, as `read_session` does: sessions' `cut_local` runs inside
