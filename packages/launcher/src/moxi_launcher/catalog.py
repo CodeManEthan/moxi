@@ -73,7 +73,8 @@ What this module gives the rest of the launcher:
   `when` and `offered_with` state, each refused with its own words, and the rules no row
   states: a scratch launch can't recycle itself (`refuse_scratch_recycle`), and a launch
   that relaunches itself is told at its `warn_at` mark, not at a `limit_at`
-  (`refuse_relaunch_mark`).
+  (`refuse_relaunch_mark`), and a `stop_at` is a multiple `<k>x` past a `warn_at` mark
+  (`refuse_stop_mark`).
 - `Row.check(value)` and `Row.tokens(mode, value, cwd=...)`: a value checked against its
   row, and the tokens one mode spells it as.
 - `fit(harness, mode, values, chosen)`: the modes rule. A composed command carries only
@@ -1067,10 +1068,11 @@ def refuse_values(harness: str, values: Mapping[str, object], *,
       `offered_with` row is at its default, which leaves it nothing to do.
 
     A row not in `values` is not offered here and is not looked at. First come
-    `refuse_scratch_recycle` and `refuse_relaunch_mark`, so a launch, its preview and
-    `presets check` all refuse those pairs in their own words."""
+    `refuse_scratch_recycle`, `refuse_relaunch_mark` and `refuse_stop_mark`, so a launch,
+    its preview and `presets check` all refuse those pairs in their own words."""
     refuse_scratch_recycle(values)
     refuse_relaunch_mark(values)
+    refuse_stop_mark(values)
     avail = _available(available)
     chosen = frozenset(chosen)
     for name, value in values.items():
@@ -1131,6 +1133,55 @@ def refuse_relaunch_mark(values: Mapping[str, object]) -> None:
     if is_set(values.get("limit_at")):
         raise RelaunchMark("limit_at", "limit_at does nothing on a launch that relaunches "
                                        "itself", RELAUNCH_LIMIT_HINT)
+
+
+class StopMark(Refused):
+    """A `stop_at` a launch can't take: not a multiple `<k>x`, on a launch that warns at
+    no mark, not past its `warn_at` mark, or on a launch whose session can't relaunch
+    itself, the stop's one way out (`presets.resolve` refuses that last)."""
+
+    code = "stop-mark"
+
+
+#: The row holding the mark past which a session may only wrap up.
+STOP_AT = "stop_at"
+#: usage's interface that has the stop: its stamps' names and `cost_multiple`.
+STOP_USAGE_INTERFACE = 3
+#: The hint of a `stop_at` on a launch that warns at no mark.
+STOP_WARN_HINT = "set warn_at first (1x, 1.5x or 2x), then a stop_at past it"
+#: The hint of a `stop_at` that is not a multiple `<k>x`.
+STOP_FORM_HINT = ("set it to a multiple <k>x past warn_at, k a number of at most two "
+                  "decimal places and at least 1, such as 2.5x or 3x")
+
+
+def refuse_stop_mark(values: Mapping[str, object]) -> None:
+    """Refuse `StopMark` when `values` set a `stop_at` that is not a multiple `<k>x` (by
+    usage's `cost_multiple`), or set one on a launch whose `warn_at` is not a mark (with
+    the hint to set `warn_at` first, so the warning always comes before the stop), or
+    whose k is not above `warn_at`'s, naming that mark. A usage without the stop
+    (`STOP_USAGE_INTERFACE`) refuses any `stop_at`."""
+    stop = values.get(STOP_AT)
+    if not is_set(stop):
+        return
+    from moxi import modules
+
+    from . import selfrecycle
+
+    found = modules.load("usage", interface=STOP_USAGE_INTERFACE)
+    if not found.ok or found.api is None:
+        raise StopMark(STOP_AT, "stop_at needs usage's stop, which the usage here lacks",
+                       f"upgrade {names.distribution('usage')}, or leave stop_at out")
+    k = found.api.cost_multiple(stop)
+    if k is None:
+        raise StopMark(STOP_AT, f"stop_at cannot be {stop!r}", STOP_FORM_HINT)
+    warn = values.get(selfrecycle.WARN_AT)
+    if warn not in selfrecycle.MARKS:
+        raise StopMark(STOP_AT, f"stop_at needs a warn_at mark before it, and this launch "
+                                f"warns at none (warn_at {warn or 'unset'})", STOP_WARN_HINT)
+    below = found.api.cost_multiple(warn)
+    if k <= below:
+        raise StopMark(STOP_AT, f"stop_at {stop} is not past warn_at {warn}",
+                       f"set stop_at past {warn}, such as {below + 0.5:g}x")
 
 
 def _met(need: When, values: Mapping[str, object], avail: Callable[[str], bool],

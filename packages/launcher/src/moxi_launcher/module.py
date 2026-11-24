@@ -49,8 +49,9 @@ OPTIONAL = {
              "Without it those rows and Keep warm aren't offered.",
     "usage": "Context warnings: warn_at sets the mark where usage warns the session and "
              "a session that can relaunch itself is told it may; recycle_at_limit "
-             "compact with limit_at compacts a session past its mark. Without it those "
-             "rows aren't offered.",
+             "compact with limit_at compacts a session past its mark; stop_at holds a "
+             "session that relaunches itself to wrap-up past a later mark. Without it "
+             "those rows aren't offered.",
     "sessions": "The latest thing said in each running session, on Home's Sessions row. "
                 "Without it a row shows when it was launched.",
     "memory": "memory's subconscious: the subconscious row turns it on for a launch, "
@@ -155,4 +156,8 @@ SESSION_ENV = {
                               "limit; scrubbed even without usage installed",
     "MOXI_USAGE_WARN_AT": "usage's warning mark, set from warn_at; scrubbed even without "
                           "usage installed",
+    "MOXI_USAGE_STOP_AT": "usage's stop mark, set from stop_at; scrubbed even without usage "
+                          "installed",
+    "MOXI_USAGE_STOP_HANDOFFS": "the handoff folder a stopped session may still write in, "
+                                "set with stop_at; scrubbed even without usage installed",
 }

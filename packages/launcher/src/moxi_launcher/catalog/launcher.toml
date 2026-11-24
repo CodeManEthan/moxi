@@ -244,6 +244,16 @@ group = "lifecycle"
 sub = "Context"
 label = "Limit mark"
 
+[stop_at]
+type = "string"
+default = ""
+requires = ["usage", "turns", "slots"]
+doc = "The context mark past which the session may only wrap up (commit, write its handoff, use comms, relaunch itself): a multiple <k>x past warn_at, such as 2.5x; only on a launch that relaunches itself and warns at a mark. Unset, no stop."
+fork = "drop"
+group = "lifecycle"
+sub = "Context"
+label = "Stop mark"
+
 [headless_exit]
 type = "list"
 default = []

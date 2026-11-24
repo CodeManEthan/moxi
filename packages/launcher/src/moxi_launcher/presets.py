@@ -392,8 +392,9 @@ def _value_rules(preset: Preset, values: Mapping[str, object],
     """The rules between rows (`catalog.refuse_values`) over what a launch of the preset
     resolves to with nothing typed: the shipped defaults, `[defaults]`, then the preset,
     whose place, when it names one, replaces the one `[defaults]` names. As `resolve`
-    holds them: on a scratch launch a `[defaults]` relaunch holds `off`, and a
-    `[defaults]` `limit_at` is left out of a relaunch launch."""
+    holds them: on a scratch launch a `[defaults]` relaunch holds `off`, a `[defaults]`
+    `limit_at` is left out of a relaunch launch, and a seat or Codex launch that sets no
+    `warn_at` holds none, so a `stop_at` it sets is refused here as at its launch."""
     harness = preset.harness if preset.harness in catalog.HARNESSES else base_harness
     rows = catalog.offered(harness, avail)
     effective = {name: row.default for name, row in rows.items()}
@@ -407,6 +408,10 @@ def _value_rules(preset: Preset, values: Mapping[str, object],
     if (effective.get(RECYCLE_AT_LIMIT) == "relaunch" and LIMIT_AT not in values
             and LIMIT_AT in effective):
         effective[LIMIT_AT] = rows[LIMIT_AT].default
+    if (WARN_AT in effective and WARN_AT not in values and WARN_AT not in defaults
+            and _no_default_mark(harness, preset, scratch=bool(effective.get("scratch")),
+                                 source=SHIPPED)):
+        effective[WARN_AT] = ""
     try:
         catalog.refuse_values(harness, effective, chosen=values, available=avail)
     except Refused as exc:
@@ -1094,10 +1099,13 @@ def resolve(request, *, presets: Presets | None = None,
     `recycle_at_limit = off`, with the `SCRATCH_RECYCLE_OFF` warning, when `relaunch` came
     from `[defaults]`; typed or set by the preset, the pair is refused
     (`catalog.ScratchRecycle`). Then `_settle_recycle`: a relaunch set for a launch that
-    can't act on it is warned of. Reads projects when a place needs it. Raises a
+    can't act on it is warned of; and `_settle_stop`: a `stop_at` on a launch that can't
+    relaunch itself is refused, or left out when it came from `[defaults]`. Reads
+    projects when a place needs it. Raises a
     `catalog.Refused`: `UnknownPreset`, `BadPreset`, `OffPosture`, `PostureBrief`,
     `NotYet`, `NeedsProjects`, `UnknownProject`, `ProjectsUnreadable`, `ProjectsBusy`, or the
-    catalog's `BadValue`; a `moxi.config.ConfigError` when the file can't be read."""
+    catalog's `BadValue` or `StopMark`; a `moxi.config.ConfigError` when the file can't be
+    read."""
     avail = _avail(available)
     laid = layered(request, presets=presets, env=env, available=avail)
     preset, harness, place = laid.preset, laid.harness, laid.place
@@ -1123,6 +1131,7 @@ def resolve(request, *, presets: Presets | None = None,
     if _no_default_mark(harness, preset, scratch=scratch, source=sources.get(WARN_AT)):
         values[WARN_AT] = ""
     warnings += _settle_recycle(harness, values, sources, cwd=cwd, available=avail)
+    warnings += _settle_stop(harness, values, sources, cwd=cwd, available=avail)
 
     _check_posture_rows(harness, values, sources, laid.defaults, off_posture)
     catalog.refuse_values(harness, values, chosen=chosen, available=avail)
@@ -1218,6 +1227,46 @@ def _settle_recycle(harness: str, values: dict, sources: dict, *, cwd: str | Non
         values[LIMIT_AT], sources[LIMIT_AT] = "", LEFT_OUT
         warnings.append(LIMIT_AT_LEFT_OUT)
     return warnings
+
+
+#: The row holding the mark past which a session may only wrap up.
+STOP_AT = "stop_at"
+#: The warning of a `stop_at` from `[defaults]` on a launch that can't relaunch itself.
+STOP_AT_LEFT_OUT = ("stop_at is left out: a stop needs a launch that can relaunch "
+                    "itself, and this launch {problem}")
+#: A `stop_at` chosen for a launch that can't relaunch itself: the problem, then the hint.
+STOP_NO_WAY_OUT = ("stop_at needs a launch that can relaunch itself, its one way out, and "
+                   "this launch {problem}")
+
+
+def _settle_stop(harness: str, values: dict, sources: dict, *, cwd: str | None,
+                 available: Callable[[str], bool]) -> list[str]:
+    """Settle `stop_at` before the values are checked, and return the warnings. A stop
+    leaves a session only wrap-up, the self relaunch last, so it is taken only where the
+    session can relaunch itself (`selfrecycle.missing`, armed). Chosen for the launch (a
+    flag, the page or its preset), a `stop_at` is checked by `catalog.refuse_stop_mark`
+    first, then refused (`catalog.StopMark`) where the launch can't relaunch itself. One
+    from `[defaults]`, which serves every launch, is left out of such a launch, with a
+    warning; `catalog.refuse_values` checks the rest."""
+    from . import selfrecycle
+
+    if not catalog.is_set(values.get(STOP_AT)):
+        return []
+    from_defaults = sources.get(STOP_AT) == DEFAULTS
+    if not from_defaults:
+        catalog.refuse_stop_mark(values)
+    target = values.get("target")
+    found = selfrecycle.missing(
+        harness=harness, target=str(target or ""), in_slot=target == "slot", cwd=cwd,
+        values=values, source=sources.get(RECYCLE_AT_LIMIT),
+        slots_here=lambda: available(slots.MODULE) and catalog.slots_here())
+    if found is None:
+        return []
+    if from_defaults:
+        values[STOP_AT], sources[STOP_AT] = "", LEFT_OUT
+        return [STOP_AT_LEFT_OUT.format(problem=found.problem)]
+    raise catalog.StopMark(STOP_AT, STOP_NO_WAY_OUT.format(problem=found.problem),
+                           found.hint)
 
 
 #: The row holding the context mark usage warns at.

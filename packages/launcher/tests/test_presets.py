@@ -1770,3 +1770,121 @@ def test_a_typed_relaunch_with_no_handoff_dir_is_warned_of(recyclable, monkeypat
 def test_a_relaunch_that_can_act_says_nothing(recyclable):
     got = resolve("", SLOTTED, typed={"recycle_at_limit": "relaunch", **IN_SLOT})
     assert got.warnings == ()
+
+
+# -- the stop mark --------------------------------------------------------------------------
+
+
+#: A relaunch seat warned at 2x that stops at 2.5x.
+STOP_SEAT = RELAUNCH_SEAT + 'stop_at = "2.5x"\n'
+#: A typed relaunch launch in a slot, warned at 2x.
+TYPED_RELAUNCH = {"recycle_at_limit": "relaunch", "warn_at": "2x", **IN_SLOT}
+
+
+@pytest.mark.parametrize("text, asked, source", [
+    ("", {"typed": {**TYPED_RELAUNCH, "stop_at": "2.5x"}}, presets.TYPED),
+    (STOP_SEAT, {"seat": "s"}, presets.PRESET),
+    ('[defaults]\nstop_at = "2.5x"\n' + RELAUNCH_SEAT, {"seat": "s"}, presets.DEFAULTS),
+])
+def test_a_stop_past_warn_at_on_a_launch_that_relaunches_itself_is_taken(
+        recyclable, text, asked, source):
+    got = resolve(text, SLOTTED, **asked)
+    assert got.values["stop_at"] == "2.5x" and got.sources["stop_at"] == source
+    assert got.warnings == ()
+    stamped = common.option_stamps({**got.values, "harness": got.harness})
+    assert stamped["MOXI_USAGE_STOP_AT"] == "2.5x"
+    assert stamped["MOXI_USAGE_CROSSING_AT"] == "2x"
+
+
+@pytest.mark.parametrize("text, asked", [
+    ("", {"typed": {**TYPED_RELAUNCH, "warn_at": "off", "stop_at": "2.5x"}}),
+    # A seat holds no warn_at unless it sets one.
+    ('[seat.s]\ntarget = "slot"\nrecycle_at_limit = "relaunch"\nstop_at = "2.5x"\n',
+     {"seat": "s"}),
+    ('[defaults]\nstop_at = "2.5x"\nwarn_at = "off"\nrecycle_at_limit = "relaunch"\n',
+     {"typed": IN_SLOT}),
+])
+def test_a_stop_on_a_launch_with_no_warn_at_is_told_to_set_warn_at_first(
+        recyclable, text, asked):
+    with pytest.raises(catalog.StopMark) as caught:
+        resolve(text, SLOTTED, **asked)
+    assert caught.value.code == "stop-mark" and caught.value.row == "stop_at"
+    assert caught.value.hint == "set warn_at first (1x, 1.5x or 2x), then a stop_at past it"
+
+
+@pytest.mark.parametrize("stop, words", [
+    ("2x", "stop_at 2x is not past warn_at 2x"),
+    ("1.5x", "stop_at 1.5x is not past warn_at 2x"),
+    ("2.5", "stop_at cannot be '2.5'"),
+    ("soon", "stop_at cannot be 'soon'"),
+])
+def test_a_stop_at_or_below_warn_at_or_off_the_form_is_refused(recyclable, stop, words):
+    with pytest.raises(catalog.StopMark, match=words):
+        resolve("", SLOTTED, typed={**TYPED_RELAUNCH, "stop_at": stop})
+    with pytest.raises(catalog.StopMark, match=words):
+        resolve(RELAUNCH_SEAT + f'stop_at = "{stop}"\n', SLOTTED, seat="s")
+
+
+@pytest.mark.parametrize("change, problem", [
+    ({"recycle_at_limit": "off"}, "has recycle_at_limit off, so it can't relaunch itself"),
+    ({"recycle_at_limit": "compact"},
+     "recycles at its limit by compacting, so it can't relaunch itself"),
+    ({"target": "terminal"}, "runs in its terminal, and only a slot launch is relaunched"),
+    ({"scratch": True, "recycle_at_limit": "compact"},
+     "recycles at its limit by compacting, so it can't relaunch itself"),
+])
+def test_a_stop_chosen_for_a_launch_that_cannot_relaunch_itself_is_refused(
+        recyclable, change, problem):
+    # The stop's one way out is the self relaunch; a stop with none would leave a session
+    # that can neither work nor leave.
+    with pytest.raises(catalog.StopMark) as caught:
+        resolve("", SLOTTED, typed={**TYPED_RELAUNCH, "stop_at": "2.5x", **change})
+    assert caught.value.problem == ("stop_at needs a launch that can relaunch itself, its "
+                                    f"one way out, and this launch {problem}")
+
+
+def test_a_stop_on_a_launch_with_no_handoff_dir_is_refused(recyclable, monkeypatch):
+    no_notes_dir(monkeypatch)
+    with pytest.raises(catalog.StopMark, match="stop_at needs a launch that can relaunch"):
+        resolve("", SLOTTED, typed={**TYPED_RELAUNCH, "stop_at": "2.5x"})
+
+
+def test_a_stop_chosen_for_a_codex_launch_is_refused_for_its_harness(recyclable):
+    with pytest.raises(catalog.StopMark, match="is a codex launch"):
+        resolve("", SLOTTED, typed={**TYPED_RELAUNCH, "harness": "codex",
+                                    "stop_at": "2.5x"})
+
+
+@pytest.mark.parametrize("text, asked, problem", [
+    ('[defaults]\nstop_at = "2.5x"\n', {"typed": IN_SLOT},
+     "has recycle_at_limit off, so it can't relaunch itself"),
+    ('[defaults]\nstop_at = "2.5x"\nrecycle_at_limit = "relaunch"\n',
+     {"typed": {"scratch": True, **IN_SLOT}},
+     "works in a scratch folder, and a scratch launch can't recycle itself"),
+    ('[defaults]\nstop_at = "2.5x"\nrecycle_at_limit = "relaunch"\n',
+     {"typed": {"harness": "codex", **IN_SLOT}},
+     "is a codex launch, and only a Claude session can be exited and relaunched"),
+])
+def test_a_defaults_stop_is_left_out_of_a_launch_that_cannot_relaunch_itself(
+        recyclable, text, asked, problem):
+    # [defaults] serves every launch: its stop is left out where it can't act, with a
+    # warning, rather than refusing every such launch.
+    got = resolve(text, SLOTTED, **asked)
+    assert got.values["stop_at"] == "" and got.sources["stop_at"] == presets.LEFT_OUT
+    assert ("stop_at is left out: a stop needs a launch that can relaunch itself, and this "
+            f"launch {problem}") in got.warnings
+    assert "MOXI_USAGE_STOP_AT" not in common.option_stamps(
+        {**got.values, "harness": got.harness})
+
+
+def test_the_presets_check_flags_a_stop_with_no_warn_at_or_not_past_it(recyclable):
+    seat = '[seat.s]\ntarget = "slot"\nrecycle_at_limit = "relaunch"\n'
+    found = errors(seat + 'stop_at = "2.5x"\n', SLOTTED)
+    assert [(p.where, p.key, p.code) for p in found] == [("seat.s", "stop_at", "stop-mark")]
+    found = errors(RELAUNCH_SEAT + 'stop_at = "2x"\n', SLOTTED)
+    assert [(p.where, p.key, p.code) for p in found] == [("seat.s", "stop_at", "stop-mark")]
+    assert not errors(STOP_SEAT, SLOTTED)
+    assert not errors('[defaults]\nwarn_at = "2x"\n' + seat + 'stop_at = "2.5x"\n', SLOTTED)
+    # A project preset keeps the shipped 2x.
+    assert not errors('[project.p]\ntarget = "slot"\nrecycle_at_limit = "relaunch"\n'
+                      'stop_at = "2.5x"\n', SLOTTED)

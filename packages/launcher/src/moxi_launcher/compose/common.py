@@ -692,8 +692,9 @@ def option_stamps(values: Mapping[str, object]) -> dict[str, str]:
     and the crossing mark (`limit_mark`) when it recycles at its limit: a `compact`
     launch always, a `relaunch` launch only where it is told it may recycle itself
     (`selfrecycle.missing` with `told`): its arm would be accepted and it warns at a mark.
-    The subconscious row stamps its mode under memory's variable. A row at `off` stamps
-    nothing."""
+    A stop (`stop_holds`) stamps its mark and the launch's handoff folder under usage's
+    variables. The subconscious row stamps its mode under memory's variable. A row at
+    `off` stamps nothing."""
     env: dict[str, str] = {}
     if values.get("keep_warm") == "on":
         env[KEEP_WARM_ENV] = "on"
@@ -702,6 +703,15 @@ def option_stamps(values: Mapping[str, object]) -> dict[str, str]:
     at_limit = values.get("recycle_at_limit")
     if at_limit == "compact" or relaunch_holds(values):
         _stamp(env, "usage", 1, "CROSSING_AT_ENV", limit_mark(values))
+    if stop_holds(values):
+        from .. import handoffs
+
+        _stamp(env, "usage", catalog.STOP_USAGE_INTERFACE, "STOP_AT_ENV",
+               str(values[catalog.STOP_AT]))
+        _stamp(env, "usage", catalog.STOP_USAGE_INTERFACE, "STOP_HANDOFFS_ENV", str(
+            handoffs.handoff_dir(str(values.get("cwd") or "."),
+                                 notes_dir=str(values.get("notes_dir") or "") or None,
+                                 create=False, create_own=False)))
     if values.get("subconscious") in ("automatic", "on-demand"):
         _stamp(env, "memory", 1, "SUBCONSCIOUS_ENV", str(values["subconscious"]))
     return env
@@ -721,6 +731,20 @@ def relaunch_holds(values: Mapping[str, object]) -> bool:
         harness=str(values.get("harness") or "claude"), target=str(target or ""),
         in_slot=target == "slot", cwd=str(values.get("cwd") or "") or None,
         values=values, source=None, told=True) is None
+
+
+def stop_holds(values: Mapping[str, object]) -> bool:
+    """Whether a launch of `values` takes its `stop_at`: one is set, the launch is told it
+    may relaunch itself at its warn-at mark (`relaunch_holds`, the stop's way out), and the
+    mark lies past `warn_at` (`catalog.refuse_stop_mark`). A launch is refused before it
+    gets here otherwise; a replay whose relaunch no longer holds stamps no stop."""
+    if not catalog.is_set(values.get(catalog.STOP_AT)) or not relaunch_holds(values):
+        return False
+    try:
+        catalog.refuse_stop_mark(values)
+    except catalog.Refused:
+        return False
+    return True
 
 
 #: The mark a limit crossing falls back to when no other mark applies.
@@ -928,7 +952,7 @@ __all__ = ["BASE_NAMES", "BASE_PREFIXES", "CODEX_KEEP", "COMMANDS", "CREDENTIAL"
            "director_words", "encode",
            "env_class", "child_env", "first_turn", "headless_words", "identity_block",
            "LIMIT_FALLBACK", "limit_mark", "locator", "no_credentials", "option_stamps",
-           "prompt_path", "read_settings", "relaunch_holds",
+           "prompt_path", "read_settings", "relaunch_holds", "stop_holds",
            "replay_env", "scratch_dir", "scratch_name", "scratch_root",
            "scratch_root_problem", "scrub", "seat_text", "settings_file", "settings_path",
            "settings_value", "short_env",

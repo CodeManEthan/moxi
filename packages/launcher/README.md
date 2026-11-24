@@ -642,6 +642,21 @@ own reads:
   it at none) `1x`. The mark is fixed when the launch is composed, and a relaunch
   composes its mark again from the values then.
 
+**Stop.** `--stop-at <k>x` (needs usage, turns and slots), unset unless set, is a hard
+stop past the relaunch line: once the session's context passes it, usage holds the
+session to wrap-up (git, its handoff, comms, `moxi launcher relaunch --self`) and
+refuses every other tool call with what to do next (usage's README, "The stop"). The
+mark is a multiple `<k>x` on usage's scale, k a number of at most two decimal places and
+at least 1, and it must lie past `warn_at`: with `warn_at = 2x`, `2.5x` or `3x`. Since a
+stopped session's one way out is relaunching itself, a stop is taken only on a launch
+that relaunches itself and is warned at a mark. A `stop_at` typed or set by the preset
+is refused (`stop-mark`, exit 3) when it is not of the form `<k>x`, when the launch has
+no `warn_at` mark (hint: set `warn_at` first), when it is not past `warn_at` (naming
+that mark), and when the launch can't relaunch itself (naming what it fails). One from
+`[defaults]` is left out, with a warning, of a launch that can't relaunch itself, and
+refused otherwise by the same rules. The launch stamps the mark as `MOXI_USAGE_STOP_AT`
+and its handoff folder as `MOXI_USAGE_STOP_HANDOFFS`. A fork drops it.
+
 **Keep-warm.** `--keep-warm on` (needs turns and cache) nudges a session shortly before
 its prompt cache would expire while it waits on work it handed out. It is off unless a
 flag, a preset, `[defaults]` or the launch page sets it on, and `off` from any of them
@@ -974,7 +989,7 @@ A refusal prints one line ending in a short code, such as `[off-posture]`, and a
 | cache | the `keep_warm` and `recycle_on_expiry` rows, and a director's relaunch refused while the session's cache is warm; each running session's cache and `Keep warm` on Home's Sessions row; the doctor row `keep-warm.timer` | neither row is offered; no session reads as kept warm, and no `Keep warm` |
 | projects | `project` keys, a project's agent listing, a directory's project key; with ui, the launcher's facts on the Projects page | `cwd` paths and scratch launches only |
 | notes | the `notes_dir` row, and notes' handoff folder; a launch notes gives no notes directory has none | the launcher's own handoff folder |
-| usage | the `warn_at`, `recycle_at_limit` and `limit_at` rows | the rows are not offered |
+| usage | the `warn_at`, `recycle_at_limit`, `limit_at` and `stop_at` rows | the rows are not offered |
 | ui | the launcher's page, and its state views on other pages | the command line only |
 | sessions | the latest thing said in each running session, on Home's Sessions row; `Open` and `All sessions` go to the sessions page | the row shows when each session was launched, and its links go to the launcher's page |
 | memory | the `subconscious` row: `--subconscious automatic` or `--subconscious on-demand` (needs turns too) stamps the mode under the variable memory names, `MOXI_MEMORY_SUBCONSCIOUS`, and memory's subconscious runs in that session; for now a recall runs on Claude Code only, so a Codex launch with the row on has it off at run time (memory's log and doctor say so); a fork drops the row | the row is not offered |

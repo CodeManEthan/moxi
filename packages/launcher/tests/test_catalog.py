@@ -35,7 +35,7 @@ LAUNCHER_ROWS = {"harness", "cwd", "project", "scratch", "identity", "scope", "d
                  "instructions", "instructions_file", "brief", "brief_file", "handoff",
                  "posture", "target", "slot", "extra_flags", "name", "notes_dir", "warn_at",
                  "keep_warm", "recycle_on_expiry", "recycle_at_limit", "limit_at",
-                 "headless_exit", "subconscious"}
+                 "stop_at", "headless_exit", "subconscious"}
 
 
 def test_each_shipped_catalog_holds_exactly_its_rows():
@@ -51,7 +51,7 @@ FORK_DROPPED = {"identity", "scope", "director", "takes_policy_directors", "post
                 "instructions", "instructions_file", "brief", "brief_file", "handoff",
                 "keep_warm", "recycle_on_expiry", "recycle_at_limit", "limit_at", "warn_at",
                 "headless_exit", "name", "native_name", "remote_control", "notes_dir",
-                "subconscious"}
+                "subconscious", "stop_at"}
 FORK_OWN = {("launcher", "target"), ("launcher", "slot"), ("claude", "session_id"),
             ("claude", "resume"), ("claude", "plugin_dir"),
             ("claude", "append_system_prompt_file")}
@@ -898,3 +898,76 @@ def test_the_installed_harnesses_match_the_catalog():
             assert h.gone == (), f"{h.command} no longer lists {h.gone}"
     if not ran:
         pytest.skip("neither claude nor codex is on PATH")
+
+
+# -- the stop mark --------------------------------------------------------------------------
+
+
+def test_the_stop_mark_row_is_a_lifecycle_string_off_unless_set():
+    row = catalog.launcher()["stop_at"]
+    assert (row.type, row.default, row.group, row.sub, row.label, row.fork) == (
+        "string", "", "lifecycle", "Context", "Stop mark", "drop")
+    assert sorted(row.required) == ["slots", "turns", "usage"]
+    assert row.unoffered(lambda module: module != "slots", "claude") is not None
+
+
+@pytest.mark.parametrize("stop, warn", [
+    ("2.5x", "2x"), ("2.01x", "2x"), ("3x", "2x"), ("10x", "2x"), ("1.5x", "1x"),
+    ("2x", "1.5x"), ("1.75x", "1.5x"),
+])
+def test_a_stop_mark_past_warn_at_is_taken(stop, warn):
+    values = {"warn_at": warn, "stop_at": stop}
+    catalog.refuse_stop_mark(values)
+    catalog.refuse_values("claude", values, chosen=values)
+
+
+@pytest.mark.parametrize("values", [{}, {"stop_at": ""}, {"stop_at": "", "warn_at": "off"}])
+def test_no_stop_mark_is_never_refused(values):
+    catalog.refuse_stop_mark(values)
+
+
+@pytest.mark.parametrize("stop", ["2.555x", "abc", "0.5x", "2,5x", "2.5", "x", "-3x",
+                                  "２x", "2.5X", " 2.5x", "nanx", "infx"])
+def test_a_stop_mark_off_the_multiple_form_is_refused(stop):
+    with pytest.raises(catalog.StopMark) as caught:
+        catalog.refuse_stop_mark({"warn_at": "2x", "stop_at": stop})
+    assert caught.value.code == "stop-mark" and caught.value.exit_code == 3
+    assert caught.value.row == "stop_at"
+    assert caught.value.problem == f"stop_at cannot be {stop!r}"
+    assert caught.value.hint == catalog.STOP_FORM_HINT
+
+
+@pytest.mark.parametrize("warn, said", [("off", "off"), ("", "unset"), (None, "unset")])
+def test_a_stop_mark_on_a_launch_with_no_warn_at_is_told_to_set_warn_at_first(warn, said):
+    values = {"stop_at": "2.5x"} if warn is None else {"stop_at": "2.5x", "warn_at": warn}
+    with pytest.raises(catalog.StopMark) as caught:
+        catalog.refuse_values("claude", values, chosen=values)
+    assert caught.value.problem == ("stop_at needs a warn_at mark before it, and this launch "
+                                    f"warns at none (warn_at {said})")
+    assert caught.value.hint == "set warn_at first (1x, 1.5x or 2x), then a stop_at past it"
+
+
+@pytest.mark.parametrize("stop, warn, such_as", [
+    ("2x", "2x", "2.5x"), ("1.5x", "2x", "2.5x"), ("1x", "2x", "2.5x"),
+    ("1.5x", "1.5x", "2x"), ("1x", "1x", "1.5x"), ("2.00x", "2x", "2.5x"),
+])
+def test_a_stop_mark_at_or_below_warn_at_is_refused_naming_that_mark(stop, warn, such_as):
+    with pytest.raises(catalog.StopMark) as caught:
+        catalog.refuse_stop_mark({"warn_at": warn, "stop_at": stop})
+    assert caught.value.problem == f"stop_at {stop} is not past warn_at {warn}"
+    assert caught.value.hint == f"set stop_at past {warn}, such as {such_as}"
+
+
+def test_a_usage_without_the_stop_refuses_any_stop_mark(monkeypatch):
+    from types import SimpleNamespace
+
+    from moxi import modules
+
+    real = modules.load
+    monkeypatch.setattr(modules, "load", lambda name, **kw: (
+        SimpleNamespace(ok=False, api=None) if name == "usage" and kw.get("interface") == 3
+        else real(name, **kw)))
+    with pytest.raises(catalog.StopMark) as caught:
+        catalog.refuse_stop_mark({"warn_at": "2x", "stop_at": "2.5x"})
+    assert caught.value.problem == "stop_at needs usage's stop, which the usage here lacks"
+    assert caught.value.hint == "upgrade moxi-usage, or leave stop_at out"

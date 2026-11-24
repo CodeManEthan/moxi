@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+- The `stop_at` row (needs usage, turns and slots; unset unless set) sets a hard stop past
+  the relaunch line, a multiple `<k>x` such as `2.5x`. It is taken only on a launch that
+  relaunches itself and is warned at a `warn_at` mark below it. A `stop_at` typed or set
+  by the preset is refused (`stop-mark`, exit 3) off the `<k>x` form, on a launch with no
+  `warn_at` mark (set `warn_at` first), at or below `warn_at`, or on a launch that can't
+  relaunch itself; one from `[defaults]` is left out of a launch that can't relaunch
+  itself, with a warning. `presets check` flags a preset whose `stop_at` has no
+  `warn_at` mark under it or is not past it. A launch with a stop stamps
+  `MOXI_USAGE_STOP_AT` and `MOXI_USAGE_STOP_HANDOFFS` (its handoff folder) through usage's
+  interface 3, and both join the stamps a launch from inside a session scrubs.
 - The `subconscious` row (`off`, `automatic`, `on-demand`; needs turns and memory) turns
   memory's subconscious on for one launch, or for every launch of a preset that sets it:
   a launch with it on stamps the mode under memory's `SUBCONSCIOUS_ENV`, read from
