@@ -1,4 +1,4 @@
-"""What a subagent past its worker ceiling may still do: hand off, commit, return.
+"""What a session past its limit may still do: hand off, commit, return.
 
 `allowed(tool, tool_input, cwd, *, handoff_roots, work_roots, commands, home)` answers
 `(True, "")` for a call that wraps the work up and `(False, reason)` for anything else,
@@ -6,7 +6,8 @@ the reason short and naming the rule that refused it. It is pure: standard libra
 no subprocess, no file read or write; its only contact with the filesystem is
 `os.path.realpath` on the paths it judges. The ceiling (`moxi_usage.ceiling`) asks it for
 every call of an agent whose hard marker has latched, after its own return-tool check,
-so the return tools are not handled here.
+so the return tools are not handled here; the stop (`moxi_usage.stop`) asks it for every
+call of a main session whose stop has latched.
 
 Allowed:
 
@@ -19,9 +20,11 @@ Allowed:
   `GIT_FORMS`), as `git [-C <dir>] <form>` or `cd <dir> && git <form>`;
 * `Bash` running a command whose words are, whole, one of `commands`, the word lists
   the user adds (`ceiling.allow_commands`), bare or after `cd <dir> &&`. A listed word
-  written `<...>`, such as `<key>`, stands for one name word there (`NAME_WORD`); every
-  other word must match as written, and a command with a word more or a word fewer is
-  refused.
+  `<handoff>` stands for a path that passes the hand-off file rule below (a `.md` file
+  under one of `handoff_roots`, a relative one read from the directory the command runs
+  in); any other listed word written `<...>`, such as `<key>`, stands for one name word
+  there (`NAME_WORD`); every other word must match as written, and a command with a word
+  more or a word fewer is refused.
 
 Claude's `Bash` and Codex's shell tool, which Codex's hooks also name `Bash`, both carry
 the shell text in `command`. The directory a command runs in is `<dir>` when named, else
@@ -66,7 +69,7 @@ from __future__ import annotations
 
 import os
 import re
-from collections.abc import Iterable, Mapping, Sequence
+from collections.abc import Callable, Iterable, Mapping, Sequence
 
 #: The suffix a hand-off file must have.
 HANDOFF_SUFFIX = ".md"
@@ -76,6 +79,8 @@ READ_LIMIT_MAX = 200
 #: The shape of the one word a `<...>` word of an allowed command stands for: a letter or
 #: digit, then up to 127 letters, digits, dots, underscores and hyphens.
 NAME_WORD = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,127}")
+#: The word of an allowed command that stands for a hand-off file's path.
+HANDOFF_WORD = "<handoff>"
 
 #: git's wrap-up forms, as the words after `git` (and after `-C <dir>`). `add -- <path>...`
 #: and `commit -m <text> [-m <text>]...` take arguments and are matched apart.
@@ -149,7 +154,7 @@ def allowed(tool: object, tool_input: object, cwd: object, *,
             _patch(tool_input.get("command"), cwd, handoff_roots)
         elif tool == "Bash":
             _bash(tool_input.get("command"), cwd, work_roots, commands, home,
-                  start=_workdir(tool_input, cwd, work_roots))
+                  start=_workdir(tool_input, cwd, work_roots), handoff_roots=handoff_roots)
         else:
             raise Refused(f"{tool or 'this tool'} is not a wrap-up operation")
     except Refused as exc:
@@ -456,13 +461,17 @@ def _commands(commands: object) -> list[tuple[str, ...]]:
     return out
 
 
-def _is_command(words: Sequence[str], listed: Sequence[str]) -> bool:
-    """`words` are the allowed command `listed`, word for word, a `<...>` word matching
-    any one name word."""
+def _is_command(words: Sequence[str], listed: Sequence[str], *,
+                is_handoff: Callable[[str], bool] = lambda word: False) -> bool:
+    """`words` are the allowed command `listed`, word for word: `<handoff>` matching a
+    word `is_handoff` accepts, any other `<...>` word any one name word."""
     if len(words) != len(listed):
         return False
     for word, want in zip(words, listed):
-        if len(want) > 2 and want.startswith("<") and want.endswith(">"):
+        if want == HANDOFF_WORD:
+            if not is_handoff(word):
+                return False
+        elif len(want) > 2 and want.startswith("<") and want.endswith(">"):
             if not NAME_WORD.fullmatch(word):
                 return False
         elif word != want:
@@ -471,9 +480,10 @@ def _is_command(words: Sequence[str], listed: Sequence[str]) -> bool:
 
 
 def _bash(command: object, cwd: object, work_roots: object, commands: object,
-          home: str | None, *, start: str | None = None) -> None:
+          home: str | None, *, start: str | None = None, handoff_roots: object = ()) -> None:
     """`start` is the directory the shell starts in when it is not `cwd` (a real path
-    that already passed the directory rule); relative directories join it."""
+    that already passed the directory rule); relative directories join it. A listed
+    command's `<handoff>` word is held to `handoff_roots`."""
     if not isinstance(command, str) or not command.strip():
         raise Refused("no command")
     cwd = _cwd(cwd)
@@ -498,8 +508,17 @@ def _bash(command: object, cwd: object, work_roots: object, commands: object,
         in_cd = False
     if not rest:
         raise Refused("nothing after '&&'")
+    runs_in = repo if repo is not None else base
+
+    def is_handoff(word: str) -> bool:
+        try:
+            _handoff_file(word, runs_in, handoff_roots)
+        except Refused:
+            return False
+        return True
+
     for listed in _commands(commands):
-        if _is_command(rest, listed):
+        if _is_command(rest, listed, is_handoff=is_handoff):
             return
     if rest[0] != "git":
         raise Refused(f"{rest[0]} is not a wrap-up command")
@@ -519,4 +538,4 @@ def _bash(command: object, cwd: object, work_roots: object, commands: object,
 
 
 __all__ = ["allowed", "lex", "patch_files", "Refused", "AND", "GIT_FORMS",
-           "HANDOFF_SUFFIX", "NAME_WORD", "READ_LIMIT_MAX"]
+           "HANDOFF_SUFFIX", "HANDOFF_WORD", "NAME_WORD", "READ_LIMIT_MAX"]

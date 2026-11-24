@@ -2,6 +2,22 @@
 
 ## Unreleased
 
+- The stop. A launch with a stop mark stamps `MOXI_USAGE_STOP_AT` (a multiple `<k>x`) and
+  `MOXI_USAGE_STOP_HANDOFFS` (its handoff folder). The warn-at listener's third purpose,
+  `stop`, fires the first time the main session's context reaches the mark: it writes a
+  latch under `STATE/usage/stop/` and adds the stop text as one line. The latch never
+  re-arms and outlives the endpoint; the doctor's `marks` row sweeps it after
+  `marks.max_age_days`. A new guard, `usage.stop`, runs on Claude in a session whose
+  launch stamped a stop mark, and once latched refuses every main-loop tool call but
+  wrap-up (git's wrap-up forms, `.md` notes in the handoff folder, `moxi repo rules`,
+  comms, `moxi launcher handoff dir` and `moxi launcher relaunch --self --handoff FILE`)
+  with `stop.deny_text`, a new setting.
+- A mark may be a multiple `<k>x`, k a decimal of at most two places and at least 1:
+  `threshold` works it out on the same equation as `1x`, `1.5x` and `2x`, and
+  `cost_multiple` reads its k. Interface 3 is interface 2 plus these and the stop's two
+  stamp names.
+- The allowlist's word `<handoff>`, in a listed command, stands for a `.md` file's path
+  under a hand-off root, held to the hand-off file rule.
 - `marks.default` is gone: a session with no `MOXI_USAGE_WARN_AT` stamp gets no notice,
   whether the launcher started it with no `warn_at` (a Codex launch that sets none) or
   did not start it. Nothing reads a config default; the key is retired, and a config that
