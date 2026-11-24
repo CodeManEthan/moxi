@@ -248,7 +248,7 @@ def test_a_stale_time_not_known_is_left_out():
 
 def test_the_stale_time_is_turns_own(monkeypatch):
     turns = pytest.importorskip("moxi_turns")
-    from moxi_turns import claude_stale
+    claude_stale = pytest.importorskip("moxi_turns.claude_stale")
 
     assert turns.STALE_AFTER_S == claude_stale.STALE_AFTER_S
     monkeypatch.setattr(quiet, "turns_stale_after_s", lambda: 60.0)

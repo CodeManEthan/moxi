@@ -1383,7 +1383,7 @@ def test_a_directors_relative_handoff_is_read_from_its_own_dir_and_stored_absolu
     assert run.handoff_path == str(tmp_path / "rel.md")
 
 
-def test_with_notes_a_directors_handoff_must_be_in_the_targets_folder(conn, tmp_path,
+def test_with_notes_a_directors_handoff_must_be_in_the_targets_handoff_dir(conn, tmp_path,
                                                                     monkeypatch):
     handoff_dir = tmp_path / "handoffs"
     handoff_dir.mkdir()

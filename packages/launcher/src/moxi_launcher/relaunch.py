@@ -282,11 +282,11 @@ def check_handoff(handoff: str, conn: sqlite3.Connection, row: store.LaunchRow,
             whose = f"launch {row.request_id}'s" if director else "this launch's"
             raise Refused("handoff", f"the handoff {path} is not in {whose} handoff "
                                      f"folder, {handoff_dir}",
-                          _folder_hint(row, director=director))
+                          _handoff_dir_hint(row, director=director))
     return path
 
 
-def _folder_hint(row: store.LaunchRow, *, director: bool) -> str:
+def _handoff_dir_hint(row: store.LaunchRow, *, director: bool) -> str:
     if not director:
         return "write it there (moxi launcher handoff dir prints the folder)"
     key = handoffs.key_of_row(row)
