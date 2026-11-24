@@ -14,10 +14,11 @@ read of the session's lifetime says when a lifetime has no keep-warm window.
   `stale`), or the last relaunch's outcome (the one that made this launch, when the
   launch has none of its own), with any notice that was refused and a note that was not
   taken.
-- `recycle`: the options in force, the last expiry or limit run, a pending compact, and
-  when the session was last told to recycle itself at its limit. A `relaunch` launch
-  whose session can recycle itself but warns at no mark shows `relaunch (armed, no
-  warning)`: its self relaunch is accepted and it is never told.
+- `recycle`: the options in force, the last expiry or limit run, and when the session
+  was last told to recycle itself at its limit. A `relaunch` launch told at its mark
+  shows it, its `warn_at` (`relaunch (2x)`); one whose session can recycle itself but
+  warns at no mark shows `relaunch (armed, no warning)`: its self relaunch is accepted
+  and it is never told.
 - `keep_warm`: on or off (`keepwarm.on`: launched with it on, or under cover; off
   wherever keep-warm can't act on this install, `keepwarm.can_act`), the open holds of
   the launch chain by name (wherever it is on, cover included), the last run of nudges,
@@ -103,13 +104,15 @@ class RelaunchState:
 @dataclass(frozen=True)
 class RecycleState:
     """The options in force (`at_limit` as `RETIRED_AT_LIMIT` for a recorded `compact`);
-    the last expiry or limit run; and when the session was last told to recycle itself at
-    its limit."""
+    the last expiry or limit run; when the session was last told to recycle itself at its
+    limit; and `mark`, the launch's `warn_at` where a `relaunch` launch is told at it
+    (`selfrecycle.missing_of_row` with `told`), else None."""
 
     on_expiry: str
     at_limit: str
     last: RunLine | None = None
     told_at: str | None = None
+    mark: str | None = None
 
 
 @dataclass(frozen=True)
@@ -168,6 +171,8 @@ class SessionState:
             line += f"; notice refused by {', '.join(relaunched.notices_refused)}"
         recycled = self.recycle
         rec = f"recycle: on expiry {recycled.on_expiry}, at limit {recycled.at_limit}"
+        if recycled.mark:
+            rec += f" ({recycled.mark})"
         last = recycled.last
         if last is not None:
             rec += f"; last: {last.kind} {last.said} at {last.updated_at}"
@@ -294,13 +299,16 @@ def _recycle(conn: sqlite3.Connection, row: store.LaunchRow, own: Sequence[store
     last = next((lines[r.run_id] for r in own if r.mode in RECYCLE_MODES), None)
     told = [e.at for e in store.events(conn, row.request_id) if e.kind == "recycle-told"]
     at_limit = str(values.get("recycle_at_limit") or "off")
+    mark = None
     if at_limit == selfrecycle.RELAUNCH and _armed_untold(row):
         at_limit = ARMED_UNTOLD
+    elif at_limit == selfrecycle.RELAUNCH and selfrecycle.missing_of_row(row, told=True) is None:
+        mark = str(values.get(selfrecycle.WARN_AT))
     elif at_limit == "compact":
         at_limit = RETIRED_AT_LIMIT
     return RecycleState(
         on_expiry=str(values.get("recycle_on_expiry") or "off"), at_limit=at_limit,
-        last=last, told_at=told[-1] if told else None)
+        last=last, told_at=told[-1] if told else None, mark=mark)
 
 
 #: The `at limit` of a `relaunch` launch whose session can recycle itself but warns at no

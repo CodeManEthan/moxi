@@ -370,12 +370,13 @@ class DirectorComms:
 class Cache:
     """A stand-in for cache's read of a session: its kind, its age and its lifetime."""
 
-    def __init__(self, kind: str, age: float, ttl: float = 3600.0):
-        self.kind, self.age, self.ttl = kind, age, ttl
+    def __init__(self, kind: str, age: float, ttl: float = 3600.0,
+                 response: float | None = 0.0):
+        self.kind, self.age, self.ttl, self.response = kind, age, ttl, response
 
     def read(self, harness, session_id, **options):
         return types.SimpleNamespace(kind=self.kind, age_s=self.age,
-                                     ttl_s=self.ttl)
+                                     ttl_s=self.ttl, response_s=self.response)
 
 
 def test_a_director_relaunch_of_claude_in_a_slot(live_env, work, own_slots):
@@ -486,11 +487,12 @@ def test_exit_session_ends_claude_through_the_exit_dialog_and_its_background_she
 
 @pytest.mark.parametrize("command", ["clear", "compact"])
 def test_a_clear_and_a_compact_on_expiry(live_env, work, own_slots, command):
-    """A launch with `recycle_on_expiry` cleared, and one compacted, once its cache reads
-    cold, while a background shell of the session runs. cache's timer asks only once a
-    Claude session's cache lifetime has passed (most often an hour after its last
-    request), so the test asks itself, with a stand-in cache that reads cold and idle past
-    the hour. The rest is live: the launch, the quiet read against Claude's idle screen,
+    """A launch with `recycle_on_expiry` cleared once its cache reads cold, and one
+    compacted while its cache still reads warm in the compact window, while a background
+    shell of the session runs. cache's timer asks only near or past a Claude session's
+    cache lifetime (most often an hour after its last request), so the test asks itself,
+    with a stand-in cache that reads cold and idle past the hour, or warm 300 s before the
+    expiry. The rest is live: the launch, the quiet read against Claude's idle screen,
     turns' command and Claude's answer to it. A clear stops the background shells, where
     turns can; a compact never does."""
     needs_claude_with_turns(work, live_env)
@@ -509,8 +511,8 @@ def test_a_clear_and_a_compact_on_expiry(live_env, work, own_slots, command):
                  what=lambda: f"{answer} and {marker}; saw "
                               f"{pane_text(own_slots, row.pane_id, live_env)[-2000:]}")
         settled(row)
-        verdict = recycle.ask_expiry(row.session_id, cache=Cache("cold", 4000.0),
-                                     caller_env=live_env)
+        read = Cache("cold", 4000.0) if command == "clear" else Cache("warm", 3300.0)
+        verdict = recycle.ask_expiry(row.session_id, cache=read, caller_env=live_env)
         done = "cleared" if command == "clear" else "compacted"
         assert verdict.outcome == done, verdict
         [run] = [r for r in runs_of(row.request_id) if r.mode == "expiry"]

@@ -295,6 +295,28 @@ def test_a_relaunch_launch_with_no_mark_shows_it_is_armed_with_no_warning(
     got = read(conn)
     assert got.recycle.at_limit == shown
     assert f"at limit {shown}" in got.lines()[2]
+    assert got.recycle.mark == ("2x" if mark == "2x" else None)
+
+
+def test_a_relaunch_launch_told_at_its_mark_shows_the_mark_from_warn_at(conn, monkeypatch):
+    monkeypatch.setattr(catalog, "slots_here", lambda: True)
+    real = modules.available
+    monkeypatch.setattr(modules, "available", lambda name: name != "notes" and real(name))
+    conn.execute("UPDATE launches SET values_json = ? WHERE request_id = 'r1'",
+                 (json.dumps({"recycle_at_limit": "relaunch", "warn_at": "1.5x"}),))
+    got = read(conn)
+    assert (got.recycle.at_limit, got.recycle.mark) == ("relaunch", "1.5x")
+    assert "recycle: on expiry off, at limit relaunch (1.5x)" in got.lines()[2]
+    assert got.as_json()["recycle"]["mark"] == "1.5x"
+
+
+def test_a_relaunch_launch_that_cannot_recycle_itself_shows_no_mark(conn, monkeypatch):
+    monkeypatch.setattr(catalog, "slots_here", lambda: False)
+    conn.execute("UPDATE launches SET values_json = ? WHERE request_id = 'r1'",
+                 (json.dumps({"recycle_at_limit": "relaunch", "warn_at": "2x"}),))
+    got = read(conn)
+    assert (got.recycle.at_limit, got.recycle.mark) == ("relaunch", None)
+    assert "2x" not in got.lines()[2]
 
 
 # -- the keep-warm part ------------------------------------------------------------------

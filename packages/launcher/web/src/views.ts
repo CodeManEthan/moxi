@@ -61,6 +61,7 @@ export function stateLines(entry: SessionState): string[] {
   const recycle = entry.recycle;
   if (recycle !== null) {
     let line = `recycle: on expiry ${recycle.on_expiry}, at limit ${recycle.at_limit}`;
+    if (recycle.mark) line += ` (${recycle.mark})`;
     if (recycle.last !== null) line += `; last: ${recycle.last.kind} ${said(recycle.last)} at ${when(recycle.last.updated_at)}`;
     if (recycle.told_at) line += `; told to recycle itself at ${when(recycle.told_at)}`;
     lines.push(line);

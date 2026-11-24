@@ -10,7 +10,7 @@ const RUN = { run_id: "r1", kind: "relaunch", mode: "self", state: "ended", outc
 const entry = (extra) => ({
   session_id: "s1", request_id: "q1",
   relaunch: { state: "failed", run: RUN, made_by: null, notices_refused: [], note_not_taken: false },
-  recycle: { on_expiry: "off", at_limit: "off", last: null, told_at: null },
+  recycle: { on_expiry: "off", at_limit: "off", last: null, told_at: null, mark: null },
   keep_warm: { on: false, holds: [], nudges: 0, last: null, window: null },
   red: false, since: null, why: null, word: null, run_id: null, unreadable: null, ...extra });
 const UP = { state: "up", detail: null, sessions: [entry()], refused: null };

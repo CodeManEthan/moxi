@@ -13,7 +13,7 @@ const run = (extra) => ({ run_id: "r1", kind: "relaunch", mode: "self", state: "
 const entry = (extra) => ({
   session_id: "s1", request_id: "q1",
   relaunch: { state: null, run: null, made_by: null, notices_refused: [], note_not_taken: false },
-  recycle: { on_expiry: "off", at_limit: "off", last: null, told_at: null },
+  recycle: { on_expiry: "off", at_limit: "off", last: null, told_at: null, mark: null },
   keep_warm: { on: false, holds: [], nudges: 0, last: null, window: null },
   red: false, since: null, why: null, word: null, run_id: null, unreadable: null, ...extra });
 const RED = entry({ red: true, word: "blocked", since: T, why: "person: someone is typing",
@@ -48,13 +48,13 @@ test("the lines say what `moxi launcher show` prints", () => {
     relaunch: { state: "relaunch-failed", run: run({ outcome: "relaunch-failed", detail: "pane gone" }),
                 made_by: null, notices_refused: ["lead", "ops"], note_not_taken: true },
     recycle: { on_expiry: "compact", at_limit: "relaunch",
-               last: run({ kind: "expiry", outcome: "compacted" }), told_at: T },
+               last: run({ kind: "expiry", outcome: "compacted" }), told_at: T, mark: "2x" },
     keep_warm: { on: true, holds: ["review"], nudges: 2, last: run({ kind: "keep-warm", outcome: "nudged" }),
                  window: "no window: lifetime 300 s" },
   });
   assert.deepEqual(stateLines(busy), [
     "relaunch: relaunch-failed: pane gone; its note to the session was not taken; notice refused by lead, ops",
-    "recycle: on expiry compact, at limit relaunch; last: expiry compacted at 2026-10-31 10:01 UTC; "
+    "recycle: on expiry compact, at limit relaunch (2x); last: expiry compacted at 2026-10-31 10:01 UTC; "
       + "told to recycle itself at 2026-10-31 10:01 UTC",
     "keep warm: on (no window: lifetime 300 s); holds: review; nudges in a row: 2; last: nudged at 2026-10-31 10:01 UTC",
   ]);

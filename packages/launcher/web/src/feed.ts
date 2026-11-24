@@ -43,6 +43,7 @@ export interface RecycleState {
   at_limit: string;
   last: RunLine | null;
   told_at: string | null;
+  mark: string | null;
 }
 
 export interface KeepWarmState {

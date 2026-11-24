@@ -259,7 +259,7 @@ SESSION_STATE = _table(
                     made_by=_text(nullable=True), notices_refused=_texts(),
                     note_not_taken=Out("bool"), nullable=True),
     recycle=_table(on_expiry=_text(), at_limit=_text(), last=_RUN_LINE_OR_NONE,
-                   told_at=_text(nullable=True), nullable=True),
+                   told_at=_text(nullable=True), mark=_text(nullable=True), nullable=True),
     keep_warm=_table(on=Out("bool"), holds=_texts(), nudges=Out("int"),
                      last=_RUN_LINE_OR_NONE, window=_text(nullable=True), nullable=True),
     red=Out("bool"), since=_text(nullable=True), why=_text(nullable=True),
