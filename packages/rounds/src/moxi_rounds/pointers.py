@@ -49,7 +49,7 @@ _SESSION = re.compile(r"[0-9A-Fa-f]{8,}@([0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-
                       r"(:[0-9]{2})?)Z")
 _URL = re.compile(r"https://[^/?#]+.*")
 _FILE = re.compile(r"file:([^#]+)#(.+)")
-_PAGE = re.compile(r"page:[a-z][a-z0-9-]*/[A-Za-z0-9_-]{8,64}@"
+_PAGE = re.compile(r"page:[a-z][a-z0-9-]*/([A-Za-z0-9_-]{8,64})@"
                    r"([0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2})Z")
 
 #: The shape of a question's origin in a build, as `build_origin` writes it.
@@ -95,9 +95,17 @@ def page_at(pointer: object) -> str | None:
     if not isinstance(pointer, str):
         return None
     page = _PAGE.fullmatch(pointer)
-    if page is None or not _is_time(page.group(1), seconds=True):
+    if page is None or not _is_time(page.group(2), seconds=True):
         return None
-    return page.group(1) + "Z"
+    return page.group(2) + "Z"
+
+
+def page_act(pointer: object) -> str | None:
+    """The act id a `PAGE` pointer names (`page:rounds/<act id>@<time>`), or None for
+    any other pointer."""
+    if page_at(pointer) is None:
+        return None
+    return _PAGE.fullmatch(pointer).group(1)
 
 
 def number(pointer: str) -> int:
@@ -143,4 +151,4 @@ def _is_under(path: str) -> bool:
 
 
 __all__ = ["COMMS", "SESSION", "URL", "FILE", "PAGE", "SHAPES", "BUILD", "shape",
-           "page_at", "number", "same", "unmet", "build_origin", "is_build_origin"]
+           "page_at", "page_act", "number", "same", "unmet", "build_origin", "is_build_origin"]

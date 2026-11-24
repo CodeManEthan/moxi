@@ -41,7 +41,8 @@ def test_the_skill_states_the_recycle_steps():
     assert "End your turn" in section
     assert "start nothing new" in section and "`no-self-recycle`" in section
     assert "`relaunched`" in section and "read the handoff" in section
-    assert "background shell" not in section
+    assert section.index("Stop your background shells") < section.index(
+        "moxi launcher relaunch --self")
 
 
 def test_the_skill_gives_each_reason_a_session_has_no_handoff_dir():

@@ -59,8 +59,9 @@ stop as usual; don't recycle at the end of a task.
 
 1. Reach a pause point, let your subagents finish, and start nothing new.
 2. Write the handoff, as above.
-3. Run `moxi launcher relaunch --self --handoff <file>` in your session's shell.
-4. End your turn and make no further tool call. The launcher exits the session once it is
+3. Stop your background shells.
+4. Run `moxi launcher relaunch --self --handoff <file>` in your session's shell.
+5. End your turn and make no further tool call. The launcher exits the session once it is
    idle and starts it again in the same place, with your handoff as its first turn.
 
 If the verb refuses `no-self-recycle`, your launch doesn't let you recycle: carry on with

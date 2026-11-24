@@ -285,14 +285,17 @@ never guessed. Turn on `restart_point.measure_weekly` to measure once a week on 
 
 ## The warn-at mark
 
-With turns installed, usage's after-tool listener tells the model, once, when a context
-passes its mark: `context 120,000 passed the 1x restart point (100,808) for <model>`. The
-mark is the launch's `MOXI_USAGE_WARN_AT` (`1x`, `1.5x`, `2x`, `off`), else
-`marks.default` (`off`). The launcher stamps its `warn_at` row, `2x` unless the launch
-sets another; a seat launch or a Codex launch is stamped only with a mark it sets. The main session and each of its agents are measured against
+With turns installed, usage's after-tool listener tells the model when a context passes
+its mark: `context 120k: past the 1x mark for <model>` (the context in thousands,
+halves up). The
+mark is the launch's `MOXI_USAGE_WARN_AT` (`1x`, `1.5x`, `2x`, `off`); a session with no
+stamp gets no notice, and no config setting stands in for one. The launcher stamps its
+`warn_at` row, `2x` unless the launch sets another; a seat launch or a Codex launch is
+stamped only with a mark it sets, so set `warn_at` on such a launch, its preset or
+`[defaults]` to be warned. The main session and each of its agents are measured against
 their own context; an agent's line also reaches its parent at the parent's next tool
 call. A mark fires once per rise past it: after a compaction brings the context below it,
-it can fire again. A floor tells turns the context below which the main session's calls
+the next rise past it warns again. A floor tells turns the context below which the main session's calls
 have nothing for usage to do, so they skip the listener. The mark reads Claude Code,
 Codex and OpenCode sessions alike, and a Codex or OpenCode subagent's own record; on
 OpenCode, turns hears tool calls but has no way to hand the model a line, so there the
@@ -302,7 +305,10 @@ A launcher that recycles at a limit stamps `MOXI_USAGE_CROSSING_AT`; each rise o
 main session past that mark calls every handler registered on the entry-point group
 `moxi.usage.crossings` with a `Crossing(harness, session_id, mark, tokens, threshold,
 model, at)`. Handlers run one after another, each waited on for at most
-`marks.handler_wait_ms` (200); a line a handler returns follows the notice. usage itself
+`marks.handler_wait_ms` (200). A line a handler returns on the call that also fired the
+notice is appended to it after `. `, so the model sees one line; on a call with no notice
+it is a line of its own. Each rise fires the crossing again: a reading below its mark arms
+it once more, so a launch that compacts at its limit compacts at every rise. usage itself
 does nothing on a crossing. The wait is per handler, and turns bounds the whole listener
 call by its own `after_tool.wait_ms` (300): two handlers that each take most of their
 200 ms outlast it, and turns then drops the call's answer, the notice with it. A handler

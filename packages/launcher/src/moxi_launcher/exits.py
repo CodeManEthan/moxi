@@ -111,7 +111,7 @@ def exit_session(session_id: str, *, dry_run: bool = False,
     env = dict(os.environ if caller_env is None else caller_env)
     current = settings if settings is not None else relaunch._settings()
     with relaunch._store(conn) as c:
-        row = store.resolve(c, session_id)
+        row = target.resolve(c, session_id, turns=turns)
         if row is None:
             raise target.NotLaunched()
         try:

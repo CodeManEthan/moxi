@@ -46,6 +46,7 @@ The caller owns a connection's lifetime: open one with `connect`, use it, close 
 
 from __future__ import annotations
 
+import dataclasses
 import json
 import secrets
 import sqlite3
@@ -967,6 +968,25 @@ def resolve(conn: sqlite3.Connection, session_id: str) -> LaunchRow | None:
                           "ORDER BY seen_at DESC, rowid DESC LIMIT 1", found).fetchone()
     cursor = conn.execute(f"{_SELECT} WHERE request_id = ?", found)
     return _row(cursor, cursor.fetchone(), newest_session_id=newest[0])
+
+
+def launch_of_process(conn: sqlite3.Connection, harness: Any) -> LaunchRow | None:
+    """The newest Claude launch whose own process is `harness` (a `moxi.proc.ProcId`):
+    its `pid` and `pid_started` name that one live process (`is_launch_parent`), with
+    `newest_session_id` the id it was last known by; None when no launch's is. A launch
+    that failed before any endpoint claimed it is skipped, as `resolve` skips it."""
+    for (request_id,) in conn.execute(
+            "SELECT request_id FROM launches WHERE harness = 'claude' AND pid = ? "
+            "AND pid_started IS NOT NULL AND NOT (state = 'failed' AND endpoint IS NULL) "
+            "ORDER BY created_at DESC, rowid DESC", (harness.pid,)).fetchall():
+        row = get(conn, request_id)
+        if row is not None and is_launch_parent(row, harness):
+            newest = conn.execute("SELECT session_id FROM session_ids WHERE request_id = ? "
+                                  "ORDER BY seen_at DESC, rowid DESC LIMIT 1",
+                                  (request_id,)).fetchone()
+            return dataclasses.replace(row, newest_session_id=newest[0] if newest else
+                                       row.session_id)
+    return None
 
 
 def kinds(session_ids: Iterable[str], *, timeout: float = 1.0,
@@ -2074,7 +2094,7 @@ __all__ = ["CAP", "COLUMNS", "DETAIL_CAP", "ENTRY_COLUMNS", "ENTRY_KINDS", "ENTR
            "claim", "connect", "crossing_key", "crossing_known", "cut", "drop_run", "end_blocked",
            "end_run", "endpoint_gone", "events", "exits_log", "get", "get_run", "held_by_sibling",
            "holds", "insert",
-           "holds_log", "insert_run", "is_launch_parent", "kinds", "launched_by", "learn_session", "log", "log_lines",
+           "holds_log", "insert_run", "is_launch_parent", "kinds", "launch_of_process", "launched_by", "learn_session", "log", "log_lines",
            "made_by", "reading",
            "new_run_id",
            "now", "open_hold", "open_holds", "open_run", "parse_endpoint", "parse_time", "path",

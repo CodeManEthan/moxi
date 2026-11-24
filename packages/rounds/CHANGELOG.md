@@ -1,5 +1,50 @@
 # Changelog
 
+## 0.1.5 (unreleased)
+
+- The page acts, at a desk. An item's popover and the walk take the operator's answer:
+  an option picked, an answer in the operator's own words, a request to explain, a park,
+  an unpark, a ruling read back or corrected, a decision accepted or rejected, a job
+  done. Answers wait in a tray, `Your answers`, kept in the browser's storage, and
+  `Send` sends it, or `Send now` one row. The page records the picks, decisions,
+  read-backs, done jobs, parks and unparks itself through rounds' own calls, each with a
+  page pointer; own words and corrections go in the message to the agent chosen in the
+  To picker (each round's lead by default, a project's lead marked `(the project's)`),
+  who words and records them, and the row reads recorded once the agent's ruling
+  appears. The message quotes the words as written and gives the command with
+  `--text TEXT` for the agent's wording, so no shell reads the words. With comms
+  installed one message goes to each recipient under rounds' send-only name; without it
+  nothing is sent and the row shows the command a lead would run. Each draft gets a
+  receipt, and `Sent` lists the sent drafts and the messages sent. A draft longer than
+  the answers route takes stays in the tray with its row saying so. A draft of a round
+  or project with no lead, as the board shows or the page server answers, offers no send
+  to a lead: it stays in the tray until an agent is picked in the To picker.
+- An act posted twice runs once: each act carries an act id, the page server answers a
+  repeat from the receipts it keeps, and after a restart an event whose pointer holds
+  the act id is that act's record, so it is not recorded again.
+- `Unpark` on a parked question takes back the parking that stands, a ruling of
+  `revoke:` that parking, whoever recorded it. A question offers `Unpark` while parked
+  and its answer form while open, whatever its row in the tray says.
+- `Drop this build…` on a step of a stage with an open build opens a confirm that names
+  what the drop ends, removes and keeps, read fresh; the drop is recorded as the
+  operator's with the page as the pointer, and with comms installed and a lead for the
+  round, the lead is told what the drop removed and kept. A drop whose post gets no
+  answer offers `Drop again` under the same act id.
+- The page reads each round's lead, a question's prepared answer (its recommended option
+  marked `recommended`), a question's record in every state with the ruling that put it
+  there, and the parked questions, which the foot's count opens.
+- New page routes, none open to the phone gateway: `GET /api/agents`, `GET /api/drop`,
+  `POST /api/answers` and `POST /api/drop/build`. Nothing acts at phone width.
+- `pointers.page_act` gives the act id a page pointer holds.
+- A board line's stage name, its id and branch with the round's `+N`, is drawn in a
+  cell of its own between the round's name and the rail, and the column labels put
+  `stage` there too. The rail holds only its steps' markers, so its line runs unbroken
+  from the round's own steps into the stage's, and no text sits on it. An unreadable
+  round's line grows to hold its reason, which no longer spills onto the line above.
+- Board lines are 38 px high, up from 34, around the same 34 px rail, so the ▼ over a
+  line's current step stays 5 px clear of the step words of the line above, where it
+  stood 1 px from them. An unreadable round's line keeps at least that height.
+
 ## 0.1.4 (unreleased)
 
 - A project's table takes three settings of its own, empty by default and with no

@@ -1298,7 +1298,7 @@ dev = [
 
 [[package]]
 name = "moxi-rounds"
-version = "0.1.4"
+version = "0.1.5"
 source = { editable = "packages/rounds" }
 dependencies = [
     { name = "moxi" },

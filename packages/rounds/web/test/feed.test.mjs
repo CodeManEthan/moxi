@@ -11,7 +11,8 @@ const ROUND = { name: "kestrel/a", project: "kestrel", slug: "a", group: "moving
 const BOARD = {
   today: "2026-11-21", home: "/home/u", read_at: "2026-11-21T12:00:00Z", state: "up", detail: null,
   columns: [{ id: "design", label: "design", part: "round" }],
-  waiting: { questions: [{ holder: "kestrel/a", id: "Q1", text: "Which?" }], decisions: [], waits: [], not_shown: [],
+  waiting: { questions: [{ holder: "kestrel/a", id: "Q1", text: "Which?" }], parked_questions: [], decisions: [], waits: [],
+             not_shown: [],
              parked: 1 },
   recent: [], rounds: [ROUND], closed: [], unreadable: [],
 };
@@ -142,4 +143,11 @@ test("a record read: the record, gone, or the failure, with the 503 retries", as
                    { kind: "failed", failure: { status: 400, why: "rounds' page server answered 400" } });
   assert.deepEqual(await readRecord(answers([{ status: 200, data: { record } }])),
                    { kind: "failed", failure: { status: 200, why: "rounds' page server sent an answer that can't be read" } });
+});
+
+test("the board keeps the parked questions, apart from what waits", () => {
+  const parked = { holder: "kestrel/a", id: "Q2", text: "Later?", until: "B1 finished" };
+  const value = parseBoard({ ...BOARD, waiting: { ...BOARD.waiting, parked_questions: [parked, { id: 3 }] } });
+  assert.deepEqual(value.waiting.parked_questions, [parked]);
+  assert.deepEqual(parseBoard(BOARD).waiting.parked_questions, []);
 });

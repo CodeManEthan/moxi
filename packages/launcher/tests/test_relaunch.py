@@ -207,7 +207,7 @@ def conn(tmp_path):
 def launched(conn, *, request_id="r1", target_name="slot", session_id=SID, scope=None,
              directors=("boss",), relaunch_of=None, base_env=None, recycle="relaunch",
              identity="planner", **more):
-    values = {"model": "opus", "director": list(directors), **more}
+    values = {"model": "opus", "director": list(directors), "warn_at": "2x", **more}
     if recycle is not None:
         values["recycle_at_limit"] = recycle
     store.insert(conn, request_id=request_id, by="ann", harness="claude",
@@ -334,32 +334,48 @@ def test_a_dry_run_arm_writes_nothing(conn, tmp_path):
 # -- the self-recycle gate ----------------------------------------------------------------
 
 
-def unset_recycle(conn, value):
+def unset_recycle(conn, value, source=None):
+    """Set r1's `recycle_at_limit` to `value` (None: leave it out), with `source` recorded
+    as where it came from (None: no `sources` recorded, a row from before they were)."""
     row = store.get(conn, "r1")
-    values = {k: v for k, v in row.values.items() if k != "recycle_at_limit"}
+    values = {k: v for k, v in row.values.items() if k not in ("recycle_at_limit", "sources")}
     if value is not None:
         values["recycle_at_limit"] = value
+    if source is not None:
+        values["sources"] = {"recycle_at_limit": source}
     conn.execute("UPDATE launches SET values_json = ? WHERE request_id = 'r1'",
                  (json.dumps(values),))
 
 
-@pytest.mark.parametrize("value, words", [
-    (None, "launch r1 was started without --recycle-at-limit relaunch, so it can't recycle "
-           "itself"),
-    ("off", "launch r1 was started without --recycle-at-limit relaunch, so it can't recycle "
-            "itself"),
-    ("compact", "launch r1 recycles at its limit by compacting, so it can't relaunch "
-                "itself")])
+def set_values(conn, **more):
+    row = store.get(conn, "r1")
+    conn.execute("UPDATE launches SET values_json = ? WHERE request_id = 'r1'",
+                 (json.dumps({**row.values, **more}),))
+
+
+@pytest.mark.parametrize("value, source, words", [
+    (None, None, "launch r1 has no recycle_at_limit, so it can't relaunch itself"),
+    # The shipped off, recorded by a launch from before relaunch was a setting or since,
+    # opts out as any other off does.
+    ("off", None, "launch r1 has recycle_at_limit off, so it can't relaunch itself"),
+    ("off", "shipped", "launch r1 has recycle_at_limit off, so it can't relaunch itself"),
+    ("off", "typed", "launch r1 has recycle_at_limit off, so it can't relaunch itself"),
+    ("off", "preset", "launch r1 has recycle_at_limit off, so it can't relaunch itself"),
+    ("off", "defaults", "launch r1 has recycle_at_limit off, so it can't relaunch itself"),
+    ("off", "left-out", "launch r1 holds recycle_at_limit off, so it can't relaunch itself"),
+    ("compact", "preset", "launch r1 recycles at its limit by compacting, so it can't "
+                          "relaunch itself")])
 @pytest.mark.parametrize("dry_run", [False, True])
-def test_a_launch_without_recycle_at_limit_relaunch_refuses_the_self_arm(
-        conn, tmp_path, value, words, dry_run):
-    unset_recycle(conn, value)
+def test_a_launch_that_opted_out_refuses_the_self_arm(conn, tmp_path, value, source, words,
+                                                      dry_run):
+    unset_recycle(conn, value, source)
     slots_api = FakeSlots()
     with pytest.raises(relaunch.Refused) as refused:
         arm(conn, handoff(tmp_path), slots_api=slots_api, dry_run=dry_run)
     assert refused.value.code == "no-self-recycle" and refused.value.exit_code == 3
     assert refused.value.problem == words
-    assert "--recycle-at-limit relaunch can recycle itself" in refused.value.hint
+    assert refused.value.hint == ("finish the work and stop; a launch with recycle_at_limit "
+                                  "relaunch can recycle itself")
     nothing_written(conn, slots_api)
 
 
@@ -367,33 +383,38 @@ def test_a_launch_without_recycle_at_limit_relaunch_refuses_the_self_arm(
 def test_an_older_scratch_row_set_to_relaunch_refuses_the_self_arm(conn, tmp_path,
                                                                     dry_run):
     # Recorded before a scratch launch was refused recycle_at_limit = relaunch.
-    row = store.get(conn, "r1")
-    conn.execute("UPDATE launches SET values_json = ? WHERE request_id = 'r1'",
-                 (json.dumps({**row.values, "scratch": True}),))
+    set_values(conn, scratch=True)
     slots_api = FakeSlots()
     with pytest.raises(relaunch.Refused) as refused:
         arm(conn, handoff(tmp_path), slots_api=slots_api, dry_run=dry_run)
     assert refused.value.code == "no-self-recycle" and refused.value.exit_code == 3
     assert refused.value.problem == ("launch r1 works in a scratch folder, and a scratch "
                                      "launch can't recycle itself")
-    assert refused.value.hint == "recycle with compact, or launch in a directory"
+    assert refused.value.hint == ("finish the work and stop; recycle with compact, or launch "
+                                  "in a directory")
     nothing_written(conn, slots_api)
 
 
-@pytest.mark.parametrize("value", [None, "off", "compact"])
-def test_an_older_scratch_row_refused_for_its_value_gets_a_scratch_hint(conn, tmp_path,
-                                                                         value):
-    unset_recycle(conn, value)
-    row = store.get(conn, "r1")
-    conn.execute("UPDATE launches SET values_json = ? WHERE request_id = 'r1'",
-                 (json.dumps({**row.values, "scratch": True}),))
-    slots_api = FakeSlots()
+def test_a_scratch_row_held_off_by_the_launcher_is_refused_for_its_scratch(conn, tmp_path):
+    # A [defaults] relaunch the launcher held off on a scratch names the scratch.
+    unset_recycle(conn, "off", "left-out")
+    set_values(conn, scratch=True)
     with pytest.raises(relaunch.Refused) as refused:
-        arm(conn, handoff(tmp_path), slots_api=slots_api)
-    assert refused.value.code == "no-self-recycle" and refused.value.exit_code == 3
-    assert refused.value.hint == relaunch.SCRATCH_HINT
-    assert "a scratch launch recycles only by compacting" in refused.value.hint
-    nothing_written(conn, slots_api)
+        arm(conn, handoff(tmp_path))
+    assert refused.value.code == "no-self-recycle"
+    assert "works in a scratch folder" in refused.value.problem
+
+
+@pytest.mark.parametrize("mark", [None, "off", ""])
+def test_a_relaunch_launch_warned_at_no_mark_may_still_recycle_itself(conn, tmp_path, mark):
+    # Never told, since no mark is set, but its self relaunch is armed and accepted.
+    row = store.get(conn, "r1")
+    values = {k: v for k, v in row.values.items() if k != "warn_at"}
+    if mark is not None:
+        values["warn_at"] = mark
+    conn.execute("UPDATE launches SET values_json = ? WHERE request_id = 'r1'",
+                 (json.dumps(values),))
+    assert arm(conn, handoff(tmp_path)).data["outcome"] == "armed"
 
 
 def test_a_slot_check_comes_before_the_self_recycle_gate(tmp_path):
@@ -653,6 +674,60 @@ def test_the_stale_check_reads_the_sessions_current_id(conn, tmp_path):
     assert "stale" in caught.value.problem
 
 
+class BeganSessions:
+    """sessions' `find` and `records`: the id's main transcript, whose first records have
+    no time and then `first`, beside a subagent's that began earlier."""
+
+    def __init__(self, first):
+        self.first, self.asked = first, []
+
+    def find(self, harness, session_id, *, root=None):
+        self.asked.append(session_id)
+        return SimpleNamespace(hits=(
+            SimpleNamespace(source=SimpleNamespace(name="agent", agent_id="a1"),
+                            compressed=False),
+            SimpleNamespace(source=SimpleNamespace(name="main", agent_id=None),
+                            compressed=False)))
+
+    def records(self, source, *, kinds=None):
+        if source.name == "agent":
+            return iter([SimpleNamespace(time=self.first - 3600)])
+        return iter([SimpleNamespace(time=object()),  # sessions' UNKNOWN
+                     SimpleNamespace(time=self.first), SimpleNamespace(time=self.first + 9)])
+
+
+def test_an_id_the_launch_never_learned_began_at_its_transcripts_first_record(conn,
+                                                                             tmp_path):
+    # A session found by its process: the stale test reads when its own transcript began,
+    # not when the launch was made.
+    path = handoff(tmp_path)
+    written = path.stat().st_mtime
+    conn.execute("UPDATE launches SET created_at = ? WHERE request_id = 'r1'",
+                 (store.stamp(datetime.fromtimestamp(written - 3600, timezone.utc)),))
+    row = store.get(conn, "r1")
+    later = BeganSessions(written + 60)
+    with pytest.raises(relaunch.Refused) as caught:
+        relaunch.check_handoff(str(path), conn, row, CLEARED, sessions=later)
+    assert "stale" in caught.value.problem and later.asked == [CLEARED]
+    assert relaunch.check_handoff(str(path), conn, row, CLEARED,
+                                  sessions=BeganSessions(written - 60)) == path
+
+
+@pytest.mark.parametrize("sessions", [None, "unread"])
+def test_with_no_transcript_read_an_unlearned_id_began_with_the_launch(conn, tmp_path,
+                                                                       sessions):
+    path = handoff(tmp_path)
+    written = path.stat().st_mtime
+    conn.execute("UPDATE launches SET created_at = ? WHERE request_id = 'r1'",
+                 (store.stamp(datetime.fromtimestamp(written + 60, timezone.utc)),))
+    row = store.get(conn, "r1")
+    if sessions == "unread":
+        sessions = SimpleNamespace(find=lambda *a, **k: (_ for _ in ()).throw(OSError("no")))
+    with pytest.raises(relaunch.Refused) as caught:
+        relaunch.check_handoff(str(path), conn, row, CLEARED, sessions=sessions)
+    assert "stale" in caught.value.problem
+
+
 def test_a_relative_handoff_is_read_from_the_working_dir(conn, tmp_path):
     handoff(tmp_path)
     row = store.get(conn, "r1")
@@ -669,6 +744,8 @@ def test_with_notes_installed_the_handoff_must_be_in_the_launchs_dir(conn, tmp_p
                         lambda name: name == "notes" or available(name))
     monkeypatch.setattr(relaunch.handoffs, "handoff_dir_of_row",
                         lambda row, create=True: handoff_dir)
+    monkeypatch.setattr(relaunch.handoffs, "handoff_dir",
+                        lambda cwd, **kw: handoff_dir)
     with pytest.raises(relaunch.Refused) as caught:
         arm(conn, handoff(tmp_path))
     assert caught.value.code == "handoff"
@@ -678,8 +755,8 @@ def test_with_notes_installed_the_handoff_must_be_in_the_launchs_dir(conn, tmp_p
 
 def test_with_notes_installed_a_launch_with_no_notes_dir_is_refused(conn, tmp_path,
                                                                     monkeypatch):
-    # A self relaunch with no notes directory for the launch is refused, and no handoff is
-    # read from anywhere else.
+    # A launch with no notes directory has no handoff folder, so its session can't recycle
+    # itself: the self arm is refused before a handoff is read from anywhere.
     available, load = relaunch.modules.available, relaunch.modules.load
     homeless = SimpleNamespace(state=relaunch.modules.PRESENT, ok=True, reason="",
                                api=SimpleNamespace(handoffs_dir=lambda path, *, create=False,
@@ -690,8 +767,11 @@ def test_with_notes_installed_a_launch_with_no_notes_dir_is_refused(conn, tmp_pa
                         homeless if name == "notes" else load(name, interface=interface))
     with pytest.raises(relaunch.Refused) as caught:
         arm(conn, handoff(tmp_path))
-    assert caught.value.code == "handoff"
-    assert caught.value.problem.endswith("so it has no handoffs/ to read from")
+    assert caught.value.code == "no-self-recycle"
+    assert caught.value.problem == ("launch r1 has no notes directory (no notes_dir and none "
+                                    "for /work), so it has no handoffs/ to read from")
+    assert caught.value.hint.endswith("launch it with notes_dir set, or in a folder notes "
+                                      "keeps notes for")
     assert not relaunch.handoffs.own_handoffs_dir(create=False).exists()
 
 
@@ -884,6 +964,20 @@ def test_an_unknown_session_id_is_not_launched_and_comms_is_never_asked(conn, wh
     with pytest.raises(target.NotLaunched):
         call(conn, which, comms=Unasked(), slots_api=slots_api)
     nothing_written(conn, slots_api)
+
+
+def test_a_session_id_the_launch_never_learned_is_found_by_its_claude_process(conn):
+    class Unasked(FakeComms):
+        def session_of(self, identity):
+            raise AssertionError("comms was asked about a session id")
+
+    ident = proc.identity(os.getppid())
+    conn.execute("UPDATE launches SET pid = ?, pid_started = ?", (ident.pid, ident.started))
+    before = store.session_ids(conn, "r1")
+    result = call(conn, CLEARED, session=FakeSession(session_id=CLEARED), comms=Unasked(),
+                  follow=False)
+    assert result.run.request_id == "r1" and result.run.session_id == CLEARED
+    assert store.session_ids(conn, "r1") == before
 
 
 def test_a_name_that_is_not_a_session_id_goes_to_comms_even_when_a_launch_holds_it(tmp_path):
