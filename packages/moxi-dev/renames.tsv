@@ -14596,6 +14596,8 @@ turns	packages/turns/src/moxi_turns/endpoint.py	while it waited. A skipped steer
 turns	packages/turns/src/moxi_turns/endpoint.py	while len(self._settled) > SETTLED_KEPT:	keep	_settled	_settled
 turns	packages/turns/src/moxi_turns/endpoint.py	skip = d.state not in (_INFLIGHT, _STEERING, _FORKING) or d.expired	keep	expired	expired
 turns	packages/turns/src/moxi_turns/endpoint.py	if any(d.keep and d.ref == ref for d in self._deliveries.values()):	keep	any	any
+turns	packages/turns/src/moxi_turns/endpoint.py	or d.state not in (_STEERING, _STARTED) or d.expired):	keep	expired	expired
+turns	packages/turns/src/moxi_turns/endpoint.py	`refused` `idle`. It becomes a turn of its own only when the harness reports it	keep	refused	refused
 turns	packages/turns/src/moxi_turns/guards/__init__.py	#: `any`, `main` or `agents`.	keep	any	any
 turns	packages/turns/src/moxi_turns/guards/__init__.py	WHO = ("any", "main", "agents")	keep	any	any
 turns	packages/turns/src/moxi_turns/guards/__init__.py	elif entry not in known and not any(p.id == entry for p in problems):	keep	any	any
@@ -14975,6 +14977,8 @@ turns	packages/turns/tests/test_claude_endpoint.py	timeout=5)), daemon=True).sta
 turns	packages/turns/tests/test_claude_endpoint.py	out = [SEEN.get(timeout=timeout) for _ in range(count)]	keep	timeout	timeout
 turns	packages/turns/tests/test_claude_endpoint.py	"environ", "fork", "keep"})	keep	environ	environ
 turns	packages/turns/tests/test_claude_endpoint.py	is_aborted=False)	keep	is_aborted	is_aborted
+turns	packages/turns/tests/test_claude_endpoint.py	assert _ids(got[3]) == [(d.id, "opened")] and got[3].turn_id == "T2"	keep	opened	opened
+turns	packages/turns/tests/test_claude_endpoint.py	assert _ids(got[4]) == [(d.id, "opened")]	keep	opened	opened
 turns	packages/turns/tests/test_claude_plugins.py	-	name	test_the_folder_marketplace_lists_both_plugins_by_relative_path	test_the_local_marketplace_lists_both_plugins_by_relative_path
 turns	packages/turns/tests/test_claude_plugins.py	@pytest.mark.parametrize("folder", ["", *PLUGINS])	keep	folder	folder
 turns	packages/turns/tests/test_claude_plugins.py	@pytest.mark.parametrize("folder", ["", *PLUGINS])	use	"folder"	"plugin_dir"
