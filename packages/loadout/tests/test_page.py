@@ -866,8 +866,11 @@ def test_a_harness_not_present_is_drawn_while_something_stands_there(state, monk
     monkeypatch.setenv("CODEX_HOME", str(tmp_path / "codex-home"))
     (tmp_path / "claude-home").mkdir()
     names = ["claude", "codex"]
-    assert harness.shown(names, [("codex", "missing"), ("codex", "off"), (None, "ok")]) == ["claude"]
-    assert harness.shown(names, [("codex", "missing"), ("codex", state)]) == names
+    assert harness.shown(names, [("codex", "missing", "/t"), ("codex", "off", None),
+                                 (None, "ok", "/t")]) == ["claude"]
+    assert harness.shown(names, [("codex", "missing", "/t"), ("codex", state, "/t")]) == names
+    # A row that places nowhere (a section that can't be placed) stands nowhere.
+    assert harness.shown(names, [("codex", state, None)]) == ["claude"]
     assert harness.shown(["kestrel"], []) == ["kestrel"]
 
 

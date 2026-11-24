@@ -226,7 +226,8 @@ def view(call: Any) -> dict[str, Any]:
             "harnesses": list(plan.harnesses),
             "present": harness.present(plan.harnesses),
             "shown": harness.shown(plan.harnesses,
-                                   [(r["harness"], r["state"]) for r in outcome["rows"]]),
+                                   [(r["harness"], r["state"], r["target"])
+                                    for r in outcome["rows"]]),
             "resolved_all": plan.resolved_all,
             "sections": _mapped(view_mod.sections(plan)),
             "items": [{**e, **view_mod.item_facts(plan, e["kind"], e["name"])}
@@ -355,7 +356,8 @@ def drift(call: Any) -> dict[str, Any]:
     except Exception as exc:  # noqa: BLE001
         return {"problem": _problem(exc, "the status"), "count": 0, "note": None}
     names = list(dict.fromkeys(r.harness for r in outcome.rows if r.harness is not None))
-    drawn = set(harness.shown(names, [(r.harness, r.state) for r in outcome.rows]))
+    drawn = set(harness.shown(names, [(r.harness, r.state, r.target)
+                                          for r in outcome.rows]))
     items = {(r.scope, r.kind, r.name) for r in outcome.rows
              if r.state not in FINE and (r.harness is None or r.harness in drawn)}
     return {"problem": None, "count": len(items), "note": note}
