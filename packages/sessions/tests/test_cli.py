@@ -8,6 +8,7 @@ import shutil
 import time
 
 import pytest
+from moxi_dev.testing import toml_string
 from conftest import THREAD, assistant_line, write_config, write_rollout, write_transcript
 
 from moxi import cli as umbrella, modules
@@ -70,7 +71,7 @@ def test_both_json_documents_carry_the_shape_version_first(env, capsys, tmp_path
 def test_find_reads_the_configured_root(env, capsys, own_config, tmp_path):
     stated = tmp_path / "stated"
     path = write_transcript(stated, "p", SID, [assistant_line()])
-    write_config(own_config, f'[claude]\nprojects = "{stated}"\n')
+    write_config(own_config, f'[claude]\nprojects = {toml_string(stated)}\n')
     assert run(capsys, "find", SID)[:2] == (0, f"{path}\n")
 
 
@@ -113,7 +114,7 @@ def test_find_marks_a_compressed_rollout_in_json(env, capsys):
 def test_find_reads_the_configured_codex_root(env, capsys, own_config, tmp_path):
     stated = tmp_path / "stated-codex"
     path = write_rollout(stated)
-    write_config(own_config, f'[codex]\nsessions = "{stated}"\n')
+    write_config(own_config, f'[codex]\nsessions = {toml_string(stated)}\n')
     assert run(capsys, "find", THREAD, "--harness", "codex")[:2] == (0, f"{path}\n")
 
 
@@ -186,8 +187,8 @@ def test_root_names_codex_home_and_xdg_data_home(env, capsys, monkeypatch, tmp_p
 
 
 def test_root_names_the_config_file(env, capsys, own_config, tmp_path):
-    file = write_config(own_config, f'[claude]\nprojects = "{tmp_path / "stated"}"\n'
-                                    f'[opencode]\ndatabase = "{tmp_path / "oc.db"}"\n')
+    file = write_config(own_config, f'[claude]\nprojects = {toml_string(tmp_path / "stated")}\n'
+                                    f'[opencode]\ndatabase = {toml_string(tmp_path / "oc.db")}\n')
     code, out, _ = run(capsys, "root", "--json")
     data = json.loads(out)
     assert code == 0 and data["claude"]["root"] == str(tmp_path / "stated")
@@ -397,7 +398,7 @@ def test_list_without_secrets_says_so_once_when_it_prints_text(listed, capsys,
 def test_list_names_a_configured_root_it_could_not_list_and_lists_the_others(
         listed, capsys, own_config, tmp_path):
     claude_session(listed, 1, time.time() - HOUR)
-    write_config(own_config, f'[codex]\nsessions = "{tmp_path / "nowhere"}"\n')
+    write_config(own_config, f'[codex]\nsessions = {toml_string(tmp_path / "nowhere")}\n')
 
     code, out, err = run(capsys, "list")
 

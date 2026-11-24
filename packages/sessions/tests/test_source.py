@@ -7,6 +7,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
+from moxi_dev.testing import toml_string
 
 from conftest import write_config
 from moxi_sessions.opencode import Snapshot
@@ -240,7 +241,7 @@ def test_a_configured_root_wins_and_says_where_it_came_from(own_config, tmp_path
     origin = root_origin("opencode")
     assert origin.source == "environment"
     assert origin.path == tmp_path / "data" / "opencode" / "opencode.db"
-    write_config(own_config, f'[codex]\nsessions = "{tmp_path / "rollouts"}"\n')
+    write_config(own_config, f'[codex]\nsessions = {toml_string(tmp_path / "rollouts")}\n')
     origin = root_origin("codex")
     assert origin.configured and origin.path == tmp_path / "rollouts"
     assert root("codex") == tmp_path / "rollouts"

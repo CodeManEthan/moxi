@@ -10,6 +10,7 @@ import logging
 from pathlib import Path
 
 import pytest
+from moxi_dev.testing import toml_string
 from conftest import write_config
 
 from moxi import config, modules
@@ -235,7 +236,7 @@ def test_another_moxi_or_another_verb_is_no_escape(home):
 def test_a_root_moved_by_config_is_guarded(home, own_config, tmp_path):
     moved = tmp_path / "moved-projects"
     (moved / "-p").mkdir(parents=True)
-    write_config(own_config, f'[claude]\nprojects = "{moved}"\n')
+    write_config(own_config, f'[claude]\nprojects = {toml_string(moved)}\n')
     assert refused("Read", {"file_path": str(moved / "-p/a.jsonl")}, home)
     assert refused("Bash", {"command": f"cat {moved}/-p/a.jsonl"}, home)
     assert ("claude", str(moved)) in readguard.transcript_roots({"HOME": str(home)})

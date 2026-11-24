@@ -6,6 +6,7 @@ import os
 import sqlite3
 
 import pytest
+from moxi_dev.testing import toml_string
 from conftest import write_config
 
 from moxi_sessions import doctor
@@ -74,9 +75,9 @@ def test_a_codex_imports_file_that_parses_is_ok_and_one_that_does_not_warns(home
 
 
 def test_a_configured_root_that_is_missing_warns(home, own_config, tmp_path):
-    write_config(own_config, f'[claude]\nprojects = "{tmp_path / "gone"}"\n'
-                             f'[codex]\nsessions = "{tmp_path / "gone2"}"\n'
-                             f'[opencode]\ndatabase = "{tmp_path / "gone.db"}"\n')
+    write_config(own_config, f'[claude]\nprojects = {toml_string(tmp_path / "gone")}\n'
+                             f'[codex]\nsessions = {toml_string(tmp_path / "gone2")}\n'
+                             f'[opencode]\ndatabase = {toml_string(tmp_path / "gone.db")}\n')
     rows = by_name()
     assert {name: row.state for name, row in rows.items()} == {
         "claude": "warn", "codex": "warn", "opencode": "warn"}

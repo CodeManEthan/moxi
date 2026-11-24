@@ -9,6 +9,7 @@ import threading
 import time
 
 import pytest
+from moxi_dev.testing import toml_string
 
 from moxi_sessions import catalog as catalog_module
 from moxi_sessions.catalog import (ACTIVITY_BYTES, Catalog, Details, Said, Unread,
@@ -257,7 +258,7 @@ def test_a_root_the_env_names_that_does_not_exist_is_absent(home, monkeypatch,
 def test_a_configured_root_that_does_not_exist_is_a_failure(home, own_config, tmp_path,
                                                             harness, key):
     table, name = key.split(".")
-    write_config(own_config, f'[{table}]\n{name} = "{tmp_path / "nowhere"}"\n')
+    write_config(own_config, f'[{table}]\n{name} = {toml_string(tmp_path / "nowhere")}\n')
 
     gathered = Catalog().gather()
 

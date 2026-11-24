@@ -16,6 +16,7 @@ import time
 from urllib.parse import quote
 
 import pytest
+from moxi_dev.testing import toml_string
 
 from moxi_sessions import catalog as catalog_module, page
 from moxi_sessions.testing import ClaudeTranscript, CodexRollout, OpenCodeDb
@@ -299,7 +300,7 @@ def test_a_row_carries_what_was_read_and_null_for_what_was_not(roots):
 def test_a_configured_root_that_does_not_exist_is_named_and_the_others_answer(
         roots, tmp_path, own_config):
     seed(roots)
-    write_config(own_config, f'[codex]\nsessions = "{tmp_path / "nowhere"}"\n')
+    write_config(own_config, f'[codex]\nsessions = {toml_string(tmp_path / "nowhere")}\n')
 
     answer = read("/api/list")
 

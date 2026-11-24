@@ -15,6 +15,7 @@ import os
 from pathlib import Path
 
 import pytest
+from moxi_dev.testing import toml_string
 from conftest import assistant_line, user_line, write_config, write_transcript
 
 from moxi.config import ConfigError
@@ -259,7 +260,7 @@ def test_with_none_and_no_config_the_root_is_the_rule_over_this_process(monkeypa
 
 def test_with_none_the_config_key_names_the_root(own_config, monkeypatch, tmp_path):
     monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(tmp_path / "cfg"))
-    write_config(own_config, f'[claude]\nprojects = "{tmp_path / "stated"}"\n')
+    write_config(own_config, f'[claude]\nprojects = {toml_string(tmp_path / "stated")}\n')
     assert projects_root(None) == tmp_path / "stated"
     assert projects_root(dict(os.environ)) == tmp_path / "cfg" / "projects", \
         "a session's own environment is never overridden by the reader's config"

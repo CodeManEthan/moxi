@@ -8,6 +8,7 @@ import sqlite3
 from pathlib import Path
 
 import pytest
+from moxi_dev.testing import toml_string
 from conftest import write_config
 
 from moxi_sessions import codex
@@ -114,7 +115,7 @@ def test_find_reads_the_default_and_configured_roots(tmp_path, monkeypatch, own_
     assert [h.source.path for h in find("claude", SESSION).hits] == [str(path)]
     stated = tmp_path / "stated"
     other = transcript(stated).write()
-    write_config(own_config, f'[claude]\nprojects = "{stated}"\n')
+    write_config(own_config, f'[claude]\nprojects = {toml_string(stated)}\n')
     assert [h.source.path for h in find("claude", SESSION).hits] == [str(other)]
 
 
@@ -308,7 +309,7 @@ def test_a_listing_entry_bounds_a_read_at_its_size(projects):
 def test_sources_reads_the_configured_root(tmp_path, own_config):
     stated = tmp_path / "stated"
     transcript(stated).write()
-    write_config(own_config, f'[claude]\nprojects = "{stated}"\n')
+    write_config(own_config, f'[claude]\nprojects = {toml_string(stated)}\n')
     listing = sources("claude")
     assert listing.root == str(stated) and len(listing) == 1
 

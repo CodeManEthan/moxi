@@ -14,6 +14,7 @@ import time
 from types import SimpleNamespace
 
 import pytest
+from moxi_dev.testing import toml_string
 
 from moxi_sessions import catalog as catalog_module, lists, pagehandlers
 from moxi_sessions.testing import ClaudeTranscript, CodexRollout, OpenCodeDb
@@ -283,7 +284,7 @@ def test_a_configured_root_that_does_not_exist_is_an_error(roots, stand_in, tmp_
                                                             own_config):
     claude(roots, 1, time.time() - 60, cwd="/work/moxi")
     stand_in(Projects({"/work/moxi": "moxi"}))
-    write_config(own_config, f'[codex]\nsessions = "{tmp_path / "nowhere"}"\n')
+    write_config(own_config, f'[codex]\nsessions = {toml_string(tmp_path / "nowhere")}\n')
 
     answer = read(ROUTE)
 
