@@ -1334,8 +1334,11 @@ class Daemon:
         """A `send` under a scoped sender (`scoped.py`): only its module's token for the
         word sends under it, never from inside a session, and only to its parent: a line
         zero that names anyone else, or the parent and another, is refused before
-        anything is posted. A scoped sender in conflict (its word declared by two modules,
-        or its name held by a program or a session) sends nothing."""
+        anything is posted. A scoped sender in conflict sends nothing: its word declared
+        by two modules, or its name held with no live binding here (a binding still open
+        in the store). A name a live session binds, or a send-only name, never reaches
+        this path: the send is checked against its holder's credential and refused
+        `credential` (docs/protocol.md)."""
         name = found.qualified
         with self._lock, self._db() as db:
             why = scoped_mod.conflict_why(db, found, bound=name in self.bindings)
