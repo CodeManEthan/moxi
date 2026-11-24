@@ -397,9 +397,11 @@ def sock_dir(tmp_path_factory):
     import shutil
     import tempfile
 
+    from moxi_dev.testing import short_root
+
     base = str(tmp_path_factory.getbasetemp())
     if len(base) > _SHORT_SOCKETS:
-        base = "/tmp"
+        base = short_root()
     path = Path(tempfile.mkdtemp(prefix="ipc", dir=base))
     yield path
     shutil.rmtree(path, ignore_errors=True)

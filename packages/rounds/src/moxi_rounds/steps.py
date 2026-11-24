@@ -173,7 +173,9 @@ class Seen:
     `state`, the build's state as git reads it; `tip`, its branch's tip; `clean`,
     whether its worktree is on this machine with the build's branch checked out and
     nothing uncommitted; `check`, the argv the repo's check gives now at `head`, None
-    when the repo declares no check; `values`, what the placeholders of a command read
+    when the repo declares no check; `full_check`, in a queue project, the argv its
+    `check.command` gives now at `head`, which meets the check step too, else None;
+    `values`, what the placeholders of a command read
     for the build at `head` (`checking.values`); `commands`, for each command step of
     the user's own, the argv that stands for its entry's filled one where `values` was
     not read, as `numbers.logged` gives the newest run's own; `ci`, what CI's form of
@@ -202,6 +204,7 @@ class Seen:
     tip: str | None = None
     clean: bool = False
     check: tuple[str, ...] | None = None
+    full_check: tuple[str, ...] | None = None
     values: Mapping[str, str] | None = None
     commands: Mapping[str, tuple[str, ...]] | None = None
     ci: ci_reads.Now | None = None
@@ -447,8 +450,11 @@ def _check(state: states.State, about: Asked) -> Step:
         return Step(CHECK, WAITING, stage=stage, waits=(seen.problem,))
     # Read at the head: the tip, or the build's head once its branch is gone, which is
     # where a finish reads it.
-    if seen.head is not None and seen.check is not None and checking.passes(
-            state, stage, CHECK, tip=seen.head, argv=seen.check):
+    # In a queue project the newest run passing with the full check's argv meets it too.
+    if seen.head is not None and any(
+            argv is not None and checking.passes(state, stage, CHECK, tip=seen.head,
+                                                 argv=argv)
+            for argv in (seen.check, seen.full_check)):
         return Step(CHECK, DONE, stage=stage)
     # A queue member the lander landed is met by its candidate's records at the tip.
     if (seen.land == own.LAND_QUEUE and seen.head is not None
