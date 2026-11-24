@@ -893,7 +893,7 @@ def test_the_exit_rule_needs_comms(monkeypatch):
                        "headless_exit": ["cold"]}, available=only("turns"))
 
 
-@pytest.mark.parametrize("row, value", [("keep_warm", "on"), ("recycle_on_expiry", "clear"),
+@pytest.mark.parametrize("row, value", [("recycle_on_expiry", "clear"),
                                         ("recycle_on_expiry", "compact")])
 def test_the_cache_timer_rows_are_left_out_of_a_headless_launch_with_an_identity(
         monkeypatch, row, value):
@@ -907,6 +907,17 @@ def test_the_cache_timer_rows_are_left_out_of_a_headless_launch_with_an_identity
     plain = headless_launch(monkeypatch, headless_comms("claude", "codex"),
                             harness="claude", identity="", brief="b", **{row: value})
     assert plain.values[row] == value
+
+
+@pytest.mark.parametrize("value", ["on", "off"])
+def test_a_headless_launch_with_an_identity_keeps_its_keep_warm(monkeypatch, value):
+    """Its nudges start the exit rule's idle count again, as any turn does, so the
+    session ends by its rule once they stop: the row is kept, with no warning."""
+    monkeypatch.setattr(catalog, "session_env_readable", lambda: True)
+    got = headless_launch(monkeypatch, headless_comms("claude", "codex"), harness="claude",
+                          brief="b", keep_warm=value)
+    assert got.values["keep_warm"] == value
+    assert not any("keep_warm" in w for w in got.warnings)
 
 
 # -- keep_warm: a launch setting, off unless set ------------------------------------------

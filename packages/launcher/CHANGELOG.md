@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- A headless launch with an identity keeps `keep_warm = "on"`, with no warning, as any
+  other launch does. A nudge is a turn, which starts the exit rule's `idle=` count again,
+  so the session ends by its rule once keep-warm stops nudging. `recycle_on_expiry` is
+  still left out there with its warning.
 - An open hold is work out wherever a live subagent or a directed agent at work is. Home's
   Sessions row reads a session with neither, but holds of its chain open, as waiting on
   them (`waits` kind `holds`, `waiting on 1 open hold`, `kept warm while 1 hold is

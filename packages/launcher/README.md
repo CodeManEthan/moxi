@@ -985,9 +985,11 @@ comms' own parser before anything starts, so a bad one is refused (2) in comms' 
 and a rule with `idle=` or `after=` and no `cold` gets a warning: mail sent once the
 session's cache is cold waits for the name's next holder. `headless_exit` set by a
 preset or a flag on any other launch is left out with a warning; set in your `[defaults]`
-it is left out without one, as `director` and `scope` are. `keep_warm` and
-`recycle_on_expiry` are left out with a warning on a headless launch with an identity,
-since nudging or recycling the session would work against its exit rule. The launch
+it is left out without one, as `director` and `scope` are. `recycle_on_expiry`
+is left out with a warning on a headless launch with an identity, since recycling the
+session would work against its exit rule. `keep_warm` stays as set: a nudge is a turn,
+which starts the rule's `idle=` count again, so the session ends by its rule once
+keep-warm stops nudging (nothing at work, or a cap spent). The launch
 returns at once; the deliverer watches the bind and ends the row `failed` as above when
 the name can't be taken, and sends nothing more. When the deliverer can't be started, the
 launcher ends the wrapper (SIGTERM), and its session with it, and the row ends `failed`,

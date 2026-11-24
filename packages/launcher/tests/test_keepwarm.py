@@ -427,6 +427,18 @@ def test_a_launch_is_nudged_only_when_made_with_keep_warm_on(conn, target, value
         assert got.runs == []
 
 
+def test_a_headless_launch_with_an_identity_and_keep_warm_on_is_nudged_while_work_is_out(
+        conn):
+    conn.execute("UPDATE launches SET values_json = ?, target = 'headless', slot = NULL "
+                 "WHERE request_id = 'r1'",
+                 ('{"keep_warm": "on", "identity": "coder", "headless_exit": ["idle=30m"]}',))
+    got = ask(conn)
+    assert (got.verdict.outcome, got.verdict.word) == ("nudged", "subagents")
+    # With nothing at work it isn't nudged, so its exit rule's idle count runs on.
+    back = ask(conn, session=FakeSession(facts_seq=[facts(number=9)]))
+    assert back.verdict.word == "idle" and back.session.delivered == []
+
+
 def test_a_session_no_launch_holds_ends_quietly(conn):
     assert ask(conn, which=NEW).verdict.word == "not-launched"
 

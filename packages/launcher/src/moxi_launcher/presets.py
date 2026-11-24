@@ -1195,10 +1195,11 @@ def _no_default_mark(harness: str, preset, *, scratch: bool, source: str | None)
 #: The row holding a headless launch's exit rule; each value is one `--exit` of comms'
 #: wrapper, and none leaves comms' own default rule.
 HEADLESS_EXIT = "headless_exit"
-#: The cache-timer rows a headless launch with an identity leaves out: a keep-warm nudge
-#: would keep its cache warm and restart its idle count, and a recycle asks the session
-#: for a clear or compact.
-CACHE_TIMER_ROWS = ("keep_warm", "recycle_on_expiry")
+#: The cache-timer rows a headless launch with an identity leaves out: a recycle asks the
+#: session for a clear or compact. `keep_warm` stays: a nudge is a turn, which starts the
+#: exit rule's idle count again, so the session ends by its rule once keep-warm stops
+#: nudging (nothing at work, or a cap spent).
+CACHE_TIMER_ROWS = ("recycle_on_expiry",)
 #: The warning of an exit rule under which mail held for a cold cache can outlast the
 #: session: it has idle= or after= and no cold.
 COLD_GAP = ("headless_exit has idle= or after= and no cold: mail sent once the session's "
