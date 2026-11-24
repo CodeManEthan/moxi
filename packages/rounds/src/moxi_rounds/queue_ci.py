@@ -13,9 +13,11 @@ takes any object with the same methods, so a test gives it a stand-in.
   a check's does (moxi's runs under `gate.lock` and `check.lock`).
 - `read(place, commit)` reads a candidate's CI at `commit` as `check` reads it
   (`ci.read_runs`), by the workflows the setting gives candidates
-  (`ci.Declared.candidate_workflows`), as one `Read`: the whole reading, `pending`
-  while any run it read has not completed (its ids in `running`), so a failed job of a
-  run that goes on reads no red, or else `cancelled` when a run it read was cancelled.
+  (`ci.Declared.candidate_workflows`), as one `Read`: the whole reading, `cancelled`
+  when a run it read was cancelled. A reading that would be red or cancelled reads
+  `pending` while any run it read has not completed (their ids in `running`), so a
+  failed job of a run that goes on reads no red; a green reading of the jobs it reads
+  stands at once, while other jobs of the run still go.
   `read_full(place, commit, not_runs=...)` reads the target's full run there the same
   way, by the full run's workflows (`ci.Declared.full_workflows`), so a candidate's
   scoped run at the same commit never stands in for it, and leaves out the runs
@@ -83,7 +85,7 @@ class Read:
     """A read of a candidate's CI: the whole reading (`ci.GREEN`, `ci.RED`, `ci.PENDING`,
     `ci.ABSENT` or `CANCELLED`), the ids of the runs read, each workflow as `ci.reading`
     gives it, the argvs that ran, and the ids of the runs read that have not completed
-    (`running`)."""
+    where they hold the reading at pending (`running`)."""
 
     word: str
     runs: tuple[str, ...] = ()
@@ -154,13 +156,16 @@ class QueueCi:
         reading, runs = ci.read_runs(self.found, values={"tip": commit}, cwd=place,
                                      is_candidate=is_candidate, not_runs=not_runs)
         # A run with no id is still named, so it still holds the read at pending.
-        running = tuple(str(run.get("databaseId", "unknown")) for run in runs
-                        if run.get("status") != "completed")
+        going = tuple(str(run.get("databaseId", "unknown")) for run in runs
+                      if run.get("status") != "completed")
         word = reading.whole
+        if any(run.get("conclusion") == CANCELLED for run in runs):
+            word = CANCELLED
+        # GitHub refuses a rerun and a failure log while a run goes, so a red or
+        # cancelled reading is not final until every run ends; any other stands.
+        running = going if word in (ci.RED, CANCELLED, ci.PENDING) else ()
         if running:
             word = ci.PENDING
-        elif any(run.get("conclusion") == CANCELLED for run in runs):
-            word = CANCELLED
         return Read(word, tuple(str(run.get("databaseId")) for run in runs
                                 if run.get("databaseId") is not None),
                     reading.workflows, reading.status_argv, reading.ids_argv,

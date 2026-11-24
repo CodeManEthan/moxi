@@ -666,12 +666,13 @@ def test_a_failed_read_is_tried_again_and_pauses_the_queue_after_too_many(
 
 class Runs:
     """What `status` and `jobs` print, stood in for so a real `queue_ci.QueueCi` reads
-    it: one run, 101, of a workflow read by its jobs `linux` and `web`, at whatever
-    commit is read. It starts going, `linux` failed and `web` still running."""
+    it: one run, `id` (101), of a workflow read by its jobs `linux` and `web`, at
+    whatever commit is read. It starts going, `linux` failed and `web` still running."""
 
     WORKFLOW = ci.Workflow("ci.yml", ("linux", "web"))
 
     def __init__(self):
+        self.id = 101
         self.restart()
 
     def restart(self) -> None:
@@ -683,8 +684,16 @@ class Runs:
         self.status, self.conclusion = "completed", "failure"
         self.jobs[1] = {"name": "web", "status": "completed", "conclusion": "success"}
 
+    def green_going(self) -> None:
+        """The run goes on, both jobs it is read by green and a job it is not read by,
+        `macos`, still running."""
+        self.status, self.conclusion = "in_progress", ""
+        self.jobs = [{"name": name, "status": "completed", "conclusion": "success"}
+                     for name in ("linux", "web")]
+        self.jobs.append({"name": "macos", "status": "in_progress", "conclusion": ""})
+
     def read_runs(self, found, *, values, cwd, is_candidate=False, not_runs=()):
-        run = {"databaseId": 101, "workflowDatabaseId": 11, "headSha": values["tip"],
+        run = {"databaseId": self.id, "workflowDatabaseId": 11, "headSha": values["tip"],
                "status": self.status, "conclusion": self.conclusion,
                "createdAt": "2026-11-01T10:00:00Z"}
         each, whole = ci.reading([self.WORKFLOW], {"ci.yml": 11}, [run], values["tip"],
@@ -725,6 +734,18 @@ def test_a_red_job_in_a_running_run_reads_pending_and_nothing_is_rerun(
     batch = queue().batches[-1].id
     assert (f"lander of proj-a: batch {batch}: run 101 is still running; waiting for it "
             "to end") in said
+
+
+def test_a_run_green_on_the_jobs_it_is_read_by_lands_while_other_jobs_go(
+        repo, ready, fake, lander_pass, monkeypatch):
+    ready()
+    read_through_queue_ci(fake, monkeypatch).green_going()
+    lander_pass()
+    said = lander_pass()
+    assert queue().member(ROUND, "B1").state == queue_file.LANDED
+    assert [(one["reading"], one.get("running")) for one in read_events()] == [
+        (ci.GREEN, None)]
+    assert not any("still running" in line for line in said)
 
 
 def test_a_running_candidate_never_counts_toward_the_read_fails(

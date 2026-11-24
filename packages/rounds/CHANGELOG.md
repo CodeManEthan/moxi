@@ -33,11 +33,13 @@
   finishing would bring into the target holds a private file, a path under one, or a
   file where its folder would be; `check` reads it before it runs and `finish` again
   under its lock. `moxi rounds doctor` gains a private files row.
-- The merge queue acts on a CI run only once it has finished. Until every run a read
-  names reads `completed`, the candidate, rerun and main paths read it as pending: they
-  rerun nothing, read no failure log and count nothing toward the failed reads. A batch
-  or head `read` event names the runs still going in `running`, and the lander's log and
-  `moxi rounds queue` say the run is still running.
+- The merge queue acts on a red or cancelled CI reading only once its run has
+  finished. Until every run such a read names reads `completed`, the candidate, rerun
+  and main paths read it as pending: they rerun nothing, read no failure log and count
+  nothing toward the failed reads. A reading green on the jobs it reads stands at once,
+  while other jobs of the run still go. A batch or head `read` event held pending names
+  the runs still going in `running`, and the lander's log and `moxi rounds queue` say
+  the run is still running.
 - Main's full run is never a candidate's run: the lander leaves out every run whose id a
   batch's read recorded when it reads the target's head, and `green` and `red` events
   that named a candidate's run, older ones included, no longer count as main's. With no

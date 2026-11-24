@@ -198,6 +198,21 @@ def test_mains_run_still_running_is_not_rerun_or_read(
     assert fake.reruns == [(("101",), True)] and fake.failure_reads == []
 
 
+def test_mains_run_green_on_the_jobs_it_is_read_by_stands_while_other_jobs_go(
+        repo, ready, fake, lander_pass, with_ref, monkeypatch):
+    ready()
+    landed(lander_pass)
+    head = hand_commit(repo, "one.txt")
+    runs = read_through_queue_ci(fake, monkeypatch, main=True)
+    runs.green_going()
+    runs.id = 301
+    lander_pass(0.0)
+    assert queue().main_at(head)["event"] == queue_file.GREEN
+    read = [one for one in queue().head_runs if one.get("head") == head]
+    assert [(one["kind"], one["reading"], one.get("running")) for one in read] == [
+        (batching.READ, ci.GREEN, None)]
+
+
 @pytest.mark.parametrize("stands_for, said", [
     ({"scoped": "linux", "web": "browser"},
      " (.github/workflows/queue.yml; scoped stands for linux, web stands for browser)"),

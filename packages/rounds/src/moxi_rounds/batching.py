@@ -31,10 +31,11 @@ pass, before its CI is read, so nothing lands without it. A repo with no `ci` se
 has no CI to read a candidate by: the queue pauses, saying so.
 
 **Read** CI each pass until it reads `green`, `red`, `cancelled`, or `absent` for
-`ABSENT_S` after the push. A read with a run that has not completed reads `pending`,
-whatever its jobs read so far (`queue_ci.Read.running`): nothing is rerun, no failure
+`ABSENT_S` after the push. A read that would be red or cancelled while a run it names
+has not completed reads `pending` (`queue_ci.Read.running`): nothing is rerun, no failure
 log is read and no failed read counted until every run it names has ended, and its
-`read` event names the runs still running. Rounds sets no limit on a running run; the
+`read` event names the runs still running. A read green on the jobs it reads stands at
+once, while other jobs of the run still go. Rounds sets no limit on a running run; the
 CI's own job limits end one. A cancelled run is rerun once; an absent one ends the batch,
 so the next pass pushes it again under the next batch number. A second cancelled run,
 or a second absent one in a row, pauses the queue with that reason. A read that fails
@@ -615,8 +616,8 @@ class _Pass:
 
     def read_head(self, head: str, *, push: bool = False) -> dict | None:
         """The target's full run at `head` as read: its `green` or `red` event, read once
-        the run has ended and, when red, after one rerun of its failed jobs. None until
-        then. Only the full run's workflows are read (`read_full`), and no run a
+        green, or once the run has ended and, when red, after one rerun of its failed
+        jobs. None until then. Only the full run's workflows are read (`read_full`), and no run a
         candidate was read by (`queue_file.Queue.candidate_runs`), so a candidate's run
         at the same commit, scoped or full, never stands in for it. With `push`, a head
         with no run is pushed to the target's `ci` ref, again once when no run shows
