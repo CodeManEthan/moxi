@@ -640,8 +640,8 @@ def test_a_package_run_past_its_bound_is_ended_with_its_tree_and_fails_alone(
     stacks = repo / check.RUN_DIR / "cache.stacks"
     out = capsys.readouterr().out
     assert (f"moxi-dev check: cache: its tests ran past their 4 s bound, so the check "
-            f"ended the run and every process under it and fails the package; the stacks "
-            f"of the 1 of its processes still running then are in {stacks}") in out
+            f"ended the run and every process under it and fails the package; the one "
+            f"process still running then wrote its stacks to {stacks}") in out
     assert [path.name for path in stacks.iterdir()] == ["main-1.txt"]
     child = int(pid_file.read_text())
     wait_for(lambda: not _running(child), testing.PROC_WAIT_S,
@@ -709,6 +709,16 @@ def test_the_check_puts_back_the_signal_handlers_it_found(repo):
     before = {one: signal.getsignal(one) for one in check.END_SIGNALS}
     run_check(repo, Runs(), full=True)
     assert {one: signal.getsignal(one) for one in check.END_SIGNALS} == before
+
+
+@pytest.mark.parametrize(("written", "said"), [
+    (0, "none of its processes wrote its stacks"),
+    (1, "the one process still running then wrote its stacks to {where}"),
+    (3, "the 3 processes still running then wrote their stacks to {where}"),
+])
+def test_the_cut_line_says_how_many_processes_wrote_their_stacks(tmp_path, written, said):
+    where = tmp_path / "cache.stacks"
+    assert check.stacks_said(written, where) == said.format(where=where)
 
 
 def test_a_run_ended_at_its_bound_with_no_stacks_says_so(repo, capsys):

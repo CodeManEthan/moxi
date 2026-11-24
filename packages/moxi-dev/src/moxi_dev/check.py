@@ -722,6 +722,16 @@ def check(root: Path, *, full: bool = False, base: str | None = None,
         return result
 
 
+def stacks_said(written: int, stacks_dir: Path) -> str:
+    """The cut line's last part: how many of the run's processes wrote their stacks into
+    `stacks_dir` at the stacks time."""
+    if written == 0:
+        return "none of its processes wrote its stacks"
+    if written == 1:
+        return f"the one process still running then wrote its stacks to {stacks_dir}"
+    return f"the {written} processes still running then wrote their stacks to {stacks_dir}"
+
+
 @dataclass
 class _Steps:
     root: Path
@@ -893,9 +903,7 @@ class _Steps:
                         path.unlink()
                 except OSError:
                     continue
-        where = (f"the stacks of the {len(written)} of its processes still running "
-                 f"then are in {stacks_dir}" if written
-                 else "none of its processes wrote its stacks")
+        where = stacks_said(len(written), stacks_dir)
         print(f"moxi-dev check: {package.dir}: its tests ran past their "
               f"{self.suite_bound_s:g} s bound, so the check ended the run and every "
               f"process under it and fails the package; {where}", flush=True)
