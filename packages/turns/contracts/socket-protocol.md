@@ -250,6 +250,22 @@ A shell left over does not make the command a failure: the command ran.
   (a Claude Code turn with no visible text, a Codex turn with no agent message or an
   empty one), and where the harness gives none (an OpenCode host). Every delivery the
   turn took, steers included, ends with the same `answer`.
+  On Claude Code a steer can go in after the turn's last request: Claude Code holds it
+  for the session's next request, and that turn's `turn.ended` does not name it. The steer
+  then opens a turn of its own, ahead of every queued delivery, whose prompt is a short
+  line saying a note came with it (Claude Code sends the held text beside that prompt).
+  The session's `prompt` listeners read the steer's text as that prompt's `text`. That
+  turn's `turn.started` and `turn.ended` name the steer as `opened`, and its `ended` is
+  that turn's end. When another turn's request carried the held text first (the person's
+  prompt, or a delivery that went ahead of the steer), no turn of its own runs: with that
+  turn still open the steer joins it, as a `turn.steered` of it, and ends with it; else it
+  ends with that turn, whose `turn.ended` went out without naming it. When Claude Code no
+  longer holds the text by then (a `/clear` or a compaction dropped it), the steer's own
+  text is that turn's prompt. When the steer's own turn ended with no request of it
+  carrying the held text (a compaction inside its first request dropped it), that turn's
+  `turn.ended` does not name the steer, though its `turn.started` did, and the steer
+  opens one more turn, whose prompt is its own text where Claude Code no longer holds it.
+  It does so once: the end of that further turn is the steer's end.
 - `source` is one of `startup`, `resume`, `clear`, `compact`, or null when the harness did
   not say.
 
@@ -449,9 +465,11 @@ endpoint decides from its own record refused the steer: `idle` when no turn runs
 when a Codex host has no accepted load, or `unsupported`. The harness's take comes later:
 the delivery's `started` value and the `turn.steered` notification arrive when the harness
 confirms it took the text, and its `ended` is that turn's end. A steer is either taken into
-the turn that is running or settles `refused` `idle`; it never becomes a turn of its own.
-So a caller that falls back to `deliver` on `idle` runs the text once whichever way the race
-went. Steers reach the harness in the order the endpoint recorded them. A steer the harness
+the turn that is running or settles `refused` `idle`. It becomes a turn of its own only on
+Claude Code, when the turn it went into ended before any request carried the text (see
+`turn.ended`): its `ended` is then that later turn's end, or the end of the turn whose
+request carried the text first. Either way the text runs once, so a caller that falls back
+to `deliver` on `idle` runs the text once whichever way the race went. Steers reach the harness in the order the endpoint recorded them. A steer the harness
 neither confirms nor refuses within 300 s settles `lost`, with a reason starting `expired`.
 
 A caller that wants a steer where the session can take one, and a turn of its own where it

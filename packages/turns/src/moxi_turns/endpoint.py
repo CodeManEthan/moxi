@@ -160,6 +160,9 @@ class Handed:
     #: Asked with `keep`: its end is written to the kept ends when it settles, and it
     #: stays out of the settled deliveries the endpoint drops, until its `ref` is acked.
     keep: bool = False
+    #: A held steer whose own turn ended before any request carried its text
+    #: (`on_steer_held`): it has opened its one further turn.
+    missed: bool = False
 
     @property
     def agent(self) -> str | None:
@@ -357,6 +360,9 @@ class Endpoint:
         self._ready: Ready | None = None
         #: Turns whose events wait for the tie, oldest first.
         self._held: list[Turn] = []
+        #: The last main-loop turn whose `TurnEnded` went out, which a held steer that
+        #: needs no turn of its own ends with (`on_steer_carried`).
+        self._last_closed: Turn | None = None
         self._attached = False
         self._holder: _Holder | None = None
         self._asks = itertools.count(1)
@@ -659,7 +665,10 @@ class Endpoint:
         The event's `own` is true when the origin is on `prompt.own_origins`, read now.
         `delivery_id` is the delivery the adapter handed in as this prompt, whose `by` and
         `senders` the event carries as `delivery_by` and `delivery_senders` (None for a
-        prompt turns did not hand in). `opens` is true when the prompt opens a turn, false
+        prompt turns did not hand in). When that delivery is a steer the harness held
+        (`on_steer_held`), the event's `text` is the steer's text: the harness's prompt
+        only points at the text it holds, and the listeners read what the steer says, as
+        they read a delivery's prompt. `opens` is true when the prompt opens a turn, false
         when it joins one already running; the adapter says where it knows, else it is
         true when no main-loop turn is open now."""
         if self._gone is not None:
@@ -669,6 +678,8 @@ class Endpoint:
             if opens is None:
                 opens = self.ledger.open is None
         by, senders = (None, None) if d is None else (d.spec.by, d.spec.senders)
+        if d is not None and d.spec.kind == "steer":
+            text = d.spec.text
         event = self._event("prompt", text=text, origin=origin, own=self._own(origin),
                             delivery_by=by, delivery_senders=senders, opens=opens)
         return turns_listeners.ask(self.registry, event, self.prompt_wait_s,
@@ -966,6 +977,89 @@ class Endpoint:
                                             answer=turn.answer))
             self._cond.notify_all()
 
+    def on_steer_held(self, delivery_id: str) -> None:
+        """The harness took a steer, but the turn it went into ended before any request
+        carried it, and the harness holds the text for the session's next request (Claude
+        Code's plugin note). The steer leaves that turn, whose `turn.ended` then does not
+        name it, and waits to open a turn of its own, ahead of every queued delivery: it
+        goes to the adapter's `submit` once no turn runs and none is in flight, and the
+        turn it opens names it, its end settling the steer; where another turn's request
+        carried the text first, the adapter says so instead (`on_steer_carried`).
+
+        The word may come for the turn the steer opened: that turn ended too before any
+        request carried the text (a compaction inside its first request dropped what the
+        harness held). The steer leaves it the same way, that turn's `turn.ended` not
+        naming it, and opens one more turn, once: a second such word changes nothing, and
+        the steer ends with its turn. A word on a steer that has settled, or on a delivery
+        that is no steer, changes nothing."""
+        with self._lock:
+            d = self._deliveries.get(delivery_id)
+            if (self._gone is not None or d is None or d.spec.kind != "steer"
+                    or d.state not in (_STEERING, _STARTED) or d.expired):
+                log.info("steer %s reported held after it settled; it changes nothing",
+                         delivery_id)
+                return
+            turn = d.turn
+            if turn is not None and turn.delivery_id == d.id:
+                if d.missed:
+                    log.warning("steer %s was missed again by turn %s, which it opened; "
+                                "it ends with that turn", d.id, turn.turn_id)
+                    return
+                d.missed = True
+                turn.delivery_id = None
+                log.warning("steer %s was missed by turn %s, which it opened; it opens "
+                            "one more turn", d.id, turn.turn_id)
+            elif turn is not None and d.id in turn.steered:
+                turn.steered.remove(d.id)
+            log.info("steer %s was held at the end of turn %s; it opens a turn of its own",
+                     d.id, turn.turn_id if turn is not None else None)
+            d.turn = None
+            d.state = _QUEUED
+            d.handed_at = None
+            self._queue.appendleft(d.id)
+            self._cond.notify_all()
+        self._pump()
+
+    def on_steer_carried(self, delivery_id: str) -> bool:
+        """A held steer handed to `submit` needs no turn of its own: a request of another
+        turn carried the text the harness held (the person's prompt went first, or a
+        delivery handed before the steer was reported held), and the adapter submitted
+        nothing. With a main-loop turn open, the one whose requests carry the text, the
+        steer joins it as a steer: it reads `Started` on it, watchers get `turn.steered`,
+        and it ends with that turn. With none open it ends with the last turn that ended,
+        the one that carried it, whose `turn.ended` has gone out without it. False,
+        changing nothing, for a delivery that is no steer waiting to start, or when no
+        turn has ended yet."""
+        with self._lock:
+            d = self._deliveries.get(delivery_id)
+            turn = self.ledger.open
+            if (self._gone is not None or d is None or d.spec.kind != "steer"
+                    or d.state not in (_QUEUED, _INFLIGHT)
+                    or (turn is None and self._last_closed is None)):
+                return False
+            if self._inflight == d.id:
+                self._inflight = None
+            with contextlib.suppress(ValueError):
+                self._queue.remove(d.id)
+            if turn is not None:
+                log.info("steer %s needs no turn of its own: turn %s carries it", d.id,
+                         turn.turn_id)
+                d.state = _STARTED
+                d.turn = turn
+                d.started = Started(turn.turn_id)
+                turn.steered.append(d.id)
+                if not turn.held:
+                    self._emit(self._turn_steered(turn, d.id))
+            else:
+                last = self._last_closed
+                log.info("steer %s needs no turn of its own: turn %s carried it", d.id,
+                         last.turn_id)
+                self._settle(d, ended=Ended(last.turn_id, last.outcome or "error",
+                                            answer=last.answer))
+            self._cond.notify_all()
+        self._pump()
+        return True
+
     def on_stop(self, facts: StopFacts) -> str | None:
         """A Stop of the main loop: ask the stop handler. A string holds the turn open
         with that text as the reason; None (no handler, no answer in time) lets it end."""
@@ -1205,8 +1299,8 @@ class Endpoint:
         recorded against the open turn and its `append` put on the worker under one hold
         of the lock. It reads `Started`, and watchers get `turn.steered`, once the adapter
         confirms the harness took it (`steered`); the harness's refusal settles it
-        `refused` `idle`. It never becomes a turn of its own. `by` and `senders` are as
-        `deliver`'s."""
+        `refused` `idle`. It becomes a turn of its own only when the harness reports it
+        held at its turn's end (`on_steer_held`). `by` and `senders` are as `deliver`'s."""
         with self._lock:
             d = self._new("steer", text, ref, by=by, senders=tuple(senders))
             reason = self._unable("steer")
@@ -1793,6 +1887,7 @@ class Endpoint:
             d = self._deliveries.get(delivery_id) if delivery_id else None
             if d is not None and d.state != _DONE:
                 self._settle(d, ended=ended)
+        self._last_closed = turn
         self._emit(TurnEnded(turn.turn_id, turn.session_id, turn.turn_number, outcome,
                              self._turn_deliveries(turn), turn.command))
         self._ask(self._event("turn", turn_id=turn.turn_id, outcome=outcome))
