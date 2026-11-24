@@ -22,14 +22,15 @@ only while the session's recall sender can send (`comms_why`,
 `moxi_memory.recall_send`); its reason otherwise names the sender when comms knows it.
 
 **A new recall (`begin`).** Under the session's subconscious lock it sets every recall of
-the session still running `hurried` and writes the new recall's record, state
-`starting`, holding everything its child runs on: the prompt's text or the topic, its
-senders and the subconscious settings the caller holds. Then it starts the child,
-`moxi-memory-subconscious`, with the session and the recall's id, through the detached
-starter (`spawn_starter`), and returns without waiting for it: the starter starts the
-child detached and exits, so the child runs outside every session. A child that can't
-be started, by this process or by the starter, leaves the record and a log line `lost`,
-with the reason `spawn`.
+the session still running `hurried`, starts the detached starter (`spawn_starter`) for
+the child, `moxi-memory-subconscious`, with the session and the recall's id, and writes
+the new recall's record, state `starting`, naming the starter as the recall's holder
+(`moxi_memory.recall_holder`) and holding everything its child runs on: the prompt's
+text or the topic, its senders and the subconscious settings the caller holds. It
+returns without waiting for the starter, which takes the session's lock before it names
+the child it started as the holder, so it never finds the record unwritten; the child
+runs outside every session. A child that can't be started, by this process or by the
+starter, leaves the record and a log line `lost`, with the reason `spawn`.
 
 **The agent's count (`asked`).** In on-demand mode the agent may start at most
 `subconscious.on_demand_per_prompt` recalls between two counted prompts. The count lives
@@ -63,7 +64,10 @@ SUBCONSCIOUS_ENV = "MOXI_MEMORY_SUBCONSCIOUS"
 AUTOMATIC = "automatic"
 ON_DEMAND = "on-demand"
 MODES = (AUTOMATIC, ON_DEMAND)
-#: The one route a recall runs on.
+#: The variable a launch stamps with the session's subconscious route; a session with
+#: the mode's stamp and none of this runs the default route.
+SUBCONSCIOUS_ROUTE_ENV = "MOXI_MEMORY_SUBCONSCIOUS_ROUTE"
+#: The routes: a fork inside the session through turns (the default).
 SUBAGENT = "subagent"
 #: The routes whose answers come back to the session as a comms message.
 BY_COMMS: tuple[str, ...] = ()
@@ -85,6 +89,12 @@ def mode(env: Mapping[str, str] | None) -> str | None:
     """The session's subconscious mode from its environment, or None when it is off."""
     value = (env or {}).get(SUBCONSCIOUS_ENV)
     return value if value in MODES else None
+
+
+def route_stamp(env: Mapping[str, str] | None) -> str:
+    """The route the session's launch picked: its `SUBCONSCIOUS_ROUTE_ENV` stamp, else
+    the default, `subagent`."""
+    return (env or {}).get(SUBCONSCIOUS_ROUTE_ENV) or SUBAGENT
 
 
 def counts(event, trigger: str) -> bool:
@@ -165,23 +175,27 @@ def begin(session_id: str, harness: str | None, *, start: str, text: str,
           now: float | None = None, spawn=None) -> dict:
     """Write a new recall's record, hurrying the session's running one, start its child
     and return the record. See the module's docstring."""
-    import time
+    from . import recall_holder
 
-    now = time.time() if now is None else now
     recall_id = new_id()
+    failed = None
     with recalls.session_lock(session_id):
         records.hurry_running(session_id, now=now)
+        # the starter takes this lock before it names the child, so it is started first
+        # and named in the record's first write
+        try:
+            pid = (spawn or spawn_child)(session_id, recall_id)
+        except Exception as exc:  # noqa: BLE001 - a child that can't start loses the recall
+            pid, failed = None, f"{type(exc).__name__}: {exc}"
         record = records.write({
             "recall": recall_id, "session": session_id, "harness": harness,
             "state": records.STARTING, "start": start, "text": text,
             "senders": list(senders or ()), "recall_senders": list(recall_senders or ()),
             "settings": dict(settings), "cwd": cwd,
             "notes_dir": notes_dir, "route": route_name, "tools": 0, "answered": False,
-            "rounds": 0}, now=now)
-    try:
-        (spawn or spawn_child)(session_id, recall_id)
-    except Exception as exc:  # noqa: BLE001 - a child that can't start loses the recall
-        record = lose_spawn(session_id, recall_id, f"{type(exc).__name__}: {exc}") or record
+            "rounds": 0, "holder": None if failed else recall_holder.holder(pid)}, now=now)
+    if failed is not None:
+        record = lose_spawn(session_id, recall_id, failed) or record
     return record
 
 
@@ -336,7 +350,7 @@ def reset_asked(session_id: str) -> None:
             write_asked(session_id, 0)
 
 
-__all__ = ["SUBCONSCIOUS_ENV", "AUTOMATIC", "ON_DEMAND", "MODES", "SUBAGENT", "BY_COMMS",
+__all__ = ["SUBCONSCIOUS_ENV", "SUBCONSCIOUS_ROUTE_ENV", "route_stamp", "AUTOMATIC", "ON_DEMAND", "MODES", "SUBAGENT", "BY_COMMS",
            "NO_FORK", "CODEX", "USER", "USER_AND_COMMS", "SCRIPT", "ASKED", "SPAWN", "mode",
            "counts", "route", "comms_why", "subconscious_settings", "settings_keys",
            "default_settings", "new_id", "begin", "lose_spawn", "DETACH", "spawn_starter",

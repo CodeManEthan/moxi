@@ -545,6 +545,17 @@ fork raises is refused rather than shown to you; a fault in that guard refuses t
 too. Once the recall's tool calls or time are used up, every further call is refused
 with a line telling the fork to answer from what it has.
 
+The guards run in a session launched on the subagent route (`MOXI_MEMORY_SUBCONSCIOUS_ROUTE`
+unset or `subagent`). A fork's calls are known by its agent id once the child has
+written it. Before that, a subagent call from an unknown agent id is judged as the fork
+of the newest recall still waiting for its fork (newest by the order the records were
+written). A recall waits only while the process that holds it, named on its record
+from its first write (the starter, then the child), still runs, and at most
+`subconscious.limit_s` plus 60 seconds from its start (120 seconds at the defaults); a
+record whose holder could not be named waits 30 seconds. On Linux these ages and the
+holder's liveness are read on clocks a wall-clock step doesn't move; elsewhere on the
+wall clock, a record's start later than now read as now.
+
 **The log.** `moxi memory subconscious list` prints one line per recall (its id, state,
 start, session, how it started, the head of its prompt or topic, its route, rounds and
 the reason of a `lost` state) and one per stretch a session's subconscious was `off`.
@@ -670,7 +681,7 @@ Two sessions share an identity only when comms' qualified names are the same, so
 | `sessions` | the session table's sessions, with an identity, settled, and by launch kind; or that no session has started or been read yet | `warn` when the table can't be opened or read |
 | `links` | whether comms, the launcher and notes load, and what memory does without each | `warn` when one is installed but fails to load |
 | `retention` | each harness's retention, from sessions | `warn` where sessions warns |
-| `subconscious` | how many live sessions have the subconscious on Claude Code's subagent route, and that a recall fork's permission asks are refused; or that none has it on | `warn` for a live session launched with it on where no route can run now, with the reason (fix: `moxi memory subconscious list`); while memory's config is in error, for the recalls it stopped since the config last read cleanly for a recall, with the newest error (fix: `moxi config memory`); for a recall line whose child and taker are gone, with its age, until the next recall child or session end takes it; for recalls in the last day whose child could not start (reason `spawn`), with the newest error; and for a recall `starting` or `hurried` 30 seconds on with no fork and no log line naming its child (the child gone before it wrote its line, or with no identity of its own to write), which the recall guards stop waiting on |
+| `subconscious` | how many live sessions have the subconscious on Claude Code's subagent route, and that a recall fork's permission asks are refused; or that none has it on | `warn` for a live session launched with it on where no route can run now, with the reason (fix: `moxi memory subconscious list`); while memory's config is in error, for the recalls it stopped since the config last read cleanly for a recall, with the newest error (fix: `moxi config memory`); for a recall line whose child and taker are gone, with its age, until the next recall child or session end takes it; for recalls in the last day whose child could not start (reason `spawn`), with the newest error; for a recall `starting` or `hurried` 30 seconds on with no fork and no log line naming its child (the child gone before it wrote its line, or with no identity of its own to write), which the recall guards stop waiting on; and for one whose holder still runs past its wait for the fork's id, with its state and age |
 
 A `config` row fails when memory's config can't be read, and a `record ingest` row shows a
 failed ingest child.

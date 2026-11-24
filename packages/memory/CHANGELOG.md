@@ -23,6 +23,17 @@
   discard`, which refuses every line on the subagent route since the harness brings
   every answer back itself. Recall records are swept after a day unless their line is
   still kept.
+- A recall's record names the process that holds it from its first write: the
+  listener or the on-demand command starts the detached starter under the session's
+  lock and names it, the starter names the child, and the child names itself. The
+  recall guards wait for a fork's id only while that holder runs and at most
+  `subconscious.limit_s` plus 60 seconds from the recall's start; memory's doctor lists
+  a record past that wait. On Linux the holder's liveness and these ages are read on
+  clocks a wall-clock step doesn't move. Records are ordered by their write sequence
+  (`seq`), and a record's `at` later than now is clamped by whoever holds the session's
+  lock (each write, the guard's judge, the day sweep). The guards run only in a session
+  on the subagent route (`MOXI_MEMORY_SUBCONSCIOUS_ROUTE`, exported as
+  `api.SUBCONSCIOUS_ROUTE_ENV`; unset means `subagent`).
 - A recall's first search under `subconscious.scope = "project-first"` (the default)
   now runs two parts every time: the project's best `prefetch_hits` hits and notes
   files, then the whole index's best hits and the notes root's best files that the

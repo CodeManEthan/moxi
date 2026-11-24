@@ -491,12 +491,16 @@ def live_subconscious() -> list[tuple[str, str, str | None]]:
 
 
 def _never_ran(lines: list[dict], *, now: float) -> str | None:
-    """The recalls whose child never ran: lines lost with reason `spawn` in the last day
-    (the child could not be started), and records `starting` or `hurried` with no fork
-    and no line naming a child past `records.STARTING_GRACE_S` (the child ended before
-    it wrote its line, or found no identity of its own to write), which the recall
-    guards no longer wait on. None when there are none."""
-    from . import recall_guard, recall_start, recalls, records
+    """The recalls whose child never ran or whose fork's id never came: lines lost with
+    reason `spawn` in the last day (the child could not be started); records `starting`
+    or `hurried` with no fork that the recall guards no longer wait on, each with its
+    state and age: those that name no holder past `records.STARTING_GRACE_S` (an old
+    record whose child ended before it wrote its line or found no identity of its own,
+    or one whose holder's identity could not be read), those whose holder is gone with
+    no log line naming a child (it ended before the child wrote one), and those whose
+    holder still runs past its wait (`recall_guard.holder_wait_s`). None when there are
+    none."""
+    from . import recall_guard, recall_holder, recall_start, recalls, records
 
     said = []
     spawn = [line for line in lines if line.get("state") == recalls.LOST
@@ -507,17 +511,26 @@ def _never_ran(lines: list[dict], *, now: float) -> str | None:
                     f"not start ({_shown([str(x.get('recall')) for x in spawn[::-1]])}): "
                     f"{spawn[-1].get('error') or 'no error recorded'}")
     named = {line.get("recall") for line in lines if recall_guard.line_child(line)}
-    silent = [record for session_id in records.session_ids()
-              for record in records.session_records(session_id)
-              if record.get("state") in (records.STARTING, records.HURRIED)
-              and not record.get("fork") and record.get("recall") not in named
-              and now - float(record.get("at") or now) >= records.STARTING_GRACE_S]
-    if silent:
-        ages = [f"{r.get('recall')} ({r.get('state')}, "
-                f"{_age(now - float(r.get('at') or now))} old)" for r in silent[::-1]]
-        said.append(f"{_plural(len(silent), 'recall')} with no log line naming its child "
-                    f"(gone before it wrote one, or with no identity to write): "
-                    f"{_shown(ages)}")
+    boot = recall_holder.boot_now()
+    silent, past = [], []
+    for session_id in records.session_ids():
+        for record in records.session_records(session_id):
+            _waits, why = recall_guard.waiting(session_id, record, now=now, boot=boot)
+            age = recall_holder.age(record, now=now, boot=boot)
+            if why == recall_guard.PAST_WAIT:
+                past.append((age, record))
+            elif why == recall_guard.NO_HOLDER or (
+                    why == recall_guard.HOLDER_GONE and record.get("recall") not in named):
+                silent.append((age, record))
+    for found, text in ((silent, "with no log line naming its child (gone before it "
+                                 "wrote one, or with no identity to write)"),
+                        (past, "whose holder still runs past its wait for the fork's id, "
+                               "so the recall guards take it as no fork")):
+        if found:
+            found.sort(key=lambda pair: pair[0])
+            ages = [f"{r.get('recall')} ({r.get('state')}, {_age(age)} old)"
+                    for age, r in found]
+            said.append(f"{_plural(len(found), 'recall')} {text}: {_shown(ages)}")
     return "; ".join(said) or None
 
 

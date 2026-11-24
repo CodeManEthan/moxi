@@ -214,7 +214,8 @@ def test_a_record_with_no_line_awaits_its_fork_only_for_the_grace(state):
     found = recall_guard.fork_record(SESSION, "agent-9", wait_s=0.1)
     assert found is not None and found["recall"] == record["recall"]
     with recalls.session_lock(SESSION):
-        records.update(SESSION, record["recall"], at=time.time() - grace - 1)
+        records.update(SESSION, record["recall"], at=time.time() - grace - 1,
+                       at_boot=None)
     assert recall_guard.fork_record(SESSION, "agent-9", wait_s=0.1) is None
     assert recall_guard.judge_call(call("Write", agent="agent-9")) is None
     assert recall_guard.judge_ask(call("Write", agent="agent-9")) is None
@@ -233,7 +234,8 @@ def test_a_record_whose_line_names_no_child_awaits_its_fork_only_for_the_grace(s
     found = recall_guard.fork_record(SESSION, "agent-9", wait_s=0.1)
     assert found is not None and found["recall"] == record["recall"]
     with recalls.session_lock(SESSION):
-        records.update(SESSION, record["recall"], at=time.time() - grace - 1)
+        records.update(SESSION, record["recall"], at=time.time() - grace - 1,
+                       at_boot=None)
     assert recall_guard.fork_record(SESSION, "agent-9", wait_s=0.1) is None
     assert recall_guard.judge_call(call("Write", agent="agent-9")) is None
     assert recall_guard.judge_ask(call("Write", agent="agent-9")) is None

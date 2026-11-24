@@ -3,7 +3,7 @@ read and answer, and nothing else, and asks no one.
 
 **Knowing its fork.** A subagent's call is a recall fork's when its agent id is the
 `fork` of a recall record of the session, in any state (`fork_record`). From the moment
-a recall's record is written until its child writes the fork's id, the record awaits
+a recall's record is written until its child writes the fork's id, the record may await
 its fork (`awaits_fork`), whether it is `starting` or `hurried`: a newer recall can hurry
 it after its first round was asked and before the fork's id is written, and that
 changes what the fork may still do, not whether its calls are judged. While the session
@@ -11,13 +11,23 @@ has a record that awaits its fork, a call from an agent id no record names waits
 `STARTING_WAIT_S` for the id, and is then judged as the fork of the newest such record
 whose first round was asked (the record's `rounds`, written before the round goes to
 turns), or of the newest such record when none was asked: only an asked round can have
-started a fork. The guard knows a recall's child only from a log line that names it
-(`line_child`). A record whose child is gone (`moxi.proc.alive` is false for that child)
-will never start a fork, so it counts as no fork. A record with no line, or a line that
-names no child (the child found no identity of its own), can't be told apart from a
-child still starting up: it awaits its fork only until `records.STARTING_GRACE_S` after
-its `at`, by when a living child has written its line, whether it is `starting` or
-`hurried`; past that it counts as no fork. Every other subagent's call is left alone.
+started a fork. Newest is by the records' write sequence (`records.order`), never by
+their `at`, which a clamp moves.
+
+A record awaits its fork only while its holder can still start one. Its holder is the
+process the record names (`moxi_memory.recall_holder`): the starter, then the child, from
+the record's first write; for a record written before records named one, the child its
+log line names. A record whose holder is gone (`recall_holder.alive` is false) will
+never start a fork, so it counts as no fork. One whose holder lives awaits its fork at
+most `holder_wait_s` from the recall's start (`subconscious.limit_s` plus the round's
+margin plus `records.STARTING_GRACE_S`, 120 s at the defaults), by when the first
+round's bound has passed and its child has read the fork's start; past it the record
+counts as no fork, and memory's doctor lists it. A record that names no holder (its
+holder's identity could not be read) can't be told apart from a child still starting
+up: it awaits its fork only until `records.STARTING_GRACE_S` from its start. Ages are
+measured by `recall_holder.age`, on a clock no wall-clock step moves where the system
+has one. Only records of the subagent route await a fork here: a fork on another route
+is not a subagent of the session. Every other subagent's call is left alone.
 
 **A fork's call (`judge_call`).**
 
@@ -56,7 +66,9 @@ leading words match an entry of the list word for word.
 never sees a dialog for it; every other subagent's ask is left to the person.
 
 **Where they run (`guarded`).** Only in a session whose launch turned the subconscious
-on, decided once at the session's start.
+on and picked the subagent route (`recall_start.route_stamp`), decided once at the
+session's start, so a session on another route never has a subagent's call judged as a
+recall fork's.
 
 Standard library at import; the core is imported at use.
 """
@@ -66,8 +78,8 @@ from __future__ import annotations
 import time
 from collections.abc import Mapping
 
-from . import recalls, records
-from .recall_start import mode
+from . import recall_holder, recalls, records
+from .recall_start import SUBAGENT, mode, route_stamp
 
 #: The refusals.
 TIME_UP = "Answer now from what you have: this recall's time is up."
@@ -88,8 +100,20 @@ _POLL_S = 0.05
 
 def guarded(env: Mapping[str, str]) -> bool:
     """Whether a session runs the recall-fork guards: its launch turned the subconscious
-    on. `env` is the session's environment, read once at its start."""
-    return mode(env) is not None
+    on, on the subagent route. `env` is the session's environment, read once at its
+    start."""
+    return mode(env) is not None and route_stamp(env) == SUBAGENT
+
+
+def holder_wait_s(record: Mapping[str, object]) -> float:
+    """How long from its recall's start a record whose holder lives awaits its fork."""
+    from .recall_stream import ROUND_MARGIN_S
+
+    try:
+        limit = float((record.get("settings") or {})["limit_s"])  # type: ignore[index]
+    except (KeyError, TypeError, ValueError):
+        limit = 60.0
+    return limit + ROUND_MARGIN_S + records.STARTING_GRACE_S
 
 
 def line_child(line: Mapping[str, object] | None):
@@ -107,25 +131,49 @@ def line_child(line: Mapping[str, object] | None):
         return None
 
 
+#: Why a record that may await its fork does not (`waiting`).
+HOLDER_GONE = "holder gone"
+PAST_WAIT = "holder past its wait"
+NO_HOLDER = "no holder"
+
+
+def holder_of(session_id: str, record: Mapping[str, object]):
+    """The holder `record` names, as a mapping, else the child its log line names (a
+    record written before records named one, or one whose holder's identity could not
+    be read); None when neither names one."""
+    value = record.get("holder")
+    if recall_holder.named(value):
+        return value
+    child = line_child(recalls.find_line(session_id, str(record.get("recall"))))
+    return {"pid": child.pid, "started": child.started} if child is not None else None
+
+
+def waiting(session_id: str, record: Mapping[str, object], *, now: float | None = None,
+            boot: dict | None = None) -> tuple[bool, str | None]:
+    """(whether `record` awaits its fork, why not when it might have: `HOLDER_GONE`,
+    `PAST_WAIT` or `NO_HOLDER`). See the module's docstring."""
+    if record.get("state") not in (records.STARTING, records.HURRIED) or record.get("fork"):
+        return False, None
+    if record.get("route") not in (None, SUBAGENT):
+        return False, None
+    age = recall_holder.age(record, now=now, boot=boot)
+    held = holder_of(session_id, record)
+    if held is not None:
+        if not recall_holder.alive(held):
+            return False, HOLDER_GONE
+        if age >= holder_wait_s(record):
+            return False, PAST_WAIT
+        return True, None
+    if age >= records.STARTING_GRACE_S:
+        return False, NO_HOLDER
+    return True, None
+
+
 def awaits_fork(session_id: str, record: Mapping[str, object], *,
                 now: float | None = None) -> bool:
-    """Whether `record` is a recall whose fork's id is not yet written while its child
-    may still write it: `starting` or `hurried`, no fork, and either a log line naming a
-    child not known gone, or no line naming a child while the record is under
-    `records.STARTING_GRACE_S` old."""
-    import moxi.proc
-
-    if record.get("state") not in (records.STARTING, records.HURRIED) or record.get("fork"):
-        return False
-    child = line_child(recalls.find_line(session_id, str(record.get("recall"))))
-    if child is not None:
-        return moxi.proc.alive(child)
-    now = time.time() if now is None else now
-    try:
-        at = float(record.get("at") or 0)
-    except (TypeError, ValueError):
-        at = 0.0
-    return now - at < records.STARTING_GRACE_S
+    """Whether `record` is a recall whose fork's id is not yet written while its holder
+    may still write it. See the module's docstring."""
+    return waiting(session_id, record, now=now)[0]
 
 
 def _asked(record: Mapping[str, object]) -> bool:
@@ -277,7 +325,7 @@ def judge_call(call):
     left = max(BUDGET_S - (time.monotonic() - started), 0.0)
     try:
         with recalls.session_lock(session_id, timeout_s=left):
-            record = records.read(session_id, recall_id) or record
+            record = records.clamp(session_id, recall_id) or record
             refusal = _refusal(call, record)
             if refusal is not None:
                 return Deny(refusal)
@@ -298,6 +346,7 @@ def judge_ask(call):
 
 
 __all__ = ["TIME_UP", "READ_ONLY", "ASK_REFUSED", "READ_TOOLS", "SHELL", "REFUSED_CHARS",
-           "STARTING_WAIT_S", "BUDGET_S", "guarded", "line_child", "awaits_fork",
+           "STARTING_WAIT_S", "BUDGET_S", "guarded", "holder_wait_s", "line_child",
+           "HOLDER_GONE", "PAST_WAIT", "NO_HOLDER", "holder_of", "waiting", "awaits_fork",
            "fork_record",
            "time_up", "plain_read", "allowed", "judge_call", "judge_ask"]
