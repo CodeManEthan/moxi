@@ -7,7 +7,8 @@
 //   its build's current step under it, with its stage's steps as tabs.
 // - The board: filter chips and a project picker, the column labels, then the groups,
 //   each round a rail of its steps (`<moxi-ui-rail>`, from ui's client script) with a
-//   sub-line per other build in flight and its folds; then the closed rounds' fold.
+//   sub-line per other build in flight and its folds; then the closed rounds' fold. A
+//   line's stage name has a cell of its own before the rail, never on the rail's line.
 // - The foot: when it was read, the parked questions, and what an address named that is
 //   no longer open.
 //
@@ -46,7 +47,7 @@ import {
   addressRoute, ageWord, ALL_PROJECTS, arrange, AT_DESK, CANT_READ, cardView, cellAt, chips, CLOSED_FOLD,
   closedFoldText, closedWords, EMPTY_HEAD, EMPTY_TEXT, foldKey, foldsOf, footWords, holdOf, isManyProjects, isOpenNow,
   isShown, isUnreadableShown, itemAddress, itemMarker, itemsOf, itemView, KEY_COLUMNS, KEY_HERE, KEY_STATES, KEY_TITLE,
-  layoutOf, LOCAL, linesShown, markAttributes, markKey, moreLabel, noLongerOpen, NOTHING_WAITS, OPEN_ROUNDS,
+  LOCAL, linesShown, markAttributes, markKey, moreLabel, noLongerOpen, NOTHING_WAITS, OPEN_ROUNDS,
   parseAddress, parseMarkKey, PASSAGE_LINES, phoneWaiting, PHONE_PX, phraseShown, placePopover, POP_WIDE, POP_WIDTH,
   popoverWidth, revealBy,
   READ_PASSAGE, READING, READING_AFTER_MS, recordQuery, revealing, sessionAt, sheetMarks, sheetQuestions, SHOW_LINE,
@@ -188,7 +189,8 @@ export class RoundsPage extends LitElement {
     .labels { position: sticky; top: 0; z-index: 2; background: var(--moxi-bg); font-size: 11px;
               color: var(--moxi-text-dim); border-bottom: 1px solid var(--moxi-border); height: 26px; }
     .labels .col { width: var(--moxi-rail-cell); text-align: center; flex: none; white-space: nowrap; }
-    .labels .stagecol { width: var(--moxi-rail-label); flex: none; padding-left: 4px; }
+    .stagecell { width: var(--moxi-rail-label); flex: none; box-sizing: border-box; padding: 0 4px; display: flex;
+                 gap: 6px; align-items: center; white-space: nowrap; overflow: hidden; }
     .name { width: 180px; flex: none; position: sticky; left: 0; z-index: 1; background: inherit;
             overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding-left: 4px; }
     .labels .name { background: var(--moxi-bg); }
@@ -203,15 +205,15 @@ export class RoundsPage extends LitElement {
     .line .name button { font-size: 15px; }
     .line .project { color: var(--moxi-text-dim); margin-left: 6px; }
     moxi-ui-rail { flex: none; }
-    .label { display: flex; gap: 6px; align-items: center; white-space: nowrap; overflow: hidden; padding: 0 4px;
-             font-size: 13px; }
-    .label .stage { color: var(--moxi-text-dim); }
-    .label .branch { overflow: hidden; text-overflow: ellipsis; }
+    .line .stagecell { font-size: 13px; }
+    .stagecell .stage { color: var(--moxi-text-dim); }
+    .stagecell .branch { overflow: hidden; text-overflow: ellipsis; min-width: 0; }
     .more { background: none; border: 0; padding: 0 2px; cursor: pointer; color: var(--moxi-text-dim); }
     .w-yours { font-weight: 600; }
     .w-bad { font-weight: 600; color: var(--moxi-state-failed); }
     .fold { display: flex; align-items: center; gap: 8px; height: 26px; padding-left: 184px; }
     .fold button { background: none; border: 0; cursor: pointer; padding: 0; }
+    .line.unreadable { height: auto; min-height: 34px; padding: 6px 0; box-sizing: border-box; }
     .unreadable .phrase { white-space: normal; }
     .closed .name { color: var(--moxi-text-dim); }
     .closedfold { margin-top: 18px; padding-left: 0; }
@@ -810,7 +812,6 @@ export class RoundsPage extends LitElement {
   }
 
   #board(value: Board): TemplateResult {
-    const layout = layoutOf(value.columns);
     const groups = arrange(value, this.#held);
     const many = isManyProjects(value);
     return html`
@@ -832,28 +833,26 @@ export class RoundsPage extends LitElement {
           @click=${() => this.#toggle({ kind: "key" })}>${KEY_TITLE}</button>
       </div>
       <div class="board"><div class="inner">
-        <div class="labels" aria-hidden="true"><span class="name">round</span>
-          ${value.columns.map((column, at) => html`${at === layout.labelAt ? html`<span class="stagecol">stage</span>` : nothing}
-            <span class="col">${column.label}</span>`)}
-          ${layout.labelAt === value.columns.length ? html`<span class="stagecol">stage</span>` : nothing}
+        <div class="labels" aria-hidden="true"><span class="name">round</span><span class="stagecell">stage</span>
+          ${value.columns.map((column) => html`<span class="col">${column.label}</span>`)}
           <span class="phrase">where it is</span><span class="age"></span></div>
-        ${groups.map((view) => this.#group(view, value, layout.labelAt, many))}
+        ${groups.map((view) => this.#group(view, value, many))}
         ${this.#closedFold(value)}
       </div></div>`;
   }
 
-  #group(view: GroupView, value: Board, labelAt: number, many: boolean): TemplateResult | typeof nothing {
+  #group(view: GroupView, value: Board, many: boolean): TemplateResult | typeof nothing {
     const rounds = view.rounds.filter((one) => isShown(one, this.#filter, this.#project));
     const unreadable = view.unreadable.filter((one) => isUnreadableShown(one, this.#filter, this.#project));
     if (rounds.length + unreadable.length === 0) return nothing;
     return html`<div class="group">${view.label}<span class="dim">${rounds.length + unreadable.length}</span></div>
-      ${rounds.map((one) => this.#round(one, value, labelAt, many))}
+      ${rounds.map((one) => this.#round(one, value, many))}
       ${unreadable.map((one) => html`<div class="line unreadable"><span class="name">${slugOf(one.name)}</span>
         <span class="phrase"><span class="w-bad">${UNREADABLE_LEAD}</span>
           <span class="dim">${unreadableWords(one)}</span></span></div>`)}`;
   }
 
-  #round(round: Round, value: Board, labelAt: number, many: boolean): TemplateResult {
+  #round(round: Round, value: Board, many: boolean): TemplateResult {
     const shown = linesShown(round, this.#unfolded);
     const now = this.#feed?.now() ?? null;
     const folds = foldsOf(round, value.columns);
@@ -865,7 +864,7 @@ export class RoundsPage extends LitElement {
             aria-expanded=${this.#address?.kind === "round" && this.#address.round === round.name ? "true" : "false"}
             @click=${() => this.#toggle({ kind: "round", round: round.name })}>${round.slug}</button>${many
             ? html`<span class="project">${round.project}</span>` : nothing}` : nothing}</span>
-        ${this.#rail(round, line, at, value.columns, labelAt, first)}
+        ${this.#stageCell(round, line, first)}${this.#rail(round, line, at, value.columns)}
         <span class="phrase">${phraseShown(first ? round.phrase : line.phrase, { roundLine: first }).map((part, i) => html`${i ? ", " : ""}<span
           class="w-${part.weight}">${part.text}</span>`)}</span>
         <span class="age">${first ? ageWord(round.last_at, now) : ""}</span>
@@ -901,23 +900,27 @@ export class RoundsPage extends LitElement {
     return item !== null && item.holder === round.name && line.kind === "round";
   }
 
-  /** One line's rail: a mark per column, with the stage label's wide cell before the
-   * first stage column. */
-  #rail(round: Round, line: Line, at: number, columns: readonly Column[], labelAt: number, first: boolean): TemplateResult {
-    const openKey = this.#openKey(round, line);
+  /** A line's stage cell, beside its rail and never on it: the stage's id and branch, and
+   * on the round line the `+N` that unfolds the round's other stages. */
+  #stageCell(round: Round, line: Line, first: boolean): TemplateResult {
     const more = first ? moreLabel(round, this.#unfolded) : null;
-    const label = html`<moxi-ui-mark wide><span class="label">${line.stage ? html`<span class="stage">${line.stage}</span>
+    return html`<span class="stagecell">${line.stage ? html`<span class="stage">${line.stage}</span>
         <span class="branch">${line.branch ?? ""}</span>` : nothing}${more ? html`<button type="button" class="more"
         aria-label=${more.label} aria-expanded=${this.#unfolded.has(foldKey(round.name, "more")) ? "true" : "false"}
-        @click=${() => this.#flip(foldKey(round.name, "more"))}>${more.text}</button>` : nothing}</span></moxi-ui-mark>`;
+        @click=${() => this.#flip(foldKey(round.name, "more"))}>${more.text}</button>` : nothing}</span>`;
+  }
+
+  /** One line's rail: a mark per column and nothing else, so its line runs unbroken. */
+  #rail(round: Round, line: Line, at: number, columns: readonly Column[]): TemplateResult {
+    const openKey = this.#openKey(round, line);
     return html`<moxi-ui-rail data-round=${round.name} data-line=${at}
         @moxi-rail-mark=${(event: Event) => this.#onMark(event, round)}>${columns.map((column, i) => {
       const stage = stageOf(column, line);
       const cell = line.cells[i] ?? null;
       const key = markKey(column.id, stage);
-      return html`${i === labelAt ? label : nothing}<moxi-ui-mark ${attributes(
+      return html`<moxi-ui-mark ${attributes(
         markAttributes(column, stage, round.slug, cell, { open: key === openKey }))}></moxi-ui-mark>`;
-    })}${labelAt === columns.length ? label : nothing}</moxi-ui-rail>`;
+    })}</moxi-ui-rail>`;
   }
 
   /** The key of the mark on this line whose popover is open, if any. */
@@ -935,15 +938,13 @@ export class RoundsPage extends LitElement {
   #closedFold(value: Board): TemplateResult | typeof nothing {
     if (value.closed.length === 0) return nothing;
     const open = this.#unfolded.has(CLOSED_FOLD);
-    const layout = layoutOf(value.columns);
     return html`<div class="fold closedfold"><button type="button" aria-expanded=${open ? "true" : "false"}
         @click=${() => this.#flip(CLOSED_FOLD)}>${open ? "▾" : "▸"} ${closedFoldText(value.closed)}</button></div>
       ${open ? value.closed.map((one) => html`<div class="line closed">
         <span class="name"><button type="button" class="link" data-name=${one.name}
           @click=${() => this.#toggle({ kind: "round", round: one.name })}>${slugOf(one.name)}</button></span>
-        <moxi-ui-rail data-closed=${one.name}>${value.columns.map((column, i) => html`${i === layout.labelAt
-          ? html`<moxi-ui-mark wide></moxi-ui-mark>` : nothing}<moxi-ui-mark ${attributes({ state: "done", settled: "",
-            quiet: "", label: `${column.label}: done` })}></moxi-ui-mark>`)}</moxi-ui-rail>
+        <span class="stagecell"></span><moxi-ui-rail data-closed=${one.name}>${value.columns.map((column) => html`<moxi-ui-mark
+          ${attributes({ state: "done", settled: "", quiet: "", label: `${column.label}: done` })}></moxi-ui-mark>`)}</moxi-ui-rail>
         <span class="phrase dim">${closedWords(one)}</span><span class="age"></span>
       </div>`) : nothing}`;
   }

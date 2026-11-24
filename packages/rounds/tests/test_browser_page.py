@@ -5,7 +5,8 @@ shell's policy refuses; what waits on the operator and the walk through it; a qu
 with its options and passage from its marker; a failed check's red job, run and output
 file; a build in a git repo, on the small flow, with its state and its check failed at
 the tip; a build's verdict; a strip card and its stage's tabs, and the card staying
-open with its build when the strip moves; the folds of a many-stage round; a round's
+open with its build when the strip moves; the folds of a many-stage round; a stage's
+name beside its line's rail, never on it; a round's
 card and the key; an address that opens its popover; a ruling of a round with no
 docket, under its line; a new question without a reload; the strip's way back to a line
 a filter hides; a closed round's card; and the phone layout at 390 px."""
@@ -219,6 +220,77 @@ def test_a_many_stage_round_folds_and_unfolds(shell, ui_page):
     expect(lines).not_to_have_count(1)
     fold.click()
     expect(lines).to_have_count(1)
+
+
+#: The key of the rail mark that holds the focus, through each shadow root; null when
+#: the focus is not in a mark.
+FOCUSED_MARK = """() => {
+  let node = document.activeElement, key = null;
+  while (node) {
+    if (node.localName === "moxi-ui-mark") key = node.getAttribute("key");
+    node = node.shadowRoot ? node.shadowRoot.activeElement : null;
+  }
+  return key;
+}"""
+
+
+def test_a_stage_name_sits_beside_the_rail_never_on_its_line(ui_shells, ui_shell_options,
+                                                             ui_contexts):
+    # A shell of its own, so the round it adds changes no other test's counts.
+    own = ui_shells(**ui_shell_options)
+    tally = "kestrel/tally"
+    with page_kit.under(own):
+        rounds_dir = page_kit.seed(page_kit.shell_home(own) / "notes")
+        opening.open_round(tally, description="a round of three stages", by="planner",
+                           flow="staged")
+        page_kit.design(rounds_dir / "tally", tally,
+                        "\n".join(page_kit.stage(f"B{n}") for n in (1, 2, 3)))
+    page = ui_contexts(own).pages[0]
+    panel = open_panel(page)
+    first = panel.locator(f'moxi-ui-rail[data-round="{tally}"][data-line="0"]')
+    more = panel.get_by_role("button", name=re.compile(r"^(Show|Fold) 2 other stages of tally$"))
+    expect(more).to_have_accessible_name("Show 2 other stages of tally")
+    expect(more).to_have_text("+2")
+    # The keyboard goes from the round's name to its +N, then into the rail's markers.
+    panel.get_by_role("button", name="tally", exact=True).focus()
+    page.keyboard.press("Tab")
+    expect(more).to_be_focused()
+    page.keyboard.press("Tab")
+    assert page.evaluate(FOCUSED_MARK) == first.evaluate(
+        "(rail) => [...rail.children].find((mark) => mark.getAttribute('state')"
+        " && !mark.hasAttribute('quiet')).getAttribute('key')")
+    page.keyboard.press("Shift+Tab")
+    page.keyboard.press("Enter")
+    expect(more).to_have_attribute("aria-expanded", "true")
+    expect(more).to_have_accessible_name("Fold 2 other stages of tally")
+    expect(panel.locator(f'moxi-ui-rail[data-round="{tally}"]')).to_have_count(3)
+    panel.get_by_role("button", name="1 closed round").click()
+    expect(panel.locator(".line.closed")).to_have_count(1)
+    expect(panel.locator("moxi-ui-mark[wide]")).to_have_count(0)
+    round_line = panel.locator(".line").filter(
+        has=page.locator(f'moxi-ui-rail[data-round="{tally}"][data-line="0"]'))
+    expect(round_line.locator(".stagecell")).to_contain_text("B1")
+    head = panel.locator(".labels")
+    stage_x = head.locator(".stagecell").bounding_box()["x"]
+    column_x = head.locator(".col").first.bounding_box()["x"]
+    lines = panel.locator(".line").filter(has=page.locator("moxi-ui-rail"))
+    assert lines.count() > 4
+    for at in range(lines.count()):
+        line = lines.nth(at)
+        cell = line.locator(".stagecell").bounding_box()
+        rail = line.locator("moxi-ui-rail").bounding_box()
+        assert cell["x"] + cell["width"] <= rail["x"] + 0.5, (at, cell, rail)
+        # Every line keeps the columns of the labels row.
+        assert abs(cell["x"] - stage_x) < 0.5 and abs(rail["x"] - column_x) < 0.5, at
+    # No line's text spills onto another's rail: the unreadable round's reason wraps
+    # inside its own line.
+    boxes = [box for box in (panel.locator(".line").nth(at).bounding_box()
+                             for at in range(panel.locator(".line").count())) if box]
+    for upper, lower in zip(boxes, boxes[1:]):
+        assert upper["y"] + upper["height"] <= lower["y"] + 0.5, (upper, lower)
+    reason = panel.locator(".line.unreadable .phrase").bounding_box()
+    line_box = panel.locator(".line.unreadable").bounding_box()
+    assert reason["y"] >= line_box["y"] and reason["y"] + reason["height"] <= line_box["y"] + line_box["height"] + 0.5
 
 
 def test_a_rounds_card_and_the_key_open(shell, ui_page):

@@ -36,6 +36,11 @@
 - New page routes, none open to the phone gateway: `GET /api/agents`, `GET /api/drop`,
   `POST /api/answers` and `POST /api/drop/build`. Nothing acts at phone width.
 - `pointers.page_act` gives the act id a page pointer holds.
+- A board line's stage name, its id and branch with the round's `+N`, is drawn in a
+  cell of its own between the round's name and the rail, and the column labels put
+  `stage` there too. The rail holds only its steps' markers, so its line runs unbroken
+  from the round's own steps into the stage's, and no text sits on it. An unreadable
+  round's line grows to hold its reason, which no longer spills onto the line above.
 
 ## 0.1.4 (unreleased)
 

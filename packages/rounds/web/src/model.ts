@@ -91,20 +91,6 @@ export function tildePath(path: string, home: string | null): string {
 
 // --- columns and markers -------------------------------------------------------------------
 
-/** Where the board's columns stand: the stage label's wide cell sits before the first
- * stage column. */
-export interface Layout {
-  columns: Column[];
-  /** The index of the first stage column, where the stage label goes; the column count
-   * when there is none. */
-  labelAt: number;
-}
-
-export function layoutOf(columns: readonly Column[]): Layout {
-  const at = columns.findIndex((one) => one.part === "stage");
-  return { columns: [...columns], labelAt: at === -1 ? columns.length : at };
-}
-
 /** A marker's key, sent back by the rail: the column, and the stage for a stage step. */
 export function markKey(column: string, stage: string | null): string {
   return stage ? `${column}|${stage}` : column;

@@ -3,7 +3,7 @@ import test from "node:test";
 
 import {
   addressRoute, ageWord, arrange, cardView, cellLabel, chips, closedWords, foldsOf, footWords, holdOf, isOpenNow,
-  isShown, itemMarker, itemsOf, itemView, layoutOf, linesShown, markAttributes, markKey, moreLabel, noLongerOpen,
+  isShown, itemMarker, itemsOf, itemView, linesShown, markAttributes, markKey, moreLabel, noLongerOpen,
   parseAddress, parseMarkKey, passageText, phoneWaiting, phraseShown, phraseText, placePopover, pointerPath, popoverWidth,
   recordQuery, revealBy, revealing, sessionAt, sheetMarks, sheetQuestions, stepHead, stepSections, stripCard, stripKey, stripStep,
   timeWord, waitingCounts, walkFoot, walkStep,
@@ -90,8 +90,6 @@ test("a mark's attributes: flags set or left off, the key with its stage, nothin
   assert.equal(markKey("docket", null), "docket");
   assert.deepEqual(parseMarkKey("check|B1"), { column: "check", stage: "B1" });
   assert.deepEqual(parseMarkKey("close"), { column: "close", stage: null });
-  assert.deepEqual(layoutOf(COLUMNS).labelAt, 3);
-  assert.equal(layoutOf(COLUMNS.filter((one) => one.part !== "stage")).labelAt, 6);
 });
 
 test("a phrase shows its first three parts, and nothing owed when it has none", () => {
