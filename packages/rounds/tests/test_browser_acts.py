@@ -13,7 +13,6 @@ from playwright.sync_api import expect
 import page_kit
 from moxi import modules
 from moxi_rounds import asking, opening, ruling
-from moxi_ui.testing.browser import press
 
 pytestmark = pytest.mark.browser
 
@@ -57,11 +56,11 @@ def tray(panel):
     return panel.get_by_role("region", name="Your answers")
 
 
-def test_a_pick_and_an_own_words_answer_each_read_their_receipt(shell, ui_page):
+def test_a_pick_and_an_own_words_answer_each_read_their_receipt(shell, ui_page, ui_press):
     panel = open_panel(ui_page, f"question/{ROUND}/Q1")
     pop = panel.locator(".pop")
-    press(pop.get_by_role("button", name="old the old name"))
-    press(pop.get_by_role("button", name="Add to answers"))
+    ui_press(pop.get_by_role("button", name="old the old name"))
+    ui_press(pop.get_by_role("button", name="Add to answers"))
     answers = tray(panel)
     expect(answers).to_contain_text("Pick old")
     expect(answers).to_contain_text("page records it on Send")
@@ -69,7 +68,7 @@ def test_a_pick_and_an_own_words_answer_each_read_their_receipt(shell, ui_page):
     panel = open_panel(ui_page, f"question/{ROUND}/Q2")
     pop = panel.locator(".pop")
     pop.get_by_role("textbox", name="Or answer in your own words").fill("Half up, to the cent.")
-    press(pop.get_by_role("button", name="Add to answers"))
+    ui_press(pop.get_by_role("button", name="Add to answers"))
     answers = tray(panel)
     # The tray came back from the browser's storage, with the pick still in it.
     expect(answers).to_contain_text("Pick old")
@@ -77,7 +76,7 @@ def test_a_pick_and_an_own_words_answer_each_read_their_receipt(shell, ui_page):
 
     # The popover closes, as the operator turns to the tray.
     ui_page.keyboard.press("Escape")
-    press(answers.get_by_role("button", name="Send", exact=True))
+    ui_press(answers.get_by_role("button", name="Send", exact=True))
     sent = answers.locator(".trow", has_text="Pick old")
     expect(sent).to_contain_text("Recorded by this page at")
     expect(sent).to_contain_text("page:rounds/")
@@ -94,29 +93,29 @@ def test_a_pick_and_an_own_words_answer_each_read_their_receipt(shell, ui_page):
     expect(panel.locator(".pop")).to_contain_text("Recorded by this page at")
 
 
-def test_a_pick_is_read_back_from_its_receipt(shell, ui_page):
+def test_a_pick_is_read_back_from_its_receipt(shell, ui_page, ui_press):
     panel = open_panel(ui_page, f"question/{ROUND}/Q3")
     pop = panel.locator(".pop")
-    press(pop.get_by_role("button", name="long the long header"))
-    press(pop.get_by_role("button", name="Send now to atlas"))
+    ui_press(pop.get_by_role("button", name="long the long header"))
+    ui_press(pop.get_by_role("button", name="Send now to atlas"))
     receipt = pop.locator(".receipt")
     expect(receipt).to_contain_text("Recorded as C")
-    press(receipt.get_by_role("button", name="That's what I said"))
+    ui_press(receipt.get_by_role("button", name="That's what I said"))
     read_back = tray(panel).locator(".trow").filter(has=ui_page.locator(".top", has_text="That's what I said"))
     expect(read_back).to_contain_text("marked as read back")
 
 
-def test_a_parked_question_opens_from_the_foot_and_is_unparked(shell, ui_page):
+def test_a_parked_question_opens_from_the_foot_and_is_unparked(shell, ui_page, ui_press):
     panel = open_panel(ui_page)
-    press(panel.get_by_role("button", name="1 parked question"))
-    press(panel.get_by_role("list", name="Parked questions").get_by_role("button", name="Q4 When does the archive go?"))
+    ui_press(panel.get_by_role("button", name="1 parked question"))
+    ui_press(panel.get_by_role("list", name="Parked questions").get_by_role("button", name="Q4 When does the archive go?"))
     pop = panel.locator(".pop")
     expect(pop).to_contain_text("Parked by C")
-    press(pop.get_by_role("button", name="Unpark"))
+    ui_press(pop.get_by_role("button", name="Unpark"))
     answers = tray(panel)
     expect(answers).to_contain_text("Unpark")
     ui_page.keyboard.press("Escape")
-    press(answers.get_by_role("button", name="Send", exact=True))
+    ui_press(answers.get_by_role("button", name="Send", exact=True))
     expect(answers.locator(".trow", has_text="Unpark")).to_contain_text("Q4 unparked: open again")
     # Open again, the question waits on the operator once more.
     expect(panel.locator(".waiting")).to_contain_text("question")
