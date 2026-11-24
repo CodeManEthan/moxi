@@ -52,13 +52,14 @@ import {
   READ_PASSAGE, READING, READING_AFTER_MS, recordQuery, revealing, sessionAt, sheetMarks, sheetQuestions, SHOW_LINE,
   slugOf, stageOf, stateWords, stepHead, stepName, stepSections, STRIP_CAPTION, STRIP_EMPTY, STRIP_HEAD, stripCard, stripKey,
   stripStep, stripTabs, UNREADABLE_LEAD, unreadableWords, WAITING_LEAD, waitingCounts, walkFoot, WALK_BUTTON,
-  walkStep, dropLines, dropReceipt, hasOpenBuild, leadOf, PARKED_HEAD, parkedGroups, parkedWords, parkingWords,
+  walkStep, dropLines, dropReceipt, hasOpenBuild, leadFromProject, leadOf, PARKED_HEAD, parkedGroups, parkedWords, parkingWords,
   preparedView, RECOMMENDED,
 } from "./model.ts";
 import type { Address, Context, DropFacts, Filter, GroupView, Held, Item, ItemKind, ItemView, Piece, Section } from "./model.ts";
 import {
-  bodyOf, chipOf, correctionFound, draftOf, EACH, isAnswerable, isPageKind, kindWords, mintId, readBackOf, receiptLines,
-  RULE_LINE, RULE_LINE_ALONE, sendable, sendWords, Tray, trayKey,
+  bodyOf, chipOf, correctionFound, draftOf, EACH, eachLeadWords, isAnswerable, isPageKind, kindWords, messageWords,
+  mintId, overCap, postsOf, readBackOf, receiptLines, recipientWords, RULE_LINE, RULE_LINE_ALONE, sendable, sendWords,
+  Tray, trayKey,
 } from "./tray.ts";
 import type { Draft, Kind, Reach, Receipt, ReceiptLine, Store } from "./tray.ts";
 
@@ -120,6 +121,8 @@ interface DropState {
   why: string | null;
   receipt: Receipt | null;
   busy: boolean;
+  /** Why the drop's post got no answer; `Drop again` posts it once more under its act id. */
+  lost: string | null;
 }
 
 /** The browser's storage, or null where it can't be reached. */
@@ -1135,7 +1138,7 @@ export class RoundsPage extends LitElement {
   // --- acting ------------------------------------------------------------------------------
 
   #reach(value: Board): Reach {
-    return { comms: this.#hasComms(), to: this.#to, leadOf: leadOf(value) };
+    return { comms: this.#hasComms(), to: this.#to, leadOf: leadOf(value), fromProject: leadFromProject(value) };
   }
 
   /** Whether the page server sends through comms: what `/api/agents` said, else whether
@@ -1210,9 +1213,10 @@ export class RoundsPage extends LitElement {
     await this.#send([draft]);
   }
 
-  /** Posts drafts to the answers route with the To choice, and takes the receipts. A post
-   * that gets no answer leaves the drafts as they were: their act ids make a second try
-   * safe. */
+  /** Posts drafts to the answers route with the To choice, in as many posts as its caps
+   * need, and takes the receipts. A draft over a cap of its own stays in the tray with
+   * its row saying why. A post that gets no answer leaves its drafts and the ones after
+   * it as they were: their act ids make a second try safe. */
   async #send(drafts: readonly Draft[]): Promise<void> {
     if (this.#sending || drafts.length === 0) return;
     this.#sending = true;
@@ -1220,13 +1224,15 @@ export class RoundsPage extends LitElement {
     this.requestUpdate();
     try {
       const going = this.#tray.toSend(drafts.map((one) => one.act));
-      const answer = await api(MODULE, "api/answers", bodyOf(going, this.#to));
-      const receipts = answer.data?.receipts;
-      if (answer.status === 200 && Array.isArray(receipts)) {
+      for (const post of postsOf(going, this.#to)) {
+        const answer = await api(MODULE, "api/answers", bodyOf(post, this.#to));
+        const receipts = answer.data?.receipts;
+        if (answer.status !== 200 || !Array.isArray(receipts)) {
+          this.#sendNote = `Not sent: ${failureWhy(answer.status)}. The answers stay in the tray; Send tries them again.`;
+          break;
+        }
         this.#tray.take(receipts, Array.isArray(answer.data.messages) ? answer.data.messages : []);
-        this.#readAnswered(going);
-      } else {
-        this.#sendNote = `Not sent: ${failureWhy(answer.status)}. The answers stay in the tray; Send tries them again.`;
+        this.#readAnswered(post);
       }
     } finally {
       this.#sending = false;
@@ -1261,7 +1267,7 @@ export class RoundsPage extends LitElement {
     return html`<label>To <select aria-label="Send to" @focus=${() => void this.#readAgents()} @change=${(event: Event) => {
         this.#to = (event.target as HTMLSelectElement).value;
         this.requestUpdate();
-      }}><option value=${EACH} ?selected=${this.#to === EACH}>Each round's lead</option>
+      }}><option value=${EACH} ?selected=${this.#to === EACH}>${eachLeadWords(this.#tray.drafts, this.#reach(value))}</option>
       ${names.map((name) => html`<option value=${name} ?selected=${this.#to === name}>${name}</option>`)}</select></label>
       ${this.#agentsWhy ? html`<span class="dim">${this.#agentsWhy}</span>` : nothing}
       ${notLed.length ? html`<span class="dim">${this.#to} does not lead ${notLed.join(", ")}</span>` : nothing}`;
@@ -1280,12 +1286,15 @@ export class RoundsPage extends LitElement {
         <button type="button" class="btn accent" ?disabled=${this.#sending || going.length === 0}
           @click=${() => void this.#send(going)}>${sendWords(tray.drafts, reach)}</button></div>
       ${this.#sendNote ? html`<div class="t-failed">${this.#sendNote}</div>` : nothing}
-      ${tray.sent.length ? html`<div><span class="strong">Sent</span>
+      ${tray.sent.length + tray.value.messages.length ? html`<div><span class="strong">Sent</span>
         <button type="button" class="linkish" @click=${() => { tray.clearSent(); this.requestUpdate(); }}>Clear</button></div>
         ${tray.sent.map((draft) => html`<div class="trow" data-act=${draft.act}>
           <div class="top"><span class="strong">${draft.holder} ${draft.item}</span><span>${kindWords(draft)}</span>
             <span class="dim">${draft.receipt?.state ?? ""}</span></div>
-          ${this.#receiptView(draft, value)}</div>`)}` : nothing}
+          ${this.#receiptView(draft, value)}</div>`)}
+        ${tray.value.messages.length ? html`<div class="messages" aria-label="Messages sent">${tray.value.messages.map(
+          (one) => html`<div class=${one.refused ? "t-failed" : "dim"}>${messageWords(one, { today: value.today })}</div>`)}
+        </div>` : nothing}` : nothing}
     </section>`;
   }
 
@@ -1293,8 +1302,9 @@ export class RoundsPage extends LitElement {
     const tray = this.#tray;
     const notTold = draft.receipt?.state === "recorded-not-told";
     const editing = this.#editing === draft.act;
-    const to = reach.to === EACH ? reach.leadOf(draft.holder) : reach.to;
-    const sendsAlone = reach.comms ? to !== null : isPageKind(draft.kind);
+    const to = recipientWords(draft, reach);
+    const over = overCap(draft);
+    const sendsAlone = over === null && (reach.comms ? to !== null : isPageKind(draft.kind));
     return html`<div class="trow" data-act=${draft.act}>
       <div class="top"><span class="strong">${draft.holder} ${draft.item}</span><span>${kindWords(draft)}</span>
         ${draft.text && !editing ? html`<span>"${draft.text}"</span>` : nothing}</div>
@@ -1304,13 +1314,14 @@ export class RoundsPage extends LitElement {
           this.requestUpdate();
         }}></textarea>` : nothing}
       <div class="chipline">${chipOf(draft, reach)}</div>
+      ${over ? html`<div class="t-failed">${over}</div>` : nothing}
       ${draft.receipt ? this.#receiptView(draft, value) : nothing}
       <div class="acts">
         ${draft.text !== null && !notTold ? html`<button type="button" class="linkish"
           @click=${() => { this.#editing = editing ? null : draft.act; this.requestUpdate(); }}>Edit</button>` : nothing}
         ${notTold ? html`<button type="button" class="btn" ?disabled=${this.#sending} @click=${() => void this.#send([draft])}>
           Send again</button>` : sendsAlone ? html`<button type="button" class="linkish" ?disabled=${this.#sending}
-          @click=${() => void this.#send([draft])}>${reach.comms ? `Send now to ${to ?? "the lead"}` : "Record now"}</button>`
+          @click=${() => void this.#send([draft])}>${reach.comms ? `Send now to ${to}` : "Record now"}</button>`
           : nothing}
         ${notTold ? nothing : html`<button type="button" class="linkish" @click=${() => { tray.remove(draft.act); this.requestUpdate(); }}>
           Remove</button>`}
@@ -1414,14 +1425,14 @@ export class RoundsPage extends LitElement {
         ? box("A note for the lead (optional)") : nothing}`;
     }
     const draft = answerable ? this.#formDraft(item, record) : null;
-    const to = draft ? (reach.to === EACH ? reach.leadOf(item.holder) : reach.to) : null;
+    const to = draft ? recipientWords(draft, reach) : null;
     const canNow = draft !== null && (comms ? to !== null : isPageKind(draft.kind));
     const parkedNow = item.kind === "question" && state === "parked";
     const acts = answerable ? html`<div class="acts">
         <button type="button" class="btn accent" ?disabled=${draft === null} @click=${() => this.#add(item, record)}>
           ${parkedNow ? "Unpark" : "Add to answers"}</button>
         ${canNow ? html`<button type="button" class="btn" ?disabled=${this.#sending}
-          @click=${() => void this.#sendNow(item, record)}>${comms ? `Send now to ${to ?? "the lead"}` : "Record now"}</button>`
+          @click=${() => void this.#sendNow(item, record)}>${comms ? `Send now to ${to}` : "Record now"}</button>`
           : nothing}
         ${item.kind === "question" && state === "open" ? html`${comms ? html`<button type="button" class="btn"
             @click=${() => this.#add(item, record, draftOf(item.holder, item.id, "explain",
@@ -1434,12 +1445,21 @@ export class RoundsPage extends LitElement {
     const inTray = row && !row.receipt ? html`<div class="receipt"><span>In your answers: ${kindWords(row)}${row.text
         ? ` "${row.text}"` : ""}</span><span class="dim">${chipOf(row, reach)}</span></div>` : nothing;
     return html`${inTray}${row?.receipt ? this.#receiptView(row, value) : nothing}
+      ${row?.receipt?.state === "kept" ? this.#keptActs(row, value, reach) : nothing}
       ${answerable ? html`<div class="answer">${form}</div>${acts}` : nothing}`;
+  }
+
+  /** A kept draft's To picker in its popover, and `Send now` once it has a recipient. */
+  #keptActs(row: Draft, value: Board, reach: Reach): TemplateResult {
+    const to = recipientWords(row, reach);
+    return html`<div class="sendrow">${this.#picker(value)}${to !== null && overCap(row) === null
+      ? html`<button type="button" class="btn" ?disabled=${this.#sending} @click=${() => void this.#send([row])}>
+          Send now to ${to}</button>` : nothing}</div>`;
   }
 
   async #openDrop(round: string, stage: string): Promise<void> {
     const act = mintId();
-    this.#drop = { round, stage, act, facts: null, why: null, receipt: null, busy: false };
+    this.#drop = { round, stage, act, facts: null, why: null, receipt: null, busy: false, lost: null };
     this.requestUpdate();
     const enc = encodeURIComponent;
     const answer = await api(MODULE, `api/drop?round=${enc(round)}&stage=${enc(stage)}`);
@@ -1457,10 +1477,14 @@ export class RoundsPage extends LitElement {
     this.requestUpdate();
     const answer = await api(MODULE, "api/drop/build", { round: drop.round, stage: drop.stage, act: drop.act });
     if (this.#drop?.act !== drop.act) return;
-    const receipt: Receipt = answer.status === 200 && answer.data ? answer.data as Receipt
-      : { act: drop.act, holder: drop.round, item: drop.stage, kind: "drop", state: "refused",
-          reason: `Not dropped: ${failureWhy(answer.status)}. Drop again tries it once more.` };
-    this.#drop = { ...this.#drop, busy: false, receipt };
+    if (answer.status !== 200 || !answer.data) {
+      // The drop may have run: Drop again posts the same act id, which runs it at most once.
+      this.#drop = { ...this.#drop, busy: false, lost: failureWhy(answer.status) };
+      this.requestUpdate();
+      return;
+    }
+    const receipt = answer.data as Receipt;
+    this.#drop = { ...this.#drop, busy: false, lost: null, receipt };
     if (receipt.state === "refused") void this.#feed?.refresh();
     this.requestUpdate();
   }
@@ -1482,8 +1506,10 @@ export class RoundsPage extends LitElement {
     return html`<div class="confirm" role="group" aria-label="Drop ${drop.stage}'s build">
       ${dropLines(drop.facts, value.today, value.home).map((one) => html`<div class="sec"><h3>${one.head}</h3>
         ${one.rows.map((row) => html`<div class="row">${row}</div>`)}</div>`)}
+      ${drop.lost ? html`<div class="t-failed">The drop got no answer (${drop.lost}), so it may or may not have run.
+        Drop again sends the same drop once more, and it runs at most once.</div>` : nothing}
       <div class="acts"><button type="button" class="btn" ?disabled=${drop.busy}
-        @click=${() => void this.#dropNow()}>Drop ${drop.stage}'s build</button>${keep}</div></div>`;
+        @click=${() => void this.#dropNow()}>${drop.lost ? "Drop again" : `Drop ${drop.stage}'s build`}</button>${keep}</div></div>`;
   }
 
   // --- the phone ---------------------------------------------------------------------------

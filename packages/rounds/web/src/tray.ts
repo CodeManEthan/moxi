@@ -117,6 +117,8 @@ export interface Reach {
   to: string;
   /** A holder's lead's name; null for none, undefined when the page can't tell. */
   leadOf: (holder: string) => string | null | undefined;
+  /** Whether a holder's lead is its project's rather than its own; none: never. */
+  fromProject?: (holder: string) => boolean;
 }
 
 /** The shape of an act id: 43 characters of `[A-Za-z0-9_-]`. */
@@ -167,6 +169,25 @@ export function recipientOf(draft: Pick<Draft, "holder">, reach: Reach): string 
   return reach.to === EACH ? reach.leadOf(draft.holder) : reach.to;
 }
 
+/** What follows a lead's name when the lead is its project's. */
+export const PROJECTS_LEAD = "(the project's)";
+
+/** Who a draft goes to, in words: the recipient's name, with `(the project's)` beside a
+ * project's lead under `EACH`; "the lead" when the page can't tell; null for none. */
+export function recipientWords(draft: Pick<Draft, "holder">, reach: Reach): string | null {
+  const to = recipientOf(draft, reach);
+  if (to === null) return null;
+  if (to === undefined) return "the lead";
+  return reach.to === EACH && reach.fromProject?.(draft.holder) ? `${to} ${PROJECTS_LEAD}` : to;
+}
+
+/** The To picker's default: each round's lead, naming the leads the drafts go to. */
+export function eachLeadWords(drafts: readonly Draft[], reach: Reach): string {
+  const each = { ...reach, to: EACH };
+  const named = [...new Set(drafts.filter((one) => recipientOf(one, each)).map((one) => recipientWords(one, each)!))];
+  return named.length ? `Each round's lead: ${named.join(", ")}` : "Each round's lead";
+}
+
 /** The one line over the drafts that says who records what. */
 export const RULE_LINE = "On Send the page records picks, decisions, read-backs, done jobs, parks and unparks at once. "
   + "Your own words and explain requests go to the agent to word and record.";
@@ -194,18 +215,18 @@ export function leadCommand(draft: Pick<Draft, "holder" | "item" | "kind" | "tex
 export function chipOf(draft: Draft, reach: Reach): string {
   if (draft.receipt?.state === "recorded-not-told") return "recorded, not told: Send again";
   if (!reach.comms) return isPageKind(draft.kind) ? "page records it" : leadCommand(draft) ?? "nothing to record";
-  const to = recipientOf(draft, reach);
-  if (to === null) return noLeadWords(draft.holder);
-  const agent = to ?? "the lead";
+  const agent = recipientWords(draft, reach);
+  if (agent === null) return noLeadWords(draft.holder);
   if (isPageKind(draft.kind)) return "page records it on Send";
   if (draft.kind === "explain") return `goes to ${agent}; nothing to record`;
   return `${agent} words and records it`;
 }
 
 /** The drafts a Send carries: with comms, each with a recipient; with none, the page's
- * kinds alone. */
+ * kinds alone; neither a draft the answers route would refuse as too long. */
 export function sendable(drafts: readonly Draft[], reach: Reach): Draft[] {
-  return drafts.filter((one) => (reach.comms ? recipientOf(one, reach) !== null : isPageKind(one.kind)));
+  return drafts.filter((one) => overCap(one) === null
+    && (reach.comms ? recipientOf(one, reach) !== null : isPageKind(one.kind)));
 }
 
 /** The Send button's words. */
@@ -213,6 +234,45 @@ export function sendWords(drafts: readonly Draft[], reach: Reach): string {
   const n = sendable(drafts, reach).length;
   if (!reach.comms) return `Record ${n} ${n === 1 ? "answer" : "answers"}`;
   return "Send";
+}
+
+/** The most drafts the answers route takes in one post. */
+export const DRAFTS_MAX = 200;
+/** The longest words one draft may carry, in characters. */
+export const DRAFT_TEXT_MAX = 20000;
+/** The longest value of any other field of a draft, and of the To choice, in characters. */
+export const FIELD_MAX = 200;
+/** The largest body the answers route reads, in bytes. */
+export const BODY_MAX_BYTES = 1024 * 1024;
+
+/** Why the answers route would refuse a draft as it stands, for its row; null when it
+ * takes it. */
+export function overCap(draft: Draft): string | null {
+  const text = draft.text ?? "";
+  if (text.length > DRAFT_TEXT_MAX) {
+    return `Too long to send: ${text.length.toLocaleString("en")} characters, `
+      + `and the most is ${DRAFT_TEXT_MAX.toLocaleString("en")}. Edit it shorter.`;
+  }
+  const long = [draft.holder, draft.item, draft.chose ?? ""].find((one) => one.length > FIELD_MAX);
+  return long === undefined ? null : `Can't be sent: a name in it is over ${FIELD_MAX} characters.`;
+}
+
+/** The drafts split into the posts that carry them, each within the answers route's caps
+ * (`DRAFTS_MAX` drafts and `BODY_MAX_BYTES` of body), in order; a draft over a cap of
+ * its own (`overCap`) goes in none. */
+export function postsOf(drafts: readonly Draft[], to: string): Draft[][] {
+  const size = (some: readonly Draft[]) => new TextEncoder().encode(JSON.stringify(bodyOf(some, to))).length;
+  const posts: Draft[][] = [];
+  let post: Draft[] = [];
+  for (const one of drafts.filter((draft) => overCap(draft) === null)) {
+    if (post.length && (post.length >= DRAFTS_MAX || size([...post, one]) > BODY_MAX_BYTES)) {
+      posts.push(post);
+      post = [];
+    }
+    post.push(one);
+  }
+  if (post.length) posts.push(post);
+  return posts;
 }
 
 /** The answers route's body: the drafts as lists of one length, an empty string for
@@ -367,6 +427,14 @@ export class Tray {
     const match = (one: Draft) => one.holder === holder && one.item === item;
     return [...this.value.drafts].reverse().find(match) ?? [...this.value.sent].reverse().find(match) ?? null;
   }
+}
+
+/** A message a send made, for Sent: who it went to, when and its comms id, or comms'
+ * refusal. */
+export function messageWords(message: Message, { today, clock }: { today: string; clock?: Clock }): string {
+  const at = message.at ? ` at ${timeWord(message.at, today, clock)}` : "";
+  if (message.refused) return `Message to ${message.to}${at} not sent: ${message.refused}`;
+  return `Message to ${message.to}${at}, comms ${message.id ?? ""}`.trim();
 }
 
 /** Whether an item's popover offers the form that answers it. A question offers it by

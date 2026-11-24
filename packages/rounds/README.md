@@ -1541,7 +1541,7 @@ Who records each answer:
 
 With comms installed, `Send` sends one message to each recipient, through comms under
 rounds' send-only name. The To picker defaults to `Each round's lead`, the round's own
-lead or else its project's. The operator can pick any agent comms knows instead, and
+lead or else its project's, which reads `(the project's)` beside its name. The operator can pick any agent comms knows instead, and
 the tray says which rounds that agent does not lead. A draft with no one to send it to
 stays in the tray and nothing is recorded for it. A record whose message comms refused
 stays recorded, and its row offers `Send again`. Without comms nothing is sent: the
@@ -1549,7 +1549,13 @@ button reads `Record <n> answers`, the page records its own kinds, and an own-wo
 answer's row shows the command a lead would run to record it.
 
 Each receipt says what happened: the record and its pointer, who was told and when, and
-what rounds now holds, such as `Recorded as C4:` with the ruling's sentence.
+what rounds now holds, such as `Recorded as C4:` with the ruling's sentence. `Sent` lists
+each sent answer and each message the send made, until the operator clears it. A
+question's popover shows its row's receipt and still offers its answer form while the
+question is open, and `Unpark` while it is parked, whatever the tray holds for it. A draft
+kept for want of a recipient offers the To picker in its popover as in the tray. A draft
+whose words run past 20,000 characters stays in the tray, its row saying so, and a large
+tray goes in as many posts as the answers route's limits need.
 
 Every act carries an act id the page mints when the draft is made. An act posted twice
 runs once: the server keeps each act's receipt for its lifetime and answers a repeat
@@ -1562,7 +1568,9 @@ what it removes if nothing in it would be lost (the worktree and the scratch fol
 each `will be removed` or `will be kept` with the reason, and CI's own refs), and what it
 keeps: the branch and its commits, and the round's log. `Drop <stage>'s build` records
 the operator's drop with the page as the pointer, and with comms installed tells the
-round's lead what the drop removed and kept. The receipt says what the drop did.
+round's lead what the drop removed and kept. The receipt says what the drop did. A drop
+whose post gets no answer offers `Drop again`, which posts the same act id, so the drop
+runs at most once.
 
 ## The read API
 

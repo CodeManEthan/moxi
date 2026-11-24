@@ -2,7 +2,8 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
-  ACT_ID, bodyOf, chipOf, correctionFound, draftOf, EACH, isAnswerable, kindWords, mintId, noLeadWords, readBackOf, receiptLines, RULE_LINE,
+  ACT_ID, BODY_MAX_BYTES, bodyOf, chipOf, correctionFound, DRAFT_TEXT_MAX, DRAFTS_MAX, draftOf, EACH, eachLeadWords,
+  isAnswerable, kindWords, messageWords, mintId, overCap, postsOf, recipientWords, noLeadWords, readBackOf, receiptLines, RULE_LINE,
   RULE_LINE_ALONE, sendable, sendWords, Tray, trayKey,
 } from "../src/tray.ts";
 
@@ -59,6 +60,48 @@ test("a project's draft whose lead the page can't tell goes, for the server to f
   const project = draft("pick", { chose: "a" }, "kestrel", "P1");
   assert.equal(chipOf(project, each), "page records it on Send");
   assert.equal(sendable([project], each).length, 1);
+});
+
+test("a project's lead reads (the project's) in the chips, the Send now name and the To picker's default", () => {
+  const leads = { "kestrel/billing-export": "atlas", "kestrel/ledger": "kestrel-lead", kestrel: "kestrel-lead" };
+  const reach = { comms: true, to: EACH, leadOf: (holder) => leads[holder],
+                  fromProject: (holder) => holder !== "kestrel/billing-export" };
+  const own = draft("words", { text: "mine" });
+  const ledger = draft("words", { text: "theirs" }, "kestrel/ledger", "Q2");
+  const project = draft("explain", {}, "kestrel", "P1");
+  assert.equal(chipOf(own, reach), "atlas words and records it");
+  assert.equal(chipOf(ledger, reach), "kestrel-lead (the project's) words and records it");
+  assert.equal(chipOf(project, reach), "goes to kestrel-lead (the project's); nothing to record");
+  assert.equal(recipientWords(ledger, reach), "kestrel-lead (the project's)");
+  assert.equal(eachLeadWords([own, ledger, project], reach), "Each round's lead: atlas, kestrel-lead (the project's)");
+  assert.equal(eachLeadWords([], reach), "Each round's lead");
+  // An agent picked is named as it is.
+  assert.equal(recipientWords(ledger, { ...reach, to: "builder-1" }), "builder-1");
+  assert.equal(recipientWords(draft("pick", {}, "kestrel/payroll"), { ...reach, leadOf: () => null }), null);
+});
+
+test("Sent lists each message a send made, and comms' refusal of one", () => {
+  assert.equal(messageWords({ to: "atlas", at: AT, id: "m1", delivery: "live", refused: null }, { today: TODAY, clock: UTC }),
+               "Message to atlas at 11:40, comms m1");
+  assert.equal(messageWords({ to: "atlas", at: AT, id: null, delivery: null, refused: "offline: no daemon" },
+                            { today: TODAY, clock: UTC }),
+               "Message to atlas at 11:40 not sent: offline: no daemon");
+});
+
+test("a draft over the answers route's caps stays in the tray, and a Send goes in posts within them", () => {
+  const long = draft("words", { text: "x".repeat(DRAFT_TEXT_MAX + 1) });
+  assert.match(overCap(long), /^Too long to send: 20,001 characters, and the most is 20,000/);
+  assert.equal(overCap(draft("words", { text: "x".repeat(DRAFT_TEXT_MAX) })), null);
+  assert.deepEqual(sendable([long], each), []);
+  const many = Array.from({ length: DRAFTS_MAX + 1 }, () => draft("pick", { chose: "a" }));
+  assert.deepEqual(postsOf([long, ...many], EACH).map((one) => one.length), [DRAFTS_MAX, 1]);
+  const big = Array.from({ length: 60 }, () => draft("words", { text: "y".repeat(DRAFT_TEXT_MAX) }));
+  const posts = postsOf(big, EACH);
+  assert.ok(posts.length > 1);
+  assert.equal(posts.flat().length, 60);
+  for (const post of posts) {
+    assert.ok(new TextEncoder().encode(JSON.stringify(bodyOf(post, EACH))).length <= BODY_MAX_BYTES);
+  }
 });
 
 test("a recorded draft not told says so, with Send again", () => {

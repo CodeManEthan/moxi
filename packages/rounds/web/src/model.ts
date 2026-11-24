@@ -977,6 +977,13 @@ export function leadOf(board: Board): (holder: string) => string | null | undefi
   };
 }
 
+/** Whether a holder's lead is its project's: a round's whose lead the board reads as
+ * the project's, and a project's own item's. */
+export function leadFromProject(board: Board): (holder: string) => boolean {
+  return (holder) => !holder.includes("/")
+    || board.rounds.find((one) => one.name === holder)?.lead?.from === "project";
+}
+
 /** What the popover says of a prepared answer: the option it marks `recommended` and the
  * line over the passage, `The lead recommends b, sure: high: <why>`; null when there is
  * none or it was prepared for other options. */
