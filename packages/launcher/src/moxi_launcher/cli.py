@@ -849,8 +849,9 @@ def _act_parsers(verbs) -> None:
                       help="launch again the session the run RUN exited")
     relaunch.add_argument("--handoff", metavar="FILE",
                           help="the handoff the new session gets as its first turn: needed "
-                               "with --self; for a director's call, else the seat's newest "
-                               "handoff written since its session began")
+                               "with --self; optional on a director's call, which without it "
+                               "carries the seat's newest handoff written since its session "
+                               "began")
     relaunch.add_argument("--dry-run", action="store_true",
                           help="take the checks and write nothing")
     relaunch.add_argument("--json", action="store_true", help="print one JSON object")
