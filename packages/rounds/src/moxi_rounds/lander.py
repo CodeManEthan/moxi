@@ -27,9 +27,11 @@ from the user manager's environment and not the caller's. Its output goes to
 
 **When it exits** (`run`): when `settled` says nothing keeps it: no member waits, no
 message comms could not take is still being tried, and the target's head has a full run
-that has ended and been read (or one the lander gave up on, pushed twice with no run). To exit it releases the lock, then reads the queue again: if a member waits and the
-lock is free, it takes the lock again and goes on. A `finish` that appends after that
-read starts its own lander, which finds the lock free. So while a member waits, a lander
+that has ended and been read (or one the lander gave up on: pushed twice with no run,
+or, with no ref to push to, read with no run for `batching.ABSENT_S`). To exit it
+releases the lock, then reads the queue again: if a member waits and the lock is free,
+it takes the lock again and goes on. A `finish` that appends after that read starts its
+own lander, which finds the lock free. So while a member waits, a lander
 runs, or the next command that reads the queue starts one.
 
 Each pass of its loop is `step`, run every `POLL_S` while it holds the lock.

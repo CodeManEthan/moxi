@@ -104,24 +104,27 @@ def launch_log(shell: Any) -> Iterator[Any]:
 def seed(shell: Any, request_id: str, *, target: str = "slot", live: bool = False,
          session_id: str | None = None, cwd: str = "/work/page", by: str = "ann",
          config_dir: str | os.PathLike | None = None, claimed: bool = False,
-         values: dict | None = None, posture: str = "operator") -> str:
-    """A Claude launch's row made by `by`, under `posture`, started; its process this test's own when
-    `live`, else one that has ended. With `config_dir` the row records it as the
-    session's `CLAUDE_CONFIG_DIR`, where `transcript` writes. With `claimed` its claim
-    names this test's own process as the turns endpoint, so `target.find` passes for a
-    turns whose session gives this process's id as `endpoint_pid`. `values` are added to
-    the row's values (`keep_warm`, ...). Returns its session id."""
+         values: dict | None = None, posture: str = "operator", slot: str = "3",
+         project_key: str | None = None, identity: str | None = None) -> str:
+    """A Claude launch's row made by `by`, under `posture`, started; its process this
+    test's own when `live`, else one that has ended. A slot launch runs in `slot`. With
+    `config_dir` the row records it as the session's `CLAUDE_CONFIG_DIR`, where
+    `transcript` writes. With `claimed` its claim names this test's own process as the
+    turns endpoint, so `target.find` passes for a turns whose session gives this process's
+    id as `endpoint_pid`. `values` are added to the row's values (`keep_warm`, ...). The
+    row records `project_key` and `identity` when given. Returns its session id."""
     sid = session_id or str(uuid.uuid4())
     base_env = None if config_dir is None else {"CLAUDE_CONFIG_DIR": str(config_dir)}
     me = proc.identity(os.getpid())
-    slot = "3" if target == "slot" else None
+    slot = slot if target == "slot" else None
     # The values a resume replays: where the session ran, and how.
     values = {"harness": "claude", "target": target, "cwd": cwd, "model": "opus",
               "posture": posture, **({"slot": slot} if slot else {}), **(values or {})}
     with launch_log(shell) as conn:
         store.insert(conn, request_id=request_id, by=by, harness="claude",
                      target=target, cwd=cwd, values=values, argv=["claude"], env={},
-                     posture=posture, session_id=sid, slot=slot, base_env=base_env)
+                     posture=posture, session_id=sid, slot=slot, base_env=base_env,
+                     project_key=project_key, identity=identity)
         # A start time no running process has, so an ended launch's process reads ended.
         store.set_state(conn, request_id, "started", pid=me.pid,
                         pid_started=me.started if live else 1.0)

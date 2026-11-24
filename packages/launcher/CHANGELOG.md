@@ -6,6 +6,10 @@
   memory's subconscious on for one launch, or for every launch of a preset that sets it:
   a launch with it on stamps the mode under memory's `SUBCONSCIOUS_ENV`, read from
   memory's API. A fork drops it. memory joins the optional links, with a `memory` extra.
+- With the `ui` extra, a `project-facts` component reports to the Projects page how many
+  launched sessions run in each project, and for the opened project where its lead runs,
+  a `Launch` row (its preset, its last launch and how it names sessions) and a `Sessions`
+  row of what runs there. It reads only the launcher's existing routes.
 - After a topic value the page reads its past sessions again through moxi-ui's
   `readLater`, so the page root's `data-reading` mark counts that read from the moment it
   is scheduled until its answer is drawn, and a test's press waits for the list it

@@ -87,8 +87,8 @@ SEGMENT = None
 PAGE = "moxi_launcher.page:PAGE"
 #: What the launcher offers the browser UI shell: its panel, the piece for Home's main spot
 #: that starts a session, Home's Sessions row with the launches running now, a block for
-#: the modules view with each launched session's state, and one session's state that any
-#: host may place.
+#: the modules view with each launched session's state, one session's state that any host
+#: may place, and its facts for the Projects page.
 #: Each script is a file the page's web build writes beside the page's assets.
 COMPONENTS = {
     "page": {"script": "page.js", "title": "Launcher", "contract": 1, "place": "page",
@@ -109,6 +109,14 @@ COMPONENTS = {
               "place": "inline", "doc": "One session's state",
               "attributes": {"session": {"type": "string", "required": True,
                                          "doc": "a session id"}}},
+    "project-facts": {"script": "project-facts.js", "title": "Launcher",
+                      "doc": "Each project's running launches, and the opened one's preset, "
+                             "last launch and session names, for the Projects page",
+                      "contract": 1, "place": "inline",
+                      "attributes": {"projects": {"type": "string",
+                                                  "doc": "the projects the page holds, JSON"},
+                                     "open": {"type": "string",
+                                              "doc": "the key of the opened project"}}},
 }
 
 # The announcement's version, and the optional names it declares.

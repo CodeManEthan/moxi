@@ -3,9 +3,10 @@
 In a project whose `land` is `"queue"`, `moxi rounds finish ROUND B<n>` does not merge.
 `join` reads the finish gates at the branch's tip `T` as a finish does, with two
 changes: gate 6 (the target) is off, since the lander's candidate holds the target by
-construction, and gate 3 (the check) is met by the scoped local check at `T`
-(`checking`). Gate 5 (drift) is read against the target's head now, `J`, and not again
-for anything that lands after (the lander's member finish reads it against `J` too).
+construction, and gate 3 (the check) is met by the scoped local check at `T`, or by
+the full one (`check --full`) passing there (`checking`). Gate 5 (drift) is read
+against the target's head now, `J`, and not again for anything that lands after (the
+lander's member finish reads it against `J` too).
 A build whose finish actions are anything but one merge is refused, since the lander
 only merges. Then, under the round's lock and the queue file's, it appends `join` to
 the queue file and `queue.join {stage, tip: T, main: J, urgent}` to the round's log.
