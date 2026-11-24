@@ -16,7 +16,6 @@ from __future__ import annotations
 
 import json
 import re
-import sys
 from typing import Any
 
 import pytest
@@ -26,9 +25,7 @@ from playwright.sync_api import expect
 import launcher_page_kit as kit
 from moxi_launcher import presets, targets
 
-pytestmark = [pytest.mark.browser,
-              pytest.mark.skipif(sys.platform == "win32",
-                                 reason="the fake harness is a script run by its #! line")]
+pytestmark = [pytest.mark.browser]
 
 BRIEF = "say the word ready"
 #: A directory long enough to wrap at 360 px.

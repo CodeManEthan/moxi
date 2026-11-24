@@ -24,8 +24,6 @@ from moxi_launcher import api, catalog, cli, first, handoffs, presets, slots, st
 from moxi_launcher.compose import common
 
 BRIEF = "Read the design and start the build."
-POSIX = pytest.mark.skipif(sys.platform == "win32",
-                           reason="the fake harness is a script run by its #! line")
 
 
 @pytest.fixture
@@ -279,7 +277,6 @@ def test_run_prints_a_first_turn_outcome_the_launch_sent(work, monkeypatch, caps
     assert out.splitlines() == ["launch r-1 started", outcome.line()]
 
 
-@POSIX
 def test_run_headless_starts_the_harness_and_logs_the_launch(work, harness, capsys):
     code, out, err = run(["run", "--target", "headless", "--brief", BRIEF], capsys)
     assert code == codes.OK, err
@@ -291,7 +288,6 @@ def test_run_headless_starts_the_harness_and_logs_the_launch(work, harness, caps
                                            f"{first.actor()}\n\n{BRIEF}"]
 
 
-@POSIX
 def test_run_whose_start_fails_exits_1_and_the_row_says_why(work, harness, monkeypatch,
                                                             capsys):
     def no_spawn(argv, **kwargs):

@@ -10,7 +10,6 @@ import dataclasses
 import json
 import os
 import stat
-import sys
 import threading
 import time
 import uuid
@@ -27,8 +26,6 @@ from moxi_launcher import (api, catalog, cli, first, job, page, pagehandlers, pr
 from moxi_dev.testing import toml_string
 
 BRIEF = "Read the design and start the build."
-POSIX = pytest.mark.skipif(sys.platform == "win32",
-                           reason="the fake harness is a script run by its #! line")
 
 
 @pytest.fixture(autouse=True)
@@ -355,7 +352,6 @@ def test_a_value_sent_equal_to_its_layer_keeps_the_layers_source(rule_file):
     assert resolved.sources["permission_mode"] == "defaults" and not request.off_posture
 
 
-@POSIX
 def test_a_defaults_row_the_mode_does_not_take_stays_not_applied(work, harness):
     write_presets(f'[defaults]\napproval = "never"\n\n[seat.coder]\nharness = "codex"\n'
                   f'cwd = {toml_string(work)}\ntarget = "headless"\nbrief = "{BRIEF}"\n')
@@ -422,7 +418,6 @@ def test_limit_at_the_preset_sets_to_its_shipped_word_can_still_be_left_out(
     assert codes(kept) == ["needs-module"] and kept["refused"][0]["row"] == "limit_at"
 
 
-@POSIX
 def test_a_codex_seats_approval_at_its_shipped_word_left_out_is_not_refused(
         work, harness, fixed_ids):
     write_presets(f'[seat.coder]\nharness = "codex"\ncwd = {toml_string(work)}\ntarget = "headless"\n'
@@ -437,7 +432,6 @@ def test_a_codex_seats_approval_at_its_shipped_word_left_out_is_not_refused(
     assert command == ["moxi", "launcher", "run", *line]
 
 
-@POSIX
 def test_a_codex_seats_approval_left_out_on_a_mode_without_it_is_not_refused(work, harness):
     write_presets(f'[seat.coder]\nharness = "codex"\ncwd = {toml_string(work)}\ntarget = "headless"\n'
                   f'brief = "{BRIEF}"\napproval = "never"\n')
@@ -448,7 +442,6 @@ def test_a_codex_seats_approval_left_out_on_a_mode_without_it_is_not_refused(wor
     assert said["refused"] == [] and said["left_out"] == ["approval"]
 
 
-@POSIX
 def test_a_codex_seats_approval_left_out_launches_under_claude(work, harness):
     write_presets(f'[seat.coder]\nharness = "codex"\ncwd = {toml_string(work)}\ntarget = "headless"\n'
                   f'brief = "{BRIEF}"\napproval = "never"\n')
@@ -757,7 +750,6 @@ def test_the_page_server_writes_nothing_to_the_presets_file(rule_file, work, har
 
 # --- /api/preview ----------------------------------------------------------------------------
 
-@POSIX
 def test_a_preview_shows_the_launch_and_issues_a_ticket(work, harness):
     said = previewed(headless(work, model="opus"))
     assert said["refused"] == []
@@ -991,7 +983,6 @@ def test_a_job_that_does_not_start_leaves_no_request_file(work, harness, monkeyp
     assert not targets.request_file("r1").exists()
 
 
-@POSIX
 def test_preview_then_launch_then_the_row_answers_the_status_path(work, harness,
                                                                   monkeypatch):
     spawned = Spawned(run=True)
@@ -1029,7 +1020,6 @@ def request_file(request_id: str = "r1", **data) -> Path:
                                           "typed": {}, "extra": [], **data})
 
 
-@POSIX
 def test_the_job_launches_the_request_and_deletes_its_file(work, harness):
     path = request_file(typed={"target": "headless", "cwd": str(work), "brief": BRIEF})
     if os.name == "posix":
@@ -1075,7 +1065,6 @@ def test_the_job_reads_the_rows_a_request_file_leaves_out():
         job.launch_request("r1", {"typed": {}, "extra": [], "left_out": "model"})
 
 
-@POSIX
 def test_the_job_launches_without_the_rows_its_request_leaves_out(work, harness):
     write_presets(f'[defaults]\ncwd = {toml_string(work)}\nmodel = "opus"\n')
     request_file(typed={"target": "headless", "brief": BRIEF}, left_out=["model"])

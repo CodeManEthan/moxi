@@ -8,7 +8,6 @@ from __future__ import annotations
 import json
 import os
 import stat
-import sys
 import threading
 from pathlib import Path
 from types import SimpleNamespace
@@ -29,8 +28,6 @@ SID = "5f6e7d8c-9b0a-4c1d-8e2f-3a4b5c6d7e8f"
 OTHER = "0a1b2c3d-4e5f-4a6b-8c7d-9e0f1a2b3c4d"
 #: A start time no running process has, so a row's process reads ended.
 ENDED = 1.0
-POSIX = pytest.mark.skipif(sys.platform == "win32",
-                           reason="the fake harness is a script run by its #! line")
 SLOTS_API = slots.api
 
 
@@ -563,7 +560,6 @@ def harness(tmp_path, monkeypatch) -> Harness:
     return Harness.on_path(tmp_path, monkeypatch)
 
 
-@POSIX
 def test_a_slot_resume_from_the_page_goes_back_to_its_slot(tmp_path, harness, rig,
                                                            monkeypatch):
     work = tmp_path / "work"
@@ -593,7 +589,6 @@ def test_a_slot_resume_from_the_page_goes_back_to_its_slot(tmp_path, harness, ri
     assert with_store(lambda c: len(store.log(c))) == 2
 
 
-@POSIX
 def test_a_plain_resume_of_a_go_launch_from_the_page_starts_with_no_first_turn(
         tmp_path, harness, rig, monkeypatch):
     """Home's continue with an empty box on a `go` session: refused without `plain`, and

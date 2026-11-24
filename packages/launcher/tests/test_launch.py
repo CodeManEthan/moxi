@@ -8,7 +8,6 @@ import json
 import os
 import sqlite3
 import stat
-import sys
 import time
 from pathlib import Path
 from types import SimpleNamespace
@@ -28,8 +27,6 @@ from moxi_launcher.compose import Context, codex, common
 TESTS = Path(__file__).resolve().parent
 SID = "5f0c3a1e-7f43-4c8e-9e0a-1d2b3c4d5e6f"
 BRIEF = "Read the design and start the build."
-POSIX = pytest.mark.skipif(sys.platform == "win32",
-                           reason="the fake harness is a script run by its #! line")
 
 @pytest.fixture(autouse=True)
 def no_turns(monkeypatch):
@@ -86,7 +83,6 @@ def nothing_written(rid: str = "r1") -> bool:
 # -- this terminal, end to end, in a process of its own ------------------------------------
 
 
-@POSIX
 def test_a_terminal_launch_becomes_the_harness(tmp_path, work, harness, monkeypatch):
     monkeypatch.setenv("CLAUDECODE", "1")
     monkeypatch.setenv("LAUNCHER_FAKE_EXIT", "7")
@@ -115,7 +111,6 @@ def test_a_terminal_launch_becomes_the_harness(tmp_path, work, harness, monkeypa
     assert stat.S_IMODE(Path(prompt).stat().st_mode) == 0o600
 
 
-@POSIX
 def test_a_terminal_launch_records_the_process_that_runs_claude(tmp_path, work, harness):
     # A held claim moves only to an endpoint whose parent is the row's pid and
     # pid_started, so both must name the `claude` process itself: the launcher execs it,
@@ -132,7 +127,6 @@ def test_a_terminal_launch_records_the_process_that_runs_claude(tmp_path, work, 
     assert abs(got.pid_started - run["started"]) < 1.0
 
 
-@POSIX
 def test_a_terminal_launch_with_turns_starts_the_deliverer_before_it_execs(
         tmp_path, work, harness, turns):
     req = {"typed": {"brief": BRIEF}, "cwd": str(work), "request_id": "r2",
@@ -159,7 +153,6 @@ def test_a_terminal_launch_with_turns_starts_the_deliverer_before_it_execs(
     wait_for(lambda: log.exists() and "delivered" in log.read_text(), timeout=30)
 
 
-@POSIX
 def test_a_terminal_launch_with_an_identity_runs_comms_wrapper(tmp_path, work, harness):
     if not modules.available("comms"):
         pytest.skip("comms is not installed")
@@ -174,7 +167,6 @@ def test_a_terminal_launch_with_an_identity_runs_comms_wrapper(tmp_path, work, h
     assert row("r3").identity == "planner"
 
 
-@POSIX
 def test_a_terminal_launch_whose_harness_is_missing_writes_nothing(tmp_path, work):
     req = {"typed": {"brief": BRIEF}, "cwd": str(work), "request_id": "r4",
            "session_id": SID, "actor": "ann"}
@@ -339,7 +331,6 @@ def test_on_windows_a_deliverer_that_fails_to_start_fails_the_launch_as_its_row(
 # -- headless, end to end ------------------------------------------------------------------
 
 
-@POSIX
 @pytest.mark.parametrize("harness_name, head", [("claude", ["claude", "-p"]),
                                                 ("codex", ["codex", "exec"])])
 def test_a_headless_launch_starts_detached_and_returns(work, harness, harness_name, head,
@@ -883,7 +874,6 @@ def test_a_comms_without_the_identity_check_lets_the_wrapper_decide(work, monkey
 SCRATCH_NAME = "20261108-1245"
 
 
-@POSIX
 def test_a_scratch_launch_makes_its_dir_and_never_removes_it(harness, tmp_path):
     req = LaunchRequest(typed={"harness": "codex", "scratch": True, "target": "headless",
                                "brief": BRIEF}, cwd=str(tmp_path), request_id="r9")
@@ -970,7 +960,6 @@ def test_a_scratch_dir_notes_would_give_a_home_is_refused(harness, tmp_path, mon
     assert nothing_written("r9") and not common.scratch_dir(SCRATCH_NAME).exists()
 
 
-@POSIX
 def test_scratch_launches_go_under_tmp_scratch_uid_whatever_tmpdir_says(
         tmp_path, monkeypatch, real_scratch_tmp):
     # The launcher's own parent, not the tests' stand-in: names only, nothing made.
@@ -982,7 +971,6 @@ def test_scratch_launches_go_under_tmp_scratch_uid_whatever_tmpdir_says(
         assert common.scratch_dir("planner-1") == Path(f"/tmp/scratch-{os.getuid()}/planner-1")
 
 
-@POSIX
 def test_scratch_launches_go_under_a_parent_of_this_users_own(harness, tmp_path,
                                                               own_scratch_tmp):
     root = common.scratch_root()
@@ -997,7 +985,6 @@ def test_scratch_launches_go_under_a_parent_of_this_users_own(harness, tmp_path,
     assert row("r9").cwd == str(root / SCRATCH_NAME)
 
 
-@POSIX
 def test_a_scratch_dir_is_named_by_the_session_name_and_a_second_launch_reuses_it(
         harness, tmp_path):
     typed = {"harness": "codex", "scratch": True, "target": "headless", "brief": BRIEF,
@@ -1010,7 +997,6 @@ def test_a_scratch_dir_is_named_by_the_session_name_and_a_second_launch_reuses_i
     assert row("r2").cwd == str(where) and (where / "left.txt").exists()
 
 
-@POSIX
 @pytest.mark.parametrize(("name", "dir_name"), [
     ("my spike", "my-spike"), ("../x", "x"), ("a/b", "a-b"), ("..", "launch"),
     (".", "launch"), ("Fix: the  pager!", "fix-the-pager"), ("Foo_Bar", "foo-bar"),
@@ -1043,7 +1029,6 @@ def refused_before_the_row(tmp_path, words: str) -> None:
     assert row("r9") is None and not common.scratch_dir(SCRATCH_NAME).exists()
 
 
-@POSIX
 def test_a_scratch_parent_open_to_other_users_refuses_the_launch_before_the_row(
         harness, tmp_path):
     root = common.scratch_root()
@@ -1054,7 +1039,6 @@ def test_a_scratch_parent_open_to_other_users_refuses_the_launch_before_the_row(
     assert stat.S_IMODE(root.stat().st_mode) == 0o755
 
 
-@POSIX
 def test_a_scratch_parent_that_is_a_link_refuses_the_launch(harness, tmp_path):
     elsewhere = tmp_path / "elsewhere"
     elsewhere.mkdir(mode=0o700)
@@ -1063,7 +1047,6 @@ def test_a_scratch_parent_that_is_a_link_refuses_the_launch(harness, tmp_path):
     assert list(elsewhere.iterdir()) == []
 
 
-@POSIX
 def test_a_scratch_parent_another_user_owns_refuses_the_launch(harness, tmp_path,
                                                               monkeypatch):
     # The folder is the real user's; the launcher is told it runs as another uid.
@@ -1073,7 +1056,6 @@ def test_a_scratch_parent_another_user_owns_refuses_the_launch(harness, tmp_path
     refused_before_the_row(tmp_path, f"is owned by another user (uid {other - 1})")
 
 
-@POSIX
 def test_a_scratch_parent_taken_after_the_check_fails_the_row_and_makes_nothing(
         harness, tmp_path, monkeypatch):
     elsewhere = tmp_path / "elsewhere"
@@ -1101,7 +1083,6 @@ def recycling_scratch(monkeypatch, tmp_path, recycle: str) -> LaunchRequest:
                          cwd=str(tmp_path), request_id="r9", session_id=SID)
 
 
-@POSIX
 def test_a_scratch_launch_set_to_recycle_itself_is_refused_before_the_row(
         harness, tmp_path, monkeypatch):
     req = recycling_scratch(monkeypatch, tmp_path, "relaunch")
@@ -1116,7 +1097,6 @@ def test_a_scratch_launch_set_to_recycle_itself_is_refused_before_the_row(
     assert row("r9") is None and not common.scratch_dir("r9").exists()
 
 
-@POSIX
 def test_a_scratch_launch_whose_preset_sets_relaunch_is_refused(harness, tmp_path,
                                                                  monkeypatch):
     recycling_scratch(monkeypatch, tmp_path, "off")
@@ -1129,7 +1109,6 @@ def test_a_scratch_launch_whose_preset_sets_relaunch_is_refused(harness, tmp_pat
     assert row("r9") is None and not common.scratch_dir("r9").exists()
 
 
-@POSIX
 def test_a_scratch_launch_holds_a_defaults_relaunch_off(harness, tmp_path, monkeypatch):
     monkeypatch.setattr("moxi_launcher.slots.links", lambda module: module != "comms")
     write_presets('[defaults]\nrecycle_at_limit = "relaunch"\n')
@@ -1141,14 +1120,12 @@ def test_a_scratch_launch_holds_a_defaults_relaunch_off(harness, tmp_path, monke
     assert row("r9").values["sources"]["recycle_at_limit"] == presets.LEFT_OUT
 
 
-@POSIX
 def test_a_scratch_launch_may_compact_at_its_limit(harness, tmp_path, monkeypatch):
     for recycle in ("compact", "off"):
         req = recycling_scratch(monkeypatch, tmp_path, recycle)
         assert "scratch-recycle" not in {r.code for r in api.check(req)}
 
 
-@POSIX
 def test_a_launch_outside_a_scratch_may_recycle_itself(harness, work, monkeypatch):
     monkeypatch.setattr("moxi_launcher.slots.links", lambda module: True)
     monkeypatch.setattr(catalog, "slots_here", lambda: True)

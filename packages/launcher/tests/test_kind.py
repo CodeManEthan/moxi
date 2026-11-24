@@ -5,7 +5,6 @@ start, launches made end to end, and a log that can't be read."""
 from __future__ import annotations
 
 import sqlite3
-import sys
 from pathlib import Path
 
 import pytest
@@ -25,8 +24,6 @@ THREAD_ID = "thr-0001"
 PARENT = "1000@1.000000"
 NESTED = "2000@2.000000"
 V1_DUMP = Path(__file__).with_name("launcher_v1.sql")
-POSIX = pytest.mark.skipif(sys.platform == "win32",
-                           reason="the fake harness is a script run by its #! line")
 
 
 class Event:
@@ -184,7 +181,6 @@ def harness(tmp_path, monkeypatch) -> Harness:
     return Harness.on_path(tmp_path, monkeypatch)
 
 
-@POSIX
 @pytest.mark.parametrize("preset, typed, kind", [
     ('[seat.tester]\nscratch = true\n', {}, "scratch"),
     ('[seat.tester]\n', {}, "seat"),

@@ -16,7 +16,6 @@ from __future__ import annotations
 
 import json
 import re
-import sys
 
 import pytest
 from moxi_dev.testing import PROC_WAIT_S, wait_for
@@ -27,9 +26,7 @@ from moxi_launcher import presets, store
 
 _copying = pytest.importorskip("moxi_ui.testing.browser", reason="ui is not installed")
 
-pytestmark = [pytest.mark.browser, pytest.mark.timeout(120),
-              pytest.mark.skipif(sys.platform == "win32",
-                                 reason="the fake harness is a script run by its #! line")]
+pytestmark = [pytest.mark.browser, pytest.mark.timeout(120)]
 
 BRIEF = "say the word ready"
 PREVIEW = "/m/launcher/api/preview"

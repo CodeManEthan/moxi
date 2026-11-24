@@ -5,7 +5,6 @@ from __future__ import annotations
 
 import json
 import os
-import sys
 from dataclasses import dataclass, field, replace
 from datetime import datetime
 from pathlib import Path
@@ -361,8 +360,6 @@ LAUNCHES = [
 ]
 
 
-@pytest.mark.skipif(sys.platform == "win32",
-                    reason="the fake harness is a script run by its #! line")
 @pytest.mark.parametrize("name, typed, with_turns", LAUNCHES, ids=[c[0] for c in LAUNCHES])
 def test_preview_argv_is_the_argv_launch_hands_the_target(tmp_path, monkeypatch, no_turns,
                                                           name, typed, with_turns):

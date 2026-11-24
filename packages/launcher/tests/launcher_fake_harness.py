@@ -1,11 +1,13 @@
 """A fake harness on PATH for the launch tests, and a launch run in a process of its own.
 
 Each fake (`claude`, `codex`, and `moxi-comms-fake` standing in for comms' wrapper) is a
-Python script run by its `#!` line. It records what it was started with (its argv,
-directory, environment, pid and open files) as one JSON file per run in the directory
-`LAUNCHER_FAKE_HARNESS` names (`runs-seen` beside its own `bin` when a replay's environment
-leaves that name out), prints one line and exits with `LAUNCHER_FAKE_EXIT` (default 0). Its `started` is its own start time as `moxi.proc.identity` reads it, so a test
-can compare the row's `pid` and `pid_started` with the process that ran.
+`console_script` stand-in: Python under the suite's interpreter, a `.cmd` on Windows. It
+records what it was started with (its argv, directory, environment, pid and open files)
+as one JSON file per run in the directory `LAUNCHER_FAKE_HARNESS` names (`runs-seen`
+beside its own `bin` when a replay's environment leaves that name out), prints one line
+and exits with `LAUNCHER_FAKE_EXIT` (default 0). Its `started` is its own start time as
+`moxi.proc.identity` reads it, so a test can compare the row's `pid` and `pid_started`
+with the process that ran.
 """
 
 from __future__ import annotations
@@ -16,14 +18,14 @@ import subprocess
 import sys
 from pathlib import Path
 
-from moxi_dev.testing import wait_for
+from moxi_dev.testing import console_script, wait_for
 
 TESTS = Path(__file__).resolve().parent
 NAMES = ("claude", "codex", "moxi-comms-fake")
 
-FAKE_HARNESS = """#!{python}
+FAKE_HARNESS = """\
 import json, os, sys
-fds = {{}}
+fds = {}
 if os.path.isdir("/proc/self/fd"):
     for fd in os.listdir("/proc/self/fd"):
         try:
@@ -32,9 +34,9 @@ if os.path.isdir("/proc/self/fd"):
             pass
 from moxi import proc
 me = proc.identity(os.getpid())
-record = {{"argv": sys.argv, "cwd": os.getcwd(), "env": dict(os.environ),
+record = {"argv": sys.argv, "cwd": os.getcwd(), "env": dict(os.environ),
           "pid": os.getpid(), "started": me.started if me is not None else None,
-          "fds": fds}}
+          "fds": fds}
 out = os.environ.get("LAUNCHER_FAKE_HARNESS") or os.path.join(
     os.path.dirname(os.path.dirname(os.path.abspath(sys.argv[0]))), "runs-seen")
 tmp = os.path.join(out, ".%d.tmp" % os.getpid())
@@ -55,9 +57,7 @@ class Harness:
         self.bin.mkdir()
         self.out.mkdir()
         for name in NAMES:
-            path = self.bin / name
-            path.write_text(FAKE_HARNESS.format(python=sys.executable))
-            path.chmod(0o755)
+            console_script(self.bin, name, FAKE_HARNESS)
 
     @classmethod
     def on_path(cls, root: Path, monkeypatch) -> "Harness":
