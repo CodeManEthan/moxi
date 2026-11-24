@@ -2,6 +2,30 @@
 
 ## Unreleased
 
+- `recycle_at_limit` ships `relaunch`: every launch whose session can recycle itself is
+  told at its `warn_at` mark that it may, and its self relaunch is armed. That is a Claude
+  launch in a slot, where slots run, not in a scratch folder, with a handoff folder, and
+  warned at a mark; one test (`selfrecycle.missing`) decides what the composer stamps,
+  what the crossing tells, what `relaunch --self` accepts and what `show` says. A launch
+  that can't holds the shipped default `off` quietly, never refused for it. `off` or
+  `compact` set by a flag, a preset or `[defaults]` opts out.
+- A Claude seat keeps `warn_at`'s shipped `2x`; only a Codex launch warns only at a mark
+  it sets.
+- A `relaunch` launch is told at `warn_at`, never at `limit_at`. A `limit_at` typed or
+  set by the preset beside `relaunch` is refused `relaunch-mark`, and so is `relaunch`
+  with `warn_at = off`; from `[defaults]` the `limit_at` is left out and the `relaunch`
+  held `off`, each with a warning. A `relaunch` set for a launch that can't act on it, a
+  Codex one or one with no handoff folder, is kept and the launch warns, naming why.
+- `relaunch --self` no longer needs a launch made with `--recycle-at-limit relaunch`. A
+  launch made before `relaunch` was the default, still at the shipped `off`, may recycle
+  itself, and `show` says `at limit relaunch (default)` for it. A refusal names what the
+  launch fails: opted out, not a Claude slot launch, slots not here, a scratch folder, no
+  handoff folder, or no warn-at mark. A launch with no notes directory is now refused
+  `no-self-recycle` before its handoff is read.
+- A replay keeps whether its session can recycle itself: it records where
+  `recycle_at_limit` came from, so an opted-out seat stays out after its relaunch, and a
+  launch from before the default comes back set to `relaunch` and is told. A replay sets
+  an option row the install can no longer run to `off`.
 - The relaunch line is Core's instruction with Moxi's verb: "write a handoff with the
   handoff skill, stop your background shells, then run `moxi launcher relaunch --self
   --handoff <file>`". It no longer names the mark (usage's notice, which it is appended

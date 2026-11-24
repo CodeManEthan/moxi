@@ -290,7 +290,7 @@ passes its mark: `context 120k: past the 1x mark for <model>` (the context in th
 halves up). The
 mark is the launch's `MOXI_USAGE_WARN_AT` (`1x`, `1.5x`, `2x`, `off`), else
 `marks.default` (`off`). The launcher stamps its `warn_at` row, `2x` unless the launch
-sets another; a seat launch or a Codex launch is stamped only with a mark it sets. The main session and each of its agents are measured against
+sets another; a Codex launch is stamped only with a mark it sets. The main session and each of its agents are measured against
 their own context; an agent's line also reaches its parent at the parent's next tool
 call. The notice fires once per session id: a compaction never brings it back, and a
 clear or a resume that names a new id starts afresh. A floor tells turns the context below which the main session's calls

@@ -358,8 +358,9 @@ the open run. Each act is a run in the launch log, with its events and its outco
 
 **Relaunch** puts a fresh session in the same slot. It needs turns and slots, and a
 launch in a slot whose turns session offers exit; comms is needed only for a director's
-relaunch. A session relaunches itself only when its launch was made with
-`--recycle-at-limit relaunch`; any other launch is refused (`no-self-recycle`, exit 3).
+relaunch. A session relaunches itself only where its launch's session can recycle itself
+(`recycle_at_limit`, below): any other launch is refused (`no-self-recycle`, exit 3),
+naming what it fails.
 A launch that names no model comes back on the model its transcript last used; a resume
 of it runs the row's own model.
 
@@ -598,25 +599,43 @@ own reads:
   cache has gone cold and the session is quiet, clear or compact it. A clear waits while
   a named hold is open (below). A session idle for an hour has its background shells
   stopped by the clear.
-- `--recycle-at-limit relaunch|compact` with `--limit-at 1x|1.5x|2x` (needs turns and
-  usage): once the context passes the mark, tell the agent it may relaunch itself with a
-  handoff, or compact it once it is idle, waiting up to `recycle.limit_wait_s`.
-  `relaunch` is what lets a session recycle itself (it also needs slots and a slot
-  launch); its line opens "This launch lets you recycle yourself", rides on usage's
-  notice as one line, and comes once per session id: a compaction that brings the context
-  back past the mark gets no second line, and a clear or a resume is told afresh. A
-  scratch launch has
-  no notes directory to keep a handoff in, so it can't take `relaunch`
-  (`scratch-recycle`, exit 3) typed or set by its preset: the launch and its preview, on
-  the command line and the page, refuse the pair, and `presets check` flags a preset
-  that sets `relaunch` and launches in a scratch. A `relaunch` from `[defaults]` reaches
-  no scratch launch: there it holds `off`, with a warning. `compact` is open to it. With
-  `--limit-at` unset, the mark is the one usage warns this launch at: its `warn_at` when
-  that is a mark; when `warn_at` is unset, usage's own `marks.default` when usage loads
-  and that is a mark; otherwise (`warn_at` is `off`, or usage's default is off or can't
-  be read) `1x`. The mark is fixed when the launch is composed: a later change to usage's
-  `marks.default` moves usage's notice but not the stamped mark, and a relaunch composes
-  its mark again from the values then. A `compact` launch takes its mark the same way.
+- `--recycle-at-limit relaunch|compact|off` (needs turns and usage). `relaunch` is the
+  shipped default: once the context passes the launch's `warn_at` mark, the agent is told
+  it may relaunch itself with a handoff. The line opens "This launch lets you recycle
+  yourself", rides on usage's notice as one line, and comes once per session id: a
+  compaction that brings the context back past the mark gets no second line, and a clear
+  or a resume is told afresh. A launch is told, and its self relaunch accepted, only where
+  its session can recycle itself: a Claude launch in a slot, where slots run, not in a
+  scratch folder, with a handoff folder (with notes installed, a notes directory for its
+  folder), and warned at a mark. `moxi launcher show` reads the same test.
+  - Where the shipped default can't act (a terminal, headless, Codex or scratch launch,
+    slots not running here, no handoff folder, `warn_at` off), the launch holds `off`
+    quietly: a default it never asked for never refuses it.
+  - A `relaunch` typed or set by the preset needs slots and a slot launch. A scratch
+    launch has no notes directory to keep a handoff in, so it can't take `relaunch`
+    (`scratch-recycle`, exit 3): the launch and its preview, on the command line and the
+    page, refuse the pair, and `presets check` flags a preset that sets `relaunch` and
+    launches in a scratch. With `warn_at = off` the pair is refused (`relaunch-mark`, exit
+    3). A `relaunch` from `[defaults]` holds `off`, with a warning, on a scratch launch or
+    with `warn_at` off. Where else a `relaunch` set for the launch can't act (a Codex
+    launch, no handoff folder), it is kept and the launch warns, naming what it fails.
+  - `relaunch` takes no `--limit-at`: its line comes at `warn_at`. A `limit_at` typed or
+    set by the preset of a `relaunch` launch is refused (`relaunch-mark`, exit 3, hint
+    "set warn_at"); one from `[defaults]` is left out, with a warning.
+  - `off` from any layer but the shipped default opts out. A launch made before `relaunch`
+    was the default holds the shipped `off`: its agent may still relaunch itself, and
+    `show` says `at limit relaunch (default)`. A replay keeps whether its session can
+    recycle itself: an opted-out launch stays out, and a launch from before the default
+    comes back set to `relaunch`.
+
+  `compact` compacts the session once it is idle, waiting up to `recycle.limit_wait_s`,
+  each time the context climbs past `--limit-at 1x|1.5x|2x`, and it is open to a scratch
+  launch. With `--limit-at` unset, the mark is the one usage warns this launch at: its
+  `warn_at` when that is a mark; when `warn_at` is unset, usage's own `marks.default` when
+  usage loads and that is a mark; otherwise (`warn_at` is `off`, or usage's default is off
+  or can't be read) `1x`. The mark is fixed when the launch is composed: a later change to
+  usage's `marks.default` moves usage's notice but not the stamped mark, and a relaunch
+  composes its mark again from the values then.
 
 **Keep-warm.** `--keep-warm on` (needs turns and cache) nudges a session shortly before
 its prompt cache would expire while it waits on work it handed out: running subagents, or
