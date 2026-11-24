@@ -47,6 +47,7 @@ EVERY_NEW_NAME = {
                     "'CLAUDE_EXTRA': 'stamped for the harness'}"),
     "INTERNAL_ENV": "{'MOXI_ALPHA_NAME': 'launcher stamp', 'MOXI_ALPHA_PIN_': 'pins'}",
     "CONFIG_CHECK": "'moxi_alpha.settings:check'",
+    "CONFIG_TABLES": "{'defaults': 'moxi_alpha.tables:DEFAULTS'}",
     "QUESTIONS": "{'relay.enabled': 'Run the relay?', 'rows.backup': 'Back up rows?'}",
 }
 
@@ -66,7 +67,7 @@ def test_known_holds_every_name_once_in_order():
     assert list(modules.KNOWN)[:11] == [
         "ANNOUNCES", "INTERFACES", "API", "CLI", "SUMMARY", "OPTIONAL", "GATED",
         "INTERNAL_ENV", "SETTINGS", "SETUP", "SEGMENT"]
-    assert len(modules.KNOWN) == 26
+    assert len(modules.KNOWN) == 27
     assert isinstance(modules.KNOWN, MappingProxyType)
     found_fields = set(modules.Found._fields)
     for name in modules.KNOWN:
@@ -79,7 +80,7 @@ def test_today_s_ten_names_load_with_every_new_field_empty(site):
     assert found.state == PRESENT
     assert found.announces == 1
     for attr in ("daemons", "timers", "health", "stores", "budgets", "components",
-                 "session_env", "questions"):
+                 "session_env", "config_tables", "questions"):
         assert dict(getattr(found, attr)) == {}, attr
     for attr in ("units_from", "doctor", "skills", "page", "teardown", "config_check"):
         assert getattr(found, attr) is None, attr
@@ -123,6 +124,7 @@ def test_a_module_with_every_new_name_loads(site):
     assert set(found.session_env) == {"MOXI_ALPHA_NAME", "MOXI_ALPHA_PIN_", "CLAUDE_EXTRA"}
     assert found.questions["rows.backup"] == "Back up rows?"
     assert found.config_check == "moxi_alpha.settings:check"
+    assert dict(found.config_tables) == {"defaults": "moxi_alpha.tables:DEFAULTS"}
 
 
 def test_tables_are_read_only_all_the_way_down(site):
@@ -333,6 +335,11 @@ TIMER = "'command': 'moxi-alpha-sweep', 'every': '5m', 'switch': 'sweep.on'"
     ({"TEARDOWN": "'teardown'"}, "TEARDOWN"),
     ({"CONFIG_CHECK": "'moxi_alpha.settings'"}, "CONFIG_CHECK"),
     ({"CONFIG_CHECK": "len"}, "CONFIG_CHECK"),
+    ({"CONFIG_TABLES": "{'Defaults': 'moxi_alpha.tables:DEFAULTS'}"}, "CONFIG_TABLES"),
+    ({"CONFIG_TABLES": "{'launch.defaults': 'moxi_alpha.tables:DEFAULTS'}"},
+     "CONFIG_TABLES"),
+    ({"CONFIG_TABLES": "{'defaults': 'moxi_alpha.tables'}"}, "CONFIG_TABLES"),
+    ({"CONFIG_TABLES": "['defaults']"}, "CONFIG_TABLES"),
     ({"SESSION_ENV": "{'NOT-A-NAME': 'x'}"}, "SESSION_ENV"),
     ({"SESSION_ENV": "{'MOXI_ALPHA_NAME': 'stamped'}"},
      "under the module's own prefix MOXI_ALPHA_, and INTERNAL_ENV does not declare it"),
