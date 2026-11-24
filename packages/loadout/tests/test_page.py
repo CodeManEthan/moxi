@@ -23,7 +23,7 @@ from pathlib import Path
 
 import loadout_kit as kit
 import pytest
-from moxi_dev.testing import timed_slack, toml_string
+from moxi_dev.testing import console_script, timed_slack, toml_string
 from test_displaced import spelled_mv
 
 from moxi import modules
@@ -469,22 +469,19 @@ STALL_S = 15.0
 #: The land-check tests' bound, five times `STALL_S`: load alone doesn't fail it, and a
 #: git call that was never cut off does, since the stalled git sleeps twice as long.
 STALL_LOOSE_S = 5 * STALL_S
-POSIX_GIT = pytest.mark.skipif(os.name != "posix", reason="the stalled git is a shell script")
 
 
 def read_while_git_stalls(path: str, monkeypatch, tmp_path) -> tuple[dict, float]:
     """`path` read while git doesn't answer, and how long the read took."""
     stalled = tmp_path / "stalled-bin"
     stalled.mkdir()
-    (stalled / "git").write_text("#!/bin/sh\nexec sleep 150\n")
-    (stalled / "git").chmod(0o755)
+    console_script(stalled, "git", "import time\ntime.sleep(150)\n")
     monkeypatch.setenv("PATH", f"{stalled}{os.pathsep}{os.environ['PATH']}")
     start = time.monotonic()
     body = read(path)
     return body, time.monotonic() - start
 
 
-@POSIX_GIT
 def test_a_read_returns_while_git_stalls(lo, monkeypatch, tmp_path):
     body, took = read_while_git_stalls("/api/status", monkeypatch, tmp_path)
     assert took < STALL_LOOSE_S, took
@@ -492,7 +489,6 @@ def test_a_read_returns_while_git_stalls(lo, monkeypatch, tmp_path):
 
 
 @pytest.mark.timed
-@POSIX_GIT
 def test_a_read_returns_while_git_stalls_in_time(lo, monkeypatch, tmp_path, timed_reading):
     body, took = read_while_git_stalls("/api/status", monkeypatch, tmp_path)
     timed_reading(took, STALL_S, "s")
@@ -571,7 +567,6 @@ def _says_git_is_slow(body: dict) -> None:
     assert (body["uncommitted"], body["more"]) == (None, 0)
 
 
-@POSIX_GIT
 def test_source_dir_whose_git_stalls_says_so_and_names_no_files(site, tree, monkeypatch, tmp_path):
     body, took = read_while_git_stalls("/api/folder", monkeypatch, tmp_path)
     assert took < STALL_LOOSE_S, took
@@ -579,7 +574,6 @@ def test_source_dir_whose_git_stalls_says_so_and_names_no_files(site, tree, monk
 
 
 @pytest.mark.timed
-@POSIX_GIT
 def test_source_dir_whose_git_stalls_says_so_and_names_no_files_in_time(
         site, tree, monkeypatch, tmp_path, timed_reading):
     body, took = read_while_git_stalls("/api/folder", monkeypatch, tmp_path)
