@@ -51,6 +51,8 @@ class Agent:
     kind: str
     state: str
     final: bool | None
+    description: str | None = None
+    last_write_at: float | None = None
 
 
 @dataclass(frozen=True)
@@ -216,11 +218,59 @@ def test_an_incomplete_agent_list_holds():
     assert "could not be read whole" in reading.first.detail
 
 
-def test_the_subagent_words_count_the_live_ones():
-    agents = Agents((Agent("a", "subagent", "running", final=False),
+def test_the_subagent_words_count_and_name_the_live_ones():
+    agents = Agents((Agent("a", "subagent", "running", final=False, description="build"),
                      Agent("b", "teammate", "waiting", None),
-                     Agent("c", "shell", "running", final=False)))
-    assert judge(agents=agents).first.detail == "2 still working (subagent, teammate)"
+                     Agent("c", "shell", "running", final=False, description="loop")))
+    assert judge(agents=agents).first.detail == (
+        '2 still working: "build" (subagent, running); "b" (teammate, waiting). '
+        "Messaging the session or ending its shells would wake it")
+
+
+def test_a_judged_entry_is_named_with_its_last_write_and_its_stale_time():
+    wrote = NOW - 1500
+    agents = Agents((Agent("a", "subagent", "waiting", final=False,
+                           description="probe sleeper", last_write_at=wrote),))
+    detail = judge(agents=agents, stale_after_s=3600.0).first.detail
+    stale_at = quiet._utc(wrote + 3600.0)
+    assert detail.startswith('1 still working: "probe sleeper" (subagent, waiting, last '
+                             f'wrote 25 min ago, reads stale at {stale_at})')
+    assert stale_at == "2027-01-15 08:35:00Z"
+
+
+def test_a_stale_time_not_known_is_left_out():
+    agents = Agents((Agent("a", "subagent", "waiting", final=False, description="x",
+                           last_write_at=NOW - 30),))
+    detail = judge(agents=agents, stale_after_s=None).first.detail
+    assert '"x" (subagent, waiting, last wrote 30 s ago)' in detail
+    assert "stale at" not in detail
+
+
+def test_the_stale_time_is_turns_own(monkeypatch):
+    turns = pytest.importorskip("moxi_turns")
+    from moxi_turns import claude_stale
+
+    assert turns.STALE_AFTER_S == claude_stale.STALE_AFTER_S
+    monkeypatch.setattr(quiet, "turns_stale_after_s", lambda: 60.0)
+    agents = Agents((Agent("a", "subagent", "waiting", final=False, last_write_at=NOW),))
+    assert f"reads stale at {quiet._utc(NOW + 60)}" in judge(agents=agents).first.detail
+
+
+@pytest.mark.parametrize("keep_warm, words", [
+    (True, "would wake it, and keep-warm should have kept it warm"),
+    (False, "would wake it; keep-warm is off for this session, so nothing kept it warm"),
+    (None, "would wake it"),
+])
+def test_the_subagent_words_say_what_keep_warm_is(keep_warm, words):
+    agents = Agents((Agent("a", "subagent", "running", final=False),))
+    detail = judge(agents=agents, keep_warm=keep_warm).first.detail
+    assert detail.endswith(words)
+
+
+@pytest.mark.parametrize("seconds, words", [(0, "0 s"), (119, "119 s"), (120, "2 min"),
+                                            (7199, "119 min"), (7260, "2 h 1 min")])
+def test_an_age_in_words(seconds, words):
+    assert quiet._span(seconds) == words
 
 
 # -- a person -----------------------------------------------------------------------------
@@ -468,7 +518,7 @@ def test_the_fields_the_read_uses_are_turns_and_slots_own():
                          results.TurnStarted, results.TurnEnded, results.Gone)}
     assert {"turn_number", "turn_open", "turn", "draft", "stale"} <= names[results.Facts]
     assert {"opening", "command", "started_at"} <= names[results.OpenTurn]
-    assert {"kind", "state", "final"} <= names[results.Agent]
+    assert {"kind", "state", "final", "description", "last_write_at"} <= names[results.Agent]
     assert {"entries", "complete"} <= names[results.Agents]
     assert {"turn_number", "deliveries", "command"} <= names[results.TurnStarted]
     assert {"turn_number"} <= names[results.TurnEnded]

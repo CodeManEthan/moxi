@@ -247,11 +247,14 @@ def conn(tmp_path):
     conn.close()
 
 
-def arm(conn, mode="self", handoff="/work/h.md", turn_number=4):
+def arm(conn, mode="self", handoff="/work/h.md", turn_number=4, *, director_handoff=None):
+    """A run armed: a self run with `handoff`; a director's with `director_handoff`
+    (None: one recorded with no handoff)."""
     return store.insert_run(conn, kind="relaunch", mode=mode, request_id="r1",
                             session_id=SID, by="planner" if mode == "self" else "boss",
-                            handoff_path=handoff if mode == "self" else None, slot="3",
-                            pane_id="%9", turn_number=turn_number, job="slots:relaunch-x")
+                            handoff_path=handoff if mode == "self" else director_handoff,
+                            slot="3", pane_id="%9", turn_number=turn_number,
+                            job="slots:relaunch-x")
 
 
 def go(conn, run, *, session=None, slots_api=None, comms=None, launch=None, settings=None,
@@ -294,7 +297,23 @@ def test_a_self_run_relaunches_with_its_handoff_into_its_held_slot(conn):
     assert request.run == got.run.run_id and request.actor == "planner"
 
 
-def test_a_director_run_carries_no_handoff_and_its_posture(conn):
+def test_a_director_run_relaunches_with_its_handoff_as_a_self_run_does(conn):
+    got = go(conn, arm(conn, mode="director", director_handoff="/work/d.md"))
+    assert got.outcome == "relaunched" and got.run.new_request_id == "r2"
+    request = got.requests[0]
+    assert request.relaunch_of == "r1" and request.handoff == "/work/d.md"
+    assert request.posture == "relaunched (handoff: /work/d.md)"
+    assert request.run == got.run.run_id and request.actor == "boss" and request.director
+    assert "wait" not in got.events
+
+
+def test_a_director_run_whose_first_turn_was_not_sent(conn):
+    got = go(conn, arm(conn, mode="director", director_handoff="/work/d.md"),
+             launch=launched_result(outcome="refused"))
+    assert got.outcome == "first-turn-not-sent"
+
+
+def test_a_director_run_recorded_with_no_handoff_keeps_its_posture(conn):
     got = go(conn, arm(conn, mode="director"))
     assert got.outcome == "relaunched"
     request = got.requests[0]
@@ -982,8 +1001,8 @@ def test_only_a_self_run_owes_a_note(conn):
 # -- repair ------------------------------------------------------------------------------
 
 
-def failed_run(conn, mode="self"):
-    run = arm(conn, mode=mode)
+def failed_run(conn, mode="self", director_handoff=None):
+    run = arm(conn, mode=mode, director_handoff=director_handoff)
     store.add_run_event(conn, run.run_id, "exit", {"turn_number": 4})
     store.end_run(conn, run.run_id, "relaunch-failed", word="spawn-failed")
     return store.get_run(conn, run.run_id)
@@ -1082,6 +1101,15 @@ def test_a_repair_falls_back_only_when_the_slot_is_someone_elses(conn, seen):
              cls=job.RepairJob)
     request = got.requests[0]
     assert request.slot == "" and request.hold is None and not request.respawn
+
+
+def test_a_repair_of_a_director_run_keeps_its_handoff(conn):
+    original = failed_run(conn, mode="director", director_handoff="/work/d.md")
+    got = go(conn, repair_run(conn, original), slots_api=FakeSlots(shown=shown("free")),
+             cls=job.RepairJob)
+    request = got.requests[0]
+    assert request.handoff == "/work/d.md"
+    assert request.posture == "relaunched (handoff: /work/d.md)"
 
 
 def test_a_repair_of_a_director_run_keeps_its_posture(conn):

@@ -380,7 +380,8 @@ class Cache:
 
 def test_a_director_relaunch_of_claude_in_a_slot(live_env, work, own_slots):
     """A director relaunches a session that names it. The run ends `relaunched`; the new
-    launch is in the same pane with the director's `with:` posture and no first turn, and
+    launch is in the same pane, posture `relaunched` with the director's handoff as its
+    first turn, and
     its environment holds the new launch's stamp, of the director's shell only the name
     `relaunch.director_pass_env` lists, and none of what the session's own shell
     exported. The caller's comms identity is stood in (`DirectorComms`): proving it takes
@@ -410,8 +411,12 @@ def test_a_director_relaunch_of_claude_in_a_slot(live_env, work, own_slots):
                  what=lambda: f"{answer} in pane {row.pane_id}; saw "
                               f"{pane_text(own_slots, row.pane_id, live_env)[-2000:]}")
         settled(row)
+        handoff = work / "director-handoff.md"
+        ask, answer = words()
+        handoff.write_text(ask + "\n")
         director_env = {**live_env, director_var: "1", passed: "1"}
-        done = relaunch.call_director(row.session_id, caller_env=director_env,
+        done = relaunch.call_director(row.session_id, handoff=str(handoff),
+                                      caller_env=director_env,
                                       comms=DirectorComms(comms, "boss"),
                                       cache=Cache("cold", 4000.0), follow=False)
         assert done.exit_code == 0, done.lines
@@ -428,13 +433,17 @@ def test_a_director_relaunch_of_claude_in_a_slot(live_env, work, own_slots):
         new = launch_row(run.new_request_id)
         assert (new.relaunch_of, new.slot, new.pane_id) == (row.request_id, row.slot,
                                                             row.pane_id)
-        assert new.posture.startswith("with:") and "boss" in new.posture, new.posture
-        assert new.handoff_path is None
+        assert new.posture == f"relaunched (handoff: {handoff})", new.posture
+        assert new.handoff_path == str(handoff)
+        wait_for(lambda: answer in pane_text(own_slots, new.pane_id, live_env),
+                 timeout=ANSWER_S, interval=0.5,
+                 what=lambda: f"{answer} from the handoff; saw "
+                              f"{pane_text(own_slots, new.pane_id, live_env)[-2000:]}")
         wait_for(lambda: launch_row(new.request_id).pid, timeout=60, interval=0.5,
                  what="the new launch's process")
         env = proc.process_env(launch_row(new.request_id).pid) or {}
         assert env.get(common.REQUEST_ENV) == new.request_id
-        assert common.RELAUNCH_ENV not in env
+        assert env.get(common.RELAUNCH_ENV) == run.run_id
         assert env.get(passed) == "1", sorted(env)
         assert director_var not in env and shell_var not in env, sorted(env)
     finally:

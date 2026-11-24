@@ -1,7 +1,8 @@
 """`moxi launcher relaunch`: exit a launched session and launch it again in its slot.
 
     arm_self(handoff)              # --self --handoff FILE: the session relaunches itself
-    call_director(session)         # SESSION_ID | IDENTITY: a director relaunches it
+    call_director(session, handoff)  # SESSION_ID | IDENTITY [--handoff FILE]: a director
+                                     # relaunches it
     status(run)                    # --status RUN: the run and its events, exit by its end
     stop_run(run)                  # --stop RUN: stop a run's job
     from_record(run)               # --from-record RUN: launch it again from a run's record
@@ -56,10 +57,18 @@ qualified, a bare one the global identity, never read in the target's scope), fo
 target with a comms identity whose launch didn't opt out
 (`takes_policy_directors = false`). The setting is read as it is now, not as it was at the target's launch: a
 relaunch is what brings the target's comms side into line with it. With cache installed,
-a session whose cache is warm or fresh is refused `warm` (it can be mailed); and the
-quiet read must pass now, or the call ends `held` (exit 75) with nothing written. The
-call then follows the run for `relaunch.follow_s` and prints its outcome; past that it
-exits 75 naming `--status`. A relaunch that came back says the identity, the slot, the
+a session whose cache is warm or fresh is refused `warm` (it can be mailed). The call
+always carries a handoff, which the new session gets as its first turn, as a self
+relaunch's does (`director_handoff`): `--handoff FILE`, else the seat's newest waiting
+handoff written since the session began, checked as a self arm's is but against the
+target's launch and session; with neither it is refused `handoff`. The quiet read must
+pass now, or the call ends `held` (exit 75) with nothing written; its words name each
+live subagent (`quiet.agents_words`), and say whether keep-warm is on for the session.
+A call held only by Claude subagents listed `waiting`, on a session whose turns endpoint
+doesn't judge them (`stale-agents`), is refused `old-endpoint` instead, since trying
+again won't help. The run records the cache kind the call read (`first.CACHE_EVENT`),
+which the first turn's words come from. The call then follows the run for
+`relaunch.follow_s` and prints its outcome; past that it exits 75 naming `--status`. A relaunch that came back says the identity, the slot, the
 new session, the posture, the model and whether comms has bound the name within 60 s, or
 could not be read. An agent runs the call with a Bash timeout of at least
 `relaunch.follow_s` plus 30 s. `--status` exits as the call would: by the run's end, 75
@@ -220,16 +229,19 @@ def may_recycle(row: store.LaunchRow, *, slots_here: Callable[[], bool] | None =
 
 def check_handoff(handoff: str, conn: sqlite3.Connection, row: store.LaunchRow,
                   session_id: str | None, *, cwd: str | None = None, sessions: Any = LOOK,
-                  env: Mapping[str, str] | None = None) -> Path:
-    """The handoff a self relaunch carries, checked: a regular file of at most
-    `HANDOFF_CAP` bytes of UTF-8 text that is not blank, modified after the session's
-    current id began (`began`); with notes installed, in notes' handoff folder for the
-    launch, and refused when notes gives the launch no notes directory. Returns its
-    absolute path. `sessions` stands in for sessions' API (None: not installed)."""
+                  env: Mapping[str, str] | None = None, director: bool = False) -> Path:
+    """The handoff a relaunch carries, checked: a regular file of at most `HANDOFF_CAP`
+    bytes of UTF-8 text that is not blank, modified after the session's current id began
+    (`began`); with notes installed, in notes' handoff folder for the launch, and refused
+    when notes gives the launch no notes directory. A relative path is read from `cwd`
+    (this process's working directory by default). Returns its absolute path. `sessions`
+    stands in for sessions' API (None: not installed). `director` words the refusals for
+    a director relaunching another launch's session `session_id`."""
     path = Path(handoff).expanduser()
     if not path.is_absolute():
         path = Path(cwd or os.getcwd()) / path
-    hint = "write the handoff, then arm the relaunch again"
+    hint = ("write a handoff for it, then relaunch it again" if director
+            else "write the handoff, then arm the relaunch again")
     try:
         info = path.stat()
     except OSError as exc:
@@ -255,8 +267,11 @@ def check_handoff(handoff: str, conn: sqlite3.Connection, row: store.LaunchRow,
         raise Refused("handoff", f"the handoff {path} is blank", hint)
     seen = began(conn, row, session_id, sessions=sessions, env=env)
     if seen and info.st_mtime <= store.parse_time(seen).timestamp():
-        raise Refused("handoff", f"the handoff {path} was last written before this session "
+        whose = f"session {session_id}" if director else "this session"
+        raise Refused("handoff", f"the handoff {path} was last written before {whose} "
                                  f"began ({seen}): it is stale",
+                      "write a handoff for it since it began, then relaunch it again"
+                      if director else
                       "write this session's handoff, then arm the relaunch again")
     if modules.available("notes"):
         try:
@@ -264,10 +279,62 @@ def check_handoff(handoff: str, conn: sqlite3.Connection, row: store.LaunchRow,
         except handoffs.NoNotesDir as exc:
             raise Refused("handoff", exc.problem, exc.hint) from None
         if path.resolve().parent != handoff_dir:
-            raise Refused("handoff", f"the handoff {path} is not in this launch's handoff "
+            whose = f"launch {row.request_id}'s" if director else "this launch's"
+            raise Refused("handoff", f"the handoff {path} is not in {whose} handoff "
                                      f"folder, {handoff_dir}",
-                          "write it there (moxi launcher handoff dir prints the folder)")
+                          _folder_hint(row, director=director))
     return path
+
+
+def _folder_hint(row: store.LaunchRow, *, director: bool) -> str:
+    if not director:
+        return "write it there (moxi launcher handoff dir prints the folder)"
+    key = handoffs.key_of_row(row)
+    return (f"write it there (moxi launcher handoffs --key {key} lists that folder's "
+            "handoffs)" if key else "write it there")
+
+
+def director_handoff(handoff: str | None, conn: sqlite3.Connection, row: store.LaunchRow,
+                     session_id: str, *, sessions: Any = LOOK,
+                     env: Mapping[str, str] | None = None) -> Path:
+    """The handoff a director's relaunch of `session_id` carries, checked as
+    `check_handoff` checks one against the target's launch `row`: `handoff` when given,
+    a relative path read from this process's working directory; else the seat's newest
+    waiting handoff (`handoffs.waiting`), when it was written after the session began.
+    With neither, refused `handoff`, naming `moxi sessions read` when sessions is
+    installed. Returns its absolute path."""
+    if handoff is not None:
+        return check_handoff(handoff, conn, row, session_id, sessions=sessions, env=env,
+                             director=True)
+    found = _waiting_handoff(conn, row)
+    if found is not None:
+        seen = began(conn, row, session_id, sessions=sessions, env=env)
+        try:
+            written = found.path.stat().st_mtime
+        except OSError:
+            written = None
+        if written is not None and (not seen
+                                    or written > store.parse_time(seen).timestamp()):
+            return check_handoff(str(found.path), conn, row, session_id, sessions=sessions,
+                                 env=env, director=True)
+    hint = "write one and pass --handoff FILE"
+    if modules.available("sessions"):
+        hint += f"; moxi sessions read {session_id} shows how it ended"
+    raise Refused("handoff", f"session {session_id} has no handoff written since it began",
+                  hint)
+
+
+def _waiting_handoff(conn: sqlite3.Connection, row: store.LaunchRow) -> Any | None:
+    """The seat's newest waiting handoff, or None when the launch has no key or its
+    folder holds none. Refused `handoff` when notes gives the launch no notes directory."""
+    key = handoffs.key_of_row(row)
+    if key is None:
+        return None
+    try:
+        where = handoffs.handoff_dir_of_row(row, create=False)
+    except handoffs.NoNotesDir as exc:
+        raise Refused("handoff", exc.problem, exc.hint) from None
+    return handoffs.waiting(conn, where, key)
 
 
 def began(conn: sqlite3.Connection, row: store.LaunchRow, session_id: str | None, *,
@@ -353,7 +420,8 @@ def _no_live_agents(session: Any) -> int | None:
 # -- the director's call ----------------------------------------------------------------
 
 
-def call_director(which: str, *, dry_run: bool = False, follow: bool = True,
+def call_director(which: str, *, handoff: str | None = None, dry_run: bool = False,
+                  follow: bool = True,
                   caller_env: Mapping[str, str] | None = None, turns: Any | None = None,
                   slots_api: Any | None = None, comms: Any = LOOK, cache: Any = LOOK,
                   settings: Mapping[str, Any] | None = None,
@@ -362,9 +430,10 @@ def call_director(which: str, *, dry_run: bool = False, follow: bool = True,
                   sleep: Callable[[float], None] = time.sleep,
                   sessions: Any = LOOK, check: Callable[[Any], Any] | None = None) -> Result:
     """Relaunch the session `which` (a session id or a bound comms name) as one of its
-    directors. Raises a refusal with nothing written; a hold now is a result, exit 75.
-    `sessions` stands in for sessions' API, which the model pin reads through, and
-    `check` for the launch check (`job.launch_check`)."""
+    directors, with `handoff` (else the seat's waiting one, `director_handoff`) as the
+    new session's first turn. Raises a refusal with nothing written; a hold now is a
+    result, exit 75. `sessions` stands in for sessions' API, which the model pin and the
+    handoff's age read through, and `check` for the launch check (`job.launch_check`)."""
     env = dict(os.environ if caller_env is None else caller_env)
     current = settings if settings is not None else _settings()
     if comms is LOOK:
@@ -389,32 +458,41 @@ def call_director(which: str, *, dry_run: bool = False, follow: bool = True,
                 raise Refused("self", f"session {sid} is your own",
                               "relaunch it with --self --handoff FILE")
             _check_director(comms, caller, row)
-            not_warm(row, sid, cache)
+            cached = not_warm(row, sid, cache)
             _no_open_run(c, row, api)
+            path = director_handoff(handoff, c, row, sid, sessions=sessions, env=env)
+            from . import keepwarm
+
             reading = quiet.read(found.session, slot=row.slot, slots_api=api,
-                                 person_s=float(current["relaunch.person_s"]))
+                                 person_s=float(current["relaunch.person_s"]),
+                                 keep_warm=keepwarm.on(c, row, sid))
             chosen = _pin(row, sid, sessions, env)
             data = {"session_id": sid, "request_id": row.request_id, "slot": row.slot,
-                    "director": caller, "model": chosen.model, "model_how": chosen.how}
+                    "director": caller, "handoff": str(path), "model": chosen.model,
+                    "model_how": chosen.how}
             if not reading.quiet:
+                _old_endpoint(found.session, sid, reading)
                 hold = reading.first
                 return Result(exits.TEMPFAIL, (f"held: {hold}; nothing was done, try again "
                                                "later",),
                               data={**data, "outcome": "held", "word": hold.word,
                                     "detail": hold.detail})
-            _launch_check(row, sid, chosen, check, mode="director", handoff=None, by=caller,
-                          env=env)
+            _launch_check(row, sid, chosen, check, mode="director", handoff=str(path),
+                          by=caller, env=env)
             if dry_run:
                 return Result(exits.OK, (f"would relaunch session {sid} in slot {row.slot} "
-                                         f"for {caller}", _would(chosen, whose="its")),
+                                         f"for {caller}, handoff {path}",
+                                         _would(chosen, whose="its")),
                               data={**data, "outcome": "dry-run", "launch_check": "passes"})
             run_id = store.new_run_id()
             run = store.insert_run(
                 c, kind="relaunch", mode="director", request_id=row.request_id,
-                session_id=sid, by=caller, slot=row.slot, pane_id=row.pane_id,
-                turn_number=reading.turn_number,
+                session_id=sid, by=caller, handoff_path=str(path), slot=row.slot,
+                pane_id=row.pane_id, turn_number=reading.turn_number,
                 job=f"slots:{job.job_name('relaunch', run_id)}",
                 gone=lambda j: job.gone(j, slots_api=api), run_id=run_id)
+            store.add_run_event(c, run.run_id, first.CACHE_EVENT,
+                                {"kind": getattr(cached, "kind", None)})
             failed = start_job(c, run, "relaunch", api, env)
             if failed is not None:
                 return failed
@@ -512,16 +590,49 @@ def _check_director(comms: Any, caller: str, row: store.LaunchRow) -> None:
                   "config that directs it, may relaunch it; mail its session")
 
 
-def not_warm(row: store.LaunchRow, session_id: str, cache: Any) -> None:
-    """With cache installed, refuse `warm` for a session whose cache is warm or fresh."""
+def not_warm(row: store.LaunchRow, session_id: str, cache: Any) -> Any | None:
+    """With cache installed, refuse `warm` for a session whose cache is warm or fresh.
+    Returns cache's read, None when cache is not installed or its read failed."""
     try:
         clock = recycle.cache_read(recycle.LOOK if cache is LOOK else cache, row,
                                    session_id, os.environ)
     except Exception:  # noqa: BLE001  (an unread cache leaves the director's call)
-        return
+        return None
     if clock is not None and clock.kind in REACHABLE:
         raise Refused("warm", f"session {session_id}'s cache is {clock.kind}: it can take a "
                               "message", "mail it")
+    return clock
+
+
+#: The turns capability of an endpoint that judges which `waiting` subagents are stale.
+STALE_AGENTS = "stale-agents"
+
+
+def _old_endpoint(session: Any, session_id: str, reading: quiet.Reading) -> None:
+    """Refuse `old-endpoint` a call held first by subagents that are all Claude subagents
+    listed `waiting`, on a session whose turns endpoint doesn't judge them
+    (`STALE_AGENTS`): it can't tell a stale one from a working one, so trying again won't
+    help. The launcher judges no entry itself."""
+    hold = reading.first
+    if hold is None or hold.word != "subagents" or reading.agents is None:
+        return
+    live = quiet.live_agents(reading.agents)
+    if not live or any(a.kind != "subagent" or a.state != "waiting" for a in live):
+        return
+    try:
+        judges = STALE_AGENTS in session.capabilities
+    except Exception:  # noqa: BLE001  (capabilities not read: the held words stand)
+        return
+    if judges:
+        return
+    raise Refused("old-endpoint",
+                  f"session {session_id}'s turns endpoint started before the stale-subagent "
+                  f"judgment was installed, so it can't tell its {len(live)} waiting "
+                  f"subagent{'s' if len(live) != 1 else ''} from working ones, and trying "
+                  "again won't change that",
+                  "wait until its subagents' waits end and it relaunches itself, or wake it "
+                  "with a message so it can stop them and relaunch itself; a relaunch then "
+                  "starts its new session on an endpoint that judges")
 
 
 # -- status ------------------------------------------------------------------------------
@@ -977,7 +1088,8 @@ def _span(seconds: float) -> str:
 
 
 __all__ = ["ARMED", "HANDOFF_CAP", "JOB_SCRIPT", "LOOK", "REACHABLE",
-           "SELF_RECYCLE_HINT", "UNREADABLE", "Refused", "Result", "arm_self", "began", "call_director",
-           "check_handoff", "follow_run", "from_record", "is_director", "job_argv",
+           "SELF_RECYCLE_HINT", "STALE_AGENTS", "UNREADABLE", "Refused", "Result", "arm_self",
+           "began", "call_director", "check_handoff", "director_handoff", "follow_run",
+           "from_record", "is_director", "job_argv",
            "may_recycle", "model_words", "not_warm", "offered",
            "outcome_result", "run_line", "start_job", "status", "stop_run"]

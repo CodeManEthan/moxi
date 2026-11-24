@@ -63,7 +63,8 @@ compact detached (`moxi.proc.spawn`); each records its own process as its run's 
    for ready, a director's relaunch too, as any slot launch does; what it finds there (a
    screen it won't answer, no ready in time) flags the relaunch, the launch's `finding`,
    and never fails it.
-7. A self run's new session gets its handoff as its first turn; not sent:
+7. The new session gets the run's handoff as its first turn (a self run's, and a
+   director's, which `moxi launcher relaunch` always gives one); not sent:
    `first-turn-not-sent`. A flagged one gets none: the run ends `first-turn-not-sent` at
    once, with the finding as its word and the launch's line, which names the screen and
    the slot.
@@ -333,12 +334,12 @@ def replay_request(row: store.LaunchRow, run_id: str, *, mode: str, handoff: str
                    by: str, slot: str | None, hold: str | None, respawn: bool,
                    director: bool = False, model_pin: str | None = None) -> Any:
     """The replay a relaunch or repair run launches: `row` made again as its relaunch,
-    with a self run's handoff as its first turn (a director's run carries none and the
-    posture `with:<director>`), into `slot` under `hold`, on `model_pin`."""
+    with the run's handoff as its first turn and the posture `relaunched`, into `slot`
+    under `hold`, on `model_pin`. A director's run recorded with no handoff comes back
+    with the posture `with:<director>` and no first turn."""
     from . import api
     from .compose import common
 
-    handoff = handoff if mode == "self" else None
     posture = (common.RELAUNCHED.format(path=handoff) if handoff
                else f"with:{by}")
     return api.ReplayRequest(
@@ -952,7 +953,7 @@ class RelaunchJob:
             model_pin=self.pin.model if self.pin is not None and self.pin.pinned else None)
 
     def respawn(self, request: Any) -> None:
-        """Steps 6 to 8: launch the row again; a self run's handoff goes as its first
+        """Steps 6 to 8: launch the row again; the run's handoff goes as its first
         turn."""
         from . import catalog
 
