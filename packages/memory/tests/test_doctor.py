@@ -392,7 +392,7 @@ class FakeSession:
 
 
 def test_live_sessions_are_checked_as_a_recalls_own_try_checks_them(monkeypatch):
-    from moxi_turns import client
+    import moxi_turns as client
 
     on = {"MOXI_MEMORY_SUBCONSCIOUS": "automatic"}
     monkeypatch.setattr(client, "sessions", lambda: [

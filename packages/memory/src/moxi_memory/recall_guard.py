@@ -161,7 +161,7 @@ def allowed(call, settings: Mapping[str, object]) -> bool:
 
 def judge_call(call):
     """The call-step judge of `memory.subconscious-fork`."""
-    from moxi_turns.guards import Deny
+    from moxi_turns import Deny
 
     record = fork_record(call.session_id, call.agent_id)
     if record is None:
@@ -179,7 +179,7 @@ def judge_call(call):
 
 def judge_ask(call):
     """The ask-step judge of `memory.subconscious-fork-ask`."""
-    from moxi_turns.guards import Deny
+    from moxi_turns import Deny
 
     if fork_record(call.session_id, call.agent_id) is None:
         return None

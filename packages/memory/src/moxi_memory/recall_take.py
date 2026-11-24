@@ -53,6 +53,8 @@ ACKED = "acked"
 SETTLED = "settled"
 #: The reason on a recall a taker found no answer for.
 GONE = "gone"
+#: How turns' `Lost` reason opens when turns holds no delivery for a ref.
+UNKNOWN_DELIVERY = "unknown delivery"
 
 
 def me() -> dict | None:
@@ -113,7 +115,7 @@ def round_number(ref: str) -> int | None:
 
 def _read_end(session_id: str) -> Callable[[str], object]:
     def read(ref: str):
-        from moxi_turns import client
+        import moxi_turns as client
 
         return client.wait_ref(ref, session_id=session_id, until="ended", timeout_s=0)
 
@@ -122,9 +124,9 @@ def _read_end(session_id: str) -> Callable[[str], object]:
 
 def _as_gone(end):
     """An `unknown delivery` end read as the round's fork gone."""
-    from moxi_turns.results import LOST_UNKNOWN, Lost
+    from moxi_turns import Lost
 
-    if isinstance(end, Lost) and str(end.reason or "").startswith(LOST_UNKNOWN):
+    if isinstance(end, Lost) and str(end.reason or "").startswith(UNKNOWN_DELIVERY):
         return Lost(f"{GONE}: {end.reason}", ref=end.ref)
     return end
 
@@ -227,6 +229,6 @@ def start_taker(session_id: str) -> int:
                             session_id], detached=True, output=os.devnull, cwd=os.sep)
 
 
-__all__ = ["TAKER", "NONE", "LEFT", "ACKED", "SETTLED", "GONE", "me", "owner", "owner_gone",
-           "needs_taking", "takeable", "claim", "round_number", "take", "take_all",
+__all__ = ["TAKER", "NONE", "LEFT", "ACKED", "SETTLED", "GONE", "UNKNOWN_DELIVERY", "me",
+           "owner", "owner_gone", "needs_taking", "takeable", "claim", "round_number", "take", "take_all",
            "session_needs_taking", "start_taker"]

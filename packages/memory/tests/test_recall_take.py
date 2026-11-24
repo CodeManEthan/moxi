@@ -5,7 +5,7 @@ an open line whose round turns has settled, one it has not, and one turns never 
 import os
 import types
 
-from moxi_turns.results import LOST_UNKNOWN, Ended, Lost
+from moxi_turns import Ended, Lost
 
 from moxi_memory import (listener, listeners, recall_child, recall_start, recall_take,
                          recalls, records)
@@ -123,7 +123,7 @@ def test_a_first_round_turns_never_had_loses_the_recall_gone():
         line["ref"] = f"{rid}:1"
         recalls.put_line(SESSION, line)
     route = AckRoute()
-    end = Lost(f"{LOST_UNKNOWN}: no live endpoint, and no kept end carries this ref")
+    end = Lost(f"{recall_take.UNKNOWN_DELIVERY}: no live endpoint, and no kept end carries this ref")
     assert recall_take.take(SESSION, rid, identity=live(), read_end=ends(end),
                             route=route) == "settled"
     line = recalls.find_line(SESSION, rid)
@@ -141,7 +141,7 @@ def test_a_later_round_turns_never_had_ends_the_stream_back():
         line["ref"] = f"{rid}:2"
         recalls.put_line(SESSION, line)
         records.update(SESSION, rid, state="back", answered=True)
-    end = Lost(f"{LOST_UNKNOWN}: no delivery at this endpoint carries this ref")
+    end = Lost(f"{recall_take.UNKNOWN_DELIVERY}: no delivery at this endpoint carries this ref")
     assert recall_take.take(SESSION, rid, identity=live(), read_end=ends(end),
                             route=AckRoute()) == "settled"
     line = recalls.find_line(SESSION, rid)

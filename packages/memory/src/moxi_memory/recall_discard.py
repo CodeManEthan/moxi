@@ -32,7 +32,7 @@ def _user() -> str | None:
 
 
 def _ack(session_id: str, ref: str) -> None:
-    from moxi_turns import client
+    import moxi_turns as client
 
     client.ack(ref, session_id=session_id)
 

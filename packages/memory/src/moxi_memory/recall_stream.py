@@ -126,7 +126,7 @@ def settle(recall, round_number: int, end, route: Route, *, now: float | None = 
     """Settle round `round_number` with turns' `end` for it: the line, then the ack,
     then the mark. True when an answer came back. The line is read again under the lock;
     one a person discarded keeps its state, and only the ack and the mark follow."""
-    from moxi_turns.results import Ended
+    from moxi_turns import Ended
 
     now = time.time() if now is None else now
     round_ref = ref(recall.recall_id, round_number)

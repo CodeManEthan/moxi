@@ -3,7 +3,7 @@ calls, the count over its rounds, the refusal of background and self-timed shell
 and the refusal of every permission ask of a fork."""
 
 import pytest
-from moxi_turns.guards import Deny, ToolCall
+from moxi_turns import Deny, ToolCall
 
 from moxi_memory import guards, recall_guard, recall_start, records
 

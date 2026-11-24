@@ -95,7 +95,7 @@ def route(harness: str | None, session_id: str) -> tuple[str | None, str | None]
     if harness != "claude":
         return None, NO_FORK
     try:
-        from moxi_turns import client
+        import moxi_turns as client
 
         found = client.find(session_id=session_id)
         if found is None:
@@ -198,7 +198,7 @@ def this_session():
     """The session the calling process runs in, found by its own process id through
     turns' client: (session id, harness, the session's environment stamps, its launch
     directory), or None when no turns endpoint serves it."""
-    from moxi_turns import client
+    import moxi_turns as client
 
     found = client.find(pid=os.getpid())
     if found is None:

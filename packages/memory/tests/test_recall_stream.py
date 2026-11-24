@@ -4,7 +4,7 @@ then acked, then unmarked; the stream's ends; a first round lost and a later one
 import types
 
 import pytest
-from moxi_turns.results import Ended, Lost, Started
+from moxi_turns import Ended, Lost, Started
 
 from moxi_memory import recall_child, recall_start, recall_stream, recalls, records
 

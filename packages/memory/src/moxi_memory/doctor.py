@@ -51,6 +51,7 @@ is there.
 from __future__ import annotations
 
 from collections.abc import Iterator
+from functools import partial
 
 from moxi.doctor import Row
 
@@ -79,7 +80,8 @@ def rows() -> Iterator[Row]:
               ("start", _start, (harnesses,)),
               ("sessions", _sessions, ()), ("links", _links, ()),
               ("retention", _retention, (harnesses,)),
-              ("subconscious", _subconscious, (config is None,)))
+              ("subconscious",
+               partial(_subconscious, config_in_error=config is None), ()))
     for name, check, args in checks:
         try:
             yield check(*args)
@@ -457,7 +459,7 @@ def _shown(items: list[str]) -> str:
 def live_subconscious() -> list[tuple[str, str, str | None]]:
     """(session id, mode, the reason no route can run, or None) for each live session
     turns serves whose launch turned the subconscious on."""
-    from moxi_turns import client
+    import moxi_turns as client
 
     from . import recall_start
 
@@ -482,7 +484,7 @@ def live_subconscious() -> list[tuple[str, str, str | None]]:
     return out
 
 
-def _subconscious(config_in_error: bool, now: float | None = None) -> Row:
+def _subconscious(*, config_in_error: bool, now: float | None = None) -> Row:
     import time
 
     from . import recall_child, recall_take, recalls

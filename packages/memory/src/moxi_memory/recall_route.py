@@ -43,14 +43,14 @@ class Subagent:
         self._bound_s: float | None = None
 
     def _find(self):
-        from moxi_turns import client
+        import moxi_turns as client
 
         if self._session is None:
             self._session = client.find(session_id=self.session_id)
         return self._session
 
     def _gone(self, why: str) -> _Known:
-        from moxi_turns.results import Lost
+        from moxi_turns import Lost
 
         return _Known(Lost(f"gone: {why}"))
 
@@ -63,7 +63,7 @@ class Subagent:
             return session.fork(text, by=BY, ref=ref, keep=True,
                                 round_timeout_s=round_timeout_s)
         except Exception as exc:  # noqa: BLE001 - a fork turns refused is a lost round
-            from moxi_turns.results import Refused
+            from moxi_turns import Refused
 
             return _Known(Refused(f"denied: {exc}"))
 
@@ -79,12 +79,12 @@ class Subagent:
             return session.fork_continue(delivery, text, ref=ref, keep=True,
                                          round_timeout_s=round_timeout_s)
         except Exception as exc:  # noqa: BLE001
-            from moxi_turns.results import Refused
+            from moxi_turns import Refused
 
             return _Known(Refused(f"denied: {exc}"))
 
     def started(self, handle) -> str | None:
-        from moxi_turns.results import Started
+        from moxi_turns import Started
 
         if isinstance(handle, _Known):
             return None
@@ -100,7 +100,7 @@ class Subagent:
         return handle.wait_ended(timeout_s)
 
     def ack(self, ref: str) -> None:
-        from moxi_turns import client
+        import moxi_turns as client
 
         client.ack(ref, session_id=self.session_id)
 

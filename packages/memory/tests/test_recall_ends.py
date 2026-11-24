@@ -93,7 +93,7 @@ def test_the_owner_asks_no_further_round_of_a_discarded_line():
             return "agent-1"
 
         def ended(self, handle, timeout_s):
-            from moxi_turns.results import Ended
+            from moxi_turns import Ended
 
             return Ended(turn_id=None, outcome="completed", answer="- a")
 
