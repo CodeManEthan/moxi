@@ -42,7 +42,7 @@ from test_browser_list import (changed_at, count_line, date_words, day_key, day_
                                keys, noon, open_list, row, sid, tid)
 from test_browser_opened import open_row, opened
 
-pytestmark = [pytest.mark.browser, pytest.mark.timeout(180),
+pytestmark = [pytest.mark.browser, pytest.mark.timeout(180, method="thread"),
               pytest.mark.skipif(not sys.platform.startswith("linux"),
                                  reason="sessions' page is checked in a browser on Linux; the "
                                         "Windows and macOS runs are owed")]

@@ -32,7 +32,7 @@ from playwright.sync_api import expect
 from moxi_sessions.testing import CodexRollout
 from test_browser_list import changed_at, claude, count_line, env_of, filter_button, group, keys, open_list, sid, tid
 
-pytestmark = [pytest.mark.browser, pytest.mark.timeout(180),
+pytestmark = [pytest.mark.browser, pytest.mark.timeout(180, method="thread"),
               pytest.mark.skipif(not sys.platform.startswith("linux"),
                                  reason="sessions' page is checked in a browser on Linux; the "
                                         "Windows and macOS runs are owed"),

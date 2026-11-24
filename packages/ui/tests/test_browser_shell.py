@@ -13,7 +13,7 @@ import pytest
 from moxi import modules
 from playwright.sync_api import expect
 
-pytestmark = [pytest.mark.browser, pytest.mark.timeout(60)]
+pytestmark = [pytest.mark.browser, pytest.mark.timeout(60, method="thread")]
 
 # The doctor runs `moxi doctor --json` in a child; give it longer than a click.
 DOCTOR_MS = 20_000

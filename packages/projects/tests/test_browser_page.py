@@ -31,7 +31,7 @@ from pathlib import Path
 import pytest
 from playwright.sync_api import expect
 
-pytestmark = [pytest.mark.browser, pytest.mark.timeout(180),
+pytestmark = [pytest.mark.browser, pytest.mark.timeout(180, method="thread"),
               pytest.mark.skipif(not sys.platform.startswith("linux"),
                                  reason="projects' page is checked in a browser on Linux; the "
                                         "Windows and macOS runs are owed")]

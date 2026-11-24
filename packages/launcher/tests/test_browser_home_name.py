@@ -23,7 +23,7 @@ from playwright.sync_api import expect
 
 import launcher_page_kit as kit
 
-pytestmark = [pytest.mark.browser, pytest.mark.timeout(120),
+pytestmark = [pytest.mark.browser, pytest.mark.timeout(120, method="thread"),
               pytest.mark.skipif(not sys.platform.startswith("linux"),
                                  reason="projects' picker is checked in a browser on Linux")]
 

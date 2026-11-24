@@ -28,7 +28,7 @@ from moxi_ui.testing.phone import (HOST, ORIGIN, PhoneBridge, free_port, gateway
 from moxi_ui.testing.shell import TestShell
 from squatter import Squatter
 
-pytestmark = [pytest.mark.browser, pytest.mark.timeout(120)]
+pytestmark = [pytest.mark.browser, pytest.mark.timeout(120, method="thread")]
 
 #: The browser tests that need the socket endpoint, which no system's probe result names.
 SOCKET_TESTS = (

@@ -17992,6 +17992,7 @@ rounds	packages/rounds/tests/test_private_files.py	path.parent.mkdir(parents=Tru
 rounds	packages/rounds/tests/test_private_files.py	assert not any(one.startswith("brought in") for one in made.block.lines)	keep	any	any
 rounds	packages/rounds/tests/test_private_files.py	assert any(all(part in one for part in said) for one in reasons), reasons	keep	any	any
 rounds	packages/rounds/tests/test_private_files.py	tree.commit("notes/readme.md", "changed")	keep	changed	changed
+ui	packages/ui/src/moxi_ui/testing/__init__.py	before = set(this.children())	keep	set	set
 launcher	packages/launcher/src/moxi_launcher/relaunch.py	found = sessions.find(row.harness, session_id,	keep	find	find
 launcher	packages/launcher/src/moxi_launcher/selfrecycle.py	"RECYCLE_AT_LIMIT", "RELAUNCH", "SCRATCH", "SLOT", "SLOTS", "WARN_AT", "missing",	keep	RELAUNCH	RELAUNCH
 launcher	packages/launcher/src/moxi_launcher/selfrecycle.py	"RECYCLE_AT_LIMIT", "RELAUNCH", "SCRATCH", "SLOT", "SLOTS", "WARN_AT", "missing",	keep	WARN_AT	WARN_AT
@@ -18040,3 +18041,8 @@ rounds	packages/rounds/tests/test_watched_paths.py	input={"file_path": str(path)
 rounds	packages/rounds/tests/test_watched_paths.py	tool="apply_patch", input={"command": text}, cwd=str(cwd))	keep	input	input
 rounds	packages/rounds/tests/test_watched_paths.py	input={"command": "mkdir x"}))):	keep	input	input
 rounds	packages/rounds/tests/test_watched_paths.py	"allow", "any")	keep	any	any
+moxi-dev	packages/moxi-dev/src/moxi_dev/testing.py	_STACKS.update(fh=fh, at=at)	keep	at	at
+moxi-dev	packages/moxi-dev/tests/test_check.py	assert checker.wait(timeout=testing.PROC_WAIT_S) == 128 + signum	keep	timeout	timeout
+moxi-dev	packages/moxi-dev/tests/test_check.py	checker.wait(timeout=1)	keep	timeout	timeout
+moxi-dev	packages/moxi-dev/tests/test_check.py	assert checker.wait(timeout=testing.PROC_WAIT_S) == 128 + signal.SIGTERM	keep	timeout	timeout
+moxi-dev	packages/moxi-dev/tests/test_kit.py	wait_for(lambda: not any(_running(pid) for pid in pids), testing.PROC_WAIT_S,	keep	any	any
