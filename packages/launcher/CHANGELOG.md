@@ -28,6 +28,10 @@
 - `moxi launcher show` and Home show a relaunch launch's mark again, read from its
   `warn_at` (`at limit relaunch (2x)`), and show a launch recorded with `compact` as
   `compact (no longer acts)`.
+- The `cache` extra now needs `moxi-cache>=0.1.7`, the first cache whose clock carries
+  `response_s`.
+- The launcher needs moxi 0.1.11 or later: its settings mark the retired
+  `recycle.limit_wait_s` `left_out`, a field an older core refuses.
 
 - The `subconscious` row (`off`, `automatic`, `on-demand`; needs turns and memory) turns
   memory's subconscious on for one launch, or for every launch of a preset that sets it:
