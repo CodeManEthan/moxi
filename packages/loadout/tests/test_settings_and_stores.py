@@ -106,7 +106,9 @@ def test_each_lock_path_makes_its_private_dir_first():
     state = Layout("loadout").state_dir()
     assert not state.exists()
     assert stores.manifest_lock() == state / "manifest.lock"
-    assert stat.S_IMODE(state.stat().st_mode) == 0o700
+    assert state.is_dir()
+    if os.name == "posix":  # Windows keeps no mode bits
+        assert stat.S_IMODE(state.stat().st_mode) == 0o700
     assert stores.install_lock() == state / "install.lock"
     lock = stores.harness_lock("~/.codex/config.toml")
     assert lock.parent == state / "locks" and lock.parent.is_dir()

@@ -403,7 +403,9 @@ def test_another_value_under_the_key_is_blocked_then_taken_over(lo):
     assert out.code == 0
     assert read(path)["mcp"]["docs"]["url"] == "https://example.invalid/m"
     backups = list((stores.backups_dir() / "opencode").iterdir())
-    assert backups and stat.S_IMODE(backups[0].stat().st_mode) == 0o600
+    assert backups
+    if os.name == "posix":  # Windows keeps no mode bits
+        assert stat.S_IMODE(backups[0].stat().st_mode) == 0o600
     assert b"mine" in backups[0].read_bytes()
 
 
