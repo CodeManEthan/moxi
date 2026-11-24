@@ -94,6 +94,7 @@ from .machine_line import COLD_AT_LIVE, POSTURE_ONCE, parse as parse_machine_lin
 from .record import AUTHOR_IDENTITY, AUTHOR_OPERATOR, Message
 from . import kinds as kinds_mod
 from . import reserved as reserved_mod
+from . import scoped as scoped_mod
 from .paths import comms_db, daemon_socket
 from .record import Forbidden
 from .replies import SentEntry
@@ -1171,6 +1172,12 @@ class Daemon:
                 # once whatever stood in its way has gone.
                 raise Refusal(reserved_mod.bind_refusal(held_for), code=wire.NAME_RESERVED,
                               name=q)
+            scoped_form = scoped_mod.form_of(db, q)
+            if scoped_form is not None:
+                # Once a module declares a word, no session binds a name of its form,
+                # held before or not: a holder that had it keeps it until it releases.
+                raise Refusal(scoped_mod.bind_refusal(scoped_form), code=wire.NAME_RESERVED,
+                              name=q)
             if q in self.bindings:
                 held = self.bindings[q]
                 raise Refusal(
@@ -2080,6 +2087,11 @@ class Daemon:
             r = self._resolve(db, tag)
             # The row decides, bound or not: a reserved name is never a recipient.
             if r.resolvable and reserved_mod.unmailable(db, r.qualified):
+                r.send_only = True
+            # Nor is a name of a declared word's form that nothing holds: no session can
+            # bind it, and its scoped sender receives nothing.
+            elif (r.resolvable and r.binding is None
+                  and scoped_mod.unmailable(db, r.qualified)):
                 r.send_only = True
             return r
 

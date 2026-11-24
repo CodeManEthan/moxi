@@ -1044,7 +1044,7 @@ def _say(lines) -> None:
 
 # --------------------------------------------------------------------------- doctor
 
-def doctor_rows(env=None, *, declared=None, chain=None) -> list:
+def doctor_rows(env=None, *, declared=None, words=None, chain=None) -> list:
     """comms' doctor rows about reserved names: reconcile first (which catches a module
     installed before comms, and a store restored from a backup), then one row per name
     that isn't reserved as declared, and per reserved token this process can't read."""
@@ -1057,7 +1057,7 @@ def doctor_rows(env=None, *, declared=None, chain=None) -> list:
         # reconciles then.
         return []
     try:
-        result = reconcile(declared=declared, chain=chain, env=env)
+        result = reconcile(declared=declared, words=words, chain=chain, env=env)
     except StoreRefused as exc:
         return [Row(MODULE, "reserved", "warn", f"reserved names weren't checked: "
                     f"{exc.reason}")]

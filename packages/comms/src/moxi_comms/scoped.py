@@ -111,7 +111,9 @@ def _parent(parent) -> tuple[str, str]:
     if not isinstance(parent, str) or not parent:
         raise ValueError(f"{parent!r} is not a comms name")
     name, scope = split_tag(parent)
-    scope = GLOBAL if scope in (None, "") else scope
+    if scope == "":
+        raise ValueError(f"{parent!r} is not a comms name")
+    scope = GLOBAL if scope is None else scope
     if not NAME_RE.match(name) or (scope != GLOBAL and not NAME_RE.match(scope)):
         raise ValueError(f"{parent!r} is not a comms name")
     return name, scope
@@ -270,17 +272,31 @@ def load(gone: str | None = None, *, entries: Iterable | None = None,
 
 # --------------------------------------------------------------------------- reads
 
+def _rows(conn, sql: str, params=()) -> list:
+    """`sql`'s rows as `sqlite3.Row`s, leaving the connection's own row factory as it
+    is."""
+    cur = conn.cursor()
+    cur.row_factory = sqlite3.Row
+    try:
+        return cur.execute(sql, params).fetchall()
+    except sqlite3.OperationalError as exc:
+        # A store a writer hasn't brought to the step that adds the table yet holds no
+        # word.
+        if "no such table: scoped" in str(exc):
+            return []
+        raise
+
+
 def rows(conn) -> dict:
     """word -> its `scoped` row, freed ones included."""
-    conn.row_factory = sqlite3.Row
-    return {r["word"]: r for r in conn.execute("SELECT * FROM scoped")}
+    return {r["word"]: r for r in _rows(conn, "SELECT * FROM scoped")}
 
 
 def word_row(conn, word: str):
     """The `scoped` row of `word` that isn't freed, or None."""
-    conn.row_factory = sqlite3.Row
-    return conn.execute("SELECT * FROM scoped WHERE word = ? AND freed_at IS NULL",
-                        (word,)).fetchone()
+    found = _rows(conn, "SELECT * FROM scoped WHERE word = ? AND freed_at IS NULL",
+                  (word,))
+    return found[0] if found else None
 
 
 def declarers(row) -> tuple:
