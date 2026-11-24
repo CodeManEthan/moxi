@@ -17744,8 +17744,7 @@ rounds	packages/rounds/tests/test_private_files.py	assert any(all(part in one fo
 rounds	packages/rounds/tests/test_private_files.py	tree.commit("notes/readme.md", "changed")	keep	changed	changed
 rounds	packages/rounds/src/moxi_rounds/brake.py	was, now = (set(entry.get("checklist") or ()) for entry in (before, current))	keep	set	set
 rounds	packages/rounds/src/moxi_rounds/checklist.py	seen = set()	keep	set	set
-rounds	packages/rounds/src/moxi_rounds/checklist.py	return set(one or ()) == set(other or ())	keep	set	set
-rounds	packages/rounds/src/moxi_rounds/checklist.py	if not marks.marked and not any(items(settings, one) for one in projects):	keep	any	any
+rounds	packages/rounds/src/moxi_rounds/checklist.py	return any(items(settings, one) for one in projects)	keep	any	any
 rounds	packages/rounds/src/moxi_rounds/checklist.py	and not any(one.project.casefold() == repo.casefold() for one in found)):	keep	any	any
 rounds	packages/rounds/src/moxi_rounds/checklist.py	gone = set(said["gone"])	keep	set	set
 rounds	packages/rounds/src/moxi_rounds/cli.py	help="for a flow with no design step, the checklist items that "	keep	help	help

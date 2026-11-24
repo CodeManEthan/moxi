@@ -486,7 +486,7 @@ def _check_command_line(file, where, command) -> None:
 #: A checklist item's id: lower-case words of letters and digits joined by `-`.
 _ITEM_ID = re.compile(r"[a-z0-9]+(-[a-z0-9]+)*")
 #: The longest checklist item id.
-ITEM_ID_CHARS = 32
+_ITEM_ID_CHARS = 32
 #: A skill's name as a harness lists it, optionally `<plugin>:<skill>`.
 _SKILL_PART = r"[A-Za-z0-9][A-Za-z0-9._-]*"
 _SKILL = re.compile(rf"{_SKILL_PART}(:{_SKILL_PART})?")
@@ -542,13 +542,13 @@ def _check_checklist(file, where, value) -> None:
         here = f"{where}[{index}]"
         _check_table_keys(file, here, item, _ITEM_KEYS, "checklist item")
         item_id = item.get("id")
-        if (not isinstance(item_id, str) or len(item_id) > ITEM_ID_CHARS
+        if (not isinstance(item_id, str) or len(item_id) > _ITEM_ID_CHARS
                 or not _ITEM_ID.fullmatch(item_id)):
             raise ConfigError(file, f"{here}.id",
                               "is missing" if item_id is None
                               else f"is {item_id!r}, which is not an item id",
                               f"give lower-case words of letters and digits joined by -, "
-                              f"at most {ITEM_ID_CHARS} characters, as public-surface")
+                              f"at most {_ITEM_ID_CHARS} characters, as public-surface")
         if item_id in seen:
             raise ConfigError(file, f"{here}.id", f"is {item_id!r}, an id used before",
                               "give each item an id of its own")
@@ -568,7 +568,7 @@ def _check_watched_paths(file, where, value) -> None:
         here = f"{where}[{index}]"
         _check_table_keys(file, here, entry, _WATCH_KEYS, "watched-paths entry")
         pattern = entry.get("pattern")
-        problem = pattern_problem(pattern)
+        problem = _pattern_problem(pattern)
         if problem:
             raise ConfigError(file, f"{here}.pattern",
                               "is missing" if pattern is None else f"is {pattern!r}, {problem}",
@@ -582,7 +582,7 @@ def _check_watched_paths(file, where, value) -> None:
             _check_bool(file, f"{here}.only_new", entry["only_new"])
 
 
-def pattern_problem(pattern) -> str:
+def _pattern_problem(pattern) -> str:
     """What makes `pattern` no watched-paths pattern, or "" when nothing does. One `/` at
     its end is the folder mark, taken off before its parts are read; every other `/`
     stands between two parts that are not empty."""
@@ -848,6 +848,6 @@ _KIND_WORDS = {"string": "a string", "bool": "a boolean", "int": "an int"}
 
 
 __all__ = ["MODULE", "SCHEMA_RESOURCE", "schema", "load", "check_text", "check",
-           "ROUND_KEYS", "BUILD_KEYS", "PROJECT_KEYS", "GUARD_SWITCH", "ITEM_ID_CHARS", "LAND_FINISH", "LAND_QUEUE", "BASE_FIELD", "MERGE", "PUSH", "COMMAND", "DEFAULT_FINISH",
+           "ROUND_KEYS", "BUILD_KEYS", "PROJECT_KEYS", "GUARD_SWITCH", "LAND_FINISH", "LAND_QUEUE", "BASE_FIELD", "MERGE", "PUSH", "COMMAND", "DEFAULT_FINISH",
            "round_setting", "build_setting", "project_setting", "project_table",
-           "finish_actions", "has_notes_dir", "pattern_problem"]
+           "finish_actions", "has_notes_dir"]

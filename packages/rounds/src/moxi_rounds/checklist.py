@@ -161,11 +161,6 @@ def marks_of(state) -> Marks:
     return Marks((), None)
 
 
-def same(one: Iterable[str] | None, other: Iterable[str] | None) -> bool:
-    """Whether two lists of marks are the same set, None reading as none."""
-    return set(one or ()) == set(other or ())
-
-
 def resolved(marks: Iterable[str], home: str, settings) -> list[Item]:
     """Each of `marks` as the item it names, as the config has it now."""
     out = []
@@ -320,6 +315,6 @@ def lines(said: dict, kind: str) -> list[str]:
 
 
 __all__ = ["KEY", "NONE", "Item", "Marks", "split", "spelled", "items", "weighed",
-           "stage_repos", "problems", "parse", "marks_of", "same", "resolved",
+           "stage_repos", "problems", "parse", "marks_of", "resolved",
            "every_item", "skills", "DRAFTING", "CHECKING", "BUILDING", "GONE", "is_said", "told",
            "verifier_lines", "marks_said", "lines"]

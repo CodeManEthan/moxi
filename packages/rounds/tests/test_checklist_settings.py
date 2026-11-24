@@ -127,7 +127,6 @@ def test_a_pattern_with_a_backslash_is_refused_with_the_slash_fix():
                                      "src/**", "**/x.py", "a/[ab]?.py", "x"])
 def test_a_pattern_inside_the_project_passes_and_one_trailing_slash_marks_a_dir(
         pattern):
-    assert settings.pattern_problem(pattern) == ""
     settings.check_text(f'[projects.proj-a]\nwatched_paths = [{{ pattern = "{pattern}", '
                         f'note = "n", skills = ["s"], only_new = true }}]\n')
 
