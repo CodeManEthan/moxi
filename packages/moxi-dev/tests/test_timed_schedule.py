@@ -8,7 +8,6 @@ user's own manager, units or cache.
 
 from __future__ import annotations
 
-import fcntl
 import json
 import os
 import re
@@ -21,6 +20,9 @@ import pytest
 
 from moxi_dev import schedule, tick, timed
 from test_check import git
+
+#: The timer is Linux only (`moxi_dev.schedule`), and its run lock is held with flock.
+fcntl = pytest.importorskip("fcntl", reason="Windows has no flock; the timer is Linux only")
 
 FAKE = f"""#!{sys.executable}
 import json, os, sys

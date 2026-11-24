@@ -7,7 +7,6 @@ no environment is synced and no test is timed.
 
 from __future__ import annotations
 
-import fcntl
 import json
 import os
 import re
@@ -20,11 +19,22 @@ import pytest
 from moxi_dev import tick, timed, timed_record, timed_show
 from moxi_dev.testing import (DURATIONS_ENV, IDLE_ENV, TIERS_ENV, TIMED_ENV,
                               TIMED_LOCK_FD_ENV, TIMED_SLACK_ENV)
+from moxi_dev.durations import fcntl, msvcrt
 from test_check import LAYOUT, git, write_workspace
 
 SUMMARY = (r"moxi-dev timed: commit [0-9a-f]{12}(\+dirty)? on [A-Za-z0-9._-]+ \| "
            r"(passed \d+, failed \d+, skipped \d+, not measured \d+( \(.*\))?|already measured)"
            r" \| total \d+\.\d s \| exit \d")
+
+
+
+def hold(fd: int) -> None:
+    """Lock `fd` as the run lock is locked on this system (`moxi_dev.timed.lock_run`)."""
+    if fcntl is not None:
+        fcntl.flock(fd, fcntl.LOCK_EX)
+    else:
+        os.lseek(fd, 0, os.SEEK_SET)
+        msvcrt.locking(fd, msvcrt.LK_NBLCK, 1)
 
 
 def entry(outcome="passed", *, other=0.1, reading=1.0, budget=2.0, failure=None):
@@ -176,7 +186,7 @@ def test_the_run_lock_comes_first_and_a_second_run_exits_2_without_syncing(repo,
     lock = record_dir(repo) / ".run-lock"
     lock.parent.mkdir(parents=True)
     fd = os.open(lock, os.O_RDWR | os.O_CREAT)
-    fcntl.flock(fd, fcntl.LOCK_EX)
+    hold(fd)
     try:
         stand = Stand(PLAN)
         assert go(repo, stand).code == 2
@@ -186,12 +196,14 @@ def test_the_run_lock_comes_first_and_a_second_run_exits_2_without_syncing(repo,
         os.close(fd)
 
 
+@pytest.mark.skipif(fcntl is None, reason="Windows has no flock: no tick runs there to "
+                    "hand its run a held descriptor")
 def test_a_descriptor_handed_on_the_lock_file_runs_and_one_on_another_file_exits_2(repo,
                                                                                    tmp_path):
     lock = record_dir(repo) / ".run-lock"
     lock.parent.mkdir(parents=True)
     fd = os.open(lock, os.O_RDWR | os.O_CREAT)
-    fcntl.flock(fd, fcntl.LOCK_EX)
+    hold(fd)
     other = os.open(tmp_path / "other", os.O_RDWR | os.O_CREAT)
     try:
         assert go(repo, Stand(PLAN), env={TIMED_LOCK_FD_ENV: str(fd)}).code == 0
@@ -221,7 +233,7 @@ def test_outside_git_the_commit_file_and_record_dir_place_the_record(synced, tmp
     assert go(synced, Stand(PLAN), record_dir=results).code == 0
     assert json.loads((results / "box" / f"{'a' * 40}.json").read_text())["commit"] == "a" * 40
     fd = os.open(synced / ".moxi-dev/timed/.run-lock", os.O_RDWR)
-    fcntl.flock(fd, fcntl.LOCK_EX)
+    hold(fd)
     try:
         assert go(synced, Stand(PLAN), record_dir=results).code == 2
     finally:
@@ -408,6 +420,8 @@ def test_an_older_host_file_with_fewer_runs_loses_none_of_the_record(host, rec):
     assert data["collected"] == ["t", "u"]
 
 
+@pytest.mark.skipif(os.name == "nt", reason="a tick file's name holds ':', which Windows "
+                    "refuses in a file name; ticks run on Linux")
 def test_take_adds_a_tick_file_once_and_reads_only_the_name_form(host, rec):
     put(host / "ticks" / "20261118T140000Z.json", tick_file(exit=2))
     put(host / "ticks" / "2026-11-18T14:00:00Z.json", tick_file())
@@ -453,7 +467,7 @@ def test_take_merges_while_its_parent_holds_the_run_lock(repo, host):
     lock = record_dir(repo) / ".run-lock"
     lock.parent.mkdir(parents=True)
     fd = os.open(lock, os.O_RDWR | os.O_CREAT)
-    fcntl.flock(fd, fcntl.LOCK_EX)
+    hold(fd)
     try:
         code, _ = timed_record.take(host, record_dir(repo), "host-b", own="alpha")
     finally:

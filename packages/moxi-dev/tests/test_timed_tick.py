@@ -8,7 +8,6 @@ measures anything.
 from __future__ import annotations
 
 import ast
-import fcntl
 import hashlib
 import json
 import os
@@ -23,6 +22,9 @@ import pytest
 
 from moxi_dev import tick
 from test_check import git
+
+#: The tick locks with flock, which Windows lacks, and only Linux's timer runs it.
+fcntl = pytest.importorskip("fcntl", reason="Windows has no flock; the tick runs on Linux")
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 
