@@ -14,8 +14,10 @@ from moxi_dev.testing import PROC_WAIT_S
 from moxi_tunnel import locks
 
 #: A child that takes the locks named in argv (core, tunnel) in the one order, prints
-#: "held", and lets them go when its stdin gets a line.
+#: "held" and its own pid, and lets them go when its stdin gets a line. Its own pid is the
+#: one a lock records: on Windows a venv's python.exe starts the interpreter as its child.
 CHILD = """
+import os
 import sys
 from contextlib import ExitStack
 from moxi import files, paths
@@ -25,15 +27,18 @@ with ExitStack() as stack:
         stack.enter_context(files.lock(paths.core_lock(), timeout_s=10))
     if "tunnel" in sys.argv[1:]:
         stack.enter_context(files.lock(locks.lock_path(), timeout_s=10))
-    print("held", flush=True)
+    print("held", os.getpid(), flush=True)
     sys.stdin.readline()
 """
 
 
 def child(*which: str) -> subprocess.Popen:
+    """The child, started and holding its locks, with `own_pid` the pid it reports."""
     proc = subprocess.Popen([sys.executable, "-c", CHILD, *which], stdin=subprocess.PIPE,
                             stdout=subprocess.PIPE, text=True)
-    assert proc.stdout.readline().strip() == "held"
+    said, _, pid = proc.stdout.readline().strip().partition(" ")
+    assert said == "held"
+    proc.own_pid = int(pid)
     return proc
 
 
@@ -87,7 +92,7 @@ def test_a_lock_held_past_the_wait_names_its_holder(which, core):
         with pytest.raises(files.LockTimeout) as caught:
             with locks.held(core=core, timeout=0.2):
                 pass
-        assert caught.value.holder == proc.pid and caught.value.exit_code == 75
+        assert caught.value.holder == proc.own_pid and caught.value.exit_code == 75
         assert not locks.holds_core() and not locks.holds_tunnel()
     finally:
         release(proc)
@@ -143,7 +148,7 @@ def test_an_uninstall_holding_the_core_lock_and_an_act_wait_on_each_other_in_tur
                                   stdin=subprocess.PIPE, stdout=subprocess.PIPE, text=True)
         with pytest.raises(subprocess.TimeoutExpired):
             waiter.wait(timeout=0.3)
-    assert waiter.stdout.readline().strip() == "held"
+    assert waiter.stdout.readline().split()[0] == "held"
     release(waiter)
 
 
