@@ -239,6 +239,38 @@ def test_a_round_is_never_opened_over_a_kept_end():
     assert line["ref"] == f"{rid}:1" and line["kept"] is True
 
 
+def test_a_recall_hurried_in_the_gap_before_its_next_round_gets_none(monkeypatch):
+    recall = a_recall()
+
+    def hurry_after_the_check(record, settings, round_number, *, now):
+        # a newer recall's begin lands between the stream's check and its next ask
+        with recalls.session_lock(SESSION):
+            records.hurry_running(SESSION)
+        return None
+
+    route = FakeRoute([ended("- a"), ended("- b")])
+    monkeypatch.setattr(recall_stream, "why_stop", hurry_after_the_check)
+    assert run(recall, route) == "ended"
+    assert len(route.asked) == 1
+    line = recalls.find_line(SESSION, recall.recall_id)
+    assert line["hurried"] is True and line["state"] == "back" and line["kept"] is False
+    assert records.read(SESSION, recall.recall_id)["state"] == "ended"
+
+
+def test_a_recall_hurried_while_starting_never_starts_its_fork():
+    recall = a_recall()
+    with recalls.session_lock(SESSION):
+        records.hurry_running(SESSION)
+    route = FakeRoute([ended("- a")])
+    assert run(recall, route) == "lost"
+    assert route.asked == []
+    line = recalls.find_line(SESSION, recall.recall_id)
+    assert line["state"] == "lost" and line["reason"] == "hurried"
+    assert line["kept"] is False and line["ref"] is None
+    record = records.read(SESSION, recall.recall_id)
+    assert record["state"] == "lost" and record["reason"] == "hurried"
+
+
 def test_the_subagent_route_with_no_endpoint_loses_the_first_round():
     from moxi_memory import recall_route
 

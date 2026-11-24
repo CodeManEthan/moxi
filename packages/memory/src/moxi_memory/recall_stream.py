@@ -24,11 +24,13 @@ the round's kept end), and no later round's ref is ever written over a kept one.
 **When the stream ends.** At an answer of `NOTHING`, or with no text, or whose last line
 is `End of recall.`; after `subconscious.max_rounds` rounds; once the fork has made
 `subconscious.max_tools` tool calls (counted on the record); at `subconscious.limit_s`
-from the recall's start; once the record is `hurried`; or at an ack turns did not
-take. Then the record ends `ended` when an answer came back, the line noting whether the
-recall was hurried or ran past its limit. A line a person discarded (`moxi_memory.recall_discard`) ends the stream as
+from the recall's start; once the record is `hurried` (read again under the session's
+lock before each round is asked); or at an ack turns did not take. Then the record ends
+`ended` when an answer came back, the line noting whether the recall was hurried or ran
+past its limit. A line a person discarded (`moxi_memory.recall_discard`) ends the stream as
 it is: the child asks no further round and leaves the line's state and the record as
-the discard set them.
+the discard set them. A recall hurried before its first round was asked never starts its
+fork: record and line end `lost`, reason `hurried`.
 
 A route (`Route`) asks turns for the rounds; `moxi_memory.recall_route` holds the
 subagent route's.
@@ -175,8 +177,9 @@ def open_round(recall, round_number: int, round_ref: str) -> str | None:
     """Under the session's lock, write round `round_number`'s ref on the line with the
     kept mark, the line `open`, before the round is asked, and return None. Writes
     nothing and returns why when no round may be asked: `discarded` (a person discarded
-    the line), or `kept` (the line still names an earlier round whose ack turns did not
-    take; that ref stays on the line for a taker)."""
+    the line), `hurried` (a newer recall of the session started), or `kept` (the line
+    still names an earlier round whose ack turns did not take; that ref stays on the
+    line for a taker)."""
     with recalls.session_lock(recall.session_id):
         current = recalls.find_line(recall.session_id, recall.recall_id)
         if current is not None:
@@ -186,9 +189,21 @@ def open_round(recall, round_number: int, round_ref: str) -> str | None:
             if current.get("kept") is True and current.get("ref") not in (None, round_ref):
                 recall.line = current
                 return KEPT
+        record = records.read(recall.session_id, recall.recall_id) or recall.record
+        recall.record = record
+        if record.get("state") == records.HURRIED:
+            return records.HURRIED
         recall.write(record={"rounds": round_number}, state=recalls.OPEN, ref=round_ref,
                      kept=True)
     return None
+
+
+def lose_hurried(recall) -> None:
+    """End a recall hurried before its first round was asked: no fork was started, so
+    record and line end `lost`, reason `hurried`, with nothing to ack."""
+    error = "a newer recall of the session started before this one asked its fork"
+    recall.put(record={"state": records.LOST, "reason": records.HURRIED, "error": error},
+               state=recalls.LOST, reason=records.HURRIED, error=error, hurried=True)
 
 
 def run(recall, route: Route, brief: str, *, clock=time.time) -> str:
@@ -205,6 +220,12 @@ def run(recall, route: Route, brief: str, *, clock=time.time) -> str:
         refused = open_round(recall, round_number, round_ref)
         if refused == recalls.DISCARDED:
             return recalls.DISCARDED
+        if refused == records.HURRIED and round_number == 1:
+            lose_hurried(recall)
+            return records.LOST
+        if refused == records.HURRIED:
+            recall.put(hurried=True)
+            break
         if refused is not None:
             break
         if handle is None:
@@ -248,4 +269,4 @@ def run(recall, route: Route, brief: str, *, clock=time.time) -> str:
 
 __all__ = ["ROUND_MARGIN_S", "END_WAIT_MARGIN_S", "NOTHING", "END_LINE", "CONTINUE", "Route",
            "ref", "round_bound_s", "ends_stream", "continue_text", "why_stop", "settle",
-           "KEPT", "open_round", "run"]
+           "KEPT", "open_round", "lose_hurried", "run"]
