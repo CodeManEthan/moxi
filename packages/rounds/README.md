@@ -1454,8 +1454,12 @@ verifier_brief = ["Review check: a hard-coded home path is a finding."]
 - `watched_paths` lists entries, each a `pattern`, a one-line `note`, its `skills` and
   optionally `only_new` (false when left out). A pattern is relative to the project's
   root, with `/` between parts: `*` matches within a part, `?` one character, `[...]`
-  one of a set, and a whole part `**` any number of parts. One `/` at its end makes it a
-  folder pattern, matched against the folders above a written file.
+  one of a set, and a whole part `**` any number of parts. Matching ignores case on
+  every system. One `/` at its end makes it a folder pattern, matched against the
+  folders above a written file. An entry with `only_new` counts only when what it
+  matched did not exist before the write: the file, or for a folder pattern any folder
+  it matches, at any depth. So `packages/*/` with `only_new` counts the first file
+  written into a new package folder, and without it every write into any package.
 - `verifier_brief` lists lines for a verifier, as `brief` lists lines for a builder.
 
 `moxi config rounds check` refuses a value that breaks these rules, with the key and
@@ -1467,9 +1471,11 @@ A design marks them in its data block's top-level key, `checklist = ["public-sur
 own project, and an item of a project a stage of the design names as its `repo` is
 written `<key>:<id>`. A round whose flow has no design step marks them when it is
 opened, with `--checklist LIST|none`, and may name an item of any project, such as the
-one it will build in. While a project the round is weighed against has a checklist,
-`fold` refuses a block with no `checklist` key and `open` refuses a round with no design
-step opened without `--checklist`; each refuses a mark of no item. The marks are a set:
+one it will build in. While a project the design is weighed against (the round's own
+and each project its stages name) has a checklist, `fold` refuses a block with no
+`checklist` key; while the round's own project has one, `open` refuses a round with no
+design step opened without `--checklist`, since the project it will build in is not
+known yet. Each refuses a mark of no item. The marks are a set:
 a fold that changes them is no change of records only. A round with no design step
 whose opening marks any item steps up to the flow `full` at its opening, recorded as a
 `flow.changed` by the lead that holds the marks as `marked`; when that is no step up,
@@ -1483,7 +1489,11 @@ step of your own give the marks and their skills. The commission block carries t
 line above the repo's `brief` lines. A mark whose item the checklist no longer has is
 said so and names no skill. A round with no design step that builds in another project,
 and marked none of its items, is told that project's items in the commission block and
-the build's verification.
+the build's verification. In `next --json` a group's `checklist` holds `marked`,
+`from` (`v<N>`, `opening` or null), `skills` and `gone`, the marks no longer in the
+checklist; the design's two groups add `items`, each `{"id", "text", "skills"}`; and a
+group told another project's items adds `unweighed`, a table `{"project": KEY, "items":
+[...]}`.
 
 As in `next`, `show`, `show --json` and the round note give the round's marks, with
 where they come from (the opening or the newest frozen version), only when the round

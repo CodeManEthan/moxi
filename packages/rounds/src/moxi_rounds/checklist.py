@@ -235,8 +235,9 @@ def told(state, home: str, settings, *, kind: str, repo: str | None = None) -> d
     `opening` or None); `skills`, each skill the marked items name, once; `gone`, the
     marks whose item the checklist no longer has. `DRAFTING` and `CHECKING` add `items`,
     every item of each weighed project. A `BUILDING` group of a round with no design
-    step whose `repo` is not its home adds `unweighed`, that repo's items, when the
-    round marked none of them: its marks were made before the repo was known."""
+    step whose `repo` is not its home adds `unweighed`, a table of the `project` (that
+    repo) and its `items`, when the round marked none of them: its marks were made
+    before the repo was known."""
     if kind not in _KINDS:
         raise ValueError(f"{kind!r} is no kind of group a checklist is said in")
     repos = [repo] if kind == BUILDING and repo is not None else []

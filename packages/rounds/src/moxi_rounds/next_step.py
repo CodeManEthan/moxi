@@ -34,7 +34,8 @@ What is read is one dict (`read`), printed as lines (`as_text`) or as JSON
   (`checklist.told`), only when the round has marks or a project it is weighed against
   has a checklist: in the design group every item to mark, in the design's
   verification the marks, their skills and every item to check them against, and in a
-  build's steps the marks and their skills. `brief`: in a verifying group (the design's
+  build's steps the marks and their skills; where a round with no design step builds in
+  a project it marked none of, `unweighed`, a table `{project, items}`. `brief`: in a verifying group (the design's
   verification, a build's, a report step of the user's own) each `verifier_brief` line
   of its projects (`checklist.verifier_lines`). That group is the verifier's brief, as
   the commission block is a builder's: the lead puts it first.
