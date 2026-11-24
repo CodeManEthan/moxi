@@ -159,23 +159,23 @@ def send(session_id: str, answer: str, *, parent: str | None = None,
     now, unless `parent` gives it), with `interrupt` and no expiry. Never raises."""
     found = link()
     if not found.ready:
-        return Sent(False, _no_link(found).why)
+        return Sent(taken=False, reason=_no_link(found).why)
     if parent is None:
         parent = parent_of(session_id, api=found.api)
     if not parent:
-        return Sent(False, NO_NAME)
+        return Sent(taken=False, reason=NO_NAME)
     try:
         result = found.api.send_scoped(MODULE, parent, parent, message_text(answer),
                                        word=WORD, interrupt=True, expires="never",
                                        timeout_s=timeout_s)
     except Exception as exc:  # noqa: BLE001 - a send that raised is one comms did not take
-        return Sent(False, f"{type(exc).__name__}: {exc}")
+        return Sent(taken=False, reason=f"{type(exc).__name__}: {exc}")
     if getattr(result, "message_id", None):
-        return Sent(True, None, str(result.message_id))
+        return Sent(taken=True, message_id=str(result.message_id))
     refusal = getattr(result, "refusal", None)
     if refusal is not None:
-        return Sent(False, f"{refusal.code}: {refusal.text}")
-    return Sent(False, str(getattr(result, "outcome", "not sent")))
+        return Sent(taken=False, reason=f"{refusal.code}: {refusal.text}")
+    return Sent(taken=False, reason=str(getattr(result, "outcome", "not sent")))
 
 
 def is_recall_sender(name: str, parent: str, *, api=None) -> bool:

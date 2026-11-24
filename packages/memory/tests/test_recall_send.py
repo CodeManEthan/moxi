@@ -88,7 +88,7 @@ def test_a_way_back_needs_a_comms_name(comms):
     comms.owner_error = OSError("daemon down")
     assert recall_send.way_back(SESSION).why == "no comms name for this session"
     assert recall_send.send(SESSION, "points") == recall_send.Sent(
-        False, "no comms name for this session")
+        taken=False, reason="no comms name for this session")
 
 
 def test_a_recall_sender_comms_says_cant_send_names_the_sender(comms):
@@ -108,7 +108,7 @@ def test_a_recall_sender_comms_says_cant_send_names_the_sender(comms):
 
 def test_a_send_goes_to_the_session_alone_with_interrupt_and_no_expiry(comms):
     assert recall_send.send(SESSION, "Recalled ...:\n- a point\n") == recall_send.Sent(
-        True, None, "m-1")
+        taken=True, message_id="m-1")
     assert comms.sent == [dict(module="memory", parent="builder@acme", to="builder@acme",
                                text="Recalled ...:\n- a point", word="subconscious",
                                interrupt=True, expires="never")]
@@ -117,7 +117,7 @@ def test_a_send_goes_to_the_session_alone_with_interrupt_and_no_expiry(comms):
 def test_a_refused_send_says_why(comms):
     comms.refusal = "scoped-conflict"
     assert recall_send.send(SESSION, "points") == recall_send.Sent(
-        False, "scoped-conflict: not now")
+        taken=False, reason="scoped-conflict: not now")
 
 
 def test_a_long_answer_is_cut_on_a_line_boundary():
