@@ -143,9 +143,13 @@ def test_the_option_stamps():
     assert common.option_stamps({"keep_warm": "off", "recycle_on_expiry": "off",
                                  "recycle_at_limit": "off", "limit_at": "1x"}) == {}
     assert common.option_stamps({"keep_warm": "on", "recycle_on_expiry": "compact",
-                                 "recycle_at_limit": "relaunch", "limit_at": "1.5x"}) == {
+                                 "recycle_at_limit": "compact", "limit_at": "1.5x"}) == {
         "MOXI_LAUNCHER_KEEP_WARM": "on", "MOXI_LAUNCHER_RECYCLE_ON_EXPIRY": "compact",
         "MOXI_USAGE_CROSSING_AT": "1.5x"}
+    # A relaunch launch crosses at warn_at, and only where it can recycle itself
+    # (test_compose_env): a terminal launch is not stamped.
+    assert common.option_stamps({"harness": "claude", "target": "terminal", "cwd": "/w",
+                                 "recycle_at_limit": "relaunch", "warn_at": "2x"}) == {}
 
 
 def test_the_grant_reaches_the_stamp_and_the_additions_alike(monkeypatch):

@@ -3979,7 +3979,7 @@ launcher	packages/launcher/src/moxi_launcher/state.py	"""`state` is the open rel
 launcher	packages/launcher/src/moxi_launcher/state.py	"of_launch", "show", "state"]	keep	show	show
 launcher	packages/launcher/src/moxi_launcher/state.py	`stale`), or the last relaunch's outcome (the one that made this launch, when the	keep	stale	stale
 launcher	packages/launcher/src/moxi_launcher/state.py	of_launch	name	environ	caller_env
-launcher	packages/launcher/src/moxi_launcher/state.py	run whose job is gone shows `stale`; and for a launch that keeps warm, cache's read of	keep	stale	stale
+launcher	packages/launcher/src/moxi_launcher/state.py	run shows an open run whose job is gone as `stale`. For a launch that keeps warm, cache's	keep	stale	stale
 launcher	packages/launcher/src/moxi_launcher/state.py	show	name	environ	caller_env
 launcher	packages/launcher/src/moxi_launcher/state.py	shown = "stale"	keep	stale	stale
 launcher	packages/launcher/src/moxi_launcher/state.py	state	name	environ	caller_env
@@ -17934,6 +17934,24 @@ rounds	packages/rounds/tests/test_private_files.py	path.parent.mkdir(parents=Tru
 rounds	packages/rounds/tests/test_private_files.py	assert not any(one.startswith("brought in") for one in made.block.lines)	keep	any	any
 rounds	packages/rounds/tests/test_private_files.py	assert any(all(part in one for part in said) for one in reasons), reasons	keep	any	any
 rounds	packages/rounds/tests/test_private_files.py	tree.commit("notes/readme.md", "changed")	keep	changed	changed
+launcher	packages/launcher/src/moxi_launcher/relaunch.py	found = sessions.find(row.harness, session_id,	keep	find	find
+launcher	packages/launcher/src/moxi_launcher/selfrecycle.py	"RECYCLE_AT_LIMIT", "RELAUNCH", "SCRATCH", "SLOT", "SLOTS", "WARN_AT", "missing",	keep	RELAUNCH	RELAUNCH
+launcher	packages/launcher/src/moxi_launcher/selfrecycle.py	"RECYCLE_AT_LIMIT", "RELAUNCH", "SCRATCH", "SLOT", "SLOTS", "WARN_AT", "missing",	keep	WARN_AT	WARN_AT
+launcher	packages/launcher/src/moxi_launcher/target.py	names, or by a replacement for it (below), else refused `changed`.	keep	changed	changed
+launcher	packages/launcher/src/moxi_launcher/target.py	session's harness process, its `newest_session_id` the live id, so a later `find` of	keep	find	find
+launcher	packages/launcher/src/moxi_launcher/target.py	parent is refused `changed`, with `reclaim_pending` set when the held endpoint is gone,	keep	changed	changed
+launcher	packages/launcher/src/moxi_launcher/target.py	and `find` does not wait. Nothing here writes the claim; only the endpoint itself does,	keep	find	find
+launcher	packages/launcher/src/moxi_launcher/target.py	For the callers that read a launch before `find`, so they find the launch `find`	keep	find	find
+launcher	packages/launcher/src/moxi_launcher/target.py	return turns.find(session_id=session_id)	keep	find	find
+launcher	packages/launcher/src/moxi_launcher/target.py	"Unclaimed", "by_process", "caller", "check_claim", "claims", "find", "replaces",	keep	find	find
+launcher	packages/launcher/tests/test_recycle.py	store.end_run(conn, first.run_id, "compacted")	keep	compacted	compacted
+launcher	packages/launcher/tests/test_relaunch.py	"""sessions' `find` and `records`: the id's main transcript, whose first records have	keep	find	find
+launcher	packages/launcher/tests/test_relaunch.py	assert "stale" in caught.value.problem and later.asked == [CLEARED]	keep	stale	stale
+launcher	packages/launcher/tests/test_replay.py	assert any(said.startswith("recycle_at_limit relaunch is not applied")	keep	any	any
+launcher	packages/launcher/tests/test_target.py	assert session.closed == 0	keep	closed	closed
+launcher	packages/launcher/tests/test_target.py	# `find` of the live id resolves the same way, asking turns for that id.	keep	find	find
+launcher	packages/launcher/tests/test_target.py	assert asked.closed == 1	keep	closed	closed
+usage	packages/usage/src/moxi_usage/mark.py	if any(name == CROSSING and fired(name, mark) for name, mark in wanted):	keep	any	any
 rounds	packages/rounds/src/moxi_rounds/brake.py	was, now = (set(entry.get("checklist") or ()) for entry in (before, current))	keep	set	set
 rounds	packages/rounds/src/moxi_rounds/checklist.py	seen = set()	keep	set	set
 rounds	packages/rounds/src/moxi_rounds/checklist.py	return any(items(settings, one) for one in projects)	keep	any	any

@@ -70,8 +70,10 @@ What this module gives the rest of the launcher:
 - `forked(harness, values)`: a fork's values from its parent's, by each row's `fork`
   class.
 - `refuse_values(harness, values, chosen=...)`: the rules between a launch's values that
-  `when` and `offered_with` state, each refused with its own words, and the one rule no
-  row states: a scratch launch can't recycle itself (`refuse_scratch_recycle`).
+  `when` and `offered_with` state, each refused with its own words, and the rules no row
+  states: a scratch launch can't recycle itself (`refuse_scratch_recycle`), and a launch
+  that relaunches itself is told at its `warn_at` mark, not at a `limit_at`
+  (`refuse_relaunch_mark`).
 - `Row.check(value)` and `Row.tokens(mode, value, cwd=...)`: a value checked against its
   row, and the tokens one mode spells it as.
 - `fit(harness, mode, values, chosen)`: the modes rule. A composed command carries only
@@ -1064,10 +1066,11 @@ def refuse_values(harness: str, values: Mapping[str, object], *,
     - a row chosen for this launch (`chosen`: typed or from the preset) whose
       `offered_with` row is at its default, which leaves it nothing to do.
 
-    A row not in `values` is not offered here and is not looked at. First
-    comes `refuse_scratch_recycle`, which no other value can fix, so a launch, its
-    preview and `presets check` all refuse that pair in its own words."""
+    A row not in `values` is not offered here and is not looked at. First come
+    `refuse_scratch_recycle` and `refuse_relaunch_mark`, so a launch, its preview and
+    `presets check` all refuse those pairs in their own words."""
     refuse_scratch_recycle(values)
+    refuse_relaunch_mark(values)
     avail = _available(available)
     chosen = frozenset(chosen)
     for name, value in values.items():
@@ -1104,6 +1107,30 @@ def refuse_scratch_recycle(values: Mapping[str, object]) -> None:
     `off` on a scratch launch, so what reaches here was typed or set by the preset."""
     if bool(values.get("scratch")) and values.get("recycle_at_limit") == "relaunch":
         raise ScratchRecycle("recycle_at_limit", *SCRATCH_RECYCLE)
+
+
+class RelaunchMark(Refused):
+    """A launch set to relaunch itself with a `limit_at`, which no longer moves the
+    relaunch line."""
+
+    code = "relaunch-mark"
+
+
+#: The hint of a `limit_at` on a launch that relaunches itself.
+RELAUNCH_LIMIT_HINT = "the relaunch line comes at warn_at; set warn_at"
+
+
+def refuse_relaunch_mark(values: Mapping[str, object]) -> None:
+    """Refuse `RelaunchMark` when `values` set `recycle_at_limit = relaunch` with a
+    `limit_at`: the relaunch line comes at `warn_at`, so a `limit_at` would do nothing.
+    `presets.resolve` has already left a `[defaults]` `limit_at` out of a relaunch
+    launch, with a warning, so what reaches here was chosen for the launch. A relaunch
+    with no warn-at mark is not refused: its session is armed and never told."""
+    if values.get("recycle_at_limit") != "relaunch":
+        return
+    if is_set(values.get("limit_at")):
+        raise RelaunchMark("limit_at", "limit_at does nothing on a launch that relaunches "
+                                       "itself", RELAUNCH_LIMIT_HINT)
 
 
 def _met(need: When, values: Mapping[str, object], avail: Callable[[str], bool],
