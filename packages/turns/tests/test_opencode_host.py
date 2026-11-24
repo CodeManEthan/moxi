@@ -14,7 +14,7 @@ import pytest
 
 import fake_opencode
 from fake_opencode import DROP_ADMITTED, DROP_UNADMITTED, FakeOpenCode
-from moxi_dev.testing import PROC_WAIT_S
+from moxi_dev.testing import PROC_WAIT_S, console_script
 from moxi_turns import opencode
 from moxi_turns.client import TurnsError
 from moxi_turns.results import (Agent, Ended, Failed, Lost, Ran, Refused, Started,
@@ -663,8 +663,7 @@ def test_a_launch_whose_server_never_listens_fails_with_the_reason(turns_env, tm
                                                                    monkeypatch):
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
-    (bin_dir / "opencode").write_text("#!/bin/sh\nexit 3\n")
-    (bin_dir / "opencode").chmod(0o755)
+    console_script(bin_dir, "opencode", "import sys\nsys.exit(3)\n")
     monkeypatch.setenv("PATH", str(bin_dir))
     with pytest.raises(opencode.OpenCodeOffline, match="exit 3"):
         opencode.launch(tmp_path)

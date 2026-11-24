@@ -439,11 +439,14 @@ def main(argv) -> int:
 
 
 def install(bin_dir: Path, name: str = "opencode") -> Path:
+    """Write a stand-in `name` into `bin_dir` that runs this stub, and return its path."""
+    from moxi_dev.testing import console_script
+
     bin_dir.mkdir(parents=True, exist_ok=True)
-    script = bin_dir / name
-    script.write_text(f"#!/bin/sh\nexec {sys.executable} {Path(__file__).resolve()} \"$@\"\n")
-    script.chmod(0o755)
-    return script
+    return console_script(bin_dir, name, (
+        "import runpy, sys\n"
+        f"sys.argv[0] = {str(Path(__file__).resolve())!r}\n"
+        "runpy.run_path(sys.argv[0], run_name='__main__')\n"))
 
 
 def control(url: str, op: str, **body) -> dict:

@@ -46,16 +46,15 @@ LIMITS = {"rateLimits": {"limitId": "codex", "primary": {"usedPercent": 12,
 
 
 def install(bin_dir: Path) -> Path:
-    """Write an executable `codex` into `folder` that runs this stub."""
+    """Write a stand-in `codex` into `bin_dir` that runs this stub, and return its path."""
+    from moxi_dev.testing import console_script
+
     bin_dir.mkdir(parents=True, exist_ok=True)
-    path = bin_dir / "codex"
-    path.write_text(f"#!{sys.executable}\n"
-                    "import sys\n"
-                    f"sys.path.insert(0, {str(HERE)!r})\n"
-                    "import fake_codex\n"
-                    "sys.exit(fake_codex.main(sys.argv[1:]))\n")
-    path.chmod(0o755)
-    return path
+    return console_script(bin_dir, "codex", (
+        "import sys\n"
+        f"sys.path.insert(0, {str(HERE)!r})\n"
+        "import fake_codex\n"
+        "sys.exit(fake_codex.main(sys.argv[1:]))\n"))
 
 
 def records() -> Path | None:

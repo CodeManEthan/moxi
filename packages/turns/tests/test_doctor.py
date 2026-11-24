@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import io
 import json
+import os
 import sys
 import time
 import types
@@ -95,15 +96,20 @@ def test_the_start_list_rows(turns_env, registry, tmp_path, monkeypatch):
                             f"'run:{unrunnable}']\n")
     rows = rows_by_name()
     assert rows["start list"].state == "ok"
-    assert rows["start list"].detail.startswith("asks comms; skipped ")
+    # Windows has no execute bit: there the plain file is a run entry it asks.
+    asks = "asks comms" if os.name == "posix" else f"asks comms, run:{unrunnable}"
+    assert rows["start list"].detail.startswith(f"{asks}; skipped ")
     assert "notes: not installed" in rows["start list"].detail
     off = rows["start list: other"]
     assert off.state == "warn" and off.fix == "add it to start.order"
     assert rows[f"start list: {missing}"].state == "warn"
     assert "does not exist" in rows[f"start list: {missing}"].detail
-    run_row = rows[f"start list: run:{unrunnable}"]
-    assert run_row.state == "warn"
-    assert run_row.detail == "this run entry adds nothing: is not executable"
+    if os.name == "posix":
+        run_row = rows[f"start list: run:{unrunnable}"]
+        assert run_row.state == "warn"
+        assert run_row.detail == "this run entry adds nothing: is not executable"
+    else:
+        assert f"start list: run:{unrunnable}" not in rows
 
 
 def test_the_listener_rows(turns_env, registry):
