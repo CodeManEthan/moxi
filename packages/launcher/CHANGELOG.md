@@ -13,6 +13,9 @@
   (moving it by parent) and learns the session's id before it answers. A self relaunch's
   handoff of an id the launch never learned is checked against the first record of the
   id's transcript.
+- The launch form keeps `recycle_at_limit`'s shipped `relaunch` selectable where slots
+  can't run it, noted "relaunch holds off here", so a form left at the default is valid;
+  the launch holds it `off` quietly.
 - `recycle_at_limit` ships `relaunch`: every launch whose session can recycle itself is
   told at its `warn_at` mark that it may, and its self relaunch is armed. That is a Claude
   launch in a slot, where slots run, not in a scratch folder, with a handoff folder, and
