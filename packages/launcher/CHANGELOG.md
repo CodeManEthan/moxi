@@ -9,6 +9,17 @@
   subagent reads the agents the session directs (the join, within 20 s), and with comms
   absent nobody is directed. A join or agent list not read whole, with no case found,
   ends the ask `unreadable`, quietly.
+- The `keep_warm` row's shipped default is `on`, and it is read on a headless launch
+  alone: there it holds `off` unless a flag, the preset or `[defaults]` sets `on`, and a
+  headless launch with an identity still has `on` left out with a warning. On any other
+  Claude launch `keep_warm = "off"` set by a preset or a flag is refused, naming the line
+  to drop, `presets check` included; from `[defaults]` it is left out with a warning. The
+  stamp `MOXI_LAUNCHER_KEEP_WARM` and the start text's `keep warm:` line follow whether
+  the launch keeps warm, and the line no longer asks for a hold per piece of work: it
+  says subagents and directed agents at work keep the session warm, and that a hold
+  covers other work. A launch whose install doesn't offer the row (turns or cache
+  missing) records it `off`, and a replay there leaves it out, warning only for a
+  headless launch that had it `on`.
 - A run of nudges counts each case apart, by the word each nudge ended with: the subagent
   case up to `keep_warm.subagent_cap`, then the director case up to
   `keep_warm.director_cap`, so a director whose subagent nudges are spent is still nudged

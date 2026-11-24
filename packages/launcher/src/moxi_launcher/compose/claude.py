@@ -107,6 +107,7 @@ def mode(values: Mapping[str, object], ctx: Context) -> str:
 
 def compose(values: Mapping[str, object], ctx: Context) -> Composition:
     """Compose one Claude launch. Pure: reads only `values` and `ctx`."""
+    warm = common.keeps_warm(HARNESS, values)
     values = common.with_defaults(HARNESS, values)
     if catalog.is_set(values.get("resume")):
         raise catalog.Refused("resume", "resume is not a value a launch sets",
@@ -136,7 +137,7 @@ def compose(values: Mapping[str, object], ctx: Context) -> Composition:
         project_key=ctx.project_key, identity=identity, scope=scope,
         handoff_dir=ctx.handoff_dir,
         agent_role=common.agent_role(str(values.get("agent") or ""), found=ctx.role_found),
-        keep_warm=common.keeps_warm(HARNESS, values))
+        keep_warm=warm)
     prompt_file = PromptFile(common.prompt_path(ctx.runs_dir, ctx.request_id),
                              common.seat_text(block, ctx.instructions))
 
@@ -192,7 +193,7 @@ def compose(values: Mapping[str, object], ctx: Context) -> Composition:
                         warn_at=str(values.get("warn_at") or "") or None,
                         notes_dir=str(values.get("notes_dir") or "") or None,
                         granted=common.commands(values),
-                        options=ctx.options(values, HARNESS))
+                        options=ctx.options(values, keep_warm=warm))
     recorded = common.recorded(HARNESS, values, mode_, fit.not_applied)
     common.check_sizes(argv, values=recorded, brief=ctx.brief, env=env, prompt=prompt,
                        is_windows=ctx.windows)

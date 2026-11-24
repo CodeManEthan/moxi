@@ -392,7 +392,9 @@ def _value_rules(preset: Preset, values: Mapping[str, object],
     """The rules between rows (`catalog.refuse_values`) over what a launch of the preset
     resolves to with nothing typed: the shipped defaults, `[defaults]`, then the preset,
     whose place, when it names one, replaces the one `[defaults]` names. On a scratch
-    launch a `[defaults]` relaunch holds `off`, as `resolve` holds it."""
+    launch a `[defaults]` relaunch holds `off`, as `resolve` holds it. A preset that sets
+    `keep_warm = "off"` for a launch that isn't headless is refused, as `resolve`
+    refuses it (`_keep_warm_row`)."""
     harness = preset.harness if preset.harness in catalog.HARNESSES else base_harness
     rows = catalog.offered(harness, avail)
     effective = {name: row.default for name, row in rows.items()}
@@ -405,6 +407,9 @@ def _value_rules(preset: Preset, values: Mapping[str, object],
         effective[RECYCLE_AT_LIMIT] = "off"
     try:
         catalog.refuse_values(harness, effective, chosen=values, available=avail)
+        _keep_warm_row(harness, str(effective.get("target") or "terminal"),
+                       {k: v for k, v in effective.items() if k == catalog.KEEP_WARM},
+                       {}, frozenset(values), [])
     except Refused as exc:
         return [Problem.of(preset.where, exc.row, exc)]
     return []

@@ -154,6 +154,23 @@ def test_a_launch_stamps_the_grant_only_with_turns(harness, extra):
                               "MOXI_LAUNCHER_REQUEST": "r1"}
 
 
+@pytest.mark.parametrize(("values", "warm"), [
+    ({"keep_warm": "on"}, True),
+    # A row recorded off on a launch that isn't headless: on all the same.
+    ({"keep_warm": "off"}, True),
+    ({"target": "headless", "keep_warm": "off"}, False),
+    ({"target": "headless", "keep_warm": "on"}, True),
+    # The resolver left the row out: the install doesn't offer it.
+    ({}, False),
+])
+def test_a_claude_launch_is_stamped_and_told_keep_warm_where_it_keeps_warm(values, warm):
+    got = claude.compose({"harness": "claude", "cwd": "/work", **values}, ctx(brief="b"))
+    assert (got.env.get(common.KEEP_WARM_ENV) == "on") is warm
+    assert ("keep warm:     " + common.KEEP_WARM_LINE in got.prompt_file.text) is warm
+    # A row left out is recorded off, so a headless one is never kept warm on replay.
+    assert got.values["keep_warm"] == values.get("keep_warm", "off")
+
+
 def test_the_rows_that_stamp():
     values = {"harness": "codex", "cwd": "/work", "warn_at": "1x", "notes_dir": "/n"}
     got = codex.compose(values, ctx(session_id=None))

@@ -84,9 +84,10 @@ def test_a_fork_copies_the_request_rows_unsets_the_dropped_and_leaves_its_own_ou
                                 "extra_flags", "trust")} == \
         {k: values[k] for k in ("harness", "cwd", "model", "effort", "permission_mode",
                                 "extra_flags", "trust")}
+    dropped = catalog.unset(catalog.launcher()["keep_warm"])
     assert (got["name"], got["posture"], got["brief"], got["identity"], got["director"],
             got["warn_at"], got["keep_warm"], got["remote_control"], got["native_name"]) == \
-        ("", "", "", "", [], "", "off", False, "")
+        ("", "", "", "", [], "", dropped, False, "")
     assert "target" not in got and "slot" not in got
 
 

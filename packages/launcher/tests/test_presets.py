@@ -909,6 +909,73 @@ def test_the_cache_timer_rows_are_left_out_of_a_headless_launch_with_an_identity
     assert plain.values[row] == value
 
 
+# -- keep_warm: on for every Claude launch but a headless one ------------------------------
+
+WARM = only("turns", "cache", "slots")
+
+
+@pytest.fixture
+def warm_rows(monkeypatch):
+    monkeypatch.setattr(catalog, "session_env_readable", lambda: True)
+    monkeypatch.setattr(catalog, "slots_here", lambda: True)
+
+
+@pytest.mark.parametrize("target", ["terminal", "slot"])
+def test_a_launch_that_is_not_headless_holds_keep_warm_on(warm_rows, target):
+    got = resolve(typed={"target": target}, available=WARM)
+    assert got.values["keep_warm"] == "on"
+    assert not any("keep_warm" in w for w in got.warnings)
+
+
+@pytest.mark.parametrize("text, request_", [
+    ("", {"typed": {"keep_warm": "off"}}),
+    ('[seat.s]\nkeep_warm = "off"\n', {"seat": "s"}),
+    ('[seat.s]\ntarget = "slot"\nkeep_warm = "off"\n', {"seat": "s"}),
+], ids=["typed", "preset", "preset-slot"])
+def test_keep_warm_off_chosen_for_a_launch_that_is_not_headless_is_refused(
+        warm_rows, text, request_):
+    with pytest.raises(catalog.BadValue) as refused:
+        resolve(text, available=WARM, **request_)
+    assert refused.value.problem == presets.KEEP_WARM_OFF
+    assert refused.value.hint == presets.KEEP_WARM_OFF_HINT
+
+
+def test_presets_check_refuses_keep_warm_off_on_a_seat_that_is_not_headless(warm_rows):
+    text = ('[seat.s]\nkeep_warm = "off"\n'
+            '[seat.h]\ntarget = "headless"\nkeep_warm = "off"\n'
+            '[seat.o]\nkeep_warm = "on"\n')
+    found = [(p.where, p.key, p.problem) for p in errors(text, WARM)]
+    assert found == [("seat.s", "keep_warm", presets.KEEP_WARM_OFF)]
+
+
+def test_keep_warm_off_from_defaults_goes_back_to_on_with_a_warning(warm_rows):
+    got = resolve('[defaults]\nkeep_warm = "off"\n', available=WARM)
+    assert got.values["keep_warm"] == "on"
+    assert presets.KEEP_WARM_DEFAULT_OFF in got.warnings
+    # A headless launch takes it as it is, with no warning.
+    headless = resolve('[defaults]\nkeep_warm = "off"\n', available=WARM,
+                       typed={"target": "headless", "brief": "b"})
+    assert headless.values["keep_warm"] == "off"
+    assert presets.KEEP_WARM_DEFAULT_OFF not in headless.warnings
+
+
+@pytest.mark.parametrize("text, typed, value", [
+    ("", {}, "off"),
+    ("", {"keep_warm": "on"}, "on"),
+    ("", {"keep_warm": "off"}, "off"),
+    ('[defaults]\nkeep_warm = "on"\n', {}, "on"),
+])
+def test_a_headless_launch_holds_keep_warm_off_unless_it_is_set_on(warm_rows, text, typed,
+                                                                   value):
+    got = resolve(text, available=WARM, typed={"target": "headless", "brief": "b", **typed})
+    assert got.values["keep_warm"] == value
+
+
+def test_keep_warm_is_left_alone_on_a_codex_launch_and_where_it_is_not_offered(warm_rows):
+    assert "keep_warm" not in resolve(typed={"harness": "codex"}, available=WARM).values
+    assert "keep_warm" not in resolve(available=only("turns")).values
+
+
 @pytest.mark.parametrize("target", ["terminal", "slot"])
 def test_a_codex_launch_with_an_identity_runs_under_the_host(monkeypatch, target):
     monkeypatch.setattr(presets, "_host_installed", lambda: True)

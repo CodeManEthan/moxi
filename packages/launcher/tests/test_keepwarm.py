@@ -413,6 +413,30 @@ def test_a_launch_that_does_not_keep_warm_ends_quietly(conn):
     assert (got.verdict.outcome, got.verdict.word) == (None, "off")
 
 
+@pytest.mark.parametrize("target", ["slot", "terminal"])
+@pytest.mark.parametrize("values", ['{"model": "opus"}', '{"keep_warm": "off"}'],
+                         ids=["no-value", "recorded-off"])
+def test_a_claude_launch_that_is_not_headless_is_nudged_whatever_its_row_says(
+        conn, target, values):
+    """No keep_warm value is read outside headless: a launch with none, and an old row
+    recorded off, are nudged alike."""
+    conn.execute("UPDATE launches SET values_json = ?, target = ? WHERE request_id = 'r1'",
+                 (values, target))
+    got = ask(conn)
+    assert (got.verdict.outcome, got.verdict.word) == ("nudged", "subagents")
+
+
+@pytest.mark.parametrize(("values", "nudged"), [
+    ('{"keep_warm": "on"}', True), ('{"keep_warm": "off"}', False), ("{}", False)])
+def test_a_headless_launch_is_nudged_only_with_keep_warm_on(conn, values, nudged):
+    conn.execute("UPDATE launches SET values_json = ?, target = 'headless' "
+                 "WHERE request_id = 'r1'", (values,))
+    got = ask(conn)
+    assert (got.verdict.outcome == "nudged") is nudged
+    if not nudged:
+        assert got.verdict.word == "off" and not got.session.delivered
+
+
 def test_a_session_no_launch_holds_ends_quietly(conn):
     assert ask(conn, which=NEW).verdict.word == "not-launched"
 

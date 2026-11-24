@@ -549,7 +549,8 @@ def _recorded(request, resolved, values: Mapping[str, object]) -> Mapping[str, o
 
 #: The option rows a replay sets back to their default, with a warning, when the
 #: install no longer offers them or no longer meets their value's needs: stamped, they
-#: would promise a timer or a crossing that never comes.
+#: would promise a timer or a crossing that never comes. `keep_warm` is left out instead
+#: (`_unoffered_keep_warm`).
 _OPTION_ROWS = ("keep_warm", "recycle_on_expiry", "recycle_at_limit")
 
 
@@ -557,6 +558,8 @@ def _unoffered_option(harness: str, target: str, values: dict, name: str) -> str
     """Set the option row `name` in `values` back to its default when it is set and this
     install doesn't offer it, or doesn't meet what its value needs; return the warning,
     or None."""
+    if name == catalog.KEEP_WARM:
+        return _unoffered_keep_warm(harness, target, values)
     row_ = catalog.row(harness, name)
     value = values.get(name)
     if row_ is None or value in (None, "", row_.default):
@@ -572,6 +575,25 @@ def _unoffered_option(harness: str, target: str, values: dict, name: str) -> str
         return None
     values[name] = row_.default
     return f"{name} {value} is not applied: {why[0]}"
+
+
+def _unoffered_keep_warm(harness: str, target: str, values: dict) -> str | None:
+    """Leave `keep_warm` out of `values` when the replayed launch keeps warm
+    (`catalog.keeps_warm`, whatever value it recorded) and this install doesn't offer the
+    row, as a fresh launch here leaves it out, so the launch isn't stamped
+    (`common.keeps_warm`). Return the warning for a headless launch, which chose `on`;
+    None for any other, which is on with no value read and which a fresh launch here
+    would leave out without a word."""
+    name = catalog.KEEP_WARM
+    row_ = catalog.row(harness, name)
+    if row_ is None or name not in values or not catalog.keeps_warm(
+            harness, target, values[name]):
+        return None
+    why = row_.unoffered(slots.links, harness)
+    if why is None:
+        return None
+    del values[name]
+    return f"{name} on is not applied: {why[0]}" if target == "headless" else None
 
 
 def _fork_of(request) -> str | None:
