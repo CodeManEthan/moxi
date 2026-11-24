@@ -902,15 +902,21 @@ shows:
   template on Home.
 - `Sessions`: each launched session running there, newest first, with where it runs
   (`slot 3`, `headless`, `terminal`) and, with sessions installed, when it was last
-  active. Remove's step says they keep running.
+  active. With turns installed, a session turns says is in a turn says `working` there
+  instead (`planner · headless · working`). Remove's step says they keep running.
 
-The component reads only the launcher's own routes: `/api/running` when it is placed, on
+The component reads the launcher's own routes: `/api/running` when it is placed, on
 the launcher's `running` topic and every 30 seconds; `/api/presets` and `/api/catalog`
 when it is placed and every 30 seconds; and, for the opened project, `/api/last` and `/api/name` when it
-opens and every 30 seconds. While the page is hidden it reads nothing. A read that fails
+opens and every 30 seconds. With turns installed, and only at the desk (turns' routes are
+not the gateway's), it also reads turns' `/api/sessions` with each of those reads and
+follows turns' `sessions` topic. A running session is `working` while the one session
+turns lists under its session id has a turn open; a session turns doesn't list, or lists
+under an id two launches share, says nothing of it. While the page is hidden it reads nothing. A read that fails
 drops only what it fed, until the next one works: the presets or the catalog failing
 drops the preset, since a preset shown without the values that can do harm would read
-safer than it is. A time that can't be read is left out, never guessed. The project's
+safer than it is; turns' list failing drops only `working`, and the lines read as they do
+without turns. A time that can't be read is left out, never guessed. The project's
 `last active` time comes from the sessions running there, so without sessions the
 launcher gives the row no time.
 
@@ -968,7 +974,7 @@ A refusal prints one line ending in a short code, such as `[off-posture]`, and a
 
 | Module | With it | Without it |
 |---|---|---|
-| turns | the first turn delivered once the session is ready; Codex session ids learned; a Codex seat's instructions in its start context; the handoff lines at a seat's start or resume; every act on a launched session; what each running session waits on, on Home's Sessions row | the brief is the opening prompt; no readiness, no pointer; a Codex seat gets only its `AGENTS.md`; Codex session ids unknown; no relaunch, exit-session, recycle or keep-warm; no session reads as waiting |
+| turns | the first turn delivered once the session is ready; Codex session ids learned; a Codex seat's instructions in its start context; the handoff lines at a seat's start or resume; every act on a launched session; what each running session waits on, on Home's Sessions row; with ui and projects, `working` on a running session in the Projects page's `Sessions` row | the brief is the opening prompt; no readiness, no pointer; a Codex seat gets only its `AGENTS.md`; Codex session ids unknown; no relaunch, exit-session, recycle or keep-warm; no session reads as waiting; no session reads as working on the Projects page |
 | comms | identities, scopes, directors and the `with:` start posture; a headless launch with an identity, and the `headless_exit` row; a director's relaunch, and notices of a failed relaunch; a director waiting on its agents, on Home's Sessions row; a covered director kept warm while its agents work | plain harness launches; `with:` and `director` refused; relaunch with `--self` only, its failures recorded only; a session waits on its subagents only, and only those can be covered |
 | slots | `--target slot`, `--slot`, and answering the startup screens you turn on; relaunch, and answering the exit dialog | `terminal` and `headless` only; no relaunch, and an exit stops at the exit dialog |
 | cache | the `keep_warm` and `recycle_on_expiry` rows, and a director's relaunch refused while the session's cache is warm; each running session's cache and `Keep warm` on Home's Sessions row; the doctor row `keep-warm.timer` | neither row is offered; no session reads as kept warm, and no `Keep warm` |

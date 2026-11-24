@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- On the Projects page, the launcher's facts mark a running session `working` in the
+  opened project's `Sessions` row while turns says it is in a turn, in place of when it
+  was last active. With turns installed and at the desk the component reads turns'
+  `/api/sessions` and follows its `sessions` topic; without turns, or when that read
+  fails, the lines read as before.
 - A headless launch with an identity keeps `keep_warm = "on"`, with no warning, as any
   other launch does. A nudge is a turn, which starts the exit rule's `idle=` count again,
   so the session ends by its rule once keep-warm stops nudging. `recycle_on_expiry` is
