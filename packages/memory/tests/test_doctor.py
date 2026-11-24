@@ -465,3 +465,27 @@ def test_live_sessions_are_checked_as_a_recalls_own_try_checks_them(monkeypatch)
         ("c-fork", "automatic", None),
         ("c-none", "automatic", "no turns fork in this session"),
         ("x-codex", "on-demand", "Codex: no recall route runs on Codex")]
+
+
+def test_a_route_that_answers_by_comms_is_off_while_its_recall_sender_cant_send(
+        monkeypatch):
+    import moxi_turns as client
+
+    from moxi_memory import recall_start
+
+    on = {"MOXI_MEMORY_SUBCONSCIOUS": "automatic"}
+    monkeypatch.setattr(recall_start, "BY_COMMS", (recall_start.SUBAGENT,))
+    whys = {"c-free": None, "c-held": "recall sender in conflict: held-subconscious",
+            "c-nameless": "no comms name for this session"}
+    monkeypatch.setattr(recall_start, "comms_why", lambda sid: whys[sid])
+    monkeypatch.setattr(client, "sessions", lambda: [
+        FakeSession(sid, "claude", on) for sid in whys])
+    live = LIVE_SUBCONSCIOUS()
+    assert live == [("c-free", "automatic", None),
+                    ("c-held", "automatic", "recall sender in conflict: held-subconscious"),
+                    ("c-nameless", "automatic", "no comms name for this session")]
+    monkeypatch.setattr(doctor, "live_subconscious", lambda: live)
+    row = by_name()["subconscious"]
+    assert row.state == "warn"
+    assert ("off for want of a route in c-held (recall sender in conflict: "
+            "held-subconscious), c-nameless (no comms name for this session)") in row.detail

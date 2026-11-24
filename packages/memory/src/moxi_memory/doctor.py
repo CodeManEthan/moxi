@@ -36,7 +36,9 @@
   warns.
 - subconscious: for each live session whose launch turned the subconscious on, whether a
   recall route can run in it now, checked as a recall's own try checks it (a Codex
-  session, or a Claude Code session whose turns offers no `fork`, has it off), naming the
+  session, or a Claude Code session whose turns offers no `fork`, has it off; a route
+  that answers by comms is off while the session has no comms name or its recall sender
+  can't send, and the reason names that sender, in conflict among them), naming the
   reason only while it holds; while memory's config file is in error, each recall it
   stopped (its line `lost` with the reason `config`) and the error; and each recall line
   still open or kept whose child and taker are gone, with its age, until a taker settles
@@ -478,6 +480,8 @@ def live_subconscious() -> list[tuple[str, str, str | None]]:
                 why = recall_start.CODEX
             elif harness != "claude" or "fork" not in session.capabilities:
                 why = recall_start.NO_FORK
+            elif recall_start.SUBAGENT in recall_start.BY_COMMS:
+                why = recall_start.comms_why(session.session_id)
             else:
                 why = None
             out.append((session.session_id, run_mode, why))

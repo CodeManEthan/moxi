@@ -17,7 +17,9 @@ turns' `fork`. It is checked at every try, not once: a Claude Code session whose
 endpoint offers `fork` has it; a Codex session has no route, nor does any other session
 whose endpoint offers no `fork`. A try that finds no route writes the session's `off`
 line with the reason (`recalls.note_off`), at the first such try and again only when the
-reason changes.
+reason changes. A route whose answers come back as a comms message (`BY_COMMS`) runs
+only while the session's recall sender can send (`comms_why`,
+`moxi_memory.recall_send`); its reason otherwise names the sender when comms knows it.
 
 **A new recall (`begin`).** Under the session's subconscious lock it sets every recall of
 the session still running `hurried` and writes the new recall's record, state
@@ -61,6 +63,8 @@ ON_DEMAND = "on-demand"
 MODES = (AUTOMATIC, ON_DEMAND)
 #: The one route a recall runs on.
 SUBAGENT = "subagent"
+#: The routes whose answers come back to the session as a comms message.
+BY_COMMS: tuple[str, ...] = ()
 #: Why a session's subconscious can't run.
 NO_FORK = "no turns fork in this session"
 CODEX = "Codex: no recall route runs on Codex"
@@ -104,7 +108,25 @@ def route(harness: str | None, session_id: str) -> tuple[str | None, str | None]
             offered = found.capabilities
     except Exception:  # noqa: BLE001 - an endpoint that can't be asked offers no fork
         return None, NO_FORK
-    return (SUBAGENT, None) if "fork" in offered else (None, NO_FORK)
+    if "fork" not in offered:
+        return None, NO_FORK
+    if SUBAGENT in BY_COMMS:
+        why = comms_why(session_id)
+        if why is not None:
+            return None, why
+    return SUBAGENT, None
+
+
+def comms_why(session_id: str) -> str | None:
+    """Why the session's answers can't go back by comms now (one of
+    `recall_send.REASONS`, followed by the recall sender's name when comms knows it),
+    or None when they can."""
+    from . import recall_send
+
+    found = recall_send.way_back(session_id)
+    if found.ok:
+        return None
+    return f"{found.why}: {found.name}" if found.name else found.why
 
 
 def subconscious_settings(settings) -> dict:
@@ -291,8 +313,8 @@ def reset_asked(session_id: str) -> None:
             write_asked(session_id, 0)
 
 
-__all__ = ["SUBCONSCIOUS_ENV", "AUTOMATIC", "ON_DEMAND", "MODES", "SUBAGENT", "NO_FORK",
-           "CODEX", "USER", "USER_AND_COMMS", "SCRIPT", "ASKED", "SPAWN", "mode", "counts",
-           "route", "subconscious_settings", "settings_keys", "default_settings", "new_id",
-           "begin", "spawn_child", "STARTED", "START_LINE", "Refused", "this_session", "ask",
-           "asked", "write_asked", "reset_asked"]
+__all__ = ["SUBCONSCIOUS_ENV", "AUTOMATIC", "ON_DEMAND", "MODES", "SUBAGENT", "BY_COMMS",
+           "NO_FORK", "CODEX", "USER", "USER_AND_COMMS", "SCRIPT", "ASKED", "SPAWN", "mode",
+           "counts", "route", "comms_why", "subconscious_settings", "settings_keys",
+           "default_settings", "new_id", "begin", "spawn_child", "STARTED", "START_LINE",
+           "Refused", "this_session", "ask", "asked", "write_asked", "reset_asked"]
