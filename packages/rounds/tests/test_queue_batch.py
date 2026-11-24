@@ -37,7 +37,10 @@ class FakeCi:
     in `full_reads`), what a push says
     (`refusal`, None for a push that goes), the local run's exit code (`local_code`, or
     `local_codes` by commit), and a red run's failures (`failed`, or `failed_at` by
-    commit), each commit they are read at kept in `failure_reads`."""
+    commit), each commit they are read at kept in `failure_reads`. While `going`, when
+    set, reads true, the run is unfinished as GitHub sees it: a rerun is refused
+    "already running" and a failure log read raises `ci.ReadFailed`; each rerun asked
+    for is kept in `reruns` either way."""
 
     def __init__(self):
         self.word = ci.GREEN
@@ -58,6 +61,7 @@ class FakeCi:
         self.full_word: str | None = None
         self.failure_reads: list[str] = []
         self.full_beside = True
+        self.going = None
 
     def push(self, place, commit, ref):
         self.pushes.append((commit, ref))
@@ -98,10 +102,15 @@ class FakeCi:
 
     def failures(self, place, commit, read):
         self.failure_reads.append(commit)
+        if self.going is not None and self.going():
+            raise ci.ReadFailed(["gh", "run", "view", "--log-failed"], "exited 1")
         return [dict(one) for one in self.failed_at.get(commit, self.failed)]
 
     def rerun(self, place, runs, *, failed):
         self.reruns.append((tuple(runs), failed))
+        if self.going is not None and self.going():
+            return queue_ci.Said(1, f"run {runs[0]} cannot be rerun; This workflow is "
+                                 "already running")
         return queue_ci.Said(0, "")
 
 
@@ -692,6 +701,7 @@ def read_through_queue_ci(fake, monkeypatch, *, main: bool = False) -> Runs:
         workflows=(Runs.WORKFLOW,), local=None, local_timeout_s=None, remote=None,
         status=(), ids=(), status_timeout_s=1), local_log=Path("local.log"))
     fake.read = real.read
+    fake.going = lambda: runs.status != "completed"
     if main:
         fake.read_full = real.read_full
     return runs
@@ -719,11 +729,14 @@ def test_a_red_job_in_a_running_run_reads_pending_and_nothing_is_rerun(
 
 def test_a_running_candidate_never_counts_toward_the_read_fails(
         repo, ready, fake, lander_pass, monkeypatch):
+    # GitHub refuses a rerun and a failure log while a run goes: neither is asked for.
     ready()
+    fake.failed = [IN_SCOPED]
     read_through_queue_ci(fake, monkeypatch)
     for now in range(batching.READ_FAILS_MAX + 2):
         said = lander_pass(float(now))
     assert queue().paused is None and queue().running() is not None
+    assert fake.reruns == [] and fake.failure_reads == []
     assert len(read_events()) == 1 and not any("still running" in line for line in said)
 
 
