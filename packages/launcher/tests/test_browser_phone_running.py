@@ -33,7 +33,7 @@ WAIT_MS = pytest.importorskip("moxi_ui.testing", reason="ui is not installed").W
 _phone = pytest.importorskip("moxi_ui.testing.phone", reason="ui is not installed")
 PhoneBridge, gateway_shell, pair_page = _phone.PhoneBridge, _phone.gateway_shell, _phone.pair_page
 
-pytestmark = [pytest.mark.browser, pytest.mark.timeout(120),
+pytestmark = [pytest.mark.browser, pytest.mark.timeout(120, method="thread"),
               pytest.mark.skipif(sys.platform == "win32",
                                  reason="a launch's process is read through the process table")]
 

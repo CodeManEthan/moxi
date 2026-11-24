@@ -17,7 +17,7 @@ import page_kit
 from moxi import modules
 from moxi_rounds import asking, listing, opening, ruling
 
-pytestmark = pytest.mark.browser
+pytestmark = [pytest.mark.browser, pytest.mark.timeout(120, method="thread")]
 
 SMALL = ("ui", "rounds", "projects")
 ROUND = "kestrel/billing-export"

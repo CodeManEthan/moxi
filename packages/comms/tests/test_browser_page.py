@@ -47,7 +47,7 @@ from moxi_dev.testing import PROC_WAIT_S
 from roster_kit import holding, wait_for
 from test_reply_enforcement import PLANNER, REVIEWER, P, R, indexed, last, reply, send
 
-pytestmark = [pytest.mark.browser,
+pytestmark = [pytest.mark.browser, pytest.mark.timeout(120, method="thread"),
               pytest.mark.skipif(not sys.platform.startswith("linux"),
                                  reason="comms runs on Linux only"),
               pytest.mark.parametrize("backend", ["local"], indirect=True)]

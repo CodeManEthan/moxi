@@ -21,7 +21,7 @@ from pathlib import Path
 import pytest
 from playwright.sync_api import expect
 
-pytestmark = [pytest.mark.browser,
+pytestmark = [pytest.mark.browser, pytest.mark.timeout(120, method="thread"),
               pytest.mark.skipif(not sys.platform.startswith("linux"),
                                  reason="loadout's drift block is checked in a browser on "
                                         "Linux; the Windows and macOS runs are owed")]

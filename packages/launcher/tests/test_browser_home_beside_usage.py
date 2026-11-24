@@ -31,7 +31,7 @@ pytest.importorskip("moxi_sessions.api", reason="sessions is not installed")
 pytest.importorskip("moxi_usage.api", reason="usage is not installed")
 WAIT_S = pytest.importorskip("moxi_ui.testing", reason="ui is not installed").WAIT_S
 
-pytestmark = [pytest.mark.browser, pytest.mark.timeout(240),
+pytestmark = [pytest.mark.browser, pytest.mark.timeout(240, method="thread"),
               pytest.mark.skipif(not sys.platform.startswith("linux"),
                                  reason="a launch's process is read through the process "
                                         "table, and usage's row is checked on Linux")]

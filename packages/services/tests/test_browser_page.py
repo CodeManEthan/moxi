@@ -22,15 +22,12 @@ from pathlib import Path
 import pytest
 from playwright.sync_api import expect
 
-from browser_kit import fake_site, get, moxi, seed, slots_said, stored, written
+from browser_kit import MARKS, fake_site, get, moxi, seed, slots_said, stored, written
 
 _copying = pytest.importorskip("moxi_ui.testing.browser", reason="ui is not installed")
 copied, press, ready_copying = _copying.copied, _copying.press, _copying.ready_copying
 
-pytestmark = [pytest.mark.browser, pytest.mark.timeout(180),
-              pytest.mark.skipif(not sys.platform.startswith("linux"),
-                                 reason="services' page is checked in a browser on Linux; the "
-                                        "Windows and macOS runs are owed")]
+pytestmark = MARKS
 
 VERDICTS = ("ok", "warn", "fail", "off")
 #: When `paused` was stopped by hand: now, so the stop is after the last boot and still

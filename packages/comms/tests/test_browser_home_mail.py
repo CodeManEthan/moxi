@@ -24,7 +24,7 @@ from moxi_comms import api, claimfile
 from moxi_dev.testing import PROC_WAIT_S
 from roster_kit import wait_for
 
-pytestmark = [pytest.mark.browser, pytest.mark.timeout(180),
+pytestmark = [pytest.mark.browser, pytest.mark.timeout(180, method="thread"),
               pytest.mark.skipif(not sys.platform.startswith("linux"),
                                  reason="comms runs on Linux only")]
 

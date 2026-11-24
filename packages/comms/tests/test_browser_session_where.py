@@ -37,7 +37,7 @@ from test_browser_page import (  # noqa: F401 -- `page_shell` is a fixture the t
 )
 from test_reply_enforcement import PLANNER, REVIEWER, P, R
 
-pytestmark = [pytest.mark.browser,
+pytestmark = [pytest.mark.browser, pytest.mark.timeout(120, method="thread"),
               pytest.mark.skipif(not sys.platform.startswith("linux"),
                                  reason="comms runs on Linux only"),
               pytest.mark.parametrize("backend", ["local"], indirect=True)]

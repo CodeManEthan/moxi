@@ -9,19 +9,15 @@ next good one puts the facts back; and once removed it reports nothing more.
 from __future__ import annotations
 
 import json
-import sys
 import time
 from datetime import datetime, timezone
 from typing import Any
 
 import pytest
 
-from browser_kit import fake_site, python, seed, written
+from browser_kit import MARKS, fake_site, python, seed, written
 
-pytestmark = [pytest.mark.browser, pytest.mark.timeout(180),
-              pytest.mark.skipif(not sys.platform.startswith("linux"),
-                                 reason="services' page is checked in a browser on Linux; the "
-                                        "Windows and macOS runs are owed")]
+pytestmark = MARKS
 
 #: How long a test waits for the component to report, in seconds: the ui kit's bound.
 WAIT_S = pytest.importorskip("moxi_ui.testing", reason="ui is not installed").WAIT_S

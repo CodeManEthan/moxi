@@ -248,6 +248,20 @@ seconds it waited in all. It goes to the path in
 `moxi-dev/durations.json` in pytest's cache directory; with neither (the cache plugin
 off) nothing is written.
 
+Stacks. With `MOXI_TEST_STACKS=<dir>` and `MOXI_TEST_STACKS_AT=<time>` (seconds since
+the epoch) in the environment pytest starts with, each process of the run (under xdist
+the controller and every worker) that is still running at that time writes every
+thread's stack (`faulthandler`) to `<dir>/<worker or main>-<pid>.txt`, whatever ran
+before in it. pytest's own faulthandler plugin cancels the one timer a process has on
+each failed or errored test and on entering pdb, so the kit arms it again after those
+and after each test; while a test runs under pytest's per-test faulthandler timeout that
+setting holds the timer. Each process opens its file at the start, so one that ended in
+time leaves it empty. `moxi-dev check` sets both for each package's run, shortly before
+its bound (`arm_stacks`). It also sets `MOXI_TEST_PARENT_PID` to its own pid: the run's
+first process watches that process (`watch_parent`) and, once it has ended by any death
+(a SIGKILL, a TerminateProcess), ends every process under it, SIGTERM and then SIGKILL,
+then on Linux and macOS its own process group, then itself.
+
 A seam with two implementations: `Seam` parametrizes a fixture over every
 implementation for the contract suites and gives the rest the default one.
 """
@@ -256,6 +270,7 @@ from __future__ import annotations
 
 import contextlib
 import dataclasses
+import faulthandler
 import functools
 import ipaddress
 import json
@@ -337,6 +352,16 @@ TIMED_SLACK_ENV = "MOXI_TEST_TIMED_SLACK"
 TIMED_LOCK_FD_ENV = "MOXI_TEST_TIMED_LOCK_FD"
 #: Tiers this run never puts back, comma-separated (module doc, Selection).
 LEAVE_OUT_ENV = "MOXI_TEST_LEAVE_OUT"
+#: The directory each process of a run writes its stacks to (module doc, Stacks).
+STACKS_ENV = "MOXI_TEST_STACKS"
+#: When, in seconds since the epoch, the processes write them (module doc, Stacks).
+STACKS_AT_ENV = "MOXI_TEST_STACKS_AT"
+#: The pid of the process whose end ends the run (module doc, Stacks).
+PARENT_PID_ENV = "MOXI_TEST_PARENT_PID"
+#: How often a run watching its parent looks whether it is still running.
+PARENT_POLL_S = 1.0
+#: How long the run's processes get after SIGTERM when its parent is gone, before SIGKILL.
+PARENT_GRACE_S = 2.0
 
 #: The marker of a test that asserts a wall-clock budget (module doc, Timed tests).
 TIMED = "timed"
@@ -877,7 +902,132 @@ def pytest_configure(config: pytest.Config) -> None:
     _SESSION.setdefault("timed_slack", _timed_slack(os.environ))
     _SESSION.setdefault("modules", _modules())
     _SESSION.setdefault("uv", _uv_dirs(os.environ, os.path.expanduser("~")))
+    arm_stacks(os.environ)
+    if not hasattr(config, "workerinput"):
+        watch_parent(os.environ)
     _install()
+
+
+# This process's armed dump (`arm_stacks`): its open file and the time it is due.
+_STACKS: dict[str, Any] = {}
+
+
+def arm_stacks(env: Mapping[str, str]) -> Path | None:
+    """Have this process write every thread's stack at the time `env` names (module doc,
+    Stacks), into a file of its own; the file, or None when `env` names no directory or
+    time, the time has passed, the file can't be made, or this process is already armed."""
+    where = env.get(STACKS_ENV, "").strip()
+    try:
+        at = float(env.get(STACKS_AT_ENV, ""))
+    except ValueError:
+        return None
+    if not where or _STACKS or not math.isfinite(at) or at - time.time() <= 0:
+        return None
+    name = env.get("PYTEST_XDIST_WORKER") or "main"
+    path = Path(where) / f"{name}-{os.getpid()}.txt"
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        # Held open, not closed by a `with`: faulthandler writes to it at the time.
+        fh = open(path, "w", encoding="utf-8")
+    except OSError:
+        return None
+    _STACKS.update(fh=fh, at=at)
+    _rearm_stacks()
+    return path
+
+
+def _rearm_stacks() -> None:
+    """Arm this process's dump again for the time left, since faulthandler keeps one
+    timer a process and pytest's own faulthandler plugin cancels it on a failed or
+    errored test, on entering pdb and around each test under its per-test timeout.
+    Past the time, a file still empty gets the stacks now: the process is still running."""
+    if not _STACKS:
+        return
+    fh, left_s = _STACKS["fh"], _STACKS["at"] - time.time()
+    try:
+        if left_s > 0:
+            faulthandler.dump_traceback_later(left_s, file=fh)
+        elif os.fstat(fh.fileno()).st_size == 0:
+            faulthandler.dump_traceback(file=fh)
+    except (OSError, ValueError):                   # the file was closed under us
+        pass
+
+
+@pytest.hookimpl(trylast=True)
+def pytest_exception_interact() -> None:
+    _rearm_stacks()
+
+
+@pytest.hookimpl(trylast=True)
+def pytest_enter_pdb() -> None:
+    _rearm_stacks()
+
+
+@pytest.hookimpl(wrapper=True)
+def pytest_runtest_protocol() -> Generator[None, object, object]:
+    try:
+        return (yield)
+    finally:
+        _rearm_stacks()
+
+
+# The thread watching this run's parent, once one is (`watch_parent`).
+_WATCHER: list[threading.Thread] = []
+
+
+def watch_parent(env: Mapping[str, str]) -> threading.Thread | None:
+    """Have this run end, with every process under it, once the process `env` names in
+    `MOXI_TEST_PARENT_PID` has ended (module doc, Stacks): the watching thread, or None
+    when `env` names none or this process already watches. A parent already gone ends
+    the run at once."""
+    from moxi import proc
+
+    try:
+        pid = int(env.get(PARENT_PID_ENV, ""))
+    except ValueError:
+        return None
+    if _WATCHER:
+        return None
+    parent = proc.identity(pid)
+
+    def watch() -> None:
+        while parent is not None and proc.alive(parent):
+            time.sleep(PARENT_POLL_S)
+        _end_this_run(pid)
+
+    thread = threading.Thread(target=watch, name="moxi-dev-parent", daemon=True)
+    _WATCHER.append(thread)
+    thread.start()
+    return thread
+
+
+def _end_this_run(parent_pid: int) -> None:
+    """End every process under this one, SIGTERM (TerminateProcess on Windows) and
+    `PARENT_GRACE_S` later SIGKILL; then, on Linux and macOS, this process's group when it
+    leads one, which takes the processes that left the tree but not the group; then this
+    process."""
+    import psutil
+
+    with contextlib.suppress(OSError, ValueError):
+        print(f"moxi-dev: the process that started this run ({parent_pid}) is gone, so "
+              f"the run ends with every process under it", file=sys.__stderr__, flush=True)
+    try:
+        under = psutil.Process().children(recursive=True)
+    except psutil.Error:
+        under = []
+    for one in under:
+        with contextlib.suppress(psutil.Error):
+            one.terminate()
+    _, left = psutil.wait_procs(under, timeout=PARENT_GRACE_S)
+    for one in left:
+        with contextlib.suppress(psutil.Error):
+            one.kill()
+    if not WINDOWS and os.getpgrp() == os.getpid():
+        import signal
+
+        with contextlib.suppress(OSError):
+            os.killpg(os.getpid(), signal.SIGKILL)
+    os._exit(1)
 
 
 def _timed_slack(env: Mapping[str, str]) -> float:
@@ -2035,10 +2185,11 @@ __all__ = ["ANCHOR_HOME_ENV", "CHANGED_ENV", "DURATIONS_ENV", "FINDING_ENV",
            "GATE_CHAIN_S", "GATE_RESAMPLE_S", "GATE_SAMPLE_S", "GAUGES", "Fence",
            "FenceError", "Gauge", "GaugeReading", "HARNESS_HOMES", "IDLE_ENV", "Idle",
            "KEPT_ENV", "LEAVE_OUT_ENV", "LIFTED", "LIVE_ENV", "MARKERS", "NOT_MEASURED",
-           "PROC_STAT", "PROC_WAIT_S", "REAL_SUPERVISOR_ENV", "RECORD_FORMAT",
-           "SHUTDOWN_POLL", "Seam", "Selection", "TIERS", "TIERS_ENV", "TIMED",
-           "TIMED_CLOCKS", "TIMED_ENV", "TIMED_LOCK_FD_ENV", "TIMED_SLACK_ENV",
-           "WINDOWS_HOMES", "WINDOWS_KEPT_ENV", "console_script", "fence", "findings_of",
-           "idle", "param_id", "selection", "served", "short_dir", "stat_counts",
-           "terminal_record", "timed_reading", "timed_slack", "touches_match", "uv_env",
-           "wait_for", "write_sqlite"]
+           "PARENT_GRACE_S", "PARENT_PID_ENV", "PARENT_POLL_S", "PROC_STAT",
+           "PROC_WAIT_S", "REAL_SUPERVISOR_ENV", "RECORD_FORMAT", "SHUTDOWN_POLL",
+           "STACKS_AT_ENV", "STACKS_ENV", "Seam", "Selection", "TIERS", "TIERS_ENV",
+           "TIMED", "TIMED_CLOCKS", "TIMED_ENV", "TIMED_LOCK_FD_ENV", "TIMED_SLACK_ENV",
+           "WINDOWS_HOMES", "WINDOWS_KEPT_ENV", "arm_stacks", "console_script", "fence",
+           "findings_of", "idle", "param_id", "selection", "served", "short_dir",
+           "stat_counts", "terminal_record", "timed_reading", "timed_slack",
+           "touches_match", "uv_env", "wait_for", "watch_parent", "write_sqlite"]

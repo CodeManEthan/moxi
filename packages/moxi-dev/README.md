@@ -6,7 +6,8 @@ repository's `uv sync` installs it, and no Moxi module depends on it at run time
 - `moxi-dev check` runs the checks a change must pass before it merges: the lock, the
   tag, comment-reference, naming and Ruff checks, the renames step (about 45 s here; see
   below), the release step (see below), the contract's import rules (import-linter and
-  deptry) and the tests of the packages the change reaches. A test in the `slow`,
+  deptry) and the tests of the packages the change reaches, each package's run
+  ending at a bound (see "The bound on each package's run" below). A test in the `slow`,
   `browser` or `build` tier runs when a path its `touches` mark names changed; `--full`
   runs every package and every tier but `live`; `--finding L<n>` runs only the tests
   marked with that finding (see "The tag check" below); `--static` runs only the
@@ -549,6 +550,44 @@ uv run --locked moxi-dev timed schedule --machine host-a --record-dir ~/moxi-tim
 
 The host needs uv with its Python 3.12, git on its PATH (some timed tests build temporary
 repositories), and linger, so its timer fires while no one is logged in.
+
+## The bound on each package's run
+
+Each package's test run in `moxi-dev check` ends at a wall-clock bound: 900 s, or the
+seconds `MOXI_TEST_SUITE_BOUND_S` gives (a number above 0; any other value exits 2). A
+run that reaches it is ended with every process under it (its process group on Linux and
+macOS, its job on Windows), and the check prints
+`moxi-dev check: <package>: its tests ran past their <bound> s bound, ...`, fails that
+package and goes on with the rest. The summary line gives that package as
+`<package> fail <seconds>s ended at its bound`.
+
+Ten seconds before the bound (at most half of it), each process of the run still going
+(under xdist the controller and every worker) writes all its threads' stacks, as
+`faulthandler` prints them, to `.moxi-dev/run/<package>.stacks/<worker>-<pid>.txt` under
+the root, and the line names that folder. A failed or errored test earlier in the
+process doesn't stop it (pytest's faulthandler plugin cancels the timer then, and the
+kit arms it again); a test running under pytest's `faulthandler_timeout` holds the timer
+while it runs. A run that ends in time leaves no such folder, and the next check
+removes it. The test kit does the writing, so it works in any package that loads
+`moxi_dev.testing`: `MOXI_TEST_STACKS=<dir>` and `MOXI_TEST_STACKS_AT=<seconds since the
+epoch>` arm it in a run started by hand too.
+
+The run ends with the check, however the check ends. A check stopped by Ctrl-C,
+SIGTERM or SIGHUP (Ctrl-Break on Windows) ends the run's tree before it exits; the
+signals other than Ctrl-C give exit code 128 plus their number. The check takes only a
+signal still at its default and puts each one back as it was when it ends: one it was
+started ignoring stays ignored, so a check under `nohup` still outlives its terminal, and
+one with a handler of its own keeps that handler. A check killed outright
+(SIGKILL, or `TerminateProcess` on Windows) can do nothing itself, so the test kit in
+the run's first process watches the check, named in `MOXI_TEST_PARENT_PID`, and once it
+is gone ends every process under it, SIGTERM and two seconds later SIGKILL, then on
+Linux and macOS its own process group, then itself: within a few seconds of the kill.
+
+On Linux and macOS a process a test started in a session of its own is outside the
+run's group and is not ended with it. After a kill outright, one whose parent ended
+before the watch saw the check go has also left the tree, so it survives too, on every
+system; so does the whole run if its first process is stuck holding Python's lock,
+where the watch can't run.
 
 ## Browser tests
 

@@ -9,7 +9,7 @@ import re
 import pytest
 from playwright.sync_api import expect
 
-pytestmark = [pytest.mark.browser, pytest.mark.timeout(60)]
+pytestmark = [pytest.mark.browser, pytest.mark.timeout(60, method="thread")]
 
 # Holds back every `ui.servers` event the push stream brings, keeping the last one, until
 # `releaseServers()` passes it on.

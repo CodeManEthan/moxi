@@ -19,7 +19,7 @@ import pytest
 
 import projects_page_kit as kit
 
-pytestmark = [pytest.mark.browser, pytest.mark.timeout(120),
+pytestmark = [pytest.mark.browser, pytest.mark.timeout(120, method="thread"),
               pytest.mark.skipif(not sys.platform.startswith("linux"),
                                  reason="projects' page is checked in a browser on Linux; the "
                                         "Windows and macOS runs are owed")]

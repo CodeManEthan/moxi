@@ -24,7 +24,7 @@ from moxi import modules
 from moxi_rounds import asking, opening, ruling
 from page_kit import BUSY, SHUT
 
-pytestmark = pytest.mark.browser
+pytestmark = [pytest.mark.browser, pytest.mark.timeout(120, method="thread")]
 
 #: The modules the shell keeps: a small install.
 SMALL = ("ui", "rounds", "projects")
