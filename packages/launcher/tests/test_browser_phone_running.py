@@ -8,8 +8,9 @@ itself refused by the gateway.
 
 The shell runs the fake turns in turns' place and reads the real cache and sessions over
 transcripts the tests write; its launches are slot launches whose process is this test's
-own, as in `test_browser_home_running.py`. The first test opens no desk page and no stream,
-so the phone's own reads start the page server's feed and its joiner.
+own, as in `test_browser_home_running.py`, but for the one a press would cover, a headless
+launch with keep-warm off. The first test opens no desk page and no stream, so the phone's
+own reads start the page server's feed and its joiner.
 """
 
 from __future__ import annotations
@@ -86,9 +87,10 @@ def phones(ui_browser):
 def seeded(gw, tmp_path):
     """`seeded(name, waits=False, covered=False, coverable=False)`: a live launch with a
     transcript, as `test_browser_home_running.Launches.seed` makes one; every one is ended
-    when the test ends, and the fake's script cleared. `coverable` gives it an hour
-    lifetime and a clock record whose watcher asks keep-warm about it, so a press would
-    cover it while it waits."""
+    when the test ends, and the fake's script cleared. `coverable` makes it a headless
+    launch with keep-warm off, the one Claude launch keep-warm is not on for by itself,
+    with an hour lifetime and a clock record whose watcher asks keep-warm about it, so a
+    press would cover it while it waits."""
     shell, _, turns = gw
     ids: list[str] = []
     sessions: dict[str, dict] = {}
@@ -97,8 +99,9 @@ def seeded(gw, tmp_path):
              coverable: bool = False) -> str:
         request_id = f"{name}-{uuid.uuid4().hex[:8]}"
         config = tmp_path / request_id
+        off = {"target": "headless", "values": {"name": name, "keep_warm": "off"}}
         sid = kit.seed(shell, request_id, live=True, claimed=True, config_dir=config,
-                       values={"name": name, **({"keep_warm": "on"} if covered else {})})
+                       **(off if coverable else {"values": {"name": name}}))
         kit.transcript(config, sid, answered=ANSWER, hour=coverable)
         if covered:
             kit.timed(shell, sid)

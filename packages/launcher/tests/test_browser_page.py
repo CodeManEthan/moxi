@@ -156,7 +156,7 @@ def test_the_panel_with_its_sessions_block_and_the_block_alone_fit_a_phone(
     expect(session).to_be_visible()
     expect(session).to_have_attribute("data-red", "true")
     expect(session.locator(".lines")).to_contain_text("recycle: on expiry off")
-    expect(session.locator(".lines")).to_contain_text("keep warm: off")
+    expect(session.locator(".lines")).to_contain_text("keep warm: on")
     expect(block.locator("h2 a")).to_have_attribute("aria-current", "page")
     ui_width_check(ui_page)
     # A terminal launch's preview, with its long command to copy.
