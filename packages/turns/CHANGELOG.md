@@ -7,7 +7,8 @@
   line is at least an hour old, whose last turn record is an assistant `end_turn`, and
   whose own agents and background-task output files wrote nothing within the hour reads
   `idle`. A transcript the endpoint cannot find or read, a record shape it does not know,
-  and an entry it has no time for within the list's 0.3 s deadline keep Claude Code's
+  and an entry it has no time for within the list's 0.3 s deadline (the search of its
+  whole transcript for output files included, read a piece at a time) keep Claude Code's
   status. Teammates and forks of the main loop are never judged.
 - The Claude runner's `/live` answer and the gate's readings send the subagent list's
   entries instead of a count, so a delivery's `refuse_agents`, a session command's

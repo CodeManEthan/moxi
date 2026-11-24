@@ -30,7 +30,9 @@ entry `waiting`.
 What it costs: one deadline, `JUDGE_BUDGET_S` from the first `stat`, bounds the judgment
 of the whole list. Every `waiting` entry first gets one `stat` of its transcript; a file
 written inside `STALE_AFTER_S` is live and nothing more is read. Only then, while time is
-left, does each silent entry get its tail read and its owned files looked at.
+left, does each silent entry get its tail read and its owned files looked at. The search
+for its output files reads the whole transcript, a piece of `TAIL_BYTES` at a time, and
+an entry the deadline passes in that read keeps Claude Code's status.
 """
 
 from __future__ import annotations
@@ -56,6 +58,9 @@ TAIL_BYTES = 256 * 1024
 #: The two ways a transcript names a background task's output file, as JSON-escaped text.
 _OUTPUTS = (re.compile(rb'Output is being written to: ([^"]{1,1024}?\.output)'),
             re.compile(rb'<output-file>([^"<]{1,1024})</output-file>'))
+#: How much of the piece before each piece of a transcript the output search reads again,
+#: in bytes: more than the longest name `_OUTPUTS` matches, with its words around it.
+_OVERLAP_BYTES = 2048
 #: The record types that are a turn's.
 _TURN_TYPES = ("user", "assistant")
 
@@ -173,7 +178,7 @@ def _silent(path: Path, owned: list[str], sub_dir: Path, now: float,
         newest = max(newest, written)
     if late():
         raise _Unknown
-    for output in _outputs(path):
+    for output in _outputs(path, late):
         if late():
             raise _Unknown
         written = _mtime(output)
@@ -241,13 +246,31 @@ def _time(value: Any) -> float:
     return at.timestamp()
 
 
-def _outputs(path: Path) -> list[Path]:
-    """The background-task output files the transcript names."""
+def _outputs(path: Path, late: Callable[[], bool]) -> list[Path]:
+    """The background-task output files the transcript names, read whole (a task's line
+    can sit anywhere in it) in pieces of `TAIL_BYTES`, each overlapping the last by
+    `_OVERLAP_BYTES` so no name is cut. Raises `_Unknown` when `late()` turns true before
+    a piece after the first, so the read keeps inside the judgment's deadline; the caller
+    asks before the first."""
+    found: list[Path] = []
     try:
-        data = path.read_bytes()
+        with path.open("rb") as fh:
+            kept = b""
+            while True:
+                piece = fh.read(TAIL_BYTES)
+                data = kept + piece
+                _named_outputs(data, found)
+                if len(piece) < TAIL_BYTES:
+                    return found
+                kept = data[-_OVERLAP_BYTES:]
+                if late():
+                    raise _Unknown
     except OSError:
         raise _Unknown from None
-    found: list[Path] = []
+
+
+def _named_outputs(data: bytes, found: list[Path]) -> None:
+    """Add to `found` each output file `data` names that it doesn't hold yet."""
     for pattern in _OUTPUTS:
         for raw in pattern.findall(data):
             try:
@@ -257,7 +280,6 @@ def _outputs(path: Path) -> list[Path]:
             output = Path(text.strip())
             if output not in found:
                 found.append(output)
-    return found
 
 
 __all__ = ["JUDGE_BUDGET_S", "STALE_AFTER_S", "TAIL_BYTES", "judge", "subagents_dir",

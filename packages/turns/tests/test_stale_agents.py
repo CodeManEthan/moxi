@@ -1,7 +1,8 @@
 """The stale-subagent judgment (`claude_stale.judge`) over transcripts written in a test
 folder: the `STALE_AFTER_S` hour off the last timestamped line, Claude Code's `waiting`,
-an `end_turn` tail past the bookkeeping records, owned files, the workflow folder, and the
-one deadline over the whole list."""
+an `end_turn` tail past the bookkeeping records, owned files and output files named
+anywhere in the transcript, the workflow folder, and the one deadline over the whole list,
+the output search included."""
 
 from __future__ import annotations
 
@@ -119,6 +120,44 @@ def test_a_task_notice_names_its_output_file_too(tmp_path):
                           "</task-notification>"}}
     s.write("a1", [notice, assistant(61 * MINUTE)])
     assert s.judge(waiting("a1"))["a1"].state == "waiting"
+
+
+def filler(age_s: float, size: int) -> dict:
+    """A bookkeeping record of about `size` bytes, which no turn reads."""
+    return {"type": "progress", "timestamp": stamp(age_s), "data": "x" * size}
+
+
+def test_an_output_file_named_before_the_tail_or_across_a_piece_keeps_it_live(tmp_path):
+    s = Session(tmp_path)
+    output = tmp_path / "tasks" / "b1.output"
+    output.parent.mkdir()
+    output.write_text("tick\n")
+    touch(output, 10 * MINUTE)
+    shell = json.dumps(started_shell(62 * MINUTE, output)).encode()
+    # The name starts just before the end of the first piece the search reads.
+    head = len(json.dumps(filler(63 * MINUTE, 0))) + 1
+    cut = claude_stale.TAIL_BYTES - head - shell.index(b"Output is being") - 10
+    s.write("a1", [filler(63 * MINUTE, cut), started_shell(62 * MINUTE, output),
+                   filler(62 * MINUTE, 2 * claude_stale.TAIL_BYTES), assistant(61 * MINUTE)])
+    got = s.judge(waiting("a1"))["a1"]
+    assert got.state == "waiting" and got.last_write_at == NOW - 10 * MINUTE
+
+
+def test_the_deadline_passing_in_the_output_search_keeps_claudes_status(tmp_path):
+    def clock_of(zeros: int):
+        ticks = iter([0.0] * zeros)
+        return lambda: next(ticks, JUDGE_BUDGET_S + 1.0)
+
+    s = Session(tmp_path)
+    # The deadline is read at the start, before the stat, before the silent entry, before
+    # the output search and after it: a short transcript is judged whole in that time.
+    s.write("a1", [assistant(61 * MINUTE)])
+    assert s.judge(waiting("a1"), clock=clock_of(5))["a1"].state == "idle"
+    # A long one is read a piece at a time, the deadline asked between pieces.
+    s.write("a1", [filler(62 * MINUTE, 3 * claude_stale.TAIL_BYTES), assistant(61 * MINUTE)])
+    got = s.judge(waiting("a1"), clock=clock_of(5))["a1"]
+    assert got.state == "waiting" and got.last_write_at is None
+    assert s.judge(waiting("a1"))["a1"].state == "idle"
 
 
 def test_a_running_or_pending_entry_is_live_whatever_its_transcript_says(tmp_path):
