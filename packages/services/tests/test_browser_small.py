@@ -7,17 +7,13 @@ opened and with the panel open.
 
 from __future__ import annotations
 
-import sys
 
 import pytest
 from playwright.sync_api import expect
 
-from browser_kit import fake_site, get
+from browser_kit import MARKS, fake_site, get
 
-pytestmark = [pytest.mark.browser, pytest.mark.timeout(180),
-              pytest.mark.skipif(not sys.platform.startswith("linux"),
-                                 reason="services' page is checked in a browser on Linux; the "
-                                        "Windows and macOS runs are owed")]
+pytestmark = MARKS
 
 #: The modules the small install holds; the core is under every install.
 SMALL = ("services", "ui")

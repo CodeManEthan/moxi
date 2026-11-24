@@ -12,18 +12,14 @@ one, and the unit read again as the one he picks.
 from __future__ import annotations
 
 import re
-import sys
 from pathlib import Path
 
 import pytest
 from playwright.sync_api import expect
 
-from browser_kit import fake_site, moxi, seed, stored, written
+from browser_kit import MARKS, fake_site, moxi, seed, stored, written
 
-pytestmark = [pytest.mark.browser, pytest.mark.timeout(180),
-              pytest.mark.skipif(not sys.platform.startswith("linux"),
-                                 reason="services' page is checked in a browser on Linux; the "
-                                        "Windows and macOS runs are owed")]
+pytestmark = MARKS
 
 #: The fake supervisor's units: `web` of his, and two units of the system's own not yet
 #: adopted, a timer that is on and a service that is off.
