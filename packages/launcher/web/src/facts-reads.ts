@@ -113,6 +113,7 @@ export class FactsReads {
       catalog: upOnly(good(this.#catalog)),
       last: upOnly(good(this.#opened?.last ?? null)),
       name: nameUp(good(this.#opened?.name ?? null)),
+      turns: null,
     };
   }
 
