@@ -190,7 +190,7 @@ def filter_button(view, key: str):
 
 
 def test_the_page_keeps_the_contract_and_has_no_heading(seeded, ui_page, ui_component_check):
-    check = ui_component_check(ui_page, "sessions", "page", keep=True, allow=("launcher", "turns"))
+    check = ui_component_check(ui_page, "sessions", "page", keep=True, allow=("launcher", "turns", "cache"))
     assert check.element == "moxi-sessions-page"
     view = check.locator.locator("moxi-sessions-list")
     expect(count_line(view)).to_have_text(f"{ALL} sessions")

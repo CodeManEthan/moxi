@@ -13,7 +13,7 @@ with sessions' `opening` and skipped when that judgment hides it (SQLite's `subs
 reads a text only up to a U+0000, so SQL's own tests see nothing there and keep the
 row). Tails (with `results`) are output and take none of these
 clauses. The filters of memory's own search apply: project, time, harness, subagents,
-scratch.
+scratch, forks.
 
 **The windows.** The rows ranked are chosen by time, which no text decides: the newest
 `WINDOW` rows holding every word that still hold every word once redacted, and the
@@ -86,6 +86,7 @@ class Query:
     results: bool = False
     subagents: bool = False
     scratch: bool = False
+    forks: bool = False
     limit: int = 8
 
 
@@ -227,7 +228,8 @@ def _filters(query: Query, *, table: str, with_state: bool,
              hidden: _Hidden) -> search._Filters:
     filters = search._Filters("r", project=query.project, since=query.since,
                               harness=query.harness, subagents=query.subagents,
-                              scratch=query.scratch, with_state=with_state,
+                              scratch=query.scratch, forks=query.forks,
+                              with_state=with_state,
                               has_agent=table == "rows")
     if table == "rows":
         sql, params = hidden.clause("r")

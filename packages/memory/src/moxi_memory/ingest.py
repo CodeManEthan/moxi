@@ -38,7 +38,10 @@ read, and the key's replace rule makes that harmless: a row whose key is stored 
 replaced only when its text differs.
 
 **Which sources.** The main sessions of each harness in config `harnesses`; subagents only
-with `index.include_subagents` on, their rows under their main session's id. A Codex thread whose
+with `index.include_subagents` on, their rows under their main session's id. A subagent
+that was a subconscious recall's fork (its agent id is a fork id in memory's recall log)
+is never read, and any rows of it read before its id reached the log are taken out when
+it is next met, since the fork holds a copy of its parent's conversation. A Codex thread whose
 import marks say it was imported (it is listed in Codex's imports file, or its turns
 carry the import prefix) is skipped: the Claude Code transcript is the original. A
 compressed Codex rollout, which sessions doesn't read, is recorded in `sources` and counted
@@ -360,6 +363,7 @@ class Ingest:
         self.mains: dict[tuple[str, str], str] = {}
         self.seen: set[tuple[str, str]] = set()
         self.report = Report(mode)
+        self._forks: frozenset[tuple[str, str]] | None = None
 
     # -- the launcher ------------------------------------------------------------------
 
@@ -523,6 +527,29 @@ class Ingest:
 
     # -- reading one source ------------------------------------------------------------
 
+    def recall_fork(self, harness: str, agent: str | None) -> bool:
+        """Whether `agent` is a subconscious recall's fork, read from memory's recall log
+        once per run."""
+        if agent is None:
+            return False
+        if self._forks is None:
+            from . import recalls
+
+            try:
+                self._forks = recalls.fork_ids()
+            except (OSError, ValueError):
+                self._forks = frozenset()
+        return (harness, agent) in self._forks
+
+    def leave_out_fork(self, src, skey: str, role: Role) -> None:
+        """Pass a recall fork's source by, taking out any rows of it already stored."""
+        from moxi import store
+
+        self.passed.add((src.harness, skey))
+        with store.transaction(self.conn):
+            self.conn.execute("DELETE FROM rows WHERE harness = ? AND session_id = ? "
+                              "AND agent_id = ?", (src.harness, role.main, role.agent))
+
     def note_compressed(self, src) -> None:
         self.report.compressed += 1
         self.conn.execute(
@@ -541,6 +568,9 @@ class Ingest:
         api = _api()
         src = item if isinstance(item, api.Source) else item.source
         skey = source_key(src)
+        if self.recall_fork(src.harness, role.agent):
+            self.leave_out_fork(src, skey, role)
+            return
         stored = self.conn.execute("SELECT cursor FROM sources WHERE harness = ? AND "
                                    "source = ?", (src.harness, skey)).fetchone()
         cursor = None if self.fresh or from_start or stored is None else stored[0]

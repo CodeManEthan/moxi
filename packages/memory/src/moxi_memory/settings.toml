@@ -39,3 +39,60 @@ type = "bool"
 default = false
 doc = "Run a catch-up ingest on a timer, outside agent sessions, as well."
 read = "use"
+
+[subconscious.trigger]
+type = "enum"
+values = ["user", "user-and-comms"]
+default = "user"
+doc = "Which prompts count as new work: in automatic mode each starts a recall, in on-demand mode each resets the agent's count of recalls. user: the user's own prompts. user-and-comms: those and comms deliveries, except one whose every message is a recall, which never starts one; a delivery that also carries other mail counts for that mail."
+read = "use"
+
+[subconscious.scope]
+type = "enum"
+values = ["project", "project-first", "everywhere"]
+default = "project-first"
+doc = "Where a recall searches past sessions and notes: project, the session's project only; project-first, the project first, then everywhere when the project finds nothing; everywhere, the whole index and the notes root."
+read = "use"
+
+[subconscious.limit_s]
+type = "int"
+default = 60
+doc = "How long a recall may run, all its rounds, before its fork is refused further calls and answers from what it has, in seconds, 1 to 3600. Each round is also bounded at this plus 30 seconds from its own send."
+read = "use"
+
+[subconscious.max_tools]
+type = "int"
+default = 8
+doc = "The most tool calls a recall's fork may make, counted over all its rounds."
+read = "use"
+
+[subconscious.max_rounds]
+type = "int"
+default = 4
+doc = "How many rounds a recall's stream may run, each answer delivered; 1 gives one answer."
+read = "use"
+
+[subconscious.max_points]
+type = "int"
+default = 5
+doc = "The most points the fork's brief allows in one answer."
+read = "use"
+
+[subconscious.prefetch_hits]
+type = "int"
+default = 8
+doc = "How many search hits the recall puts in the fork's brief before the fork starts; 0 runs no first search."
+read = "use"
+
+[subconscious.on_demand_per_prompt]
+type = "int"
+default = 2
+doc = "In on-demand mode, the most recalls the agent may start between two prompts that subconscious.trigger counts (by default the user's own)."
+read = "use"
+
+[subconscious.fork_commands]
+type = "list"
+items = "str"
+default = ["moxi memory search", "moxi sessions read", "grep", "cat", "head", "tail", "ls", "wc", "cut"]
+doc = "The shell commands a recall fork may run, alone or joined by pipes, each matched word for word at the start of a command. A program added here is yours to vouch for: it must not run another program from its flags or arguments."
+read = "use"
