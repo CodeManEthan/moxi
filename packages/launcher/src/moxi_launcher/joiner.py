@@ -28,7 +28,8 @@ What a pass reads, each only when its module is installed:
 * `waits`, `covered` and `coverable` (`read_waits`), with turns, only while the launch's
   own turn is closed. The session is found as an act finds it (`target.find`), but slots is never
   asked. `waits` counts its live subagents as keep-warm counts them (`keepwarm.signal_of`);
-  with none, and comms installed, the agents its comms name directs that work. The pass
+  with none, and comms installed, the agents its comms name directs that work; with
+  neither, the open holds of its chain, read as a press reads them. The pass
   joins where keep-warm's ask would (`keepwarm.joins`): unless a live subagent's case is
   under its cap, so with the subagent case spent the directed agents still count toward
   `covered`. It reads them as
@@ -36,7 +37,7 @@ What a pass reads, each only when its module is installed:
   pass, `session_of` for each directed agent, then turns' facts of that agent's session.
   Each comms read may take `COMMS_TIMEOUT_S`, and once one finds the daemon down the pass
   asks comms nothing more. A join that raised, or one through a comms that is installed
-  and does not load, gives no `waits`, and one that met the deadline leaves the launch
+  and does not load, counts no agents (only open holds, if any, are waited on), and one that met the deadline leaves the launch
   unpublished in this pass. `covered` is `keepwarm.would_nudge` over what the pass read,
   the directed join included, and is false without cache. `coverable`, set only on a launch that waits and is not covered, is the
   cap of the case a press would nudge for, when `keepwarm.reading` with `pressed` passes
@@ -305,7 +306,7 @@ def read_waits(each: Pass, launch: Launch) -> dict[str, Any]:
     """`waits`, `covered` and `coverable`, while the launch's own turn is closed: the
     session found as an act finds it but without asking slots, its facts, then its live
     subagents counted as keep-warm counts them, else the agents it directs that work
-    (`waits.directed`); whether keep-warm's next ask would nudge it, on the launch or its
+    (`waits.directed`), else its chain's open holds; whether keep-warm's next ask would nudge it, on the launch or its
     cover (`keepwarm.would_nudge`); and, for a launch that waits and is not covered,
     whether a press would cover it (`coverable`). Nothing without turns; no `waits`,
     `covered` false and `coverable` null for a session not found live, or whose turn is
@@ -344,7 +345,10 @@ def _waits_and_cover(each: Pass, launch: Launch, conn: Any, found: Any) -> dict[
     nudges = each.call(keepwarm.run_of_nudges, conn, found.row.request_id,
                        getattr(facts, "session_id", None) or sid, number)
     now_sid = getattr(facts, "session_id", None) or sid
-    signal = each.call(keepwarm.signal_now, conn, found.row, listed, nudges, sid=now_sid)
+    # The holds are read as a press reads them, so a launch a press would cover reads the
+    # open holds of its chain as what it waits on.
+    signal = each.call(keepwarm.signal_now, conn, found.row, listed, nudges, sid=now_sid,
+                       pressed=True)
     joined = None
     if each.comms is not None and keepwarm.joins(
             signal, room=_subagent_room(each, conn, found.row, now_sid, nudges)):
@@ -356,6 +360,8 @@ def _waits_and_cover(each: Pass, launch: Launch, conn: Any, found: Any) -> dict[
         fact = {"kind": "subagents", "count": len(signal.agents)}
     elif joined is not None and not joined.raised and joined.names:
         fact = {"kind": "agents", "count": len(joined.names)}
+    elif signal.holds:
+        fact = {"kind": "holds", "count": len(signal.holds)}
     return {"waits": fact, **_covered(each, launch, conn, found, sid, facts, listed, fact,
                                       joined)}
 

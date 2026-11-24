@@ -669,7 +669,9 @@ launch, so each starts without it. A covered session is nudged for both cases, a
 cover the count in a row starts at the press. Holds work wherever keep-warm is on, cover
 included: a covered headless session takes holds with the verbs above while its cover
 lasts, and its chain's open holds keep it warm. `moxi launcher show` reads a covered
-session as keep-warm on, with its holds.
+session as keep-warm on, with its holds. It reads keep-warm off wherever keep-warm can't
+act on this install (turns or cache missing, or a system where cache can't read a
+session's environment), as the launch's stamp and start text do.
 
 Cover lasts until a keep-warm ask reads the session's own subagents and its directed
 agents in full and finds nobody at work and no hold open. Asks come only near the end of
@@ -806,8 +808,8 @@ sessions are running (`3 running`), and shows nothing when none is. Click it to 
 list in place: at most four sessions, each with its name, where it runs (the slot,
 `terminal` or `headless`, then the project or the folder's name), its cache when that is
 known, and on the second line the time and first line of the latest thing said in it,
-or when it was launched. A session that waits on agents or subagents while its cache is
-warm, with nothing set to keep it warm, comes first and says in heavy type when its cache
+or when it was launched. A session that waits on agents, subagents or open holds while
+its cache is warm, with nothing set to keep it warm, comes first and says in heavy type when its cache
 goes cold and what it waits on; the row then names it while closed and rises above the
 rows that need nothing. `Open` goes to the session's transcript on the sessions page, and
 `All sessions (N)` to that page's list; without sessions installed both go to the
@@ -822,7 +824,7 @@ keep it warm. Hover it for the cost: it sends a short turn before each cold time
 session waits, at most the cap in a row (see "Acting on launched sessions" for what a
 turn costs and how long cover lasts). A press sends nothing at once. It records cover,
 and cache's timer's next ask sends the first nudge. The row then reads `kept warm while
-1 subagent runs` (or `n agents work`) with `Open` alone, moves down to its place, and
+1 subagent runs` (or `n agents work`, or `n holds are open`) with `Open` alone, moves down to its place, and
 the focus goes to its `Open`. The button isn't offered on a Codex or headless session,
 on a cache too close to cold for an ask to come, with text typed in the prompt box,
 after an ask that failed since the session's last request, or while cache's watcher
@@ -847,7 +849,8 @@ A session waits only while its own turn is closed. With turns, it waits on its s
 and teammates at work, counted as keep-warm counts them; with none, and comms installed,
 on the agents its comms name directs whose turn is open, or whose turn is closed while
 they wait on subagents of their own (a Claude session's; a Codex session counts only by
-its open turn). The directed agents are read wherever keep-warm's ask would read them,
+its open turn); with neither, on the open holds of its launch chain, so a session at its
+director cap with only holds open is offered `Keep warm` too. The directed agents are read wherever keep-warm's ask would read them,
 so a session whose subagent nudges are spent still reads `kept warm` while an agent it
 directs works, as the ask nudges it. Each comms read may take 2 seconds, and once comms'
 daemon is found down the pass asks it nothing more. A waiting session reads `kept warm` when every step of

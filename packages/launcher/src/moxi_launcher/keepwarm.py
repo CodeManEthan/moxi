@@ -721,6 +721,13 @@ def launch_on(row: store.LaunchRow) -> bool:
     return catalog.keeps_warm(row.harness, row.target, row.values.get(catalog.KEEP_WARM))
 
 
+def can_act(row: store.LaunchRow) -> bool:
+    """Whether keep-warm can act on the launch `row` on this install: its `keep_warm` row
+    is offered for the launch's harness (turns and cache present, and cache's timer times
+    that harness here), as a launch's stamp reads it when it is composed."""
+    return catalog.launcher()[catalog.KEEP_WARM].offered(harness=row.harness)
+
+
 # -- whether the next ask would nudge -----------------------------------------------------
 
 
@@ -1056,4 +1063,4 @@ __all__ = ["ASK_EVERY_S", "ASK_JOIN_BUDGET_S", "BLOCKED_REFUSALS", "CAPS", "CASE
            "hold", "holds", "keep_warm", "no_window", "nudge_text", "open_hold", "reading", "release",
            "release_hold", "run_counts", "run_of_nudges", "signal_now", "signal_of", "spent",
            "timed", "window", "chosen", "launch_on", "would_nudge", "subagent_room",
-           "joins"]
+           "joins", "can_act"]

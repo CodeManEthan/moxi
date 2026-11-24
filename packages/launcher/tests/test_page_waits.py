@@ -573,6 +573,21 @@ def subagent_nudges(sid, count):
         conn.close()
 
 
+def director_nudges(sid, count):
+    """`count` director nudges in a row on launch r1, the newest opening turn 4: the
+    director case's cap spent when `count` is 10."""
+    conn = store.connect()
+    try:
+        for number in range(4 - count, 4):
+            run = store.insert_run(conn, kind="keep-warm", mode="ask", request_id="r1",
+                                   session_id=sid, by="launcher", state="acting",
+                                   job=f"proc:{me()}", turn_number=number)
+            store.end_run(conn, run.run_id, "nudged", word=keepwarm.DIRECTOR,
+                          turn_number=number + 1)
+    finally:
+        conn.close()
+
+
 def test_with_the_subagent_cap_spent_an_agent_it_directs_at_work_keeps_it_covered(wired):
     """Home reads the join the ask reads: past the subagent case's cap the ask joins and
     nudges as a director, so the row reads covered."""
@@ -604,6 +619,44 @@ def test_with_the_subagent_cap_spent_and_nobody_directed_at_work_it_is_not_cover
     subagent_nudges(sid, 3)
     got = joined()
     assert got["covered"] is False and got["coverable"] == {"cap": 3}
+
+
+def test_at_the_director_cap_with_only_a_hold_open_it_waits_on_it_and_is_coverable(wired):
+    """An open hold is work out wherever a live subagent or a directed agent at work is:
+    Home reads it as what the session waits on, and offers the press at the cap."""
+    sid = seeded(values={"keep_warm": "on"})
+    wired.turns = Turns({sid: live(sid)})
+    wired.cache = Cache([sid], asks=ASKS)
+    conn = store.connect()
+    try:
+        store.open_hold(conn, "r1", "review")
+        store.open_hold(conn, "r1", "port")
+    finally:
+        conn.close()
+    got = joined()
+    assert got["waits"] == {"kind": "holds", "count": 2}
+    assert got["covered"] is True and got["coverable"] is None
+    director_nudges(sid, 10)
+    got = joined()
+    assert got["waits"] == {"kind": "holds", "count": 2}
+    assert got["covered"] is False and got["coverable"] == {"cap": 10}
+    pressed(sid)
+    got = joined()
+    assert got["covered"] is True and got["coverable"] is None
+
+
+def test_a_subagent_or_a_directed_agent_at_work_is_named_before_a_hold(wired):
+    sid, _ = agents_case(wired, ("coder@proj-a", live("x", turn_open=True)),
+                         values={"keep_warm": "on"})
+    wired.cache = Cache([sid], asks=ASKS)
+    conn = store.connect()
+    try:
+        store.open_hold(conn, "r1", "review")
+    finally:
+        conn.close()
+    assert joined()["waits"] == {"kind": "agents", "count": 1}
+    wired.turns.sessions[sid] = live(sid, entries=[agent("a1")])
+    assert joined()["waits"] == {"kind": "subagents", "count": 1}
 
 
 def test_a_record_whose_asks_lacks_the_subscription_gives_neither_with_keep_warm_on(wired):

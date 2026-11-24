@@ -11,7 +11,7 @@ import pytest
 from moxi import exit as codes
 from moxi import proc
 
-from moxi_launcher import keepwarm, state, store, target
+from moxi_launcher import catalog, keepwarm, slots, state, store, target
 
 SID = "5f6e7d8c-9b0a-4c1d-8e2f-3a4b5c6d7e8f"
 NEW = "0a1b2c3d-4e5f-4a6b-8c7d-9e0f1a2b3c4d"
@@ -44,6 +44,13 @@ class FakeCache:
     def read(self, harness, session_id, **options):
         self.reads.append((harness, session_id))
         return SimpleNamespace(kind="warm", age_s=10.0, ttl_s=self.ttl)
+
+
+@pytest.fixture(autouse=True)
+def env_readable(monkeypatch):
+    """cache reads a session's environment here, as on Linux and macOS, so keep-warm can
+    act on a Claude launch whatever system the tests run on."""
+    monkeypatch.setattr(catalog, "session_env_readable", lambda: True)
 
 
 @pytest.fixture
@@ -304,6 +311,24 @@ def test_cover_for_another_session_id_leaves_keep_warm_off(conn):
     keepwarm.cover_on(conn, store.get(conn, "r1"), NEW, turn_number=3,
                       waits={"kind": "subagents", "count": 1})
     assert not read(conn).keep_warm.on
+
+
+@pytest.mark.parametrize("missing", ["turns", "cache", "session environments"])
+def test_keep_warm_reads_off_where_keep_warm_can_t_act_on_this_install(conn, monkeypatch,
+                                                                       missing):
+    """Without turns or cache, or where cache can't read a session's environment, the
+    `keep_warm` row isn't offered and nothing nudges the session, so it reads off, as
+    its launch was stamped; holds and cache aren't read."""
+    store.open_hold(conn, "r1", "port-cache")
+    if missing == "session environments":
+        monkeypatch.setattr(catalog, "session_env_readable", lambda: False)
+    else:
+        real = slots.links
+        monkeypatch.setattr(slots, "links", lambda name: name != missing and real(name))
+    cache = FakeCache()
+    got = read(conn, cache=cache)
+    assert got.keep_warm.on is False and got.keep_warm.holds == ()
+    assert got.lines()[3] == "keep warm: off" and cache.reads == []
 
 
 def test_keep_warm_off_reads_no_cache(conn):

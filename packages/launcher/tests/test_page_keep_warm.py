@@ -233,12 +233,38 @@ def test_a_session_nobody_works_for_is_not_waiting(waiting):
     assert code() == "not-waiting"
 
 
-def test_an_open_hold_alone_is_not_waiting(wired):
+def test_an_open_hold_alone_at_the_director_cap_is_covered_by_a_press(wired):
+    """An open hold is work out, as a live subagent or a directed agent at work is: a
+    session at its director cap with only a hold open is covered by a press."""
     sid = seeded(values={"keep_warm": "on"})
     wired.turns = Turns({sid: live(sid)})
     wired.cache = Clock([sid], asks=ASKS)
     writing(lambda conn: (store.open_hold(conn, "r1", "review"), nudges(conn, sid, 10)))
-    assert code() == "not-waiting"
+    assert press() is None
+    (event,) = covers()
+    assert event.detail["waits"] == {"kind": "holds", "count": 1}
+
+
+def test_a_hold_of_a_launch_made_with_keep_warm_off_counts_for_its_press(wired):
+    """A press reads the session as if cover had just been set, so the open holds of its
+    chain count, as they will once it is covered."""
+    sid = seeded(**OFF)
+    wired.turns = Turns({sid: live(sid)})
+    wired.cache = Clock([sid], asks=ASKS)
+    writing(lambda conn: store.open_hold(conn, "r1", "review"))
+    assert press() is None
+    assert [e.detail["waits"] for e in covers()] == [{"kind": "holds", "count": 1}]
+
+
+def test_a_session_with_nobody_at_work_and_no_hold_open_is_not_waiting(wired):
+    sid = seeded(values={"keep_warm": "on"})
+    wired.turns = Turns({sid: live(sid)})
+    wired.cache = Clock([sid], asks=ASKS)
+    writing(lambda conn: nudges(conn, sid, 10))
+    refused = press()
+    assert refused["code"] == "not-waiting"
+    assert refused["problem"] == ("no subagent of the session and no agent it directs is "
+                                  "at work, and no hold is open")
 
 
 @pytest.mark.parametrize("unread", ["agents raise", "agents incomplete", "comms down",

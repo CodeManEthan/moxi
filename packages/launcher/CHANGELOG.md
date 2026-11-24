@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+- An open hold is work out wherever a live subagent or a directed agent at work is. Home's
+  Sessions row reads a session with neither, but holds of its chain open, as waiting on
+  them (`waits` kind `holds`, `waiting on 1 open hold`, `kept warm while 1 hold is
+  open`), and offers `Keep warm` at its cap; the press counts those holds as work out
+  (read as if cover had just been set) and records cover with that wait. A refused
+  press with nobody at work now says no hold is open either.
+- `moxi launcher show` reads keep-warm off wherever keep-warm can't act on this install
+  (`keepwarm.can_act`: the `keep_warm` row isn't offered, with turns or cache missing or
+  where cache can't read a session's environment), as the stamp and the start text's
+  `keep warm:` line already do.
 - Keep-warm is on for every Claude Code launch that isn't headless, whatever its
   `keep_warm` value, a launch recorded `off` included (`keepwarm.launch_on`); a headless
   launch keeps the opt-in. Holds and the hold verbs follow it, so they work on any such

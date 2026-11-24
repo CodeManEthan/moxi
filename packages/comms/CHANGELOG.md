@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- The launched sessions on the page read launcher's `holds` wait as launcher's Home row
+  does: a session whose open holds alone keep it waiting reads `waiting on 1 open hold`,
+  or `kept warm while 1 hold is open`, and gets `Keep warm` where a press would cover it.
 - comms' config gains `[policy] directors`, by default the plain name `fleet-lead`:
   names that direct every comms session on the box that doesn't opt out, after its
   launch's own directors. Each directs only while its name holds a standing row
