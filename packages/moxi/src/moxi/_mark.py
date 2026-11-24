@@ -74,9 +74,16 @@ def present(env: Mapping[str, str], names, *, fold: bool | None = None) -> tuple
 
 def _program() -> str:
     """This program's name, for the mark's value: `python -m <module>` for a module run
-    with `-m`, else the script's base name, else the interpreter's."""
+    with `-m`, else the script's base name, else the interpreter's. An `-X` or `-W`
+    option before `-m`, its value given apart or joined to it, is read past."""
     orig = getattr(sys, "orig_argv", None) or []
+    skip = False
     for at, part in enumerate(orig[1:], start=1):
+        if skip or part in ("-X", "-W"):
+            skip = not skip and part in ("-X", "-W")
+            continue
+        if part.startswith(("-X", "-W")):
+            continue
         if not part.startswith("-") or part.startswith("--") or "c" in part:
             break
         if part.endswith("m"):

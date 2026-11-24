@@ -90,10 +90,11 @@ def test_short_dir_is_short_and_goes():
     with short_dir() as where:
         assert where.is_dir()
         if hasattr(socket, "AF_UNIX"):
-            # <root>/mx-<6>/<1>/mx-<8>: 24 bytes past the temp root, however the system
+            # <root>/mx-<6>/<1>/<1>/mx-<8>: the process dir, the run's short directory,
+            # the test's, then this one: 26 bytes past the temp root, however the system
             # spells the root (macOS's /tmp is /private/tmp).
-            root = where.parents[2]
-            assert len(str(where)) - len(str(root)) == 24, where
+            root = where.parents[3]
+            assert len(str(where)) - len(str(root)) == 26, where
         else:
             # The bound is for a Unix socket's path, and Python has no Unix sockets here
             # (Windows): the directory is a short name right in the short root.

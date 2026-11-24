@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+- The test fence holds every process the tests start, from a fixture of any scope, to
+  the run's own folders. When the test loop starts, the kit puts a run's environment in
+  place (its homes in the run's temp root, its runtime and temp directory in one
+  run-level short directory that holds every short directory of the run), so a
+  module- or session-scoped fixture and its children no longer see the real homes. Every
+  child gets uv's folders under the run's roots, one uv cache per run that its xdist
+  workers share (tests that install third-party packages download into it), the
+  suite's own Python with downloads off, and byte code off. A seam over
+  `subprocess.Popen` adds what a child's own environment lacks, refuses one that points
+  a home, temp directory or uv folder outside the run, and gives an isolated Python child
+  a byte-code folder in the run. `uv_env` is now the fenced environment with these keys,
+  not uv's real cache, and `started_env()` gives the environment pytest started with.
 - `MOXI_TEST_TEMP` (`disk` or `ram`, unset meaning `disk`) decides where a test run keeps
   its temp: on Linux `/var/tmp` or `/dev/shm`, elsewhere the system's own, where `ram`
   runs as `disk` and says so. The kit's short directories leave `/tmp` for the same root,

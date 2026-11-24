@@ -62,7 +62,8 @@ def test_the_env_is_what_the_fence_says(fence, tmp_path):
     expected = set(testing.HARNESS_HOMES) | {"XDG_RUNTIME_DIR", "TMPDIR",
                                               testing.ANCHOR_HOME_ENV,
                                               testing.FENCED_ENV} | {
-        f"MOXI_{m.upper()}_HOME" for m in modules}
+        f"MOXI_{m.upper()}_HOME" for m in modules} | {*testing.CHILD_ENV,
+                                                      testing.BROWSERS_ENV}
     kept = set(testing.KEPT_ENV)
     if testing.WINDOWS:
         expected |= set(testing.WINDOWS_HOMES) | {"HOMEDRIVE", "HOMEPATH", "TEMP", "TMP"}
@@ -78,6 +79,12 @@ def test_the_env_is_what_the_fence_says(fence, tmp_path):
         assert Path(os.environ[key]).is_relative_to(tmp_path)
     assert os.environ["XDG_RUNTIME_DIR"] == str(fence.runtime)
     assert os.environ["TMPDIR"] == str(fence.short) == tempfile.gettempdir()
+    # The run's child keys and browsers folder, carried as the run set them.
+    assert {key: os.environ[key] for key in testing._RUN.carried} == testing._RUN.carried
+    assert os.environ[testing.UV_PYTHON_ENV] == sys.executable
+    assert os.environ[testing.NO_BYTE_CODE_ENV] == "1"
+    # The test's short directory is in the run's.
+    assert fence.short.parent == Path(testing._RUN.short)
     # The mark a run started from this test reads as nested in it.
     assert os.environ[testing.FENCED_ENV] == str(fence.short)
     assert fence.runtime.is_dir()
@@ -289,100 +296,15 @@ def test_terminal_record_writes_the_recorded_names_under_the_tests_anchor(
 
 # --- uv in a child ---------------------------------------------------------------------
 
-def test_uv_finds_its_dirs_as_uv_does():
-    dirs, join = testing._uv_dirs, os.path.join     # joined by this system's separator
-    assert dirs({}, "/h", is_windows=False) == {
-        "UV_CACHE_DIR": join("/h", ".cache", "uv"),
-        "UV_PYTHON_INSTALL_DIR": join("/h", ".local", "share", "uv", "python")}
-    assert dirs({"XDG_CACHE_HOME": "/c", "XDG_DATA_HOME": "/d"}, "/h", is_windows=False) == {
-        "UV_CACHE_DIR": join("/c", "uv"), "UV_PYTHON_INSTALL_DIR": join("/d", "uv", "python")}
-    assert dirs({"UV_CACHE_DIR": "/uc", "UV_PYTHON_INSTALL_DIR": "/up", "XDG_CACHE_HOME": "/c",
-                 "XDG_DATA_HOME": "/d"}, "/h", is_windows=False) == {
-        "UV_CACHE_DIR": "/uc", "UV_PYTHON_INSTALL_DIR": "/up"}
-    # An empty value is unset, as uv reads it.
-    assert dirs({"UV_CACHE_DIR": "", "XDG_DATA_HOME": ""}, "/h", is_windows=False) == \
-        dirs({}, "/h", is_windows=False)
+def test_uv_env_is_the_fenced_env_with_the_child_keys(fence, uv_env):
+    def but_the_phase(env):
+        return {k: v for k, v in env.items() if k != "PYTEST_CURRENT_TEST"}
 
-
-def test_on_windows_uv_finds_its_dirs_as_uv_does(monkeypatch, tmp_path):
-    local, roaming, home = tmp_path / "L", tmp_path / "R", tmp_path / "H"
-    older = tmp_path / "R2"
-    (older / "uv").mkdir(parents=True)
-    (older / "uv" / "data").write_text("")
-    # Made before the platform is patched: the fence judges this test's own writes by it.
-    monkeypatch.setattr(testing, "WINDOWS", True)
-    env = {"LOCALAPPDATA": str(local), "APPDATA": str(roaming)}
-    assert testing._uv_dirs(env, str(home)) == {
-        "UV_CACHE_DIR": str(local / "uv" / "cache"),
-        "UV_PYTHON_INSTALL_DIR": str(roaming / "uv" / "python")}
-    # Without the two folders' variables, the folders under the home.
-    assert testing._uv_dirs({}, str(home)) == {
-        "UV_CACHE_DIR": str(home / "AppData" / "Local" / "uv" / "cache"),
-        "UV_PYTHON_INSTALL_DIR": str(home / "AppData" / "Roaming" / "uv" / "python")}
-    # uv goes on using its older data folder where it is there, even as a file.
-    assert testing._uv_dirs({"APPDATA": str(older)}, str(home))[
-        "UV_PYTHON_INSTALL_DIR"] == str(older / "uv" / "data" / "python")
-    assert testing._uv_dirs({**env, "UV_PYTHON_INSTALL_DIR": "P"}, str(home))[
-        "UV_PYTHON_INSTALL_DIR"] == "P"
-    # Off Windows the same environment gives the XDG places, whatever is in APPDATA.
-    monkeypatch.setattr(testing, "WINDOWS", False)
-    assert testing._uv_dirs(env, str(home)) == {
-        "UV_CACHE_DIR": str(home / ".cache" / "uv"),
-        "UV_PYTHON_INSTALL_DIR": str(home / ".local" / "share" / "uv" / "python")}
-
-
-def test_uv_env_carries_the_real_uv_and_leaves_this_process_fenced(fence, uv_env):
-    real = testing._SESSION["uv"]
-    assert {k: uv_env[k] for k in real} == real
-    assert not Path(real["UV_CACHE_DIR"]).is_relative_to(fence.home)
-    assert not Path(real["UV_PYTHON_INSTALL_DIR"]).is_relative_to(fence.home)
-    assert uv_env["UV_PYTHON_DOWNLOADS"] == "never"
+    assert but_the_phase(uv_env) == but_the_phase(os.environ)
+    assert {key: uv_env[key] for key in testing.CHILD_ENV} == testing._RUN.child
     assert uv_env["HOME"] == str(fence.home)
-    added = {*real, "UV_PYTHON_DOWNLOADS", "PYTEST_CURRENT_TEST"}
-    assert {k: v for k, v in uv_env.items() if k not in added} == \
-        {k: v for k, v in os.environ.items() if k not in added}
-    for key in (*real, "UV_PYTHON_DOWNLOADS"):
-        assert key not in os.environ
-
-
-@pytest.mark.skipif(shutil.which("uv") is None, reason="needs uv")
-def test_uv_reads_the_real_cache_only_through_uv_env(fence, uv_env):
-    def cache_dir(env):
-        return subprocess.run(["uv", "cache", "dir"], env=env, capture_output=True,
-                              text=True, check=True, timeout=60).stdout.strip()
-
-    assert cache_dir(uv_env) == uv_env["UV_CACHE_DIR"]
-    own = ("AppData", "Local", "uv", "cache") if testing.WINDOWS else (".cache", "uv")
-    assert Path(cache_dir(dict(os.environ))) == fence.home.joinpath(*own)
-
-
-UV_PROBE = '''
-import os
-
-CACHE, DATA, DATA_VAR = {cache!r}, {data!r}, {data_var!r}
-
-
-def test_uv_env_is_read_at_the_start(uv_env):
-    assert uv_env["UV_CACHE_DIR"] == CACHE
-    assert uv_env["UV_PYTHON_INSTALL_DIR"] == os.path.join(DATA, "uv", "python")
-    assert "UV_CACHE_DIR" not in os.environ
-    assert os.environ[DATA_VAR] != DATA
-'''
-
-
-def test_uv_env_reads_uv_before_the_fence_empties_the_env(pytester, monkeypatch,
-                                                                    tmp_path):
-    cache, data = str(tmp_path / "cache"), str(tmp_path / "data")
-    # The variable uv takes its Pythons' folder from: APPDATA on Windows.
-    data_var = "APPDATA" if testing.WINDOWS else "XDG_DATA_HOME"
-    monkeypatch.setenv("UV_CACHE_DIR", cache)
-    monkeypatch.setenv(data_var, data)
-    monkeypatch.delenv("UV_PYTHON_INSTALL_DIR", raising=False)
-    pytester.makeconftest('pytest_plugins = ["moxi_dev.testing"]\n')
-    pytester.makepyfile(test_uv_probe=UV_PROBE.format(cache=cache, data=data,
-                                                      data_var=data_var))
-    result = pytester.runpytest_subprocess("-p", "no:cacheprovider")
-    result.assert_outcomes(passed=1)
+    for key in testing.UV_DIRS_ENV:
+        assert testing._in_roots(uv_env[key]), key
 
 
 # --- writes ----------------------------------------------------------------------------
@@ -577,8 +499,8 @@ def test_temp_files_land_in_the_test_s_short_dir(fence):
     with testing.short_dir() as where:
         assert where.parent.resolve() == fence.short.resolve()
         if hasattr(socket, "AF_UNIX"):          # a Unix socket's bound; Windows has none
-            # /var/tmp/mx-<6>/<1>/mx-<8>/sock: the test's short dir is in its
-            # process's short process dir.
+            # /var/tmp/mx-<6>/<1>/<1>/mx-<8>/sock: the test's short dir is in the
+            # run's, which is in its process's short process dir.
             assert len(str(where / "sock")) < 44
 
 
@@ -619,7 +541,7 @@ MACOS_SUN_PATH = 104
 
 
 @pytest.mark.skipif(sys.platform == "win32", reason="Unix socket paths")
-def test_on_macos_a_fenced_test_s_sockets_are_as_short_as_without_process_dirs(fence):
+def test_on_macos_a_fenced_test_s_sockets_fit_under_the_process_and_run_dirs(fence):
     darwin = temp.Places(platform="darwin", system_temp="/var/folders/q2/abc/T")
     assert darwin.macos_short_root == "/tmp"
     # The kit's macOS branch, on a stand-in for /tmp the fence lets this test write.
@@ -630,12 +552,13 @@ def test_on_macos_a_fenced_test_s_sockets_are_as_short_as_without_process_dirs(f
     assert choice.short_root == str(stand_in)
     process = temp.make_process_dir(choice.short_root)
     try:
-        short = testing._make_test_short_dir(str(process.path))
-        on_macos = PurePosixPath(MACOS_TMP, process.path.name, short.name)
+        run = testing._make_test_short_dir(str(process.path))
+        short = testing._make_test_short_dir(str(run))
+        on_macos = PurePosixPath(MACOS_TMP, process.path.name, run.name, short.name)
     finally:
         process.release()
     straight = PurePosixPath(MACOS_TMP, "mx-" + "x" * 8)    # one made straight in /tmp
-    assert len(str(on_macos)) == len(str(straight)) == 24
+    assert len(str(on_macos)) == len(str(straight)) + 2 == 26
 
     # Each module's runtime dir, as moxi.paths builds it from the fenced environment.
     modules = sorted({"comms", *testing._modules()})

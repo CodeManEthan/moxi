@@ -77,7 +77,7 @@ def test_run_does_not_check_the_exit_status():
 
 
 def test_run_uses_env_as_given_and_cwd(tmp_path):
-    code = "import os; print(os.environ.get('ONLY'), os.environ.get('HOME'), os.getcwd())"
+    code = "import os; print(os.environ.get('ONLY'), os.environ.get('XDG_CONFIG_HOME'), os.getcwd())"
     done = proc.run([PY, "-c", code], timeout_s=30, env=child_env(ONLY="yes"), cwd=tmp_path)
     only, home, cwd = done.stdout.decode().split()
     assert (only, home) == ("yes", "None")
@@ -555,7 +555,7 @@ def test_spawn_refuses_what_does_not_fit():
 
 
 def test_spawn_passes_env_as_given_and_cwd(tmp_path):
-    code = "import os; print(os.environ.get('ONLY'), os.environ.get('HOME'), os.getcwd())"
+    code = "import os; print(os.environ.get('ONLY'), os.environ.get('XDG_CONFIG_HOME'), os.getcwd())"
     child = proc.spawn([PY, "-c", code], env=child_env(ONLY="yes"), cwd=tmp_path,
                        stdout=subprocess.PIPE)
     out, _ = child.communicate(timeout=30)
@@ -1155,7 +1155,12 @@ def _state(pid: int) -> str:
 
 @LINUX
 def test_the_linux_reader_reads_an_empty_env_of_a_running_process_as_empty():
-    child = _child_with({})
+    # The test kit adds its own keys to an environment handed to a child, so the empty
+    # one is made by `env -i`, which the child execs into in place.
+    child = subprocess.Popen(["env", "-i", PY, "-c",
+                              "import sys; print('up', flush=True); sys.stdin.read()"],
+                             stdin=subprocess.PIPE, stdout=subprocess.PIPE)
+    assert child.stdout.readline().strip() == b"up"
     try:
         assert proc.process_env(child.pid) == {}
     finally:
@@ -1361,6 +1366,12 @@ def test_on_windows_any_spelling_of_the_mark_counts(monkeypatch):
     (["/lib/pytest/__main__.py"], ["python3", "-m", "pytest"], "python -m pytest"),
     (["/lib/x/__main__.py"], ["python3", "-Im", "x"], "python -m x"),
     (["-c"], ["python3", "-c", "pass", "-m", "x"], "python3"),
+    # An -X or -W option, as a test kit adds to an isolated child, is read past.
+    (["/lib/x/__main__.py"], ["python3", "-X", "pycache_prefix=/t/pc", "-I", "-m", "x"],
+     "python -m x"),
+    (["/lib/x/__main__.py"], ["python3", "-Xpycache_prefix=/t/pcm", "-Im", "x"],
+     "python -m x"),
+    (["/lib/x/__main__.py"], ["python3", "-W", "ignore", "-m", "x"], "python -m x"),
 ])
 def test_the_mark_names_the_program(monkeypatch, argv, orig, name):
     monkeypatch.setattr(sys, "argv", argv)

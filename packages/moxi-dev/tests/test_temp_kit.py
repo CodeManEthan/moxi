@@ -98,7 +98,7 @@ def top_level_run(pytester: pytest.Pytester, machine: FakeMachine,
 
 #: Tests the child runs: one passes and one fails, each writing in its tmp_path; then
 #: the third looks at what is left of them while the run still goes, and at the short
-#: process dir its own short directory sits in.
+#: process dir its own short directory sits in, inside the run's short directory.
 CHILD_TESTS = '''
 import os, re
 from pathlib import Path
@@ -118,7 +118,7 @@ def test_c_looks(tmp_path, fence):
     failed = list(Path(parent.parent).rglob("test_b_fails0"))
     if in_memory:
         assert not passed and failed
-    process_dir = Path(fence.short).parent
+    process_dir = Path(fence.short).parent.parent
     assert re.fullmatch(r"mx-[a-z0-9_]{6}", process_dir.name), process_dir
     assert (process_dir.parent / (process_dir.name + ".mx-owner")).is_file()
     print("PROCESS_DIR", process_dir)
@@ -214,7 +214,9 @@ from pathlib import Path
 from moxi_dev import testing
 
 def test_short_dirs_go_in_the_outer_tests(fence):
-    assert Path(fence.short).parent == Path(OUTER)
+    # In process the run is the outer one, so the test's short directory is right in the
+    # outer test's; in a child process the run's own short directory is in it.
+    assert Path(fence.short).parents[DEPTH] == Path(OUTER)
     with testing.short_dir() as where:
         assert where.parent == Path(fence.short)
 '''
@@ -227,7 +229,8 @@ def test_a_nested_run_chooses_records_and_sweeps_nothing(pytester, machine, monk
     leftover = machine.leftover(machine.ram)
     before = {root: machine.contents(root) for root in (machine.disk, machine.ram)}
     pytester.makeconftest(machine.conftest())
-    pytester.makepyfile(test_nested=NESTED_TESTS.replace("OUTER", repr(str(fence.short))))
+    pytester.makepyfile(test_nested=NESTED_TESTS.replace("OUTER", repr(str(fence.short)))
+                        .replace("DEPTH", "0" if how == "in_process" else "1"))
     monkeypatch.setenv(TEMP_ENV, "ram")
     run = pytester.runpytest if how == "in_process" else pytester.runpytest_subprocess
     result = run("-p", "no:cacheprovider")
@@ -249,7 +252,7 @@ def test_shows_its_dirs(tmp_path, fence):
     parent = tmp_path.parent
     base = parent.parent if parent.name.startswith("popen-gw") else parent
     print("BASETEMP", base, flush=True)
-    print("PROCESS_DIR", Path(fence.short).parent, flush=True)
+    print("PROCESS_DIR", Path(fence.short).parent.parent, flush=True)
     if os.environ.get("LIVE_HANG"):
         time.sleep(600)
 '''

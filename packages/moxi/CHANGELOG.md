@@ -2,6 +2,8 @@
 
 ## 0.1.11 (unreleased)
 
+- The start mark names a module run as `python -X <option> -m <module>` (or with `-W`)
+  `python -m <module>`, as it does without the option, where it named the script's file.
 - New `moxi install <module> --setup-only`: runs an installed module's `SETUP` again in a
   fresh process under the core lock and records the version it ran at in `setup.json`,
   as an install's settle step does, and nothing else: no install, no index, no catalogue

@@ -257,6 +257,7 @@ from __future__ import annotations
 import contextlib
 import dataclasses
 import functools
+import inspect
 import ipaddress
 import json
 import math
@@ -267,6 +268,7 @@ import re
 import shutil
 import socket
 import sqlite3
+import subprocess
 import sys
 import tempfile
 import threading
@@ -278,7 +280,7 @@ from typing import Any, TypeVar
 from urllib.parse import parse_qs, urlsplit
 
 import pytest
-from moxi.paths import ANCHOR_HOME_ENV
+from moxi.paths import ANCHOR_HOME_ENV, HOME_ENV
 
 from moxi_dev import temp
 from moxi_dev.temp import FENCED_ENV as FENCED_ENV
@@ -408,11 +410,32 @@ WINDOWS_HOMES = {
 WINDOWS_KEPT_ENV = ("SYSTEMROOT", "SYSTEMDRIVE", "WINDIR", "COMSPEC", "PATHEXT", "OS",
                     "PROCESSOR_ARCHITECTURE", "NUMBER_OF_PROCESSORS", "USERNAME")
 
+#: The child keys that name a folder uv writes, each under the run's roots (module doc,
+#: The run).
+UV_DIRS_ENV = ("UV_CACHE_DIR", "UV_PYTHON_INSTALL_DIR", "UV_PYTHON_BIN_DIR", "UV_TOOL_DIR",
+               "UV_TOOL_BIN_DIR")
+#: The interpreter uv runs, and whether it may download another.
+UV_PYTHON_ENV = "UV_PYTHON"
+UV_DOWNLOADS_ENV = "UV_PYTHON_DOWNLOADS"
+#: Python's two byte-code variables: set non-empty, the first writes none; the second
+#: names the folder byte code goes to instead of beside its source.
+NO_BYTE_CODE_ENV = "PYTHONDONTWRITEBYTECODE"
+PYCACHE_PREFIX_ENV = "PYTHONPYCACHEPREFIX"
+#: Every child key, which the run's environment and each test's carry.
+CHILD_ENV = (*UV_DIRS_ENV, UV_PYTHON_ENV, UV_DOWNLOADS_ENV, NO_BYTE_CODE_ENV)
+#: Where Playwright finds its browsers, which the run's environment sets to the folder
+#: the started environment finds.
+BROWSERS_ENV = "PLAYWRIGHT_BROWSERS_PATH"
+
+#: The run's folders in its pytest temp root: its homes, uv's folders but the cache, the
+#: cache when the run has no xdist controller, and an isolated child's byte code.
+RUN_HOME = "run-home"
+RUN_UV = "run-uv"
+UV_CACHE = "uv-cache"
+PYCACHE = "pycache"
+
 #: A path of either flavour, kept as the caller's.
 _P = TypeVar("_P", bound=PurePath)
-
-#: What `uv_env` adds to the fenced environment, besides uv's two directories.
-_UV_NO_DOWNLOADS = {"UV_PYTHON_DOWNLOADS": "never"}
 
 _KEPT_PREFIXES = ("LC_",)
 _GROUP = "moxi.modules"
@@ -688,10 +711,39 @@ _HANDLERS: dict[str, Callable[[tuple], str | None]] = {
 }
 
 
+def _on_start(env_at: int) -> Callable[[tuple], str | None]:
+    """A start by `os.exec*`, `os.spawn*` or `os.posix_spawn*`: its environment, at
+    `env_at` in the event's arguments, is judged as the seam judges one (`_refusal`), and
+    must also hold every child key. None inherits this process's."""
+    def check(args: tuple) -> str | None:
+        env = args[env_at] if len(args) > env_at else None
+        if env is None:
+            return None
+        try:
+            given = {os.fsdecode(key): os.fsdecode(value) for key, value in env.items()}
+        except (AttributeError, TypeError):
+            return None
+        lacks = [key for key in _RUN.child if not _holds(given, key)]
+        if lacks:
+            return f"a start whose environment lacks {', '.join(lacks)}"
+        return _refusal(given)
+    return check
+
+
+#: The starts the hook judges for the whole loop, not only a test's span.
+_START_HANDLERS: dict[str, Callable[[tuple], str | None]] = {
+    "os.exec": _on_start(2),
+    "os.spawn": _on_start(3),
+    "os.posix_spawn": _on_start(2),
+}
+
+
 def _audit(event: str, args: tuple) -> None:
-    if not _GUARD.active:
-        return
-    handler = _HANDLERS.get(event)
+    handler = _START_HANDLERS.get(event) if _RUN.depth else None
+    if handler is None:
+        if not _GUARD.active:
+            return
+        handler = _HANDLERS.get(event)
     if handler is None or getattr(_LOCAL, "busy", False):
         return
     _LOCAL.busy = True
@@ -700,8 +752,14 @@ def _audit(event: str, args: tuple) -> None:
     finally:
         _LOCAL.busy = False
     if refusal:
+        _refuse(refusal)
+
+
+def _refuse(refusal: str) -> None:
+    """Record a refusal (while a test is fenced) and raise it."""
+    if _GUARD.active:
         _GUARD.breaches.append(refusal)
-        raise FenceError(f"the test fence refused {refusal}")
+    raise FenceError(f"the test fence refused {refusal}")
 
 
 def _install() -> None:
@@ -723,11 +781,12 @@ _SHORT: dict[str, str] = {}
 
 def short_root() -> str:
     """Where short directories go: inside the current test's short directory while a
-    test is fenced, else this process's short process dir (module doc, Temp files), else
-    the system temp directory."""
+    test is fenced, else inside the run's short directory while the test loop runs
+    (module doc, The run), else this process's short process dir (module doc, Temp
+    files), else the system temp directory."""
     if _GUARD.active and _GUARD.short:
         return _GUARD.short
-    return _SHORT.get("root") or tempfile.gettempdir()
+    return _RUN.short or _SHORT.get("root") or tempfile.gettempdir()
 
 
 #: The characters of a test's short directory's one-character name.
@@ -738,12 +797,14 @@ _SHORT_NAMES: list[str] = []
 
 
 def _make_test_short_dir(root: str) -> Path:
-    """Make the test's short directory, private, in `root`: `short_root()`, the process
-    dir, or in a nested run the outer test's short directory.
+    """Make a test's short directory, or the run's, private, in `root`: `short_root()`,
+    which is the run's short directory for a test's, and the process dir (or in a nested
+    run the outer test's short directory) for the run's.
 
-    Its name is one character, so a fenced test's short path is as short as a short dir
-    `mx-` and 8 characters made straight in the root: on macOS `/tmp/mx-<6>/<1>`, 16
-    bytes, and a module's sockets under it keep within macOS's 104-byte limit. The
+    Its name is one character, so a fenced test's short path is two bytes longer than a
+    short dir `mx-` and 8 characters made straight in the root: on macOS
+    `/tmp/mx-<6>/<1>/<1>`, 18 bytes, and a module's sockets under it keep within macOS's
+    104-byte limit. The
     names are given in shuffled turns of 36: no name repeats within a turn, and each
     turn is a fresh shuffle, so a name may come back as soon as the next turn starts.
     A name that exists is always passed over, so the directory is always new. When every
@@ -809,28 +870,344 @@ def _fenced_env(source: Mapping[str, str], home: Path, runtime: Path, short: Pat
     return env
 
 
-def _uv_dirs(env: Mapping[str, str], home: str, *,
-             is_windows: bool | None = None) -> dict[str, str]:
-    """uv's cache and installed-Python directories, as uv finds them from `environ`;
-    `is_windows` is `WINDOWS` unless given."""
-    def given(key: str) -> str | None:
-        return env.get(key) or None
+# --- the run ---------------------------------------------------------------------------
 
-    if WINDOWS if is_windows is None else is_windows:
-        local = given("LOCALAPPDATA") or os.path.join(home, "AppData", "Local")
-        roaming = given("APPDATA") or os.path.join(home, "AppData", "Roaming")
-        cache = os.path.join(local, "uv", "cache")
-        # uv keeps its Pythons in <Roaming>\uv\python, unless its older folder
-        # <Roaming>\uv\data is there, which it goes on using.
-        legacy = os.path.join(roaming, "uv", "data")
-        pythons = os.path.join(legacy if os.path.exists(legacy)
-                               else os.path.join(roaming, "uv"), "python")
+class _Run:
+    """The run's state in this process (module doc, The run)."""
+
+    def __init__(self) -> None:
+        #: How many test loops run in this process: 1 in the loop that owns the run, more
+        #: in a loop that borrows it.
+        self.depth = 0
+        #: The environment pytest started with; inside a borrowing loop, the outer test's
+        #: when that loop started.
+        self.started: dict[str, str] | None = None
+        #: The child keys and their values.
+        self.child: dict[str, str] = {}
+        #: What every test's environment carries from the run's: the child keys and
+        #: Playwright's browsers folder.
+        self.carried: dict[str, str] = {}
+        #: The run's roots, by their real paths: its pytest temp root, its short
+        #: directory and its uv cache.
+        self.roots: tuple[str, ...] = ()
+        #: The run's short directory, which holds every short directory the loop makes.
+        self.short: str | None = None
+        #: Where an isolated Python child puts its byte code.
+        self.pycache: str | None = None
+        #: Whether the run opted into the real supervisor, where a child's homes and temp
+        #: directory may be the account's own.
+        self.real_supervisor = False
+
+
+_RUN = _Run()
+
+#: The key a controller hands its xdist workers the run's uv cache under.
+_UV_CACHE_KEY = "moxi_dev_uv_cache"
+
+#: The temp directory's variables a child is given when it lacks them: `tempfile` reads
+#: `TMPDIR`, then `TEMP` and `TMP`, on every system.
+_TEMP_KEYS = ("TMPDIR", "TEMP", "TMP")
+
+#: A module's home variable, which the fence moves.
+_MODULE_HOME = re.compile(r"MOXI_[A-Z0-9]+_HOME")
+
+#: `subprocess.Popen`'s own `__init__`, which the seam calls on.
+_POPEN_INIT = subprocess.Popen.__init__
+_POPEN_SIGNATURE = inspect.signature(_POPEN_INIT)
+
+
+def started_env() -> dict[str, str]:
+    """The environment pytest started with, before the run's or any test's fence: a
+    copy. Inside a pytest run inside a test (pytester's in-process run), the outer
+    test's environment when it started that run. Before the test loop (at collection)
+    it is this process's environment, which is still the started one."""
+    return dict(_RUN.started if _RUN.started is not None else os.environ)
+
+
+def _name(key: str) -> str:
+    """A variable's name as this system compares it: on Windows, in upper case."""
+    return key.upper() if WINDOWS else key
+
+
+def _value(env: Mapping[str, str], key: str) -> str | None:
+    """`key`'s value in `env`, on Windows in whatever case `env` spells it; None when
+    unset."""
+    for name, value in env.items():
+        if _name(name) == _name(key):
+            return value
+    return None
+
+
+def _holds(env: Mapping[str, str], key: str) -> bool:
+    return _value(env, key) is not None
+
+
+def _put(env: dict[str, str], key: str, value: str) -> None:
+    """Set `key` in `env`, dropping any other spelling of it on Windows."""
+    for name in [name for name in env if _name(name) == _name(key)]:
+        del env[name]
+    env[key] = value
+
+
+def _moved(key: str) -> bool:
+    """Whether the fence moves the variable `key`: a home, the runtime or temp directory,
+    `MOXI_HOME` or a module's home."""
+    name = _name(key)
+    return (name in HARNESS_HOMES or name in _TEMP_KEYS
+            or name in ("XDG_RUNTIME_DIR", HOME_ENV) or bool(_MODULE_HOME.fullmatch(name))
+            or (WINDOWS and name in WINDOWS_HOMES))
+
+
+def _in_roots(path: str) -> bool:
+    """Whether `path`, resolved, is one of the run's roots or inside one."""
+    roots = (*_RUN.roots, *_GUARD.roots, *_SHORT_DIRS)
+    real = os.path.realpath(path)
+    if WINDOWS:
+        return _under(ntpath.normcase(real), [ntpath.normcase(root) for root in roots])
+    return _under(real, roots)
+
+
+def _lax() -> bool:
+    """Whether a child's homes and temp directory may name the account's own: a run that
+    opted into the real supervisor, or a `live` test."""
+    return _RUN.real_supervisor or (_GUARD.active and not _GUARD.network)
+
+
+def _refusal(env: Mapping[str, str]) -> str | None:
+    """Why the fence refuses a child `env`, or None: a uv folder outside the run's roots,
+    byte code on with no prefix under them, or, outside the opt-in tiers, a variable the
+    fence moves set to a path that exists outside them (one that names nothing on disk,
+    such as `/nowhere`, passes)."""
+    for key in UV_DIRS_ENV:
+        value = _value(env, key)
+        if value and not _in_roots(value):
+            return f"a child's {key}={value}: outside the run's roots"
+    if not _value(env, NO_BYTE_CODE_ENV):
+        prefix = _value(env, PYCACHE_PREFIX_ENV)
+        if not (prefix and _in_roots(prefix)):
+            return (f"a child with byte code on and no {PYCACHE_PREFIX_ENV} under the "
+                    "run's roots")
+    if not _lax():
+        for key, value in env.items():
+            if value and _moved(key) and os.path.exists(value) and not _in_roots(value):
+                return f"a child's {key}={value}: outside the run's roots"
+    return None
+
+
+def _child_env(given: Mapping[Any, Any]) -> dict[str, str]:
+    """The environment the seam hands a child given `given`: each missing child key
+    added, a missing temp directory and home added, then judged (`_refusal`)."""
+    env = {os.fsdecode(key): os.fsdecode(value) for key, value in given.items()}
+    for key, value in _RUN.child.items():
+        current = _value(env, key)
+        # An empty uv variable reads as unset to uv; an empty byte-code one turns it on.
+        if current is None or (not current and key != NO_BYTE_CODE_ENV):
+            _put(env, key, value)
+    for key in _TEMP_KEYS if WINDOWS else _TEMP_KEYS[:1]:
+        if not _holds(env, key) and os.environ.get(key):
+            env[key] = os.environ[key]
+    if WINDOWS:
+        own = _value(env, "USERPROFILE") or _value(env, "HOME")
+        for key, rel in WINDOWS_HOMES.items():
+            if not _holds(env, key):
+                value = ((own if rel == "." else ntpath.join(own, *rel.split("/")))
+                         if own else os.environ.get(key))
+                if value:
+                    env[key] = value
+    if not _holds(env, "HOME") and os.environ.get("HOME"):
+        env["HOME"] = os.environ["HOME"]
+    refusal = _refusal(env)
+    if refusal:
+        _refuse(refusal)
+    return env
+
+
+def _is_python(program: str) -> bool:
+    """Whether `program` names a Python interpreter: the suite's own, or a file whose name
+    starts with `python`."""
+    if os.path.basename(program).lower().startswith("python"):
+        return True
+    return bool(sys.executable) and os.path.realpath(program) == os.path.realpath(
+        sys.executable)
+
+
+def _with_prefix(argv: Any) -> list[Any] | None:
+    """`argv` with `-X pycache_prefix=<the run's byte-code folder>` after the interpreter,
+    when it starts a Python interpreter isolated (`-I` or `-E` among its options) and
+    gives neither `-B` nor a prefix of its own; else None. A prefix of its own outside
+    the run's roots is refused."""
+    if isinstance(argv, (str, bytes)) or not _RUN.pycache:
+        return None
+    try:
+        items = list(argv)
+        words = [os.fsdecode(item) for item in items]
+    except TypeError:
+        return None
+    if not words or not _is_python(words[0]):
+        return None
+    isolated = no_byte_code = False
+    prefix = None
+    at = 1
+    while at < len(words):
+        word = words[at]
+        if word in ("-X", "-W", "--check-hash-based-pycs"):
+            option = words[at + 1] if at + 1 < len(words) else ""
+            if word == "-X" and option.startswith("pycache_prefix="):
+                prefix = option.partition("=")[2]
+            at += 2
+            continue
+        if word.startswith("-X"):
+            if word[2:].startswith("pycache_prefix="):
+                prefix = word.partition("=")[2]
+            at += 1
+            continue
+        if word.startswith("-W"):
+            at += 1
+            continue
+        if word in ("-", "--") or not word.startswith("-") or word.startswith("--"):
+            break
+        flags = word[1:]
+        for flag in flags:
+            if flag in "cm":
+                break
+            isolated = isolated or flag in "IE"
+            no_byte_code = no_byte_code or flag == "B"
+        if "c" in flags or "m" in flags:
+            break
+        at += 1
+    if prefix is not None:
+        if prefix and not _in_roots(prefix):
+            _refuse(f"a child's -X pycache_prefix={prefix}: outside the run's roots")
+        return None
+    if not isolated or no_byte_code:
+        return None
+    return [items[0], "-X", f"pycache_prefix={_RUN.pycache}", *items[1:]]
+
+
+@functools.wraps(_POPEN_INIT)
+def _seam_init(self: subprocess.Popen, *args: Any, **kwargs: Any) -> None:
+    """The seam over `subprocess.Popen`, in place for the whole test loop (module doc,
+    The run): a child given an environment gets what it lacks and is refused what points
+    outside; an isolated Python child gets a byte-code prefix under the run's roots."""
+    if _RUN.depth:
+        bound = _POPEN_SIGNATURE.bind(self, *args, **kwargs)
+        given = bound.arguments
+        if given.get("env") is not None:
+            given["env"] = _child_env(given["env"])
+        if not given.get("shell"):
+            argv = _with_prefix(given.get("args"))
+            if argv is not None:
+                given["args"] = argv
+        args, kwargs = bound.args[1:], bound.kwargs
+    _POPEN_INIT(self, *args, **kwargs)
+
+
+def _browsers_dir(env: Mapping[str, str]) -> str:
+    """The folder Playwright finds its browsers in under `env`: its own variable, else
+    its per-system default under the home."""
+    given = env.get(BROWSERS_ENV)
+    if given:
+        return given
+    home = env.get("HOME") or os.path.expanduser("~")
+    if WINDOWS:
+        base = env.get("LOCALAPPDATA") or os.path.join(home, "AppData", "Local")
+    elif sys.platform == "darwin":
+        base = os.path.join(home, "Library", "Caches")
     else:
-        cache = os.path.join(given("XDG_CACHE_HOME") or os.path.join(home, ".cache"), "uv")
-        pythons = os.path.join(given("XDG_DATA_HOME")
-                               or os.path.join(home, ".local", "share"), "uv", "python")
-    return {"UV_CACHE_DIR": given("UV_CACHE_DIR") or cache,
-            "UV_PYTHON_INSTALL_DIR": given("UV_PYTHON_INSTALL_DIR") or pythons}
+        base = env.get("XDG_CACHE_HOME") or os.path.join(home, ".cache")
+    return os.path.join(base, "ms-playwright")
+
+
+def _uv_cache(basetemp: Path) -> Path:
+    """The run's one uv cache in `basetemp`, made."""
+    cache = basetemp / UV_CACHE
+    cache.mkdir(exist_ok=True)
+    return cache
+
+
+def _put_environ(env: Mapping[str, str]) -> None:
+    """Make this process's environment exactly `env`."""
+    os.environ.clear()
+    os.environ.update(env)
+
+
+@contextlib.contextmanager
+def _owned(config: pytest.Config) -> Iterator[None]:
+    """The run, for the loop that owns it: the run's environment in place, the seam on,
+    and at the end the started environment back and the run's short directory gone."""
+    factory = getattr(config, "_tmp_path_factory", None)
+    if factory is None:                 # pytest's tmp_path plugin is off: no run
+        yield
+        return
+    basetemp = _spelled_long(Path(os.path.realpath(factory.getbasetemp())))
+    started = dict(os.environ)
+    tempdir = tempfile.tempdir
+    short = _spelled_long(_make_test_short_dir(short_root()))
+    try:
+        home = basetemp / RUN_HOME
+        home.mkdir(exist_ok=True)
+        home = _spelled_long(home)
+        runtime = short / "run"
+        runtime.mkdir(mode=0o700)
+        workerinput = getattr(config, "workerinput", None) or {}
+        cache = Path(workerinput.get(_UV_CACHE_KEY) or _uv_cache(basetemp))
+        uv_dir, pycache = basetemp / RUN_UV, basetemp / PYCACHE
+        pycache.mkdir(exist_ok=True)
+        child = {"UV_CACHE_DIR": str(cache),
+                 "UV_PYTHON_INSTALL_DIR": str(uv_dir / "python"),
+                 "UV_PYTHON_BIN_DIR": str(uv_dir / "python-bin"),
+                 "UV_TOOL_DIR": str(uv_dir / "tools"),
+                 "UV_TOOL_BIN_DIR": str(uv_dir / "tool-bin"),
+                 UV_PYTHON_ENV: sys.executable, UV_DOWNLOADS_ENV: "never",
+                 NO_BYTE_CODE_ENV: "1"}
+        env = _fenced_env(started, home, runtime, short, _SESSION.get("modules") or _modules())
+        env["TMPDIR"] = env[FENCED_ENV] = str(short)
+        _RUN.carried = {**child, BROWSERS_ENV: _browsers_dir(started)}
+        env.update(_RUN.carried)
+        _RUN.started, _RUN.child, _RUN.short = started, child, str(short)
+        _RUN.roots = tuple(dict.fromkeys(os.path.realpath(path)
+                                         for path in (basetemp, short, cache)))
+        _RUN.pycache = str(pycache)
+        _RUN.real_supervisor = started.get(REAL_SUPERVISOR_ENV) == "1"
+        _put_environ(env)
+        tempfile.tempdir = str(short)
+        subprocess.Popen.__init__ = _seam_init          # type: ignore[method-assign]
+        _RUN.depth = 1
+        yield
+    finally:
+        _RUN.depth = 0
+        subprocess.Popen.__init__ = _POPEN_INIT         # type: ignore[method-assign]
+        _put_environ(started)
+        tempfile.tempdir = tempdir
+        _RUN.__init__()
+        shutil.rmtree(short, ignore_errors=True)
+
+
+@contextlib.contextmanager
+def _borrowed() -> Iterator[None]:
+    """The run, for a loop inside the loop that owns it (pytester's in-process run): the
+    kit's state saved and put back at the end; nothing made and nothing removed."""
+    saved = (_GUARD.save(), _RUN.started, dict(os.environ), tempfile.tempdir)
+    _RUN.started = dict(os.environ)
+    _RUN.depth += 1
+    try:
+        yield
+    finally:
+        _RUN.depth -= 1
+        guard, _RUN.started, env, tempfile.tempdir = saved
+        _GUARD.restore(guard)
+        if dict(os.environ) != env:
+            _put_environ(env)
+
+
+@pytest.hookimpl(wrapper=True)
+def pytest_runtestloop(session: pytest.Session) -> Iterator[None]:
+    """Put the run in place for the test loop (module doc, The run). xdist's controller
+    runs no test, so it puts nothing in place."""
+    if session.config.pluginmanager.has_plugin("dsession"):
+        return (yield)
+    with _borrowed() if _RUN.depth else _owned(session.config):
+        return (yield)
 
 
 def _quiet_fsync(fd: Any) -> None:
@@ -876,7 +1253,6 @@ def pytest_configure(config: pytest.Config) -> None:
     _SESSION.setdefault("live", os.environ.get(LIVE_ENV) == "1")
     _SESSION.setdefault("timed_slack", _timed_slack(os.environ))
     _SESSION.setdefault("modules", _modules())
-    _SESSION.setdefault("uv", _uv_dirs(os.environ, os.path.expanduser("~")))
     _install()
 
 
@@ -1204,8 +1580,13 @@ class _TempRun:
 
     @pytest.hookimpl(optionalhook=True)
     def pytest_configure_node(self, node: Any) -> None:
-        """An xdist worker starts: hand it the whole choice."""
+        """An xdist worker starts: hand it the whole choice, and the run's one uv cache,
+        which this controller makes in its own temp root (module doc, The run)."""
         node.workerinput[_TEMP_KEY] = self.choice.as_dict()
+        factory = getattr(self.config, "_tmp_path_factory", None)
+        if factory is not None:
+            basetemp = _spelled_long(Path(os.path.realpath(factory.getbasetemp())))
+            node.workerinput[_UV_CACHE_KEY] = str(_uv_cache(basetemp))
 
     @pytest.hookimpl(tryfirst=True)
     def pytest_sessionstart(self, session: pytest.Session) -> None:
@@ -1746,6 +2127,7 @@ def fence(request: pytest.FixtureRequest, tmp_path: Path,
     env = _fenced_env(os.environ, home, runtime, short,
                       _SESSION.get("modules") or _modules())
     env["TMPDIR"] = env[FENCED_ENV] = str(short)
+    env.update(_RUN.carried)
     for key in [k for k in os.environ if k not in env]:
         monkeypatch.delenv(key)
     for key, value in env.items():
@@ -1783,10 +2165,10 @@ def fence(request: pytest.FixtureRequest, tmp_path: Path,
 
 @pytest.fixture
 def uv_env(fence: Fence) -> dict[str, str]:
-    """An environment for a child process that runs uv (module doc): the fenced one, with
-    uv's real cache and installed Pythons and no Python downloads. Pass it as the child's
-    `env`; this process's own environment is left as the fence made it."""
-    return {**os.environ, **_SESSION["uv"], **_UV_NO_DOWNLOADS}
+    """An environment for a child process that runs uv: the fenced one, a copy, which
+    holds the child keys (module doc, The run): uv's folders under the run's roots, the
+    run's one uv cache, the suite's Python and no Python downloads."""
+    return {**os.environ, **_RUN.child}
 
 
 # --- the terminal record ---------------------------------------------------------------
@@ -2031,14 +2413,15 @@ def _statements(script: str) -> Iterator[str]:
         yield pending
 
 
-__all__ = ["ANCHOR_HOME_ENV", "CHANGED_ENV", "DURATIONS_ENV", "FINDING_ENV",
-           "GATE_CHAIN_S", "GATE_RESAMPLE_S", "GATE_SAMPLE_S", "GAUGES", "Fence",
-           "FenceError", "Gauge", "GaugeReading", "HARNESS_HOMES", "IDLE_ENV", "Idle",
-           "KEPT_ENV", "LEAVE_OUT_ENV", "LIFTED", "LIVE_ENV", "MARKERS", "NOT_MEASURED",
-           "PROC_STAT", "PROC_WAIT_S", "REAL_SUPERVISOR_ENV", "RECORD_FORMAT",
-           "SHUTDOWN_POLL", "Seam", "Selection", "TIERS", "TIERS_ENV", "TIMED",
-           "TIMED_CLOCKS", "TIMED_ENV", "TIMED_LOCK_FD_ENV", "TIMED_SLACK_ENV",
-           "WINDOWS_HOMES", "WINDOWS_KEPT_ENV", "console_script", "fence", "findings_of",
-           "idle", "param_id", "selection", "served", "short_dir", "stat_counts",
-           "terminal_record", "timed_reading", "timed_slack", "touches_match", "uv_env",
-           "wait_for", "write_sqlite"]
+__all__ = ["ANCHOR_HOME_ENV", "BROWSERS_ENV", "CHANGED_ENV", "CHILD_ENV", "DURATIONS_ENV",
+           "FINDING_ENV", "GATE_CHAIN_S", "GATE_RESAMPLE_S", "GATE_SAMPLE_S", "GAUGES",
+           "Fence", "FenceError", "Gauge", "GaugeReading", "HARNESS_HOMES", "IDLE_ENV",
+           "Idle", "KEPT_ENV", "LEAVE_OUT_ENV", "LIFTED", "LIVE_ENV", "MARKERS",
+           "NOT_MEASURED", "NO_BYTE_CODE_ENV", "PROC_STAT", "PROC_WAIT_S",
+           "PYCACHE_PREFIX_ENV", "REAL_SUPERVISOR_ENV", "RECORD_FORMAT", "SHUTDOWN_POLL",
+           "Seam", "Selection", "TIERS", "TIERS_ENV", "TIMED", "TIMED_CLOCKS", "TIMED_ENV",
+           "TIMED_LOCK_FD_ENV", "TIMED_SLACK_ENV", "UV_DIRS_ENV", "UV_DOWNLOADS_ENV",
+           "UV_PYTHON_ENV", "WINDOWS_HOMES", "WINDOWS_KEPT_ENV", "console_script", "fence",
+           "findings_of", "idle", "param_id", "selection", "served", "short_dir",
+           "started_env", "stat_counts", "terminal_record", "timed_reading", "timed_slack",
+           "touches_match", "uv_env", "wait_for", "write_sqlite"]
