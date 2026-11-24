@@ -29,7 +29,7 @@ from moxi_comms.client import DaemonError, DaemonOffline
 from moxi_comms.config import ConfigError
 from moxi_comms.mcp import tokens
 from moxi_comms.mcp.additions import SHELL_REACH_ENV, SHELL_REACH_OFF, TOKEN_ENV, URL_ENV
-from moxi_dev.testing import PROC_WAIT_S
+from moxi_dev.testing import PROC_WAIT_S, toml_string
 
 PLANNER = "planner@proj-a"
 REVIEWER = "reviewer@proj-a"
@@ -439,7 +439,7 @@ def roster_launch(tmp_path, row: str, *, url=None):
     work = tmp_path / "work"
     work.mkdir(exist_ok=True)
     config = tmp_path / "roster.toml"
-    config.write_text(f'[codex.agents."planner@proj-a"]\ncwd = "{work}"\n{row}')
+    config.write_text(f'[codex.agents."planner@proj-a"]\ncwd = {toml_string(work)}\n{row}')
     return plan(args("planner@proj-a", "--config", str(config)),
                 endpoint=lambda: (url, "" if url else "off"))
 

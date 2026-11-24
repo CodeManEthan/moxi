@@ -21,6 +21,7 @@ from moxi_comms.mcp import tools as mcp_tools
 from moxi_comms.paths import comms_db, daemon_socket
 from moxi_comms.store import books
 from moxi_comms.store.schema import ID_BASE
+from moxi_dev.testing import toml_string
 
 #: The older record's ids: one the store had already used when the counter moved (so
 #: it is reached through history only), two above it, and the counter's last id.
@@ -105,7 +106,7 @@ def older(tmp_path):
     older_dir = tmp_path / "older-comms"
     older_dir.mkdir()
     record, identities = _build(older_dir)
-    write_config(None, f'[archive]\nrecord = "{record}"\nidentities = "{identities}"\n')
+    write_config(None, f'[archive]\nrecord = {toml_string(record)}\nidentities = {toml_string(identities)}\n')
     before = _fingerprint(older_dir)
     yield older_dir
     assert _fingerprint(older_dir) == before, "the older files are never changed"

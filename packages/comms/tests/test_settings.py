@@ -11,6 +11,7 @@ from conftest import write_config
 from moxi import config as moxi_config
 
 from moxi_comms import config, constants, record, local_record, module, secrets, tokens
+from moxi_dev.testing import toml_string
 
 
 def test_the_schema_parses_and_its_overrides_are_spelled_with_the_prefix():
@@ -261,7 +262,7 @@ def test_the_token_store_location_comes_from_the_config(monkeypatch, tmp_path):
     from moxi_comms import paths
 
     assert tokens.TokenStore().root == paths.tokens_dir()
-    write_config(None, f'[credentials]\nstore = "{tmp_path / "a"}"\n')
+    write_config(None, f'[credentials]\nstore = {toml_string(tmp_path / "a")}\n')
     assert tokens.TokenStore().root == tmp_path / "a"
     monkeypatch.setenv(tokens.TOKEN_STORE_ENV, str(tmp_path / "b"))
     assert tokens.TokenStore().root == tmp_path / "b"
@@ -286,7 +287,7 @@ def test_a_role_the_box_lists_keys_under_itself_and_an_unlisted_one_is_unknown()
 
 def test_the_chain_reads_the_configured_store(profile):
     store = profile / "store"
-    write_config(None, f'[credentials]\nchain = ["store"]\nstore = "{store}"\n')
+    write_config(None, f'[credentials]\nchain = ["store"]\nstore = {toml_string(store)}\n')
     owner = tokens.owner_for_role(tokens.ROLE_OPERATOR)
     tokens.TokenStore(store).write_secret(owner, tokens.OPERATOR_SECRET_ID, "tok")
     chain = secrets.from_config()

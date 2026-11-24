@@ -28,7 +28,7 @@ from moxi_comms.adapters.codex_roster import record_write_root
 from moxi_comms.adapters.codex_wrapper import Refused, build_parser, plan
 from moxi_comms.claimhold import CLAIM_SOCKET_ENV
 from moxi_comms.context import CONTEXT_BLOCK
-from moxi_dev.testing import PROC_WAIT_S
+from moxi_dev.testing import PROC_WAIT_S, toml_string
 
 NAME = "coder"
 
@@ -140,7 +140,7 @@ def test_a_roster_launch_is_the_rows_flags_with_no_window(tmp_path, monkeypatch)
     work = tmp_path / "work"
     work.mkdir()
     config = tmp_path / "roster.toml"
-    config.write_text(f'[codex.agents."planner@proj-a"]\ncwd = "{work}"\n'
+    config.write_text(f'[codex.agents."planner@proj-a"]\ncwd = {toml_string(work)}\n'
                       'network_access = false\nmodel = "gpt-sample"\n'
                       'directors = ["lead"]\n')
     launch = plan(args("planner@proj-a", "--config", str(config)))

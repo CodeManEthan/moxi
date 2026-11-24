@@ -25,6 +25,7 @@ from moxi import exit as moxi_exit
 from moxi_comms import adapter, api, cli, module, sending
 from moxi_comms.api import tokens as api_tokens
 from moxi_comms.claimhold import ClaimServer
+from moxi_dev.testing import toml_string
 
 R_SCOPED = "reviewer@proj-a"
 
@@ -637,7 +638,7 @@ def test_the_paths(env, tmp_path):
 
     assert api.daemon_socket() == paths.daemon_socket()
     assert api.record_dir() == paths.comms_db().parent
-    write_config(None, f'[local]\nrecord = "{tmp_path / "r" / "record.db"}"\n')
+    write_config(None, f'[local]\nrecord = {toml_string(tmp_path / "r" / "record.db")}\n')
     assert api.record_dir() == tmp_path / "r"
     assert not hasattr(api, "replay")
 
