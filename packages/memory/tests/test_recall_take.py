@@ -166,6 +166,19 @@ def test_a_settled_line_still_kept_is_only_acked():
     line = recalls.find_line(SESSION, rid)
     assert line["state"] == "back" and line["kept"] is False
     assert line["rounds"] == [{"round": 1, "text": "- a", "at": 1.0}]
+    # no further round will be asked, so the record ends too
+    assert records.read(SESSION, rid)["state"] == "ended"
+
+
+def test_a_taker_ends_the_record_of_a_lost_line_lost():
+    rid = a_line(state="lost", kept=True, reason="denied", error="denied: too many")
+    with recalls.session_lock(SESSION):
+        line = recalls.find_line(SESSION, rid)
+        line["ref"] = f"{rid}:1"
+        recalls.put_line(SESSION, line)
+    assert recall_take.take(SESSION, rid, identity=live(), route=AckRoute()) == "acked"
+    record = records.read(SESSION, rid)
+    assert record["state"] == "lost" and record["reason"] == "denied"
 
 
 def test_an_ack_turns_refuses_leaves_the_mark():
@@ -181,6 +194,7 @@ def test_an_ack_turns_refuses_leaves_the_mark():
         recalls.put_line(SESSION, line)
     assert recall_take.take(SESSION, rid, identity=live(), route=Refusing()) == "left"
     assert recalls.find_line(SESSION, rid)["kept"] is True
+    assert records.read(SESSION, rid)["state"] == "lost"
 
 
 def test_an_open_line_its_child_left_before_any_round_is_lost_gone():

@@ -20,7 +20,8 @@ line and the other leaves it. A line a taker left is free again once that taker 
 
 - A line whose round is already settled on it (`back`, `lost` or `discarded`) and still
   kept: what the round's end says is safe on the line, so it acks the round's ref and
-  clears the mark.
+  clears the mark, and ends the record as the line says (`lost` for a `lost` line, else
+  `ended`), since no further round will be asked.
 - An `open` line with no ref: its child died before it asked the fork anything, so the
   line and the record end `lost` (`gone`).
 - An `open` line with a ref: it reads the round's end by the ref without waiting. When
@@ -146,12 +147,17 @@ def _ack_kept(recall, ref: str, route) -> str:
 
 
 def _end_record(recall) -> None:
+    """End the record of a recall no further round will be asked of: `lost` beside a
+    `lost` line, else `ended`. A record already over is left as it is."""
     current = records.read(recall.session_id, recall.recall_id) or recall.record
     if current.get("state") in records.DONE:
         return
-    recall.put(record={"state": records.ENDED},
-               hurried=current.get("state") == records.HURRIED
-               or bool(recall.line.get("hurried")))
+    hurried = current.get("state") == records.HURRIED or bool(recall.line.get("hurried"))
+    if recall.line.get("state") == recalls.LOST:
+        recall.put(record={"state": records.LOST, "reason": recall.line.get("reason"),
+                           "error": recall.line.get("error")}, hurried=hurried)
+        return
+    recall.put(record={"state": records.ENDED}, hurried=hurried)
 
 
 def take(session_id: str, recall_id: str, *, identity: dict | None = None,
@@ -174,7 +180,11 @@ def take(session_id: str, recall_id: str, *, identity: dict | None = None,
         route = recall_route.for_recall(recall)
     ref = line.get("ref")
     if line.get("state") != recalls.OPEN:
-        return _ack_kept(recall, str(ref), route) if ref else NONE
+        if not ref:
+            return NONE
+        outcome = _ack_kept(recall, str(ref), route)
+        _end_record(recall)
+        return outcome
     if not ref:
         recall_child.lose(recall, GONE, "the recall's child ended before it asked the fork")
         return SETTLED
