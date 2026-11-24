@@ -17,8 +17,10 @@ queue --repo KEY` as the fix for a member that waits with no lander.
 
 **How it is started** (`start`): in a transient user unit (`systemd-run --user
 --collect`), so it leaves the starting session's process group and cgroup and does not
-end with the builder's session; where that can't be run, in a new session of its own
-(`setsid`). Either way it runs the interpreter that started it, `python -m moxi rounds
+end with the builder's session; where that can't be run, detached from the caller with no
+shell between (`moxi.proc.spawn(..., detached=True)`: a session of its own on POSIX, a
+detached process outside the caller's job on Windows), its output appended to its log by
+the core. Either way it runs the interpreter that started it, `python -m moxi rounds
 land --repo KEY`, in the repo's root, with the starter's `PATH`, `HOME`, git's and gh's
 credentials (`SSH_AUTH_SOCK`, `GH_TOKEN`, `GITHUB_TOKEN`, `GH_CONFIG_DIR`), the XDG
 roots and every `MOXI_` variable (`ENV_KEPT`, `KEPT_PREFIX`), since a user unit starts
@@ -47,7 +49,7 @@ from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 
-from moxi import files
+from moxi import files, proc
 
 from . import batching, folders, queue_file, telling
 from . import settings as own
@@ -166,10 +168,7 @@ def start(repo: str, *, env=None, spawn: Callable[[list[str], dict], None] | Non
             done = None
         if done is not None and done.returncode == 0:
             return Started("unit", log, unit)
-    # The shell appends the lander's output to its log, so no file is opened here.
-    subprocess.Popen(["sh", "-c", 'exec "$@" >>"$0" 2>&1', str(log), *command], cwd=root,
-                     env=run_env, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
-                     stderr=subprocess.DEVNULL, start_new_session=True)
+    proc.spawn(command, detached=True, output=log, cwd=root, env=run_env)
     return Started("session", log)
 
 

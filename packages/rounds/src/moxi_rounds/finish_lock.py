@@ -25,8 +25,11 @@ one lock it means.
 - `found` reads what holds the ref now, and `stale` each lock in this format older than
   `STALE_S`, for the doctor.
 
-A pid read from a line is checked only on this machine, and only on POSIX: elsewhere
-every holder counts as live, so a lock is never cleared on a guess.
+A pid read from a line is checked only on this machine, on every system, by the core's
+process identity (`moxi.proc.identity`): the holder is gone when no process has its pid,
+or when the process that has it started after the lock was taken, so a pid the system
+gave to another process since never keeps a dead holder's lock. A start time is readable
+for another user's process too, so a live holder of another user is never cleared.
 """
 
 from __future__ import annotations
@@ -38,6 +41,8 @@ import time
 from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
+
+from moxi import proc
 
 from . import places, write
 from . import settings as own
@@ -56,6 +61,10 @@ CLEARED = "lock.cleared"
 _LINE_MAX_BYTES = 4096
 #: How many times `take` tries again when the ref changed between two of its git calls.
 _TRIES = 5
+#: How much later than the holder's line says the lock was taken its process may read as
+#: started and still be the holder: the line's time is cut to the second, and a start
+#: time read again can move by up to a second when the wall clock is set.
+_TAKEN_SLACK_S = 2.0
 _TIME = r"\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ"
 _LINE = re.compile(rf"(?P<actor>\S(?:.*\S)?) pid=(?P<pid>[1-9]\d*) host=(?P<host>\S+) "
                    rf"(?P<at>{_TIME}) (?P<round>\S+) (?P<stage>\S+)")
@@ -217,17 +226,19 @@ def stale(root: str | os.PathLike, refs: Iterable[str], *,
 
 
 def _dead(found_holder: Holder | None) -> bool:
-    """Whether the holder is a process of this machine that is no longer running."""
-    if found_holder is None or found_holder.host != places.host() or os.name != "posix":
+    """Whether the holder is a process of this machine that is no longer running: no
+    process has its pid, or the one that has it started after the lock was taken."""
+    if found_holder is None or found_holder.host != places.host():
         return False
     try:
-        os.kill(found_holder.pid, 0)
-    except ProcessLookupError:
-        return True
-    except (OSError, OverflowError):
-        # It runs as another user, or no pid can be that number: it counts as live.
+        now = proc.identity(found_holder.pid)
+    except (OSError, OverflowError, ValueError):
+        # No pid can be that number: it counts as live, so nothing is cleared on a guess.
         return False
-    return False
+    if now is None:
+        return True
+    taken = calendar.timegm(time.strptime(found_holder.at, "%Y-%m-%dT%H:%M:%SZ"))
+    return now.started > taken + _TAKEN_SLACK_S
 
 
 def _held(now: Held) -> Unmet:

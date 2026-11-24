@@ -2,6 +2,13 @@
 
 ## 0.1.4 (unreleased)
 
+- Where `systemd-run` can't start the lander, it starts detached through the core's
+  `moxi.proc.spawn`, with no shell, its output appended to `lander.log`. It started
+  through `sh -c`, so `finish` in a queue project failed on Windows.
+- The finish lock clears a dead holder's lock on every system: the holder is gone when no
+  process of this machine has its pid, or when the process that has it started after the
+  lock was taken (`moxi.proc.identity`). On Windows it never cleared one, and on POSIX a
+  pid given to another process since kept the lock.
 - A `ci.workflows` entry can read jobs by name pattern (`matrix = ["browser (*)"]`), name
   its run's `pick` job, and carry `reads_candidates = true`: a merge queue's candidate is
   then read by the entries so marked, and a build's check and the target's full run by

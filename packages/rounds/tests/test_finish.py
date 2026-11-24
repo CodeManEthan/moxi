@@ -28,13 +28,6 @@ CHECK = shlex.join([sys.executable, "-c", "print('the check passed')"])
 POINTER = "comms:1234567"
 LOCK = "refs/rounds/finishing/main"
 
-#: The finish lock clears a holder that died on this machine only on POSIX; on Windows it
-#: refuses, naming the command that clears the lock.
-CLEARS_DEAD = pytest.mark.skipif(os.name != "posix",
-                                 reason="Windows: the finish lock never reads a holder "
-                                        "as dead there")
-
-
 @pytest.fixture
 def repo(git_repo, tmp_path):
     from moxi import cli
@@ -339,7 +332,6 @@ def test_a_repos_lock_ref_is_the_lock_finish_takes(ready, repo, configure):
     assert of_type(path, "finish.action") == []
 
 
-@CLEARS_DEAD
 def test_a_dead_holders_lock_is_cleared_and_recorded_before_the_merge(ready, repo):
     path, _tree = ready
     line = finish_lock.holder("pilot", ROUND, "B1", at="2026-01-02T03:04:05Z",
@@ -472,7 +464,6 @@ def test_a_refusal_after_the_merge_names_what_was_done_and_that_it_reads_merged(
     assert "Q1" in err.split("refused because:")[1]
 
 
-@CLEARS_DEAD
 def test_a_refusal_after_a_dead_holder_was_cleared_names_the_clearing(ready, repo,
                                                                       monkeypatch):
     path, tree = ready

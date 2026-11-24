@@ -5,8 +5,12 @@ what `moxi rounds queue` and the doctor say."""
 from __future__ import annotations
 
 import subprocess
+import sys
+import time
 
 import pytest
+from moxi import proc
+from moxi_dev.testing import PROC_WAIT_S
 from test_queue_join import ROUND, configure, ready, repo, round_log  # noqa: F401 -- fixtures
 
 from moxi_rounds import doctor, joining, lander, queue_file
@@ -217,21 +221,39 @@ def test_the_lander_gets_the_tools_credentials_and_moxi_settings_of_its_starter(
     assert lander.lander_env(env) == {key: env[key] for key in env if key != "OTHER"}
 
 
-def test_without_systemd_run_the_lander_starts_in_a_session_of_its_own(repo, monkeypatch):
-    popened = []
+def test_without_systemd_run_the_lander_starts_detached_with_no_shell(repo, monkeypatch):
+    spawned = []
 
-    class Popen:
-        def __init__(self, argv, **kwargs):
-            popened.append((argv, kwargs))
+    def spawn(argv, **kwargs):
+        spawned.append((argv, kwargs))
+        return 4321
 
     monkeypatch.setattr(lander.shutil, "which", lambda _name: None)
-    monkeypatch.setattr(subprocess, "Popen", Popen)
-    found = lander.start(REPO)
+    monkeypatch.setattr(proc, "spawn", spawn)
+    found = lander.start(REPO, env={"PATH": "/bin", "MOXI_X": "1", "OTHER": "x"})
     assert found.how == "session" and found.log == lander.log_file(REPO)
-    [(argv, kwargs)] = popened
-    assert argv[:2] == ["sh", "-c"] and argv[3] == str(found.log)
-    assert argv[4:] == lander.argv(REPO) and kwargs["start_new_session"] is True
+    [(argv, kwargs)] = spawned
+    assert argv == lander.argv(REPO)
+    assert kwargs["detached"] is True and kwargs["output"] == found.log
+    assert kwargs["env"] == {"PATH": "/bin", "MOXI_X": "1"}
     assert kwargs["cwd"] == repo.root.resolve() or str(kwargs["cwd"]) == str(repo.root)
+
+
+def test_a_lander_started_with_no_shell_appends_its_output_to_its_log(repo, monkeypatch):
+    log = lander.log_file(REPO)
+    log.parent.mkdir(parents=True, exist_ok=True)
+    log.write_text("before\n", encoding="utf-8")
+    monkeypatch.setattr(lander.shutil, "which", lambda _name: None)
+    monkeypatch.setattr(lander, "argv", lambda _repo: [
+        sys.executable, "-c", "import sys; print('out'); print('err', file=sys.stderr)"])
+    lander.start(REPO)
+    deadline = time.monotonic() + PROC_WAIT_S
+    while time.monotonic() < deadline:
+        lines = log.read_text(encoding="utf-8").split()
+        if "out" in lines and "err" in lines:
+            break
+        time.sleep(0.05)
+    assert sorted(log.read_text(encoding="utf-8").split()) == ["before", "err", "out"]
 
 
 def test_with_systemd_run_the_lander_starts_in_a_transient_user_unit(repo, monkeypatch):

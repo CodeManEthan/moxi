@@ -18,13 +18,6 @@ from moxi_rounds.errors import Refused
 REF = "refs/rounds/finishing/main"
 ROUND = "proj-a/a-round"
 
-#: The finish lock clears a holder that died on this machine only on POSIX; on Windows it
-#: refuses, naming the command that clears the lock.
-CLEARS_DEAD = pytest.mark.skipif(os.name != "posix",
-                                 reason="Windows: the finish lock never reads a holder "
-                                        "as dead there")
-
-
 def points_at(repo, ref: str) -> str | None:
     done = subprocess.run(["git", "-C", str(repo.root), "rev-parse", "--verify", "--quiet",
                            ref], capture_output=True, text=True, env=repo.env(),
@@ -194,7 +187,6 @@ def test_the_command_a_refusal_prints_clears_that_lock(git_repo):
 
 # -- a dead holder -----------------------------------------------------------------------------
 
-@CLEARS_DEAD
 def test_a_dead_holder_on_this_machine_is_cleared_in_one_swap_and_recorded(git_repo):
     line = dead_line()
     dead = blob_of(git_repo, line)
@@ -209,7 +201,6 @@ def test_a_dead_holder_on_this_machine_is_cleared_in_one_swap_and_recorded(git_r
     events.check(entry.type, entry.fields)
 
 
-@CLEARS_DEAD
 def test_of_two_finishes_that_find_a_dead_holder_one_clears_it(git_repo, taker):
     git_repo.git("update-ref", REF, blob_of(git_repo, dead_line()))
     procs = [taker(git_repo.root, REF, actor) for actor in ("coder", "pilot")]
@@ -221,7 +212,6 @@ def test_of_two_finishes_that_find_a_dead_holder_one_clears_it(git_repo, taker):
         == f"pid={winner.own_pid}"
 
 
-@CLEARS_DEAD
 def test_a_swap_git_refuses_because_another_finish_cleared_first_reads_the_new_holder(
         git_repo, taker, monkeypatch):
     git_repo.git("update-ref", REF, blob_of(git_repo, dead_line()))
@@ -248,6 +238,24 @@ def test_a_holder_of_another_machine_is_not_cleared_even_with_a_dead_pid(git_rep
     with pytest.raises(Refused) as refused:
         finish_lock.take(git_repo.root, REF, by="coder", name=ROUND, stage="B1")
     assert "host=box-1" in refused.value.unmet[0].reason
+    assert points_at(git_repo, REF) == held
+
+
+def test_a_holder_whose_pid_a_later_process_has_is_cleared(git_repo):
+    # This process started after the line's time, so it is not the holder the line names.
+    line = dead_line(pid=os.getpid())
+    git_repo.git("update-ref", REF, blob_of(git_repo, line))
+    taken = finish_lock.take(git_repo.root, REF, by="coder", name=ROUND, stage="B1")
+    assert taken.cleared == finish_lock.parse(line)
+    assert points_at(git_repo, REF) == taken.blob
+
+
+def test_a_holder_whose_process_started_before_its_line_is_live(git_repo):
+    line = finish_lock.holder("pilot", ROUND, "B1", pid=os.getpid()).line + "\n"
+    held = blob_of(git_repo, line)
+    git_repo.git("update-ref", REF, held)
+    with pytest.raises(Refused):
+        finish_lock.take(git_repo.root, REF, by="coder", name=ROUND, stage="B1")
     assert points_at(git_repo, REF) == held
 
 
