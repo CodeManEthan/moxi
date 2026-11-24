@@ -202,8 +202,8 @@ def view(call: Any) -> dict[str, Any]:
     """`GET /api/view`: everything the page's items draw, from the one plan `status`
     builds: `status`'s outcome (its rows, with `moxi_loadout.view`'s facts on each, its
     lines, notes and counts), whether every section resolved, the note, the home,
-    loadout and manifest paths, the harness table's names and those on this machine
-    (`harness.present`), the sections (each path section with the project it is in), the
+    loadout and manifest paths, the harness table's names, those on this machine
+    (`harness.present`) and those the page draws (`harness.shown`), the sections (each path section with the project it is in), the
     items as `/api/list` gives them, and the global file as `/api/global` does."""
     from moxi_loadout import doctor, harness, homes, install
     from moxi_loadout import view as view_mod
@@ -225,6 +225,8 @@ def view(call: Any) -> dict[str, Any]:
             "manifest": os.fspath(found.path),
             "harnesses": list(plan.harnesses),
             "present": harness.present(plan.harnesses),
+            "shown": harness.shown(plan.harnesses,
+                                   [(r["harness"], r["state"]) for r in outcome["rows"]]),
             "resolved_all": plan.resolved_all,
             "sections": _mapped(view_mod.sections(plan)),
             "items": [{**e, **view_mod.item_facts(plan, e["kind"], e["name"])}
@@ -237,7 +239,7 @@ def view(call: Any) -> dict[str, Any]:
     except Exception as exc:  # noqa: BLE001 - a read says what failed, it never raises
         return {"problem": _problem(exc, "the status"), "lines": [], "notes": [],
                 "counts": {}, "note": None, "home": None, "folder": None, "manifest": None,
-                "harnesses": [], "present": [], "resolved_all": False, "sections": [], "items": [],
+                "harnesses": [], "present": [], "shown": [], "resolved_all": False, "sections": [], "items": [],
                 "rows": [],
                 "item_notes": [],
                 "global": {"source": None, "mode": "off", "chosen": False, "files": []}}
@@ -340,8 +342,10 @@ def projects(call: Any) -> dict[str, Any]:
 def drift(call: Any) -> dict[str, Any]:
     """`GET /api/drift`: how many items aren't `ok` or `off`, and the note that the
     page would write elsewhere than the user's last run in a terminal (`moxi_loadout.homes`). An item counts once however many of its harnesses aren't ok (its rows share a
-    section, a kind and a name). The note is never counted."""
-    from moxi_loadout import homes
+    section, a kind and a name). Only the harnesses the page draws count
+    (`harness.shown`), so the block and the page's verdict agree. The note is never
+    counted."""
+    from moxi_loadout import harness, homes
     from moxi_loadout.planner import FINE
 
     try:
@@ -350,7 +354,10 @@ def drift(call: Any) -> dict[str, Any]:
             note = homes.note()
     except Exception as exc:  # noqa: BLE001
         return {"problem": _problem(exc, "the status"), "count": 0, "note": None}
-    items = {(r.scope, r.kind, r.name) for r in outcome.rows if r.state not in FINE}
+    names = list(dict.fromkeys(r.harness for r in outcome.rows if r.harness is not None))
+    drawn = set(harness.shown(names, [(r.harness, r.state) for r in outcome.rows]))
+    items = {(r.scope, r.kind, r.name) for r in outcome.rows
+             if r.state not in FINE and (r.harness is None or r.harness in drawn)}
     return {"problem": None, "count": len(items), "note": note}
 
 

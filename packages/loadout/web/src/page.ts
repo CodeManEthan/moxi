@@ -48,11 +48,11 @@ import { css, html, LitElement, nothing } from "lit";
 import { repeat } from "lit/directives/repeat.js";
 import { api, navigate, WaitClock } from "/m/ui/client.js";
 
-import { CHANGED, Feed, parseJob, parseProjects, parseReplacePreview, parseSourceDir, parseView } from "./feed.ts";
+import { CHANGED, Feed, parseJob, parseProjects, parseReplacePreview, parseSourceDir } from "./feed.ts";
 import type { Job, Projects, ReplacePreview, SourceDir, View, ViewRow } from "./feed.ts";
 import { addAct, commandOf, globalOffAct, installAct, jobId, replaceAct } from "./acts-model.ts";
-import { ADD_KINDS, ADD_NOTE, BY_NAME, notListed, pickerOf } from "./add-model.ts";
-import type { NotListedRow, Picker } from "./add-model.ts";
+import { ADD_KINDS, ADD_NOTE, BY_NAME, harnessPicker, notListed, pickerOf } from "./add-model.ts";
+import type { HarnessOption, NotListedRow, Picker } from "./add-model.ts";
 import { confirmView, replaceRows } from "./confirm-model.ts";
 import type { PageAct } from "./acts-model.ts";
 import {
@@ -62,8 +62,8 @@ import {
 import type { Address, FilteredView } from "./address-model.ts";
 import {
   actCommand, COPIED, COPIED_MS, COPY, emptyGlobal, emptyLines, failedLine, fixLine, folderView, footLines,
-  GLOBAL_PLACE, GONE, INSTALL_ALL_PLACE, itemPlace, jobPlace, noteGroup, pageState, PLACED_PLACE, problemPlace,
-  READING, READING_AFTER_MS, REFRESH_MS, SETTINGS_LINK, SETTINGS_ROUTE,
+  GLOBAL_PLACE, GONE, INSTALL_ALL_PLACE, itemPlace, jobPlace, noteGroup, pageState, parseShownOnly, PLACED_PLACE,
+  problemPlace, READING, READING_AFTER_MS, REFRESH_MS, SETTINGS_LINK, SETTINGS_ROUTE,
 } from "./frame-model.ts";
 import { itemsView, scopeOf } from "./items-model.ts";
 import type { CellView, GlobalRow, GroupView, ItemRow, KindRow, Tone } from "./items-model.ts";
@@ -314,8 +314,10 @@ export class LoadoutPage extends LitElement {
   #wholeDiff = false;
   /** `/api/projects`, read each time Add opens. */
   #projects: Feed<Projects> | null = null;
-  /** Add's choices: the section (the picker's value), and by name its kind and name. */
+  /** Add's choices: the section (the picker's value), the harness (`For`'s value, empty for
+   * every harness), and by name its kind and name. */
   #addTo = "";
+  #addFor = "";
   #addKind: string = ADD_KINDS[0];
   #addName = "";
 
@@ -355,7 +357,7 @@ export class LoadoutPage extends LitElement {
     super.connectedCallback();
     this.#waited.start(() => this.requestUpdate());
     const changed = (): void => this.requestUpdate();
-    this.#view = new Feed<View>(() => api("loadout", "api/view"), parseView, changed);
+    this.#view = new Feed<View>(() => api("loadout", "api/view"), parseShownOnly, changed);
     this.#dir = new Feed<SourceDir>(() => api("loadout", "api/folder"), parseSourceDir, changed);
     this.#readAll();
     document.addEventListener("visibilitychange", this.#shown);
@@ -487,6 +489,7 @@ export class LoadoutPage extends LitElement {
       this.#preview?.feed.close();
       this.#preview = null;
       this.#addTo = "";
+      this.#addFor = "";
       this.#addName = "";
       this.#addKind = ADD_KINDS[0];
       if (address.piece !== "replace") this.#replaceItem = null;
@@ -1063,6 +1066,20 @@ export class LoadoutPage extends LitElement {
       ? html`<span class="sub" data-line="picker">${picker.line}</span>` : nothing}`;
   }
 
+  /** `For every harness ▾`: every harness, or one harness on this machine. */
+  #harnessPicker(options: HarnessOption[]) {
+    return html`<select class="pick" data-line="add-for" aria-label="For" @change=${(event: Event) => {
+      this.#addFor = (event.target as HTMLSelectElement).value;
+      this.requestUpdate();
+    }}>${options.map((option) => html`<option value=${option.value} ?selected=${option.value === this.#addFor}>${
+      option.label}</option>`)}</select>`;
+  }
+
+  /** The harness Add names: `For`'s choice, every harness (null) when it is gone. */
+  #addHarness(options: HarnessOption[]): string | null {
+    return options.find((option) => option.value === this.#addFor)?.harness ?? null;
+  }
+
   /** The section Add names: the picker's choice, Your items when it is gone. */
   #addSection(picker: Picker): string | null {
     return picker.options.find((option) => option.value === this.#addTo)?.section ?? null;
@@ -1080,9 +1097,11 @@ export class LoadoutPage extends LitElement {
   }
 
   #addOpen(row: NotListedRow, picker: Picker, ctx: Ctx) {
-    const act = addAct(row.kind, row.name, this.#addSection(picker));
+    const harnesses = harnessPicker(ctx.view);
+    const act = addAct(row.kind, row.name, this.#addSection(picker), this.#addHarness(harnesses));
     return html`<div class="det" data-part="add">
       <div class="r"><span class="k">Add to</span><span class="f">${this.#picker(picker)}</span><span></span></div>
+      <div class="r"><span class="k">For</span><span class="f">${this.#harnessPicker(harnesses)}</span><span></span></div>
       <div class="r"><span class="k">From</span><span class="f" data-line="from">${row.from.replace(/^From /, "")}</span><span></span></div>
       ${this.#addButtons(act, ctx)}
       <div class="foot">${this.#byNameButton()}</div>
@@ -1096,7 +1115,8 @@ export class LoadoutPage extends LitElement {
 
   #addByName(picker: Picker, ctx: Ctx) {
     const name = this.#addName.trim();
-    const act = name === "" ? null : addAct(this.#addKind, name, this.#addSection(picker));
+    const harnesses = harnessPicker(ctx.view);
+    const act = name === "" ? null : addAct(this.#addKind, name, this.#addSection(picker), this.#addHarness(harnesses));
     return html`<div class="det" data-part="add">
       <div class="r"><span class="k">Kind</span><span class="f"><select class="pick" data-line="kind" aria-label="Kind"
         @change=${(event: Event) => { this.#addKind = (event.target as HTMLSelectElement).value; this.requestUpdate(); }}>${
@@ -1107,6 +1127,7 @@ export class LoadoutPage extends LitElement {
           this.requestUpdate();
         }}></span><span></span></div>
       <div class="r"><span class="k">Add to</span><span class="f">${this.#picker(picker)}</span><span></span></div>
+      <div class="r"><span class="k">For</span><span class="f">${this.#harnessPicker(harnesses)}</span><span></span></div>
       ${this.#addButtons(act, ctx)}
     </div>`;
   }

@@ -18010,3 +18010,9 @@ loadout	packages/loadout/src/moxi_loadout/cli.py	help="list it for harness H onl
 loadout	packages/loadout/src/moxi_loadout/page.py	_ADD_BODY = {**_ITEM_BODY, "harnesses": lb.Field("list", required=False, max=LIST_MAX,	keep	required	required
 loadout	packages/loadout/tests/test_page.py	if home.is_dir() and not any(home.iterdir()):	keep	any	any
 loadout	packages/loadout/tests/test_page.py	claude.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
+loadout	packages/loadout/src/moxi_loadout/harness.py	STANDING = frozenset({"ok", "stale", "modified", "blocked"})	keep	stale	stale
+loadout	packages/loadout/src/moxi_loadout/harness.py	here = set(present(names, env))	keep	set	set
+loadout	packages/loadout/src/moxi_loadout/pagehandlers.py	drawn = set(harness.shown(names, [(r.harness, r.state) for r in outcome.rows]))	keep	set	set
+loadout	packages/loadout/tests/test_page.py	harness.home(name).mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
+loadout	packages/loadout/tests/test_page.py	@pytest.mark.parametrize("state", sorted(["ok", "stale", "modified", "blocked"]))	keep	stale	stale
+loadout	packages/loadout/tests/test_page.py	paths.claude_home().mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok

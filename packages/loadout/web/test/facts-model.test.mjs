@@ -13,7 +13,7 @@ const ATLAS = { key: "atlas-api", root: `${HOME}/code/atlas-api` };
 const KESTREL = { key: "kestrel-web", root: `${HOME}/code/kestrel-web` };
 const GIVEN = [ATLAS, KESTREL];
 
-const section = (name, where = "key", root = null) => ({ name, where, root });
+const section = (name, where = "key", root = null, project = null) => ({ name, where, root, project });
 const item = (kind, name, scope) => ({ kind, name, scope, harnesses: null, source: `${HOME}/my-loadout/x`,
                                        disabled: [] });
 /** `/api/list`'s answer: Your items, and atlas-api's section by key with its two items. */

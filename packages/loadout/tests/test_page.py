@@ -218,7 +218,7 @@ def test_every_value_that_can_hold_a_path_carries_a_mark():
                  "/api/job outcome.kept[].id", "/api/job outcome.kept[].back",
                  "/api/replace-preview problem", "/api/replace-preview diff"):
         assert marks[said] == "redact", said
-    plain = {"/api/view harnesses[]", "/api/view present[]", "/api/view counts.ok", "/api/view sections[].where",
+    plain = {"/api/view harnesses[]", "/api/view present[]", "/api/view shown[]", "/api/view counts.ok", "/api/view sections[].where",
              "/api/view items[].kind", "/api/view items[].name", "/api/view items[].harnesses[]",
              "/api/view items[].disabled[]", "/api/view rows[].kind",
              "/api/view rows[].harness", "/api/view rows[].state",
@@ -346,13 +346,18 @@ def test_global_answers_what_global_show_json_prints_and_whether_the_mode_is_cho
 
 def test_drift_counts_the_items_not_ok_and_notes_a_difference_without_counting_it(
         lo, monkeypatch, tmp_path, terminal_record):
+    from moxi_loadout import harness
+
     terminal_record()
+    for name in ("claude", "codex"):
+        harness.home(name).mkdir(parents=True, exist_ok=True)
     # review is missing for claude and for codex: one item, however many harnesses.
     assert read("/api/status")["counts"] == {"missing": 2}
     assert read("/api/drift")["count"] == 1
     assert install.install().code == 0
     assert read("/api/drift") == {"problem": None, "count": 0, "note": None}
     monkeypatch.setenv("CODEX_HOME", str(tmp_path / "elsewhere"))
+    (tmp_path / "elsewhere").mkdir()
     body = read("/api/drift")
     assert "Codex's home" in body["note"] and "CODEX_HOME" in body["note"]
     assert body["count"] == len({(r["scope"], r["kind"], r["name"])
@@ -851,6 +856,44 @@ def test_view_names_the_harnesses_on_this_machine_by_their_homes(lo, monkeypatch
     assert body["harnesses"] == table
     assert body["present"] == [h for h in table if h in ("claude", "codex")]
     assert harness.present(["kestrel", "codex"]) == ["kestrel", "codex"]
+
+
+@pytest.mark.parametrize("state", sorted(["ok", "stale", "modified", "blocked"]))
+def test_a_harness_not_present_is_drawn_while_something_stands_there(state, monkeypatch, tmp_path):
+    from moxi_loadout import harness
+
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(tmp_path / "claude-home"))
+    monkeypatch.setenv("CODEX_HOME", str(tmp_path / "codex-home"))
+    (tmp_path / "claude-home").mkdir()
+    names = ["claude", "codex"]
+    assert harness.shown(names, [("codex", "missing"), ("codex", "off"), (None, "ok")]) == ["claude"]
+    assert harness.shown(names, [("codex", "missing"), ("codex", state)]) == names
+    assert harness.shown(["kestrel"], []) == ["kestrel"]
+
+
+def test_view_and_drift_leave_out_a_harness_not_present_with_nothing_there(lo, monkeypatch, tmp_path):
+    from moxi import paths
+
+    paths.claude_home().mkdir(parents=True, exist_ok=True)
+    monkeypatch.setenv("CODEX_HOME", str(tmp_path / "no-codex"))
+    # review is missing for claude and for codex; codex isn't on this machine.
+    assert read("/api/status")["counts"] == {"missing": 2}
+    body = read("/api/view")
+    assert "codex" in body["harnesses"] and "codex" not in body["present"]
+    assert body["shown"] == [h for h in body["harnesses"] if h in body["present"]]
+    assert "codex" not in body["shown"]
+    assert {r["harness"] for r in body["rows"]} >= {"claude", "codex"}
+    assert read("/api/drift")["count"] == 1
+    # Placed for claude only, nothing stands for codex: the drift block counts nothing.
+    kit.manifest(lo, '[user]\nskills = ["review"]\n[skill.review]\nharnesses = ["claude"]\n')
+    assert install.install().code == 0
+    assert read("/api/drift")["count"] == 0
+    # Something of loadout's stands in codex's skills folder: codex is drawn and counted.
+    kit.manifest(lo, '[user]\nskills = ["review"]\n')
+    assert install.install().code == 0
+    body = read("/api/view")
+    assert "codex" not in body["present"]
+    assert "codex" in body["shown"]
 
 
 # -- acts -----------------------------------------------------------------------------------

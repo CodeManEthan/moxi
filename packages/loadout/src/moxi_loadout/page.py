@@ -256,7 +256,9 @@ VIEW_GLOBAL = lb.Out("table", items={
 #: Everything the page's items draw, from the one plan `status` builds: `status`'s
 #: `rows`, `lines`, `notes` and `counts`; `note`, the drift block's; the `home` folder,
 #: the loadout `folder` and its `manifest`; `harnesses`, the harness table's names in its
-#: order; `present`, those on this machine, in that order; `resolved_all`, whether every section resolved; the `sections` and `items` as
+#: order; `present`, those on this machine, and `shown`, those the page draws (the present
+#: ones and any other something stands in), each in that order; `resolved_all`, whether
+#: every section resolved; the `sections` and `items` as
 #: `/api/list` gives them, with what the view adds; the notes on each item for each
 #: harness (`item_notes`); and `global` as `/api/global` gives it, with its source and
 #: forms. The paths are null only with `problem` set, and `home` when nothing places a
@@ -272,6 +274,7 @@ VIEW = {
     "manifest": _MAYBE_PATH,
     "harnesses": lb.Out("list", items=_TEXT),
     "present": lb.Out("list", items=_TEXT),
+    "shown": lb.Out("list", items=_TEXT),
     "resolved_all": lb.Out("bool"),
     "sections": lb.Out("list", items=VIEW_SECTION),
     "items": lb.Out("list", items=VIEW_ITEM),

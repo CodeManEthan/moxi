@@ -103,6 +103,23 @@ def present(names: Iterable[str], env: Mapping[str, str] | None = None) -> list[
     return out
 
 
+#: The states of a row that say something stands where it places: loadout's placement, or
+#: what is in its way.
+STANDING = frozenset({"ok", "stale", "modified", "blocked"})
+
+
+def shown(names: Iterable[str], rows: Iterable[tuple[str | None, str]],
+          env: Mapping[str, str] | None = None) -> list[str]:
+    """Which of `names` the page draws, in their order: each `present` one, and one that
+    isn't present while one of its `rows` (`(harness, state)` pairs) is `STANDING`, so
+    nothing on disk is hidden. A harness not present with only `missing` or `off` rows
+    isn't drawn, and its rows aren't counted."""
+    names = list(names)
+    standing = {h for h, state in rows if state in STANDING}
+    here = set(present(names, env))
+    return [name for name in names if name in here or name in standing]
+
+
 def settings_file(harness: str) -> Path | None:
     """The JSON file a harness's hooks and settings go in: Claude's `settings.json`,
     Codex's `hooks.json`, OpenCode's `opencode.json`."""
