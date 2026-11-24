@@ -63,6 +63,10 @@ memory = "moxi_memory.module"
 [project.entry-points."moxi.turns.listeners"]
 memory = "moxi_memory.listeners"
 
+# The guards that keep a recall's fork to reads and refuse its permission asks.
+[project.entry-points."moxi.turns.guards"]
+memory = "moxi_memory.guards"
+
 # The two commands the start line names run without an approval prompt in a launch.
 [project.entry-points."moxi.turns.additions"]
 memory = "moxi_memory.additions:additions"
