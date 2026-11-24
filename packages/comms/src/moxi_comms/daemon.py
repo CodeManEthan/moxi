@@ -99,8 +99,8 @@ from .paths import comms_db, daemon_socket
 from .record import Forbidden
 from .replies import SentEntry
 from .provision import NAMES
-from .scoping import (GLOBAL, NAME_RE, OPERATOR_NAME, is_auto_name, qualify, split_tag,
-                      tag_matches)
+from .scoping import (GLOBAL, NAME_RE, OPERATOR_NAME, identity_of, is_auto_name, qualify,
+                      split_tag, tag_matches)
 
 log = logging.getLogger("comms.daemon")
 
@@ -1263,8 +1263,14 @@ class Daemon:
             if self._stopping:
                 raise DaemonStopping()
             row = reserved_mod.lookup(db, who)
+            # A name of a declared word's form that a live session holds is that
+            # session's, and sends as any binding does; otherwise it is a scoped sender.
+            found = (None if row is not None or who in self.bindings
+                     else scoped_mod.form_of(db, who))
         if row is not None:
             return self._send_reserved(conn, row, token, content)
+        if found is not None:
+            return self._send_scoped(conn, found, token, content)
         with self._lock, self._db() as db:
             if self._stopping:
                 raise DaemonStopping()
@@ -1322,6 +1328,47 @@ class Daemon:
         message = self.record.post_as_reserved(name, self._names_channel(), content)
         log.info("send %s under %s, held by %s", message.id, name,
                  "a program" if program else row["module"])
+        return {"message_id": str(message.id)}
+
+    def _send_scoped(self, conn, found, token, content: str) -> dict:
+        """A `send` under a scoped sender (`scoped.py`): only its module's token for the
+        word sends under it, never from inside a session, and only to its parent: a line
+        zero that names anyone else, or the parent and another, is refused before
+        anything is posted. A scoped sender in conflict (its word declared by two modules,
+        or its name held by a program or a session) sends nothing."""
+        name = found.qualified
+        with self._lock, self._db() as db:
+            why = scoped_mod.conflict_why(db, found, bound=name in self.bindings)
+        if why:
+            raise Refusal(f"{why}: nothing sends under it", code=wire.SCOPED_CONFLICT,
+                          name=name)
+        row = found.row
+        given_raw = (hashlib.sha256(token.encode()).digest()
+                     if isinstance(token, str) else None)
+        if given_raw is not None:
+            with self._lock:
+                session_token = any(hmac.compare_digest(b.token_hash, given_raw)
+                                    for b in self.bindings.values() if b.token_hash)
+            if session_token:
+                raise Refusal(f"{name} is {row['module']}'s scoped sender for "
+                              f"{found.parent}: a session's token never sends under it",
+                              code=wire.NAME_RESERVED, name=name)
+        self._refuse_session_peer(conn, name)
+        given = reserved_mod.token_hash(token) if isinstance(token, str) else ""
+        if not row["token_hash"] or not hmac.compare_digest(row["token_hash"], given):
+            raise Refusal("posting credential refused", code=wire.CREDENTIAL,
+                          credential=True)
+        ml = parse_machine_line(content)
+        named = {identity_of(t) for t in ml.recipients} if ml is not None else set()
+        if named != {found.parent}:
+            others = sorted(named - {found.parent})
+            said = (f"it names {', '.join(others)}" if others else
+                    "it names no recipient")
+            raise Refusal(f"{name} sends only to {found.parent}, and {said}: nothing was "
+                          "posted", code=wire.SCOPED_RECIPIENT, name=name)
+        message = self.record.post_as_reserved(name, self._names_channel(), content)
+        log.info("send %s under %s, %s's scoped sender for %s", message.id, name,
+                 row["module"], found.parent)
         return {"message_id": str(message.id)}
 
     def _refuse_session_peer(self, conn, name: str) -> None:

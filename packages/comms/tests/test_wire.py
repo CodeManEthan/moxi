@@ -192,7 +192,7 @@ def test_the_hello_agrees_the_version_and_answers_the_daemons_own_capabilities(r
     answer = result(line.hello(capabilities={"x-not-comms"}))
     assert answer["version"] == wire.VERSIONS[1]
     assert set(answer["capabilities"]) == {"remove", "expiry", "interrupt", "reserved-names",
-                                           "mcp", "connector"}
+                                           "mcp", "connector", "scoped-senders"}
     # Each side holds the other's set: the daemon's connection holds what the client
     # offered, not an intersection.
     bound(line)
@@ -248,7 +248,8 @@ def test_the_codes_are_the_tables_and_their_ranges():
         1104: "name-unknown", 1105: "not-mailable", 1106: "credential", 1107: "too-long",
         1108: "not-sender", 1109: "already-delivered", 1110: "unknown-message",
         1111: "unknown-adapter", 1112: "not-bound", 1113: "mcp-token-taken",
-        1114: "mcp-token-revoked", 1150: "stopping", 1151: "failed", 1152: "busy",
+        1114: "mcp-token-revoked", 1115: "scoped-conflict", 1116: "scoped-recipient",
+        1150: "stopping", 1151: "failed", 1152: "busy",
         1153: "store-busy"}
     for code in wire.CODE_NAMES:
         assert wire.is_refusal(code) == (code < 1150)
