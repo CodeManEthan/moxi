@@ -15,7 +15,7 @@ from playwright.sync_api import expect
 
 import fixture_kit
 
-pytestmark = [pytest.mark.browser, pytest.mark.timeout(90)]
+pytestmark = [pytest.mark.browser, pytest.mark.timeout(90, method="thread")]
 
 PUSH = "/m/ui/api/push"
 

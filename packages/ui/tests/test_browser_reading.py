@@ -12,7 +12,7 @@ from playwright.sync_api import expect
 
 from moxi_ui.testing.browser import READING_MARK, settled
 
-pytestmark = [pytest.mark.browser, pytest.mark.timeout(60)]
+pytestmark = [pytest.mark.browser, pytest.mark.timeout(60, method="thread")]
 
 SUMMARY = re.compile(r"/m/fixture/api/summary(\?.*)?$")
 

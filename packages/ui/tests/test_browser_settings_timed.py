@@ -15,7 +15,8 @@ import pytest
 from moxi import modules
 from moxi_dev.testing import timed_slack
 
-pytestmark = [pytest.mark.browser, pytest.mark.slow, pytest.mark.timed, pytest.mark.timeout(120)]
+pytestmark = [pytest.mark.browser, pytest.mark.slow, pytest.mark.timed,
+              pytest.mark.timeout(120, method="thread")]
 
 #: Every module of the repository: the full install.
 FULL = ("cache", "comms", "connector", "launcher", "loadout", "notes", "projects", "publishing",

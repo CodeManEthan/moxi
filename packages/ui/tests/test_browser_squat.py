@@ -23,7 +23,7 @@ from playwright.sync_api import expect
 from moxi_ui.testing import WAIT_MS
 from squatter import Squatter
 
-pytestmark = [pytest.mark.browser, pytest.mark.timeout(120)]
+pytestmark = [pytest.mark.browser, pytest.mark.timeout(120, method="thread")]
 
 ENGINES = ("chromium", "firefox", "webkit")
 #: The `a`s in `/m/ui/<a's>/sw.js` for the longest script URL each engine registers.

@@ -31,7 +31,7 @@ from playwright.sync_api import expect
 
 import fixture_kit
 
-pytestmark = [pytest.mark.browser, pytest.mark.timeout(90)]
+pytestmark = [pytest.mark.browser, pytest.mark.timeout(90, method="thread")]
 
 LOCKED = "Locked for this run of the shell."
 TOKENS = Path(__file__).resolve().parents[1] / "web" / "tokens.json"
