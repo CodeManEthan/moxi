@@ -612,9 +612,11 @@ def _old_endpoint(session: Any, session_id: str, reading: quiet.Reading) -> None
     """Refuse `old-endpoint` a call held first by subagents that are all Claude subagents
     listed `waiting`, on a session whose turns endpoint doesn't judge them
     (`STALE_AGENTS`): it can't tell a stale one from a working one, so trying again won't
-    help. The launcher judges no entry itself."""
+    help. Only a list read whole counts; one read in part keeps the held words, since the
+    next read may pass. The launcher judges no entry itself."""
     hold = reading.first
-    if hold is None or hold.word != "subagents" or reading.agents is None:
+    if (hold is None or hold.word != "subagents" or reading.agents is None
+            or not reading.agents.complete):
         return
     live = quiet.live_agents(reading.agents)
     if not live or any(a.kind != "subagent" or a.state != "waiting" for a in live):

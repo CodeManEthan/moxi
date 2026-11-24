@@ -1282,7 +1282,7 @@ def test_an_endpoint_that_does_not_judge_held_by_waiting_subagents_is_refused(
         conn, entries):
     slots_api = FakeSlots()
     with pytest.raises(relaunch.Refused) as caught:
-        call(conn, session=FakeSession(agents=entries), slots_api=slots_api)
+        call(conn, session=FakeSession(agents=entries, complete=True), slots_api=slots_api)
     refused = caught.value
     count = sum(1 for a in entries if a.kind == "subagent")
     assert refused.code == "old-endpoint" and refused.exit_code == 3
@@ -1295,6 +1295,17 @@ def test_an_endpoint_that_does_not_judge_held_by_waiting_subagents_is_refused(
         "wait until its subagents' waits end and it relaunches itself, or wake it with a "
         "message so it can stop them and relaunch itself; a relaunch then starts its new "
         "session on an endpoint that judges")
+    nothing_written(conn, slots_api)
+
+
+def test_a_list_read_in_part_of_waiting_subagents_is_held_not_refused(conn):
+    slots_api = FakeSlots()
+    session = FakeSession(agents=[agent(state="waiting"), agent(state="waiting")],
+                          complete=False)
+    result = call(conn, session=session, slots_api=slots_api)
+    assert result.exit_code == 75 and result.data["outcome"] == "held"
+    assert result.data["word"] == "subagents"
+    assert result.data["detail"] == "the agent list could not be read whole"
     nothing_written(conn, slots_api)
 
 
