@@ -19,7 +19,10 @@ that offers `fork`; a Claude Code session whose endpoint offers none falls back 
 slot route. The slot route (`SLOT`) forks the session into a slot through the
 launcher's interface 3 and needs that launcher, tmux slots here and a way back by comms
 (`slot_why`). A Codex session runs only the slot route, and only where its launch picked
-it (`CODEX`); any other harness has no route. A try that finds no route writes the
+it (`CODEX`). Codex's host fork (`HOST_FORK`, `moxi_memory.recall_route.HostFork`), a
+fork of the main thread by turns' Codex host, is picked for no session: turns' Codex
+host offers no `fork` yet, and a Codex session's recall stays off by default. Any other
+harness has no route. A try that finds no route writes the
 session's `off` line with the reason (`recalls.note_off`), at the first such try and
 again only when the reason changes. A route whose answers come back as a comms message
 (`BY_COMMS`) runs only while the session's recall sender can send (`comms_why`,
@@ -84,8 +87,12 @@ SUBAGENT = "subagent"
 #: The route that forks the session into a slot through the launcher.
 SLOT = "slot"
 ROUTES = (SUBAGENT, SLOT)
+#: The route of a recall on Codex's host fork: turns' `fork` on the Codex session, each
+#: round a turn on the forked thread. No launch value names it; `route` picks it for no
+#: session while a Codex session's recall is off unless its launch picks the slot route.
+HOST_FORK = "host-fork"
 #: The routes whose answers come back to the session as a comms message.
-BY_COMMS: tuple[str, ...] = (SLOT,)
+BY_COMMS: tuple[str, ...] = (SLOT, HOST_FORK)
 #: Why a session's subconscious can't run.
 NO_FORK = "no turns fork in this session"
 CODEX = "Codex: off unless the launch picks the slot route"
@@ -421,7 +428,8 @@ def reset_asked(session_id: str) -> None:
 
 __all__ = ["SUBCONSCIOUS_ENV", "SUBCONSCIOUS_ROUTE_ENV", "SUBCONSCIOUS_FORK_ENV",
            "STAMPS", "route_stamp", "AUTOMATIC", "ON_DEMAND", "MODES", "SUBAGENT", "SLOT",
-           "ROUTES", "BY_COMMS", "NO_FORK", "CODEX", "NO_SLOTS", "NO_LAUNCHER", "IN_FORK",
+           "HOST_FORK", "ROUTES", "BY_COMMS", "NO_FORK", "CODEX", "NO_SLOTS", "NO_LAUNCHER",
+           "IN_FORK",
            "is_fork", "offers_fork", "slot_why", "slots_here", "USER", "USER_AND_COMMS",
            "SCRIPT", "ASKED", "SPAWN", "mode",
            "counts", "route", "comms_why", "subconscious_settings", "settings_keys",
