@@ -23,7 +23,8 @@ moxi rounds show alpha/search
 
 rounds starts no agent and registers no git hook. It writes the open questions out as
 markdown and as data. With the `ui` extra it also has a page in the browser UI shell,
-which shows every open round and acts on nothing (see The page).
+which shows every open round and, at a desk, takes the operator's answers (see The
+page).
 
 ## What this version does
 
@@ -56,9 +57,7 @@ This version does not yet do:
 - the suggestion of a sitting with the operator;
 - parent and child rounds: a design may plan a stage that stands for a child round,
   and `next` prints that stage's steps as not built;
-- `list --dormant`, the rounds that have gone quiet;
-- acting from the page: answering a question, a decision or a job there, or dropping a
-  build. The page reads only, and the operator still answers through the round's lead.
+- `list --dormant`, the rounds that have gone quiet.
 
 `defaults.dormant_days` and `defaults.sitting_at` belong to those parts: they are
 declared and checked, and nothing reads them yet (see Config).
@@ -1544,8 +1543,8 @@ rounds reads no environment variable but the ones that place its directories,
 With the `ui` extra (`moxi-ui` 0.2.4 or later, Moxi's browser UI shell), rounds has a
 page in the shell, at `/m/rounds/`, listed as Rounds among the daily pages. It shows
 every open round as one line of its steps, the steps in columns lined up across rounds,
-with a line under it for each build in flight. It only reads: it writes no log and no
-index, and nothing on it acts on a round. Top to bottom:
+with a line under it for each build in flight. Reading it writes nothing; at a desk the
+operator answers from it (see Acting from the page). Top to bottom:
 
 - **Waiting on you.** The questions, decisions, jobs and rulings to read back that wait
   on the operator, counted with the number of rounds they are in, or `Nothing waits on
@@ -1570,32 +1569,106 @@ green for done, amber for waiting on the operator, red for failed or sent back. 
 lists them all. A marker opens its step's record in place: a build's CI, the checks run
 and their output files, verdicts and their open findings, finish gates, what the step
 waits on and the command that clears it, and the newest events. A marker that waits on
-the operator opens the question, decision or job, which reads only and ends with the
-command the round's lead records the answer with. A round's name opens its card.
+the operator opens the question, decision or job, with the answers it takes. A round's
+name opens its card.
 Whatever is open is in the page's address, so a link reopens it and Back closes it. An
 address that names something no longer open says so at the foot.
 
 At 720 px wide and under the page is a column of rounds; a round opens a sheet with its
-steps as one vertical rail and its questions as text, to be answered at a desk.
+steps as one vertical rail and its questions as text, to be answered at a desk. Nothing
+acts at that width.
 
 With turns installed, a builder's name in a build's record links to its row on Live
 sessions when exactly one live session runs in the build's worktree. The page needs only
 ui, rounds and projects.
 
-The page server reads rounds in process and never runs the `moxi rounds` command. It has
-three routes, none open to the phone gateway:
+The page server reads and records rounds in process and never runs the `moxi rounds`
+command. Its routes, none open to the phone gateway:
 
 | Route | Gives |
 |---|---|
 | `GET /api/rounds` | the whole board, with the server's clock |
-| `GET /api/record` | one marker's record, a waiting item's or a round's card; `{"gone": true}` for a round no longer open |
+| `GET /api/record` | one marker's record, a waiting item's or a round's card; `{"gone": true}` for a round no longer open. A question answers in every state, with the ruling that put it there |
 | `GET /api/events` | the stream, topic `rounds`: the board, published when it changes |
+| `GET /api/agents` | the agents comms knows, for the To picker, and whether the server sends through comms |
+| `GET /api/drop` | what dropping one open build would remove and keep, read now |
+| `POST /api/answers` | the tray sent: a receipt for each draft, and the messages sent |
+| `POST /api/drop/build` | the operator's drop of one open build, and its receipt |
 
 The server reads again every 5 seconds only what changed since its last read: each
 round's log, its project's log, its `design.md` and the config file. Git can change with
 no file written, so once a minute it also reads git again for every round with an open
 build. A question's text, and every other free text, is cut to a fixed length before it
 is sent.
+
+### Acting from the page
+
+At a desk, an item's popover and the walk take the operator's answer:
+
+- a question: pick an option (its key, or `1` to `4`), answer in the operator's own
+  words, ask the lead to explain (with comms installed), or park it;
+- a parked question: `Unpark`, which takes the parking back so the question is open
+  again;
+- a ruling to read back: `That's what I said`, or `Not what I said…` with the
+  operator's words;
+- a decision: accept or reject;
+- a job: `I've done it`, with an optional note when comms is installed;
+- a build in flight: `Drop this build…`, behind a confirm.
+
+An answer goes into a tray, `Your answers`, under the waiting line. The tray is kept in
+the browser's storage across a reload, one per page server, and each row says who will
+record it. `Send` sends the whole tray; `Send now` sends one row. A question's popover
+shows an answer the lead prepared ahead, with the option it recommends marked
+`recommended`. The foot's count of parked questions opens their list, round by round.
+
+Who records each answer:
+
+- **The page**, on Send: an option picked, a decision accepted or rejected, a ruling read
+  back, a job done, a park and an unpark. Each is recorded through rounds' own calls
+  under the round's lock, by the page server's actor, with a page pointer of its own,
+  `page:rounds/<act id>@<time>`.
+- **The agent the message goes to**: an answer in the operator's own words and a
+  correction of a ruling. The page records nothing for them. The message quotes the
+  words as written, line by line, and gives the command that records the agent's wording
+  of them, `--text TEXT`, with that message as the pointer. The words never go into the
+  command, so it reads the same in any shell it is pasted into. The
+  row reads `not recorded yet` until the round holds the agent's ruling, then `Recorded
+  as C<n>`, with the read-back.
+- **Nobody**: a request to explain. The question stays open; the reply comes by message.
+
+With comms installed, `Send` sends one message to each recipient, through comms under
+rounds' send-only name. The To picker defaults to `Each round's lead`, the round's own
+lead or else its project's, which reads `(the project's)` beside its name. The operator can pick any agent comms knows instead, and
+the tray says which rounds that agent does not lead. A draft with no one to send it to
+stays in the tray and nothing is recorded for it. A record whose message comms refused
+stays recorded, and its row offers `Send again`. Without comms nothing is sent: the
+button reads `Record <n> answers`, the page records its own kinds, and an own-words
+answer's row shows the command a lead would run to record it, `TEXT` standing for the
+lead's wording of the words shown above it.
+
+Each receipt says what happened: the record and its pointer, who was told and when, and
+what rounds now holds, such as `Recorded as C4:` with the ruling's sentence. `Sent` lists
+each sent answer and each message the send made, until the operator clears it. A
+question's popover shows its row's receipt and still offers its answer form while the
+question is open, and `Unpark` while it is parked, whatever the tray holds for it. A draft
+kept for want of a recipient offers the To picker in its popover as in the tray. A draft
+whose words run past 20,000 characters stays in the tray, its row saying so, and a large
+tray goes in as many posts as the answers route's limits need.
+
+Every act carries an act id the page mints when the draft is made. An act posted twice
+runs once: the server keeps each act's receipt for its lifetime and answers a repeat
+with it. After a restart, the log is the guard: an event whose pointer holds the act id
+is that act's record, so it is not recorded again.
+
+**Dropping a build.** `Drop this build…` sits on the popover of each step of a stage with
+an open build. Its confirm, read fresh from `GET /api/drop`, names what the drop ends,
+what it removes if nothing in it would be lost (the worktree and the scratch folder,
+each `will be removed` or `will be kept` with the reason, and CI's own refs), and what it
+keeps: the branch and its commits, and the round's log. `Drop <stage>'s build` records
+the operator's drop with the page as the pointer, and with comms installed tells the
+round's lead what the drop removed and kept, each kept folder by its path with the
+reason. The receipt says what the drop did. A drop whose post gets no answer offers
+`Drop again`, which posts the same act id, so the drop runs at most once.
 
 ## The read API
 
@@ -1662,4 +1735,4 @@ lists the other modules.
 
 ## License
 
-MIT. See [LICENSE](https://github.com/CodeManEthan/moxi/blob/moxi-rounds-v0.1.4/packages/rounds/LICENSE).
+MIT. See [LICENSE](https://github.com/CodeManEthan/moxi/blob/moxi-rounds-v0.1.5/packages/rounds/LICENSE).
