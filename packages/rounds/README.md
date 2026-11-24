@@ -1632,8 +1632,11 @@ Who records each answer:
   words as written, line by line, and gives the command that records the agent's wording
   of them, `--text TEXT`, with that message as the pointer. The words never go into the
   command, so it reads the same in any shell it is pasted into. The
-  row reads `not recorded yet` until the round holds the agent's ruling, then `Recorded
-  as C<n>`, with the read-back.
+  row reads `not recorded yet` until the round or project holds the agent's ruling, then
+  `Recorded as C<n>` with who recorded it, and the read-back; a ruling recorded from
+  another pointer reads `Ruled as C<n> from <pointer>, not from this message`. For a
+  correction, that ruling is the newest one that replaces the corrected ruling, found
+  whether or not it was read back already.
 - **Nobody**: a request to explain. The question stays open; the reply comes by message.
 
 With comms installed, `Send` sends one message to each recipient, through comms under

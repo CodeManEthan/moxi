@@ -225,8 +225,18 @@ export interface Findings {
   note: number;
 }
 
-/** A record: a step's, a card's or a waiting item's. Each holds only its own kind's
- * keys, so every key is optional. */
+/** A ruling as a record gives it. */
+export interface RulingFields {
+  id: string;
+  text: string | null;
+  record: string | null;
+  actor: string | null;
+  at: string | null;
+  shown: boolean;
+}
+
+/** A record: a step's, a card's, a waiting item's or a ruling's. Each holds only its own
+ * kind's keys, so every key is optional. */
 export interface RecordValue {
   round?: string;
   column?: string;
@@ -287,9 +297,14 @@ export interface RecordValue {
   item?: Entry & Partial<Job> & Partial<Shown> & { project?: string | null; ruling?: string | null; chose?: string | null };
   answer?: string;
   passage?: string | null;
-  /** The ruling that put a question where it is: ruled, parked or withdrawn. */
-  ruling?: { id: string; text: string | null; record: string | null; actor: string | null; at: string | null;
-             shown: boolean } | null;
+  /** The ruling that put a question where it is: ruled, parked or withdrawn; in a ruling's
+   * record, the ruling itself. */
+  ruling?: RulingFields | null;
+  // a ruling's record
+  /** The round or project whose log holds the ruling. */
+  holder?: string;
+  /** The newest ruling that replaces it, shown or not; null while none has. */
+  replaced_by?: RulingFields | null;
   lead?: Lead | null;
 }
 
