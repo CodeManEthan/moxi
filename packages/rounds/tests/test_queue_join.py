@@ -12,8 +12,8 @@ from pathlib import Path
 
 import pytest
 
-from moxi_rounds import (checking, commissioning, finishing, joining, log, next_step,
-                         opening, queue_file, queue_log, verdicts)
+from moxi_rounds import (checking, commissioning, finishing, joining, lander, log,
+                         next_step, opening, queue_file, queue_log, verdicts)
 from moxi_rounds import settings as own
 from moxi_rounds import state as states
 from moxi_rounds.cli import main
@@ -24,6 +24,14 @@ OTHER = "proj-a/b-round"
 FULL = shlex.join([sys.executable, "-c", "print('the full check')"])
 SCOPED = shlex.join([sys.executable, "-c", "import sys; print(sys.argv)", "--base",
                      "{base}"])
+
+
+@pytest.fixture(autouse=True)
+def no_lander_process(monkeypatch):
+    """`finish` starts no lander process here: one started would outlive the test where
+    its files stay behind it (on Windows the files it holds open do)."""
+    monkeypatch.setattr(lander, "start", lambda repo, *, env=None, spawn=None: lander.Started(
+        "session", lander.log_file(repo)))
 
 
 @pytest.fixture
