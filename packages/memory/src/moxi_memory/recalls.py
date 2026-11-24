@@ -17,7 +17,10 @@ its state, the reason for a `lost` or `off` state and the error behind it, how i
 the fork's id, the child's process identity (`child`: pid and start time) and that of
 the process that took the line over when its owner was gone (`taker`), the current
 round's ref and whether turns still keeps that round's end for memory (`kept`), the
-prefetch's hit count and whether it searched past the project, the child's start-up
+first search's hit count (`prefetch_hits`, sessions and notes files) and its count in
+each part, the project's (`project_hits`) and the one beyond it (`beyond_hits`), None
+for a part it had none of (a line written before the parts holds `widened`, whether that
+search went past the project, and no counts per part), the child's start-up
 time, whether the recall was hurried or ran past its limit, each round's text and when
 it came back (`rounds`), and when the line was first and last written.
 
@@ -66,8 +69,9 @@ ASKED = "asked"
 HEAD_CHARS = 80
 #: The fields of a recall's line.
 LINE_FIELDS = ("recall", "session", "harness", "state", "reason", "error", "start", "head",
-               "route", "fork", "child", "taker", "ref", "kept", "prefetch_hits", "widened",
-               "startup_s", "hurried", "past_limit", "past_bound", "rounds", "sending_at",
+               "route", "fork", "child", "taker", "ref", "kept", "prefetch_hits",
+               "project_hits", "beyond_hits", "widened", "startup_s", "hurried",
+               "past_limit", "past_bound", "rounds", "sending_at",
                "send_tries", "send_reason", "sent_at", "message_id", "discarded_by",
                "discarded_at", "at", "updated")
 #: A session id the log may name a file after.

@@ -23,6 +23,17 @@
   discard`, which refuses every line on the subagent route since the harness brings
   every answer back itself. Recall records are swept after a day unless their line is
   still kept.
+- A recall's first search under `subconscious.scope = "project-first"` (the default)
+  now runs two parts every time: the project's best `prefetch_hits` hits and notes
+  files, then the whole index's best hits and the notes root's best files that the
+  project's part didn't already show, each part under its own heading in the brief. It
+  no longer waits for the project to find nothing before it widens. The fork's own
+  searches run without `--project`, and the brief names the project and its notes
+  directory. The notes search reads Markdown files only, reads the notes root whole (no
+  cap on how many files), cuts each shown line at 200 characters, takes a notes
+  directory that doesn't exist as none, and orders equal matches by path. The log line
+  records `project_hits` and `beyond_hits` in place of `widened`; older lines keep
+  `widened`.
 - A recall's fork gives its first answer as soon as it has one useful point, from the
   first search alone when that holds one, and the stream goes on after it while the fork
   has tool calls and time left: only a later answer's `End of recall.` ends it. The

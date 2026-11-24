@@ -71,7 +71,8 @@ class Recall:
             "state": recalls.OPEN, "start": record.get("start"),
             "head": recalls.head(record.get("text") or ""), "route": record.get("route"),
             "fork": None, "child": None, "ref": None, "kept": False,
-            "prefetch_hits": None, "widened": False, "startup_s": None,
+            "prefetch_hits": None, "project_hits": None, "beyond_hits": None,
+            "startup_s": None,
             "hurried": False, "past_limit": False, "rounds": [],
             "at": record.get("at")}
         if line is not None:
@@ -141,8 +142,10 @@ def write_brief(recall: Recall, *, search=None, places=None) -> str:
     text_brief = recall_brief.brief(start=str(record.get("start")), text=text,
                                     session_id=recall.session_id, found=found,
                                     settings=recall.settings, recalled=recalled)
+    counts = found.counts()
     recall.put(record={"brief": text_brief}, prefetch_hits=found.count,
-               widened=found.widened)
+               project_hits=counts[recall_brief.PROJECT_PART],
+               beyond_hits=counts[recall_brief.BEYOND_PART])
     return text_brief
 
 

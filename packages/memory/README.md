@@ -513,9 +513,14 @@ so a recall never holds the prompt. The child:
 
 1. reads the prompt's keywords (common words left out) and runs a first search in
    `subconscious.scope`, keeping the best `subconscious.prefetch_hits` hits, leaving out
-   this session, subagents and fork launches, plus up to three notes files that hold the
-   most of the keywords (with notes installed). A prompt with no keyword gets no first
-   search;
+   this session, subagents and fork launches, plus up to three Markdown notes files that
+   hold the most of the keywords (with notes installed), each shown line cut at 200
+   characters. Under `project-first` the search has two parts, both run every time: the
+   project's best hits and its notes directory's best files, then the whole index's best
+   hits and the notes root's best files that the project's part didn't already show,
+   each part under its own heading in the brief. The notes are read whole, however many
+   files there are, and a notes directory that doesn't exist counts as none. A prompt
+   with no keyword gets no first search;
 2. writes the fork's brief with those hits, the rules below and this session's id;
 3. asks turns to fork the session with the brief. The fork answers as soon as it has
    one useful point (from the first search alone when that holds one), at most
@@ -615,12 +620,12 @@ effect at the next read.
 | `reminder.enabled` | `true` | send the reminder at each prompt |
 | `ingest.timer.enabled` | `false` | run a catch-up walk every hour, outside sessions |
 | `subconscious.trigger` | `user` | which prompts count as new work: `user`, the user's own; `user-and-comms`, those and comms deliveries. In automatic mode each starts a recall; in on-demand mode each resets the agent's count |
-| `subconscious.scope` | `project-first` | where a recall looks: `project`, `project-first` (everywhere only when the project finds nothing) or `everywhere`; a session with no project label (its folder unknown) searches everywhere under each |
+| `subconscious.scope` | `project-first` | where a recall looks: `project`; `project-first`, every search covering the project and everything beyond it, the project's results first; or `everywhere`; a session with no project label (its folder unknown) searches everywhere under each |
 | `subconscious.limit_s` | `60` | how long a recall may run, all its rounds, in seconds, 1 to 3600; each round is also bounded at this plus 30 |
 | `subconscious.max_tools` | `8` | the most tool calls a recall's fork may make over all its rounds; at least 1 |
 | `subconscious.max_rounds` | `4` | how many rounds a recall may run, each answer delivered; at least 1 |
 | `subconscious.max_points` | `5` | the most points the brief allows in one answer; at least 1 |
-| `subconscious.prefetch_hits` | `8` | how many hits the first search puts in the brief; 0 runs none |
+| `subconscious.prefetch_hits` | `8` | how many hits the first search puts in the brief from each of its parts (the project's, and under `project-first` the one beyond it); 0 runs none |
 | `subconscious.on_demand_per_prompt` | `2` | in on-demand mode, the most recalls between two counted prompts; 0 refuses every one |
 | `subconscious.fork_commands` | `moxi memory search`, `moxi sessions read`, `grep`, `cat`, `head`, `tail`, `ls`, `wc`, `cut` | the shell commands a recall's fork may run; a program you add must not run another from its arguments |
 

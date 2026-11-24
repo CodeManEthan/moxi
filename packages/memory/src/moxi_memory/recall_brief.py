@@ -4,19 +4,29 @@
 once, less the common words of `COMMON` and words of fewer than `MIN_CHARS` characters.
 A prompt that leaves none runs no first search.
 
-**The first search (`prefetch`).** It searches past sessions with `moxi_memory.api.search`
-for the keywords and keeps the best `subconscious.prefetch_hits` hits, leaving out the
-session itself (the fork holds its whole conversation) and subagent rows; and it reads
-the notes: the files under the scope's notes directories whose text holds the most of
-the keywords, at most `NOTES_SHOWN`, each with the lines around its matches.
-`subconscious.scope` says where: `project` searches the session's project and its notes
-directory; `everywhere` the whole index and the notes root; `project-first` the
-project first, and the whole index and the notes root only when the project's sessions
-and its notes both found nothing. A session with no project label searches everywhere.
+**The first search (`prefetch`).** It runs in parts (`Part`), each searching past
+sessions with `moxi_memory.api.search` for the keywords and keeping the best
+`subconscious.prefetch_hits` hits, leaving out the session itself (the fork holds its
+whole conversation) and subagent rows, and reading the notes: the Markdown files under
+the part's notes directories whose text holds the most of the keywords, at most
+`NOTES_SHOWN` of each part, each with the lines around its matches, every shown line cut
+at `NOTES_LINE_CHARS` characters. Every file under a directory is read, however many
+there are; a file larger than `NOTES_FILE_MAX_BYTES` is skipped, and files that match
+alike are ordered by path. A notes directory that doesn't exist is none.
+
+`subconscious.scope` says where. `project`: one part, the session's project and its
+notes directory. `everywhere`: one part, the whole index and the notes root.
+`project-first`: two parts, both run every time: the project's, then everything beyond
+it, which is the whole index's best hits less the sessions the project's part showed and
+the notes root's best files less the files it showed (a file known by
+`os.path.normcase(os.path.realpath(path))`). A session with no project label has no
+project part and searches everywhere under any scope.
 
 **The brief (`brief`).** The fork's task, from `TEMPLATE`: the prompt or topic, the first
-search's hits, where the fork may look further and within what limits, and how it
-answers.
+search's hits (the project's part first under its own heading when there are two), where
+the fork may look further and within what limits, and how it answers. Under
+`project-first` the fork's own searches run without `--project`, and the brief names the
+project and its notes directory so the fork can tell the project's hits from the rest.
 
 Standard library at import; the search is imported at use.
 """
@@ -37,15 +47,20 @@ COMMON = frozenset(
     "please should".split())
 #: Words shorter than this are left out of a query.
 MIN_CHARS = 3
-#: The most notes files the first search shows.
+#: The most notes files each part of the first search shows.
 NOTES_SHOWN = 3
-#: The most notes files it reads, and the largest it reads, in bytes.
-NOTES_READ_MAX = 5000
+#: The notes files it reads: Markdown files, up to this size in bytes.
+NOTES_SUFFIX = ".md"
 NOTES_FILE_MAX_BYTES = 1 << 20
+#: How many characters of a notes line it shows.
+NOTES_LINE_CHARS = 200
 #: The most matching lines it shows of one notes file, with one line around each.
 NOTES_LINES = 3
 #: How many characters of the prompt the answer's heading quotes.
 PROMPT_HEAD_CHARS = 80
+#: The most hits one search of the first search asks for, while the hits it leaves out
+#: (this session's, or sessions an earlier part showed) leave fewer than it keeps.
+SEARCH_ASK_MAX = 2000
 #: The scopes.
 PROJECT = "project"
 PROJECT_FIRST = "project-first"
@@ -53,6 +68,12 @@ EVERYWHERE = "everywhere"
 
 NO_KEYWORD = "(no first search: the prompt holds no keyword to search for)"
 NO_HITS = "(the first search found nothing)"
+NO_PART_HITS = "(found nothing here)"
+#: The parts of the first search.
+PROJECT_PART = "project"
+BEYOND_PART = "beyond"
+PROJECT_HEADING = "In this project, {project}:"
+BEYOND_HEADING = "Beyond this project:"
 NO_SEARCH = "(no first search: subconscious.prefetch_hits is 0)"
 
 TEMPLATE = """\
@@ -76,7 +97,7 @@ further:
   --results to search tool output too. To read around a hit, run the moxi sessions read
   line printed under the hits. Skip any hit from session {session_id}: it is this
   conversation, which you already have.
-{notes}{widen}
+{notes}{project_line}
 Limits: at most {max_tools} tool calls and about {limit_s} seconds in all. Only read:
 change no file, send no message, start no agent, and run no command that waits or follows
 a file. A shell call is one command, or several joined by |, each starting with one of:
@@ -113,12 +134,10 @@ STREAM = (" Your first answer never ends the recall: after each answer you are a
           "you find something new, with only what is new since your last answer. End a "
           "later answer with the line End of recall. when you have what is needed or "
           "nothing more is worth looking for, and you are not asked again.")
-WIDEN_NOTES = ("These search this project only. Run a search wider only for keywords "
-               "whose search of this project's sessions and whose grep of its notes have "
-               "both found nothing: then search again without --project and grep "
-               "{notes_root}.\n")
-WIDEN = ("These search this project only. Run a search wider only for keywords whose "
-         "search of this project found nothing: then search again without --project.\n")
+PROJECT_LINE = ("These search past this project too. This project is {project}: its hits "
+                "are this project's own record, and --project {project_arg} searches its "
+                "sessions alone.")
+PROJECT_NOTES = " Its own notes are under {project_notes}."
 RECALLED = ("Already recalled for the main agent, which has it: context only. Do not "
             "recall for it and do not repeat it.\n<<<\n{recalled_lines}\n>>>\n\n")
 
@@ -147,20 +166,14 @@ def keywords(text: str) -> list[str]:
 
 
 @dataclass
-class Prefetch:
-    """What the first search found. `keywords`, the query; `hits`, the sessions' hits;
-    `notes`, (path, lines) for each notes file shown; `widened`, whether it searched past
-    the project; `project`, the project label it searched in, or None; `notes_dirs`, the
-    notes directories it read; `notes_root`, the notes root when notes gives one;
-    `error`, why the sessions could not be searched, or None."""
+class Part:
+    """One part of the first search: its name (`PROJECT_PART` or `BEYOND_PART`), the
+    sessions' hits, (path, lines) for each notes file shown, and why the sessions could
+    not be searched, or None."""
 
-    keywords: list[str]
+    name: str
     hits: list = field(default_factory=list)
     notes: list[tuple[str, list[str]]] = field(default_factory=list)
-    widened: bool = False
-    project: str | None = None
-    notes_dirs: list[str] = field(default_factory=list)
-    notes_root: str | None = None
     error: str | None = None
 
     @property
@@ -168,12 +181,76 @@ class Prefetch:
         return len(self.hits) + len(self.notes)
 
 
+@dataclass
+class Prefetch:
+    """What the first search found. `keywords`, the query; `scope`, the scope it ran
+    under (`everywhere` for a session with no project label); `parts`, its parts in the
+    order the brief shows them; `project`, the session's project label, or None;
+    `project_dir`, the project's notes directory when it exists; `notes_root`, the notes
+    root when notes gives one; `notes_dirs`, the notes directories the brief names for
+    the fork's own greps."""
+
+    keywords: list[str]
+    scope: str = EVERYWHERE
+    parts: list[Part] = field(default_factory=list)
+    project: str | None = None
+    project_dir: str | None = None
+    notes_root: str | None = None
+    notes_dirs: list[str] = field(default_factory=list)
+
+    def part(self, name: str) -> Part | None:
+        return next((p for p in self.parts if p.name == name), None)
+
+    @property
+    def hits(self) -> list:
+        return [hit for part in self.parts for hit in part.hits]
+
+    @property
+    def notes(self) -> list[tuple[str, list[str]]]:
+        return [note for part in self.parts for note in part.notes]
+
+    @property
+    def count(self) -> int:
+        return sum(part.count for part in self.parts)
+
+    def counts(self) -> dict[str, int | None]:
+        """Each part's hit count (sessions and notes files) for the log: the project's
+        and the one beyond it, None for a part this search had none of."""
+        out: dict[str, int | None] = {PROJECT_PART: None, BEYOND_PART: None}
+        for part in self.parts:
+            out[part.name] = part.count
+        return out
+
+
+def path_key(path: str | os.PathLike) -> str:
+    """How the first search knows a notes file or directory: its resolved path,
+    case-folded where the system's paths are."""
+    return os.path.normcase(os.path.realpath(path))
+
+
+def within(path: str, root: str) -> bool:
+    """Whether `path` is `root` or lies under it, both known by `path_key`."""
+    path, root = path_key(path), path_key(root)
+    try:
+        return os.path.commonpath([path, root]) == root
+    except ValueError:  # different drives
+        return False
+
+
 def _sessions(words: list[str], session_id: str, project: str | None, limit: int,
-              search) -> list:
+              search, *, skip: frozenset[str] = frozenset()) -> list:
+    """The best `limit` hits for `words`, none of this session's or of a session in
+    `skip`; asks for more hits while the ones left out leave fewer than `limit`."""
     if limit < 1:
         return []
-    result = search(" ".join(words), project=project, limit=limit + 50)
-    return [h for h in result.hits if h.session_id != session_id][:limit]
+    asked = limit + 50
+    while True:
+        result = search(" ".join(words), project=project, limit=asked)
+        kept = [h for h in result.hits
+                if h.session_id != session_id and h.session_id not in skip][:limit]
+        if len(kept) >= limit or len(result.hits) < asked or asked >= SEARCH_ASK_MAX:
+            return kept
+        asked = min(asked * 4, SEARCH_ASK_MAX)
 
 
 def _note_files(roots: list[str]) -> list[Path]:
@@ -182,18 +259,22 @@ def _note_files(roots: list[str]) -> list[Path]:
         for dirpath, dirnames, filenames in os.walk(root):
             dirnames[:] = sorted(d for d in dirnames if not d.startswith("."))
             for name in sorted(filenames):
-                if name.startswith("."):
+                if name.startswith(".") or not name.lower().endswith(NOTES_SUFFIX):
                     continue
                 files.append(Path(dirpath) / name)
-                if len(files) >= NOTES_READ_MAX:
-                    return files
     return files
 
 
-def _notes(words: list[str], roots: list[str]) -> list[tuple[str, list[str]]]:
+def _notes(words: list[str], roots: list[str], *,
+           skip: frozenset[str] = frozenset()) -> list[tuple[str, list[str]]]:
     folded = [w.casefold() for w in words]
     scored = []
+    seen: set[str] = set(skip)
     for path in _note_files(roots):
+        key = path_key(path)
+        if key in seen:
+            continue
+        seen.add(key)
         try:
             if path.stat().st_size > NOTES_FILE_MAX_BYTES:
                 continue
@@ -215,13 +296,13 @@ def _notes(words: list[str], roots: list[str]) -> list[tuple[str, list[str]]]:
                 if len(shown) >= NOTES_LINES:
                     break
         keep = sorted({j for i in shown for j in (i - 1, i, i + 1) if 0 <= j < len(lines)})
-        out.append((path, [f"{j + 1}: {lines[j]}" for j in keep]))
+        out.append((path, [f"{j + 1}: {lines[j][:NOTES_LINE_CHARS]}" for j in keep]))
     return out
 
 
 def notes_places(cwd: str | None, override: str | None) -> tuple[str | None, str | None]:
     """(the session's notes directory, the notes root), each None where notes gives
-    none or is not installed."""
+    none, where it does not exist, or where notes is not installed."""
     from . import links
 
     link = links.notes()
@@ -238,7 +319,23 @@ def notes_places(cwd: str | None, override: str | None) -> tuple[str | None, str
         root = str(link.api.root())
     except Exception:  # noqa: BLE001
         root = None
-    return project_dir, root
+    return _existing(project_dir), _existing(root)
+
+
+def _existing(path: str | None) -> str | None:
+    return path if path and os.path.isdir(path) else None
+
+
+def _run_part(part: Part, words: list[str], session_id: str, project: str | None,
+              hits: int, search, notes_dirs: list[str], *,
+              skip_sessions: frozenset[str] = frozenset(),
+              skip_notes: frozenset[str] = frozenset()) -> Part:
+    try:
+        part.hits = _sessions(words, session_id, project, hits, search, skip=skip_sessions)
+    except Exception as exc:  # noqa: BLE001 - a search that fails is said in the brief
+        part.error = str(exc) or type(exc).__name__
+    part.notes = _notes(words, notes_dirs, skip=skip_notes)
+    return part
 
 
 def prefetch(text: str, *, session_id: str, cwd: str | None, notes_dir: str | None,
@@ -253,51 +350,71 @@ def prefetch(text: str, *, session_id: str, cwd: str | None, notes_dir: str | No
     except (OSError, ValueError):
         project = None
     project_dir, root = (places or notes_places)(cwd, notes_dir)
-    found = Prefetch(words, project=project, notes_root=root)
+    project_dir, root = _existing(project_dir), _existing(root)
+    if project is None:
+        scope = EVERYWHERE
+    found = Prefetch(words, scope=scope, project=project, project_dir=project_dir,
+                     notes_root=root)
+    if scope == PROJECT:
+        found.notes_dirs = [project_dir] if project_dir else []
+    else:
+        found.notes_dirs = [root] if root else []
+        if project_dir and not (root and within(project_dir, root)):
+            found.notes_dirs.append(project_dir)
     if not words or hits < 1:
         return found
     if search is None:
         from .api import search
-    wide = scope == EVERYWHERE or project is None
-    if not wide:
-        found.notes_dirs = [project_dir] if project_dir else []
-        try:
-            found.hits = _sessions(words, session_id, project, hits, search)
-        except Exception as exc:  # noqa: BLE001 - a search that fails is said in the brief
-            found.error = str(exc) or type(exc).__name__
-        found.notes = _notes(words, found.notes_dirs)
-        if found.count or found.error or scope == PROJECT:
-            return found
-        found.widened = True
-    found.project = None
-    found.notes_dirs = [root] if root else []
-    try:
-        found.hits = _sessions(words, session_id, None, hits, search)
-    except Exception as exc:  # noqa: BLE001
-        found.error = str(exc) or type(exc).__name__
-    found.notes = _notes(words, found.notes_dirs)
+    if scope == PROJECT:
+        found.parts = [_run_part(Part(PROJECT_PART), words, session_id, project, hits,
+                                 search, found.notes_dirs)]
+    elif scope == EVERYWHERE:
+        found.parts = [_run_part(Part(BEYOND_PART), words, session_id, None, hits, search,
+                                 found.notes_dirs)]
+    else:
+        own = _run_part(Part(PROJECT_PART), words, session_id, project, hits, search,
+                        [project_dir] if project_dir else [])
+        beyond = _run_part(Part(BEYOND_PART), words, session_id, None, hits, search,
+                           [root] if root else [],
+                           skip_sessions=frozenset(h.session_id for h in own.hits),
+                           skip_notes=frozenset(path_key(p) for p, _ in own.notes))
+        found.parts = [own, beyond]
     return found
 
 
-def prefetch_text(found: Prefetch, hits: int) -> str:
-    """The first search as the brief shows it."""
-    if not found.keywords or hits < 1:
-        return NO_KEYWORD if not found.keywords else NO_SEARCH
+def _part_lines(part: Part) -> list[str]:
     from .cli import read_line
     from .clock import show
 
     lines: list[str] = []
-    if found.error:
-        lines.append(f"(past sessions could not be searched: {found.error})")
-    for hit in found.hits:
+    if part.error:
+        lines.append(f"(past sessions could not be searched: {part.error})")
+    for hit in part.hits:
         when = show(hit.time) if hit.time is not None else "-"
         lines.append(f"- session {hit.session_id} ({hit.harness}), {when}, project "
                      f"{hit.project or '-'}: {hit.snippet}")
         lines.append(f"  {read_line(hit)}")
-    for path, note_lines in found.notes:
+    for path, note_lines in part.notes:
         lines.append(f"- notes {path}")
         lines += [f"  {line}" for line in note_lines]
-    return "\n".join(lines) if lines else NO_HITS
+    return lines
+
+
+def prefetch_text(found: Prefetch, hits: int) -> str:
+    """The first search as the brief shows it: with two parts, each under its heading,
+    the project's first, a part that found nothing saying so."""
+    if not found.keywords or hits < 1:
+        return NO_KEYWORD if not found.keywords else NO_SEARCH
+    if len(found.parts) < 2:
+        lines = [line for part in found.parts for line in _part_lines(part)]
+        return "\n".join(lines) if lines else NO_HITS
+    out: list[str] = []
+    for part in found.parts:
+        heading = (PROJECT_HEADING.format(project=found.project)
+                   if part.name == PROJECT_PART else BEYOND_HEADING)
+        out.append(heading)
+        out += _part_lines(part) or [NO_PART_HITS]
+    return "\n".join(out)
 
 
 def split_recalled(text: str, sent: frozenset[str] | set[str]) -> tuple[str, list[str]]:
@@ -321,14 +438,18 @@ def brief(*, start: str, text: str, session_id: str, found: Prefetch,
     from .recalls import ASKED
 
     hits = int(settings["prefetch_hits"])
-    scoped = found.project is not None
-    scope_args = f" --project {shlex.quote(found.project)}" if scoped else ""
+    project = found.project if found.scope != EVERYWHERE else None
+    scope_args = (f" --project {shlex.quote(project)}"
+                  if project is not None and found.scope == PROJECT else "")
     notes_line = (NOTES_LINE.format(notes_dirs=", ".join(found.notes_dirs))
                   if found.notes_dirs else "")
-    widen = ""
-    if scoped and settings["scope"] == PROJECT_FIRST:
-        widen = (WIDEN_NOTES.format(notes_root=found.notes_root)
-                 if found.notes_dirs and found.notes_root else WIDEN)
+    project_line = ""
+    if project is not None and found.scope == PROJECT_FIRST:
+        project_line = PROJECT_LINE.format(project=project,
+                                           project_arg=shlex.quote(project))
+        if found.project_dir:
+            project_line += PROJECT_NOTES.format(project_notes=found.project_dir)
+        project_line += "\n"
     rounds = int(settings["max_rounds"])
     return TEMPLATE.format(
         start=START_ASKED if start == ASKED else START_PROMPT,
@@ -339,7 +460,7 @@ def brief(*, start: str, text: str, session_id: str, found: Prefetch,
         scope_args=scope_args,
         session_id=session_id,
         notes=notes_line,
-        widen=widen,
+        project_line=project_line,
         max_tools=settings["max_tools"],
         limit_s=settings["limit_s"],
         fork_commands=", ".join(settings["fork_commands"]),
@@ -349,6 +470,8 @@ def brief(*, start: str, text: str, session_id: str, found: Prefetch,
         max_points=settings["max_points"])
 
 
-__all__ = ["COMMON", "MIN_CHARS", "NOTES_SHOWN", "PROJECT", "PROJECT_FIRST", "EVERYWHERE",
-           "NO_KEYWORD", "NO_HITS", "NO_SEARCH", "TEMPLATE", "keywords", "Prefetch", "notes_places",
-           "prefetch", "prefetch_text", "split_recalled", "brief"]
+__all__ = ["COMMON", "MIN_CHARS", "NOTES_SHOWN", "NOTES_SUFFIX", "NOTES_LINE_CHARS",
+           "PROJECT", "PROJECT_FIRST", "EVERYWHERE", "PROJECT_PART", "BEYOND_PART",
+           "NO_KEYWORD", "NO_HITS", "NO_SEARCH", "NO_PART_HITS", "TEMPLATE", "keywords",
+           "Part", "Prefetch", "path_key", "within", "notes_places", "prefetch",
+           "prefetch_text", "split_recalled", "brief"]

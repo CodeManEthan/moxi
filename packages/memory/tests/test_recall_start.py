@@ -194,54 +194,153 @@ class FakeSearch:
 
     def __call__(self, query, *, project=None, limit=10):
         self.asked.append((query, project))
-        return types.SimpleNamespace(hits=tuple(self.by_project.get(project, ())))
+        return types.SimpleNamespace(hits=tuple(self.by_project.get(project, ()))[:limit])
 
 
 def no_notes(cwd, override):
     return None, None
 
 
-def test_the_prefetch_leaves_out_this_session_and_stays_in_the_project(tmp_path,
-                                                                        monkeypatch):
+def test_project_first_runs_both_parts_every_time(tmp_path, monkeypatch):
     monkeypatch.setattr("moxi_memory.labels.project_label", lambda cwd: "shop")
-    search = FakeSearch({"shop": [hit(SESSION), hit("other-1")], None: [hit("wide-1")]})
+    search = FakeSearch({"shop": [hit(SESSION), hit("other-1")],
+                         None: [hit("other-1"), hit("wide-1", project="farm")]})
     found = recall_brief.prefetch("ingest lock stall", session_id=SESSION,
                                   cwd=str(tmp_path), notes_dir=None, scope="project-first",
                                   hits=8, search=search, places=no_notes)
-    assert [h.session_id for h in found.hits] == ["other-1"]
-    assert found.widened is False and found.project == "shop"
-    assert search.asked == [("ingest lock stall", "shop")]
+    assert [p.name for p in found.parts] == ["project", "beyond"]
+    # the project's part first; beyond it, the sessions it showed left out
+    assert [h.session_id for h in found.part("project").hits] == ["other-1"]
+    assert [h.session_id for h in found.part("beyond").hits] == ["wide-1"]
+    assert search.asked == [("ingest lock stall", "shop"), ("ingest lock stall", None)]
+    assert found.counts() == {"project": 1, "beyond": 1}
 
 
-def test_project_first_goes_wide_only_when_the_project_finds_nothing(tmp_path,
-                                                                     monkeypatch):
+def test_the_part_beyond_keeps_its_full_count_past_the_sessions_it_leaves_out(
+        tmp_path, monkeypatch):
     monkeypatch.setattr("moxi_memory.labels.project_label", lambda cwd: "shop")
-    search = FakeSearch({"shop": [hit(SESSION)], None: [hit("wide-1")]})
-    found = recall_brief.prefetch("ingest lock", session_id=SESSION, cwd=str(tmp_path),
-                                  notes_dir=None, scope="project-first", hits=8,
+    shown = [hit("own-0"), hit("own-1")]
+    wide = [hit(f"own-{i % 2}") for i in range(60)] + [hit("wide-1"), hit("wide-2")]
+    search = FakeSearch({"shop": shown, None: wide})
+    found = recall_brief.prefetch("ingest", session_id=SESSION, cwd=str(tmp_path),
+                                  notes_dir=None, scope="project-first", hits=2,
                                   search=search, places=no_notes)
-    assert [h.session_id for h in found.hits] == ["wide-1"]
-    assert found.widened is True and found.project is None
-    found = recall_brief.prefetch("ingest lock", session_id=SESSION, cwd=str(tmp_path),
-                                  notes_dir=None, scope="project", hits=8,
-                                  search=FakeSearch({}), places=no_notes)
-    assert found.hits == [] and found.widened is False
+    assert [h.session_id for h in found.part("beyond").hits] == ["wide-1", "wide-2"]
+    # the first ask (2 + 50 hits) held only shown sessions, so it asked for more
+    assert len(search.asked) == 3
 
 
-def test_a_notes_hit_in_the_project_keeps_the_search_there(tmp_path, monkeypatch):
+def test_project_and_everywhere_run_one_part(tmp_path, monkeypatch):
     monkeypatch.setattr("moxi_memory.labels.project_label", lambda cwd: "shop")
-    notes_dir = tmp_path / "notes"
-    notes_dir.mkdir()
-    (notes_dir / "a.md").write_text("one\nthe ingest lock stalled at noon\nthree\n")
-    (notes_dir / "b.md").write_text("nothing here\n")
+    search = FakeSearch({"shop": [hit("own-1")], None: [hit("wide-1")]})
+    found = recall_brief.prefetch("ingest", session_id=SESSION, cwd=str(tmp_path),
+                                  notes_dir=None, scope="project", hits=8, search=search,
+                                  places=no_notes)
+    assert [h.session_id for h in found.hits] == ["own-1"]
+    assert found.counts() == {"project": 1, "beyond": None}
+    found = recall_brief.prefetch("ingest", session_id=SESSION, cwd=str(tmp_path),
+                                  notes_dir=None, scope="everywhere", hits=8, search=search,
+                                  places=no_notes)
+    assert [h.session_id for h in found.hits] == ["wide-1"]
+    assert found.counts() == {"project": None, "beyond": 1}
+
+
+def test_a_session_with_no_project_label_searches_everywhere(monkeypatch):
+    search = FakeSearch({None: [hit("wide-1")]})
+    found = recall_brief.prefetch("ingest", session_id=SESSION, cwd=None, notes_dir=None,
+                                  scope="project-first", hits=8, search=search,
+                                  places=no_notes)
+    assert found.scope == "everywhere" and found.project is None
+    assert search.asked == [("ingest", None)]
+
+
+def notes_tree(tmp_path):
+    root = tmp_path / "notes"
+    own = root / "shop"
+    own.mkdir(parents=True)
+    (own / "a.md").write_text("one\nthe ingest lock stalled at noon\nthree\n")
+    (own / "b.md").write_text("nothing here\n")
+    (root / "farm").mkdir()
+    (root / "farm" / "c.md").write_text("ingest lock again\n")
+    (root / "farm" / "d.json").write_text('{"ingest": "lock"}\n')
+    return root, own
+
+
+def test_notes_come_from_the_project_then_the_root_less_what_it_showed(tmp_path,
+                                                                        monkeypatch):
+    monkeypatch.setattr("moxi_memory.labels.project_label", lambda cwd: "shop")
+    root, own = notes_tree(tmp_path)
     found = recall_brief.prefetch("ingest lock", session_id=SESSION, cwd=str(tmp_path),
                                   notes_dir=None, scope="project-first", hits=8,
                                   search=FakeSearch({}),
-                                  places=lambda cwd, o: (str(notes_dir), str(tmp_path)))
-    assert found.widened is False
-    [(path, lines)] = found.notes
+                                  places=lambda cwd, o: (str(own), str(root)))
+    [(path, lines)] = found.part("project").notes
     assert path.endswith("a.md")
     assert lines == ["1: one", "2: the ingest lock stalled at noon", "3: three"]
+    # the root's part leaves out a.md (shown) and reads only Markdown files
+    assert [p for p, _ in found.part("beyond").notes] == [str(root / "farm" / "c.md")]
+    assert found.notes_dirs == [str(root)] and found.project_dir == str(own)
+
+
+def test_a_file_already_shown_is_known_by_its_resolved_path(tmp_path, monkeypatch):
+    monkeypatch.setattr("moxi_memory.labels.project_label", lambda cwd: "shop")
+    root, own = notes_tree(tmp_path)
+    link = tmp_path / "shop-link"
+    try:
+        link.symlink_to(own, target_is_directory=True)
+    except OSError:
+        pytest.skip("this system makes no symlink here")
+    found = recall_brief.prefetch("ingest lock", session_id=SESSION, cwd=str(tmp_path),
+                                  notes_dir=None, scope="project-first", hits=8,
+                                  search=FakeSearch({}),
+                                  places=lambda cwd, o: (str(link), str(root)))
+    assert [p for p, _ in found.part("project").notes] == [str(link / "a.md")]
+    assert [p for p, _ in found.part("beyond").notes] == [str(root / "farm" / "c.md")]
+
+
+def test_the_notes_are_read_whole_and_each_line_cut(tmp_path):
+    root = tmp_path / "notes"
+    for i in range(30):
+        (root / f"d{i:02}").mkdir(parents=True)
+        for j in range(250):
+            (root / f"d{i:02}" / f"n{j:03}.md").write_text("nothing\n")
+    (root / "zz").mkdir()
+    (root / "zz" / "late.md").write_text("ingest " + "x" * 400 + "\n")
+    [(path, lines)] = recall_brief._notes(["ingest"], [str(root)])
+    assert path.endswith("late.md")
+    assert lines == ["1: " + ("ingest " + "x" * 400)[:200]]
+
+
+def test_files_that_match_alike_are_ordered_by_path(tmp_path):
+    for name in ("b.md", "a.md", "c.md", "d.md"):
+        (tmp_path / name).write_text("ingest\n")
+    shown = [p for p, _ in recall_brief._notes(["ingest"], [str(tmp_path)])]
+    assert shown == [str(tmp_path / n) for n in ("a.md", "b.md", "c.md")]
+
+
+def test_a_notes_directory_that_does_not_exist_is_none(tmp_path, monkeypatch):
+    monkeypatch.setattr("moxi_memory.labels.project_label", lambda cwd: "shop")
+    root, _own = notes_tree(tmp_path)
+    missing = tmp_path / "notes" / ".local" / "state" / "shop"
+    found = recall_brief.prefetch("ingest lock", session_id=SESSION, cwd=str(tmp_path),
+                                  notes_dir=None, scope="project-first", hits=8,
+                                  search=FakeSearch({}),
+                                  places=lambda cwd, o: (str(missing), str(root)))
+    assert found.project_dir is None and found.notes_dirs == [str(root)]
+    assert found.part("project").notes == []
+    assert len(found.part("beyond").notes) == 2
+
+
+def test_a_project_notes_directory_outside_the_root_is_named_too(tmp_path, monkeypatch):
+    monkeypatch.setattr("moxi_memory.labels.project_label", lambda cwd: "shop")
+    root, _own = notes_tree(tmp_path)
+    outside = tmp_path / "elsewhere"
+    outside.mkdir()
+    found = recall_brief.prefetch("ingest", session_id=SESSION, cwd=str(tmp_path),
+                                  notes_dir=None, scope="project-first", hits=8,
+                                  search=FakeSearch({}),
+                                  places=lambda cwd, o: (str(outside), str(root)))
+    assert found.notes_dirs == [str(root), str(outside)]
 
 
 def test_a_prompt_with_no_keyword_runs_no_search():
@@ -253,10 +352,15 @@ def test_a_prompt_with_no_keyword_runs_no_search():
     assert recall_brief.prefetch_text(found, 8) == recall_brief.NO_KEYWORD
 
 
-def brief(start="prompt", **changes):
+def brief(start="prompt", *, scope="project-first", project_dir="/notes/shop",
+          parts=None, **changes):
     settings = dict(recall_start.default_settings(), **changes)
-    found = recall_brief.Prefetch(["ingest"], hits=[hit("other-1")], project="shop",
-                                  notes_dirs=["/notes/shop"], notes_root="/notes")
+    if parts is None:
+        parts = [recall_brief.Part("project", hits=[hit("other-1")]),
+                 recall_brief.Part("beyond", hits=[hit("wide-1", project="farm")])]
+    found = recall_brief.Prefetch(["ingest"], scope=scope, parts=parts, project="shop",
+                                  project_dir=project_dir, notes_dirs=["/notes"],
+                                  notes_root="/notes")
     return recall_brief.brief(start=start, text="why did the ingest stall", session_id=SESSION,
                               found=found, settings=settings)
 
@@ -267,15 +371,39 @@ def test_the_brief_holds_the_prompt_the_hits_and_the_limits():
     assert "The prompt:\n<<<\nwhy did the ingest stall\n>>>" in text
     assert "- session other-1 (claude)" in text
     assert "moxi sessions read other-1" in text
-    assert 'moxi memory search "<a few keywords>" --project shop' in text
+    assert 'moxi memory search "<a few keywords>"\n' in text
     assert f"Skip any hit from session {SESSION}" in text
-    assert "- Notes: the files under /notes/shop." in text
-    assert "grep /notes." in text
+    assert "- Notes: the files under /notes." in text
     assert "at most 8 tool calls and about 60 seconds" in text
     assert "moxi memory search, moxi sessions read, grep" in text
     assert "End of recall." in text
     assert 'Recalled from past sessions and notes for "why did the ingest stall":' in text
     assert "{" not in text
+
+
+def test_project_first_shows_the_project_first_and_names_it():
+    text = brief()
+    project_at = text.index("In this project, shop:\n- session other-1")
+    assert text.index("Beyond this project:\n- session wide-1") > project_at
+    assert ("These search past this project too. This project is shop: its hits are this "
+            "project's own record, and --project shop searches its sessions alone. Its "
+            "own notes are under /notes/shop.") in " ".join(text.split())
+    assert "--project shop\n" not in text
+
+
+def test_a_part_that_found_nothing_says_so():
+    text = brief(parts=[recall_brief.Part("project"),
+                        recall_brief.Part("beyond", hits=[hit("wide-1")])],
+                 project_dir=None)
+    assert "In this project, shop:\n(found nothing here)\nBeyond this project:" in text
+    assert "Its own notes" not in text
+
+
+def test_the_project_scope_searches_with_project_and_names_no_project_line():
+    text = brief(scope="project", parts=[recall_brief.Part("project",
+                                                           hits=[hit("other-1")])])
+    assert 'moxi memory search "<a few keywords>" --project shop\n' in text
+    assert "In this project" not in text and "These search past" not in text
 
 
 def test_the_brief_asks_for_a_first_answer_at_once_and_a_stream_after_it():
@@ -325,7 +453,11 @@ def test_the_child_opens_its_line_with_its_identity_then_writes_the_brief(monkey
     assert line["head"] == "ingest lock stall" and line["route"] == "subagent"
     recall_child.write_brief(recall, search=FakeSearch({None: [hit("other-1")]}),
                              places=no_notes)
-    assert recalls.find_line(SESSION, record["recall"])["prefetch_hits"] == 1
+    line = recalls.find_line(SESSION, record["recall"])
+    # a record with no cwd has no project part: its one part is the one beyond
+    assert line["prefetch_hits"] == 1
+    assert line["project_hits"] is None and line["beyond_hits"] == 1
+    assert "widened" not in line
     assert "other-1" in records.read(SESSION, record["recall"])["brief"]
 
 
