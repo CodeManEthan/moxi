@@ -163,6 +163,18 @@ def project_at(path: str | os.PathLike) -> str | None:
     return None if found is None else found.key
 
 
+def project_root_at(path: str | os.PathLike) -> tuple[str, Path] | None:
+    """The key of the project the file or folder `path` is in, with the folder its
+    record names as its root, or None when it is in none; read as `project_at` reads
+    it."""
+    api = _projects()
+    try:
+        found = api.for_path(os.fspath(path))
+    except api.ProjectsError as exc:
+        raise RoundsError(f"the projects list can't be read: {exc}") from None
+    return None if found is None else (found.key, Path(os.path.expanduser(found.root)))
+
+
 def slugs(rounds_dir: Path) -> list[str]:
     """The slug of each round in the rounds folder `rounds_dir`, sorted: every folder there
     that holds a round's log and whose name is a slug. A rounds folder that does not
@@ -280,4 +292,4 @@ def _notes_dir(record) -> Path:
 
 
 __all__ = ["SLUG", "Home", "is_slug", "split", "home", "homes", "notes_dir", "lead",
-           "root", "slugs", "names"]
+           "root", "project_root_at", "slugs", "names"]

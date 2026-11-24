@@ -36,7 +36,9 @@ with a `retro` step or not.
   and `reject`, as the settlements that stand leave them. Numbers written before
   `settled` was counted read it as zero.
 - `skips`: skips of a step or of a finish action; `step_ups`: the lead's moves to a
-  later flow; `repairs`; `corrections`: rulings that replace or take back another;
+  later flow; `checklist_step_ups`: the moves a round's opening made for its checklist
+  marks, a `flow.changed` that holds `marked`, which `step_ups` leaves out (numbers
+  written before it was counted read it as zero); `repairs`; `corrections`: rulings that replace or take back another;
   `drops`: builds dropped; `cleared_locks`: finish locks of a dead holder cleared;
   `flags`: the reports flagged `extra-full-pass` and `model-below-tier`.
 
@@ -316,7 +318,9 @@ def of(state: states.State, *, ended_at: str | None = None,
         "skips": sum(_rules(one).startswith((corrections.SKIP, corrections.SKIP_ACTION))
                      for one in rulings),
         "step_ups": sum(one.get("type") == "flow.changed" and one.get("by") == stepping.LEAD
-                        for one in history),
+                        and "marked" not in one for one in history),
+        "checklist_step_ups": sum(one.get("type") == "flow.changed" and "marked" in one
+                                  for one in history),
         "repairs": sum(one.get("type") == "repair" for one in history),
         "corrections": sum(bool(one.get("supersedes"))
                            or _rules(one).startswith(corrections.REVOKE)
@@ -353,7 +357,8 @@ def _duration(seconds: object) -> str:
 #: The keys `lines` gives a line of their own to; any other is given as it is.
 _SAID = ("design_passes", "fold_first", "folds", "records_only_folds", "lead_decisions",
          "step_time_s", "round_time_s", "longest_gap", "findings", "rechecks", "drift_rechecks", "checks_failed",
-         "questions", "decisions", "settled", "skips", "step_ups", "repairs", "corrections", "drops",
+         "questions", "decisions", "settled", "skips", "step_ups", "checklist_step_ups",
+         "repairs", "corrections", "drops",
          "cleared_locks", "flags")
 
 
@@ -386,6 +391,7 @@ def lines(numbers: Mapping) -> list[str]:
         f"{_count(settled, decisions.ACCEPT)}, rejected "
         f"{_count(settled, decisions.REJECT)}",
         f"skips {_count(numbers, 'skips')}, step-ups {_count(numbers, 'step_ups')}, "
+        f"checklist step-ups {_count(numbers, 'checklist_step_ups')}, "
         f"repairs {_count(numbers, 'repairs')}, corrections "
         f"{_count(numbers, 'corrections')}, dropped builds {_count(numbers, 'drops')}, "
         f"cleared locks {_count(numbers, 'cleared_locks')}",

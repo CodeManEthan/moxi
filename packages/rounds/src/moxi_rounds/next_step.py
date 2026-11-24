@@ -30,6 +30,17 @@ What is read is one dict (`read`), printed as lines (`as_text`) or as JSON
 - `changed`: in the group of a stage with an open build, each ruling recorded since
   the build's block was printed that reaches the stage (`commission_block.changed`),
   so a correction reaches a build already commissioned.
+- `checklist`: what a group is told of the round's checklist marks
+  (`checklist.told`), only when the round has marks or a project it is weighed against
+  has a checklist: in the design group every item to mark, in the design's
+  verification the marks, their skills and every item to check them against, and in a
+  build's steps the marks and their skills; where a round with no design step builds in
+  a project it marked none of, `unweighed`, a table `{project, items}`. `brief`: in a verifying group (the design's
+  verification, a build's, a report step of the user's own) each `verifier_brief` line
+  of its projects (`checklist.verifier_lines`). That group is the verifier's brief, as
+  the commission block is a builder's: the lead puts it first.
+- `stepped`: in the design group of a round its opening stepped up for its checklist
+  marks, the flow it was opened with (`was`) and the marks (`marked`).
 - `numbers`: in the `retro` group, the round's numbers as they stand now, counted from
   its log as its ending will count them, for the retrospective to read.
 - `close`: for an open round, `waits`, what its close waits for (`closing.waits`). It
@@ -60,9 +71,10 @@ from __future__ import annotations
 import json
 from collections.abc import Callable, Sequence
 
-from . import (answer_block, brake, builds, checking, ci, closing, commission_block, drift, flows,
-               leads, log, model_tiers, places, queue_file, queue_view, rendering,
-               report_block, showing, sizing, stages, steps, tracing, versions)
+from . import (answer_block, brake, builds, checking, checklist, ci, closing,
+               commission_block, drift, flows, leads, log, model_tiers, places, queue_file,
+               queue_view, rendering, report_block, showing, sizing, stages, steps,
+               tracing, versions)
 from . import numbers as counted
 from . import settings as own
 from . import shown as showings
@@ -126,10 +138,58 @@ def _named(step: steps.Step) -> list[str]:
     return [str(line) for line in ([reads] if isinstance(reads, str) else reads)]
 
 
+def _settings(found: showing.Shown):
+    return own.load() if found.settings is None else found.settings
+
+
+def _repo_of(found: showing.Shown, step: steps.Step) -> str | None:
+    """The repo of the build of `step`'s stage: its build's, else the plan's."""
+    if step.stage is None:
+        return None
+    build = builds.current(found.state, step.stage)
+    if build is not None:
+        return build.repo
+    planned = stages.find(found.state, step.stage)
+    return None if planned is None else planned.repo
+
+
+def _checklist_of(found: showing.Shown, step: steps.Step, kind: str, *,
+          verifies: bool = False) -> dict:
+    """The checklist a group of `kind` is told (`checklist.told`), and with `verifies`
+    the `verifier_brief` lines of its projects as `brief`; each only when there is
+    something to tell."""
+    settings = _settings(found)
+    repo = None if kind != checklist.BUILDING else _repo_of(found, step)
+    said = {}
+    marks = checklist.told(found.state, found.project, settings, kind=kind, repo=repo)
+    if marks is not None:
+        said["checklist"] = marks
+    if verifies:
+        lines = checklist.verifier_lines(found.state, found.project, settings, kind=kind,
+                                         repo=repo)
+        if lines:
+            said["brief"] = lines
+    return said
+
+
+def _stepped(state) -> dict | None:
+    """The step up the round's opening made for its checklist marks: the flow it was
+    opened with (`was`) and the marks (`marked`); None when it made none."""
+    event = next((one for one in state.history if one["type"] == "flow.changed"
+                  and isinstance(one.get("marked"), list)), None)
+    return None if event is None else {"was": event.get("was"),
+                                       "marked": list(event["marked"])}
+
+
 def _design(found: showing.Shown, step: steps.Step) -> dict:
-    return {"reads": _named(step),
+    said = {"reads": _named(step),
             "write": f"{versions.DESIGN_FILE} in {found.round_dir}",
-            "then": [f"moxi rounds fold {found.name}"]}
+            "then": [f"moxi rounds fold {found.name}"],
+            **_checklist_of(found, step, checklist.DRAFTING)}
+    stepped = _stepped(found.state)
+    if stepped is not None:
+        said["stepped"] = stepped
+    return said
 
 
 def _verify_design(found: showing.Shown, step: steps.Step) -> dict:
@@ -148,7 +208,8 @@ def _verify_design(found: showing.Shown, step: steps.Step) -> dict:
     return {**said, "reads": reads + _named(step),
             "write": (f"a report in {found.round_dir} with the block from: moxi rounds "
                       f"next --schema {report_block.DESIGN}"),
-            "then": [f"moxi rounds verdict {found.name} <your report>"]}
+            "then": [f"moxi rounds verdict {found.name} <your report>"],
+            **_checklist_of(found, step, checklist.CHECKING, verifies=True)}
 
 
 def _docket(found: showing.Shown, step: steps.Step) -> dict:
@@ -171,12 +232,13 @@ def _commission(found: showing.Shown, step: steps.Step) -> dict:
 
 def _build(found: showing.Shown, step: steps.Step) -> dict:
     build = builds.current(found.state, step.stage)
+    told = _checklist_of(found, step, checklist.BUILDING)
     if build is None or build.ended is not None:
-        return {"reads": _named(step)}
+        return {"reads": _named(step), **told}
     commissioned = checking.commission_of(found.state, build)
     worktree = places.expand_home(commissioned.get("worktree"))
     return {"reads": _named(step),
-            "write": f"the work, committed on {build.branch} in {worktree}"}
+            "write": f"the work, committed on {build.branch} in {worktree}", **told}
 
 
 def _check(found: showing.Shown, step: steps.Step) -> dict:
@@ -205,7 +267,8 @@ def _verify_build(found: showing.Shown, step: steps.Step) -> dict:
     said = {"reads": _named(step),
             "write": (f"a report in {found.round_dir} with the block from: moxi rounds "
                       f"next --schema {report_block.BUILD}"),
-            "then": [f"moxi rounds verdict {found.name} <your report>"]}
+            "then": [f"moxi rounds verdict {found.name} <your report>"],
+            **_checklist_of(found, step, checklist.BUILDING, verifies=True)}
     if build is None or build.ended is not None:
         return said
     said["reads"] = [f"the diff {build.base[:7]}..{build.branch}", *said["reads"]]
@@ -230,7 +293,8 @@ def _report(found: showing.Shown, step: steps.Step) -> dict:
     said = {"reads": _named(step),
             "write": (f"a report in {found.round_dir} with the block from: moxi rounds "
                       f"next --schema {report_block.STEP}, its step {step.step!r}"),
-            "then": [f"moxi rounds verdict {found.name} <your report>"]}
+            "then": [f"moxi rounds verdict {found.name} <your report>"],
+            **_checklist_of(found, step, checklist.BUILDING, verifies=True)}
     if build is not None and build.ended is None:
         said["reads"] = [f"the diff {build.base[:7]}..{build.branch}", *said["reads"]]
     return said
@@ -542,8 +606,15 @@ def _queue_line(place: dict) -> str:
     return "; ".join(said)
 
 
+#: The kind of checklist lines each step's group prints; any other step's are a build's.
+_CHECKLIST_KIND = {steps.DESIGN: checklist.DRAFTING, steps.VERIFIES: checklist.CHECKING}
+
+
 def _group_lines(said: dict, group: dict) -> list[str]:
     lines = [_head(said, group)]
+    if group.get("stepped") is not None:
+        lines.append(f"stepped up: from {group['stepped']['was']} at its opening, by the "
+                     f"checklist marks {', '.join(group['stepped']['marked'])}")
     lines += [commission_block.line(one) for one in group.get("changed", ())]
     if group["built"]:
         if "pass" in group:
@@ -558,6 +629,10 @@ def _group_lines(said: dict, group: dict) -> list[str]:
         if group["write"] is not None:
             lines.append(f"write: {group['write']}")
         lines += [f"then:  {line}" for line in group["then"]]
+        if "checklist" in group:
+            lines += checklist.lines(group["checklist"], _CHECKLIST_KIND.get(
+                group["step"], checklist.BUILDING))
+        lines += [f"brief: {line}" for line in group.get("brief", ())]
         if "ci" in group:
             read = group["ci"]
             lines.append("ci:    no read on record" if read is None

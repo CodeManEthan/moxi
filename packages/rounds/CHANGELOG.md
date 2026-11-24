@@ -2,6 +2,31 @@
 
 ## 0.1.4 (unreleased)
 
+- A project's table takes three settings of its own, empty by default and with no
+  `defaults.` form: `checklist`, items of an `id`, a line of `text` and the `skills` to
+  load; `watched_paths`, entries of a `pattern`, a `note`, `skills` and optionally
+  `only_new`; and `verifier_brief`, lines for a verifier. `moxi config rounds check`
+  refuses a value that breaks their rules, with the key and the fix.
+- A design's block gains a top-level `checklist` key, the items its work touches: a bare
+  id for the round's project, `<key>:<id>` for a project a stage names. `fold` refuses a
+  mark of no item and a block with no key while a weighed checklist is not empty; a
+  change of marks is no change of records only. `open --checklist LIST|none` marks for a
+  round with no design step, required while its project has a checklist, and any mark
+  steps the round up to `full` at its opening: `flow.changed` by the lead with the marks
+  as `marked`, counted in the numbers as `checklist_step_ups`, apart from `step_ups`.
+- `next` names the marked items' skills: the design group lists the items to mark, the
+  design's verification gives the marks, their skills and every item, and a build's
+  steps give the marks and their skills; the commission block carries the same line
+  above the repo's `brief`. A verifying group prints each `verifier_brief` line of its
+  projects as `brief: <line>`. `show`, `show --json` and the round note give the
+  round's marks with where they come from, under the same condition as `next`.
+- The watched-paths guard, `rounds.watched-paths`, registered with turns through the
+  `moxi.turns.guards` entry `rounds`: after a write to a path a project watches it adds
+  one line with the note and the skills, once per agent, and never refuses. It runs
+  only while `watched_paths_guard.enabled` is on, which `moxi install` asks about. The
+  `turns` extra needs turns 0.2.8, whose `touched_files` it reads the written files
+  with.
+
 - A `ci.workflows` entry can read jobs by name pattern (`matrix = ["browser (*)"]`), name
   its run's `pick` job, and carry `reads_candidates = true`: a merge queue's candidate is
   then read by the entries so marked, and a build's check and the target's full run by

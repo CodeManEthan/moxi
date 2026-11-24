@@ -6,6 +6,8 @@ it came from, or raises `BadBlock` with every problem, each with its line and it
 `empty()` is the block's empty text.
 
 ```toml
+checklist = ["public-surface"]   # the checklist items the work touches; [] for none
+
 [[question]]
 id = "Q4"
 text = "Should search read archived notes too?"
@@ -35,6 +37,10 @@ as = "carried"
 id = "R1"
 text = "A search never reads a note that was deleted."
 ```
+
+The top-level `checklist` lists the marks of the checklist items that apply, a bare id
+for an item of the home project and `<key>:<id>` for another project's; whether each
+names an item is checked when the design is frozen, against the config.
 
 A question may also carry `[question.prepared]`, an answer prepared for it, with one
 `[[question.prepared.option]]` for each of its options.
@@ -189,6 +195,10 @@ class DesignBlock:
     stages: tuple[Stage, ...]
     traces: tuple[Trace, ...]
     commitments: tuple[Commitment, ...]
+    #: The checklist marks, None when the block carries no `checklist` key.
+    checklist: tuple[str, ...] | None = None
+    #: The line the `checklist` key is on, the block's own when it has none.
+    checklist_line: int = 0
 
 
 # The schema.
@@ -318,7 +328,18 @@ COMMITMENT = Table("commitment", "one for each thing the design commits to", (
 ))
 
 #: The schema of the block's top.
-SCHEMA = Table("", tables=(QUESTION, STAGE, TRACE, COMMITMENT))
+def _marks(value: object) -> str | None:
+    if not isinstance(value, list) or not all(
+            isinstance(one, str) and _TOKEN.fullmatch(one) for one in value):
+        return f"is {datablock.shown(value)}, not a list of marks"
+    return None
+
+
+CHECKLIST = datablock.Key(
+    "checklist", _marks, '["<item id>", "<key>:<item id>"], or [] for none',
+    "the checklist items this work touches; [] for none", blank="[]", required=False)
+
+SCHEMA = Table("", keys=(CHECKLIST,), tables=(QUESTION, STAGE, TRACE, COMMITMENT))
 
 #: A stage's keys in each of its two forms: a build, and a round in place of one.
 _BUILD = ("id", "repo", "branch", "after", "why", "slice")
@@ -328,7 +349,7 @@ _CHILD = ("id", "round", "after")
 def empty() -> str:
     """The empty block of a design: every table once, a stage in each of its two
     forms, each key with an empty value and its comment."""
-    return datablock.empty(Table("", tables=(
+    return datablock.empty(Table("", keys=(CHECKLIST,), tables=(
         QUESTION, _form_of(_BUILD, "one for each planned build"),
         _form_of(_CHILD, "one for each round planned in place of a build"),
         TRACE, COMMITMENT)))
@@ -368,13 +389,19 @@ def read(file: Path | str) -> DesignBlock:
         commitments=tuple(
             Commitment(id=one["id"], text=one["text"], where=one.get("where", ""),
                        **_placed(found, ("commitment", number), one))
-            for number, one in enumerate(data.get("commitment", ()))))
+            for number, one in enumerate(data.get("commitment", ()))),
+        checklist=None if "checklist" not in data else tuple(data["checklist"]),
+        checklist_line=found.line_of("checklist"))
 
 
 def _between(found: Found) -> list[Problem]:
     """The problems between the entries of a block whose keys and values are right."""
     data = found.data
     problems: list[Problem] = []
+    marks = data.get("checklist") or ()
+    for mark in dict.fromkeys(one for one in marks if marks.count(one) > 1):
+        problems.append(Problem(found.line_of("checklist"), f"`checklist` marks {mark} "
+                                "twice", f"mark {mark} once"))
     for name in ("question", "stage", "trace", "commitment"):
         problems += _twice(found, (name,), data.get(name, ()), "id", f"`[[{name}]]`")
     for number, question in enumerate(data.get("question", ())):
@@ -510,5 +537,5 @@ def _trace(found: Found, number: int, one: dict) -> Trace:
 __all__ = ["WHAT", "NONE", "ALL", "CARRIED", "AMENDED", "CUT", "TRACED", "SURE",
            "COMMITMENT_ID", "TRACE_ID", "SLICE_ID", "PreparedOption", "Prepared",
            "Question", "Slice", "Stage", "Trace", "Commitment", "DesignBlock",
-           "QUESTION", "STAGE", "TRACE", "COMMITMENT", "SCHEMA", "PREPARED",
+           "QUESTION", "STAGE", "TRACE", "COMMITMENT", "CHECKLIST", "SCHEMA", "PREPARED",
            "PREPARED_OPTION", "empty", "read", "prepared_between", "prepared_of"]
