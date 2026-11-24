@@ -508,6 +508,7 @@ def test_a_file_with_no_block_or_two_is_refused_as_a_designs(design):
 
 
 FILL = {
+    ("", "checklist"): "[]",
     ("[[question]]", "id"): '"Q1"', ("[[question]]", "text"): '"Which?"',
     ("[[question]]", "blocks"): '["B1"]',
     ("[[question]]", "options"): '{ a = "this", b = "that" }',

@@ -389,7 +389,8 @@ def test_the_package_requires_none_of_repo_turns_or_comms_and_each_only_as_its_e
 
 def test_the_package_registers_its_module_its_listener_its_refusal_and_no_git_hook():
     declared = tomllib.loads((PACKAGE / "pyproject.toml").read_text(encoding="utf-8"))
-    expected = {"moxi.modules", "moxi.turns.listeners", "moxi.projects"}
+    expected = {"moxi.modules", "moxi.turns.listeners", "moxi.turns.guards",
+                "moxi.projects"}
     assert set(declared["project"]["entry-points"]) == expected
 
     groups = {point.group for point in metadata.distribution("moxi-rounds").entry_points}

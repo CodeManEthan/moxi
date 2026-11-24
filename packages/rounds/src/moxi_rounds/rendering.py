@@ -233,6 +233,9 @@ def _flow(shown_as: dict) -> list[str]:
     if shown_as["inherits"]:
         lines += ["", *_item("starts from the standing rulings "
                              f"{', '.join(shown_as['inherits'])}")]
+    if shown_as["checklist"] is not None:
+        lines += ["", *_item("checklist marks: "
+                             f"{showing.marks_line(shown_as['checklist'])}")]
     if shown_as["skips"]:
         lines.append("")
     for one in shown_as["skips"]:

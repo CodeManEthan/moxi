@@ -9,7 +9,9 @@ queue` are then the only places the news shows.
 **Only to recorded names.** rounds names no seat: a message goes to a name recorded on
 the build (its builder, from its commission), on the round or the project's record (the
 round's lead, `leads.of`), or in the rounds config (the project's `director`). Each
-name gets its own send, so a name comms refuses does not stop the others.
+name gets its own send, so a name comms refuses does not stop the others. A builder is
+sent to only while it can receive (`Teller.can_receive`): comms reads its name `held`
+by a running session.
 
 **The record** is one `told` event in the repo's queue file per try (`Teller.tell`):
 `key` (the message's own, so it is sent once), `to`, `about`, `text`, and `delivery`,
@@ -29,8 +31,10 @@ what became of it:
 - `nobody`: there was no name to send to (`why`: no director set, or no lead recorded).
   Recorded whether or not comms is installed, so `queue` and `next` can say so.
 
-`undelivered(queue)` gives the newest record of each message that did not reach a
-name, which `queue` shows.
+`undelivered(queue)` gives the newest record of each send of a message no name
+received, which `queue` shows: a message is its `about`, `text` and `member`, so a send
+refused beside another of the same text that reached its name is not counted. Old logs
+read the same way.
 """
 
 from __future__ import annotations
@@ -57,6 +61,8 @@ NOBODY = "nobody"
 NOT_DELIVERED = (OFFLINE, UNSENT, REFUSED, ERROR, NOBODY)
 #: comms' outcomes after which nothing was sent and a later try may go.
 _TRY_AGAIN = ("offline", "cache-unread")
+#: The identity state comms reads for a name a running session holds.
+HELD = "held"
 #: Load comms when the teller is made (the default of `comms`).
 LOAD = object()
 
@@ -71,17 +77,38 @@ def comms_api() -> Any | None:
     return found.api if found.ok else None
 
 
-def undelivered(queue: queue_file.Queue) -> list[dict]:
-    """The newest record of each message that reached no name, oldest first."""
+def _newest(queue: queue_file.Queue) -> list[dict]:
+    """The newest record of each send (each `key`), oldest first."""
     newest: dict[str, dict] = {}
     for one in queue.told:
         newest[str(one.get("key"))] = one
-    return [one for one in newest.values() if one.get("delivery") in NOT_DELIVERED]
+    return list(newest.values())
+
+
+def message_of(record: dict) -> tuple:
+    """The message a `told` record is a send of: its `about`, `text` and `member`."""
+    return (record.get("about"), record.get("text"), tuple(record.get("member") or ()))
+
+
+def undelivered(queue: queue_file.Queue) -> list[dict]:
+    """The newest record of each send of a message no name received, oldest first: a
+    message any of whose sends reached a name is left out."""
+    newest = _newest(queue)
+    reached = {message_of(one) for one in newest
+               if one.get("delivery") not in NOT_DELIVERED}
+    return [one for one in newest if one.get("delivery") in NOT_DELIVERED
+            and message_of(one) not in reached]
+
+
+def sends_of(queue: queue_file.Queue, key: str) -> list[dict]:
+    """The newest record of each send of the message `key`, each send's key being
+    `<key>:<to>`, oldest first."""
+    return [one for one in _newest(queue) if str(one.get("key")).startswith(f"{key}:")]
 
 
 def trying(queue: queue_file.Queue) -> list[dict]:
-    """The messages still being tried: those whose newest record is `offline`."""
-    return [one for one in undelivered(queue) if one.get("delivery") == OFFLINE]
+    """The sends still being tried: those whose newest record is `offline`."""
+    return [one for one in _newest(queue) if one.get("delivery") == OFFLINE]
 
 
 class Teller:
@@ -93,6 +120,23 @@ class Teller:
                  say: Callable[[str], None] = print):
         self.repo, self.env, self.clock, self.say = repo, env, clock, say
         self.comms = comms_api() if comms is LOAD else comms
+
+    def can_receive(self, name: str) -> bool:
+        """Whether comms reads `name` held by a running session; a name comms does not
+        take, a read that raises, or no comms reads as no."""
+        if self.comms is None:
+            return False
+        try:
+            return str(self.comms.identity_state(name).state) == HELD
+        except UnfencedTest:
+            raise
+        except Exception:  # noqa: BLE001  (a read that raises reads as no)
+            return False
+
+    def record_of(self, key: str) -> dict | None:
+        """The newest record of the send `key`, None when there is none."""
+        return next((one for one in reversed(queue_file.read(self.repo, self.env).told)
+                     if one.get("key") == key), None)
 
     def tell(self, to: str | None, about: str, key: str, text: str, *,
              why_nobody: str = "", **fields) -> dict | None:
@@ -133,31 +177,36 @@ class Teller:
         why = f"{code}: {words}" if code and words != code else words
         return self.record(key, to, about, text, REFUSED, why=why, **fields)
 
-    def retry(self, *, reread: Callable[[dict, dict], str | None] | None = None) -> None:
+    def retry(self, *,
+              reread: Callable[[dict, dict], str | None] | None = None) -> list[dict]:
         """Try again each message comms could not take, until `UNSENT_S` after its first
         try; past that it is recorded `unsent` and no longer tried. `reread(record,
         fields)`, before each try, reads again what the message depends on: it updates
         the `fields` the try is recorded with, and gives why the message is no longer
-        owed (recorded `unsent`, not tried again), or None to try it."""
+        owed (recorded `unsent`, not tried again), or None to try it. The `unsent`
+        records this wrote, oldest first."""
+        ended: list[dict] = []
         if self.comms is None:
-            return
+            return ended
         for one in trying(queue_file.read(self.repo, self.env)):
             first_s = float(one.get("first_s") or 0)
             fields = {name: value for name, value in one.items()
                       if name not in ("event", "at", "key", "to", "about", "text",
                                       "delivery", "why", "first_s", "message_id")}
             if self.clock() - first_s >= UNSENT_S:
-                self.record(one["key"], one.get("to"), one.get("about"), one.get("text"),
-                            UNSENT, why=f"comms could not take it for {int(UNSENT_S)} s: "
-                            f"{one.get('why')}", **fields)
+                ended.append(self.record(
+                    one["key"], one.get("to"), one.get("about"), one.get("text"), UNSENT,
+                    why=f"comms could not take it for {int(UNSENT_S)} s: {one.get('why')}",
+                    **fields))
                 continue
             gone = None if reread is None else reread(one, fields)
             if gone is not None:
-                self.record(one["key"], one.get("to"), one.get("about"), one.get("text"),
-                            UNSENT, why=gone, **fields)
+                ended.append(self.record(one["key"], one.get("to"), one.get("about"),
+                                         one.get("text"), UNSENT, why=gone, **fields))
                 continue
             self.send(one["key"], one["to"], one.get("about"), one.get("text"),
                       first_s=first_s, **fields)
+        return ended
 
     def record(self, key: str, to: str | None, about: str, text: str, delivery: str,
                **fields) -> dict:
@@ -173,5 +222,5 @@ class Teller:
 
 
 __all__ = ["MODULE", "SENDER", "UNSENT_S", "OFFLINE", "UNSENT", "REFUSED", "ERROR",
-           "NOBODY", "NOT_DELIVERED", "LOAD", "comms_api", "undelivered", "trying",
-           "Teller"]
+           "NOBODY", "NOT_DELIVERED", "HELD", "LOAD", "comms_api", "message_of",
+           "undelivered", "sends_of", "trying", "Teller"]

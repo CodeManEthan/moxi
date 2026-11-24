@@ -175,8 +175,9 @@ the build's worktree, which must be clean with the build's branch checked out, o
 build that has work, with no shell, stdin closed, no `GIT_` variable, its output in
 `check-<n>.log` in the build's scratch folder, and its whole process tree ended at the
 check's `timeout_s` (or `--timeout-s`, else 3600 s): SIGINT, then SIGKILL 30 s later.
-One check runs at a time on the machine: a run waits for the check lock another holds,
-or with `--no-wait` is refused. The run is recorded with its commit, that
+One check runs at a time on the machine: a run waits in line for the check lock, taking
+it in the order the runs asked, or with `--no-wait` is refused while another holds it or
+waits for it. The run is recorded with its commit, that
 commit's merge-base with the target, the argv as it ran, its exit code and its
 duration; when the tip moved or the worktree changed while it ran, nothing is
 recorded. Run with no round in a build's worktree, it checks that build. A check
@@ -373,6 +374,13 @@ def _declare_open(verbs) -> None:
                         help="the agent who leads the round: letters, digits, . _ -, "
                              "and at most one @scope (default: none of its own, so the "
                              "round reads its project's lead)")
+    parser.add_argument("--checklist", metavar="LIST|none",
+                        help="for a flow with no design step, the checklist items that "
+                             "apply, as public-surface,proj-b:core-code: a bare id for "
+                             "an item of the round's project, <key>:<id> for an item of "
+                             "another, such as the project the round will build in; "
+                             "none for no item. Required when the round's project has a "
+                             "checklist")
     _writes(parser)
 
 
@@ -381,7 +389,8 @@ def _open(args, out) -> int:
 
     opened = opening.open_round(args.round, description=args.description,
                                 by=_actor(args), flow=args.flow, record=args.record,
-                                inherits=_listed(args.inherits), lead=args.lead)
+                                inherits=_listed(args.inherits), lead=args.lead,
+                                checklist=_marked(args.checklist))
     steps = ", ".join(step["step"] for step in opened.steps) or "no steps"
     print(f"opened {opened.name}   flow {opened.flow} ({steps})", file=out)
     print(f"folder: {opened.round_dir}", file=out)
@@ -389,10 +398,30 @@ def _open(args, out) -> int:
         print(f"lead: {args.lead}", file=out)
     if opened.inherits:
         print(f"inherits: {', '.join(opened.inherits)}", file=out)
+    if "marked" in opened.event:
+        print(f"checklist: {', '.join(opened.event['marked']) or 'none marked'}", file=out)
+    if opened.stepped is not None:
+        steps = ", ".join(step["step"] for step in opened.stepped["steps"]) or "no steps"
+        print(f"stepped up to {opened.stepped['flow']} ({steps}): the checklist marks "
+              f"{', '.join(opened.stepped['marked'])}", file=out)
     for line in _left(opened):
         print(line, file=out)
     _warn_of(opened.failed, args.prog, args.verb)
     return codes.OK
+
+
+def _marked(text: str | None) -> tuple[str, ...] | None:
+    """The marks `--checklist` gives: () for none; None when it was not given."""
+    from . import checklist
+    from .errors import BadArgument
+
+    if text is None:
+        return None
+    marks = checklist.parse(text)
+    if marks is None:
+        raise BadArgument("--checklist names no item",
+                          "give the marks, as --checklist public-surface, or none")
+    return marks
 
 
 def _listed(text: str | None) -> list[str] | None:
@@ -1417,15 +1446,16 @@ def _declare_check(verbs) -> None:
                       help="run the command step NAME of the round's flow, a step of "
                            "your own, in place of the repo's check")
     form.add_argument("--full", action="store_true",
-                      help="in a repo that declares ci, run the repo's declared check in "
-                           "place of reading CI")
+                      help="run the repo's declared check (check.command): in a repo "
+                           "that declares ci, in place of reading CI; in a queue "
+                           "project, in place of the scoped one")
     parser.add_argument("--timeout-s", metavar="N", type=float, dest="timeout_s",
                         help="end the run's whole process tree after N seconds, in place "
                              "of the check's or the step's own timeout_s (3600 when "
                              "neither is set)")
     parser.add_argument("--no-wait", action="store_true", dest="no_wait",
                         help="refuse at once when another check on this machine holds "
-                             "the check lock, in place of waiting for it")
+                             "or waits for the check lock, in place of waiting in line")
     _writes(parser)
 
 

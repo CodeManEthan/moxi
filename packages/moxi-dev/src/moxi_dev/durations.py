@@ -115,6 +115,17 @@ def load_held(path: Path) -> list[str]:
         if isinstance(held, list) else []
 
 
+def load_temp(path: Path) -> dict[str, Any] | None:
+    """Where a run kept its temp, as its `durations.json` records the kit's choice
+    (`moxi_dev.temp.Choice`); `None` when it records none or there is no file."""
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    chosen = data.get("temp") if isinstance(data, dict) else None
+    return chosen if isinstance(chosen, dict) else None
+
+
 def summarize(runs: Mapping[str, PackageRun]) -> Summary:
     times = sorted((test_seconds(entry) for run in runs.values()
                     for entry in run.tests.values()), reverse=True)

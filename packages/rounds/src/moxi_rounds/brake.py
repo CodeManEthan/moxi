@@ -218,7 +218,8 @@ def settled(state: states.State) -> frozenset[str]:
 def differences(before: dict, current: dict, *, settled=()) -> list[str]:
     """Where what the gates read differs between two versions' declarations, each as
     a line: a question or a stage that only one of them has, a question that holds up
-    other stages, a stage that builds elsewhere or waits for other stages. A
+    other stages, a stage that builds elsewhere or waits for other stages, and the
+    checklist marks, compared as a set, a version with none reading as none. A
     question's sentence, its options, a stage's slices and what else a block declares
     are read by no gate and are not compared. Neither is a question of `settled`, the
     ids the record holds as ruled or withdrawn, that the newer block left out: a
@@ -249,6 +250,11 @@ def differences(before: dict, current: dict, *, settled=()) -> list[str]:
             if after != waits:
                 found.append(f"{one} waited for {', '.join(sorted(after)) or 'nothing'} "
                              f"and now waits for {', '.join(sorted(waits)) or 'nothing'}")
+    # A version frozen with no checklist key marks none.
+    was, now = (set(entry.get("checklist") or ()) for entry in (before, current))
+    if was != now:
+        found.append(f"the checklist marks changed from {', '.join(sorted(was)) or 'none'} "
+                     f"to {', '.join(sorted(now)) or 'none'}")
     return found
 
 

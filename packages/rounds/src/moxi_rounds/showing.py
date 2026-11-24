@@ -7,7 +7,9 @@ lines (`as_text`) or as data (`as_json`), both from the same reading.
 
 A round is shown with what it is for, its status, its lead (its own, else its
 project's, `leads.of`), the name of the flow it follows now and the steps recorded for
-it, the skips that stand, the newest frozen version of its
+it, the checklist marks it made and where they come from (the opening or a frozen
+version, `checklist.marks_of`) when it marked any or a project it is weighed against has
+a checklist (`checklist.is_said`), the skips that stand, the newest frozen version of its
 design with what that version took away, and its stages; then its records, a section
 for each kind: its questions by state, each with who asked it and when; its own rulings, each with its pointer and whether
 the operator was shown it; and its history, every event, oldest first.
@@ -55,8 +57,8 @@ from pathlib import Path
 
 from moxi import store
 
-from . import (builds, checking, ci, closing, decisions, drift, findings, finish_actions,
-               folders,
+from . import (builds, checking, checklist, ci, closing, decisions, drift, findings,
+               finish_actions, folders,
                index, leads, log, numbers,
                open_builds, places, questions, shown, sizing, skips, steps, tracing,
                versions, waits)
@@ -299,6 +301,10 @@ def history_of(event: dict) -> str | None:
     of = event.get("id") or ",".join(event.get("ids") or ()) or event.get("stage")
     if event.get("type") == "flow.changed":
         of = f"{event.get('was')} to {event.get('flow')}, by {event.get('by')}"
+        if isinstance(event.get("marked"), list):
+            of = (f"flow {event.get('was')} -> {event.get('flow')}, by the "
+                  f"{event.get('by')} at its opening, for the checklist marks "
+                  f"{', '.join(map(str, event['marked']))}")
     if event.get("type") == leads.CHANGED:
         of = f"{event.get('was') or 'none'} to {event.get('lead')}"
     if event.get("type") == "stage.changed" and isinstance(of, str):
@@ -817,6 +823,7 @@ def _head(found: Shown) -> dict:
             "lead": leads.of(state, found.project_lead),
             "parent": state.parent, "inherits": list(state.inherits),
             "flow": state.flow, "steps": state.steps,
+            "checklist": _marks(state, found.project, settings),
             "step": None if at is None else at.data(),
             "close": (None if state.status != states.OPEN
                       else {"waits": list(closing.waits(
@@ -828,6 +835,24 @@ def _head(found: Shown) -> dict:
             "threads": _threads(state),
             "register_unreadable": (None if found.register_unreadable is None
                                     else found.register_unreadable.reason)}
+
+
+def _marks(state: states.State, home: str, settings) -> dict | None:
+    """The round's checklist marks and where they come from (`checklist.marks_of`);
+    None when it made none, or when it has no marks and no project it is weighed
+    against, a stage's repo included, has a checklist (`checklist.is_said`), as `next`
+    says nothing then."""
+    marks = checklist.marks_of(state)
+    repos = [stage.repo for stage in state.stages if stage.repo is not None]
+    if marks.source is None or not checklist.is_said(state, home, settings, repos=repos):
+        return None
+    return {"marked": list(marks.marked), "from": marks.source}
+
+
+def marks_line(marks: dict) -> str:
+    """The round's checklist marks as a line, with where they come from."""
+    source = "the opening" if marks["from"] == "opening" else marks["from"]
+    return f"{', '.join(marks['marked']) or 'none marked'} (from {source})"
 
 
 def step_lines(step: dict | None) -> list[str]:
@@ -1058,6 +1083,8 @@ def as_text(found: Shown) -> str:
         lines.append(f"parent: {shown_as['parent']}")
     if shown_as["inherits"]:
         lines.append(f"inherits: {', '.join(shown_as['inherits'])}")
+    if shown_as["checklist"] is not None:
+        lines.append(f"checklist: {marks_line(shown_as['checklist'])}")
     if shown_as["ended"] is not None:
         lines.append(f"ended: {ended_line(shown_as['ended'])}")
         lines += [f"  {decisions.left_open_line(one)}"
@@ -1076,7 +1103,7 @@ def as_text(found: Shown) -> str:
 
 
 __all__ = ["ci_line", "Shown", "Section", "SECTIONS", "show", "data", "as_json", "as_text",
-           "ended_line", "lead_line", "skip_line", "stage_line", "build_line", "build_verdict_line",
+           "ended_line", "lead_line", "skip_line", "marks_line", "stage_line", "build_line", "build_verdict_line",
            "finding_line", "drift_line", "step_lines", "version_lines", "thread_line",
            "verdict_lines", "history_of", "repair_of", "repair_line", "check_run",
            "ci_read", "build_verdict", "command_steps", "finish_actions_of"]

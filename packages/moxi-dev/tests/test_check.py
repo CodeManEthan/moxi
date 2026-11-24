@@ -7,6 +7,7 @@ real thing once.
 
 from __future__ import annotations
 
+import dataclasses
 import json
 import os
 import re
@@ -22,7 +23,7 @@ from pathlib import Path
 import pytest
 from moxi import proc
 
-from moxi_dev import check, testing
+from moxi_dev import check, temp, testing
 from moxi_dev.testing import wait_for
 from test_release import METADATA, release_files
 
@@ -1137,7 +1138,7 @@ def test_only_renames_reads_the_whole_tree_and_filters_printing(repo, monkeypatc
 # --- --static: the whole-tree static steps alone ------------------------------------------
 
 STATIC_NOT_RUN = ("| stamps not run | web not run | sync not run | lint not run | "
-                  "no suites run | timed not run | durations none |")
+                  "no suites run | timed not run | durations none | temp not run |")
 
 
 def test_static_runs_the_static_steps_and_nothing_else(repo, monkeypatch):
@@ -1247,6 +1248,7 @@ LINE = re.compile(
     r"timed (?P<timed>held \d+|none|not run) \| "
     r"(?P<durations>durations none|durations \d+\.\d+s, slowest 5% \d+%, delta "
     r"(none|[+-]\d+\.\d+s vs [0-9a-f]{12}( \([^)]+\))?)) \| "
+    r"(?P<temp>temp (disk|PYTEST_DEBUG_TEMPROOT|not run)( \([^|]+\))?) \| "
     r"total \d+\.\d+s \| exit (?P<code>\d)$")
 
 
@@ -1756,3 +1758,128 @@ def test_the_suites_drop_a_caller_s_left_out_tiers(repo):
     run_check(repo, runs, full=True,
               env={"PATH": "/usr/bin", testing.LEAVE_OUT_ENV: "slow"})
     assert all(testing.LEAVE_OUT_ENV not in env for _, _, _, env in pytest_calls(runs))
+
+
+# --- where the suites keep their temp --------------------------------------------------
+
+@pytest.fixture
+def fake_temp(tmp_path, monkeypatch):
+    """A Linux machine for moxi_dev.temp: a disk root on ext4 and a RAM root on tmpfs."""
+    disk, ram = tmp_path / "disk", tmp_path / "shm"
+    disk.mkdir()
+    ram.mkdir()
+    mounts = tmp_path / "mountinfo"
+    mounts.write_text(f"1 0 0:1 / / rw - ext4 ext4 rw\n"
+                      f"2 1 0:2 / {os.path.realpath(disk)} rw - ext4 ext4 rw\n"
+                      f"3 1 0:3 / {os.path.realpath(ram)} rw - tmpfs tmpfs rw\n")
+    where = temp.Places(platform="linux", disk_root=str(disk), ram_root=str(ram),
+                        system_temp=str(disk), mountinfo=str(mounts))
+    monkeypatch.setattr(temp, "_PLACES", where)
+    return where
+
+
+def _suite_envs(runs):
+    return [env for cmd, _, env in runs.calls if "pytest" in cmd]
+
+
+def test_a_check_moves_ram_to_disk_for_its_suites(repo, fake_temp):
+    commit_file(repo, "packages/sessions/x.py")
+    runs = Runs()
+    result = run_check(repo, runs, env={"PATH": "/usr/bin", "MOXI_TEST_TEMP": "ram"})
+    envs = _suite_envs(runs)
+    assert envs and all(env["MOXI_TEST_TEMP"] == "disk" for env in envs)
+    assert "| temp disk (ram asked; a check keeps its temp on disk) |" in result.line()
+    assert LINE.match(result.line()), result.line()
+
+
+def test_a_check_leaves_ram_to_the_suites_off_linux(repo, fake_temp, monkeypatch):
+    monkeypatch.setattr(temp, "_PLACES", dataclasses.replace(fake_temp, platform="darwin"))
+    commit_file(repo, "packages/sessions/x.py")
+    runs = Runs()
+    result = run_check(repo, runs, env={"PATH": "/usr/bin", "MOXI_TEST_TEMP": "ram"})
+    assert all(env["MOXI_TEST_TEMP"] == "ram" for env in _suite_envs(runs))
+    assert "| temp disk (ram asked; no RAM filesystem on this system) |" in result.line()
+
+
+def test_a_check_moves_a_temproot_in_memory_to_disk(repo, fake_temp):
+    commit_file(repo, "packages/sessions/x.py")
+    runs = Runs()
+    given = {"PATH": "/usr/bin", "PYTEST_DEBUG_TEMPROOT": fake_temp.ram_root}
+    result = run_check(repo, runs, env=given)
+    for env in _suite_envs(runs):
+        assert env["MOXI_TEST_TEMP"] == "disk"
+        assert env["PYTEST_DEBUG_TEMPROOT"] == fake_temp.ram_root
+    assert (f"| temp disk (PYTEST_DEBUG_TEMPROOT={fake_temp.ram_root} is in memory; a "
+            "check keeps its temp on disk) |") in result.line()
+
+
+def test_a_check_passes_a_disk_choice_through(repo, fake_temp, tmp_path):
+    commit_file(repo, "packages/sessions/x.py")
+    scratch = fake_temp.disk_root + "/scratch"
+    os.mkdir(scratch)
+    for given, field in (({}, "temp disk"),
+                         ({"PYTEST_DEBUG_TEMPROOT": fake_temp.disk_root}, "temp disk"),
+                         ({"PYTEST_DEBUG_TEMPROOT": scratch}, "temp PYTEST_DEBUG_TEMPROOT"),
+                         ({"MOXI_TEST_TEMP": "disk"}, "temp disk")):
+        runs = Runs()
+        result = run_check(repo, runs, env={"PATH": "/usr/bin", **given})
+        for env in _suite_envs(runs):
+            assert env.get("MOXI_TEST_TEMP") == given.get("MOXI_TEST_TEMP")
+            assert env.get("PYTEST_DEBUG_TEMPROOT") == given.get("PYTEST_DEBUG_TEMPROOT")
+            assert not any(arg.startswith("--basetemp") for arg in runs.calls[0][0])
+        assert f"| {field} |" in result.line()
+
+
+def test_a_bad_setting_stops_the_check_and_still_sweeps(repo, fake_temp, capsys):
+    swept = []
+    result = run_check(repo, Runs(), env={"PATH": "/usr/bin", "MOXI_TEST_TEMP": "RAM"},
+                       sweep=lambda: swept.append(1) or temp.Swept())
+    assert result.code == 2 and result.lock == "not run"
+    assert "MOXI_TEST_TEMP must be disk or ram; it is 'RAM'" in capsys.readouterr().err
+    assert swept == [1]                                 # the end's sweep, by any path
+
+
+def test_static_reads_no_temp_setting_and_sweeps_nothing(repo, fake_temp):
+    def sweep():
+        pytest.fail("a run that starts no test swept")
+
+    result = run_check(repo, Runs(), static=True, sweep=sweep,
+                       env={"PATH": "/usr/bin", "MOXI_TEST_TEMP": "RAM"})
+    assert result.code == 0, "a bad MOXI_TEST_TEMP doesn't stop a run that makes no temp"
+    assert "| temp not run |" in result.line()
+
+
+def test_the_check_sweeps_at_its_start_after_each_suite_and_at_its_end(repo, capsys):
+    commit_file(repo, "packages/sessions/x.py")
+    runs = Runs({lambda cmd, cwd: "pytest" in cmd and cwd.name == "cache": -9})
+
+    def sweep():
+        runs.calls.append((["sweep"], Path("."), {}))
+        first = len([c for c in runs.calls if c[0] == ["sweep"]]) == 1
+        return temp.Swept(count=2, size=3 * 1024 ** 3) if first else temp.Swept()
+
+    result = run_check(repo, runs, sweep=sweep)
+    order = ["sweep" if cmd == ["sweep"] else cwd.name
+             for cmd, cwd, _ in runs.calls if cmd == ["sweep"] or "pytest" in cmd]
+    assert order == ["sweep", "sessions", "sweep", "cache", "sweep", "comms", "sweep",
+                     "sweep"]
+    assert result.code == 1                              # cache's suite died by a signal
+    assert ("moxi-dev check: removed 2 test temp dirs (3.0 GiB) left by runs that ended "
+            "without cleaning up") in capsys.readouterr().out
+
+
+def test_a_suite_in_memory_after_all_is_named_in_the_summary(repo):
+    commit_file(repo, "packages/sessions/x.py")
+
+    class Writing(Runs):
+        def __call__(self, cmd, cwd, env, /, *, timeout_s=None):
+            if "pytest" in cmd and cwd.name in ("sessions", "cache"):
+                chosen = {"mode": "disk", "root": "/tmp", "is_in_memory": True,
+                          "why": "/var/tmp is not writable"}
+                Path(env[testing.DURATIONS_ENV]).write_text(
+                    json.dumps({"format": 1, "tests": {}, "temp": chosen}))
+            return super().__call__(cmd, cwd, env, timeout_s=timeout_s)
+
+    result = run_check(repo, Writing())
+    assert ("| temp disk (2 suites in memory at /tmp: /var/tmp is not writable) |"
+            in result.line())

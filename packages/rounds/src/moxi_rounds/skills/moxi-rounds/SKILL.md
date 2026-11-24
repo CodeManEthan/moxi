@@ -10,6 +10,13 @@ check. For commands, run `moxi rounds next`: it prints the step, who does it, wh
 read and the command that completes it. Every refusal names its fix, and every verb has
 `--help`.
 
+A verifier's brief starts with the group `next` prints for its step, as a builder's
+starts with the commission block: it names the checklist items marked, their skills
+and the project's lines for verifiers. Mark what a design touches in its block's
+`checklist` key, `[]` for none; a round with no design step marks at its opening. The
+watched-paths guard, off until its switch is on, adds a line after a watched write and
+never refuses.
+
 ## The brake on design passes
 
 A design gets one full pass; every pass after it re-checks what changed. A second full

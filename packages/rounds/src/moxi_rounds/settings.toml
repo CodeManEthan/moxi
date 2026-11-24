@@ -153,10 +153,20 @@ label = "A leftover must sit unchanged for"
 line = "At least 1."
 unit = "hours"
 
+[watched_paths_guard.enabled]
+type = "bool"
+default = false
+doc = "Run the watched-paths guard, which turns enforces: an agent's write of a file a project's watched_paths match (Claude Code's Write or Edit, Codex's apply_patch) gets one line after it, naming the entry's note and the skills to load. It never refuses, and it sees no shell command's write and no OpenCode write. Naming rounds.watched-paths on turns' guards.run runs it too. Off, a project's watched_paths say nothing."
+read = "use"
+label = "Watched-paths guard"
+line = "Tells an agent when it writes a file a project's watched_paths name, with the skills to load. Off, nothing is said."
+common = true
+hurts = { when = "off", says = "turns this guard off", confirm = "From the next session start, resume, clear or compaction, no agent is told when it writes a watched path, unless turns' guards.run names rounds.watched-paths." }
+
 [projects]
 type = "table"
 default = {}
-doc = "Per-project tables, [projects.<key>]: any key of defaults, and the project's own dir, into, land, check, ci, finish, shared_paths, keep_branch, lock_ref, brief and private_files."
+doc = "Per-project tables, [projects.<key>]: any key of defaults, and the project's own dir, into, land, check, ci, finish, shared_paths, keep_branch, lock_ref, brief, private_files, checklist, watched_paths and verifier_brief."
 read = "use"
 label = "Each project's own settings"
-line = "[projects.<key>] tables: any key of defaults, and the project's own dir, into, land, check, finish, private_files and more."
+line = "[projects.<key>] tables: any key of defaults, and the project's own dir, into, land, check, finish, checklist, watched_paths, verifier_brief and more."

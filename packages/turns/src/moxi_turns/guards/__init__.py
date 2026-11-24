@@ -56,6 +56,9 @@ This module imports nothing beyond the standard library when it is imported, so 
 module that imports it pays for nothing else; the loader reaches the core only when it
 runs.
 
+`touched_files(call)` reads which files a write call touches, each a `TouchedFile`, so
+a judge that asks where a call writes need not parse a Codex patch itself.
+
 It also holds turns' own `GUARDS`, the three it ships (removal, no-nested-agents and
 question mode, each off by default), and `LISTENERS`, question mode's prompt reminder and
 the session id start line (`moxi_turns.startline`).
@@ -227,6 +230,93 @@ class Guard:
     def deadline(self, max_wait_ms: int = MAX_WAIT_MS) -> int:
         """The judge's bound in milliseconds, clamped to `max_wait_ms`."""
         return max(1, min(int(self.deadline_ms), int(max_wait_ms)))
+
+
+# -- the files a call touches ------------------------------------------------------------
+
+#: The kinds of `TouchedFile`: a whole write by a write tool, and each section kind of a
+#: Codex patch, an update with `*** Move to:` giving two.
+TOUCH_KINDS = ("write", "add", "update", "delete", "moved-from", "moved-to")
+
+#: Each write tool's path field and text field, per harness.
+_WRITE_FIELDS = {("claude", "Write"): ("file_path", "content"),
+                 ("claude", "Edit"): ("file_path", "new_string"),
+                 ("opencode", "write"): ("filePath", "content"),
+                 ("opencode", "edit"): ("filePath", "newString")}
+_PATCH_SECTION = re.compile(r"\*\*\* (Add File|Update File|Delete File|Move to): (.*)")
+_PATCH_KINDS = {"Add File": "add", "Update File": "update", "Delete File": "delete"}
+
+
+@dataclass(frozen=True)
+class TouchedFile:
+    """One file a tool call touches. `path` is as the call names it, never joined with
+    the call's `cwd`; `kind` is one of `TOUCH_KINDS`; `text` is what the call puts in the
+    file (a write's whole text or new string, a patch section's added lines joined by a
+    newline), `""` for a deletion."""
+
+    path: str
+    kind: str
+    text: str
+
+
+def touched_files(call: object) -> tuple[TouchedFile, ...]:
+    """The files `call` (a `ToolCall`) touches, in the call's order.
+
+    Claude Code's `Write` and `Edit` and OpenCode's `write` and `edit` give one `write`
+    entry. A Codex `apply_patch` gives one entry per section of its `command`: `add`,
+    `update` or `delete`, and an update with `*** Move to:` gives `moved-from` for its old
+    path and `moved-to` for the target, each with the section's added lines. A line of a
+    patch it does not place is skipped. A tool it does not know, or input of the wrong
+    shape, gives `()`. It never raises."""
+    try:
+        harness, tool = getattr(call, "harness", None), getattr(call, "tool", None)
+        tool_input = getattr(call, "input", None)
+        if not isinstance(tool_input, Mapping):
+            return ()
+        if (harness, tool) == ("codex", "apply_patch"):
+            return _patch_files(tool_input.get("command"))
+        fields = _WRITE_FIELDS.get((harness, tool))
+        if fields is None:
+            return ()
+        path, text = tool_input.get(fields[0]), tool_input.get(fields[1])
+        if not isinstance(path, str) or not path or not isinstance(text, str):
+            return ()
+        return (TouchedFile(path, "write", text),)
+    except Exception:  # noqa: BLE001 - a reader for guards, which must never break on one
+        return ()
+
+
+def _patch_files(command: object) -> tuple[TouchedFile, ...]:
+    if not isinstance(command, str):
+        return ()
+    # Each section: [kind, path, added lines, the Move to target or None].
+    sections: list[list] = []
+    current: list | None = None
+    for raw in command.split("\n"):
+        line = raw[:-1] if raw.endswith("\r") else raw
+        m = _PATCH_SECTION.match(line.strip())
+        if m:
+            what, path = m.group(1), m.group(2).strip()
+            if what == "Move to":
+                if current is not None and current[0] == "update" and current[3] is None \
+                        and path:
+                    current[3] = path
+                continue
+            current = [_PATCH_KINDS[what], path, [], None] if path else None
+            if current is not None:
+                sections.append(current)
+            continue
+        if current is not None and current[0] != "delete" and line.startswith("+"):
+            current[2].append(line[1:])
+    out: list[TouchedFile] = []
+    for kind, path, lines, moved_to in sections:
+        text = "\n".join(lines)
+        if moved_to is not None:
+            out += [TouchedFile(path, "moved-from", text),
+                    TouchedFile(moved_to, "moved-to", text)]
+        else:
+            out.append(TouchedFile(path, kind, text))
+    return tuple(out)
 
 
 # -- checks ------------------------------------------------------------------------------
@@ -838,5 +928,5 @@ __all__ = ["GROUP", "ON_KEY", "MAX_WAIT_KEY", "HARNESSES", "WHO", "WANTS", "ON_E
            "CODEX_ALIASES_VERSION", "FILE_SUFFIXES", "SOURCES", "Prompt", "ToolCall",
            "Allow", "Deny", "Guard", "Found", "On", "Problem", "Loaded", "SwitchReader",
            "SessionsReader", "regex_problem", "compile_match", "is_file_entry", "load",
-           "read_switch", "read_sessions",
+           "read_switch", "read_sessions", "TOUCH_KINDS", "TouchedFile", "touched_files",
            "judge_of", "REMOVAL_MATCH", "NO_NESTED_AGENTS_DENY", "GUARDS", "LISTENERS"]
