@@ -22,7 +22,10 @@ counts. Every other subagent's call is left alone.
   read (`plain_read`) whose every command starts with an entry of
   `subconscious.fork_commands`.
 - Every other call (writes, edits, agents, messages, MCP tools, other shell commands)
-  is refused with `READ_ONLY`.
+  is refused with `READ_ONLY`. That includes Claude Code's other shell tools: its
+  `PowerShell` tool (on Windows) parses a command by other rules than the POSIX ones
+  the plain-read test knows, so a command the test reads as one plain read could run
+  more there, and its `Monitor` tool runs a command in the background.
 
 Each call allowed is counted on the record, under the session's lock. A judge has
 `BUDGET_S` from its start, inside its guard's deadline: the wait for a `starting`

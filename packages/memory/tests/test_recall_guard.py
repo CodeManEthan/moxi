@@ -77,6 +77,15 @@ def test_a_fork_is_refused_everything_but_reads(tool, given):
     assert records.read(SESSION, record["recall"])["tools"] == 0
 
 
+@pytest.mark.parametrize("tool", ["PowerShell", "Monitor"])
+def test_bash_is_the_one_shell_tool_a_fork_may_read_with(tool):
+    assert recall_guard.SHELL == "Bash"
+    record = a_fork()
+    assert recall_guard.judge_call(call(tool, command="grep x f")) == Deny(
+        recall_guard.READ_ONLY)
+    assert records.read(SESSION, record["recall"])["tools"] == 0
+
+
 @pytest.mark.parametrize("fields", [
     {"state": "hurried"}, {"state": "lost"}, {"tools": 8}, {"at": 0.0}])
 def test_a_fork_past_its_limits_is_told_to_answer(fields):
