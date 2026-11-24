@@ -1,7 +1,7 @@
 {
   "name": "moxi-loadout-web",
   "private": true,
-  "description": "The loadout module's web sources: its page, and the drift block that counts the items that aren't ok.",
+  "description": "The loadout module's web sources: its page, the drift block that counts the items that aren't ok, and the facts it gives the Projects page.",
   "license": "MIT",
   "type": "module",
   "scripts": {

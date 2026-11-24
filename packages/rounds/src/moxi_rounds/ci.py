@@ -39,8 +39,8 @@ job's log with no `picked:` line) is a failed read (`ReadFailed`), and nothing i
 **The reading** (`reading`). A path's id is the `id` of the one `ids` object with that
 path; a path none names reads `absent`. Of the `status` objects whose
 `workflowDatabaseId` is that id and whose `headSha` is the tip, the newest by
-`createdAt`, the first listed on a tie, is the workflow's run; with none the workflow
-reads `absent`. A workflow read whole reads its run: `green` (completed, with success),
+`createdAt`, the first listed on a tie, is the workflow's run (`run_of`); with none the
+workflow reads `absent`. A workflow read whole reads its run: `green` (completed, with success),
 `pending` (not completed) or `red` (completed, with any other conclusion). A workflow
 read by its jobs reads each job it names from the first of the run's jobs with exactly
 that name, in the same words, and by each `matrix` pattern every other job whose name the
@@ -410,6 +410,24 @@ def _job_words(flow: Workflow, run: Mapping, jobs: Sequence[Mapping],
     return [one for one, _job in each], None if picks is None else list(picks[None])
 
 
+def run_of(flow: Workflow, ids: Mapping[str, object], runs: Sequence[Mapping],
+           tip: str) -> Mapping | None:
+    """The run `flow` is read by at `tip`: of the `runs` of its file's id (by `ids`)
+    whose `headSha` is `tip`, the newest by `createdAt`, the first listed on a tie; None
+    when there is none."""
+    if flow.path not in ids:
+        return None
+    wanted = ids[flow.path]
+    newest = None
+    for run in runs:
+        if run.get("workflowDatabaseId") != wanted or run.get("headSha") != tip:
+            continue
+        # The first listed wins a tie.
+        if newest is None or str(run.get("createdAt")) > str(newest.get("createdAt")):
+            newest = run
+    return newest
+
+
 def reading(workflows: Sequence[str | Workflow], ids: Mapping[str, object],
             runs: Sequence[Mapping], tip: str, *,
             jobs_of: Callable[[Mapping], Sequence[Mapping]] | None = None,
@@ -426,14 +444,7 @@ def reading(workflows: Sequence[str | Workflow], ids: Mapping[str, object],
     for flow in workflows:
         flow = flow if isinstance(flow, Workflow) else Workflow(flow)
         wanted = ids.get(flow.path)
-        at = [] if flow.path not in ids else [
-            run for run in runs
-            if run.get("workflowDatabaseId") == wanted and run.get("headSha") == tip]
-        newest = None
-        for run in at:
-            # The first listed wins a tie.
-            if newest is None or str(run.get("createdAt")) > str(newest.get("createdAt")):
-                newest = run
+        newest = run_of(flow, ids, runs, tip)
         one = {"path": flow.path, "id": wanted,
                "reading": ABSENT if newest is None else _word(newest),
                "url": None if newest is None else newest.get("url")}
@@ -477,7 +488,8 @@ def read_runs(found: Declared, *, values: Mapping[str, str], cwd,
               is_candidate: bool = False) -> tuple[Reading, tuple[dict, ...]]:
     """`read`'s reading, by the candidate's workflows with `is_candidate`
     (`Declared.candidate_workflows`), and the runs at the tip that each workflow read
-    (the newest of its file's runs there), as the `status` command printed them."""
+    (`run_of`: the newest of its file's runs there), as the `status` command printed
+    them."""
     status = tuple(checking.fill(found.status, values))
     ids = tuple(checking.fill(found.ids, values))
     runs = _runs(status, _json(status, cwd=cwd, timeout_s=found.status_timeout_s))
@@ -503,9 +515,13 @@ def read_runs(found: Declared, *, values: Mapping[str, str], cwd,
     flows = found.candidate_workflows if is_candidate else found.full_workflows
     each, whole = reading(flows, by_path, runs, values["tip"], jobs_of=jobs_of,
                           picked_of=picked_of)
-    urls = {one.get("url") for one in each if one.get("url")}
-    read_by = tuple(run for run in runs if run.get("url") in urls)
-    return Reading(values["tip"], status, ids, each, whole, tuple(jobs_argvs)), read_by
+    read_by: list[dict] = []
+    for flow in flows:
+        run = run_of(flow, by_path, runs, values["tip"])
+        if run is not None and not any(run is one for one in read_by):
+            read_by.append(run)
+    return (Reading(values["tip"], status, ids, each, whole, tuple(jobs_argvs)),
+            tuple(read_by))
 
 
 def picks_in(argv: Sequence[str], log: str) -> dict[str | None, list[str]]:
@@ -646,6 +662,7 @@ __all__ = ["READ", "LOCAL", "NONE", "STATUS", "IDS", "JOBS", "BRANCH", "STATUS_T
            "GREEN", "SKIPPED", "PENDING", "RED", "ABSENT", "Workflow", "Declared",
            "declared", "matches", "JOB", "PICK_LOG", "picks_in", "gh_repo",
            "ref_problem", "overlap_problem", "prefix_of", "ref_for", "RUN", "Now", "now_of",
-           "ReadFailed", "Reading", "reading", "read", "read_runs", "run_jobs", "newest",
+           "ReadFailed", "Reading", "run_of", "reading", "read", "read_runs", "run_jobs",
+           "newest",
            "why_not", "met",
            "LOCAL_JOB", "candidate_why_not"]

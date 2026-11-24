@@ -8,7 +8,8 @@ endpoint socket (`contracts/socket-protocol.md`).
 
 The tie rule: each plugin submit has one window, opened when the endpoint hands
 the runner its `submit` line and closed exactly once, at the first end it accepts: the
-runner's `submit.close` report (`resolve`, `drop` or `fail`), the runner's `submit.bound`
+runner's `submit.close` report (`resolve`, `drop`, `fail`, or `carried` for a held steer),
+the runner's `submit.bound`
 report while the prompt is not admitted, a report the runner could not deliver, the
 core's expiry, or the endpoint's own end. Inside the window the endpoint holds the events
 of the last main-loop turn whose `turn.start` was reported there; a later `turn.start`
@@ -19,7 +20,10 @@ releases the held one as the person's. At the close:
 - drop: a held turn is released; the delivery reads `Refused` with the reason the
   endpoint recorded, else the plugins' own code from the runner's report (`gone`,
   `unsupported`), else `dropped` for another plugin's drop;
-- fail: a held turn is released; the delivery reads `Lost` (`untied: …`).
+- fail: a held turn is released; the delivery reads `Lost` (`untied: …`);
+- carried: a held turn is released; the held steer, which the runner did not submit, goes
+  to the core's `on_steer_carried`, and reads `Lost` (`untied: …`) where that takes it
+  nowhere.
 
 The endpoint hands the next submit only once the window has closed. The ledger opens and
 closes turns on the reports at once; only the events and the delivery's answers wait.
@@ -77,7 +81,20 @@ origin's kind and `opens` (no main-loop turn was open in the runner), which go o
 window's delivery, whose `by` and `senders` the event carries.
 
 A steer reads `Started`, and its turn names it, once the runner reports `append.done`
-(`$.session.append` resolved without a deny); `append.failed` refuses it `idle`.
+(`$.session.append` resolved without a deny); `append.failed` refuses it `idle`. A steer
+the runner reports `append.held` (its turn ended before any request carried the note, and
+Claude Code holds the note for the next request) goes to the core's `on_steer_held`: it
+leaves its turn and opens one of its own. Its submit line carries `HELD_PROMPT` in place
+of its text, since Claude Code sends the held note beside that prompt, so the model reads
+the note once; the core hands the prompt listeners the steer's text as the prompt's. The
+line carries the steer's text as `note`, and the runner reads where the note stands before
+it submits: when another request carried it first, it submits nothing and closes the window
+`carried`; when the note is gone (a /clear or a compaction dropped it), it submits the
+steer's text in place of `HELD_PROMPT`. When it submitted `HELD_PROMPT` and no request of
+the turn that followed carried the note, it reports `append.held` for the steer again
+ahead of that turn's end, and the core opens one more turn for it, once
+(`on_steer_held`); that submit carries `note` too, so the runner reads again where the
+note stands.
 
 A fork goes to the runner on a `fork` line, and a fork's further round
 (`fork.continue`) on a `fork.continue` line naming the fork's agent id; neither holds a
@@ -134,6 +151,10 @@ LIVE_WAIT_S = 1.0
 PARENT_POLL_S = 0.5
 #: How many closed windows the endpoint remembers, to name a late entry's delivery.
 CLOSED_KEPT = 64
+#: The prompt of the turn a held steer opens. Claude Code sends the held note with the
+#: session's next request, beside this prompt, so the prompt does not repeat its text.
+HELD_PROMPT = ("A note came in as your last turn ended, after its last request, so it "
+               "comes with this prompt. Read it and act on it.")
 
 
 @dataclass
@@ -389,8 +410,11 @@ class ClaudeHarness(Harness):
                 if w is None:
                     return
                 d = w.spec
-            if self._lines.write({"op": leg.LINE_SUBMIT, "delivery": d.id,
-                                  "kind": w.kind, "text": d.text, "nonce": w.nonce}):
+            line = {"op": leg.LINE_SUBMIT, "delivery": d.id, "kind": w.kind,
+                    "text": HELD_PROMPT if d.kind == "steer" else d.text, "nonce": w.nonce}
+            if d.kind == "steer":
+                line["note"] = d.text
+            if self._lines.write(line):
                 return
             with self._lock:
                 if self._window is not w:
@@ -438,6 +462,10 @@ class ClaudeHarness(Harness):
                                else "dropped")
                 log.info("submit %s dropped%s: %s", w.delivery,
                          " by the gate" if refused_by_gate else "", reason)
+            elif end == leg.END_CARRIED:
+                if not ep.on_steer_carried(w.delivery):
+                    ep.lost(w.delivery, f"{LOST_UNTIED}: the runner submitted nothing, "
+                                        "and no turn carried the delivery")
             else:
                 ep.lost(w.delivery, f"{LOST_UNTIED}: the submit failed"
                                     + (f": {reason}" if reason else ""))
@@ -511,6 +539,10 @@ class ClaudeHarness(Harness):
             delivery = body.get("delivery")
             if isinstance(delivery, str):
                 ep.on_refused(delivery, "idle")
+        elif kind == leg.R_APPEND_HELD:
+            delivery = body.get("delivery")
+            if isinstance(delivery, str):
+                ep.on_steer_held(delivery)
         elif kind == leg.R_COMMAND_DONE:
             self._command_done(body)
         elif kind in (leg.R_FORK_STARTED, leg.R_FORK_DONE, leg.R_FORK_LOST):

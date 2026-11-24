@@ -13,9 +13,29 @@
 - The Claude runner's `/live` answer and the gate's readings send the subagent list's
   entries instead of a count, so a delivery's `refuse_agents`, a session command's
   subagent check and `facts.agents` count the judged list. The endpoint still reads an
-  older runner's or gate's integer count, unjudged. The gate is version 0.1.1.
+  older runner's or gate's integer count, unjudged. The gate is version 0.1.1 and the
+  runner 0.3.2, so `moxi install turns` updates an install at user scope.
 - `agents` entries gain `is_fork` (a fork of the main loop, which Claude Code lists as a
   subagent) and `last_write_at` (the newest write the judgment read).
+- On Claude Code, a steer that lands while the model writes its last answer no longer
+  waits for the next prompt. Claude Code holds such a note for the session's next
+  request when the turn makes no further one; the runner now reads that at the turn's end
+  and reports the steer held, and the steer opens a turn of its own, ahead of every queued
+  delivery. That turn's prompt is a short line saying a note came with it, since Claude
+  Code sends the held note beside it, so the model reads the note once; the session's
+  `prompt` listeners read the steer's text as the prompt's `text`. The steer's
+  `turn.steered` names the first turn, whose `turn.ended` no longer names it; the new
+  turn's `turn.started` and `turn.ended` name it as the delivery that opened it, and its
+  `ended` is that turn's end. When another turn's request carried the held note first
+  (the person's prompt, or a delivery that went ahead), the steer opens no turn: it joins
+  that turn as a steer while it runs, or ends with it once it has ended. When a /clear
+  or a compaction dropped the held note before the steer's turn, the steer's own text is
+  that turn's prompt, so the message is not lost. When no request of the steer's own
+  turn carried the held note (a compaction inside that turn's first request dropped it),
+  the runner reads that at the turn's end, and the steer opens one more turn, once, with
+  its own text as the prompt where the note is gone; the first turn's `turn.ended` then
+  does not name it. A steer a request carried ends with its turn as before. The runner is version 0.3.1, so
+  `moxi install turns` updates an install at user scope.
 - A new request, `fork {text, by, ref?}` (the client's `fork(text, by=, ref=)`), and a new
   capability, `fork`: start a fork of the session's main loop with `text` as its task. It
   runs beside the main loop's turns and holds no slot. Its `started` value carries the

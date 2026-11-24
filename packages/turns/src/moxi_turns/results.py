@@ -576,8 +576,10 @@ class SessionEvent:
       `is_error`, `point` (`after`, or `pre` where the harness has only a pre-tool point)
       and `record_path`, the file the harness writes this session's records to (None
       where it has none).
-    - On `prompt`: `text`, the prompt as the harness gave it; `origin`, its origin
-      kind (`composer`, `plugin`, ...), None where the harness gives none; and `own`,
+    - On `prompt`: `text`, the prompt as the harness gave it, except on the turn a
+      steer the harness held opens, where it is the steer's text (the harness's prompt
+      there only points at the text it holds); `origin`, its origin kind (`composer`,
+      `plugin`, ...), None where the harness gives none; and `own`,
       true when that origin is on turns' `prompt.own_origins`, so the person typed it;
       `delivery_by` and `delivery_senders`, the `by` and `senders` of the turns delivery
       that is this prompt, both None for a prompt turns did not hand in (`senders` an

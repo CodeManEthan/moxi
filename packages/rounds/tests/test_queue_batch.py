@@ -13,7 +13,7 @@ from pathlib import Path
 import pytest
 
 from moxi_rounds import (batching, checking, ci, commissioning, finishing, joining, log,
-                         opening, queue_ci, queue_file, queue_log, verdicts)
+                         opening, queue_ci, queue_file, queue_log, queue_view, verdicts)
 from moxi_rounds import state as states
 from moxi_rounds.cli import main
 from moxi_rounds.errors import Refused
@@ -26,14 +26,17 @@ SCOPED = shlex.join([sys.executable, "-c", "import sys; print(sys.argv)", "--bas
 
 
 class FakeCi:
-    """The candidate's CI: what it reads (`word` for a commit pushed as a candidate,
-    `main_word` for any other, `words` by commit, and `landed_word`, when set, for the
-    target's head as `main_of()` gives it; `read_full`, the target's full run, reads
-    `full_word` where it is set and else the same, and records the commit in
-    `full_reads`), what a push says
+    """The candidate's CI: what it reads (`word` for a commit pushed as a candidate, by
+    its run 101, `main_word` for any other, by run 201, `words` by commit, and
+    `landed_word`, when set, for the target's head as `main_of()` gives it, by run 202;
+    `read_full`, the target's full run, reads `full_word` by run 303 where it is set and
+    else the same, each commit it reads kept in `full_reads`), what a push says
     (`refusal`, None for a push that goes), the local run's exit code (`local_code`, or
     `local_codes` by commit), and a red run's failures (`failed`, or `failed_at` by
-    commit)."""
+    commit), each commit they are read at kept in `failure_reads`. While `going`, when
+    set, reads true, the run is unfinished as GitHub sees it: a rerun is refused
+    "already running" and a failure log read raises `ci.ReadFailed`; each rerun asked
+    for is kept in `reruns` either way."""
 
     def __init__(self):
         self.word = ci.GREEN
@@ -52,6 +55,8 @@ class FakeCi:
         self.locals: list[str] = []
         self.full_reads: list[str] = []
         self.full_word: str | None = None
+        self.failure_reads: list[str] = []
+        self.going = None
 
     def push(self, place, commit, ref):
         self.pushes.append((commit, ref))
@@ -73,22 +78,29 @@ class FakeCi:
         if self.landed_word is not None and self.main_of is not None \
                 and commit == self.main_of() and commit not in self.words:
             return queue_ci.Read(self.landed_word, ("202",))
-        if commit in self.words:
-            return queue_ci.Read(self.words[commit], ("101",))
         candidate = any(pushed == commit and "queue-" in ref for pushed, ref in self.pushes)
-        return queue_ci.Read(self.word if candidate else self.main_word, ("101",))
+        runs = ("101",) if candidate else ("201",)
+        if commit in self.words:
+            return queue_ci.Read(self.words[commit], runs)
+        return queue_ci.Read(self.word if candidate else self.main_word, runs)
 
     def read_full(self, place, commit):
         self.full_reads.append(commit)
         if self.full_word is not None:
             return queue_ci.Read(self.full_word, ("303",))
-        return self.read(place, commit)
+        return FakeCi.read(self, place, commit)
 
     def failures(self, place, commit, read):
+        self.failure_reads.append(commit)
+        if self.going is not None and self.going():
+            raise ci.ReadFailed(["gh", "run", "view", "--log-failed"], "exited 1")
         return [dict(one) for one in self.failed_at.get(commit, self.failed)]
 
     def rerun(self, place, runs, *, failed):
         self.reruns.append((tuple(runs), failed))
+        if self.going is not None and self.going():
+            return queue_ci.Said(1, f"run {runs[0]} cannot be rerun; This workflow is "
+                                 "already running")
         return queue_ci.Said(0, "")
 
 
@@ -640,6 +652,169 @@ def test_a_failed_read_is_tried_again_and_pauses_the_queue_after_too_many(
     assert "no network" in queue().paused
 
 
+# -- a run still running -----------------------------------------------------------------
+
+class Runs:
+    """What `status` and `jobs` print, stood in for so a real `queue_ci.QueueCi` reads
+    it: one run, `id` (101), of a workflow read by its jobs `linux` and `web`, at
+    whatever commit is read. It starts going, `linux` failed and `web` still running."""
+
+    WORKFLOW = ci.Workflow("ci.yml", ("linux", "web"))
+
+    def __init__(self):
+        self.id = 101
+        self.restart()
+
+    def restart(self) -> None:
+        self.status, self.conclusion = "in_progress", ""
+        self.jobs = [{"name": "linux", "status": "completed", "conclusion": "failure"},
+                     {"name": "web", "status": "in_progress", "conclusion": ""}]
+
+    def finish(self) -> None:
+        self.status, self.conclusion = "completed", "failure"
+        self.jobs[1] = {"name": "web", "status": "completed", "conclusion": "success"}
+
+    def green_going(self) -> None:
+        """The run goes on, both jobs it is read by green and a job it is not read by,
+        `macos`, still running."""
+        self.status, self.conclusion = "in_progress", ""
+        self.jobs = [{"name": name, "status": "completed", "conclusion": "success"}
+                     for name in ("linux", "web")]
+        self.jobs.append({"name": "macos", "status": "in_progress", "conclusion": ""})
+
+    def read_runs(self, found, *, values, cwd, is_candidate=False):
+        run = {"databaseId": self.id, "workflowDatabaseId": 11, "headSha": values["tip"],
+               "status": self.status, "conclusion": self.conclusion,
+               "createdAt": "2026-11-01T10:00:00Z"}
+        each, whole = ci.reading([self.WORKFLOW], {"ci.yml": 11}, [run], values["tip"],
+                                 jobs_of=lambda _run: self.jobs)
+        return ci.Reading(values["tip"], (), (), each, whole), (run,)
+
+
+def read_through_queue_ci(fake, monkeypatch, *, main: bool = False) -> Runs:
+    """Read the candidate's CI (and, with `main`, the target's full run) through a real
+    `queue_ci.QueueCi` over `Runs`; the rest of `fake` stays."""
+    runs = Runs()
+    monkeypatch.setattr(ci, "read_runs", runs.read_runs)
+    real = queue_ci.QueueCi(ci.Declared(
+        workflows=(Runs.WORKFLOW,), local=None, local_timeout_s=None, remote=None,
+        status=(), ids=(), status_timeout_s=1), local_log=Path("local.log"))
+    fake.read = real.read
+    fake.going = lambda: runs.status != "completed"
+    if main:
+        fake.read_full = real.read_full
+    return runs
+
+
+def read_events() -> list[dict]:
+    return [one for one in queue().batches[-1].runs if one.get("kind") == batching.READ]
+
+
+def test_a_red_job_in_a_running_run_reads_pending_and_nothing_is_rerun(
+        repo, ready, fake, lander_pass, monkeypatch):
+    ready()
+    read_through_queue_ci(fake, monkeypatch)
+    lander_pass()
+    said = lander_pass()
+    assert fake.reruns == [] and fake.failure_reads == []
+    kinds = [one.get("kind") for one in queue().batches[-1].runs]
+    assert batching.READ_FAILED not in kinds and batching.RERUN not in kinds
+    assert [(one["reading"], one["running"]) for one in read_events()] == [
+        (ci.PENDING, ["101"])]
+    batch = queue().batches[-1].id
+    assert (f"lander of proj-a: batch {batch}: run 101 is still running; waiting for it "
+            "to end") in said
+
+
+def test_a_run_green_on_the_jobs_it_is_read_by_lands_while_other_jobs_go(
+        repo, ready, fake, lander_pass, monkeypatch):
+    ready()
+    read_through_queue_ci(fake, monkeypatch).green_going()
+    lander_pass()
+    said = lander_pass()
+    assert queue().member(ROUND, "B1").state == queue_file.LANDED
+    assert [(one["reading"], one.get("running")) for one in read_events()] == [
+        (ci.GREEN, None)]
+    assert not any("still running" in line for line in said)
+
+
+def test_a_running_candidate_never_counts_toward_the_read_fails(
+        repo, ready, fake, lander_pass, monkeypatch):
+    # GitHub refuses a rerun and a failure log while a run goes: neither is asked for.
+    ready()
+    fake.failed = [IN_SCOPED]
+    read_through_queue_ci(fake, monkeypatch)
+    for now in range(batching.READ_FAILS_MAX + 2):
+        said = lander_pass(float(now))
+    assert queue().paused is None and queue().running() is not None
+    assert fake.reruns == [] and fake.failure_reads == []
+    assert len(read_events()) == 1 and not any("still running" in line for line in said)
+
+
+def test_the_red_path_runs_once_the_run_has_finished(
+        repo, ready, fake, lander_pass, monkeypatch):
+    ready()
+    fake.failed = [IN_SCOPED]
+    runs = read_through_queue_ci(fake, monkeypatch)
+    lander_pass(0.0)
+    lander_pass(0.0)
+    assert fake.reruns == []
+    runs.finish()
+    lander_pass(0.0)
+    assert fake.reruns == [(("101",), True)] and fake.failure_reads == []
+    lander_pass(batching.ABSENT_S)
+    candidate = str(queue().batches[-1].candidate)
+    assert fake.failure_reads == [candidate]
+    assert [one["reading"] for one in read_events()] == [ci.PENDING, ci.RED]
+    assert "running" not in read_events()[-1]
+
+
+def test_a_rerun_read_while_running_is_not_over(repo, ready, fake, lander_pass,
+                                                monkeypatch):
+    ready()
+    fake.failed = [IN_SCOPED]
+    runs = read_through_queue_ci(fake, monkeypatch)
+    lander_pass(0.0)
+    runs.finish()
+    lander_pass(0.0)
+    assert fake.reruns == [(("101",), True)]
+    runs.restart()
+    lander_pass(1.0)
+    lander_pass(2.0)
+    # the rerun goes, its linux job red already: pending, and no failures read
+    assert read_events()[-1]["reading"] == ci.PENDING and fake.failure_reads == []
+    assert fake.reruns == [(("101",), True)]
+    runs.finish()
+    lander_pass(3.0)
+    assert fake.failure_reads == [str(queue().batches[-1].candidate)]
+
+
+def test_the_queue_says_a_run_is_still_running():
+    main, head = "m" * 40, "h" * 40
+    batch = {"event": queue_file.BATCH, "state": queue_file.BUILT, "id": "mmm-1", "n": 1,
+             "main": main, "branch": "queue-mmm-1", "candidate": "c" * 40,
+             "members": [{"round": ROUND, "stage": "B1", "tip": "t" * 40}]}
+    read = {"event": queue_file.RUN, "batch": "mmm-1", "kind": batching.READ,
+            "reading": ci.PENDING, "runs": ["101"], "running": ["101"],
+            "at": "2026-11-23T10:00:00Z"}
+    head_read = {"event": queue_file.RUN, "head": head, "kind": batching.READ,
+                 "reading": ci.PENDING, "runs": ["202", "203"], "running": ["202", "203"],
+                 "at": "2026-11-23T10:05:00Z"}
+    said = queue_view.lines(queue_file.fold("proj-a", [batch, read, head_read]),
+                            lander_runs=True)
+    assert (f"batch mmm-1 on {main[:12]}: 1 member(s), CI still running: run 101, since "
+            "2026-11-23T10:00:00Z") in said
+    assert (f"main's full run at {head[:12]}: still running: run 202, 203, since "
+            "2026-11-23T10:05:00Z") in said
+    # an old read event with no running field reads as before; a head read since is not
+    old = {key: value for key, value in read.items() if key != "running"}
+    green = {"event": queue_file.GREEN, "head": head, "run": ["202"]}
+    said = queue_view.lines(queue_file.fold("proj-a", [batch, old, head_read, green]),
+                            lander_runs=True)
+    assert f"batch mmm-1 on {main[:12]}: 1 member(s), CI pending" in said
+    assert not any("still running" in line for line in said)
+
+
 # -- the landing re-read drops a member a gate now holds -----------------------------------
 
 def _gains_a_finding(tree, tmp_path):
@@ -705,7 +880,8 @@ def test_a_failure_mains_run_at_m_has_blames_no_member_and_lands_excused(
     lander_pass(0.0)
     lander_pass(0.0)
     # main's own run at M is read and rerun from the first pass, beside the candidate's
-    assert fake.reruns == [(("101",), True)] * 2 and queue().running() is not None
+    assert sorted(fake.reruns) == [(("101",), True), (("201",), True)]
+    assert queue().running() is not None
     lander_pass(batching.ABSENT_S)
     assert queue().main_at(main_head)["failures"] == [IN_LINUX]
     assert queue().member(ROUND, "B1").state == queue_file.LANDED
