@@ -16,6 +16,9 @@ record holds, never on a fresh read of memory's config:
 3. It runs the first search and writes the fork's brief (`moxi_memory.recall_brief`),
    noting the hit count and whether the search went past the project on the line, and
    the brief on the record.
+4. It runs the recall's stream through its route (`moxi_memory.recall_stream`): the
+   brief as the first round, later rounds while the stream lasts, each round settled
+   on the line and acked to turns, and the record ended.
 
 It exits 0 when the recall ran to an end, 2 for arguments or a record it can't use.
 """
@@ -116,7 +119,7 @@ def write_brief(recall: Recall, *, search=None, places=None) -> str:
     return text_brief
 
 
-def run(session_id: str, recall_id: str) -> int:
+def run(session_id: str, recall_id: str, *, route=None) -> int:
     """The child's whole run. See the module's docstring."""
     record = records.read(session_id, recall_id)
     if record is None:
@@ -129,7 +132,19 @@ def run(session_id: str, recall_id: str) -> int:
     if error is not None:
         lose(recall, CONFIG, error)
         return 0
-    write_brief(recall)
+    text_brief = write_brief(recall)
+    from . import recall_stream
+
+    if route is None:
+        from . import recall_route
+
+        route = recall_route.for_recall(recall)
+    try:
+        recall_stream.run(recall, route, text_brief)
+    finally:
+        close = getattr(route, "close", None)
+        if close is not None:
+            close()
     return 0
 
 
