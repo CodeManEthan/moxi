@@ -4,13 +4,13 @@ from __future__ import annotations
 
 import dataclasses
 import os
-import signal
 import time
 import types
 
+import psutil
 import pytest
 
-from moxi_dev.testing import PROC_WAIT_S, toml_string
+from moxi_dev.testing import PROC_WAIT_S, console_script, toml_string
 import moxi_turns as turns
 from fake_harness import FakeHarness
 import listener_targets
@@ -533,8 +533,9 @@ def test_the_start_plan_reads_the_list_shares_and_file_sizes_and_runs_nothing(
     installed["entries"] = [Entry("comms", [("start", "listener_targets:comms")]),
                             Entry("launcher", [("start", "listener_targets:cache")]),
                             Entry("cache", [("start", "listener_targets:cache")])]
-    write_config(turns_env, f'[start]\norder = ["launcher", "{brief}", "comms", "notes", '
-                            f'"comms", "{tmp_path / "gone.md"}"]\nlimit_chars = 0\n')
+    write_config(turns_env, f'[start]\norder = ["launcher", {toml_string(brief)}, "comms", '
+                            f'"notes", "comms", {toml_string(tmp_path / "gone.md")}]\n'
+                            'limit_chars = 0\n')
     got = turns.start_plan("claude")
     assert isinstance(got, turns.StartPlan)
     assert (got.harness, got.total, got.limit, got.ceiling) == ("claude", 9500, 0, 9500)
@@ -595,26 +596,26 @@ def test_the_start_plan_refuses_a_harness_turns_does_not_know():
 # -- run entries ---------------------------------------------------------------------------
 
 def _program(tmp_path, name, body):
-    """An executable Python script at tmp_path/name; `body` is its code after the imports."""
-    import sys
-
-    path = tmp_path / name
-    path.write_text(f"#!{sys.executable}\nimport json, os, subprocess, sys, time\n{body}\n")
-    path.chmod(0o755)
-    return path
+    """A program in tmp_path that runs Python; `body` is its code after the imports. Its
+    path is the one returned (`name.exe` on Windows). It ends its lines with `\\n` on
+    every system, so what it prints reads the same everywhere."""
+    return console_script(tmp_path, name, (
+        "import json, os, subprocess, sys, time\n"
+        "sys.stdout.reconfigure(newline='\\n')\n"
+        # A child that outlives it: a session of its own, or on Windows out of its job.
+        "AWAY = ({'start_new_session': True} if os.name == 'posix' else\n"
+        "        {'creationflags': subprocess.DETACHED_PROCESS\n"
+        "         | subprocess.CREATE_BREAKAWAY_FROM_JOB})\n"
+        "SLEEP = [sys.executable, '-c', 'import time; time.sleep(30)']\n"
+        f"{body}\n"))
 
 
 def _alive(pid):
-    try:
-        os.kill(pid, 0)
-    except ProcessLookupError:
-        return False
     # A killed child of the program is a zombie until init reaps it.
     try:
-        with open(f"/proc/{pid}/stat") as fh:
-            return fh.read().split(") ", 1)[1][0] != "Z"
-    except OSError:
-        return True
+        return psutil.Process(pid).status() != psutil.STATUS_ZOMBIE
+    except psutil.Error:
+        return False
 
 
 def test_the_run_test_comes_before_the_file_test():
@@ -628,7 +629,9 @@ def test_a_run_entry_adds_its_output_on_exit_0_and_gets_the_starts_facts(tmp_pat
     prog = _program(tmp_path, "facts", (
         "facts = json.load(sys.stdin)\n"
         "print(sys.argv[1], facts['harness'], facts['session_id'], facts['source'],\n"
-        "      facts['cwd'] == os.getcwd(), os.environ.get('HOME'), os.getpgrp() == os.getpid())"))
+        "      facts['cwd'] == os.getcwd(), os.environ.get('HOME'),\n"
+        # Windows has no process group to read: turns starts it in a new one there too.
+        "      os.getpgrp() == os.getpid() if hasattr(os, 'getpgrp') else True)"))
     reg = registry(Entry("comms", [("start", "listener_targets:comms")]),
                    order=("comms", f"run:{prog}"))
     for source in ("startup", "resume", "clear", "compact"):
@@ -638,8 +641,9 @@ def test_a_run_entry_adds_its_output_on_exit_0_and_gets_the_starts_facts(tmp_pat
 
 def test_a_run_entry_with_a_home_path_is_expanded(tmp_path, monkeypatch):
     monkeypatch.setenv("HOME", str(tmp_path))
-    _program(tmp_path, "hello", "print('hello')")
-    reg = registry(order=("run:~/hello",))
+    monkeypatch.setenv("USERPROFILE", str(tmp_path))      # what `~` reads on Windows
+    hello = _program(tmp_path, "hello", "print('hello')")
+    reg = registry(order=(f"run:~/{hello.name}",))
     assert listeners.ask(reg, event("start", source="startup"), 5.0) == "hello\n"
 
 
@@ -665,15 +669,23 @@ def test_a_failing_missing_unrunnable_or_non_utf8_run_entry_adds_nothing(tmp_pat
     assert len(logged) == 5                     # each bad entry once per endpoint
     assert any("exited with 3" in m for m in logged)
     assert any("not UTF-8" in m for m in logged)
-    assert dict(listeners.plan(reg).skipped) == {
-        f"run:{plain}": "is not executable", f"run:{missing}": "does not exist",
-        "run:relative/prog": "not an absolute path; write it from / or ~"}
+    skipped = {f"run:{missing}": "does not exist",
+               "run:relative/prog": "not an absolute path; write it from / or ~"}
+    if os.name == "posix":
+        skipped[f"run:{plain}"] = "is not executable"
+    else:
+        # Windows has no execute bit: the file is run, and can't start.
+        assert any(m.startswith(f"start list entry run:{plain} adds nothing: it cannot start")
+                   for m in logged)
+    assert dict(listeners.plan(reg).skipped) == skipped
 
 
+@pytest.mark.skipif(os.name != "posix", reason="a process group is killed on POSIX only; "
+                    "on Windows turns stops the program alone")
 def test_at_the_bound_turns_stops_waiting_and_kills_the_programs_group(tmp_path):
     pids = tmp_path / "pids"
     slow = _program(tmp_path, "slow", (
-        "child = subprocess.Popen(['sleep', '30'])\n"
+        "child = subprocess.Popen(SLEEP)\n"
         f"open({str(pids)!r}, 'w').write(f'{{os.getpid()}} {{child.pid}}')\n"
         "time.sleep(30)\nprint('too late')"))
     reg = registry(Entry("comms", [("start", "listener_targets:comms")]),
@@ -695,8 +707,8 @@ def test_a_detached_child_outlives_the_bound(tmp_path):
     starter = _program(tmp_path, "starter", (
         "subprocess.Popen([sys.executable, '-c', 'import time, sys; time.sleep(1.2); "
         "open(sys.argv[1], \"w\").write(\"ran\")', "
-        f"{str(done)!r}], start_new_session=True, stdout=subprocess.DEVNULL, "
-        "stderr=subprocess.DEVNULL, stdin=subprocess.DEVNULL)\n"
+        f"{str(done)!r}], stdout=subprocess.DEVNULL, "
+        "stderr=subprocess.DEVNULL, stdin=subprocess.DEVNULL, **AWAY)\n"
         "time.sleep(30)"))
     reg = registry(order=(f"run:{starter}",))
     assert listeners.ask(reg, event("start", source="startup"), 0.5) is None
@@ -711,10 +723,11 @@ def test_a_program_that_exits_while_its_child_holds_stdout_is_logged_as_exited(
     pids = tmp_path / "pids"
 
     def holder(name, code):
-        # Prints, starts a detached child that inherits stdout, and exits with `code`.
+        # Prints, starts a detached child that holds its stdout, and exits with `code`.
         return _program(tmp_path, name, (
             "print('kept?', flush=True)\n"
-            "child = subprocess.Popen(['sleep', '30'], start_new_session=True)\n"
+            # Its stdout given by name: Windows hands a child no handle it isn't given.
+            "child = subprocess.Popen(SLEEP, stdout=sys.stdout, **AWAY)\n"
             f"open({str(pids)!r}, 'a').write(f'{{child.pid}}\\n')\n"
             f"sys.exit({code})"))
 
@@ -734,19 +747,21 @@ def test_a_program_that_exits_while_its_child_holds_stdout_is_logged_as_exited(
         deadline = time.monotonic() + PROC_WAIT_S
         while len(logged()) < 3 and time.monotonic() < deadline:
             time.sleep(0.05)
+        # A Windows exit code after the stop can't tell an exit from the stop.
         assert logged() == {
             f"run:{clean}": "it exited, but its output stayed open past 600 ms "
                             "(a process it started still holds it)",
             f"run:{failed}": "it exited with 3, and its output stayed open past 600 ms "
-                             "(a process it started still holds it)",
+                             "(a process it started still holds it)"
+                             if os.name == "posix" else "it ran past 600 ms and was stopped",
             f"run:{running}": "it ran past 600 ms and was stopped"}
         children = [int(p) for p in pids.read_text().split()]
         assert len(children) == 2 and all(_alive(c) for c in children)  # left to live on
     finally:
         for c in (int(p) for p in pids.read_text().split()) if pids.exists() else ():
             try:
-                os.kill(c, signal.SIGKILL)
-            except ProcessLookupError:
+                psutil.Process(c).kill()
+            except psutil.Error:
                 pass
 
 
@@ -755,7 +770,9 @@ def test_the_start_plan_lists_a_run_entry_and_runs_none(installed, turns_env, tm
 
     marker = tmp_path / "ran"
     prog = _program(tmp_path, "prog", f"open({str(marker)!r}, 'w').write('x')")
-    write_config(turns_env, f'[start]\norder = ["run:{prog}", "run:{tmp_path / "gone"}"]\n')
+    gone = tmp_path / "gone"
+    write_config(turns_env, f'[start]\norder = [{toml_string(f"run:{prog}")}, '
+                            f'{toml_string(f"run:{gone}")}]\n')
     got = turns.start_plan("claude")
     assert got.entries == (turns.StartEntry(f"run:{prog}", "run", 9500),)
     assert dict(got.skipped) == {f"run:{tmp_path / 'gone'}": "does not exist"}
