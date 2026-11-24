@@ -768,7 +768,9 @@ def _past_bound(code: int | None, wait_s: float) -> str:
 
 def _kill_group(proc: subprocess.Popen) -> None:
     """Kill `proc`'s process group, and stop reading it: a child that left the group may
-    still hold its output open."""
+    still hold its output open. On Windows `communicate` reads stdout in a thread of its
+    own, which holds the pipe's lock until a read returns, so closing it here would wait
+    for the last process holding it; that thread closes it itself when the pipe ends."""
     try:
         if os.name == "posix":
             os.killpg(proc.pid, signal.SIGKILL)
@@ -777,7 +779,7 @@ def _kill_group(proc: subprocess.Popen) -> None:
     except OSError:
         pass
     proc.wait()
-    for pipe in (proc.stdin, proc.stdout):
+    for pipe in (proc.stdin, proc.stdout) if os.name == "posix" else (proc.stdin,):
         try:
             if pipe is not None:
                 pipe.close()

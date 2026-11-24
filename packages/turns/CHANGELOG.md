@@ -2,6 +2,9 @@
 
 ## 0.2.7 (unreleased)
 
+- On Windows a start list's run entry stopped at the bound is logged at once. Turns closed
+  the program's output after the stop while the reader thread still read it, which waited
+  for any process the program started that still held the output.
 - On Claude Code, a steer that lands while the model writes its last answer no longer
   waits for the next prompt. Claude Code holds such a note for the session's next
   request when the turn makes no further one; the runner now reads that at the turn's end
