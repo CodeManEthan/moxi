@@ -396,7 +396,7 @@ def _signal(conn: sqlite3.Connection, row: store.LaunchRow, sid: str, session: A
     if newly and write:
         store.add_run_event(conn, nudges[0].run_id, "dropped", {"agents": list(newly)})
     joined = None
-    if joins(signal, room=subagent_room):
+    if joins(signal, has_room=subagent_room):
         joined = join()
         signal, _ = signal_of(listed, named, dropped, held, directed=joined)
     if signal.case is None:
@@ -429,12 +429,12 @@ def subagent_room(conn: sqlite3.Connection, row: store.LaunchRow, sid: str,
     return run_counts(_since(nudges, cover(conn, row, sid)))[SUBAGENTS] < cap
 
 
-def joins(signal: Signal, *, room: bool) -> bool:
+def joins(signal: Signal, *, has_room: bool) -> bool:
     """Whether a reading of keep-warm makes the directed join: unless a subagent is live
-    and its case is under its cap (`room`, from `subagent_room`), so the ask nudges for
+    and its case is under its cap (`has_room`, from `subagent_room`), so the ask nudges for
     it. The ask, Home's row and the press each join by this one rule, so they read the
     same cases."""
-    return not (signal.agents and room)
+    return not (signal.agents and has_room)
 
 
 def _joiner(turns: Any, comms: Any, sid: str) -> Callable[[], waits.Directed]:

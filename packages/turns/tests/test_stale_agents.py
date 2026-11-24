@@ -1,7 +1,7 @@
 """The stale-subagent judgment (`claude_stale.judge`) over transcripts written in a test
-folder: Core's hour off the last timestamped line, Claude Code's `waiting`, an `end_turn`
-tail past the bookkeeping records, owned files, the workflow folder, and the one
-deadline over the whole list."""
+folder: the `STALE_AFTER_S` hour off the last timestamped line, Claude Code's `waiting`,
+an `end_turn` tail past the bookkeeping records, owned files, the workflow folder, and the
+one deadline over the whole list."""
 
 from __future__ import annotations
 

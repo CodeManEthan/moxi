@@ -2201,8 +2201,8 @@ def _cover(conn: sqlite3.Connection, found: target.Target, sid: str,
             live_agents, held = signal.agents, signal.holds
             # The join is the last read, so one the deadline cuts short keeps what it
             # found. It is made where the ask would make it (`keepwarm.joins`).
-            room = keepwarm.subagent_room(conn, row, now_sid, nudges, current)
-            if reads.comms is not None and keepwarm.joins(signal, room=room):
+            has_room = keepwarm.subagent_room(conn, row, now_sid, nudges, current)
+            if reads.comms is not None and keepwarm.joins(signal, has_room=has_room):
                 joined = waits.directed(reads, sid)
     except waits.Late:
         return _no("unreadable", "the session was not read within "

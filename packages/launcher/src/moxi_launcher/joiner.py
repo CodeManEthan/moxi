@@ -351,7 +351,7 @@ def _waits_and_cover(each: Pass, launch: Launch, conn: Any, found: Any) -> dict[
                        pressed=True)
     joined = None
     if each.comms is not None and keepwarm.joins(
-            signal, room=_subagent_room(each, conn, found.row, now_sid, nudges)):
+            signal, has_room=_subagent_room(each, conn, found.row, now_sid, nudges)):
         joined = waits.directed(each, sid)
         if joined.late:
             raise Late()
