@@ -21,7 +21,7 @@ import threading
 import time
 
 import pytest
-from conftest import FakeClock, wait_until
+from conftest import CHECKS_MODE_BITS, FakeClock, wait_until
 
 from moxi_comms import claimfile, listener, paths
 from moxi_comms.adapters import respawn, word
@@ -442,7 +442,8 @@ def test_the_new_adapters_note_is_printed_once_at_the_next_event():
     line = (f"comms: this session's comms adapter had stopped at {at}. A new one has "
             "bound planner again, and its mail resumes.")
     assert (session_dir / respawn.NOTE).read_text() == line + "\n"
-    assert oct((session_dir / respawn.NOTE).stat().st_mode & 0o777) == "0o600"
+    if CHECKS_MODE_BITS:
+        assert oct((session_dir / respawn.NOTE).stat().st_mode & 0o777) == "0o600"
     assert listener.take_note(env) == line
     assert listener.take_note(env) is None, "once"
     assert list(session_dir.iterdir()) == []
