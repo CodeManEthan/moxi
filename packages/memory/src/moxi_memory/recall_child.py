@@ -15,6 +15,10 @@ record holds, never on a fresh read of memory's config:
    refused, it starts no fork: it sets the record and the line `lost` with the reason
    `config` and the error, and exits.
 3. It runs the first search and writes the fork's brief (`moxi_memory.recall_brief`),
+   leaving out of the search's query and the brief's prompt each line that equals one
+   memory sent to the session, when the prompt came from a recall sender of the session
+   among others (the record's `recall_senders`); the brief carries those lines as what
+   the main agent already has,
    noting the hit count and whether the search went past the project on the line, and
    the brief on the record.
 4. It runs the recall's stream through its route (`moxi_memory.recall_stream`): the
@@ -125,6 +129,10 @@ def write_brief(recall: Recall, *, search=None, places=None) -> str:
 
     record = recall.record
     text = record.get("text") or ""
+    recalled = None
+    if record.get("recall_senders"):
+        text, recalled = recall_brief.split_recalled(
+            text, recalls.sent_lines(recall.session_id, skip=recall.recall_id))
     hits = int(recall.settings["prefetch_hits"])
     found = recall_brief.prefetch(text, session_id=recall.session_id,
                                   cwd=record.get("cwd"), notes_dir=record.get("notes_dir"),
@@ -132,7 +140,7 @@ def write_brief(recall: Recall, *, search=None, places=None) -> str:
                                   search=search, places=places)
     text_brief = recall_brief.brief(start=str(record.get("start")), text=text,
                                     session_id=recall.session_id, found=found,
-                                    settings=recall.settings)
+                                    settings=recall.settings, recalled=recalled)
     recall.put(record={"brief": text_brief}, prefetch_hits=found.count,
                widened=found.widened)
     return text_brief

@@ -224,6 +224,20 @@ def note_off(session_id: str, reason: str, *, harness: str | None = None,
         return True
 
 
+def sent_lines(session_id: str, *, skip: str | None = None) -> frozenset[str]:
+    """Every non-blank line, stripped, of every answer the session's log holds (each
+    round's text), leaving out recall `skip`'s: what memory sent to the session."""
+    out = set()
+    for line in read_lines(session_id):
+        if line.get("recall") is None or line.get("recall") == skip:
+            continue
+        for entry in line.get("rounds") or []:
+            text = entry.get("text") if isinstance(entry, dict) else None
+            if isinstance(text, str):
+                out.update(t.strip() for t in text.splitlines() if t.strip())
+    return frozenset(out)
+
+
 def head(text: str) -> str:
     """The first `HEAD_CHARS` characters of a prompt or topic, on one line."""
     return " ".join(str(text).split())[:HEAD_CHARS]
@@ -232,4 +246,4 @@ def head(text: str) -> str:
 __all__ = ["DIR_NAME", "LOG", "LOCKS", "OPEN", "SENDING", "BACK", "LOST", "DISCARDED", "OFF",
            "LINE_STATES", "DISCARDABLE", "PROMPT", "ASKED", "HEAD_CHARS", "LINE_FIELDS", "is_safe",
            "subconscious_dir", "log_path", "session_lock", "read_lines", "logged_sessions",
-           "all_lines", "fork_ids", "find_line", "put_line", "note_off", "head"]
+           "all_lines", "fork_ids", "find_line", "put_line", "note_off", "sent_lines", "head"]

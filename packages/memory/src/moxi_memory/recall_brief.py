@@ -296,6 +296,19 @@ def prefetch_text(found: Prefetch, hits: int) -> str:
     return "\n".join(lines) if lines else NO_HITS
 
 
+def split_recalled(text: str, sent: frozenset[str] | set[str]) -> tuple[str, list[str]]:
+    """`text` less its lines that, stripped, equal a line memory sent (`sent`), and
+    those lines, stripped: memory's own earlier answers a prompt carries, context for
+    the fork and never what it recalls for."""
+    kept, recalled = [], []
+    for line in str(text).splitlines():
+        if line.strip() and line.strip() in sent:
+            recalled.append(line.strip())
+        else:
+            kept.append(line)
+    return "\n".join(kept), recalled
+
+
 def brief(*, start: str, text: str, session_id: str, found: Prefetch,
           settings: Mapping[str, object], recalled: list[str] | None = None) -> str:
     """The fork's brief. See the module's docstring."""
@@ -334,4 +347,4 @@ def brief(*, start: str, text: str, session_id: str, found: Prefetch,
 
 __all__ = ["COMMON", "MIN_CHARS", "NOTES_SHOWN", "PROJECT", "PROJECT_FIRST", "EVERYWHERE",
            "NO_KEYWORD", "NO_HITS", "NO_SEARCH", "TEMPLATE", "keywords", "Prefetch", "notes_places",
-           "prefetch", "prefetch_text", "brief"]
+           "prefetch", "prefetch_text", "split_recalled", "brief"]

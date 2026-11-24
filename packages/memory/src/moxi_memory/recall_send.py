@@ -208,6 +208,20 @@ def recall_senders(senders: Iterable[str] | None, parent: str | None, *,
     return [n for n in names if is_recall_sender(n, parent, api=api)]
 
 
+def session_parent(session_id: str, env=None, *, timeout_s: float = 2.0) -> str | None:
+    """The session's comms name, read from inside the session: proven by comms' claim
+    socket that `env` names, which needs no daemon; else, when that gives none, from
+    comms' `owner`, bounded by `timeout_s`. None when neither gives one."""
+    found = link()
+    if not found.ready:
+        return None
+    try:
+        name = found.api.caller_identity(env)
+    except Exception:  # noqa: BLE001 - a claim that can't be read proves no name
+        name = None
+    return name or parent_of(session_id, api=found.api, timeout_s=timeout_s)
+
+
 def from_recalls_only(senders: Iterable[str] | None, parent: str | None, *,
                       api=None) -> bool:
     """Whether a delivery from `senders` comes only from recalls of the session named
@@ -219,4 +233,4 @@ def from_recalls_only(senders: Iterable[str] | None, parent: str | None, *,
 __all__ = ["WORD", "MODULE", "SUBCONSCIOUS", "NO_COMMS", "NO_SCOPED", "NO_NAME", "CONFLICT",
            "UNDECLARED", "UNREADABLE", "FAILING", "REASONS", "MAX_CHARS", "WayBack", "Sent",
            "link", "parent_of", "sender_state", "way_back", "message_text", "send",
-           "is_recall_sender", "recall_senders", "from_recalls_only"]
+           "is_recall_sender", "recall_senders", "session_parent", "from_recalls_only"]

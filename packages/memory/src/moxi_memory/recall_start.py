@@ -161,8 +161,8 @@ def new_id() -> str:
 
 def begin(session_id: str, harness: str | None, *, start: str, text: str,
           senders, settings: Mapping[str, object], cwd: str | None,
-          notes_dir: str | None, route_name: str, now: float | None = None,
-          spawn=None) -> dict:
+          notes_dir: str | None, route_name: str, recall_senders=(),
+          now: float | None = None, spawn=None) -> dict:
     """Write a new recall's record, hurrying the session's running one, start its child
     and return the record. See the module's docstring."""
     import time
@@ -174,7 +174,8 @@ def begin(session_id: str, harness: str | None, *, start: str, text: str,
         record = records.write({
             "recall": recall_id, "session": session_id, "harness": harness,
             "state": records.STARTING, "start": start, "text": text,
-            "senders": list(senders or ()), "settings": dict(settings), "cwd": cwd,
+            "senders": list(senders or ()), "recall_senders": list(recall_senders or ()),
+            "settings": dict(settings), "cwd": cwd,
             "notes_dir": notes_dir, "route": route_name, "tools": 0, "answered": False,
             "rounds": 0}, now=now)
     try:

@@ -319,3 +319,71 @@ def test_a_child_whose_config_read_is_refused_loses_the_recall(monkeypatch):
 
 def test_the_child_refuses_an_unknown_recall():
     assert recall_child.main(["--session", SESSION, "--recall", "nope"]) == 2
+
+
+# -- memory's own earlier answers in a prompt ----------------------------------------
+
+def comms_event(senders, *, mode="automatic"):
+    found = event(mode=mode, own=False, by="comms",
+                  text="  - the lock is held by the writer\n  please also check the reader")
+    found.delivery_senders = senders
+    return found
+
+
+@pytest.fixture
+def recall_names(monkeypatch):
+    """comms reads `me-subconscious` back as this session's recall sender."""
+    from moxi_memory import recall_send
+
+    monkeypatch.setattr(recall_send, "session_parent", lambda session_id, env: "me")
+    monkeypatch.setattr(recall_send, "recall_senders", lambda senders, parent: [
+        s for s in senders if parent == "me" and s == "me-subconscious"])
+    monkeypatch.setattr(listener, "subconscious_settings", lambda: dict(
+        recall_start.default_settings(), trigger="user-and-comms"))
+
+
+def test_a_delivery_only_from_this_sessions_recalls_starts_no_recall(started, recall_names):
+    listener.subconscious(comms_event(["me-subconscious"]))
+    assert started == [] and recalls.logged_sessions() == []
+
+
+def test_a_delivery_only_from_recalls_resets_no_count(started, recall_names):
+    with recalls.session_lock(SESSION):
+        recall_start.write_asked(SESSION, 2)
+    listener.subconscious(comms_event(["me-subconscious"], mode="on-demand"))
+    assert recall_start.asked(SESSION) == 2
+    listener.subconscious(comms_event(["me-subconscious", "builder"], mode="on-demand"))
+    assert recall_start.asked(SESSION) == 0
+
+
+def test_a_name_of_the_form_comms_does_not_read_back_follows_the_trigger(started,
+                                                                         recall_names):
+    listener.subconscious(comms_event(["other-subconscious"]))
+    [(_, recall_id)] = started
+    assert records.read(SESSION, recall_id)["recall_senders"] == []
+
+
+def test_a_recall_with_other_mail_leaves_memorys_own_lines_to_recalled(started,
+                                                                       recall_names):
+    with recalls.session_lock(SESSION):
+        recalls.put_line(SESSION, {"recall": "earlier", "state": "back", "rounds": [
+            {"round": 1, "text": "Recalled ...:\n- the lock is held by the writer"}]})
+    listener.subconscious(comms_event(["me-subconscious", "builder"]))
+    [(_, recall_id)] = started
+    record = records.read(SESSION, recall_id)
+    assert record["recall_senders"] == ["me-subconscious"]
+    recall = recall_child.Recall(record)
+    search = FakeSearch({})
+    text = recall_child.write_brief(recall, search=search, places=no_notes)
+    assert all("writer" not in query for query, _ in search.asked)
+    assert "Already recalled for the main agent" in text
+    assert "<<<\n- the lock is held by the writer\n>>>" in text
+    prompt_part = text.split("Already recalled")[0]
+    assert "please also check the reader" in prompt_part
+    assert "held by the writer" not in prompt_part
+
+
+def test_split_recalled_matches_stripped_lines_only():
+    kept, recalled = recall_brief.split_recalled("  - a\n- b changed\n\n- c",
+                                                 frozenset({"- a", "- b", "- c"}))
+    assert kept == "- b changed\n" and recalled == ["- a", "- c"]

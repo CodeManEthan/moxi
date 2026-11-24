@@ -21,7 +21,11 @@ config `subconscious.trigger` counts starts a recall in automatic mode, once a r
 run (else it logs the session's `off` line), and resets the agent's count of recalls in
 on-demand mode. It runs on the last good `subconscious.*` settings while memory's config
 file is in error (the defaults when none read cleanly yet), logs the error once as a
-warning, and passes the settings to the recall's child. It never raises.
+warning, and passes the settings to the recall's child. A comms delivery whose every
+sender comms reads back, at that prompt, as an active recall sender of this session
+(memory's own earlier answers) starts no recall and resets no count; when such senders
+come with others, the recall's record names them, so its child leaves memory's own lines
+out of what it recalls for. It never raises.
 
 `subconscious_gone(event)` answers a `gone` of a session whose launch turned the
 subconscious on: when a recall's line of the session is still open or kept, it starts a
@@ -192,6 +196,10 @@ def _subconscious(event) -> None:
     session_id = getattr(event, "session_id", None)
     if mode is None or not recalls.is_safe(session_id):
         return
+    senders = [str(s) for s in getattr(event, "delivery_senders", None) or () if s]
+    ours = recall_senders(event, session_id, env, senders)
+    if senders and len(ours) == len(senders):
+        return
     held = subconscious_settings()
     if not recall_start.counts(event, held["trigger"]):
         return
@@ -205,9 +213,21 @@ def _subconscious(event) -> None:
         return
     recall_start.begin(session_id, harness, start=recalls.PROMPT,
                        text=getattr(event, "text", None) or "",
-                       senders=getattr(event, "delivery_senders", None) or (),
-                       settings=held, cwd=session_path(event),
-                       notes_dir=notes_override(env), route_name=route)
+                       senders=senders, settings=held, cwd=session_path(event),
+                       notes_dir=notes_override(env), route_name=route,
+                       recall_senders=ours)
+
+
+def recall_senders(event, session_id: str, env, senders: list[str]) -> list[str]:
+    """The senders of a comms delivery that comms reads back, now, as recall senders
+    of this session: memory's own earlier answers. A delivery made of these alone
+    starts no recall and resets no count."""
+    if getattr(event, "delivery_by", None) != "comms" or not senders:
+        return []
+    from . import recall_send
+
+    parent = recall_send.session_parent(session_id, env)
+    return recall_send.recall_senders(senders, parent)
 
 
 def subconscious_gone(event) -> None:
