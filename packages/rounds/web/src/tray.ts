@@ -11,7 +11,7 @@
 
 import { timeWord } from "./model.ts";
 import type { Clock } from "./model.ts";
-import type { Board, RecordValue, RulingFields } from "./feed.ts";
+import type { RecordValue, RulingFields } from "./feed.ts";
 
 /** The kinds of draft, as the answers route takes them. */
 export type Kind = "pick" | "accept" | "reject" | "read-back" | "done" | "park" | "unpark"
@@ -556,12 +556,4 @@ export function sameRuling(one: RulingOf | null, other: RulingOf | null): boolea
   if (one === null || other === null) return one === other;
   return one.id === other.id && one.text === other.text && one.record === other.record && one.actor === other.actor
     && one.at === other.at && one.shown === other.shown;
-}
-
-/** What a sent row's record is read again on: for a round, its `rev`, which changes with
- * each event of its log; for a project, which has no rev, the board's `read_at`, since a
- * write to the project's log makes a new gather. A row is read again when this changes. */
-export function readKey(holder: string, value: Pick<Board, "rounds" | "read_at">): string {
-  if (holder.includes("/")) return value.rounds.find((one) => one.name === holder)?.rev ?? "";
-  return value.read_at;
 }

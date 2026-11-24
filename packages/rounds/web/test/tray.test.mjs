@@ -4,7 +4,7 @@ import test from "node:test";
 import {
   ACT_ID, BODY_MAX_BYTES, bodyOf, chipOf, correctionFound, DRAFT_TEXT_MAX, DRAFTS_MAX, draftOf, EACH, eachLeadWords,
   isAnswerable, kindWords, leadsKnown, messageWords, mintId, overCap, postsOf, recipientWords, noLeadWords, readBackOf, receiptLines, RULE_LINE,
-  RULE_LINE_ALONE, readKey, sameRuling, sendable, sendWords, Tray, trayKey,
+  RULE_LINE_ALONE, sameRuling, sendable, sendWords, Tray, trayKey,
 } from "../src/tray.ts";
 
 const UTC = {
@@ -376,16 +376,6 @@ test("a found ruling is the same only when every field is", () => {
   for (const change of [{ id: "C6" }, { actor: null }, { shown: true }, { record: "comms:m9" }]) {
     assert.equal(sameRuling(one, { ...one, ...change }), false, JSON.stringify(change));
   }
-});
-
-test("a round's row is read again when its rev changes, a project's at each new gather", () => {
-  const value = (rev, readAt) => ({ rounds: [{ name: "kestrel/billing-export", rev }], read_at: readAt });
-  assert.equal(readKey("kestrel/billing-export", value("r1", "t1")), "r1");
-  assert.equal(readKey("kestrel/billing-export", value("r1", "t2")), "r1");
-  assert.notEqual(readKey("kestrel/billing-export", value("r2", "t1")), "r1");
-  assert.equal(readKey("kestrel/ledger", value("r1", "t1")), "");
-  assert.equal(readKey("kestrel", value("r1", "t1")), "t1");
-  assert.equal(readKey("kestrel", value("r1", "t2")), "t2");
 });
 
 test("an explain request's receipt says the question stays open", () => {

@@ -59,7 +59,7 @@ import {
 import type { Address, Context, DropFacts, Filter, GroupView, Held, Item, ItemKind, ItemView, Piece, Section } from "./model.ts";
 import {
   bodyOf, chipOf, correctionFound, draftOf, EACH, eachLeadWords, isAnswerable, isPageKind, kindWords, messageWords,
-  leadsKnown, mintId, overCap, postsOf, readBackOf, readKey, receiptLines, recipientWords, RULE_LINE, RULE_LINE_ALONE,
+  leadsKnown, mintId, overCap, postsOf, readBackOf, receiptLines, recipientWords, RULE_LINE, RULE_LINE_ALONE,
   sameRuling, sendable, sendWords, Tray, trayKey,
 } from "./tray.ts";
 import type { Draft, Kind, Reach, Receipt, ReceiptLine, RulingOf, Store } from "./tray.ts";
@@ -337,8 +337,9 @@ export class RoundsPage extends LitElement {
   #editing: string | null = null;
   #parkedOpen = false;
   #drop: DropState | null = null;
-  /** Each sent own-words answer's and correction's `readKey` when its record was last read. */
-  #readAt = new Map<string, string>();
+  /** Each sent own-words answer's and correction's feed value (`Feed.taken`) when its
+   * record was last read. */
+  #readAt = new Map<string, number>();
 
   connectedCallback(): void {
     super.connectedCallback();
@@ -432,22 +433,25 @@ export class RoundsPage extends LitElement {
       if (round && this.#record && this.#record.rev !== null && round.rev !== this.#record.rev) {
         void this.#readRecord(this.#address!);
       }
-      void this.#readFound(value);
+      void this.#readFound(feed.taken);
     }
     this.requestUpdate();
   }
 
-  /** Reads again, for each sent own-words answer and correction whose holder changed
-   * (`readKey`), the record its row reads from: the question's, so the row reads recorded
-   * once the agent's ruling appears; for a correction the corrected ruling's, which gives
-   * the newest ruling that replaces it, read back or not. */
-  async #readFound(value: Board): Promise<void> {
+  /** Reads again, for each sent own-words answer and correction, at each new board value
+   * the feed takes (`taken`), the record its row reads from: the question's, so the row
+   * reads recorded once the agent's ruling appears; for a correction the corrected
+   * ruling's, which gives the newest ruling that replaces it, read back or not. Not a
+   * round's `rev`: a read-back in the project's log can show a round's ruling and change
+   * nothing of the round's value, and a closed round has no rev. Not the board's
+   * `read_at`: two gathers in one second share it. The page server publishes a value only
+   * when it changed, so each one taken is a change somewhere. */
+  async #readFound(taken: number): Promise<void> {
     const sent = this.#tray.sent.filter((one) => (one.kind === "words" || one.kind === "correct")
       && one.receipt?.message?.id);
     for (const draft of sent) {
-      const key = readKey(draft.holder, value);
-      if (this.#readAt.get(draft.act) === key) continue;
-      this.#readAt.set(draft.act, key);
+      if (this.#readAt.get(draft.act) === taken) continue;
+      this.#readAt.set(draft.act, taken);
       const route = draft.kind === "words" ? recordQuery({ kind: "question", holder: draft.holder, id: draft.item })!
         : rulingQuery(draft.holder, draft.item);
       const read = await readRecord(() => api(MODULE, route));

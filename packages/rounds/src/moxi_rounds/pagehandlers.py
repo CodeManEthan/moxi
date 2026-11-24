@@ -393,7 +393,9 @@ class Board:
             stat = token.stat(log.round_log(summary.log_dir))
             if stat is None or (tenth is not None and _when(stat) < tenth):
                 break
-            key = (stat, token.stat(token.config))
+            # The project's log too: it holds the read-backs that show the round's
+            # rulings, which its records read.
+            key = (stat, token.stat(log.project_log(home.rounds_dir)), token.stat(token.config))
             kept = self.closed.get(summary.name)
             if kept is None or kept.key != key:
                 try:
@@ -475,8 +477,8 @@ def _log_of(held: Held, name: str):
     """The log of the round or project `name` as it reads now: `(the log's state, the
     project's state, on_closed)`, or None. A round's comes from its part; a project's
     from the project's log as the part of one of its open rounds holds it, else read
-    now. A closed round's part is kept while its own log is unchanged, so the project's
-    log it holds may be older than the gather."""
+    now. A closed round's part in the strip is kept while its own log and the project's are
+    unchanged, so the project's log it holds is the gather's."""
     part_ = held.parts.get(name)
     if part_ is not None:
         return part_.state, part_.found.register, part_.found.on_closed

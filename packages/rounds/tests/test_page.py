@@ -424,6 +424,25 @@ def test_a_project_rulings_record_answers_from_the_projects_log(kit):
     assert record["replaced_by"] == _fields(second, by="builder-1", shown=True)
 
 
+def test_a_closed_rounds_ruling_reads_shown_once_a_project_read_back_covers_it(kit):
+    from moxi_rounds import opening, ruling
+
+    spare = "kestrel/spare"
+    opening.open_round(spare, description="a round that closes", by="planner")
+    ruling.rule(spare, text="Exports keep a header row.", record=page_kit.PTR, by="lead",
+                at="2026-01-02T00:00:00Z")
+    second = ruling.rule(spare, text="Exports keep no header row.", supersedes="C1",
+                         record="comms:7000001", by="builder-1", at="2026-01-03T00:00:00Z")
+    page_kit.append(kit / "spare", "round.closed")
+    [record] = _ruling_records(spare, "C1")
+    assert record["replaced_by"] == _fields(second, by="builder-1", shown=False)
+    # In the project's log alone: the closed round's own log is not written.
+    ruling.rule("kestrel", item="readback=2026-01-03T00:00:00Z", record="comms:7000002",
+                by="lead")
+    [record] = _ruling_records(spare, "C1")
+    assert record["replaced_by"] == _fields(second, by="builder-1", shown=True)
+
+
 def test_a_ruling_no_log_holds_is_gone(kit):
     [_, (_, missing), (_, nowhere)] = run(
         ("/api/rounds", None),

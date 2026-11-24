@@ -38,8 +38,10 @@
   from its log, shown or not, with the newest ruling that replaces it: the row reads
   `Recorded as C<n>` with who recorded it, also when that ruling was read back
   elsewhere first, and `Ruled as C<n> from <pointer>, not from this message` for a
-  ruling recorded from another pointer. A project's sent rows are read again at each
-  new gather, a round's when its log changes.
+  ruling recorded from another pointer. Every sent row, a round's as a project's, is
+  read again at each new board value the page takes, so a read-back in the project's log
+  updates a round's row too. A closed round the strip holds is read again when the
+  project's log changes.
 - New page routes, none open to the phone gateway: `GET /api/agents`, `GET /api/drop`,
   `POST /api/answers` and `POST /api/drop/build`. Nothing acts at phone width.
 - `pointers.page_act` gives the act id a page pointer holds.

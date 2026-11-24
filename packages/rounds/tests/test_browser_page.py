@@ -9,7 +9,8 @@ open with its build when the strip moves; the folds of a many-stage round; a sta
 name beside its line's rail, never on it; a current step's ▼ clear of the line
 above; a round's card and the key; an address that opens its popover; a ruling of a round with no
 docket, under its line; a sent correction whose replacing ruling was read back already,
-recorded with who recorded it; a new question without a reload; the strip's way back to a line
+recorded with who recorded it; a project's read-back showing a closed round's found ruling;
+a new question without a reload; the strip's way back to a line
 a filter hides; a closed round's card; and the phone layout at 390 px."""
 
 from __future__ import annotations
@@ -431,6 +432,43 @@ def test_a_sent_correction_reads_recorded_once_its_ruling_is_read_back(ui_shells
     expect(row).to_contain_text("Recorded as C2: Exports keep no header row.")
     expect(row).to_contain_text("by builder-1")
     expect(row).not_to_contain_text("not recorded yet")
+
+
+def test_a_project_read_back_shows_a_closed_rounds_found_ruling(ui_shells, ui_shell_options,
+                                                                ui_contexts):
+    # A shell of its own, so the round and the read-back it adds change no other test.
+    own = ui_shells(**ui_shell_options)
+    spare = "kestrel/spare"
+    with page_kit.under(own):
+        rounds_dir = page_kit.seed(page_kit.shell_home(own) / "notes")
+        opening.open_round(spare, description="a round that closes", by="planner")
+        ruling.rule(spare, text="Exports keep a header row.", record=page_kit.PTR, by="lead",
+                    at="2026-01-02T00:00:00Z")
+        ruling.rule(spare, text="Exports keep no header row.", supersedes="C1",
+                    record="comms:7000001", by="builder-1", at="2026-01-03T00:00:00Z")
+        page_kit.append(rounds_dir / "spare", "round.closed")
+    act = "d" * 43
+    sent = {"act": act, "holder": spare, "item": "C1", "kind": "correct", "chose": None,
+            "text": "No header row.", "tell": None, "about": "Exports keep a header row.",
+            "found": None,
+            "receipt": {"act": act, "holder": spare, "item": "C1", "kind": "correct",
+                        "state": "sent", "message": {"to": "atlas", "at": "2026-01-03T00:00:00Z",
+                                                     "id": "7000001", "delivery": "delivered"}}}
+    page = ui_contexts(own).pages[0]
+    open_panel(page)
+    page.evaluate("tray => localStorage.setItem(`moxi-rounds-tray:${location.origin}`, tray)",
+                  json.dumps({"drafts": [], "sent": [sent], "messages": []}))
+    panel = open_panel(page)
+    row = panel.get_by_role("region", name="Your answers").locator(f'.trow[data-act="{act}"]')
+    expect(row).to_contain_text("Recorded as C2: Exports keep no header row.")
+    stored = ("shown => JSON.parse(localStorage.getItem(`moxi-rounds-tray:${location.origin}`))"
+              ".sent[0].found?.shown === shown")
+    page.wait_for_function(stored, arg=False)
+    # The read-back is in the project's log alone: the closed round's log is not written.
+    with page_kit.under(own):
+        ruling.rule("kestrel", item="readback=2026-01-03T00:00:00Z", record="comms:7000002",
+                    by="lead")
+    page.wait_for_function(stored, arg=True)
 
 
 def test_show_its_line_sets_the_filter_that_hides_it_and_scrolls_to_it(shell, ui_page):
