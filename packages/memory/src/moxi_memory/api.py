@@ -17,6 +17,9 @@
   `automatic` or `on-demand`.
 * `SUBCONSCIOUS_ROUTE_ENV`: the variable a launch stamps with the route a session's
   recalls run on; a session with the mode's stamp and none of this runs `subagent`.
+* `SUBCONSCIOUS_FORK_ENV`: the variable a recall's slot fork carries, set to the
+  recall's id. The launcher leaves a session that carries it out of park, crash
+  discovery and restore.
 
 Reading a session is sessions' (`moxi sessions read`), not memory's: a hit names its
 harness, session and time for that.
@@ -26,9 +29,9 @@ from __future__ import annotations
 
 from .index import IndexMissing, IndexUnreadable, StateUnreadable
 from .search import Filling, Hit, Result, cut, search
-from .recall_start import SUBCONSCIOUS_ENV, SUBCONSCIOUS_ROUTE_ENV
+from .recall_start import SUBCONSCIOUS_ENV, SUBCONSCIOUS_FORK_ENV, SUBCONSCIOUS_ROUTE_ENV
 from .status import Status, status
 
 __all__ = ["search", "Result", "Hit", "Filling", "status", "Status", "IndexMissing",
            "IndexUnreadable", "StateUnreadable", "cut", "SUBCONSCIOUS_ENV",
-           "SUBCONSCIOUS_ROUTE_ENV"]
+           "SUBCONSCIOUS_ROUTE_ENV", "SUBCONSCIOUS_FORK_ENV"]

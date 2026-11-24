@@ -33,11 +33,15 @@ SESSION_ENV = {"MOXI_MEMORY_SUBCONSCIOUS": "the session's subconscious mode, aut
                                           "on-demand, stamped by the launcher's "
                                           "subconscious row",
                "MOXI_MEMORY_SUBCONSCIOUS_ROUTE": "the route a session's recalls run on; "
-                                                "subagent when it is not set"}
+                                                "subagent when it is not set",
+               "MOXI_MEMORY_SUBCONSCIOUS_FORK": "the recall a slot fork serves, its id; "
+                                               "set on the fork by memory"}
 INTERNAL_ENV = {"MOXI_MEMORY_SUBCONSCIOUS": "set by the launcher for one launch; read from "
                                             "the session's environment",
                 "MOXI_MEMORY_SUBCONSCIOUS_ROUTE": "set by the launcher for one launch; read "
-                                                  "from the session's environment"}
+                                                  "from the session's environment",
+                "MOXI_MEMORY_SUBCONSCIOUS_FORK": "set by memory on a recall's slot fork; "
+                                                 "read from the session's environment"}
 #: The config schema; every key is read at its use.
 SETTINGS = "settings.toml"
 #: The module's whole loader over a config text: the schema, then the rules it can't say.

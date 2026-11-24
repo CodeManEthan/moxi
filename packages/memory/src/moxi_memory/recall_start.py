@@ -67,6 +67,10 @@ MODES = (AUTOMATIC, ON_DEMAND)
 #: The variable a launch stamps with the session's subconscious route; a session with
 #: the mode's stamp and none of this runs the default route.
 SUBCONSCIOUS_ROUTE_ENV = "MOXI_MEMORY_SUBCONSCIOUS_ROUTE"
+#: The variable a slot fork of a recall carries, set to that recall's id: it marks the
+#: session as a recall's fork, so no recall starts in it, its calls are judged against
+#: that recall's record, and the launcher never parks, reserves or restores it.
+SUBCONSCIOUS_FORK_ENV = "MOXI_MEMORY_SUBCONSCIOUS_FORK"
 #: The routes: a fork inside the session through turns (the default).
 SUBAGENT = "subagent"
 #: The routes whose answers come back to the session as a comms message.
@@ -350,7 +354,8 @@ def reset_asked(session_id: str) -> None:
             write_asked(session_id, 0)
 
 
-__all__ = ["SUBCONSCIOUS_ENV", "SUBCONSCIOUS_ROUTE_ENV", "route_stamp", "AUTOMATIC", "ON_DEMAND", "MODES", "SUBAGENT", "BY_COMMS",
+__all__ = ["SUBCONSCIOUS_ENV", "SUBCONSCIOUS_ROUTE_ENV", "SUBCONSCIOUS_FORK_ENV",
+           "route_stamp", "AUTOMATIC", "ON_DEMAND", "MODES", "SUBAGENT", "BY_COMMS",
            "NO_FORK", "CODEX", "USER", "USER_AND_COMMS", "SCRIPT", "ASKED", "SPAWN", "mode",
            "counts", "route", "comms_why", "subconscious_settings", "settings_keys",
            "default_settings", "new_id", "begin", "lose_spawn", "DETACH", "spawn_starter",

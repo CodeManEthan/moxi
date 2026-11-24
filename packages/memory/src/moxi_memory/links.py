@@ -35,6 +35,8 @@ COMMS_SCOPED_INTERFACE = 3
 #: The launcher interface memory speaks: `launch_kind` and `launch_kinds`.
 LAUNCHER = "launcher"
 LAUNCHER_INTERFACE = 1
+#: The launcher interface the slot route speaks: `fork` and `exit_session`.
+LAUNCHER_FORK_INTERFACE = 3
 #: The notes interface memory speaks: `notes_dir`, `root` and `NOTES_DIR_ENV`.
 NOTES = "notes"
 NOTES_INTERFACE = 1
@@ -90,11 +92,18 @@ def launcher() -> Link:
     return load(LAUNCHER, LAUNCHER_INTERFACE)
 
 
+def launcher_forks() -> Link:
+    """The link to the launcher that forks a session and exits one, for the slot route
+    and a slot fork's discard."""
+    return load(LAUNCHER, LAUNCHER_FORK_INTERFACE)
+
+
 def notes() -> Link:
     """The link to notes, for the notes a recall reads."""
     return load(NOTES, NOTES_INTERFACE)
 
 
 __all__ = ["READY", "NONE", "FAILING", "NO_INTERFACE", "COMMS", "COMMS_INTERFACE",
-           "COMMS_SCOPED_INTERFACE", "LAUNCHER", "LAUNCHER_INTERFACE", "NOTES",
-           "NOTES_INTERFACE", "Link", "load", "comms", "comms_scoped", "launcher", "notes"]
+           "COMMS_SCOPED_INTERFACE", "LAUNCHER", "LAUNCHER_INTERFACE",
+           "LAUNCHER_FORK_INTERFACE", "NOTES", "NOTES_INTERFACE", "Link", "load", "comms",
+           "comms_scoped", "launcher", "launcher_forks", "notes"]

@@ -57,10 +57,11 @@ def conn():
     conn.close()
 
 
-def parked(conn, rid, sid, slot, *, harness="claude", identity_name=None, posture=""):
+def parked(conn, rid, sid, slot, *, harness="claude", identity_name=None, posture="",
+           env=None):
     store.insert(conn, request_id=rid, by="ann", harness=harness, target="slot",
                  cwd="/tmp", values={"posture": posture} if posture else {},
-                 argv=[harness], env={}, posture=posture,
+                 argv=[harness], env=env or {}, posture=posture,
                  session_id=sid, slot=str(slot), identity=identity_name)
     store.set_state(conn, rid, "ready")
     return store.add_entry(conn, park_id="p1", kind="park", by="ann", slot=slot,
@@ -183,6 +184,28 @@ def test_restore_closes_an_entry_a_later_launch_took_up(conn, rig):
     now = store.get_entry(conn, entry.entry_id)
     assert (now.state, now.restore_request_id) == ("restored", "r9")
     assert rig.slot(3)["hold"] is None
+
+
+def test_restore_drops_a_recalls_fork_and_releases_its_slot(conn, rig):
+    parked(conn, "r3", SID3, 3)
+    fork = parked(conn, "f5", SID5, 5, env={"MOXI_MEMORY_SUBCONSCIOUS_FORK": "recall-1"})
+    rig.plan(slots={"3": reserved("missing", "r3"), "5": reserved("ended", "f5")})
+    launch = Launch()
+    result = go(conn, launch=launch)
+    assert [r.resume_of for r in launch.requests] == ["r3"]
+    now = store.get_entry(conn, fork.entry_id)
+    assert now.state == "dropped" and now.detail.startswith(restore.RECALL_FORK)
+    assert rig.slot(5)["hold"] is None
+    assert result.exit_code == 0, result.lines
+    assert result.lines[-1] == "restored 1 of 1 parked session"
+
+
+def test_a_dry_run_says_a_recalls_fork_would_be_dropped(conn, rig):
+    entry = parked(conn, "f5", SID5, 5, env={"MOXI_MEMORY_SUBCONSCIOUS_FORK": "recall-1"})
+    rig.plan(slots={"5": reserved("ended", "f5")})
+    result = go(conn, dry_run=True, launch=Launch())
+    assert store.get_entry(conn, entry.entry_id).state == "open"
+    assert result.lines[0] == f"slot 5: {SID5}: dropped: {restore.RECALL_FORK}"
 
 
 def test_an_occupied_reserved_slot_falls_back_to_the_lowest_and_releases_it(conn, rig):

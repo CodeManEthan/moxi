@@ -692,8 +692,9 @@ def option_stamps(values: Mapping[str, object]) -> dict[str, str]:
     and the crossing mark (`limit_mark`) when it recycles at its limit: a `compact`
     launch always, a `relaunch` launch only where it is told it may recycle itself
     (`selfrecycle.missing` with `told`): its arm would be accepted and it warns at a mark.
-    The subconscious row stamps its mode under memory's variable. A row at `off` stamps
-    nothing."""
+    The subconscious row stamps its mode under memory's variable, and with it the route
+    row its route (`subagent` when the row is unset). A subconscious at `off` stamps
+    neither."""
     env: dict[str, str] = {}
     if values.get("keep_warm") == "on":
         env[KEEP_WARM_ENV] = "on"
@@ -704,6 +705,8 @@ def option_stamps(values: Mapping[str, object]) -> dict[str, str]:
         _stamp(env, "usage", 1, "CROSSING_AT_ENV", limit_mark(values))
     if values.get("subconscious") in ("automatic", "on-demand"):
         _stamp(env, "memory", 1, "SUBCONSCIOUS_ENV", str(values["subconscious"]))
+        _stamp(env, "memory", 1, "SUBCONSCIOUS_ROUTE_ENV",
+               str(values.get("subconscious_route") or "subagent"))
     return env
 
 

@@ -181,3 +181,29 @@ def test_a_keep_warm_launch_has_its_identity_line():
     assert block.splitlines()[-1] == "keep warm:     " + common.KEEP_WARM_LINE
     assert "agents you direct at work keep you warm" in common.KEEP_WARM_LINE
     assert "keep warm" not in common.identity_block(session_id="s", cwd="/w", posture="go")
+
+
+def test_the_subconscious_route_row():
+    row = catalog.launcher()["subconscious_route"]
+    assert row.values == ("subagent", "slot") and row.default == "subagent"
+    assert row.required == ("turns", "memory")
+    assert "On Codex only slot runs a recall" in row.doc
+
+
+def test_the_slot_route_needs_slots_and_comms(readable):
+    values = {"subconscious": "automatic", "subconscious_route": "slot"}
+    catalog.refuse_values("claude", values, available=everything)
+    catalog.refuse_values("codex", values, available=everything)
+    for absent in ("slots", "comms"):
+        with pytest.raises(NeedsModule, match="the subconscious in a slot needs slots and "
+                                              "comms"):
+            catalog.refuse_values("claude", values, available=without(absent))
+    catalog.refuse_values("claude", {**values, "subconscious_route": "subagent"},
+                          available=without("slots", "comms"))
+
+
+def test_the_slot_route_is_refused_where_slots_cant_run(monkeypatch):
+    monkeypatch.setattr(catalog, "slots_here", lambda: False)
+    values = {"subconscious": "on-demand", "subconscious_route": "slot"}
+    with pytest.raises(NeedsModule, match="the subconscious in a slot"):
+        catalog.refuse_values("claude", values, available=everything)
