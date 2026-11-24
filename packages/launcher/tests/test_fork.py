@@ -10,6 +10,7 @@ from pathlib import Path
 
 import pytest
 
+import launcher_starts as starts
 import launcher_fake_turns as fake_turns
 from launcher_fake_harness import Harness
 from moxi_launcher import api, catalog, cli, fork, store, targets
@@ -40,13 +41,10 @@ def work(tmp_path) -> Path:
 
 @pytest.fixture
 def no_exec(monkeypatch):
-    """exec stood in for: records what it was handed."""
+    """The terminal's start stood in for: records what it was handed."""
     seen = []
-
-    def execve(command, argv, env):
-        seen.append({"command": command, "argv": argv, "env": env})
-
-    monkeypatch.setattr(targets, "_execve", execve)
+    starts.stand_in(monkeypatch, lambda command, argv, env, cwd: seen.append(
+        {"command": command, "argv": argv, "env": env}))
     here = os.getcwd()
     yield seen
     os.chdir(here)

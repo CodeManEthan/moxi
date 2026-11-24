@@ -398,6 +398,9 @@ def test_the_deliverer_waits_the_whole_bind_then_the_whole_ready_wait(conn, monk
     assert (seen["ready_wait_s"], seen["first_wait_s"]) == (float(ready_s), 120.0)
 
 
+@pytest.mark.skipif(sys.platform == "win32",
+                    reason="Windows: comms' wrapper forks its adapter, so no wrapped launch "
+                           "runs there and the terminal starts no deliverer for one")
 def test_a_terminal_launch_with_an_identity_starts_the_deliverer(tmp_path, monkeypatch):
     # No first turn owed, but the deliverer watches the bind.
     if not modules.available("comms"):

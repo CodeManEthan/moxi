@@ -8,6 +8,7 @@ import json
 import os
 import sqlite3
 import stat
+import sys
 import time
 from pathlib import Path
 from types import SimpleNamespace
@@ -19,6 +20,7 @@ from moxi.config import ConfigError
 from moxi_dev.testing import toml_string, wait_for
 
 import launcher_fake_turns as fake_turns
+import launcher_starts as starts
 from launcher_fake_harness import Harness, run_child
 from moxi_launcher import api, catalog, first, presets, store, targets
 from moxi_launcher.api import LaunchRequest
@@ -180,16 +182,20 @@ def test_a_terminal_launch_whose_harness_is_missing_writes_nothing(tmp_path, wor
 # -- this terminal, in process, with exec stood in for -------------------------------------
 
 
+#: Linux and macOS: the terminal execs the harness. On Windows it starts the harness as a
+#: child and waits for it, with its own tests below (`targets.WINDOWS` set).
+EXECS = pytest.mark.skipif(sys.platform == "win32",
+                           reason="Windows: the terminal starts a waited child, not exec")
+
+
 @pytest.fixture
 def no_exec(monkeypatch):
-    """exec stood in for: records what it was handed, and the row as it was then."""
+    """The terminal's start stood in for: records what it was handed, and the row as it
+    was then."""
     seen = []
-
-    def execve(command, argv, env):
-        seen.append({"command": command, "argv": argv, "env": env, "cwd": os.getcwd(),
-                     "row": row(env["MOXI_LAUNCHER_REQUEST"]), "order": "exec"})
-
-    monkeypatch.setattr(targets, "_execve", execve)
+    starts.stand_in(monkeypatch, lambda command, argv, env, cwd: seen.append(
+        {"command": command, "argv": argv, "env": env, "cwd": cwd,
+         "row": row(env["MOXI_LAUNCHER_REQUEST"]), "order": "exec"}))
     here = os.getcwd()
     yield seen
     os.chdir(here)
@@ -207,6 +213,7 @@ def deliverers(monkeypatch):
     return started
 
 
+@EXECS
 def test_the_terminal_writes_its_pid_and_started_before_it_execs(work, harness, no_exec,
                                                                  deliverers):
     result = api.launch(request(work, brief=BRIEF))
@@ -233,6 +240,7 @@ def test_the_warnings_are_given_before_the_session_starts(work, harness, no_exec
     assert result.warnings == ("identity planner is ignored: comms is not installed",)
 
 
+@EXECS
 def test_the_deliverer_starts_after_started_and_before_exec(work, harness, no_exec,
                                                             deliverers, turns):
     api.launch(request(work, brief=BRIEF))
@@ -255,6 +263,7 @@ def test_a_deliverer_that_fails_to_start_fails_the_launch_and_execs_nothing(
     assert row().state == "failed" and row().reason == targets.NO_DELIVERER
 
 
+@EXECS
 def test_an_exec_that_fails_ends_the_row_failed(work, harness, monkeypatch):
     def execve(command, argv, env):
         raise PermissionError(13, "Permission denied")
@@ -287,7 +296,8 @@ def test_on_windows_the_terminal_waits_for_its_child(work, harness, monkeypatch,
     monkeypatch.setattr(targets, "WINDOWS", True)
     monkeypatch.setattr(targets, "_popen", Child)
     result = api.launch(request(work, brief=BRIEF))
-    assert Child.seen["argv"][0] == str(harness.bin / "claude")
+    found = Path(Child.seen["argv"][0])
+    assert found.parent == harness.bin and found.stem == "claude"
     assert Child.seen["argv"][1:] == list(result.argv[1:])
     assert Child.seen["cwd"] == str(work) and Child.seen["row"].state == "spawning"
     # Its pid recorded, then the deliverer given that pid, then the child's exit code.
@@ -295,6 +305,22 @@ def test_on_windows_the_terminal_waits_for_its_child(work, harness, monkeypatch,
     assert result.exit_code == 5 and row().pid == Child.pid
     marked = terminal.marked({})[terminal.STARTED_BY_ENV]
     assert Child.seen["env"][terminal.STARTED_BY_ENV] == marked
+
+
+def test_on_windows_a_child_that_cannot_start_ends_the_row_failed(work, harness,
+                                                                  monkeypatch):
+    def broken(argv, env, cwd):
+        raise PermissionError(13, "Permission denied")
+
+    monkeypatch.setattr(targets, "WINDOWS", True)
+    monkeypatch.setattr(targets, "_popen", broken)
+    result = api.launch(request(work, brief=BRIEF))
+    assert (result.state, result.reason, result.exit_code) == (
+        "failed", targets.SPAWN_FAILED, exits.ERROR)
+    got = row()
+    assert got.state == "failed" and got.reason == targets.SPAWN_FAILED
+    [event] = [e for e in store.events(store.connect(), "r1") if e.kind == "start-failed"]
+    assert "Permission denied" in event.detail["why"]
 
 
 def test_on_windows_a_deliverer_that_fails_to_start_fails_the_launch_as_its_row(

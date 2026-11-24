@@ -18,6 +18,7 @@ from moxi import exit as codes
 from moxi import proc
 from moxi.paths import Layout
 
+import launcher_starts as starts
 import launcher_fake_turns as fake_turns
 from launcher_fake_harness import Harness
 from moxi_launcher import api, catalog, cli, names, presets, store, targets
@@ -238,9 +239,9 @@ def work(tmp_path) -> Path:
 
 @pytest.fixture
 def no_exec(monkeypatch):
-    """exec stood in for, so a launch in this terminal returns and its row records this
-    process, which runs."""
-    monkeypatch.setattr(targets, "_execve", lambda command, argv, env: None)
+    """The terminal's start stood in for, so a launch in this terminal returns and its row
+    records this process, which runs."""
+    starts.stand_in(monkeypatch, starts.ignored)
     here = os.getcwd()
     yield
     os.chdir(here)

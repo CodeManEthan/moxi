@@ -19,6 +19,7 @@ import pytest
 from moxi import modules
 from test_page import get, post, write_presets
 
+import launcher_starts as starts
 import launcher_fake_turns as fake_turns
 from launcher_fake_harness import Harness
 from moxi_launcher import (api, catalog, first, job, page, pagehandlers, presets, slots, store,
@@ -71,8 +72,8 @@ def harness(tmp_path, monkeypatch) -> Harness:
 
 @pytest.fixture(autouse=True)
 def no_exec(monkeypatch):
-    """exec stood in for, so a terminal launch returns and its row stays."""
-    monkeypatch.setattr(targets, "_execve", lambda command, argv, env: None)
+    """The terminal's start stood in for, so a terminal launch returns and its row stays."""
+    starts.stand_in(monkeypatch, starts.ignored)
     here = os.getcwd()
     yield
     os.chdir(here)

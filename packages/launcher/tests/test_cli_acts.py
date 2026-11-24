@@ -17,6 +17,7 @@ import pytest
 from moxi import exit as codes
 from moxi import modules
 
+import launcher_starts as starts
 import launcher_fake_turns as fake_turns
 from launcher_fake_harness import Harness
 from moxi_launcher import (api, cli, exits, keepwarm, relaunch, resume, slots, state, store,
@@ -701,8 +702,7 @@ def test_a_plain_resume_of_a_go_launch_starts_with_no_first_turn(conn, capsys, t
     brief, and the resumed session gets no first turn, its launch's own brief included."""
     Harness.on_path(tmp_path, monkeypatch)
     execs = []
-    monkeypatch.setattr(targets, "_execve",
-                        lambda command, argv, env: execs.append(argv))
+    starts.stand_in(monkeypatch, lambda command, argv, env, cwd: execs.append(argv))
     monkeypatch.chdir(tmp_path)
     work = tmp_path / "work"
     work.mkdir()

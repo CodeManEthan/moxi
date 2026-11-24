@@ -13,6 +13,7 @@ from types import SimpleNamespace
 import pytest
 from moxi.paths import Layout
 
+import launcher_starts as starts
 import launcher_fake_slots as fake
 import launcher_fake_turns as fake_turns
 from launcher_fake_harness import Harness
@@ -349,7 +350,7 @@ def test_a_trusted_root_with_the_setting_off_shows_no_screen_and_goes_on(
 @pytest.mark.parametrize("target", ["terminal", "headless"])
 def test_a_terminal_or_headless_launch_writes_nothing(tmp_path, harness, rig, launch_config,
                                                      monkeypatch, target):
-    monkeypatch.setattr(targets, "_execve", lambda *a: None)
+    starts.stand_in(monkeypatch, starts.ignored)
     monkeypatch.setattr(targets, "_spawn", lambda *a, **kw: 99)
     repo = git_repo(tmp_path / "repo")
     trust_setting(on=True)
@@ -382,7 +383,7 @@ def digest(path: Path) -> tuple[bytes, int]:
                                     pytest.param("slot", marks=pytest.mark.slot_target)])
 def test_a_launch_changes_only_the_trust_key_and_only_in_a_claude_slot_launch(
         tmp_path, harness, rig, launch_config, monkeypatch, target, harness_name):
-    monkeypatch.setattr(targets, "_execve", lambda *a: None)
+    starts.stand_in(monkeypatch, starts.ignored)
     monkeypatch.setattr(targets, "_spawn", lambda *a, **kw: 99)
     repo = git_repo(tmp_path / "repo")
     path = Layout("launcher").config_file()

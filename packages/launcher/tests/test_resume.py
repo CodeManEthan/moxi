@@ -15,6 +15,7 @@ import pytest
 from moxi import proc
 from moxi_dev.testing import wait_for
 
+import launcher_starts as starts
 import launcher_fake_slots as fake
 import launcher_fake_turns as fake_turns
 from launcher_fake_harness import Harness
@@ -701,8 +702,8 @@ def work(tmp_path) -> Path:
 @pytest.fixture
 def no_exec(monkeypatch):
     seen = []
-    monkeypatch.setattr(targets, "_execve",
-                        lambda command, argv, env: seen.append({"argv": argv, "env": env}))
+    starts.stand_in(monkeypatch, lambda command, argv, env, cwd: seen.append(
+        {"argv": argv, "env": env}))
     here = os.getcwd()
     yield seen
     os.chdir(here)

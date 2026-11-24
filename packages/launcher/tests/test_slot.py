@@ -17,6 +17,7 @@ from moxi import config, modules
 from moxi import exit as exits
 from moxi.paths import Layout
 
+import launcher_starts as starts
 import launcher_fake_slots as fake
 import launcher_fake_turns as fake_turns
 from launcher_fake_harness import Harness
@@ -188,7 +189,7 @@ def test_a_slot_named_for_another_target_is_refused_as_a_usage_error(work, harne
                                                                      target, extra,
                                                                      monkeypatch):
     execs = []
-    monkeypatch.setattr(targets, "_execve", lambda *a: execs.append(a))
+    starts.stand_in(monkeypatch, lambda *a: execs.append(a))
     monkeypatch.setattr(targets, "_spawn", lambda *a, **kw: execs.append(a) or 99)
     rig.plan(slots={"3": {"state": "free", "launchable": True}})
     asked = request(work, slot="3", target=target, **extra)
@@ -206,7 +207,7 @@ def test_run_with_a_slot_and_no_slot_target_exits_2(work, harness, rig, monkeypa
     from moxi_launcher import cli
 
     execs = []
-    monkeypatch.setattr(targets, "_execve", lambda *a: execs.append(a))
+    starts.stand_in(monkeypatch, lambda *a: execs.append(a))
     monkeypatch.chdir(work)
     assert cli.main(["run", "--slot", "3"]) == exits.USAGE
     assert "[bad-value]" in capsys.readouterr().err
