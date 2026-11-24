@@ -16,6 +16,7 @@ import sys
 from pathlib import Path
 
 import pytest
+from moxi_dev.testing import console_script
 
 from moxi import exit as moxi_exit
 from moxi_comms import cli, config, paths
@@ -69,12 +70,10 @@ def test_a_box_with_its_daemon_up(rig):
 def test_adapter_binaries_and_their_versions(tmp_path):
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
-    fake = bin_dir / "claude"
-    fake.write_text("#!/bin/sh\necho '9.9.9 (Claude Code)'\n")
-    fake.chmod(0o755)
+    fake = console_script(bin_dir, "claude", "print('9.9.9 (Claude Code)')\n")
     _, out = doctor(env={"PATH": str(bin_dir)})
     r = rows(out)
-    assert r["claude"] == f"{fake}, 9.9.9 (Claude Code)"
+    assert os.path.normcase(r["claude"]) == os.path.normcase(f"{fake}, 9.9.9 (Claude Code)")
     assert r["codex"] == "not on PATH"
 
 

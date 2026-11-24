@@ -3,10 +3,12 @@ kinds of failure."""
 
 from __future__ import annotations
 
+import os
 import socket
 import threading
 
 import pytest
+from moxi_dev.testing import console_script
 from conftest import write_config
 
 from moxi_comms.adapters import opencode_roster as roster
@@ -148,11 +150,11 @@ def test_the_binary_is_the_rows_then_path_then_the_installers_dir(tmp_path,
     own.write_text("#!/bin/sh\n")
     own.chmod(0o755)
     assert roster.resolve_binary(str(own)) == str(own)
-    on_path = tmp_path / "bin" / "opencode"
-    on_path.parent.mkdir()
-    on_path.write_text("#!/bin/sh\n")
-    on_path.chmod(0o755)
-    assert roster.resolve_binary(None, path=str(on_path.parent)) == str(on_path)
+    (tmp_path / "bin").mkdir()
+    on_path = console_script(tmp_path / "bin", "opencode")
+    # A PATH lookup on Windows spells the suffix as PATHEXT does; the case doesn't matter.
+    found = roster.resolve_binary(None, path=str(on_path.parent))
+    assert os.path.normcase(found) == os.path.normcase(on_path)
     installed = tmp_path / "home" / ".opencode" / "bin" / "opencode"
     installed.parent.mkdir(parents=True)
     installed.write_text("#!/bin/sh\n")

@@ -13,6 +13,7 @@ import os
 from pathlib import Path
 
 from conftest import wait_until
+from moxi_dev.testing import console_script
 
 from moxi import exit as moxi_exit
 from moxi_comms import cache, cli, machine_line
@@ -115,13 +116,11 @@ def doctor(path):
 def test_doctor_lists_the_opencode_binary_with_its_version(tmp_path):
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
-    fake = bin_dir / "opencode"
-    fake.write_text("#!/bin/sh\necho '1.18.34'\n")
-    fake.chmod(0o755)
+    fake = console_script(bin_dir, "opencode", "print('1.18.34')\n")
     rows = {line.split("  ", 1)[0].strip(): line.split("  ", 1)[1].strip()
             for line in doctor(str(bin_dir)).splitlines()
             if line[:1] != " " and "  " in line}
-    assert rows["opencode"] == f"{fake}, 1.18.34"
+    assert os.path.normcase(rows["opencode"]) == os.path.normcase(f"{fake}, 1.18.34")
     rows = {line.split("  ", 1)[0].strip(): line.split("  ", 1)[1].strip()
             for line in doctor(str(tmp_path / "empty")).splitlines()
             if line[:1] != " " and "  " in line}
