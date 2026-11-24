@@ -16,14 +16,17 @@ with the time it came back, the line `back`, and the record `back` at the first 
 (a `hurried` record stays `hurried`). A first round with no answer ends the recall `lost`, record and line, with
 the reason (`denied`, `gone`, or the delivery's refusal); a later one ends the stream,
 the line `back` with the round's loss noted. A round whose end turns never gave within
-the wait is left with its kept mark and the line as it was, for a taker.
+the wait is left with its kept mark and the line as it was, for a taker. An ack turns
+did not take (refused, or the call raised) leaves the mark and ends the stream at that
+round: the line keeps naming the round's ref, so a taker acks it (and turns releases
+the round's kept end), and no later round's ref is ever written over a kept one.
 
 **When the stream ends.** At an answer of `NOTHING`, or with no text, or whose last line
 is `End of recall.`; after `subconscious.max_rounds` rounds; once the fork has made
 `subconscious.max_tools` tool calls (counted on the record); at `subconscious.limit_s`
-from the recall's start; or once the record is `hurried`. Then the record ends `ended`
-when an answer came back, the line noting whether the recall was hurried or ran past
-its limit. A line a person discarded (`moxi_memory.recall_discard`) ends the stream as
+from the recall's start; once the record is `hurried`; or at an ack turns did not
+take. Then the record ends `ended` when an answer came back, the line noting whether the
+recall was hurried or ran past its limit. A line a person discarded (`moxi_memory.recall_discard`) ends the stream as
 it is: the child asks no further round and leaves the line's state and the record as
 the discard set them.
 
@@ -164,32 +167,46 @@ def settle(recall, round_number: int, end, route: Route, *, now: float | None = 
     return got
 
 
-def open_round(recall, round_number: int, round_ref: str) -> bool:
+#: Why `open_round` asked no round.
+KEPT = "kept"
+
+
+def open_round(recall, round_number: int, round_ref: str) -> str | None:
     """Under the session's lock, write round `round_number`'s ref on the line with the
-    kept mark, the line `open`, before the round is asked. False, writing nothing, when
-    a person has discarded the line."""
+    kept mark, the line `open`, before the round is asked, and return None. Writes
+    nothing and returns why when no round may be asked: `discarded` (a person discarded
+    the line), or `kept` (the line still names an earlier round whose ack turns did not
+    take; that ref stays on the line for a taker)."""
     with recalls.session_lock(recall.session_id):
         current = recalls.find_line(recall.session_id, recall.recall_id)
-        if current is not None and current.get("state") == recalls.DISCARDED:
-            recall.line = current
-            return False
+        if current is not None:
+            if current.get("state") == recalls.DISCARDED:
+                recall.line = current
+                return recalls.DISCARDED
+            if current.get("kept") is True and current.get("ref") not in (None, round_ref):
+                recall.line = current
+                return KEPT
         recall.write(record={"rounds": round_number}, state=recalls.OPEN, ref=round_ref,
                      kept=True)
-    return True
+    return None
 
 
 def run(recall, route: Route, brief: str, *, clock=time.time) -> str:
     """Run the recall's rounds to the stream's end, and return how it ended: `ended`,
     `lost`, `discarded` (a person discarded its line; no further round is asked), or
-    `unsettled` (a round's end never came; the line keeps its mark)."""
+    `unsettled` (a round's end never came; the line keeps its mark). A round whose ack
+    turns did not take ends the stream there, its ref and mark left on the line."""
     settings = recall.settings
     bound = round_bound_s(settings)
     handle = None
     round_number = 1
     while True:
         round_ref = ref(recall.recall_id, round_number)
-        if not open_round(recall, round_number, round_ref):
+        refused = open_round(recall, round_number, round_ref)
+        if refused == recalls.DISCARDED:
             return recalls.DISCARDED
+        if refused is not None:
+            break
         if handle is None:
             handle = route.first(brief, ref=round_ref, round_timeout_s=bound)
         else:
@@ -231,4 +248,4 @@ def run(recall, route: Route, brief: str, *, clock=time.time) -> str:
 
 __all__ = ["ROUND_MARGIN_S", "END_WAIT_MARGIN_S", "NOTHING", "END_LINE", "CONTINUE", "Route",
            "ref", "round_bound_s", "ends_stream", "continue_text", "why_stop", "settle",
-           "open_round", "run"]
+           "KEPT", "open_round", "run"]

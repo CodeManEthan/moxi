@@ -1,6 +1,7 @@
 """A recall's stream: rounds with their refs and the kept mark, each settled line first,
 then acked, then unmarked; the stream's ends; a first round lost and a later one."""
 
+import os
 import types
 
 import pytest
@@ -178,6 +179,64 @@ def test_an_ack_turns_refused_leaves_the_mark():
     run(recall, FakeRoute([ended("NOTHING")], on_ack=refuse))
     line = recalls.find_line(SESSION, recall.recall_id)
     assert line["state"] == "back" and line["kept"] is True
+
+
+class KeptEnds(FakeRoute):
+    """A route whose turns keeps every round's end until its ref is acked, and refuses
+    the acks of the refs in `refuse`."""
+
+    def __init__(self, ends, *, refuse=()):
+        super().__init__(ends)
+        self.held = set()
+        self.refuse = set(refuse)
+
+    def first(self, text, *, ref, round_timeout_s):
+        self.held.add(ref)
+        return super().first(text, ref=ref, round_timeout_s=round_timeout_s)
+
+    def next(self, prior, text, *, ref, round_timeout_s):
+        self.held.add(ref)
+        return super().next(prior, text, ref=ref, round_timeout_s=round_timeout_s)
+
+    def ack(self, ref):
+        if ref in self.refuse:
+            self.refuse.discard(ref)
+            raise RuntimeError("the endpoint got the ack and did not answer")
+        self.held.discard(ref)
+
+
+def test_an_ack_not_taken_ends_the_stream_and_its_kept_end_stays_named_for_a_taker():
+    from moxi_memory import recall_take
+
+    recall = a_recall()
+    rid = recall.recall_id
+    route = KeptEnds([ended("- a"), ended("- b"), ended("- c\nEnd of recall.")],
+                     refuse={f"{rid}:1"})
+    route.recall_id = rid
+    assert recall_stream.run(recall, route, "the brief") == "ended"
+    # no later round was asked over the kept one
+    assert [a[2] for a in route.asked] == [f"{rid}:1"]
+    line = recalls.find_line(SESSION, rid)
+    assert line["state"] == "back" and line["kept"] is True and line["ref"] == f"{rid}:1"
+    assert records.read(SESSION, rid)["state"] == "ended"
+    assert route.held == {f"{rid}:1"}
+    # once the child is gone a taker acks the line's round, and turns releases its end
+    with recalls.session_lock(SESSION):
+        # this pid with a start time it never had: a process that has ended
+        line["child"] = {"pid": os.getpid(), "started": 1.0}
+        recalls.put_line(SESSION, line)
+    assert recall_take.take(SESSION, rid, identity=recall_take.me(), route=route) == "acked"
+    assert route.held == set()
+    assert recalls.find_line(SESSION, rid)["kept"] is False
+
+
+def test_a_round_is_never_opened_over_a_kept_end():
+    recall = a_recall()
+    rid = recall.recall_id
+    assert recall_stream.open_round(recall, 1, f"{rid}:1") is None
+    assert recall_stream.open_round(recall, 2, f"{rid}:2") == "kept"
+    line = recalls.find_line(SESSION, rid)
+    assert line["ref"] == f"{rid}:1" and line["kept"] is True
 
 
 def test_the_subagent_route_with_no_endpoint_loses_the_first_round():

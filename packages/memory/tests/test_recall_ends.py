@@ -101,7 +101,7 @@ def test_the_owner_asks_no_further_round_of_a_discarded_line():
             pass
 
     route = Route()
-    assert recall_stream.open_round(recall, 1, f"{recall.recall_id}:1")
+    assert recall_stream.open_round(recall, 1, f"{recall.recall_id}:1") is None
     with recalls.session_lock(SESSION):
         line = recalls.find_line(SESSION, recall.recall_id)
         line["state"] = "discarded"
