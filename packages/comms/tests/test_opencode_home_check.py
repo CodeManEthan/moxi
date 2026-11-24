@@ -8,6 +8,7 @@ import importlib.util
 import os
 import shutil
 import subprocess
+import sys
 import time
 from pathlib import Path
 
@@ -15,6 +16,10 @@ from moxi_dev.testing import PROC_WAIT_S
 import pytest
 
 SCRIPT = Path(__file__).resolve().parent.parent / "scripts" / "opencode-home-check.py"
+#: The check finds running OpenCode processes in /proc, so it runs on Linux only.
+LINUX_CHECK = pytest.mark.skipif(not sys.platform.startswith("linux"),
+                                 reason="the check reads running processes from /proc, "
+                                        "which only Linux has")
 
 
 @pytest.fixture(scope="module")
@@ -54,7 +59,7 @@ def test_only_new_state_of_opencodes_own_written_during_the_run_is_removed(check
     kept_db.write_text("his, changed")
     after = check.snapshot(check.opencode_dirs(home))
     remove, new_left, changed = check.plan_cleanup(before, after, started, home)
-    names = {str(Path(p).relative_to(home)) for p in remove}
+    names = {Path(p).relative_to(home).as_posix() for p in remove}
     assert names == {".local/share/opencode/opencode.db",
                      ".local/share/opencode/opencode.db-wal",
                      ".local/share/opencode/log/2026-10-04T000000.log",
@@ -68,6 +73,7 @@ def test_only_new_state_of_opencodes_own_written_during_the_run_is_removed(check
     assert kept_db.exists() and stranger.exists() and early.exists()
 
 
+@LINUX_CHECK
 def test_it_refuses_while_another_opencode_runs(check, tmp_path, capsys):
     fake = tmp_path / "opencode"
     # A shell ignores the name it runs under, and `read` is a builtin, so the stand-in
@@ -88,6 +94,7 @@ def test_it_refuses_while_another_opencode_runs(check, tmp_path, capsys):
         proc.stdin.close()
 
 
+@LINUX_CHECK
 def test_an_opencode_that_starts_during_the_check_means_nothing_is_removed(
         check, tmp_path, monkeypatch, capsys):
     home = tmp_path / "home"
