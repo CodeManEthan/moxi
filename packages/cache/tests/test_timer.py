@@ -12,7 +12,7 @@ import time
 from pathlib import Path
 
 import pytest
-from conftest import claude_config, write_cache_config
+from conftest import POSIX_MODES, claude_config, write_cache_config
 
 from moxi_cache import cli, timer, watch
 from moxi_cache.timer import Refusal, Subscription, Timer
@@ -97,6 +97,7 @@ def test_missing_fields_and_a_non_table_are_refused(exe):
         "timer.subscriber is not a list of tables"
 
 
+@POSIX_MODES
 def test_a_file_that_is_not_executable_is_refused(exe):
     exe.chmod(0o644)
     s = checked(sub(exe))
@@ -183,7 +184,8 @@ def test_a_modules_subscription_resolves_its_own_script(scripts):
     ("bin/moxi-lc-clear", ["moxi-lc-clear"], "not a console script's bare name"),
     ("moxi-other", ["moxi-lc-clear"], "not one of the module's own console scripts"),
     ("moxi-lc-gone", ["moxi-lc-gone"], "is not installed in this environment"),
-    ("moxi-lc-plain", ["moxi-lc-plain"], "not an executable file"),
+    pytest.param("moxi-lc-plain", ["moxi-lc-plain"], "not an executable file",
+                 marks=POSIX_MODES),
 ])
 def test_a_modules_run0_is_refused(scripts, argv0, scripts_of, words):
     make, find = scripts

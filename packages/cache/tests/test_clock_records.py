@@ -161,6 +161,9 @@ TIMERS_JSON = {
 @pytest.fixture
 def frozen(monkeypatch, own_roots, tmp_path):
     """The clock stopped at NOW in UTC, and one subscription in cache's config."""
+    if not hasattr(time, "tzset"):
+        pytest.skip("Windows: time.tzset is POSIX-only, so a test can't put the local zone "
+                    "at UTC; the timers' text is the same rendering on every system")
     exe = tmp_path / "bin" / "verb"
     exe.parent.mkdir()
     exe.write_text("#!/bin/sh\nexit 0\n")

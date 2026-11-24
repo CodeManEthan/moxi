@@ -14,6 +14,7 @@ import subprocess
 import sys
 
 import pytest
+from conftest import POSIX_MODES
 from test_codex_clock import (TID, drifting, measured_seconds, one_turn,
                               sessions_root)
 
@@ -117,6 +118,7 @@ def test_a_read_only_store_reads_what_the_learner_wrote(tmp_path, learner):
     assert "lowered from" in clock.key
 
 
+@POSIX_MODES
 def test_a_lowering_that_cannot_be_written_reads_unknown_until_one_is(tmp_path, learner):
     state = drift.record_path().parent
     root, now = write_rollout(tmp_path, drifting(measured_seconds() - 1200))

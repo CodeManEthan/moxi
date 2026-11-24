@@ -8,8 +8,8 @@ is the reader beneath it.
 from __future__ import annotations
 
 import pytest
-from conftest import (HOUR, assistant_line, claude_config, user_line, write_cache_config,
-                      write_sessions_config, write_transcript)
+from conftest import (HOUR, POSIX_MODES, assistant_line, claude_config, user_line,
+                      write_cache_config, write_sessions_config, write_transcript)
 
 from moxi_cache import api, claude, clock
 from moxi_sessions.api import Request
@@ -82,7 +82,8 @@ def test_an_id_from_someones_record_with_no_transcript_is_unknown(tmp_path):
     assert (clock.kind, clock.code) == ("unknown", "no-record")
 
 
-@pytest.mark.parametrize("case", ["no root reported", "root missing", "root unreadable",
+@pytest.mark.parametrize("case", ["no root reported", "root missing",
+                                  pytest.param("root unreadable", marks=POSIX_MODES),
                                   "turned"])
 def test_no_transcript_without_the_sessions_own_evidence_is_unknown(tmp_path, case):
     root = tmp_path / "projects"
@@ -233,6 +234,7 @@ def test_a_session_id_that_cannot_be_looked_up_is_unknown(tmp_path, sid):
     assert reported.kind == "unknown", "and never fresh on the session's own word"
 
 
+@POSIX_MODES
 def test_an_unreadable_file_is_unknown(tmp_path):
     path = write_transcript(SESS_A, 30, root=tmp_path)
     path.chmod(0)

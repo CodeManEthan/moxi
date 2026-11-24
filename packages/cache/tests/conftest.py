@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import json
 import os
+import sys
 import time
 from pathlib import Path
 
@@ -21,6 +22,13 @@ import pytest
 
 from moxi_cache import table, timer
 from moxi_sessions.api import testing
+
+#: The mark of a test that takes a read, a write or the execute bit away with `os.chmod`,
+#: which on Windows sets only the read-only flag.
+POSIX_MODES = pytest.mark.skipif(
+    sys.platform == "win32",
+    reason="Windows: os.chmod sets only the read-only flag there, so a test can't take a "
+           "read, a write or the execute bit away with it")
 
 HOUR = 3600
 

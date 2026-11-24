@@ -14,6 +14,7 @@ import sqlite3
 import time
 
 import pytest
+from conftest import POSIX_MODES
 
 from moxi_cache import api, opencode, table
 from moxi_sessions.api import opencode as reader
@@ -191,7 +192,9 @@ WITNESS_CODES = {
 }
 
 
-@pytest.mark.parametrize("case", list(WITNESS_CODES))
+@pytest.mark.parametrize("case", [
+    pytest.param(case, marks=POSIX_MODES) if case == "unreadable-db" else case
+    for case in WITNESS_CODES])
 def test_each_witness_that_fails_is_unknown(tmp_path, case):
     if case == "missing-column":
         s = oc_db(tmp_path)

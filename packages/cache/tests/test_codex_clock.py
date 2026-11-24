@@ -10,6 +10,7 @@ hand it; `test_drift.py` covers the store itself, and `api.read` the store's sea
 from __future__ import annotations
 
 import json
+import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -501,13 +502,14 @@ def test_no_rollout_file(tmp_path):
     assert codex_read(root, turned=True).kind == "unknown"
     assert codex_read(tmp_path / "missing", turned=False).kind == "unknown"
     assert codex_read(None, turned=False).reason == codex.NO_ROOT
-    locked = tmp_path / "locked"
-    locked.mkdir()
-    locked.chmod(0)
-    try:
-        assert codex_read(locked, turned=False).kind == "unknown"
-    finally:
-        locked.chmod(0o700)
+    if sys.platform != "win32":       # os.chmod takes no read away on Windows
+        locked = tmp_path / "locked"
+        locked.mkdir()
+        locked.chmod(0)
+        try:
+            assert codex_read(locked, turned=False).kind == "unknown"
+        finally:
+            locked.chmod(0o700)
 
 
 def test_finding_the_rollout(tmp_path):
@@ -563,12 +565,13 @@ def test_a_lone_zst_is_cold_with_no_age(tmp_path):
 def test_unreadable_and_scan_limit_and_no_stamp(tmp_path, monkeypatch):
     root = sessions_root(tmp_path)
     path = one_turn(60).write(root)
-    path.chmod(0)
-    try:
-        clock = codex_read(root)
-        assert clock.kind == "unknown" and "could not be read" in clock.reason
-    finally:
-        path.chmod(0o600)
+    if sys.platform != "win32":       # os.chmod takes no read away on Windows
+        path.chmod(0)
+        try:
+            clock = codex_read(root)
+            assert clock.kind == "unknown" and "could not be read" in clock.reason
+        finally:
+            path.chmod(0o600)
     r = Rollout().start("t1", NOW - 100)
     for _n in range(300):
         r.item("reasoning", NOW - 99, summary=["y" * 200])
