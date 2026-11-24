@@ -348,11 +348,13 @@ def test_a_new_file_is_0600_and_an_existing_files_mode_is_kept(demo):
     assert stat.S_IMODE(os.stat(demo).st_mode) == 0o644
 
 
+#: A holder prints its own pid: on Windows a venv's python.exe starts the interpreter as its
+#: child, so `Popen.pid` is not the pid the lock records.
 HOLDER = textwrap.dedent("""
-    import sys, time
+    import os, sys, time
     from moxi import files
     with files.lock(sys.argv[1]):
-        print("held", flush=True)
+        print("held", os.getpid(), flush=True)
         time.sleep(30)
 """)
 
@@ -363,12 +365,13 @@ def test_a_lock_held_past_the_wait_refuses_with_exit_75(demo, monkeypatch):
     proc = subprocess.Popen([sys.executable, "-c", HOLDER, str(lock)],
                             stdout=subprocess.PIPE, text=True)
     try:
-        assert proc.stdout.readline().strip() == "held"
+        said, _, own_pid = proc.stdout.readline().strip().partition(" ")
+        assert said == "held"
         exc = refused(config.set_value, "demo", "block", value=True, by="cli")
     finally:
         proc.kill()
         proc.wait()
-    assert exc.exit_code == 75 and str(proc.pid) in exc.problem
+    assert exc.exit_code == 75 and own_pid in exc.problem
     assert not demo.exists()
 
 
@@ -687,13 +690,14 @@ def test_config_set_json_on_a_locked_file_exits_75(demo, monkeypatch, capsys):
     proc = subprocess.Popen([sys.executable, "-c", HOLDER, str(lock)],
                             stdout=subprocess.PIPE, text=True)
     try:
-        assert proc.stdout.readline().strip() == "held"
+        said, _, own_pid = proc.stdout.readline().strip().partition(" ")
+        assert said == "held"
         code, out = change_json(capsys, "set", "demo", "block", "true")
     finally:
         proc.kill()
         proc.wait()
     assert code == 75 and out["changed"] is False
-    assert out["problem"] == f"{demo}: key 'block': is locked by pid {proc.pid}"
+    assert out["problem"] == f"{demo}: key 'block': is locked by pid {own_pid}"
     assert out["fix"] == "try again once it is free"
 
 

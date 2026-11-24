@@ -98,20 +98,25 @@ def test_atomic_write_retries_a_sharing_violation(tmp_path, monkeypatch):
 
 # -- lock --------------------------------------------------------------------------------
 
+#: A holder prints its own pid: on Windows a venv's python.exe starts the interpreter as its
+#: child, so `Popen.pid` is not the pid the lock records.
 HOLDER = textwrap.dedent("""
-    import sys, time
+    import os, sys, time
     from moxi import files
     with files.lock(sys.argv[1]):
-        print("held", flush=True)
+        print("held", os.getpid(), flush=True)
         time.sleep(float(sys.argv[2]))
 """)
 
 
 def hold(path: Path, seconds: float = 30.0) -> subprocess.Popen:
-    """A real process that holds the lock on `path` until killed or `seconds` pass."""
+    """A real process that holds the lock on `path` until killed or `seconds` pass, with
+    `own_pid` the pid it reports itself."""
     proc = subprocess.Popen([sys.executable, "-c", HOLDER, str(path), str(seconds)],
                             stdout=subprocess.PIPE, text=True)
-    assert proc.stdout.readline().strip() == "held"
+    said, _, pid = proc.stdout.readline().strip().partition(" ")
+    assert said == "held"
+    proc.own_pid = int(pid)
     return proc
 
 
@@ -147,10 +152,10 @@ def test_timeout_zero_raises_at_once_naming_the_holder(tmp_path, holder):
         with files.lock(path, timeout_s=0):
             pass
     assert time.monotonic() - started < 0.5
-    assert caught.value.holder == proc.pid
+    assert caught.value.holder == proc.own_pid
     assert caught.value.path == path
     assert caught.value.exit_code == 75
-    assert str(proc.pid) in str(caught.value)
+    assert str(proc.own_pid) in str(caught.value)
 
 
 def test_a_float_timeout_waits_that_long(tmp_path, holder):
@@ -345,7 +350,7 @@ def test_a_standalone_nested_call_waits_for_an_install(core, holder):
         with files.lock(core, nested=True, timeout_s=0.3):
             pass
     assert time.monotonic() - started >= 0.3
-    assert caught.value.holder == proc.pid
+    assert caught.value.holder == proc.own_pid
     proc.kill()
     proc.wait()
     with files.lock(core, nested=True):
@@ -608,7 +613,7 @@ def test_lock_never_reads_the_variable(core, holder, monkeypatch):
         with pytest.raises(files.LockTimeout) as caught:
             with files.lock(core, nested=True, timeout_s=0.2):
                 pass
-        assert caught.value.holder == proc.pid
+        assert caught.value.holder == proc.own_pid
         assert os.environ[files.LOCK_FD_ENV] == str(fd)
     finally:
         os.close(fd)
@@ -649,7 +654,7 @@ def test_an_adopted_claim_lets_nested_calls_yield(core, holder):
         assert files.adopt_core_claim(core) is True
         with files.lock(core, nested=True, timeout_s=0):
             pass
-        assert core.read_text().strip() == str(proc.pid)
+        assert core.read_text().strip() == str(proc.own_pid)
     finally:
         os.close(fd)
 

@@ -38,6 +38,10 @@ POSIX = pytest.mark.skipif(sys.platform == "win32", reason="POSIX signals")
 #: The gate as its own process, as a unit runs it.
 GATE = [sys.executable, "-c", "import sys; from moxi.run import main; sys.exit(main())"]
 PY = sys.executable
+#: The interpreter itself, for a child that needs only the standard library and whose own
+#: pid a test compares with the one the gate records: on Windows a venv's python.exe starts
+#: the interpreter as its child, so a child run by `PY` reports a pid the gate never started.
+BASE_PY = getattr(sys, "_base_executable", None) or sys.executable
 
 
 @pytest.fixture
@@ -380,8 +384,8 @@ def test_a_command_that_cannot_start_says_so_in_the_log(demo, tmp_path):
 def test_runtime_file_names_the_running_command_and_goes_with_it(demo, tmp_path):
     path = run.runtime_path("demo", "daemon")
     seen = tmp_path / "seen"
-    code = run.main(["--record", "demo/daemon", "--runtime", "--",
-                     *py(f"""
+    code = run.main(["--record", "demo/daemon", "--runtime", "--", BASE_PY, "-c",
+                     textwrap.dedent(f"""
                          import os, pathlib, time
                          p = pathlib.Path({str(path)!r})
                          for _ in range(200):
@@ -755,7 +759,7 @@ def test_the_runtime_file_the_gate_writes_reads_live_in_the_task_scheduler_backe
     child = (f"import os, pathlib, time; pathlib.Path({str(pid_file)!r})"
              f".write_text(str(os.getpid())); p = pathlib.Path({str(stop_file)!r}); "
              "[time.sleep(0.05) for _ in range(600) if not p.exists()]")
-    words = _gate_words("schtasks", _spec("daemon", command=(PY, "-c", child)))
+    words = _gate_words("schtasks", _spec("daemon", command=(BASE_PY, "-c", child)))
     runtime = backend.runtime_file("demo", "relay")
     proc = subprocess.Popen([PY, "-m", "moxi", "run", *words])
     try:

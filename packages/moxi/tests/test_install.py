@@ -634,19 +634,21 @@ def test_a_second_install_waits_for_the_first(fake, capsys):
 
     lock = moxi.paths.core_lock()
     holder = subprocess.Popen([sys.executable, "-c", textwrap.dedent(f"""
-        import sys, time
+        import os, sys, time
         from moxi import files
         with files.lock({str(lock)!r}):
-            print("held", flush=True)
+            print("held", os.getpid(), flush=True)
             time.sleep(1.5)
         """)], stdout=subprocess.PIPE, text=True)
     try:
-        assert holder.stdout.readline().strip() == "held"
+        # Its own pid: on Windows a venv's python.exe starts the interpreter as a child.
+        said, _, own_pid = holder.stdout.readline().strip().partition(" ")
+        assert said == "held"
         code, _, err = moxi_install(capsys, "turns", "--none")
     finally:
         holder.wait(PROC_WAIT_S)
     assert code == 0, err
-    assert f"waiting for the core lock, which pid {holder.pid} holds (an install or " \
+    assert f"waiting for the core lock, which pid {own_pid} holds (an install or " \
            "uninstall, or a module reading or changing its units)" in err
 
 

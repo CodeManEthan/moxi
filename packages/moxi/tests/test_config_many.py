@@ -238,11 +238,13 @@ def test_set_many_returns_one_list_of_the_units_each_key_applied(demo, monkeypat
     assert asked == ["context.warn_at", "context.alert_at"]
 
 
+#: A holder prints its own pid: on Windows a venv's python.exe starts the interpreter as its
+#: child, so `Popen.pid` is not the pid the lock records.
 HOLDER = textwrap.dedent("""
-    import sys, time
+    import os, sys, time
     from moxi import files
     with files.lock(sys.argv[1]):
-        print("held", flush=True)
+        print("held", os.getpid(), flush=True)
         time.sleep(30)
 """)
 
@@ -255,13 +257,14 @@ def test_a_held_lock_refuses_with_exit_75_and_is_not_a_changed_file(demo, monkey
     proc = subprocess.Popen([sys.executable, "-c", HOLDER, str(lock)],
                             stdout=subprocess.PIPE, text=True)
     try:
-        assert proc.stdout.readline().strip() == "held"
+        said, _, own_pid = proc.stdout.readline().strip().partition(" ")
+        assert said == "held"
         exc = refused(config.set_many, "demo", RAISED, by="ui")
     finally:
         proc.kill()
         proc.wait()
     assert exc.exit_code == 75 and not isinstance(exc, ConfigChanged)
-    assert str(proc.pid) in exc.problem
+    assert own_pid in exc.problem
     assert demo.read_text() == COMMENTED and writes == []
 
 
