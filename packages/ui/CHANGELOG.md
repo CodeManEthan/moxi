@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+- For module authors: a test shell that a module- or session-scoped fixture starts through
+  `ui_shells` (the `ui_shell` fixture among them) keeps the core's record of the
+  terminal's environment under its own home, as it did before moxi-dev's test kit gave
+  wider fixtures the run's environment; one a test starts still reads the test's.
+  `TestShell` and `shell_env` take `anchor_at_home` for the same choice.
+
 ## 0.2.8 (2026-11-23)
 
 - On the modules view, each block's card says `Reading…` until its block first takes up

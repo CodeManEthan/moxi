@@ -28,7 +28,9 @@ A module whose `ui` is an optional extra uses these fixtures by name and never i
     setting or variable reaches these.
 `ui_shells` (module scope)
     `ui_shells(**options)` starts one more test shell with those options; each is stopped
-    when the test module ends. It also takes `home`, the directory the shell keeps its
+    when the test module ends. A shell a test or a function-scoped fixture starts reads
+    the test's `MOXI_ANCHOR_HOME`; one a fixture of wider scope starts has its anchor
+    under its own home. It also takes `home`, the directory the shell keeps its
     files in (a new one under pytest's temp root unless given): a test whose own sockets go
     under the shell's runtime root gives a short one, since pytest's root can make a
     socket's path too long. A test that gives `home` removes it after stopping the shell.
@@ -236,6 +238,24 @@ def ui_shell_options() -> dict[str, Any]:
     return {}
 
 
+#: The scopes of the fixtures being set up in this process now, innermost last.
+_SETTING_UP: list[str] = []
+
+
+@pytest.hookimpl(wrapper=True)
+def pytest_fixture_setup(fixturedef: Any, request: pytest.FixtureRequest) -> Iterator[Any]:
+    _SETTING_UP.append(fixturedef.scope)
+    try:
+        return (yield)
+    finally:
+        _SETTING_UP.pop()
+
+
+def _in_wider_fixture() -> bool:
+    """Whether the innermost fixture being set up now has a scope wider than a test's."""
+    return bool(_SETTING_UP) and _SETTING_UP[-1] != "function"
+
+
 @pytest.fixture(scope="module")
 def ui_shells(tmp_path_factory: pytest.TempPathFactory) -> Iterator[Callable[..., Any]]:
     """`ui_shells(**options)`: one more test shell; each is stopped at the module's end."""
@@ -245,6 +265,7 @@ def ui_shells(tmp_path_factory: pytest.TempPathFactory) -> Iterator[Callable[...
 
     def start(**options: Any) -> TestShell:
         home = options.pop("home", None)
+        options.setdefault("anchor_at_home", _in_wider_fixture())
         shell = TestShell(tmp_path_factory.mktemp("ui-shell") if home is None else home,
                           **options)
         started.append(shell)

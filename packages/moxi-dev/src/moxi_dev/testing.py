@@ -1075,24 +1075,26 @@ def _child_env(given: Mapping[Any, Any]) -> dict[str, str]:
     """The environment the seam hands a child given `given`: each missing child key
     added, a missing temp directory and home added, then judged (`_refusal`)."""
     env = {os.fsdecode(key): os.fsdecode(value) for key, value in given.items()}
+    # This process's environment: the run's, or the test's inside a fence.
+    current_env = dict(os.environ)
     for key, value in _RUN.child.items():
         current = _value(env, key)
         # An empty uv variable reads as unset to uv; an empty byte-code one turns it on.
         if current is None or (not current and key != NO_BYTE_CODE_ENV):
             _put(env, key, value)
     for key in _TEMP_KEYS if WINDOWS else _TEMP_KEYS[:1]:
-        if not _holds(env, key) and os.environ.get(key):
-            env[key] = os.environ[key]
+        if not _holds(env, key) and current_env.get(key):
+            env[key] = current_env[key]
     if WINDOWS:
         own = _value(env, "USERPROFILE") or _value(env, "HOME")
         for key, rel in WINDOWS_HOMES.items():
             if not _holds(env, key):
                 value = ((own if rel == "." else ntpath.join(own, *rel.split("/")))
-                         if own else os.environ.get(key))
+                         if own else current_env.get(key))
                 if value:
                     env[key] = value
-    if not _holds(env, "HOME") and os.environ.get("HOME"):
-        env["HOME"] = os.environ["HOME"]
+    if not _holds(env, "HOME") and current_env.get("HOME"):
+        env["HOME"] = current_env["HOME"]
     refusal = _refusal(env)
     if refusal:
         _refuse(refusal)
@@ -1202,7 +1204,7 @@ def _uv_cache(basetemp: Path) -> Path:
     return cache
 
 
-def _put_environ(env: Mapping[str, str]) -> None:
+def _put_env(env: Mapping[str, str]) -> None:
     """Make this process's environment exactly `env`."""
     os.environ.clear()
     os.environ.update(env)
@@ -1246,7 +1248,7 @@ def _owned(config: pytest.Config) -> Iterator[None]:
                                          for path in (basetemp, short, cache)))
         _RUN.pycache = str(pycache)
         _RUN.real_supervisor = started.get(REAL_SUPERVISOR_ENV) == "1"
-        _put_environ(env)
+        _put_env(env)
         tempfile.tempdir = str(short)
         subprocess.Popen.__init__ = _seam_init          # type: ignore[method-assign]
         _RUN.depth = 1
@@ -1254,7 +1256,7 @@ def _owned(config: pytest.Config) -> Iterator[None]:
     finally:
         _RUN.depth = 0
         subprocess.Popen.__init__ = _POPEN_INIT         # type: ignore[method-assign]
-        _put_environ(started)
+        _put_env(started)
         tempfile.tempdir = tempdir
         _RUN.__init__()
         shutil.rmtree(short, ignore_errors=True)
@@ -1274,7 +1276,7 @@ def _borrowed() -> Iterator[None]:
         guard, _RUN.started, env, tempfile.tempdir = saved
         _GUARD.restore(guard)
         if dict(os.environ) != env:
-            _put_environ(env)
+            _put_env(env)
 
 
 @pytest.hookimpl(wrapper=True)

@@ -98,7 +98,7 @@ def test_a_child_given_an_env_starts_with_the_keys_added():
 # --- what the seam refuses -------------------------------------------------------------
 
 @pytest.mark.parametrize("key", testing.UV_DIRS_ENV)
-def test_a_uv_folder_outside_the_roots_is_refused_existing_or_not(key, outside):
+def test_a_uv_dir_outside_the_roots_is_refused_existing_or_not(key, outside):
     for where in (outside, os.path.join(outside, "nothing-here")):
         assert "outside the run's roots" in refused(lambda: testing._child_env({key: where}))
 
@@ -113,7 +113,7 @@ def test_byte_code_on_needs_a_prefix_under_the_roots(tmp_path, outside):
 
 @pytest.mark.parametrize("key", ["HOME", "XDG_CONFIG_HOME", "XDG_RUNTIME_DIR", "TMPDIR",
                                  "TEMP", "MOXI_HOME", "MOXI_COMMS_HOME", "CODEX_HOME"])
-def test_a_moved_variable_set_to_a_folder_outside_is_refused(key, outside):
+def test_a_moved_variable_set_to_a_dir_outside_is_refused(key, outside):
     assert "outside the run's roots" in refused(lambda: testing._child_env({key: outside}))
 
 
@@ -123,9 +123,10 @@ def test_a_placeholder_that_names_nothing_passes(outside):
     assert env["HOME"] == env["MOXI_HOME"] == nowhere
 
 
-def test_the_opt_in_tiers_may_name_the_account_s_folders_but_not_uv_s(outside):
-    def lax_then_back(attr, value):
-        holder = testing._RUN if attr == "real_supervisor" else testing._GUARD
+def test_the_opt_in_tiers_may_name_the_account_s_dirs_but_not_uv_s(outside):
+    # A live test, then a run with the real supervisor.
+    for holder, attr, value in ((testing._GUARD, "network", False),
+                                (testing._RUN, "real_supervisor", True)):
         saved = getattr(holder, attr)
         setattr(holder, attr, value)
         try:
@@ -134,9 +135,6 @@ def test_the_opt_in_tiers_may_name_the_account_s_folders_but_not_uv_s(outside):
             refused(lambda: testing._child_env({"PYTHONDONTWRITEBYTECODE": ""}))
         finally:
             setattr(holder, attr, saved)
-
-    lax_then_back("network", False)          # a live test
-    lax_then_back("real_supervisor", True)   # a run with the real supervisor
     refused(lambda: testing._child_env({"HOME": outside}))
 
 

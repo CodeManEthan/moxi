@@ -147,6 +147,39 @@ def test_a_shell_reads_the_record_under_the_test_kits_anchor(fence, tmp_path, mo
     assert env["MOXI_ANCHOR_HOME"] == env.get("LOCALAPPDATA", str(tmp_path))
 
 
+def test_a_shell_anchored_at_home_keeps_the_record_under_its_own_home(fence, tmp_path):
+    from moxi_ui.testing.shell import shell_env
+
+    env = shell_env(tmp_path, anchor_at_home=True)
+    assert env["MOXI_ANCHOR_HOME"] == env.get("LOCALAPPDATA", str(tmp_path))
+    assert env["MOXI_ANCHOR_HOME"] != str(fence.anchor_home)
+
+
+@pytest.fixture(scope="module")
+def wider_fixture_says():
+    from moxi_ui import testing
+
+    return testing._in_wider_fixture()
+
+
+@pytest.fixture
+def function_fixture_says():
+    from moxi_ui import testing
+
+    return testing._in_wider_fixture()
+
+
+def test_ui_shells_anchors_a_wider_fixture_s_shell_at_its_home(wider_fixture_says,
+                                                                function_fixture_says):
+    from moxi_ui import testing
+
+    # A shell a fixture of wider scope starts would otherwise share the run's anchor
+    # with every other such shell of the run.
+    assert wider_fixture_says is True
+    assert function_fixture_says is False
+    assert testing._in_wider_fixture() is False
+
+
 def test_a_shells_env_cant_move_it_out_of_its_home(tmp_path):
     from moxi_ui.testing.shell import TestShell, shell_env
 

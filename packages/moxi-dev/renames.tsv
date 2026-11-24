@@ -7760,7 +7760,7 @@ moxi-dev	packages/moxi-dev/src/moxi_dev/testing.py	#: `HOME`, under the test's `
 moxi-dev	packages/moxi-dev/src/moxi_dev/testing.py	_SHORT_DIRS: set[str] = set()	keep	set	set
 moxi-dev	packages/moxi-dev/src/moxi_dev/testing.py	__all__ = ["ANCHOR_HOME", "CHANGED_ENV", "DURATIONS_ENV", "FINDING_ENV", "Fence",	keep	ANCHOR_HOME	ANCHOR_HOME
 moxi-dev	packages/moxi-dev/src/moxi_dev/testing.py	_uv_dirs	name	environ	env
-moxi-dev	packages/moxi-dev/src/moxi_dev/testing.py	_uv_dirs	name	windows	is_windows
+moxi-dev	-	removed:moxi_dev.testing:_uv_dirs	keep	windows	is_windows
 moxi-dev	packages/moxi-dev/src/moxi_dev/testing.py	`PATHEXT`. A test that needs the path uses the one returned, never `directory / name`.	use	directory / name	script_dir / name
 moxi-dev	packages/moxi-dev/src/moxi_dev/testing.py	body["held"] = sorted(self.held | set(self.config.stash.get(_HELD, [])))	keep	set	set
 moxi-dev	packages/moxi-dev/src/moxi_dev/testing.py	can_symlink	name	error	exc
@@ -17766,8 +17766,6 @@ moxi-dev	packages/moxi-dev/conftest.py	if not any(getattr(item, "originalname", 
 moxi-dev	packages/moxi-dev/src/moxi_dev/testing.py	temp directory and `HOME` it lacks, and on Windows each folder of `WINDOWS_HOMES` it	keep	HOME	HOME
 moxi-dev	packages/moxi-dev/src/moxi_dev/testing.py	lacks, laid out under its own home where it names one (`USERPROFILE`, else `HOME`), else	keep	HOME	HOME
 moxi-dev	packages/moxi-dev/src/moxi_dev/testing.py	own = _value(env, "USERPROFILE") or _value(env, "HOME")	keep	HOME	HOME
-moxi-dev	packages/moxi-dev/src/moxi_dev/testing.py	if not _holds(env, "HOME") and os.environ.get("HOME"):	keep	HOME	HOME
-moxi-dev	packages/moxi-dev/src/moxi_dev/testing.py	env["HOME"] = os.environ["HOME"]	keep	HOME	HOME
 moxi-dev	packages/moxi-dev/src/moxi_dev/testing.py	home = env.get("HOME") or os.path.expanduser("~")	keep	HOME	HOME
 moxi-dev	packages/moxi-dev/src/moxi_dev/testing.py	cache.mkdir(exist_ok=True)	keep	exist_ok	exist_ok
 moxi-dev	packages/moxi-dev/src/moxi_dev/testing.py	home.mkdir(exist_ok=True)	keep	exist_ok	exist_ok
@@ -17783,7 +17781,9 @@ moxi-dev	packages/moxi-dev/tests/test_child_seam.py	assert testing._child_env({"
 moxi-dev	packages/moxi-dev/tests/test_child_seam.py	refused(lambda: testing._child_env({"HOME": outside}))	keep	HOME	HOME
 moxi-dev	packages/moxi-dev/tests/test_child_seam.py	assert "outside the run's roots" in refused(lambda: _start({**full, "HOME": outside}))	keep	HOME	HOME
 moxi-dev	packages/moxi-dev/tests/test_run_fence.py	"a_home": {**_system_env(), "HOME": str(own_home)}}[kind]	keep	HOME	HOME
-moxi-dev	packages/moxi-dev/tests/test_run_fence.py	for folder in said["folders"]:	keep	folders	folders
 moxi-dev	packages/moxi-dev/tests/test_run_fence.py	assert json.loads(_ask([sys.executable, "-c", WHERE], env, cwd))["folders"][1] \	keep	folders	folders
 moxi-dev	packages/moxi-dev/tests/test_run_fence.py	(sentinel / key.lower()).mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
 moxi-dev	packages/moxi-dev/tests/test_run_fence.py	"-s", timeout=900)	keep	timeout	timeout
+moxi-dev	packages/moxi-dev/src/moxi_dev/testing.py	if not _holds(env, "HOME") and current_env.get("HOME"):	keep	HOME	HOME
+moxi-dev	packages/moxi-dev/src/moxi_dev/testing.py	env["HOME"] = current_env["HOME"]	keep	HOME	HOME
+moxi-dev	packages/moxi-dev/tests/test_run_fence.py	for said_dir in said["folders"]:	keep	folders	folders

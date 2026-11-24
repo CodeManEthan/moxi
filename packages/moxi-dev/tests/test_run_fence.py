@@ -90,8 +90,8 @@ def test_every_child_would_write_inside_the_run(kind, run_env, uv_env, tmp_path,
     cwd = tmp_path / "cwd"              # no project, no .venv, for uv to find
     cwd.mkdir()
     answers = {key: _ask([UV, *argv], env, cwd) for key, argv in UV_DIRS.items()}
-    for key, folder in answers.items():
-        assert testing._in_roots(folder), f"{key}: {folder}"
+    for key, answer_dir in answers.items():
+        assert testing._in_roots(answer_dir), f"{key}: {answer_dir}"
     # The run's one uv cache, under xdist the one the controller named for every worker,
     # outside the worker's own temp root.
     cache = Path(answers["UV_CACHE_DIR"])
@@ -110,8 +110,8 @@ def test_every_child_would_write_inside_the_run(kind, run_env, uv_env, tmp_path,
         assert said["no_byte_code"] or (said["pycache_prefix"]
                                         and testing._in_roots(said["pycache_prefix"])), \
             (argv[1], said)
-        for folder in said["folders"]:
-            assert testing._in_roots(folder), (argv[1], folder)
+        for said_dir in said["folders"]:
+            assert testing._in_roots(said_dir), (argv[1], said_dir)
     if kind == "a_home":
         assert json.loads(_ask([sys.executable, "-c", WHERE], env, cwd))["folders"][1] \
             == str(own_home)
@@ -274,10 +274,10 @@ def test_children_of_every_scope_write_nothing_outside_the_run(pytester, tmp_pat
     (line,) = [line for line in result.outlines if "REPORT " in line]
     nested = json.loads(line.split("REPORT ", 1)[1])
     assert nested["short"] and not os.path.exists(nested["short"])
-    found = [path for folder in real_places["deep"] for path in _named(folder, token,
-                                                                         deep=True)]
-    found += [path for folder in real_places["flat"] for path in _named(folder, token,
-                                                                          deep=False)]
+    found = [path for real_dir in real_places["deep"]
+             for path in _named(real_dir, token, deep=True)]
+    found += [path for real_dir in real_places["flat"]
+              for path in _named(real_dir, token, deep=False)]
     assert found == []
 
 

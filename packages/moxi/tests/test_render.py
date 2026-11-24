@@ -33,10 +33,17 @@ SEGMENT_PACKAGE = {
 }
 
 
-def child(code: str, *args, cwd=None) -> subprocess.CompletedProcess:
+def child(code: str, *args, cwd=None, env=None) -> subprocess.CompletedProcess:
     return subprocess.run([sys.executable, "-c", textwrap.dedent(code), *args],
                           capture_output=True, text=True, timeout=60, cwd=cwd,
-                          env=dict(os.environ))
+                          env=dict(os.environ) if env is None else env)
+
+
+def byte_code_on(tmp_path) -> dict[str, str]:
+    """The test's environment with byte code writes left on, each to a prefix under
+    `tmp_path`, so an import tries one and nothing lands beside a source."""
+    return {**os.environ, "PYTHONDONTWRITEBYTECODE": "",
+            "PYTHONPYCACHEPREFIX": str(tmp_path / "pycache")}
 
 
 def segment_package(root, name="fakeseg"):
@@ -129,7 +136,7 @@ def test_an_import_with_no_bytecode_goes_on_under_the_hook(tmp_path):
         assert segment.__file__.startswith(sys.argv[1])
         print(segment.segment("abc").text, len(refused))
     '''
-    proc = child(probe, str(tmp_path / "pkg"))
+    proc = child(probe, str(tmp_path / "pkg"), env=byte_code_on(tmp_path))
     assert proc.returncode == 0, proc.stderr
     text, refusals = proc.stdout.split()
     assert text == "seg:abc" and int(refusals) >= 1
@@ -156,7 +163,7 @@ def test_a_hook_raising_another_error_breaks_that_import(tmp_path):
         except RuntimeError:
             print("import failed")
     '''
-    proc = child(probe, str(tmp_path / "pkg"))
+    proc = child(probe, str(tmp_path / "pkg"), env=byte_code_on(tmp_path))
     assert proc.stdout.strip() == "import failed", proc.stderr
 
 

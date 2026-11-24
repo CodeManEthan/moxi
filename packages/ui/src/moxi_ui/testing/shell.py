@@ -9,7 +9,10 @@ environment never reaches them. `MOXI_ANCHOR_HOME`, the test kits' stand-in for 
 account's own folder, which places the core's record of the terminal's environment, is
 passed on from this process (the test kit's fence sets it to the test's home), else set
 under `home`: so the shell reads the record a test wrote with the kit's
-`terminal_record`, and never the real account's. The modules it serves are this
+`terminal_record`, and never the real account's. With `anchor_at_home`, it is set under
+`home` whatever this process has: `ui_shells` gives that to a shell a fixture of wider
+scope starts, whose process holds the run's anchor, which every such shell of the run
+would otherwise share. The modules it serves are this
 environment's installed ones, plus any installed as a distribution in a `site` directory.
 
 A test reaches it three ways:
@@ -92,7 +95,7 @@ class ShellError(RuntimeError):
 
 def shell_env(home: str | os.PathLike, site: Sequence[str | os.PathLike] = (),
               extra: Mapping[str, str] | None = None, *,
-              gateway: bool = False) -> dict[str, str]:
+              gateway: bool = False, anchor_at_home: bool = False) -> dict[str, str]:
     """The whole environment a test shell under `home` runs with (see the module doc).
 
     `extra` adds variables of a test's own, or replaces a kept one such as `PATH`. Raises
@@ -100,7 +103,8 @@ def shell_env(home: str | os.PathLike, site: Sequence[str | os.PathLike] = (),
     `XDG_RUNTIME_DIR`, `MOXI_HOME`, the temp directories, `PYTHONPATH` and their Windows
     forms, and `MOXI_ANCHOR_HOME`), or a name or value that isn't a string. With
     `gateway`, the gateway mode's environment (see the module doc), which also refuses any
-    Moxi locator variable.
+    Moxi locator variable. With `anchor_at_home`, `MOXI_ANCHOR_HOME` is under `home`
+    whatever this process has.
     """
     home = Path(home)
     extra = dict(extra or {})
@@ -132,7 +136,7 @@ def shell_env(home: str | os.PathLike, site: Sequence[str | os.PathLike] = (),
         if gateway:
             env["WIN_PD_OVERRIDE_APPDATA"] = env["APPDATA"]
             env["WIN_PD_OVERRIDE_LOCAL_APPDATA"] = env["LOCALAPPDATA"]
-    if not env.get(ANCHOR_HOME_ENV):  # no kit's fence: the shell's own home stands in
+    if anchor_at_home or not env.get(ANCHOR_HOME_ENV):  # the shell's own home stands in
         env[ANCHOR_HOME_ENV] = env.get("LOCALAPPDATA") or str(home)
     if site:
         env["PYTHONPATH"] = os.pathsep.join(str(Path(path)) for path in site)
@@ -185,7 +189,7 @@ class TestShell:
                  failed_for: float | None = None, port: int = 0,
                  env: Mapping[str, str] | None = None,
                  start_timeout: float = START_TIMEOUT, gateway: bool = False,
-                 checks: bool = False):
+                 checks: bool = False, anchor_at_home: bool = False):
         self.home = Path(home)
         self.site = tuple(Path(path) for path in site)
         self.child_args = tuple(str(arg) for arg in child_args)
@@ -195,7 +199,8 @@ class TestShell:
         self.start_timeout = start_timeout
         self.gateway = bool(gateway)
         self.checks = bool(checks)
-        self.env = shell_env(self.home, self.site, env, gateway=self.gateway)
+        self.env = shell_env(self.home, self.site, env, gateway=self.gateway,
+                             anchor_at_home=anchor_at_home)
         self.port: int | None = None
         self.info: Any = None
         self._process: subprocess.Popen | None = None
