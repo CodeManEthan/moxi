@@ -229,18 +229,18 @@ def may_recycle(row: store.LaunchRow, *, slots_here: Callable[[], bool] | None =
 
 def check_handoff(handoff: str, conn: sqlite3.Connection, row: store.LaunchRow,
                   session_id: str | None, *, cwd: str | None = None, sessions: Any = LOOK,
-                  env: Mapping[str, str] | None = None, director: bool = False) -> Path:
+                  env: Mapping[str, str] | None = None, by_director: bool = False) -> Path:
     """The handoff a relaunch carries, checked: a regular file of at most `HANDOFF_CAP`
     bytes of UTF-8 text that is not blank, modified after the session's current id began
     (`began`); with notes installed, in notes' handoff folder for the launch, and refused
     when notes gives the launch no notes directory. A relative path is read from `cwd`
     (this process's working directory by default). Returns its absolute path. `sessions`
-    stands in for sessions' API (None: not installed). `director` words the refusals for
+    stands in for sessions' API (None: not installed). `by_director` words the refusals for
     a director relaunching another launch's session `session_id`."""
     path = Path(handoff).expanduser()
     if not path.is_absolute():
         path = Path(cwd or os.getcwd()) / path
-    hint = ("write a handoff for it, then relaunch it again" if director
+    hint = ("write a handoff for it, then relaunch it again" if by_director
             else "write the handoff, then arm the relaunch again")
     try:
         info = path.stat()
@@ -267,11 +267,11 @@ def check_handoff(handoff: str, conn: sqlite3.Connection, row: store.LaunchRow,
         raise Refused("handoff", f"the handoff {path} is blank", hint)
     seen = began(conn, row, session_id, sessions=sessions, env=env)
     if seen and info.st_mtime <= store.parse_time(seen).timestamp():
-        whose = f"session {session_id}" if director else "this session"
+        whose = f"session {session_id}" if by_director else "this session"
         raise Refused("handoff", f"the handoff {path} was last written before {whose} "
                                  f"began ({seen}): it is stale",
                       "write a handoff for it since it began, then relaunch it again"
-                      if director else
+                      if by_director else
                       "write this session's handoff, then arm the relaunch again")
     if modules.available("notes"):
         try:
@@ -279,15 +279,15 @@ def check_handoff(handoff: str, conn: sqlite3.Connection, row: store.LaunchRow,
         except handoffs.NoNotesDir as exc:
             raise Refused("handoff", exc.problem, exc.hint) from None
         if path.resolve().parent != handoff_dir:
-            whose = f"launch {row.request_id}'s" if director else "this launch's"
+            whose = f"launch {row.request_id}'s" if by_director else "this launch's"
             raise Refused("handoff", f"the handoff {path} is not in {whose} handoff "
                                      f"folder, {handoff_dir}",
-                          _handoff_dir_hint(row, director=director))
+                          _handoff_dir_hint(row, by_director=by_director))
     return path
 
 
-def _handoff_dir_hint(row: store.LaunchRow, *, director: bool) -> str:
-    if not director:
+def _handoff_dir_hint(row: store.LaunchRow, *, by_director: bool) -> str:
+    if not by_director:
         return "write it there (moxi launcher handoff dir prints the folder)"
     key = handoffs.key_of_row(row)
     return (f"write it there (moxi launcher handoffs --key {key} lists that folder's "
@@ -305,7 +305,7 @@ def director_handoff(handoff: str | None, conn: sqlite3.Connection, row: store.L
     installed. Returns its absolute path."""
     if handoff is not None:
         return check_handoff(handoff, conn, row, session_id, sessions=sessions, env=env,
-                             director=True)
+                             by_director=True)
     found = _waiting_handoff(conn, row)
     if found is not None:
         seen = began(conn, row, session_id, sessions=sessions, env=env)
@@ -316,7 +316,7 @@ def director_handoff(handoff: str | None, conn: sqlite3.Connection, row: store.L
         if written is not None and (not seen
                                     or written > store.parse_time(seen).timestamp()):
             return check_handoff(str(found.path), conn, row, session_id, sessions=sessions,
-                                 env=env, director=True)
+                                 env=env, by_director=True)
     hint = "write one and pass --handoff FILE"
     if modules.available("sessions"):
         hint += f"; moxi sessions read {session_id} shows how it ended"
