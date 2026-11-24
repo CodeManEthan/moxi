@@ -70,7 +70,7 @@ lower-case letters, digits and `-`.
 
 | Command | Does |
 |---|---|
-| `moxi rounds open ROUND --description TEXT [--flow NAME] [--record PTR] [--inherits S<n>[,...]] [--lead NAME]` | open a round: make its folder and record what it is for and its flow; `--record` points to where the operator gave the go, `--inherits` names the standing rulings it starts from, and `--lead` the agent who leads it (see A round's lead) |
+| `moxi rounds open ROUND --description TEXT [--flow NAME] [--record PTR] [--inherits S<n>[,...]] [--lead NAME] [--checklist LIST\|none]` | open a round: make its folder and record what it is for and its flow; `--record` points to where the operator gave the go, `--inherits` names the standing rulings it starts from, `--lead` the agent who leads it (see A round's lead), and `--checklist`, for a flow with no design step, the checklist items that apply (see A project's checklist) |
 | `moxi rounds next [ROUND] [--json]` | what is done next: the step the round is at, then the first step not done of each other stage and each other step of the round's own that is ready, each with who does it, what they read, the command that completes it and what it waits for; with no round, in a build's worktree, the round of the open build on the branch checked out there |
 | `moxi rounds queue [--repo KEY] [--resume]` | show each queue project's queue, its lander, a pause, the running batch and the members in the order they are taken; start a lander where a member waits and none runs; with `--resume`, lift a pause |
 | `moxi rounds land --repo KEY` | run a queue project's lander; `finish`, `next` and `queue` start it, and it exits at once when another holds the repo's lock |
@@ -874,7 +874,8 @@ sent back stand at `lead-decision`), the time spent at each step, findings by
 severity, re-checks and drift re-checks, failed check runs, questions by where they
 came from, decisions the operator accepted and rejected, the minor ones the lead
 settled (`settled`, accept and reject; numbers written before it read it as zero),
-skips, step-ups, repairs, corrections,
+skips, the lead's step-ups, checklist step-ups (an opening's marks that stepped a round
+up; numbers written before them read zero), repairs, corrections,
 dropped builds, cleared locks, and reports flagged `extra-full-pass` or
 `model-below-tier`. The time at each step is in whole seconds, under the step's name
 or `<step> B<n>` for a stage's: the log is read once at the end, and the time from
@@ -1244,7 +1245,8 @@ fails before it writes: put a test in `packages/rounds/tests` and run pytest fro
 | `models` | `{}` | the model each tier names, per harness or one for all; see below |
 | `defaults.trace` | `false` | run the trace check when a design is frozen |
 | `defaults.idle_days` | `14` | days a build's head may go without a commit before the read API's `builds` gives the build as idle |
-| `projects` | `{}` | per-project tables, `[projects.<key>]`, which may set `dir`, `flow`, `trace` and `idle_days` for that project |
+| `projects` | `{}` | per-project tables, `[projects.<key>]`, which may set `dir`, `flow`, `trace` and `idle_days` for that project, and its own `checklist`, `watched_paths` and `verifier_brief` (see A project's checklist) |
+| `watched_paths_guard.enabled` | `false` | run the watched-paths guard (see A project's checklist); the install asks |
 
 ```toml
 [projects.alpha]
@@ -1440,6 +1442,99 @@ after the one the step names for the pass (`model` for a full pass, `recheck_mod
 for a re-check, or `model` when the step has none), the verdict is recorded with the
 flag `model-below-tier`. The flag is shown with the verdict and refuses nothing. A
 model in no tier gets no flag.
+
+### A project's checklist
+
+Three settings of a project's own table, all empty by default, make rounds name the
+skills a piece of work should load. None has a `defaults.` form: each belongs to one
+project's code. The skill names below are made up; name the skills as your harness lists
+them.
+
+```toml
+[projects.alpha]
+checklist = [
+  { id = "public-surface", text = "Adds, changes or removes a public command or flag.", skills = ["layout-review"] },
+]
+watched_paths = [
+  { pattern = "packages/*/", only_new = true, note = "A new package folder.", skills = ["layout-review"] },
+  { pattern = "packages/*/pyproject.toml", note = "A package's pyproject: check its dependencies.", skills = ["layout-review"] },
+]
+verifier_brief = ["Review check: a hard-coded home path is a finding."]
+```
+
+- `checklist` lists items, each an `id` (lower-case words joined by `-`, at most 32
+  characters), one line of `text` and the `skills` to load (at least one, each a
+  harness skill's name, optionally `<plugin>:<skill>`). rounds does not check that a
+  skill is installed.
+- `watched_paths` lists entries, each a `pattern`, a one-line `note`, its `skills` and
+  optionally `only_new` (false when left out). A pattern is relative to the project's
+  root, with `/` between parts: `*` matches within a part, `?` one character, `[...]`
+  one of a set, and a whole part `**` any number of parts. Matching ignores case on
+  every system. One `/` at its end makes it a folder pattern, matched against the
+  folders above a written file. An entry with `only_new` counts only when what it
+  matched did not exist before the write: the file, or for a folder pattern any folder
+  it matches, at any depth. So `packages/*/` with `only_new` counts the first file
+  written into a new package folder, and without it every write into any package.
+- `verifier_brief` lists lines for a verifier, as `brief` lists lines for a builder.
+
+`moxi config rounds check` refuses a value that breaks these rules, with the key and
+the fix.
+
+**Marking the items that apply.** A round marks the checklist items its work touches.
+A design marks them in its data block's top-level key, `checklist = ["public-surface",
+"beta:core-code"]`, or `checklist = []` for none: a bare id is an item of the round's
+own project, and an item of a project a stage of the design names as its `repo` is
+written `<key>:<id>`. A round whose flow has no design step marks them when it is
+opened, with `--checklist LIST|none`, and may name an item of any project, such as the
+one it will build in. While a project the design is weighed against (the round's own
+and each project its stages name) has a checklist, `fold` refuses a block with no
+`checklist` key; while the round's own project has one, `open` refuses a round with no
+design step opened without `--checklist`, since the project it will build in is not
+known yet. Each refuses a mark of no item. The marks are a set:
+a fold that changes them is no change of records only. A round with no design step
+whose opening marks any item steps up to the flow `full` at its opening, recorded as a
+`flow.changed` by the lead that holds the marks as `marked`; when that is no step up,
+`open` is refused.
+
+**Where the skills are named.** `next` adds a `checklist` line to a group only when the
+round has marks or a project it is weighed against has a checklist: the design group
+lists the items to mark; the design's verification gives the marks, the skills they
+name and every item to check the marks against; a build, its verification and a report
+step of your own give the marks and their skills. The commission block carries the same
+line above the repo's `brief` lines. A mark whose item the checklist no longer has is
+said so and names no skill. A round with no design step that builds in another project,
+and marked none of its items, is told that project's items in the commission block and
+the build's verification. In `next --json` a group's `checklist` holds `marked`,
+`from` (`v<N>`, `opening` or null), `skills` and `gone`, the marks no longer in the
+checklist; the design's two groups add `items`, each `{"id", "text", "skills"}`; and a
+group told another project's items adds `unweighed`, a table `{"project": KEY, "items":
+[...]}`.
+
+As in `next`, `show`, `show --json` and the round note give the round's marks, with
+where they come from (the opening or the newest frozen version), only when the round
+has marks or a project it is weighed against has a checklist. The history gives a
+checklist's step-up as `flow fix -> full, by the lead at its opening, for the checklist
+marks <marks>`.
+
+**The verifier's brief.** The group `next` prints for a verifying step (the design's
+verification, a build's, a report step of your own) is the verifier's brief in rounds'
+terms: put it first in a verifier's brief, as the commission block goes first in a
+builder's. After its `then` lines it prints each `verifier_brief` line as `brief:
+<line>`: the round's project's and those of each project the design's stages name, for
+the design; the build's repo's, for a build.
+
+**The watched-paths guard.** With turns installed, rounds offers a turns guard,
+`rounds.watched-paths`, that adds one line after a write to a watched path, naming the
+path, the entry's note and the skills to load. It never refuses a call. It is off until
+`watched_paths_guard.enabled` is on (or turns' `guards.run` names it): `moxi install`
+asks about it, and `moxi config set rounds watched_paths_guard.enabled true` turns it
+on. A change reaches a running session only at its start or at a `ready` (a resume, a
+clear, a compaction). Each path and entry is named once per agent in a session's
+endpoint process. It sees only the file-writing tools of Claude Code (`Write`, `Edit`)
+and Codex (`apply_patch`): a shell command that writes a file is not seen, and neither
+is any OpenCode write, since turns has no point before an OpenCode tool call. In a
+linked git worktree, patterns are matched from the worktree's own top, at the root's
+place in it.
 
 rounds reads no environment variable but the ones that place its directories,
 `MOXI_ROUNDS_HOME` and the rest, and `MOXI_HOME`.

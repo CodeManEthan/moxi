@@ -83,6 +83,9 @@ out of the harness. This package is turns' whole public API, the announcement's
                               # sessions, "package.module:function", takes the session's
                               # env and answers True to turn the guard on there, asked
                               # once at the session's start
+    turns.touched_files(call)   # (TouchedFile(path, kind, text), ...): the files a write
+                              # call touches, in its order; kind write | add | update |
+                              # delete | moved-from | moved-to; () for any other call
 
 A request the endpoint never got reads as refused (`Refused("gone")`); one it got and
 did not answer in time has an unknown outcome, never a refusal (the `Delivery` above,
@@ -115,7 +118,8 @@ _WHERE = {
                      "StopFacts", "SessionEvent", "CAPABILITIES", "OUTCOMES",
                      "DELIVERY_REFUSALS", "COMMAND_REFUSALS", "READY_SOURCES", "COMMANDS"),
                     "results"),
-    **dict.fromkeys(("Guard", "ToolCall", "Prompt", "Allow", "Deny"), "guards"),
+    **dict.fromkeys(("Guard", "ToolCall", "Prompt", "Allow", "Deny", "TouchedFile",
+                     "touched_files"), "guards"),
     "COMMANDS_ENV": "config",
 }
 
@@ -129,6 +133,7 @@ __all__ = [
     "DeliveryRef", "Gone", "StopFacts", "SessionEvent",
     "CAPABILITIES", "OUTCOMES", "DELIVERY_REFUSALS", "COMMAND_REFUSALS", "READY_SOURCES",
     "COMMANDS", "COMMANDS_ENV", "Guard", "ToolCall", "Prompt", "Allow", "Deny",
+    "TouchedFile", "touched_files",
 ]
 
 

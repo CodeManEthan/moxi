@@ -206,6 +206,7 @@ ALLOWED = {
     ("settings.py", "_check_rounds_dirs_apart", "expanduser"): (1, "the same setting"),
     ("folders.py", "root", "expanduser"): (1, "the root a project's record names"),
     ("folders.py", "roots", "expanduser"): (1, "the same, for every project"),
+    ("folders.py", "project_root_at", "expanduser"): (1, "the same, for a written file"),
     ("folders.py", "_rounds_dir", "expanduser"): (1, "a project's `dir` setting"),
     ("folders.py", "_notes_dir", "expanduser"): (1, "the notes folder a record names"),
     ("places.py", "expand_home", "expanduser"): (1, "a `~` path a round's record holds"),
