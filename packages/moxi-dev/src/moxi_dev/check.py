@@ -96,6 +96,15 @@ worker count or base stops it there, before any step runs. Then, in order:
    (`MOXI_TEST_TIMED=hold`), the kit names them in the suite's durations, and
    `moxi-dev timed` runs them on their own. A package whose pass ran nothing because
    every test it chose was timed counts as `none`.
+
+   A check keeps its tests' temp on disk, whatever `MOXI_TEST_TEMP` says
+   (`moxi_dev.temp.for_check`): with `ram` on Linux, or with the setting unset and a
+   `PYTEST_DEBUG_TEMPROOT` in memory, the suites get `MOXI_TEST_TEMP=disk`; off Linux
+   `ram` reaches them as it is and each suite runs it as `disk`. Otherwise both reach
+   the suites as the caller set them. No step passes `--basetemp`. Outside a test the
+   check sweeps what earlier runs left in memory or in the short roots
+   (`moxi_dev.temp.sweep`) at its start, after each suite's pytest returns and at its
+   end, and prints a line for each sweep that removed something.
 8. Read each suite's durations (the kit writes them), keep the commit's record and find
    the newest record on `main` to compare with (`moxi_dev.durations`).
 9. Print one summary line, the last line of the output: the commit, the packages, the
@@ -105,7 +114,10 @@ worker count or base stops it there, before any step runs. Then, in order:
    Chromium couldn't start), `timed held <n>` with the number of timed tests the suites
    held back (`timed none` when they held none, `timed not run` when the suites never
    ran), the tests' own seconds with the slowest 5 %'s share of them and the delta
-   against main, the total and the exit code.
+   against main, where the tests kept their temp (`temp disk`, with the reason when the
+   check moved a memory choice to disk; `temp PYTEST_DEBUG_TEMPROOT` when the caller's
+   root on disk was kept; and how many suites kept it in memory after all, read from
+   their durations, with why), the total and the exit code.
 
 The tags, references, names, Ruff, renames, release, pronoun and machine-text steps, each
 package's lint and each package's tests all run even when one before them failed, so one
@@ -113,15 +125,16 @@ run shows every failure.
 
 The exit code is 0 only when every step passed, 1 when one failed, and 2 when the check
 could not start or a step could not be run (not in a workspace, a member with no readable
-`pyproject.toml` or no project name, no merge base, a bad `MOXI_TEST_WORKERS` or
-`--finding`, `uv` not on PATH, a private-names list secrets can't read). The summary
-line is printed in every case.
+`pyproject.toml` or no project name, no merge base, a bad `MOXI_TEST_WORKERS`,
+`MOXI_TEST_TEMP` or `--finding`, `uv` not on PATH, a private-names list secrets can't
+read). The summary line is printed in every case.
 
 `--static` reads the workspace and runs step 2 alone, over the whole repository: the
 tag, comment-reference, naming, Ruff, renames, release, pronoun and machine-text steps,
 with the same printed lines, the same summary line (every other step `not run`,
-`packages: none`) and the same exit codes. It reads no changed paths and no worker
-count, and runs no lock check, so no step needs the network.
+`packages: none`, `temp not run`) and the same exit codes. It reads no changed paths and
+no worker count, and runs no lock check, so no step needs the network. It starts no
+test, so it reads no `MOXI_TEST_TEMP`, chooses no temp root and sweeps nothing.
 
 `--pick` reads the workspace and the changed paths as step 3 does, prints one line,
 the JSON object `{"packages": [...]}` with the picked packages' folders under
@@ -146,7 +159,7 @@ from pathlib import Path
 from typing import Callable, Mapping, Sequence
 
 from . import (durations, lint, machine_text, naming, pronouns, refs, release, rename,
-               ruff_check, stamp, tags)
+               ruff_check, stamp, tags, temp)
 from .testing import (CHANGED_ENV, DURATIONS_ENV, FINDING_ENV, FINDING_NAME,
                       LEAVE_OUT_ENV, TIERS_ENV, TIMED_ENV)
 
@@ -419,6 +432,8 @@ except Exception as exc:
 # Why Chromium can't start in the check's environment, or None when it starts; given the
 # environment's python and the suites' environment. Tests replace it.
 Probe = Callable[[Path, Mapping[str, str]], str | None]
+#: The sweep of what earlier test runs left; `moxi_dev.temp.sweep` outside a test.
+Sweep = Callable[[], temp.Swept]
 
 
 def chromium_probe(python: Path, env: Mapping[str, str]) -> str | None:
@@ -464,8 +479,31 @@ class Result:
     durations: durations.Summary | None = None
     delta: durations.Delta | None = None
     kept: Path | None = None             # the commit's durations record, when kept
+    #: Why the check moved its tests' temp to disk or left a memory choice to the suites
+    #: (`moxi_dev.temp.for_check`), None when it did neither.
+    temp_why: str | None = None
+    #: Whether the suites keep their temp where the caller's PYTEST_DEBUG_TEMPROOT says.
+    is_temproot_given: bool = False
+    #: Whether the check chose its tests' temp; False under --static, which runs none.
+    is_temp_chosen: bool = True
+    #: (package, root, why) for each suite whose temp was in memory after all.
+    temp_in_memory: list[tuple[str, str, str | None]] = field(default_factory=list)
     seconds: float = 0.0
     code: int = 0
+
+    def temp_text(self) -> str:
+        """The summary's temp field."""
+        if not self.is_temp_chosen:
+            return "temp not run"
+        notes = [self.temp_why] if self.temp_why else []
+        if self.temp_in_memory:
+            count = len(self.temp_in_memory)
+            roots = ", ".join(sorted({root for _, root, _ in self.temp_in_memory}))
+            text = f"{count} suite{'' if count == 1 else 's'} in memory at {roots}"
+            whys = sorted({why for _, _, why in self.temp_in_memory if why})
+            notes.append(text + (": " + "; ".join(whys) if whys else ""))
+        word = temp.TEMPROOT_ENV if self.is_temproot_given else temp.DISK
+        return f"temp {word}" + (f" ({'; '.join(notes)})" if notes else "")
 
     def timing(self) -> str:
         if self.durations is None:
@@ -503,7 +541,7 @@ class Result:
                 f"machine {self.machine} | stamps {self.stamps} | "
                 f"web {self.web} | sync {self.sync} | "
                 f"lint {linted} | {suites} | timed {timed} | {self.timing()} | "
-                f"total {self.seconds:.1f}s | exit {self.code}")
+                f"{self.temp_text()} | total {self.seconds:.1f}s | exit {self.code}")
 
 
 def _commit(root: Path) -> str:
@@ -521,19 +559,50 @@ def check_findings(findings: Sequence[str]) -> list[str]:
     return list(dict.fromkeys(findings))
 
 
+def _sweep() -> temp.Swept:
+    """The sweep of what earlier test runs left (`moxi_dev.temp.sweep`), in a check that
+    is not nested in a test."""
+    return temp.sweep()
+
+
+def _swept(sweep: Sweep) -> None:
+    removed = sweep().line()
+    if removed:
+        print(f"moxi-dev check: {removed}", flush=True)
+
+
+def temp_env(env: Mapping[str, str]) -> tuple[dict[str, str], str | None, bool]:
+    """The check's environment with its tests' temp kept on disk
+    (`moxi_dev.temp.for_check`), the reason it gives, and whether the suites keep their
+    temp where the caller's PYTEST_DEBUG_TEMPROOT says. A bad MOXI_TEST_TEMP raises
+    CheckError."""
+    try:
+        checked, why = temp.for_check(env)
+        given = temp.choose(checked).source == temp.BY_TEMPROOT
+    except temp.TempError as exc:
+        raise CheckError(str(exc)) from exc
+    return checked, why, given
+
+
 def check(root: Path, *, full: bool = False, base: str | None = None,
           finding: Sequence[str] = (), static: bool = False,
           env: Mapping[str, str] | None = None, run: Run | None = None,
-          plan: Plan | None = None, probe: Probe | None = None) -> Result:
+          plan: Plan | None = None, probe: Probe | None = None,
+          sweep: Sweep | None = None) -> Result:
     """Run the check's steps on the workspace at `root`; the result holds the exit code.
-    With `static`, run only the whole-tree static steps (`_Steps.static`)."""
+    With `static`, run only the whole-tree static steps (`_Steps.static`), which start no
+    test, so it chooses no temp and sweeps nothing."""
     env = os.environ if env is None else env
     run = run or _run
     plan = plan or lint.plan
     probe = probe or chromium_probe
+    sweep = sweep or _sweep
     started = time.monotonic()
-    result = Result()
+    result = Result(is_temp_chosen=not static)
     try:
+        if not static:
+            env, result.temp_why, result.is_temproot_given = temp_env(env)
+            _swept(sweep)
         findings = check_findings(finding)
         result.commit = _commit(root)
         packages = load_workspace(root)
@@ -549,11 +618,14 @@ def check(root: Path, *, full: bool = False, base: str | None = None,
         result.packages = [package.dir for package in chosen]
         steps = _Steps(root, packages, workers, env, run, plan, result,
                        changed=changed, findings=findings, base=base or "main",
-                       probe=probe)
+                       probe=probe, sweep=lambda: _swept(sweep))
         result.code = 0 if steps.all(chosen) else 1
     except CheckError as exc:
         print(f"moxi-dev check: {exc}", file=sys.stderr, flush=True)
         result.code = 2
+    finally:
+        if not static:
+            _swept(sweep)
     result.seconds = time.monotonic() - started
     return result
 
@@ -571,6 +643,7 @@ class _Steps:
     findings: Sequence[str] = ()
     base: str = "main"
     probe: Probe = chromium_probe
+    sweep: Callable[[], None] = lambda: None
 
     def all(self, chosen: Sequence[Package]) -> bool:
         """The lock, the tags, the stamps, the sync, the lint and the suites, recorded in
@@ -653,6 +726,11 @@ class _Steps:
             args, extra = browsers.get(package.dir, ((), {}))
             code = run([python, "-m", "pytest", *self.workers, *args], package.path,
                        {**env, **extra, TIMED_ENV: "hold", DURATIONS_ENV: str(where)})
+            self.sweep()
+            chosen_temp = durations.load_temp(where) or {}
+            if chosen_temp.get("is_in_memory"):
+                result.temp_in_memory.append((package.dir, str(chosen_temp.get("root")),
+                                              chosen_temp.get("why")))
             tests = durations.load_run(where)
             held = durations.load_held(where)
             passed: bool | None = code == 0

@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+- `MOXI_TEST_TEMP` (`disk` or `ram`, unset meaning `disk`) decides where a test run keeps
+  its temp: on Linux `/var/tmp` or `/dev/shm`, elsewhere the system's own, where `ram`
+  runs as `disk` and says so. The kit's short directories leave `/tmp` for the same root,
+  inside one recorded directory per pytest process, where a test's own has a
+  one-character name to keep its socket paths short. A run in memory removes a passed
+  test's files when it ends and the whole run's at the run's end, and goes to disk when
+  RAM is short. Each top-level run sweeps what killed runs of the kit left, by the owner
+  records they hold locked, and touches nothing else. A run nested in a test (the fence's
+  new `MOXI_TEST_FENCED` mark, or a fence active in its process) chooses and sweeps
+  nothing. `moxi-dev check` and `moxi-dev timed` keep their tests' temp on disk whatever
+  is set, and the check's summary gains a `temp` field. `moxi-dev check --static`
+  starts no test, so it reads no `MOXI_TEST_TEMP`, sweeps nothing and says `temp not run`.
 - `moxi-dev check --pick [--base REV]` prints the packages the change picks as one JSON
   line, `{"packages": [...]}`, and runs no step, so a workflow can run only the picked
   packages' jobs.

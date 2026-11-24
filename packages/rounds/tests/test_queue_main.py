@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import pytest
 from test_queue_batch import (  # noqa: F401 -- fixtures
-    OTHER, ROUND, configure, fake, queue, ready, repo)
+    OTHER, ROUND, configure, fake, queue, read_through_queue_ci, ready, repo)
 from test_queue_telling import (  # noqa: F401 -- fixtures
     comms, config_text, lander_pass, no_lander_process, told)
 
@@ -43,14 +43,64 @@ def main_pushes(fake) -> list[str]:
 
 # -- the push and the read ---------------------------------------------------------------
 
-def test_a_landing_whose_head_has_its_candidates_full_run_pushes_nothing(
+def test_a_candidates_full_run_at_the_landed_head_is_mains_full_run(
         repo, ready, fake, lander_pass, with_ref):
     ready()
     landed(lander_pass)
     head = repo.rev("main")
-    assert queue().main_at(head)["event"] == queue_file.GREEN
+    # The candidate ran the full workflows at this very commit: no second run is owed.
+    assert (queue().main_at(head)["event"], queue().main_at(head)["run"]) == (
+        queue_file.GREEN, ["101"])
     assert main_pushes(fake) == []
     assert lander.settled("proj-a", queue())
+    ref = next(ref for commit, ref in fake.pushes if commit == head)
+    assert (f"main's last full run: green at {head[:12]}, run ['101'], the candidate's "
+            f"run on {ref}") in queue_view.lines(queue(), lander_runs=False)
+
+
+def test_an_old_green_naming_a_candidates_run_counts_as_mains_and_says_so():
+    old, kept = "o" * 40, "k" * 40
+    events = [
+        {"event": queue_file.GREEN, "head": kept, "run": ["7"]},
+        {"event": queue_file.BATCH, "state": queue_file.BUILT, "id": "kkk-1", "n": 1,
+         "main": kept, "branch": "queue-kkk-1", "candidate": old,
+         "members": [{"round": ROUND, "stage": "B1", "tip": "t" * 40}]},
+        {"event": queue_file.RUN, "batch": "kkk-1", "kind": batching.PUSHED,
+         "ref": "ci/queue-kkk-1"},
+        {"event": queue_file.RUN, "batch": "kkk-1", "kind": batching.READ,
+         "reading": ci.GREEN, "runs": ["9"]},
+        {"event": queue_file.GREEN, "head": old, "run": ["9"]},
+    ]
+    found = queue_file.fold("proj-a", events)
+    assert [one["head"] for one in found.mains] == [kept, old]
+    assert found.main_at(old)["run"] == ["9"]
+    assert (f"main's last full run: green at {old[:12]}, run ['9'], the candidate's run "
+            "on ci/queue-kkk-1") in queue_view.lines(found, lander_runs=False)
+    found = queue_file.fold("proj-a", events[:1])
+    assert f"main's last full run: green at {kept[:12]}, run ['7']" in queue_view.lines(
+        found, lander_runs=False)
+
+
+def test_a_head_with_no_ref_and_no_run_is_given_up(repo, ready, fake, lander_pass,
+                                                    write_config, comms):
+    write_config(config_text(table='director = "dir-a"'))
+    ready()
+    lander_pass()
+    fake.full_word = ci.ABSENT
+    landed(lander_pass)
+    head = repo.rev("main")
+    assert main_pushes(fake) == [] and not lander.settled("proj-a", queue())
+    lander_pass(batching.ABSENT_S - 1)
+    assert not lander.settled("proj-a", queue())
+    lander_pass(batching.ABSENT_S)
+    gave_up = [one for one in queue().head_runs if one.get("kind") == batching.GAVE_UP]
+    assert [(one["head"], one["why"]) for one in gave_up] == [(head, batching.NO_REF_WHY)]
+    assert lander.settled("proj-a", queue())
+    lander_pass(2 * batching.ABSENT_S)
+    told_dir = comms.to("dir-a")
+    assert len(told_dir) == 1 and "names no ref" in told_dir[0]
+    assert (f"main's full run at {head[:12]} never showed, and the ci setting names no "
+            "ref to push it to") in queue_view.lines(queue(), lander_runs=False)
 
 
 def test_a_candidates_scoped_run_at_the_head_does_not_stand_in_for_its_full_run(
@@ -116,6 +166,73 @@ def test_a_head_whose_pushes_show_no_run_is_given_up_and_the_director_told(
     assert "never started" in comms.to("dir-a")[0]
     assert any("never started" in line for line in queue_view.lines(queue(),
                                                                    lander_runs=False))
+
+
+def test_mains_run_still_running_is_not_rerun_or_read(
+        repo, ready, fake, lander_pass, with_ref, monkeypatch):
+    ready()
+    landed(lander_pass)
+    head = hand_commit(repo, "one.txt")
+    runs = read_through_queue_ci(fake, monkeypatch, main=True)
+    lander_pass(0.0)
+    lander_pass(batching.ABSENT_S)
+    assert queue().main_at(head) is None
+    assert fake.reruns == [] and fake.failure_reads == [] and main_pushes(fake) == []
+    read = [one for one in queue().head_runs if one.get("head") == head]
+    assert [(one["kind"], one["reading"], one["running"]) for one in read] == [
+        (batching.READ, ci.PENDING, ["101"])]
+    assert not lander.settled("proj-a", queue())
+    runs.finish()
+    lander_pass(2 * batching.ABSENT_S)
+    assert fake.reruns == [(("101",), True)] and fake.failure_reads == []
+
+
+def test_mains_run_green_on_the_jobs_it_is_read_by_stands_while_other_jobs_go(
+        repo, ready, fake, lander_pass, with_ref, monkeypatch):
+    ready()
+    landed(lander_pass)
+    head = hand_commit(repo, "one.txt")
+    runs = read_through_queue_ci(fake, monkeypatch, main=True)
+    runs.green_going()
+    runs.id = 301
+    lander_pass(0.0)
+    assert queue().main_at(head)["event"] == queue_file.GREEN
+    read = [one for one in queue().head_runs if one.get("head") == head]
+    assert [(one["kind"], one["reading"], one.get("running")) for one in read] == [
+        (batching.READ, ci.GREEN, None)]
+
+
+@pytest.mark.parametrize("stands_for, said", [
+    ({"scoped": "linux", "web": "browser"},
+     " (.github/workflows/queue.yml; scoped stands for linux, web stands for browser)"),
+    (None, " (.github/workflows/queue.yml)"),
+], ids=["stands-for", "paths-alone"])
+def test_the_queue_names_the_candidates_run_of_the_last_landing(stands_for, said):
+    flow = {"path": ".github/workflows/queue.yml", "reading": ci.GREEN}
+    if stands_for:
+        flow["stands_for"] = stands_for
+    landing = "l" * 40
+    events = [
+        {"event": queue_file.BATCH, "state": queue_file.BUILT, "id": "mmm-1", "n": 1,
+         "main": "m" * 40, "branch": "queue-mmm-1", "candidate": landing,
+         "members": [{"round": ROUND, "stage": "B1", "tip": "t" * 40}]},
+        {"event": queue_file.RUN, "batch": "mmm-1", "kind": batching.READ,
+         "reading": ci.RED, "runs": ["8"], "workflows": [flow]},
+        {"event": queue_file.RUN, "batch": "mmm-1", "kind": batching.READ,
+         "reading": ci.GREEN, "runs": ["9"], "workflows": [flow]},
+        {"event": queue_file.RUN, "batch": "mmm-1", "kind": batching.READ,
+         "reading": ci.PENDING, "runs": ["10"], "workflows": [flow]},
+        {"event": queue_file.LANDED, "round": ROUND, "stage": "B1", "tip": "t" * 40,
+         "batch": "mmm-1", "landing": landing},
+    ]
+    assert (f"last landing: {ROUND} B1 at {landing[:12]}, on its candidate's run 9"
+            + said) in queue_view.lines(queue_file.fold("proj-a", events),
+                                        lander_runs=False)
+    # a landing past the target's own failures names its newest read
+    events[2]["reading"] = ci.RED
+    assert (f"last landing: {ROUND} B1 at {landing[:12]}, on its candidate's run 10"
+            + said) in queue_view.lines(queue_file.fold("proj-a", events),
+                                        lander_runs=False)
 
 
 # -- red spells --------------------------------------------------------------------------

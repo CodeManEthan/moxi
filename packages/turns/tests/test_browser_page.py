@@ -13,19 +13,15 @@ The shells, the stand-in `claude` and the helpers are `panel_kit`'s.
 from __future__ import annotations
 
 import re
-import sys
 
 import pytest
 from playwright.sync_api import expect
 
 from moxi_turns.results import Agent
-from panel_kit import (T, copied, full, group, harness, key_of, keys, launch, line, on, open_panel, own_panel, row,
-                       rows, small, started)
+from panel_kit import (MARKS, T, copied, full, group, harness, key_of, keys, launch, line, on,
+                       open_panel, own_panel, row, rows, small, started)
 
-pytestmark = [pytest.mark.browser, pytest.mark.timeout(120),
-              pytest.mark.skipif(not sys.platform.startswith("linux"),
-                                 reason="turns' panel is checked in a browser on Linux; the "
-                                        "Windows and macOS runs are owed")]
+pytestmark = MARKS
 
 __all__ = ["full", "own_panel", "small"]
 
