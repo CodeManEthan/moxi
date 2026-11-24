@@ -178,7 +178,7 @@ def test_below_the_mark_says_nothing_until_it_is_passed():
     assert mark.on_tool(s.event()) == notice(ONE_X)
 
 
-def test_the_notice_and_core_text_round_thousands_halves_up():
+def test_the_notice_rounds_thousands_halves_up():
     assert mark.thousands(412_330) == 412
     assert mark.thousands(412_500) == 413
     assert mark.thousands(499) == 0

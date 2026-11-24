@@ -821,7 +821,7 @@ def through_usage(group, at):
     return group.mark.run_handlers(crossing, wait=5.0)
 
 
-def test_the_relaunch_line_is_cores_instruction_with_moxis_verb(conn):
+def test_the_relaunch_line_says_to_hand_off_stop_shells_and_relaunch(conn):
     limit(conn, "relaunch")
     line = recycle.crossing_line(conn, crossing(mark="1.5x"), pid=os.getpid())
     assert line == (
