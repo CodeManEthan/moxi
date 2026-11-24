@@ -86,7 +86,7 @@ def test_the_first_line_and_no_hello_before_the_session_id(claude):
     assert s.capabilities == frozenset({"deliver", "only-if-idle", "steer", "stop-handler",
                                         "clear", "exit", "compact", "agents",
                                         "stop-shells", "guards", "after-tool", "usage",
-                                        "environ", "fork", "keep"})
+                                        "environ", "fork", "keep", "stale-agents"})
     assert s.info["mod_version"] == "0.1.0"
 
 
@@ -355,6 +355,38 @@ def test_agents_maps_the_runners_list(claude):
         ("a6", "subagent", "stopped", True), ("a7", "subagent", "unknown", None)]
     assert a.entries[0].description == "find it" and a.entries[1].parent_id == "a1"
     assert a.busy() == 3
+
+
+def test_agents_judges_the_waiting_subagents_beside_the_ready_transcript(claude, tmp_path):
+    import json
+    from datetime import datetime, timezone
+    ep, runner = claude()
+    s = turns.find(session_id="s-1")
+    record = tmp_path / "s-1.jsonl"
+    record.write_text("")
+    sub_dir = tmp_path / "s-1" / "subagents"
+    sub_dir.mkdir(parents=True)
+    old = time.time() - 2 * 3600
+    for agent_id in ("old", "fork"):
+        path = sub_dir / f"agent-{agent_id}.jsonl"
+        path.write_text(json.dumps({
+            "type": "assistant",
+            "timestamp": datetime.fromtimestamp(old, timezone.utc).isoformat(),
+            "message": {"stop_reason": "end_turn", "content": []}}) + "\n")
+        os.utime(path, (old, old))
+    runner.agent_list = [
+        {"id": "old", "type": "general-purpose", "description": "d", "status": "waiting"},
+        {"id": "fork", "type": "fork", "description": "subconscious", "status": "waiting"},
+        {"id": "new", "type": "general-purpose", "description": "d", "status": "running"}]
+    a = s.agents()                               # no transcript path yet: none judged
+    assert [e.state for e in a.entries] == ["waiting", "waiting", "running"]
+    runner.post(leg.PATH_CONTEXT, {"event": "ready", "source": "startup",
+                                   "session_id": "s-1", "transcript_path": str(record)})
+    a = s.agents()
+    assert [(e.id, e.state, e.is_fork) for e in a.entries] == [
+        ("old", "idle", False), ("fork", "waiting", True), ("new", "running", False)]
+    assert abs(a.entries[0].last_write_at - old) < 1 and a.entries[1].last_write_at is None
+    assert a.busy() == 2
 
 
 def test_an_unread_or_late_agent_list_is_not_complete(claude):

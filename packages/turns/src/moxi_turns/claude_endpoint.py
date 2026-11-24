@@ -116,6 +116,7 @@ from dataclasses import dataclass, field
 from typing import Any, BinaryIO
 
 from . import claude_leg as leg
+from . import claude_stale
 from . import listeners as turns_listeners
 from .guards import ToolCall
 from .guards.run import GuardRunner, prompts_of
@@ -162,7 +163,7 @@ class ClaudeHarness(Harness):
     name = "claude"
     can = frozenset({"deliver", "only-if-idle", "steer", "stop-handler", "clear", "exit",
                      "compact", "agents", "stop-shells", "guards", "after-tool", "usage",
-                     "environ", "fork", "keep"})
+                     "environ", "fork", "keep", "stale-agents"})
     live_wait_s = LIVE_WAIT_S
 
     @staticmethod
@@ -283,10 +284,15 @@ class ClaudeHarness(Harness):
         return Live(agents=agents, draft=draft)
 
     def agents(self) -> Agents:
-        """The runner's `$.agent.list()`, read on this call; the states are mapped here. A
-        list the runner could not read, or that came back malformed, is not complete."""
+        """The runner's `$.agent.list()`, read on this call; the states are mapped and the
+        `waiting` subagents judged here (`claude_stale`). A list the runner could not
+        read, or that came back malformed, is not complete."""
         answer = self._ask_runner(leg.LINE_AGENTS, "agents")
-        return agents_from_runner(answer.get("entries"), time.time())
+        return self._judged(answer.get("entries"))
+
+    def _judged(self, entries: Any) -> Agents:
+        """The runner's or the gate's unmapped entries, mapped and judged."""
+        return claude_stale.judge(agents_from_runner(entries, time.time()), self.record_path)
 
     def floors_changed(self, values: dict[str, int]) -> None:
         """The core read a floor that changed: the runner gets the whole map."""
@@ -791,12 +797,15 @@ CLAUDE_STATES = {"pending": "pending", "running": "running", "waiting": "waiting
                  "killed": "stopped"}
 #: The statuses that are a final notice.
 CLAUDE_FINAL = frozenset({"completed", "failed", "killed"})
+#: The agent type Claude Code lists a fork of the main loop as.
+FORK_TYPE = "fork"
 
 
 def agents_from_runner(entries: Any, at: float) -> Agents:
     """The runner's unmapped `$.agent.list()` entries as `Agents`. Null is a list the runner
     could not read; an entry with no id makes the list not complete, never shorter. A
-    status turns does not know reads `unknown`, with no notice to call final."""
+    status turns does not know reads `unknown`, with no notice to call final. An entry of
+    type `fork` is a fork of the main loop (`Agent.is_fork`)."""
     if not isinstance(entries, list):
         return Agents((), complete=False, at=at)
     out: list[Agent] = []
@@ -811,7 +820,8 @@ def agents_from_runner(entries: Any, at: float) -> Agents:
         final = (status in CLAUDE_FINAL) if state != "unknown" else None
         teammate = isinstance(raw.get("teammateId"), str) or raw.get("type") == "teammate"
         out.append(Agent(raw["id"], "teammate" if teammate else "subagent", state, final,
-                         _opt_str(raw, "description"), _opt_str(raw, "parentId")))
+                         _opt_str(raw, "description"), _opt_str(raw, "parentId"),
+                         is_fork=raw.get("type") == FORK_TYPE))
     return Agents(tuple(out), complete, at)
 
 

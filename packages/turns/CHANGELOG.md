@@ -2,6 +2,15 @@
 
 ## 0.2.7 (unreleased)
 
+- A new capability, `stale-agents`, which Claude Code sessions offer: the endpoint judges
+  each `waiting` subagent Claude Code lists, and one whose transcript's last timestamped
+  line is at least an hour old, whose last turn record is an assistant `end_turn`, and
+  whose own agents and background-task output files wrote nothing within the hour reads
+  `idle`. A transcript the endpoint cannot find or read, a record shape it does not know,
+  and an entry it has no time for within the list's 0.3 s deadline keep Claude Code's
+  status. Teammates and forks of the main loop are never judged.
+- `agents` entries gain `is_fork` (a fork of the main loop, which Claude Code lists as a
+  subagent) and `last_write_at` (the newest write the judgment read).
 - A new request, `fork {text, by, ref?}` (the client's `fork(text, by=, ref=)`), and a new
   capability, `fork`: start a fork of the session's main loop with `text` as its task. It
   runs beside the main loop's turns and holds no slot. Its `started` value carries the

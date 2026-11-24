@@ -104,11 +104,12 @@ The session's capabilities:
 | `environ` | yes | yes | yes | `environ` |
 | `fork` | yes | no | no | `fork` |
 | `keep` | yes | yes | yes | `keep` on `deliver`, `fork` and `fork.continue`, and `ack` |
+| `stale-agents` | yes | no | no | `agents`, `facts.agents` and the busy checks read a stale `waiting` subagent `idle` |
 
 `session`, `facts`, `watch` and `wait` are always there and carry no capability. A method or
 option the session lacks is answered with the `capability` error, never a refusal. OpenCode
 support is experimental. An endpoint of an older turns lacks the later capabilities
-(`guards` to `keep`), and a caller reads their absence as "not offered". An older
+(`guards` to `stale-agents`), and a caller reads their absence as "not offered". An older
 endpoint would ignore `keep` and keep nothing, so a caller sends `keep` only to a session
 that offers it. On OpenCode an
 `after-tool` row is still told of a finished call, observe only: its text reaches no
@@ -203,7 +204,8 @@ The live part of the facts (`draft`, `agents`) is read from the harness within a
 on Claude Code, 2 s on Codex and OpenCode. Past the bound it reads unreadable: `draft` true
 and `agents` null. That refuses and never passes.
 
-**Agents.** `entries` is a list of `{id, kind, state, final, description, parent_id}`:
+**Agents.** `entries` is a list of
+`{id, kind, state, final, description, parent_id, is_fork, last_write_at}`:
 
 - `kind` is `subagent`, `teammate` or `shell` (a Codex background terminal).
 - `state` is `pending`, `running`, `waiting`, `idle`, `done`, `failed`, `stopped` or
@@ -213,10 +215,20 @@ and `agents` null. That refuses and never passes.
   true as soon as the harness records its final notice, whether or not a main-loop turn is
   open: `agents` reads the harness's own record on every call.
 - `parent_id` is the agent that spawned it, or null.
+- `is_fork` is true for a fork of the session's main loop, which Claude Code lists as a
+  subagent; false on every other entry.
+- `last_write_at` is the newest write (Unix seconds) the stale judgment read for a
+  `waiting` subagent it judged, else null.
 - `complete` is false when the list could not be read whole; then `facts.agents` is null.
 
 Per harness: on Claude Code the entries are what Claude Code lists as its agents (`completed`
-reads `done`, `killed` reads `stopped`), and a workflow's agents are not listed. On Codex
+reads `done`, `killed` reads `stopped`), and a workflow's agents are not listed. The
+endpoint judges each `waiting` subagent that is not a fork (`stale-agents`): it reads
+`idle` when its own transcript's last timestamped line is at least an hour old, its last
+`user` or `assistant` record is an assistant `end_turn`, and nothing it owns (the agents it
+started, the output files of the background tasks it started) was written within the hour.
+A transcript missing or unreadable, a record shape the endpoint does not know, and an
+entry not judged within the list's 0.3 s deadline keep Claude Code's status. On Codex
 they are the collaborating agents the host has seen (`pendingInit` reads `pending`,
 `errored` reads `failed`, `interrupted` and `shutdown` read `stopped`, `notFound` reads
 `unknown`), and each background terminal as a `shell` entry, `running`, `final` false. A
