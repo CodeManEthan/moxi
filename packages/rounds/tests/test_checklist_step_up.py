@@ -115,11 +115,12 @@ def test_show_and_the_note_give_the_marks_with_their_source_and_the_history_line
     assert data["checklist"] == {"marked": ["public-surface"], "from": "opening"}
     text = showing.as_text(found)
     assert "checklist: public-surface (from the opening)" in text
-    assert ("flow.changed  fix to full, by lead at its opening, for the checklist marks "
-            "public-surface") in text
+    assert ("flow.changed  flow fix -> full, by the lead at its opening, for the "
+            "checklist marks public-surface") in text
     note = (notes / "rounds" / "a-fix" / "round-note.md").read_text(encoding="utf-8")
     assert "checklist marks: public-surface (from the opening)" in note
-    assert "at its opening, for the checklist marks public-surface" in note
+    assert ("flow fix -> full, by the lead at its opening, for the checklist marks "
+            "public-surface") in note
 
 
 def test_a_round_that_marked_nothing_shows_no_marks(notes):

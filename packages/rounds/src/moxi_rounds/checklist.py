@@ -213,6 +213,17 @@ def _without_design(state) -> bool:
     return not flows.has(state.steps, "design")
 
 
+def is_said(state, home: str, settings, *, repos: Iterable[str] = ()) -> bool:
+    """Whether the checklist of the round `state`, whose home project is `home`, is
+    said at all: the round has marks, or a project it is weighed against (the home
+    project, the repos its newest version's stages name, and `repos`) has an item. A
+    round whose projects have no checklist is told nothing and shown nothing."""
+    if marks_of(state).marked:
+        return True
+    projects = weighed(home, [*_declared_repos(state), *repos])
+    return any(items(settings, one) for one in projects)
+
+
 def told(state, home: str, settings, *, kind: str, repo: str | None = None) -> dict | None:
     """What a group of `kind` (`DRAFTING`, `CHECKING` or `BUILDING`) is told of the
     checklist of the round `state`, whose home project is `home`; `repo` is the repo of
@@ -228,13 +239,11 @@ def told(state, home: str, settings, *, kind: str, repo: str | None = None) -> d
     round marked none of them: its marks were made before the repo was known."""
     if kind not in _KINDS:
         raise ValueError(f"{kind!r} is no kind of group a checklist is said in")
-    repos = _declared_repos(state)
-    if kind == BUILDING and repo is not None:
-        repos = [*repos, repo]
-    projects = weighed(home, repos)
-    marks = marks_of(state)
-    if not marks.marked and not any(items(settings, one) for one in projects):
+    repos = [repo] if kind == BUILDING and repo is not None else []
+    if not is_said(state, home, settings, repos=repos):
         return None
+    projects = weighed(home, [*_declared_repos(state), *repos])
+    marks = marks_of(state)
     found = resolved(marks.marked, home, settings)
     said = {"marked": list(marks.marked), "from": marks.source,
             "skills": skills(found),
@@ -311,5 +320,5 @@ def lines(said: dict, kind: str) -> list[str]:
 
 __all__ = ["KEY", "NONE", "Item", "Marks", "split", "spelled", "items", "weighed",
            "stage_repos", "problems", "parse", "marks_of", "same", "resolved",
-           "every_item", "skills", "DRAFTING", "CHECKING", "BUILDING", "GONE", "told",
+           "every_item", "skills", "DRAFTING", "CHECKING", "BUILDING", "GONE", "is_said", "told",
            "verifier_lines", "marks_said", "lines"]

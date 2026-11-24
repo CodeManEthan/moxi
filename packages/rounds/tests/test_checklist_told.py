@@ -11,7 +11,7 @@ import sys
 import pytest
 
 from moxi_rounds import (checking, checklist, commissioning, freezing, next_step, opening,
-                         ruling)
+                         ruling, showing)
 from moxi_rounds.cli import main
 
 ROUND = "proj-a/a-round"
@@ -152,6 +152,23 @@ def test_a_round_whose_projects_have_no_checklist_and_no_brief_is_told_nothing(
     assert group["step"] == "verify-design"
     assert "checklist" not in group and "brief" not in group
     assert not any(line.startswith(("checklist:", "brief:")) for line in lines)
+
+
+def test_show_and_the_note_give_the_marks_only_where_a_weighed_project_has_a_checklist(
+        round_dir, write_config):
+    fold(round_dir, "[]")
+    found = showing.show(ROUND)
+    assert showing.data(found)["checklist"] == {"marked": [], "from": "v1"}
+    assert "checklist: none marked (from v1)" in showing.as_text(found)
+
+    write_config("")
+    fold(round_dir, "[]")
+
+    found = showing.show(ROUND)
+    assert showing.data(found)["checklist"] is None
+    assert "checklist" not in showing.as_text(found)
+    note = (round_dir / "round-note.md").read_text(encoding="utf-8")
+    assert "checklist" not in note
 
 
 def test_a_brief_with_no_checklist_still_prints(round_dir, write_config, capsys):

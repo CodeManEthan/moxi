@@ -8,7 +8,8 @@ lines (`as_text`) or as data (`as_json`), both from the same reading.
 A round is shown with what it is for, its status, its lead (its own, else its
 project's, `leads.of`), the name of the flow it follows now and the steps recorded for
 it, the checklist marks it made and where they come from (the opening or a frozen
-version, `checklist.marks_of`), the skips that stand, the newest frozen version of its
+version, `checklist.marks_of`) when it marked any or a project it is weighed against has
+a checklist (`checklist.is_said`), the skips that stand, the newest frozen version of its
 design with what that version took away, and its stages; then its records, a section
 for each kind: its questions by state, each with who asked it and when; its own rulings, each with its pointer and whether
 the operator was shown it; and its history, every event, oldest first.
@@ -301,8 +302,9 @@ def history_of(event: dict) -> str | None:
     if event.get("type") == "flow.changed":
         of = f"{event.get('was')} to {event.get('flow')}, by {event.get('by')}"
         if isinstance(event.get("marked"), list):
-            of += (" at its opening, for the checklist marks "
-                   f"{', '.join(map(str, event['marked']))}")
+            of = (f"flow {event.get('was')} -> {event.get('flow')}, by the "
+                  f"{event.get('by')} at its opening, for the checklist marks "
+                  f"{', '.join(map(str, event['marked']))}")
     if event.get("type") == leads.CHANGED:
         of = f"{event.get('was') or 'none'} to {event.get('lead')}"
     if event.get("type") == "stage.changed" and isinstance(of, str):
@@ -820,7 +822,8 @@ def _head(found: Shown) -> dict:
             "description": state.description,
             "lead": leads.of(state, found.project_lead),
             "parent": state.parent, "inherits": list(state.inherits),
-            "flow": state.flow, "steps": state.steps, "checklist": _marks(state),
+            "flow": state.flow, "steps": state.steps,
+            "checklist": _marks(state, found.project, settings),
             "step": None if at is None else at.data(),
             "close": (None if state.status != states.OPEN
                       else {"waits": list(closing.waits(
@@ -834,11 +837,12 @@ def _head(found: Shown) -> dict:
                                     else found.register_unreadable.reason)}
 
 
-def _marks(state: states.State) -> dict | None:
-    """The round's checklist marks and where they come from, None when it made none
-    (`checklist.marks_of`)."""
+def _marks(state: states.State, home: str, settings) -> dict | None:
+    """The round's checklist marks and where they come from (`checklist.marks_of`);
+    None when it made none, or when it has no marks and no project it is weighed
+    against has a checklist (`checklist.is_said`), as `next` says nothing then."""
     marks = checklist.marks_of(state)
-    if marks.source is None:
+    if marks.source is None or not checklist.is_said(state, home, settings):
         return None
     return {"marked": list(marks.marked), "from": marks.source}
 

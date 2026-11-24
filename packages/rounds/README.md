@@ -1485,6 +1485,12 @@ said so and names no skill. A round with no design step that builds in another p
 and marked none of its items, is told that project's items in the commission block and
 the build's verification.
 
+As in `next`, `show`, `show --json` and the round note give the round's marks, with
+where they come from (the opening or the newest frozen version), only when the round
+has marks or a project it is weighed against has a checklist. The history gives a
+checklist's step-up as `flow fix -> full, by the lead at its opening, for the checklist
+marks <marks>`.
+
 **The verifier's brief.** The group `next` prints for a verifying step (the design's
 verification, a build's, a report step of your own) is the verifier's brief in rounds'
 terms: put it first in a verifier's brief, as the commission block goes first in a

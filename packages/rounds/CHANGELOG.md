@@ -19,7 +19,7 @@
   steps give the marks and their skills; the commission block carries the same line
   above the repo's `brief`. A verifying group prints each `verifier_brief` line of its
   projects as `brief: <line>`. `show`, `show --json` and the round note give the
-  round's marks with where they come from.
+  round's marks with where they come from, under the same condition as `next`.
 - The watched-paths guard, `rounds.watched-paths`, registered with turns through the
   `moxi.turns.guards` entry `rounds`: after a write to a path a project watches it adds
   one line with the note and the skills, once per agent, and never refuses. It runs
