@@ -542,10 +542,7 @@ def _walk(place: Path) -> Kept | None:
             return Kept(place, "B7", f"{walked_dir} can't be read: {exc.strerror}")
         for entry in listed:
             try:
-                # On Windows a folder entry's stat holds no device (0), so the entry is
-                # read again whole.
-                found = (os.lstat(entry.path) if sys.platform == "win32"
-                         else entry.stat(follow_symlinks=False))
+                found = _entry_stat(entry)
             except OSError as exc:
                 return Kept(place, "B7", f"{entry.path} can't be read: {exc.strerror}")
             if found.st_dev != device:
@@ -596,6 +593,14 @@ def _unescape(field: str) -> str:
             out.append(field[at])
             at += 1
     return "".join(out)
+
+
+def _entry_stat(entry: os.DirEntry) -> os.stat_result:
+    """A folder entry's own stat, not following a link. On Windows a listing's stat holds
+    no device (0), so the entry is read again whole there."""
+    if sys.platform == "win32":
+        return os.lstat(entry.path)
+    return entry.stat(follow_symlinks=False)
 
 
 def _reparse(found: os.stat_result) -> bool:
@@ -663,7 +668,7 @@ def _delete(target_dir: Path, device: int) -> None:
         return
     for entry in listed:
         try:
-            found = entry.stat(follow_symlinks=False)
+            found = _entry_stat(entry)
             if found.st_dev != device:
                 continue
             if stat.S_ISDIR(found.st_mode) and not _reparse(found):
