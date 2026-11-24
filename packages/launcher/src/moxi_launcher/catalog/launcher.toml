@@ -255,3 +255,14 @@ group = "lifecycle"
 sub = "Headless"
 label = "Headless exit"
 shown_with = "comms"
+
+[subconscious]
+type = "enum"
+default = "off"
+values = ["off", "automatic", "on-demand"]
+requires = ["turns", "memory"]
+doc = "memory's subconscious: a second agent that recalls past sessions and notes for the main agent, at each prompt (automatic) or when the agent asks (on-demand). Each recall spends tokens."
+fork = "drop"
+group = "lifecycle"
+sub = "Memory"
+label = "Subconscious"

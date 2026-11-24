@@ -983,6 +983,9 @@ cache = [
 comms = [
     { name = "moxi-comms" },
 ]
+memory = [
+    { name = "moxi-memory" },
+]
 notes = [
     { name = "moxi-notes" },
 ]
@@ -1018,6 +1021,7 @@ requires-dist = [
     { name = "moxi", editable = "packages/moxi" },
     { name = "moxi-cache", marker = "extra == 'cache'", editable = "packages/cache" },
     { name = "moxi-comms", marker = "extra == 'comms'", editable = "packages/comms" },
+    { name = "moxi-memory", marker = "extra == 'memory'", editable = "packages/memory" },
     { name = "moxi-notes", marker = "extra == 'notes'", editable = "packages/notes" },
     { name = "moxi-projects", marker = "extra == 'projects'", editable = "packages/projects" },
     { name = "moxi-sessions", marker = "extra == 'sessions'", editable = "packages/sessions" },
@@ -1027,7 +1031,7 @@ requires-dist = [
     { name = "moxi-usage", marker = "extra == 'usage'", editable = "packages/usage" },
     { name = "psutil", specifier = ">=5.9" },
 ]
-provides-extras = ["turns", "comms", "projects", "slots", "ui", "notes", "cache", "usage", "sessions"]
+provides-extras = ["turns", "comms", "projects", "slots", "ui", "notes", "cache", "usage", "sessions", "memory"]
 
 [package.metadata.requires-dev]
 dev = [

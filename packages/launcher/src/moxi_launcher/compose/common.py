@@ -688,8 +688,8 @@ def commands(values: Mapping[str, object]) -> tuple[str, ...]:
 
 def option_stamps(values: Mapping[str, object]) -> dict[str, str]:
     """The stamps a launch's option rows set: keep-warm on, recycle on expiry's value,
-    and the crossing mark (`limit_mark`) when it recycles at its limit. A row at `off`
-    stamps nothing."""
+    the crossing mark (`limit_mark`) when it recycles at its limit, and the
+    subconscious's mode under memory's variable. A row at `off` stamps nothing."""
     env: dict[str, str] = {}
     if values.get("keep_warm") == "on":
         env[KEEP_WARM_ENV] = "on"
@@ -697,6 +697,8 @@ def option_stamps(values: Mapping[str, object]) -> dict[str, str]:
         env[RECYCLE_ON_EXPIRY_ENV] = str(values["recycle_on_expiry"])
     if values.get("recycle_at_limit") in ("relaunch", "compact"):
         _stamp(env, "usage", 1, "CROSSING_AT_ENV", limit_mark(values))
+    if values.get("subconscious") in ("automatic", "on-demand"):
+        _stamp(env, "memory", 1, "SUBCONSCIOUS_ENV", str(values["subconscious"]))
     return env
 
 

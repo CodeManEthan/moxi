@@ -131,14 +131,22 @@ def test_the_stamps_with_turns_the_additions_usage_and_notes():
 
 def test_a_value_for_a_module_that_cannot_load_is_not_stamped_and_the_launch_goes_on(
         monkeypatch):
-    # A replayed row can carry warn_at or notes_dir after usage or notes was removed.
+    # A replayed row can carry warn_at, notes_dir or subconscious after usage, notes or
+    # memory was removed.
     real = modules.load
     monkeypatch.setattr(modules, "load", lambda name, **kw: (
-        SimpleNamespace(ok=False, api=None) if name in ("usage", "notes")
+        SimpleNamespace(ok=False, api=None) if name in ("usage", "notes", "memory")
         else real(name, **kw)))
     assert common.stamps("r1", warn_at="1.5x", notes_dir="/notes") == {
         "MOXI_LAUNCHER_REQUEST": "r1"}
     assert common.option_stamps({"recycle_at_limit": "compact", "limit_at": "1x"}) == {}
+    assert common.option_stamps({"subconscious": "automatic"}) == {}
+
+
+@pytest.mark.parametrize("mode", ["automatic", "on-demand"])
+def test_the_subconscious_row_stamps_its_mode_under_memorys_variable(mode):
+    assert common.option_stamps({"subconscious": mode}) == {"MOXI_MEMORY_SUBCONSCIOUS": mode}
+    assert common.option_stamps({"subconscious": "off"}) == {}
 
 
 @pytest.mark.parametrize("harness, extra", [("claude", {}), ("codex", {})])
