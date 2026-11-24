@@ -5,6 +5,7 @@
     moxi memory ingest [--all]
     moxi memory reindex [--relabel]
     moxi memory status [--json]
+    moxi memory subconscious list [--session ID] [--json]
 
 `search` prints each hit (harness, session id, time, project, row kind, then a snippet),
 and under them one `moxi sessions read` command that opens the first hit's session
@@ -29,6 +30,8 @@ index's rows were stored by an older secrets `redact` than the installed one, th
 is a version rebuild (`moxi_memory.ingest`), and `reindex` says first what it keeps and
 what still leaves. `--relabel` derives each session's project label again where its
 folder still exists.
+
+`subconscious` holds the subconscious's verbs (`moxi_memory.recall_cli`).
 
 `status` prints the index's rows, reads and backlog, whether the first full read has
 finished, whether a rebuild is running, a request waiting, the session table's counts
@@ -375,7 +378,14 @@ def _status(args, out, prog: str) -> int:
     return codes.OK if s.index == stat.OK else codes.ERROR
 
 
-_VERBS = {"search": _search, "ingest": _ingest, "reindex": _reindex, "status": _status}
+def _subconscious(args, out, prog: str) -> int:
+    from . import recall_cli
+
+    return recall_cli.run(args, out, prog)
+
+
+_VERBS = {"search": _search, "ingest": _ingest, "reindex": _reindex, "status": _status,
+          "subconscious": _subconscious}
 
 
 def _parser(prog: str) -> argparse.ArgumentParser:
@@ -428,6 +438,10 @@ def _parser(prog: str) -> argparse.ArgumentParser:
                                      "whether a rebuild is running, and the session "
                                      "table's counts.")
     p.add_argument("--json", action="store_true", help="print one JSON object")
+
+    from . import recall_cli
+
+    recall_cli.add_parser(verbs)
     return parser
 
 

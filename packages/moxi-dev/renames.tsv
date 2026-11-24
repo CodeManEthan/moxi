@@ -5969,6 +5969,7 @@ memory	packages/memory/src/moxi_memory/rows.py	and not record.reasoning and reco
 memory	packages/memory/src/moxi_memory/rows.py	known_secret = set(secret_calls)	keep	set	set
 memory	packages/memory/src/moxi_memory/search.py	seen: set[str] = set()	keep	set	set
 memory	packages/memory/src/moxi_memory/settings.py	if not sets or any(not s.strip() for s in sets):	keep	any	any
+memory	packages/memory/src/moxi_memory/settings.py	if any(not c.split() for c in commands):	keep	any	any
 memory	packages/memory/src/moxi_memory/start.py	turns_dir = paths.Layout(MODULE).runtime_dir(create=True) / TURNS	keep	create	create
 memory	packages/memory/src/moxi_memory/start.py	turns_dir.mkdir(mode=0o700, exist_ok=True)	keep	exist_ok	exist_ok
 memory	packages/memory/src/moxi_memory/status.py	listing = api.sources(harness, modified_since=last, heads=False)	keep	heads	heads
@@ -6069,6 +6070,12 @@ memory	packages/memory/tests/test_setup.py	-	name	test_auto_memory_is_offered_wh
 memory	packages/memory/tests/test_table.py	-	name	test_the_store_lives_in_memorys_state_directory	test_the_store_lives_in_memorys_state_dir
 memory	packages/memory/tests/test_ingest.py	FakeLauncher.launch_kind	name	timeout	timeout_s
 memory	packages/memory/tests/test_search.py	FakeLauncher.launch_kind	name	timeout	timeout_s
+memory	packages/memory/src/moxi_memory/recall_cli.py	p = verbs.add_parser("subconscious", help="see the subconscious's recalls",	keep	help	help
+memory	packages/memory/src/moxi_memory/recall_cli.py	q = sub.add_parser("list", help="show the log of recalls",	keep	help	help
+memory	packages/memory/src/moxi_memory/recall_cli.py	q.add_argument("--session", metavar="ID", help="only this session's lines, each "	keep	help	help
+memory	packages/memory/src/moxi_memory/recall_cli.py	q.add_argument("--json", action="store_true", help="print the lines as one JSON array")	keep	help	help
+memory	packages/memory/src/moxi_memory/recalls.py	if not gate.acquire(timeout=-1 if timeout_s is None else max(timeout_s, 0.0)):	keep	timeout	timeout
+memory	packages/memory/tests/test_recalls.py	path.parent.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
 moxi	packages/moxi/src/moxi/_mark.py	-	name	NAME	STARTED_BY_ENV
 moxi	packages/moxi/src/moxi/_mark.py	for at, part in enumerate(orig[1:], start=1):	keep	start	start
 moxi	packages/moxi/src/moxi/_mark.py	if not any(name.upper() == STARTED_BY_ENV for name in child):	keep	any	any

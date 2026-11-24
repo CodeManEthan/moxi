@@ -43,12 +43,16 @@ TIMERS = {"ingest": {"command": "moxi-memory-ingest", "args": ["--walk"], "every
                      "switch": "ingest.timer.enabled",
                      "doc": "read the transcripts that changed since the last walk"}}
 #: The session table, which holds each session's identity and launch kind and can't be
-#: rebuilt from the transcripts; and the index folder, which holds the index generations,
-#: their locks and the pointer, and is rebuilt with `moxi memory reindex`.
+#: rebuilt from the transcripts; the index folder, which holds the index generations,
+#: their locks and the pointer, and is rebuilt with `moxi memory reindex`; and the
+#: subconscious's folder, its log of recalls and its session locks.
 STORES = {
     "sessions": {"root": "state", "path": "state.db", "kind": "sqlite", "private": True,
                  "retention": "keep", "rebuildable": False, "lazy": True},
     "index": {"root": "cache", "path": "index", "kind": "dir", "private": True,
               "retention": "keep", "rebuildable": True, "lazy": True},
+    "subconscious": {"root": "state", "path": "subconscious", "kind": "dir",
+                     "private": True, "retention": "keep", "rebuildable": False,
+                     "lazy": True},
 }
 SEGMENT = None
