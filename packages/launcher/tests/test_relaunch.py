@@ -363,8 +363,8 @@ def set_values(conn, **more):
     ("off", "preset", "launch r1 has recycle_at_limit off, so it can't relaunch itself"),
     ("off", "defaults", "launch r1 has recycle_at_limit off, so it can't relaunch itself"),
     ("off", "left-out", "launch r1 holds recycle_at_limit off, so it can't relaunch itself"),
-    ("compact", "preset", "launch r1 recycles at its limit by compacting, so it can't "
-                          "relaunch itself")])
+    ("compact", "preset", "launch r1 was launched with recycle_at_limit compact, which no "
+                          "longer acts, so it can't relaunch itself")])
 @pytest.mark.parametrize("dry_run", [False, True])
 def test_a_launch_that_opted_out_refuses_the_self_arm(conn, tmp_path, value, source, words,
                                                       dry_run):
@@ -390,8 +390,8 @@ def test_an_older_scratch_row_set_to_relaunch_refuses_the_self_arm(conn, tmp_pat
     assert refused.value.code == "no-self-recycle" and refused.value.exit_code == 3
     assert refused.value.problem == ("launch r1 works in a scratch folder, and a scratch "
                                      "launch can't recycle itself")
-    assert refused.value.hint == ("finish the work and stop; recycle with compact, or launch "
-                                  "in a directory")
+    assert refused.value.hint == ("finish the work and stop; set recycle_at_limit off, or "
+                                  "launch in a directory")
     nothing_written(conn, slots_api)
 
 
