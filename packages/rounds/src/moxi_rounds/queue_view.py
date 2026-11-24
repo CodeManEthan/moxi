@@ -2,8 +2,9 @@
 pause and its reason, a wait on something outside the queue, each running batch and its
 CI reading (two or more while a red batch is split) or the CI run it waits on to end,
 each member still in the queue in the order it is taken, the target's last full run
-(and, where a batch was read by it, the candidate's ref), the newest landing and its candidate's run, a full run still running at the newest head
-read, and the messages the lander could not send.
+(and, where a batch was read by it, the candidate's ref), the newest landing and its
+candidate's run, a full run still running at the newest head read, and the messages the
+lander could not send.
 
 Everything said is read from the queue file (`queue_file.read`); nothing is written.
 """
