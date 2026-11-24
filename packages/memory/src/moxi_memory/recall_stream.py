@@ -11,9 +11,9 @@ answer came by then. The first round's task is the brief; a later one's is
 **Settling a round.** Once turns has settled the round's delivery (its end read), the
 child, under the session's lock, writes the line's state first, then acks the round's
 ref to turns, then clears the kept mark. A child that dies between two of them leaves the
-mark, and a taker finishes them. An answer goes on the line with the time it came back,
-the line `back`, and the record `back` at the first answer (a `hurried` record stays
-`hurried`). A first round with no answer ends the recall `lost`, record and line, with
+mark, and a taker finishes them (`moxi_memory.recall_take`). An answer goes on the line
+with the time it came back, the line `back`, and the record `back` at the first answer
+(a `hurried` record stays `hurried`). A first round with no answer ends the recall `lost`, record and line, with
 the reason (`denied`, `gone`, or the delivery's refusal); a later one ends the stream,
 the line `back` with the round's loss noted. A round whose end turns never gave within
 the wait is left with its kept mark and the line as it was, for a taker.
@@ -122,15 +122,19 @@ def _reason(end) -> tuple[str, str]:
 
 def settle(recall, round_number: int, end, route: Route, *, now: float | None = None) -> bool:
     """Settle round `round_number` with turns' `end` for it: the line, then the ack,
-    then the mark. True when an answer came back."""
+    then the mark. True when an answer came back. The line is read again under the lock;
+    one a person discarded keeps its state, and only the ack and the mark follow."""
     from moxi_turns.results import Ended
 
     now = time.time() if now is None else now
     round_ref = ref(recall.recall_id, round_number)
     with recalls.session_lock(recall.session_id):
         recall.record = records.read(recall.session_id, recall.recall_id) or recall.record
+        recall.line = recalls.find_line(recall.session_id, recall.recall_id) or recall.line
         rounds = list(recall.line.get("rounds") or [])
-        if isinstance(end, Ended):
+        if recall.line.get("state") == recalls.DISCARDED:
+            got = False
+        elif isinstance(end, Ended):
             answer = end.answer or ""
             rounds.append({"round": round_number, "text": answer, "at": now})
             state = recall.record.get("state")

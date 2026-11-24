@@ -21,6 +21,11 @@ run (else it logs the session's `off` line), and resets the agent's count of rec
 on-demand mode. It runs on the last good `subconscious.*` settings while memory's config
 file is in error, and passes them to the recall's child. It never raises.
 
+`subconscious_gone(event)` answers a `gone` of a session whose launch turned the
+subconscious on: when a recall's line of the session is still open or kept, it starts a
+taker for the session's lines, detached (`moxi_memory.recall_take`), and returns. It
+never raises.
+
 `lists(event)` answers a `start` with two lists of recent sessions, read from memory's
 session table and nothing else: this agent's own recent sessions from any project, then
 the project's, each leaving out this session, subagents, scratch launches and sessions
@@ -184,6 +189,21 @@ def _subconscious(event) -> None:
                        senders=getattr(event, "delivery_senders", None) or (),
                        settings=held, cwd=session_path(event),
                        notes_dir=notes_override(env), route_name=route)
+
+
+def subconscious_gone(event) -> None:
+    """When a session with the subconscious on is ending and a recall's line of it is
+    still open or kept, start a taker for its lines, detached, and return None at once."""
+    try:
+        from . import recall_start, recall_take
+
+        session_id = getattr(event, "session_id", None)
+        if (recall_start.mode(getattr(event, "env", None)) is not None
+                and recall_take.session_needs_taking(session_id)):
+            recall_take.start_taker(session_id)
+    except Exception:  # noqa: BLE001 - an ending session never waits on a taker's start
+        logging.getLogger(__name__).exception("the subconscious's taker did not start")
+    return None
 
 
 def notes_override(env) -> str | None:
@@ -399,5 +419,6 @@ def lists(event) -> str | None:
 
 __all__ = ["START_LINE", "PROJECT", "REMINDER", "DEADLINE", "ROW_WAIT", "IDENTITY_WAIT",
            "IDENTITY_WRITE_WAIT", "QUERY_WAIT", "SHOWN", "session_path", "start_line",
-           "start", "prompt", "fire", "subconscious", "subconscious_settings",
+           "start", "prompt", "fire", "subconscious", "subconscious_gone",
+           "subconscious_settings",
            "notes_override", "lists", "format_lists", "write_late_identity"]

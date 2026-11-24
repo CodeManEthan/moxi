@@ -1,7 +1,8 @@
 """`moxi-memory-subconscious`: the detached child that owns one recall from its start to
-its end.
+its end, or a taker of a session's lines whose owner is gone.
 
     moxi-memory-subconscious --session SESSION --recall RECALL
+    moxi-memory-subconscious --take --session SESSION
 
 The listener or the on-demand command wrote the recall's record and started this child
 outside the session (`moxi_memory.recall_start`). The child runs on the settings the
@@ -20,7 +21,15 @@ record holds, never on a fresh read of memory's config:
    brief as the first round, later rounds while the stream lasts, each round settled
    on the line and acked to turns, and the record ended.
 
-It exits 0 when the recall ran to an end, 2 for arguments or a record it can't use.
+From its start, beside these steps, a thread takes over every session's lines whose
+owner is gone (`moxi_memory.recall_take.take_all`), and the child waits for it before
+it exits.
+
+With `--take`, it takes over the session's lines whose owner is gone and exits: the
+taker memory's `gone` listener starts when a session with the subconscious on ends.
+
+It exits 0 when the recall ran to an end or the taking is done, 2 for arguments or a
+record it can't use.
 """
 
 from __future__ import annotations
@@ -28,6 +37,7 @@ from __future__ import annotations
 import argparse
 import os
 import sys
+import threading
 import time
 
 from . import recalls, records
@@ -37,10 +47,10 @@ CONFIG = "config"
 
 
 class Recall:
-    """One recall as its child holds it: the record's fixed parts and the log line it
-    keeps writing."""
+    """One recall as its owner holds it: the record's fixed parts and the log line it
+    keeps writing. A child starts a new line; a taker passes the line it took (`line`)."""
 
-    def __init__(self, record: dict):
+    def __init__(self, record: dict, *, line: dict | None = None):
         self.session_id: str = record["session"]
         self.recall_id: str = record["recall"]
         self.record = record
@@ -53,6 +63,8 @@ class Recall:
             "prefetch_hits": None, "widened": False, "startup_s": None,
             "hurried": False, "past_limit": False, "rounds": [],
             "at": record.get("at")}
+        if line is not None:
+            self.line = dict(line)
 
     def put(self, *, record: dict | None = None, **line: object) -> None:
         """Write the line with `line`'s fields, and the record with `record`'s, under
@@ -128,38 +140,66 @@ def run(session_id: str, recall_id: str, *, route=None) -> int:
         return 2
     recall = Recall(record)
     open_line(recall)
-    error = read_config()
-    if error is not None:
-        lose(recall, CONFIG, error)
-        return 0
-    text_brief = write_brief(recall)
-    from . import recall_stream
-
-    if route is None:
-        from . import recall_route
-
-        route = recall_route.for_recall(recall)
+    taking = threading.Thread(target=take_others, args=(recall_id,),
+                              name="memory-recall-take", daemon=True)
+    taking.start()
     try:
-        recall_stream.run(recall, route, text_brief)
+        error = read_config()
+        if error is not None:
+            lose(recall, CONFIG, error)
+            return 0
+        text_brief = write_brief(recall)
+        from . import recall_stream
+
+        if route is None:
+            from . import recall_route
+
+            route = recall_route.for_recall(recall)
+        try:
+            recall_stream.run(recall, route, text_brief)
+        finally:
+            close = getattr(route, "close", None)
+            if close is not None:
+                close()
+        return 0
     finally:
-        close = getattr(route, "close", None)
-        if close is not None:
-            close()
-    return 0
+        taking.join()
+
+
+def take_others(recall_id: str) -> None:
+    """Take over every session's lines whose owner is gone, leaving out this child's own
+    recall. Never raises."""
+    from . import recall_take
+
+    try:
+        recall_take.take_all(skip=recall_id)
+    except Exception:  # noqa: BLE001 - a taking that fails leaves the lines for the next
+        pass
 
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="moxi-memory-subconscious",
                                      description="Run one recall of memory's subconscious.")
     parser.add_argument("--session", required=True, help="the main session's id")
-    parser.add_argument("--recall", required=True, help="the recall's id")
+    parser.add_argument("--recall", help="the recall's id")
+    parser.add_argument("--take", action="store_true",
+                        help="take over the session's lines whose owner is gone, and exit")
     args = parser.parse_args(argv)
-    if not (recalls.is_safe(args.session) and recalls.is_safe(args.recall)):
+    if args.take == bool(args.recall):
+        print("moxi-memory-subconscious: give --recall, or --take", file=sys.stderr)
+        return 2
+    if not (recalls.is_safe(args.session)
+            and (args.take or recalls.is_safe(args.recall))):
         print("moxi-memory-subconscious: a session or recall id memory can't use",
               file=sys.stderr)
         return 2
+    if args.take:
+        from . import recall_take
+
+        recall_take.take_all(sessions=[args.session])
+        return 0
     return run(args.session, args.recall)
 
 
 __all__ = ["CONFIG", "Recall", "open_line", "read_config", "lose", "write_brief", "run",
-           "main"]
+           "take_others", "main"]
