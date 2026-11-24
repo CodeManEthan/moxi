@@ -13,17 +13,22 @@ takes any object with the same methods, so a test gives it a stand-in.
   a check's does (moxi's runs under `gate.lock` and `check.lock`).
 - `read(place, commit)` reads a candidate's CI at `commit` as `check` reads it
   (`ci.read_runs`), by the workflows the setting gives candidates
-  (`ci.Declared.candidate_workflows`), as one `Read`: the whole reading, or `cancelled`
-  when a run it read was cancelled. `read_full(place, commit)` reads the target's full
-  run there the same way, by the full run's workflows (`ci.Declared.full_workflows`),
-  so a candidate's scoped run at the same commit never stands in for it.
+  (`ci.Declared.candidate_workflows`), as one `Read`: the whole reading, `cancelled`
+  when a run it read was cancelled. A reading that would be red, cancelled or absent
+  reads `pending` while any run it read has not completed (their ids in `running`), so
+  a failed job of a run that goes on reads no red; a green reading of the jobs it reads
+  stands at once, while other jobs of the run still go.
+  `read_full(place, commit)` reads the target's full run there the same way, by the
+  full run's workflows (`ci.Declared.full_workflows`), so a candidate's scoped run at the
+  same commit never stands in for it, while a candidate's run of those workflows there
+  is that full run.
 - `rerun(place, runs, failed=...)` reruns each run, or only its failed jobs.
 - `failures(place, commit, read)` lists the failures of a red read's runs at `commit`
   (`failures.of_run`): each run's failed jobs by the setting's `jobs` command, of the
   jobs the setting names where every workflow is read by its jobs, and the tests their
   logs name (`LOG_FAILED`), each failure of a job the read's workflows give a
   `stands_for` holding the job it stands for. Raises `ci.ReadFailed` when either
-  command fails.
+  command fails, and, running nothing, for a read with a run still running.
 
 The two `gh` commands the setting does not give, the rerun and `LOG_FAILED`, take the
 repository the setting's own commands name (`ci.gh_repo`: the first `--repo` or `-R`
@@ -79,7 +84,8 @@ class Local:
 class Read:
     """A read of a candidate's CI: the whole reading (`ci.GREEN`, `ci.RED`, `ci.PENDING`,
     `ci.ABSENT` or `CANCELLED`), the ids of the runs read, each workflow as `ci.reading`
-    gives it, and the argvs that ran."""
+    gives it, the argvs that ran, and the ids of the runs read that have not completed
+    where they hold the reading at pending (`running`)."""
 
     word: str
     runs: tuple[str, ...] = ()
@@ -87,6 +93,7 @@ class Read:
     status_argv: tuple[str, ...] = ()
     ids_argv: tuple[str, ...] = ()
     jobs_argvs: tuple[tuple[str, ...], ...] = ()
+    running: tuple[str, ...] = ()
 
 
 #: The `--repo` argument the setting's own commands give gh.
@@ -146,15 +153,26 @@ class QueueCi:
     def _read(self, place: Path, commit: str, *, is_candidate: bool) -> Read:
         reading, runs = ci.read_runs(self.found, values={"tip": commit}, cwd=place,
                                      is_candidate=is_candidate)
+        # A run with no id is still named, so it still holds the read at pending.
+        going = tuple(str(run.get("databaseId", "unknown")) for run in runs
+                      if run.get("status") != "completed")
         word = reading.whole
         if any(run.get("conclusion") == CANCELLED for run in runs):
             word = CANCELLED
+        # GitHub refuses a rerun and a failure log while a run goes, and a run not
+        # shown yet may still start, so only a green reading stands while one goes.
+        running = going if word != ci.GREEN else ()
+        if running:
+            word = ci.PENDING
         return Read(word, tuple(str(run.get("databaseId")) for run in runs
                                 if run.get("databaseId") is not None),
                     reading.workflows, reading.status_argv, reading.ids_argv,
-                    reading.jobs_argvs)
+                    reading.jobs_argvs, running)
 
     def failures(self, place: Path, commit: str, read: Read) -> list[dict]:
+        if read.running:
+            raise ci.ReadFailed(LOG_FAILED, "the run " + ", ".join(read.running)
+                                + " has not completed, so its failures are not final")
         names = None
         if read.workflows and all("jobs" in one for one in read.workflows):
             names = [str(job.get("name")) for one in read.workflows for job in one["jobs"]]
