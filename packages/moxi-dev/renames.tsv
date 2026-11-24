@@ -3028,6 +3028,7 @@ comms	packages/comms/tests/test_scoped_send.py	client.send(FORMED, held, machine
 comms	packages/comms/tests/test_scoped_send.py	client.send(FORMED, planner, machine_line.compose([PARENT], "x"))	keep	fail	fail
 comms	packages/comms/tests/test_scoped_send.py	client.send(FORMED, token(), "no machine line")	keep	fail	fail
 comms	packages/comms/tests/test_scoped_send.py	client.send(FORMED, token(), machine_line.compose(	keep	fail	fail
+comms	packages/comms/tests/test_scoped_send.py	client.send(name, token(), machine_line.compose(	keep	fail	fail
 comms	packages/comms/tests/test_scoped_send.py	ml = machine_line.parse(digest.record.get_message(result.message_id).content)	keep	record	record
 comms	packages/comms/tests/test_scoped_send.py	msg = digest.record.get_message(mid)	keep	record	record
 comms	packages/comms/tests/test_scoped_send.py	return rig.record.history(rig.names_channel)	keep	record	record
