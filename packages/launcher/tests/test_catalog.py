@@ -35,7 +35,7 @@ LAUNCHER_ROWS = {"harness", "cwd", "project", "scratch", "identity", "scope", "d
                  "instructions", "instructions_file", "brief", "brief_file", "handoff",
                  "posture", "target", "slot", "extra_flags", "name", "notes_dir", "warn_at",
                  "keep_warm", "recycle_on_expiry", "recycle_at_limit", "limit_at",
-                 "headless_exit"}
+                 "headless_exit", "subconscious"}
 
 
 def test_each_shipped_catalog_holds_exactly_its_rows():
@@ -50,7 +50,8 @@ def test_each_shipped_catalog_holds_exactly_its_rows():
 FORK_DROPPED = {"identity", "scope", "director", "takes_policy_directors", "posture",
                 "instructions", "instructions_file", "brief", "brief_file", "handoff",
                 "keep_warm", "recycle_on_expiry", "recycle_at_limit", "limit_at", "warn_at",
-                "headless_exit", "name", "native_name", "remote_control", "notes_dir"}
+                "headless_exit", "name", "native_name", "remote_control", "notes_dir",
+                "subconscious"}
 FORK_OWN = {("launcher", "target"), ("launcher", "slot"), ("claude", "session_id"),
             ("claude", "resume"), ("claude", "plugin_dir"),
             ("claude", "append_system_prompt_file")}

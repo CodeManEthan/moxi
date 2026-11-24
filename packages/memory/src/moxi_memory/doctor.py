@@ -31,9 +31,18 @@
   doesn't import.
 - sessions: rows in the session table, with an identity, settled, and with each launch
   kind. `warn` when memory's state store can't be opened or read.
-- links: whether comms and the launcher load, and what memory does without each.
+- links: whether comms, the launcher and notes load, and what memory does without each.
 - retention: each harness's transcript retention, from sessions. `warn` where sessions
   warns.
+- subconscious: for each live session whose launch turned the subconscious on, whether a
+  recall route can run in it now, checked as a recall's own try checks it (a Codex
+  session, or a Claude Code session whose turns offers no `fork`, has it off), naming the
+  reason only while it holds; while memory's config file is in error, each recall it
+  stopped (its line `lost` with the reason `config`) and the error; and each recall line
+  still open or kept whose child and taker are gone, with its age, until a taker settles
+  it. `warn` for each of those. With the subconscious on in a live session it also says
+  that a recall fork's permission asks are refused. Recall runs on Claude Code's subagent
+  route only.
 
 No row writes anything: the index is opened to read, and the state store only when it
 is there.
@@ -42,6 +51,7 @@ is there.
 from __future__ import annotations
 
 from collections.abc import Iterator
+from functools import partial
 
 from moxi.doctor import Row
 
@@ -69,7 +79,9 @@ def rows() -> Iterator[Row]:
               ("folders", _roots_row, (harnesses,)), ("sets", _sets, (config,)),
               ("start", _start, (harnesses,)),
               ("sessions", _sessions, ()), ("links", _links, ()),
-              ("retention", _retention, (harnesses,)))
+              ("retention", _retention, (harnesses,)),
+              ("subconscious",
+               partial(_subconscious, config_in_error=config is None), ()))
     for name, check, args in checks:
         try:
             yield check(*args)
@@ -385,6 +397,7 @@ def _sessions() -> Row:
 _WITHOUT = {
     "comms": "no identities: no agent list, and the project list names harnesses",
     "launcher": "no launch kinds: every session is searched by default and may be listed",
+    "notes": "a recall reads past sessions only, no notes",
 }
 
 
@@ -393,7 +406,8 @@ def _links() -> Row:
 
     parts = []
     state = "ok"
-    for name, link in (("comms", links.comms()), ("launcher", links.launcher())):
+    for name, link in (("comms", links.comms()), ("launcher", links.launcher()),
+                       ("notes", links.notes())):
         if link.ready:
             parts.append(f"{name} loads")
         elif link.state == links.FAILING:
@@ -416,4 +430,155 @@ def _retention(harnesses) -> Row:
                "moxi doctor sessions" if warn else None)
 
 
-__all__ = ["rows"]
+# -- the subconscious --------------------------------------------------------------------
+
+#: The most recalls the subconscious row names in one of its lists.
+SUBCONSCIOUS_SHOWN = 5
+#: A line this young whose owner is gone is not listed: its child may not have written
+#: its identity yet.
+UNTAKEN_GRACE_S = 30.0
+SUBCONSCIOUS_LIST = "moxi memory subconscious list"
+
+
+def _age(seconds: float) -> str:
+    seconds = max(0, int(seconds))
+    if seconds < 120:
+        return f"{seconds}s"
+    if seconds < 7200:
+        return f"{seconds // 60}m"
+    if seconds < 172800:
+        return f"{seconds // 3600}h"
+    return f"{seconds // 86400}d"
+
+
+def _shown(items: list[str]) -> str:
+    more = len(items) - SUBCONSCIOUS_SHOWN
+    return ", ".join(items[:SUBCONSCIOUS_SHOWN]) + (f" and {more} more" if more > 0 else "")
+
+
+def live_subconscious() -> list[tuple[str, str, str | None]]:
+    """(session id, mode, the reason no route can run, or None) for each live session
+    turns serves whose launch turned the subconscious on."""
+    import moxi_turns as client
+
+    from . import recall_start
+
+    out = []
+    for session in client.sessions():
+        with session:
+            try:
+                stamps = session.env([recall_start.SUBCONSCIOUS_ENV])
+            except Exception:  # noqa: BLE001 - an endpoint that can't read it is passed by
+                continue
+            run_mode = recall_start.mode({k: v for k, v in stamps.items() if v is not None})
+            if run_mode is None or session.session_id is None:
+                continue
+            harness = session.harness
+            if harness == "codex":
+                why = recall_start.CODEX
+            elif harness != "claude" or "fork" not in session.capabilities:
+                why = recall_start.NO_FORK
+            else:
+                why = None
+            out.append((session.session_id, run_mode, why))
+    return out
+
+
+def _never_ran(lines: list[dict], *, now: float) -> str | None:
+    """The recalls whose child never ran: lines lost with reason `spawn` in the last day
+    (the child could not be started), and records `starting` or `hurried` with no fork
+    and no line naming a child past `records.STARTING_GRACE_S` (the child ended before
+    it wrote its line, or found no identity of its own to write), which the recall
+    guards no longer wait on. None when there are none."""
+    from . import recall_guard, recall_start, recalls, records
+
+    said = []
+    spawn = [line for line in lines if line.get("state") == recalls.LOST
+             and line.get("reason") == recall_start.SPAWN
+             and now - float(line.get("at") or 0) < records.SWEEP_AFTER_S]
+    if spawn:
+        said.append(f"{_plural(len(spawn), 'recall')} in the last day whose child could "
+                    f"not start ({_shown([str(x.get('recall')) for x in spawn[::-1]])}): "
+                    f"{spawn[-1].get('error') or 'no error recorded'}")
+    named = {line.get("recall") for line in lines if recall_guard.line_child(line)}
+    silent = [record for session_id in records.session_ids()
+              for record in records.session_records(session_id)
+              if record.get("state") in (records.STARTING, records.HURRIED)
+              and not record.get("fork") and record.get("recall") not in named
+              and now - float(record.get("at") or now) >= records.STARTING_GRACE_S]
+    if silent:
+        ages = [f"{r.get('recall')} ({r.get('state')}, "
+                f"{_age(now - float(r.get('at') or now))} old)" for r in silent[::-1]]
+        said.append(f"{_plural(len(silent), 'recall')} with no log line naming its child "
+                    f"(gone before it wrote one, or with no identity to write): "
+                    f"{_shown(ages)}")
+    return "; ".join(said) or None
+
+
+def _config_losses(lines: list[dict]) -> list[dict]:
+    """The lines lost with reason `config` since memory's config last read cleanly for a
+    recall: those opened after the newest line whose child got past its config read (its
+    first search noted on it). A loss to an error fixed since is left out. `lines` are
+    oldest first."""
+    from . import recall_child, recalls
+
+    out: list[dict] = []
+    for line in lines:
+        if line.get("state") == recalls.LOST and line.get("reason") == recall_child.CONFIG:
+            out.append(line)
+        elif line.get("prefetch_hits") is not None:
+            out = []
+    return out
+
+
+def _subconscious(*, config_in_error: bool, now: float | None = None) -> Row:
+    import time
+
+    from . import recall_take, recalls
+
+    now = time.time() if now is None else now
+    parts: list[str] = []
+    warn = False
+    try:
+        live = live_subconscious()
+    except Exception as exc:  # noqa: BLE001 - turns that can't list its sessions
+        live = []
+        parts.append(f"turns can't list its live sessions ({exc}), so none is checked")
+    on = [sid for sid, _mode, why in live if why is None]
+    off = [f"{sid} ({why})" for sid, _mode, why in live if why is not None]
+    if on:
+        parts.append(f"on in {_plural(len(on), 'live session')}, on Claude Code's "
+                     "subagent route; a recall fork's permission asks are refused")
+    if off:
+        warn = True
+        parts.append(f"off for want of a route in {_shown(off)}")
+    lines = recalls.all_lines()
+    if config_in_error:
+        lost = _config_losses(lines)
+        if lost:
+            warn = True
+            newest = lost[-1]
+            parts.append(f"{_plural(len(lost), 'recall')} stopped while memory's config "
+                         f"is in error ({_shown([str(x.get('recall')) for x in lost[::-1]])}"
+                         f"): {newest.get('error') or 'no error recorded'}")
+    untaken = [line for line in lines
+               if now - float(line.get("updated") or line.get("at") or 0) >= UNTAKEN_GRACE_S
+               and recall_take.takeable(line)]
+    if untaken:
+        warn = True
+        named = [f"{line.get('recall')} ({line.get('state')}, "
+                 f"{_age(now - float(line.get('updated') or line.get('at') or now))} old)"
+                 for line in untaken[::-1]]
+        parts.append(f"{_plural(len(untaken), 'recall line')} not yet taken, child gone: "
+                     f"{_shown(named)}; the next recall child or session end takes it")
+    never_ran = _never_ran(lines, now=now)
+    if never_ran:
+        warn = True
+        parts.append(never_ran)
+    if not parts:
+        parts.append("on in no live session")
+    fix = CONFIG if config_in_error and warn else (SUBCONSCIOUS_LIST if warn else None)
+    return Row(MODULE, "subconscious", "warn" if warn else "ok", "; ".join(parts), fix)
+
+
+__all__ = ["rows", "live_subconscious"]

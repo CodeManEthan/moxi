@@ -6,8 +6,10 @@ again whenever it changed, so an edit takes effect at the next read.
 
 `check_text(text)` is the module's whole loader over a config text, the announcement's
 `CONFIG_CHECK`: the schema's check, then the rules the schema can't say. `harnesses`
-names only harnesses memory reads, `index.tail_chars` is at least 1, and `redact.sets`
-names at least one set.
+names only harnesses memory reads, `index.tail_chars` is at least 1, `redact.sets`
+names at least one set, `subconscious.limit_s` is 1 to `LIMIT_S_MAX` (so a round's bound,
+`limit_s` plus 30 s, stays inside turns' longest timer), the subconscious's counts are at
+least their floor (`FLOORS`), and `subconscious.fork_commands` names no empty command.
 
 memory reads no environment variable of its own. Its folders move with the core's root
 variables like every module's (`moxi.paths.Layout`): `state_dir()` holds the session table,
@@ -29,6 +31,12 @@ SCHEMA_RESOURCE = "settings.toml"
 
 #: The harnesses memory can index, by sessions' names for them.
 HARNESSES = ("claude", "codex", "opencode")
+#: The longest `subconscious.limit_s` the check takes, in seconds.
+LIMIT_S_MAX = 3600
+#: The least each of the subconscious's counts may be.
+FLOORS = {"subconscious.limit_s": 1, "subconscious.max_tools": 1,
+          "subconscious.max_rounds": 1, "subconscious.max_points": 1,
+          "subconscious.prefetch_hits": 0, "subconscious.on_demand_per_prompt": 0}
 
 _schema: Schema | None = None
 
@@ -73,6 +81,18 @@ def _check(settings, file) -> None:
     if not sets or any(not s.strip() for s in sets):
         raise ConfigError(file, "redact.sets", "names no set, or an empty one",
                           "name at least one secrets set, such as credentials")
+    for key, floor in FLOORS.items():
+        if settings[key] < floor:
+            raise ConfigError(file, key, f"is {settings[key]}, below {floor}",
+                              f"give a whole number of {floor} or more")
+    if settings["subconscious.limit_s"] > LIMIT_S_MAX:
+        raise ConfigError(file, "subconscious.limit_s",
+                          f"is {settings['subconscious.limit_s']}, above {LIMIT_S_MAX}",
+                          f"give a number of seconds from 1 to {LIMIT_S_MAX}, such as 60")
+    commands = settings["subconscious.fork_commands"]
+    if any(not c.split() for c in commands):
+        raise ConfigError(file, "subconscious.fork_commands", "holds an empty command",
+                          "give each command as its program and words, such as grep")
 
 
 def layout():
@@ -93,5 +113,5 @@ def cache_dir(env: Mapping[str, str] | None = None) -> Path:
     return layout().cache_dir(env)
 
 
-__all__ = ["MODULE", "HARNESSES", "schema", "read", "check_text", "layout", "state_dir",
-           "cache_dir"]
+__all__ = ["MODULE", "HARNESSES", "LIMIT_S_MAX", "FLOORS", "schema", "read", "check_text",
+           "layout", "state_dir", "cache_dir"]

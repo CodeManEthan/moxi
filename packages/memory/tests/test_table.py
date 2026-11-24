@@ -190,10 +190,11 @@ def test_the_agent_list_matches_the_qualified_identity_from_any_project(conn):
     assert table.agent_sessions(conn, "", ME) == []
 
 
-def test_both_lists_leave_out_this_session_unsettled_and_scratch_sessions(conn):
+def test_both_lists_leave_out_this_session_unsettled_scratch_and_fork_sessions(conn):
     listed(conn, "claude", "me", identity="planner", newest=99.0)
     listed(conn, "codex", "me", identity="planner", newest=98.0)  # same id, other harness
     listed(conn, "claude", "scratch", identity="planner", kind="scratch", newest=97.0)
+    listed(conn, "claude", "fork", identity="planner", kind="fork", newest=97.5)
     listed(conn, "claude", "unsettled", identity="planner", settled=False, newest=96.0)
     table.write_start(conn, "claude", "unread", "proj", now=95.0)
     table.write_identity(conn, "claude", "unread", "planner", now=95.0)
@@ -237,9 +238,11 @@ def test_the_list_queries_read_the_listable_index(conn):
 
     agent = plan("SELECT harness, session_id, newest, identity FROM sessions "
                  "WHERE identity = ? AND settled = 1 AND kind IS NOT 'scratch' "
+                 "AND kind IS NOT 'fork' "
                  "ORDER BY newest DESC LIMIT 10", ("planner",))
     project = plan("SELECT harness, session_id, newest, identity FROM sessions "
                    "WHERE label = ? AND settled = 1 AND kind IS NOT 'scratch' "
+                   "AND kind IS NOT 'fork' "
                    "ORDER BY newest DESC LIMIT 10", ("proj",))
     assert "USING INDEX sessions_by_identity" in agent and "TEMP B-TREE" not in agent
     assert "USING INDEX sessions_by_label" in project and "TEMP B-TREE" not in project
