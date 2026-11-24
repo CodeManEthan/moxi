@@ -12,10 +12,7 @@
 //   both, since a preset shown without the values of it that can do harm would read safer
 //   than it is;
 // - `/api/last`: that line's `last launched` clause;
-// - `/api/name`: the `Launch` row's second line;
-// - turns' `/api/sessions`, read only with turns installed and at the desk: `working` on a
-//   `Sessions` line whose session has a turn open, where the line would say when it was
-//   last active. A line turns says nothing of reads as it does without turns.
+// - `/api/name`: the `Launch` row's second line.
 //
 // The words are Home's for the same facts: `runWords` for where a launch runs,
 // `runsWhere` and `clock` for a running session's line, `presetSets` for what a preset
@@ -34,8 +31,6 @@ import { DAY, HOUR, runWords } from "./prompt-model.ts";
 import type { Clock } from "./prompt-model.ts";
 import { clock, runsWhere } from "./running-model.ts";
 import type { Running, RunningEntry, Where } from "./running-model.ts";
-import { WORKING, workingOf } from "./working-model.ts";
-import type { Live } from "./working-model.ts";
 
 /** The event a facts component dispatches, with its report as the `detail`. */
 export const FACTS_EVENT = "moxi-project-facts";
@@ -72,11 +67,18 @@ export interface Part {
   text: string;
   claims?: string[];
   count?: { one: string; many: string };
+  /** A part that holds only while the line's session is not in a turn: a running line's
+   * `last active`. The page may leave it out when another module says the session is in
+   * one. */
+  idle_only?: true;
 }
 
 export interface Line {
   parts: Part[];
   claims?: string[];
+  /** The launcher's word that the line's session runs now: on each running launch's line,
+   * never on the `<n> more` line. */
+  runs?: true;
 }
 
 export interface Section {
@@ -117,8 +119,6 @@ export interface Reads {
   catalog: Catalog | null;
   last: Last | null;
   name: Named | null;
-  /** turns' sessions; null where turns isn't read or its last read failed. */
-  turns: Live | null;
 }
 
 /** What the times are worded against: now, and how the browser writes an hour and a day. */
@@ -284,30 +284,27 @@ export function launchSection(reads: Reads, key: string, when: When): Section | 
   return lines.length ? { label: LAUNCH, lines } : null;
 }
 
-/** One running launch's line in the `Sessions` row: its name, how it runs, then `working`
- * when its request id is in `working`, else when its session was last active; each left
- * out when it is none. It claims its session. */
-export function sessionLine(entry: RunningEntry, working: ReadonlySet<string> = new Set()): Line {
+/** One running launch's line in the `Sessions` row: its name, how it runs, and when its
+ * session was last active, each left out when it is none. It claims its session and says
+ * it runs (`runs`); its `last active` part holds only while the session is not in a turn
+ * (`idle_only`), so the page can join another module's word for a turn in its place. */
+export function sessionLine(entry: RunningEntry): Line {
   const parts: Part[] = [{ text: clip(entry.name || entry.request_id) }];
-  const runs = runsWhere(entry.where);
-  if (runs !== "") parts.push({ text: clip(runs) });
-  if (working.has(entry.request_id)) return { parts: [...parts, { text: WORKING }], claims: [claimOf(entry)] };
+  const where = runsWhere(entry.where);
+  if (where !== "") parts.push({ text: clip(where) });
   const at = entry.activity === null || epochOf(entry.activity.at) === null ? "" : clock(entry.activity.at);
-  if (at !== "") parts.push({ text: `last active ${at}` });
-  return { parts, claims: [claimOf(entry)] };
+  if (at !== "") parts.push({ text: `last active ${at}`, idle_only: true });
+  return { parts, claims: [claimOf(entry)], runs: true };
 }
 
-/** The `Sessions` row: a line per running launch, newest first, those in `working` saying
- * so; past the contract's cap, the last line says how many more and claims their
- * sessions. */
-export function sessionsSection(entries: readonly RunningEntry[],
-                                working: ReadonlySet<string> = new Set()): Section | null {
+/** The `Sessions` row: a line per running launch, newest first; past the contract's cap,
+ * the last line says how many more and claims their sessions. */
+export function sessionsSection(entries: readonly RunningEntry[]): Section | null {
   if (!entries.length) return null;
-  const line = (entry: RunningEntry): Line => sessionLine(entry, working);
-  if (entries.length <= LINES_MAX) return { label: SESSIONS, lines: entries.map(line) };
+  if (entries.length <= LINES_MAX) return { label: SESSIONS, lines: entries.map(sessionLine) };
   const shown = entries.slice(0, LINES_MAX - 1);
   const rest = entries.slice(LINES_MAX - 1);
-  return { label: SESSIONS, lines: [...shown.map(line),
+  return { label: SESSIONS, lines: [...shown.map(sessionLine),
                                     { parts: [{ text: `${rest.length} more` }], claims: rest.map(claimOf) }] };
 }
 
@@ -338,7 +335,7 @@ export function agentsOf(entries: readonly RunningEntry[], project: Given): Reco
  * `open` the opened key: null when every route failed, or `/api/running` failed with no
  * project opened. Each given project with a launch running gets its `at` and its count,
  * and the opened one its `agents`, its `Launch` and `Sessions` rows and its `stays` line,
- * each from the routes that feed it. turns' sessions only mark a `Sessions` line working.
+ * each from the routes that feed it.
  */
 export function factsReport(reads: Reads, given: readonly Given[], open: string | null, when: When): Report | null {
   const running = reads.running;
@@ -369,8 +366,7 @@ export function factsReport(reads: Reads, given: readonly Given[], open: string 
     const sections: Section[] = [];
     const launch = launchSection(reads, opened.key, when);
     if (launch !== null) sections.push(launch);
-    const working = running === null || !reads.turns ? new Set<string>() : workingOf(running.sessions, reads.turns);
-    const sessions = sessionsSection(list, working);
+    const sessions = sessionsSection(list);
     if (sessions !== null) sections.push(sessions);
     if (sections.length) facts.sections = sections;
     const agents = agentsOf(list, opened);

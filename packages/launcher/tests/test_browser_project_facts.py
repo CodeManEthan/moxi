@@ -1,5 +1,5 @@
 """The launcher's `project-facts` on the Projects page, in a browser, through a real shell
-that starts the launcher's and projects' real page servers, on three installs:
+that starts the launcher's and projects' real page servers, on two installs:
 
 - **the full install**: core, ui, projects and the launcher. Placed alone, the component
   reports, for the projects it is given, each one's running launches and claims, and for
@@ -8,13 +8,7 @@ that starts the launcher's and projects' real page servers, on three installs:
   runs there, the opened project shows who runs where, its preset, its last launch and
   how it names sessions, Remove's step says the sessions keep running, a launch started
   or ended reaches the page on the launcher's `running` topic, and a route that fails
-  drops only what it feeds. Without turns it asks nothing of turns, and no running line
-  says `working`.
-- **the turns install**: the full install and turns. A running line whose session turns
-  says has a turn open says `working`; an idle one reads as it does without turns; and
-  when turns' list can't be read every line reads as it does without turns. turns' route
-  is answered in the browser and the shell's push stream is kept from bringing its real
-  topic, so each test sets the live state it needs.
+  drops only what it feeds.
 - **the small install**: core, ui and projects. The page places nothing of the launcher,
   draws no gap where its facts would be, and asks nothing of it.
 
@@ -34,7 +28,6 @@ from __future__ import annotations
 import json
 import re
 import sys
-import time
 import uuid
 from pathlib import Path
 from typing import Any, NamedTuple
@@ -186,16 +179,6 @@ def full_shell(ui_shells, tmp_path_factory):
 
 
 @pytest.fixture(scope="module")
-def turns_shell(ui_shells, tmp_path_factory):
-    """The full install with turns: the four projects, and nothing else seeded."""
-    if "turns" not in {found.name for found in modules.scan()}:
-        pytest.skip("moxi-turns is not installed")
-    shell = ui_shells(**install(tmp_path_factory.mktemp("turns-install"), "projects", "launcher", "turns"))
-    add_projects(shell)
-    return shell
-
-
-@pytest.fixture(scope="module")
 def small_shell(ui_shells, tmp_path_factory):
     """The small install: the four projects, and no launcher."""
     shell = ui_shells(**install(tmp_path_factory.mktemp("small-install"), "projects"))
@@ -339,7 +322,8 @@ def test_placed_alone_it_reports_what_runs_in_each_project_and_the_opened_ones_r
     launch = atlas["sections"][0]
     assert re.fullmatch(LAST, launch["lines"][0]["parts"][1]["text"]), launch
     launch["lines"][0]["parts"][1]["text"] = "<last>"
-    # Newest first: planner, then builder-1. Nothing has a latest message: no `at`.
+    # Newest first: planner, then builder-1, each saying it runs. Nothing has a latest
+    # message: no `at`, and no `last active` part.
     assert report == {"version": 1, "order": 10, "activity": "window", "projects": {
         "atlas-api": {
             "parts": running(busy["planner"], busy["builder-1"]),
@@ -347,8 +331,10 @@ def test_placed_alone_it_reports_what_runs_in_each_project_and_the_opened_ones_r
                 {"label": "Launch", "lines": [{"parts": [{"text": "no preset"}, {"text": "<last>"}]},
                                               {"parts": [{"text": EVERY}]}]},
                 {"label": "Sessions", "lines": [
-                    {"parts": [{"text": "planner"}, {"text": "headless"}], "claims": [busy["planner"]]},
-                    {"parts": [{"text": "builder-1"}, {"text": "slot 4"}], "claims": [busy["builder-1"]]}]}],
+                    {"parts": [{"text": "planner"}, {"text": "headless"}], "claims": [busy["planner"]],
+                     "runs": True},
+                    {"parts": [{"text": "builder-1"}, {"text": "slot 4"}], "claims": [busy["builder-1"]],
+                     "runs": True}]}],
             "agents": {"planner": {"runs": True, "state": "running now", "where": "headless"},
                        "builder-1": {"runs": True, "state": "running now", "where": "in slot 4"}},
             "stays": ["the 2 running now keep running"]},
@@ -477,137 +463,4 @@ def test_the_small_install_places_nothing_of_the_launcher_and_asks_it_nothing(
     # No row of the launcher's, and no gap where one would be.
     assert labels(item) == ["Folder", "Agents"]
     expect(lines(item, "Agents")).to_have_text(["builder-1 leads · planner and reviewer also work here"])
-    assert asked == []
-
-
-# --- turns' live state ---------------------------------------------------------------------
-
-#: Drops each event of turns' topic `sessions` from the shell's push stream, so the page
-#: knows only what the stubbed route answers.
-_DROP_TURNS = r"""(() => {
-  const fetched = window.fetch.bind(window);
-  window.fetch = async (input, init) => {
-    const answer = await fetched(input, init);
-    const url = typeof input === "string" ? input : input.url;
-    if (!url.includes("/m/ui/api/push") || answer.body === null) return answer;
-    const decoder = new TextDecoder();
-    const encoder = new TextEncoder();
-    let held = "";
-    const body = answer.body.pipeThrough(new TransformStream({
-      transform(chunk, out) {
-        held += decoder.decode(chunk, { stream: true });
-        const blocks = held.split("\n\n");
-        held = blocks.pop();
-        for (const block of blocks) {
-          if (!/^event: ?turns\.sessions\s*$/m.test(block)) out.enqueue(encoder.encode(`${block}\n\n`));
-        }
-      },
-    }));
-    return new Response(body, { status: answer.status, statusText: answer.statusText, headers: answer.headers });
-  };
-})()"""
-
-
-def live(session_id: str, *, turn_open: bool) -> dict:
-    """One session in turns' declared shape, on turn 9, its agent list whole."""
-    now = time.time()
-    return {
-        "key": f"claude-{session_id[:8]}", "harness": "claude", "pid": 4242, "session_id": session_id,
-        "cwd": "/work/atlas-api", "started": now - 3600, "capabilities": ["agents"], "endpoint_version": "1.0",
-        "mod_version": "1.0", "trouble": None,
-        "facts": {"session_id": session_id, "turn_number": 9, "turn_open": turn_open,
-                  "turn_started_at": now - 300 if turn_open else None, "agents": 0, "draft": False,
-                  "stale": False, "ready": None, "at": now},
-        "agents": {"entries": [], "complete": True}, "read_error": None, "ended_at": None,
-        "has_box": False, "unread_since": None,
-    }
-
-
-class TurnsStub:
-    """turns' `sessions` route, answered in the browser: `sessions` is what it lists, and
-    `status`, when set, the status it answers with instead. `reads` counts its reads."""
-
-    def __init__(self, page: Any, sessions: list[dict], *, status: int | None = None) -> None:
-        self.sessions = sessions
-        self.status = status
-        self.reads = 0
-        page.add_init_script(_DROP_TURNS)
-        page.route("**/m/turns/api/sessions", self._sessions)
-
-    def _sessions(self, route: Any) -> None:
-        self.reads += 1
-        if self.status is not None:
-            route.fulfill(status=self.status, content_type="text/plain", body="down")
-            return
-        body = {"now": time.time(), "listed": True, "detail": None, "home": "/home/you", "reach": None,
-                "sessions": self.sessions}
-        route.fulfill(status=200, content_type="application/json", body=json.dumps(body))
-
-
-def session_of(claim: str) -> str:
-    """The session id a `claude/<id>` claim names."""
-    return claim.split("/", 1)[1]
-
-
-@pytest.fixture
-def live_launches(turns_shell):
-    """In atlas-api, builder-1 in slot 4 then planner headless, running in the turns
-    install. Returns their claims by name."""
-    seeded = Launches(turns_shell)
-    try:
-        claims = {"builder-1": seeded.start("atlas-api", "builder-1", target="slot", slot="4"),
-                  "planner": seeded.start("atlas-api", "planner", target="headless")}
-        kit.published(turns_shell, "running", lambda data: data["count"] == 2)
-        yield claims
-    finally:
-        seeded.end()
-
-
-def test_a_working_session_says_working_and_an_idle_one_reads_as_without_turns(
-        turns_shell, live_launches, ui_contexts):
-    page = ui_contexts(turns_shell).pages[0]
-    stub = TurnsStub(page, [live(session_of(live_launches["planner"]), turn_open=True),
-                            live(session_of(live_launches["builder-1"]), turn_open=False)])
-    item = opened(page, "atlas-api")
-    expect_labels(page, item, ["Folder", "Agents", "Launch", "Sessions"])
-    expect(lines(item, "Sessions")).to_have_text(["planner · headless · working", "builder-1 · slot 4"])
-    # turns adds only the word: the count and who runs where are the launcher's as before.
-    expect(line_two(item)).to_have_text("2 running")
-    expect(lines(item, "Agents")).to_have_text(
-        ["builder-1 leads · running now in slot 4 · planner and reviewer also work here"])
-    assert stub.reads >= 1
-
-
-def test_a_session_turns_does_not_list_says_nothing_of_it(turns_shell, live_launches, ui_contexts):
-    page = ui_contexts(turns_shell).pages[0]
-    stub = TurnsStub(page, [live("0f0e0d0c-0b0a-4908-8706-050403020100", turn_open=True)])
-    item = opened(page, "atlas-api")
-    expect_labels(page, item, ["Folder", "Agents", "Launch", "Sessions"])
-    expect(lines(item, "Sessions")).to_have_text(["planner · headless", "builder-1 · slot 4"])
-    assert stub.reads >= 1
-
-
-def test_turns_read_failing_leaves_every_line_as_without_turns(turns_shell, live_launches, ui_contexts):
-    page = ui_contexts(turns_shell).pages[0]
-    stub = TurnsStub(page, [live(session_of(live_launches["planner"]), turn_open=True)], status=500)
-    item = opened(page, "atlas-api")
-    expect_labels(page, item, ["Folder", "Agents", "Launch", "Sessions"])
-    for _ in range(int(WAIT_S * 20)):
-        if stub.reads:
-            break
-        page.wait_for_timeout(50)
-    assert stub.reads >= 1
-    # No gap, no word, no line of trouble: the lines read as they do without turns.
-    expect(lines(item, "Sessions")).to_have_text(["planner · headless", "builder-1 · slot 4"])
-    expect(line_two(item)).to_have_text("2 running")
-
-
-def test_without_turns_it_asks_nothing_of_turns_and_no_line_says_working(full_shell, busy, ui_contexts):
-    page = ui_contexts(full_shell).pages[0]
-    asked: list[str] = []
-    page.on("request", lambda request: asked.append(request.url) if "/m/turns/" in request.url else None)
-    item = opened(page, "atlas-api")
-    expect_labels(page, item, ["Folder", "Agents", "Launch", "Sessions"])
-    expect(lines(item, "Sessions")).to_have_text(["planner · headless", "builder-1 · slot 4"])
-    page.wait_for_timeout(1000)
     assert asked == []

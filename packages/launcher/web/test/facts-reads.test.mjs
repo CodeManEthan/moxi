@@ -26,7 +26,7 @@ const ANSWERS = {
  * while the path is held; it records every read, subscription and timer. */
 function fakeShell(answers = {}) {
   const shell = {
-    asked: [], topics: [], timers: [], held: new Map(), answers: { ...ANSWERS, ...answers }, page: null,
+    asked: [], topics: [], timers: [], held: new Map(), answers: { ...ANSWERS, ...answers },
     read(path) {
       shell.asked.push(path);
       if (shell.held.has(path)) return new Promise((done) => shell.held.get(path).push(done));
@@ -50,47 +50,8 @@ function fakeShell(answers = {}) {
       for (const done of shell.held.get(path) ?? []) done({ status: 200, data });
       shell.held.delete(path);
     },
-    turns() {
-      return shell.page;
-    },
   };
   return shell;
-}
-
-/** turns' session list with one session per `[session id, turn open]`. */
-const liveOf = (...pairs) => ({ listed: true, detail: null, home: "/home/you", reach: null, sessions: pairs.map(
-  ([sid, open]) => ({ key: `claude-${sid}`, harness: "claude", session_id: sid,
-                      facts: { session_id: sid, turn_number: 1, turn_open: open, agents: 0 } })) });
-
-/** turns' page: `answer` is what `api/sessions` answers (a status, or a value), or held
- * while `held` is set; it records every read and subscription. */
-function fakeTurns(answer = liveOf(["r1-sid", true])) {
-  const page = {
-    asked: [], topics: [], answer, held: null,
-    read(path) {
-      page.asked.push(path);
-      if (page.held !== null) return new Promise((done) => page.held.push(done));
-      return Promise.resolve(typeof page.answer === "number" ? { status: page.answer, data: null }
-                                                             : { status: 200, data: page.answer });
-    },
-    subscribe(topic, fn) {
-      const sub = { topic, fn, live: true };
-      page.topics.push(sub);
-      return () => { sub.live = false; };
-    },
-  };
-  return page;
-}
-
-/** Started as `started` is, with turns' page given. */
-function startedWithTurns(page = fakeTurns(), open = "proj") {
-  const shell = fakeShell();
-  shell.page = page;
-  let changes = 0;
-  const reads = new FactsReads(shell, () => { changes += 1; });
-  reads.setOpen(open);
-  reads.start();
-  return { shell, page, reads, changes: () => changes };
 }
 
 const settle = () => new Promise((done) => setTimeout(done, 0));
@@ -249,120 +210,4 @@ test("`read` stays false until a read has finished", async () => {
   shell.release("api/catalog", ANSWERS["api/catalog"]);
   await settle();
   assert.equal(reads.read, true);
-});
-
-// -- turns' list ---------------------------------------------------------------------------------
-
-const workingIds = (live) => live.sessions.filter((one) => one.turn_open).map((one) => one.session_id);
-
-test("without turns' page it reads nothing of turns, and says nothing of it", async () => {
-  const { shell, reads } = started();
-  await settle();
-  assert.ok(shell.asked.every((path) => !path.includes("sessions")));
-  assert.equal(reads.reads().turns, null);
-});
-
-test("with turns' page it reads turns' `api/sessions` and follows turns' topic `sessions`, beside its own", async () => {
-  const { shell, page, reads } = startedWithTurns();
-  await settle();
-  assert.deepEqual(page.asked, ["api/sessions"]);
-  assert.deepEqual(page.topics.map((sub) => sub.topic), ["sessions"]);
-  assert.deepEqual(shell.topics.map((sub) => sub.topic), [RUNNING_TOPIC]);
-  assert.ok(shell.asked.every((path) => path !== "api/sessions"));
-  assert.deepEqual(workingIds(reads.reads().turns), ["r1-sid"]);
-  assert.notEqual(reads.reads().running, null);
-});
-
-test("turns' topic replaces the list without a read; each 30 s tick reads it again", async () => {
-  const { page, reads, shell, changes } = startedWithTurns();
-  await settle();
-  const before = changes();
-  page.asked.length = 0;
-  page.topics[0].fn(liveOf(["r1-sid", false], ["r2-sid", true]));
-  assert.deepEqual(workingIds(reads.reads().turns), ["r2-sid"]);
-  assert.equal(changes(), before + 1);
-  assert.deepEqual(page.asked, []);
-  shell.timers[0].fn();
-  await settle();
-  assert.deepEqual(page.asked, ["api/sessions"]);
-  assert.deepEqual(workingIds(reads.reads().turns), ["r1-sid"]);
-});
-
-test("turns' read failing drops turns' list and only it; the next good read puts it back", async () => {
-  const { page, reads, shell } = startedWithTurns(fakeTurns(500));
-  await settle();
-  let got = reads.reads();
-  assert.equal(got.turns, null);
-  assert.ok(got.running !== null && got.presets !== null && got.catalog !== null && got.last !== null
-            && got.name !== null);
-  page.answer = liveOf(["r1-sid", true]);
-  shell.timers[0].fn();
-  await settle();
-  assert.deepEqual(workingIds(reads.reads().turns), ["r1-sid"]);
-  for (const bad of [404, 0, { nonsense: true }]) {
-    page.answer = bad;
-    shell.timers[0].fn();
-    await settle();
-    got = reads.reads();
-    assert.equal(got.turns, null, JSON.stringify(bad));
-    assert.notEqual(got.running, null);
-  }
-});
-
-test("turns gone at a read: its topic stops and its list is forgotten; back at a later read, it is read again", async () => {
-  const page = fakeTurns();
-  const { shell, reads, changes } = startedWithTurns(page);
-  await settle();
-  shell.page = null;
-  const before = changes();
-  shell.timers[0].fn();
-  await settle();
-  assert.equal(reads.reads().turns, null);
-  assert.deepEqual(page.topics.map((sub) => sub.live), [false]);
-  assert.ok(changes() > before);
-  page.asked.length = 0;
-  shell.page = page;
-  shell.timers[0].fn();
-  await settle();
-  assert.deepEqual(page.asked, ["api/sessions"]);
-  assert.deepEqual(page.topics.map((sub) => sub.live), [false, true]);
-  assert.deepEqual(workingIds(reads.reads().turns), ["r1-sid"]);
-});
-
-test("paused, it stops turns' topic and keeps the list; started again it reads and follows turns once more", async () => {
-  const { page, reads } = startedWithTurns();
-  await settle();
-  reads.pause();
-  assert.deepEqual(page.topics.map((sub) => sub.live), [false]);
-  assert.notEqual(reads.reads().turns, null);
-  page.asked.length = 0;
-  reads.start();
-  await settle();
-  assert.deepEqual(page.asked, ["api/sessions"]);
-  assert.deepEqual(page.topics.map((sub) => sub.live), [false, true]);
-});
-
-test("closed, a late answer from turns changes nothing", async () => {
-  const page = fakeTurns();
-  page.held = [];
-  const { reads, changes } = startedWithTurns(page);
-  await settle();
-  reads.close();
-  const before = changes();
-  for (const done of page.held) done({ status: 200, data: liveOf(["r1-sid", true]) });
-  await settle();
-  assert.equal(changes(), before);
-  assert.equal(reads.reads().turns, null);
-  assert.deepEqual(page.topics.map((sub) => sub.live), [false]);
-});
-
-test("turns' list alone is no first read: `read` waits for one of the launcher's own", async () => {
-  const shell = fakeShell();
-  for (const path of ["api/running", "api/presets", "api/catalog"]) shell.hold(path);
-  shell.page = fakeTurns();
-  const reads = new FactsReads(shell, () => {});
-  reads.start();
-  await settle();
-  assert.notEqual(reads.reads().turns, null);
-  assert.equal(reads.read, false);
 });

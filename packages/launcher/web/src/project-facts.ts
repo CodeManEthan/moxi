@@ -4,13 +4,11 @@
 // and the one in `open`.
 //
 // Its reads are `FactsReads`': they run while it is connected and the document shows,
-// pause while the document is hidden, and read once when it shows again. Of another
-// module's it reads only turns' list of sessions, and only with turns installed and at the
-// desk (turns' routes are not the gateway's), to say which running launches are working.
-// It reports only when what it would say changed, and always once after its first read
-// since it was connected.
+// pause while the document is hidden, and read once when it shows again. It reads nothing
+// of another module's. It reports only when what it would say changed, and always once
+// after its first read since it was connected.
 
-import { api, gateway, installed, subscribe } from "/m/ui/client.js";
+import { api, subscribe } from "/m/ui/client.js";
 
 import { FACTS_EVENT, factsReport, parseGiven } from "./facts-model.ts";
 import { FactsReads } from "./facts-reads.ts";
@@ -47,8 +45,6 @@ export class LauncherProjectFacts extends HTMLElement {
         const timer = setInterval(fn, ms);
         return () => clearInterval(timer);
       },
-      turns: () => (installed("turns") && !gateway()
-        ? { read: (path) => api("turns", path), subscribe: (topic, fn) => subscribe("turns", topic, fn) } : null),
     }, () => this.#report());
     this.#reads.setOpen(this.getAttribute("open"));
     document.addEventListener("visibilitychange", this.#shown);

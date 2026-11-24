@@ -10,7 +10,6 @@ import { parseLast } from "../src/fill-model.ts";
 import { parseName } from "../src/name-model.ts";
 import { parseCatalog, parsePresets } from "../src/panel.ts";
 import { parseRunning } from "../src/running-model.ts";
-import { parseLive, WORKING } from "../src/working-model.ts";
 
 const pad = (n) => String(n).padStart(2, "0");
 /** The tests' clocks: the hour and the day in this zone, written the same in every locale. */
@@ -76,12 +75,8 @@ const reads = (over = {}) => ({
     entry("r3", "atlas-api", { activity: { at: local(19, 9), by: "you", text: null } }),
     entry("r4", null),
   ]),
-  presets: presets([KESTREL]), catalog: CATALOG, last: last(local(18, 45)), name: OWN, turns: null, ...over,
+  presets: presets([KESTREL]), catalog: CATALOG, last: last(local(18, 45)), name: OWN, ...over,
 });
-/** turns' list with one session per `[session id, turn open]`. */
-const turns = (...pairs) => parseLive({ listed: true, detail: null, home: "/home/you", reach: null, sessions: pairs.map(
-  ([sid, open]) => ({ key: `claude-${sid}`, harness: "claude", session_id: sid,
-                      facts: open === null ? null : { session_id: sid, turn_number: 2, turn_open: open, agents: 0 } })) });
 const report = (over = {}, open = "kestrel-web") => factsReport(reads(over), GIVEN, open, WHEN);
 const kestrel = (over = {}, open = "kestrel-web") => report(over, open).projects["kestrel-web"];
 const texts = (line) => line.parts.map((part) => part.text);
@@ -253,36 +248,6 @@ test("the Sessions row: a line per running launch, newest first, each claiming i
   assert.equal(rows.link, undefined);
 });
 
-test("a running line whose session turns says is working says `working` where it would say when it was last active", () => {
-  const rows = section(kestrel({ turns: turns(["r1-sid", true], ["r2-sid", true]) }), "Sessions");
-  assert.deepEqual(rows.lines.map(texts), [["r1-name", "slot 4", WORKING], ["r2-name", "headless", "working"]]);
-  assert.deepEqual(rows.lines.map((line) => line.claims), [["claude/r1-sid"], ["claude/r2-sid"]]);
-});
-
-test("an idle session, one turns hasn't read yet, and one turns doesn't list read as they do without turns", () => {
-  const without = section(kestrel(), "Sessions");
-  for (const live of [turns(["r1-sid", false], ["r2-sid", false]), turns(["r1-sid", null]), turns(["other", true])]) {
-    assert.deepEqual(section(kestrel({ turns: live }), "Sessions"), without);
-  }
-});
-
-test("a working session is only its Sessions line: the count, claims, agents, stays and `at` don't change", () => {
-  const live = turns(["r1-sid", true], ["r2-sid", false], ["r3-sid", true]);
-  const found = factsReport(reads({ turns: live }), GIVEN, "kestrel-web", WHEN);
-  const without = factsReport(reads(), GIVEN, "kestrel-web", WHEN);
-  const strip = (facts) => ({ ...facts, sections: facts.sections.filter((row) => row.label !== "Sessions") });
-  assert.deepEqual(strip(found.projects["kestrel-web"]), strip(without.projects["kestrel-web"]));
-  assert.deepEqual(found.projects["atlas-api"], without.projects["atlas-api"]);
-  assert.deepEqual(texts(section(found.projects["kestrel-web"], "Sessions").lines[1]), ["r2-name", "headless"]);
-});
-
-test("a session id two running launches share is working on neither line", () => {
-  const twin = (request) => entry(request, "kestrel-web", { session_id: "twin" });
-  const found = factsReport(reads({ running: running([twin("r1"), twin("r2")]), turns: turns(["twin", true]) }),
-                            GIVEN, "kestrel-web", WHEN).projects["kestrel-web"];
-  assert.ok(section(found, "Sessions").lines.every((line) => !texts(line).includes(WORKING)));
-});
-
 test("past six running launches the last line says how many more and claims them", () => {
   const list = Array.from({ length: 9 }, (_, n) => parseRunning({ state: "up", detail: null, count: 1,
                                                                     sessions: [entry(`s${n}`, "x")] }).sessions[0]);
@@ -291,6 +256,21 @@ test("past six running launches the last line says how many more and claims them
   assert.deepEqual(texts(rows.lines[5]), ["4 more"]);
   assert.deepEqual(rows.lines[5].claims, ["claude/s5-sid", "claude/s6-sid", "claude/s7-sid", "claude/s8-sid"]);
   assert.equal(sessionsSection([]), null);
+});
+
+test("a running line says it runs, and its last-active part holds only while idle; the more line says neither", () => {
+  const rows = section(kestrel(), "Sessions");
+  assert.deepEqual(rows.lines.map((line) => line.runs), [true, true]);
+  assert.deepEqual(rows.lines[0].parts.map((part) => part.idle_only), [undefined, undefined, true]);
+  assert.deepEqual(rows.lines[1].parts.map((part) => part.idle_only), [undefined, undefined]);
+  const list = Array.from({ length: 9 }, (_, n) => parseRunning({ state: "up", detail: null, count: 1,
+                                                                    sessions: [entry(`s${n}`, "x")] }).sessions[0]);
+  const more = sessionsSection(list).lines[5];
+  assert.equal(more.runs, undefined);
+  assert.deepEqual(more.parts.map((part) => part.idle_only), [undefined]);
+  const bare = sessionLine(entry("a", "x", { activity: null }));
+  assert.equal(bare.runs, true);
+  assert.ok(bare.parts.every((part) => part.idle_only === undefined));
 });
 
 test("agents: a running launch under the lead's or an associated name runs now, where it runs; none else", () => {
@@ -340,20 +320,6 @@ test("`/api/running` failing drops `at`, the count, agents, the Sessions lines, 
   assert.deepEqual(Object.keys(facts), ["sections"]);
   assert.deepEqual(facts.sections.map((row) => row.label), ["Launch"]);
   assert.equal(section(facts, "Launch").lines.length, 2);
-});
-
-test("turns' read failing, or turns not read, drops `working` and only it", () => {
-  const working = kestrel({ turns: turns(["r1-sid", true]) });
-  assert.deepEqual(texts(section(working, "Sessions").lines[0]), ["r1-name", "slot 4", "working"]);
-  assert.deepEqual(kestrel({ turns: null }), kestrel());
-  assert.deepEqual(texts(section(kestrel({ turns: null }), "Sessions").lines[0]),
-                   ["r1-name", "slot 4", `last active ${hhmm(local(18, 52))}`]);
-});
-
-test("turns' sessions alone, with `/api/running` failing, say nothing", () => {
-  assert.deepEqual(report({ running: null, turns: turns(["r1-sid", true]) }), report({ running: null }));
-  assert.equal(report({ running: null, presets: null, catalog: null, last: null, name: null,
-                        turns: turns(["r1-sid", true]) }), null);
 });
 
 test("`/api/running` failing with nothing opened reports null", () => {
