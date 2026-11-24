@@ -110,6 +110,7 @@ def test_an_unwritable_stdout_exits_zero():
     assert err == "0"
 
 
+@pytest.mark.skipif(sys.platform == "win32", reason="Windows: no SIGALRM, so the hook kit arms no wall there")
 def test_the_deadline_bounds_the_whole_process():
     """Law 5 as a process: a body past the bound writes nothing, reports once with
     `where="deadline"`, and the hook still exits 0."""

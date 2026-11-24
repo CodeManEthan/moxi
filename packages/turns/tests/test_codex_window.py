@@ -1,6 +1,9 @@
 """The stable command and terminal pieces of the Codex window."""
 
+import sys
 import threading
+
+import pytest
 
 from moxi_turns.codex_window import RESTORE_SCREEN, WindowSession, window_argv
 
@@ -36,6 +39,9 @@ def test_ready_wait_prints_once_and_gives_up_with_current_reason():
     assert host.failed == "resume settings differ"
 
 
+@pytest.mark.skipif(sys.platform == "win32",
+                    reason="Windows: the Codex window runs on a terminal (termios), which "
+                           "Windows lacks, and turns' Codex host doesn't run there")
 def test_exited_window_checks_generation_before_calling_it_operator_close():
     class Generation:
         ready = threading.Event()

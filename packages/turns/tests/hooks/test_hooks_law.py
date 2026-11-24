@@ -266,6 +266,7 @@ def test_l4_an_unknown_attribute_is_still_an_attribute_error():
 
 # --- Law 5 — A hard per-hook time bound ---------------------------------------------
 
+@pytest.mark.skipif(sys.platform == "win32", reason="Windows: no SIGALRM, so the hook kit arms no wall there")
 def test_l5_a_body_past_the_bound_returns_default_emits_nothing_and_reports_once():
     """Gauge: a body that sleeps past the bound returns `default`, emits nothing, and
     reports once."""

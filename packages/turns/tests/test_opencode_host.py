@@ -7,6 +7,7 @@ import itertools
 import json
 import os
 import stat
+import sys
 import time
 
 import pytest
@@ -155,7 +156,8 @@ def test_options_are_laid_unread_with_turns_instructions_at_every_server_start(h
     path = h.instructions_path
     assert path.parent == h.endpoint.dir
     assert path.read_text() == "Layer one text."
-    assert stat.S_IMODE(path.stat().st_mode) == 0o600
+    if sys.platform != "win32":                  # mode bits mean nothing on Windows
+        assert stat.S_IMODE(path.stat().st_mode) == 0o600
     assert world.configs == [{**options, "instructions": [str(path)]}]
     world.servers[-1].kill()
     assert until(lambda: len(world.configs) == 2 and h._ready)

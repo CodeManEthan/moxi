@@ -9,6 +9,7 @@ from __future__ import annotations
 import json
 import os
 import shutil
+import sys
 from pathlib import Path
 
 import pytest
@@ -32,6 +33,14 @@ def _log(state: Path) -> list[str]:
     except OSError:
         return []
 
+
+#: The mark of a reach that asks `claude`: it runs the plugin list only where it can kill
+#: the command's whole process group at the bound, so on Windows the reach reads None.
+ASKS_CLAUDE = pytest.mark.skipif(
+    sys.platform == "win32",
+    reason="Windows: no POSIX process groups (os.killpg), so the reach never runs claude "
+           "there and reads None, which test_the_reach_is_none_without_posix_process_groups "
+           "covers")
 
 @pytest.fixture
 def placed(turns_env, claude_root):
@@ -592,6 +601,7 @@ def _name_in_endpoint_file(placed: Path, command: str) -> None:
     (placed / "moxi-turns" / "endpoint.json").write_text(json.dumps({"command": command}))
 
 
+@ASKS_CLAUDE
 def test_the_reach_is_start_with_the_runner_and_a_current_endpoint_json(placed, fake_claude):
     _runner_listed(fake_claude, enabled=True)
     claude_setup.write_endpoint_file()
@@ -602,6 +612,7 @@ def test_the_reach_is_start_with_the_runner_and_a_current_endpoint_json(placed, 
     assert claude_setup.reach() == "start"
 
 
+@ASKS_CLAUDE
 def test_the_reach_is_setup_when_the_install_would_fix_it(placed, fake_claude):
     claude_setup.write_endpoint_file()
     _runner_listed(fake_claude, scope="project")
@@ -639,6 +650,7 @@ exit 0
 """
 
 
+@ASKS_CLAUDE
 def test_the_reach_is_none_past_its_bound_and_kills_a_child_holding_the_pipes(
         placed, fake_claude):
     import time
@@ -688,7 +700,7 @@ def test_the_reach_is_none_when_endpoint_json_names_another_executable(placed, f
 def test_the_reach_is_none_without_posix_process_groups(placed, fake_claude, monkeypatch):
     _runner_listed(fake_claude)
     claude_setup.write_endpoint_file()
-    monkeypatch.delattr(os, "killpg")
+    monkeypatch.delattr(os, "killpg", raising=False)            # none on Windows
     assert claude_setup.reach() is None
     assert "plugin list --json" not in _log(fake_claude)
 
@@ -702,6 +714,7 @@ def _tree(*roots: Path) -> dict:
     return out
 
 
+@ASKS_CLAUDE
 def test_the_reach_writes_nothing(turns_env, placed, fake_claude, claude_root):
     from moxi.paths import Layout
 
