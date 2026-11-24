@@ -206,6 +206,9 @@ def _read(path: Path) -> tuple[bytes, bool]:
         if (stat.S_ISLNK(seen.st_mode)
                 or getattr(seen, "st_file_attributes", 0) & stat.FILE_ATTRIBUTE_REPARSE_POINT):
             raise OSError(errno.ELOOP, "a symbolic link", str(path))
+        if not stat.S_ISREG(seen.st_mode):
+            raise NotACard("it is not a regular file, and comms reads only regular "
+                           "files here")
     fd = os.open(path, os.O_RDONLY | _NOFOLLOW | _NONBLOCK | getattr(os, "O_BINARY", 0))
     try:
         held = os.fstat(fd)

@@ -13,6 +13,7 @@ native-session display claim and its one-way rule; and the import fence that mak
 import ast
 import io
 import re
+import sys
 from pathlib import Path
 
 import pytest
@@ -277,6 +278,7 @@ def test_a_card_that_cannot_be_decoded_exits_five():
 
 # ------------------------------------------------------------------- hostile files
 
+@pytest.mark.skipif(sys.platform == "win32", reason="Windows has no FIFOs")
 def test_a_fifo_at_a_card_path_answers_instead_of_hanging():
     """The byte cap bounds what a card can cost in context and memory; nothing
     bounded what it could cost in TIME. A FIFO blocked `open()` forever, wedging every
