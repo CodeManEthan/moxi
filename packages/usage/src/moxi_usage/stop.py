@@ -21,7 +21,10 @@ in memory. With no latch it allows. Latched, it allows only:
   directory, `Write`, `Edit` and bounded `Read` of `.md` files under the folder, and the
   commands `COMMANDS`, where `<handoff>` is a path under the folder by the hand-off rule;
 * comms' MCP tools (server `comms`), and `moxi comms <verb> ...` on the shell for the
-  message verbs `COMMS_VERBS`, written bare and passing the allowlist's lexer.
+  message verbs `COMMS_VERBS`, written bare and passing the allowlist's lexer;
+* the tools `WRAP_UP_TOOLS`: `Skill`, so a handoff skill can be loaded, and `ToolSearch`,
+  so comms' MCP tools can be loaded where Claude Code holds them back. Neither acts on its
+  own: a tool `ToolSearch` loads is judged by this guard when it is called.
 
 Everything else is refused with `stop.deny_text`, its `{mark}` and `{folder}` filled in,
 and the allowlist's reason in brackets. A subagent's calls are not the guard's: the stop
@@ -51,6 +54,9 @@ STATE_DIR = "stop"
 SCHEMA = 1
 #: The prefix of comms' MCP tools in a Claude session (`mcp__<server>__<tool>`).
 COMMS_TOOL_PREFIX = "mcp__comms__"
+#: The tools a stopped session may call whatever their input: they load a skill or a
+#: tool's schema and act on nothing themselves.
+WRAP_UP_TOOLS = ("Skill", "ToolSearch")
 #: The comms verbs a stopped session may run on the shell: its message verbs.
 COMMS_VERBS = ("send", "reply", "agents", "whoami", "history", "remove")
 #: The commands a stopped session may run, as the allowlist's word lists.
@@ -270,7 +276,8 @@ def decide(call, *, env=None) -> str | None:
     if latched(harness, session_id, env) is None:
         return None
     tool = getattr(call, "tool", None)
-    if isinstance(tool, str) and tool.startswith(COMMS_TOOL_PREFIX):
+    if isinstance(tool, str) and (tool.startswith(COMMS_TOOL_PREFIX)
+                                  or tool in WRAP_UP_TOOLS):
         return None
     from collections.abc import Mapping
 
@@ -327,6 +334,6 @@ def _warn(kind: str, message: str, *, exc_info: bool = False) -> None:
 
 
 __all__ = ["GUARD_ID", "NAME", "DENY_TEXT_KEY", "STATE_DIR", "SCHEMA", "COMMS_TOOL_PREFIX",
-           "COMMS_VERBS", "COMMANDS", "NO_HANDOFF_DIR", "state_dir", "latch_file", "read_latch",
+           "WRAP_UP_TOOLS", "COMMS_VERBS", "COMMANDS", "NO_HANDOFF_DIR", "state_dir", "latch_file", "read_latch",
            "latched", "latch", "sweep", "reset", "deny_text", "stop_text", "fill", "on_for",
            "judge", "decide", "comms_verb"]

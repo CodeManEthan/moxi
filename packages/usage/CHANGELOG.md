@@ -10,8 +10,9 @@
   `marks.max_age_days`. A new guard, `usage.stop`, runs on Claude in a session whose
   launch stamped a stop mark, and once latched refuses every main-loop tool call but
   wrap-up (git's wrap-up forms, `.md` notes in the handoff folder, `moxi repo rules`,
-  comms, `moxi launcher handoff dir` and `moxi launcher relaunch --self --handoff FILE`)
-  with `stop.deny_text`, a new setting.
+  comms, `moxi launcher handoff dir`, `moxi launcher relaunch --self --handoff FILE`,
+  and Claude's `Skill` and `ToolSearch`, whose loaded tools are judged when called) with
+  `stop.deny_text`, a new setting.
 - A mark may be a multiple `<k>x`, k a decimal of at most two places and at least 1:
   `threshold` works it out on the same equation as `1x`, `1.5x` and `2x`, and
   `cost_multiple` reads its k. Interface 3 is interface 2 plus these and the stop's two

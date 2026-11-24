@@ -123,6 +123,9 @@ def test_with_no_latch_every_call_runs(where, tool, tool_input):
     ("Bash", {"command": "moxi comms whoami"}),
     ("mcp__comms__send", {"to": "fleet-lead", "text": "done"}),
     ("mcp__comms__history", {}),
+    ("Skill", {"skill": "handoff"}),
+    ("ToolSearch", {"query": "select:mcp__comms__send", "max_results": 1}),
+    ("ToolSearch", {"query": "notebook jupyter", "max_results": 5}),
 ])
 def test_latched_only_wrap_up_runs(where, tool, tool_input):
     latch()
@@ -134,7 +137,6 @@ def test_latched_only_wrap_up_runs(where, tool, tool_input):
 @pytest.mark.parametrize("tool,tool_input,why", [
     ("Grep", {"pattern": "x"}, "Grep is not a wrap-up operation"),
     ("Agent", {"prompt": "go on"}, "Agent is not a wrap-up operation"),
-    ("Skill", {"skill": "x"}, "Skill is not a wrap-up operation"),
     ("Bash", {"command": "pytest -q"}, "pytest is not a wrap-up command"),
     ("Bash", {"command": "git push"}, "git push is not a wrap-up git form"),
     ("Write", {"file_path": "{work}/a.md", "content": "x"},
@@ -164,6 +166,16 @@ def test_latched_everything_else_is_refused_with_the_stop_text(where, tool, tool
                       f"--handoff FILE. ({why})")
     denied = stop.judge(call(where, tool, filled, turns_call=True))
     assert isinstance(denied, turns.Deny) and denied.reason == reason
+
+
+def test_a_tool_toolsearch_loads_is_still_judged_when_called(where):
+    latch()
+    assert stop.decide(call(where, "ToolSearch", {"query": "select:NotebookEdit,WebFetch",
+                                                  "max_results": 2})) is None
+    for tool in ("NotebookEdit", "WebFetch"):
+        reason = stop.decide(call(where, tool, {}))
+        assert reason.endswith(f"({tool} is not a wrap-up operation)")
+        assert isinstance(stop.judge(call(where, tool, {}, turns_call=True)), turns.Deny)
 
 
 def test_a_subagents_calls_are_not_the_stops(where):
