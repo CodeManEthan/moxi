@@ -60,13 +60,18 @@ def standing_row(conn, name: str, scope: str):
 
 def retired(conn, name: str, scope: str) -> bool:
     """Is (name, scope) retired: an `identities` row at exactly (name, scope) whose status is
-    `retired`? A retired identity is one comms no longer binds, routes to or queues for;
-    its binding history rows, its messages in the record, its cursor and its card stay. Read
-    per call, like every directory fact the daemon uses."""
-    return conn.execute(
+    `retired`, or a row the archive's identities file retired (`archive.retired`)? A retired
+    identity is one comms no longer binds, routes to or queues for; its binding history
+    rows, its messages in the record, its cursor and its card stay. comms.db is read per
+    call, like every directory fact the daemon uses."""
+    if conn.execute(
         "SELECT 1 FROM identities WHERE name = ? AND scope = ? AND status = 'retired'",
         (name, scope),
-    ).fetchone() is not None
+    ).fetchone() is not None:
+        return True
+    from . import archive
+
+    return archive.retired(name, scope)
 
 
 #: The refusals for a retired identity, word for word: the register's, and resolution's
@@ -82,6 +87,35 @@ RETIRED_SEND = ("{q} is retired: comms keeps a project suffix only to tell apart
 
 def standing_rows(conn):
     return conn.execute("SELECT * FROM identities WHERE status = 'active'").fetchall()
+
+
+def provisioned(names, *, path: str | Path | None = None, env=None) -> set | None:
+    """Which of the qualified `names` hold an active standing row now, read-only; an
+    empty set when there is no store yet, None when it can't be read."""
+    from .scoping import GLOBAL, split_tag
+    from .store import path as store_path
+
+    names = list(names or ())
+    if not names:
+        return set()
+    target = Path(path) if path is not None else store_path(env)
+    if not target.exists():
+        return set()
+    try:
+        conn = connect(target, read_only=True, env=env)
+    except Exception:  # noqa: BLE001 - any store that can't be opened reads as unknown
+        return None
+    try:
+        held = set()
+        for name in names:
+            bare, scope = split_tag(name)
+            if standing_row(conn, bare, scope or GLOBAL) is not None:
+                held.add(name)
+        return held
+    except sqlite3.Error:
+        return None
+    finally:
+        conn.close()
 
 
 def operator(conn, user_id: str):

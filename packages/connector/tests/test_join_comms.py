@@ -42,6 +42,7 @@ from moxi_connector.app import Front, Host, build_app
 from moxi_connector.calllog import MemoryLog
 from moxi_connector.codes import mint_method
 from moxi_connector.oauth import OAuth
+from moxi_dev.testing import PROC_WAIT_S
 
 COMMS_TESTS = Path(__file__).resolve().parents[2] / "comms" / "tests"
 
@@ -61,10 +62,11 @@ def _comms_rig():
 
 
 RIG = _comms_rig()
-# comms' fixtures, for this module: its roots under tmp, its reserve step scoped, its
-# socket unit read as unknown, every thread a test starts ended at its teardown, the rig.
-env, installs, unit_read, threads_end, rig = (RIG.env, RIG.installs, RIG.unit_read,
-                                              RIG.threads_end, RIG.rig)
+# comms' fixtures, for this module: the test's profile directory and its roots there, its
+# reserve step scoped, its socket unit read as unknown, every thread a test starts ended at
+# its teardown, the rig.
+profile, env, installs, unit_read, threads_end, rig = (
+    RIG.profile, RIG.env, RIG.installs, RIG.unit_read, RIG.threads_end, RIG.rig)
 
 
 @pytest.fixture
@@ -94,7 +96,9 @@ def kinds(rows, kind):
 @pytest.fixture
 def registry(rig):
     """The providers this environment installs, loaded from `moxi.connector.providers` and
-    started on the test's roots, comms' among them; stopped at the end."""
+    started on the test's roots, comms' among them; stopped at the end. The read tools'
+    providers load beside comms in the workspace, so a check of the tools served reads
+    comms' own."""
     from moxi_connector.providers import Registry
 
     found = Registry.from_group()
@@ -226,7 +230,8 @@ def test_the_registry_loads_comms_with_its_gate_from_the_entry_point(registry):
     assert gates["comms"] is entry.provider.gate
     gate = comms("connector.gate")
     assert (gates["comms"].peer, gates["comms"].shell) == (gate.peer, gate.shell)
-    assert list(registry.tools()) == NAMES
+    assert [name for name, (module, _) in registry.tools().items()
+            if module == "comms"] == NAMES
 
 
 @pytest.mark.parametrize("where", ["inside", "unplaced"])
@@ -360,7 +365,8 @@ def test_the_full_sign_in_then_comms_tools_reach_the_daemon(running, walk, regis
         assert "tools" in mcp_over(d.port, access, initialize())["capabilities"]
 
         # tools/list: comms' four tools, each with its title and truthful annotations.
-        listed = mcp_over(d.port, access, rpc("tools/list", rid=2))["tools"]
+        listed = [t for t in mcp_over(d.port, access, rpc("tools/list", rid=2))["tools"]
+                  if t["name"] in NAMES]
         assert [t["name"] for t in listed] == NAMES
         hints = {t["name"]: t["annotations"] for t in listed}
         assert {n: h["readOnlyHint"] for n, h in hints.items()} == {
@@ -417,7 +423,7 @@ def test_a_failed_write_leaves_comms_messages_unread(door, registry, rig):
         await request(d.front, "POST", "/mcp", call("check_messages"), headers=access,
                       send_fails=True)
         assert unread(rig) == set(ids)
-        deadline = time.monotonic() + 5
+        deadline = time.monotonic() + PROC_WAIT_S
         while pending() != ids:
             assert time.monotonic() < deadline, pending()
             await asyncio.sleep(0.01)
@@ -458,7 +464,7 @@ def test_a_caller_that_hangs_up_mid_wait_frees_the_slot_and_the_late_reply_stays
                                                "wait_s": 60}, rid=8),
                 token=access, until=lambda: tools.waiting == 1 and sent_by_me(rig))
         cut = time.monotonic()
-        wait_for(lambda: tools.waiting == 0, within=10)
+        wait_for(lambda: tools.waiting == 0, within=PROC_WAIT_S)
         assert time.monotonic() - cut < 5               # well before the 60 s asked
         wait_for(lambda: tool_rows(d, "send_and_wait"))
         mid = sent_by_me(rig)
@@ -560,7 +566,7 @@ def test_an_error_answer_after_comms_opened_the_digest_leaves_its_messages_unrea
             result["content"][0]["text"]
         monkeypatch.setattr(link, "read", real)
         assert unread(rig) == set(ids)
-        deadline = time.monotonic() + 5
+        deadline = time.monotonic() + PROC_WAIT_S
         while pending() != ids:
             assert time.monotonic() < deadline, pending()
             await asyncio.sleep(0.01)
@@ -613,7 +619,8 @@ def test_the_doctor_names_comms_provider_its_gate_and_its_identity(
     bound(registry)
     with running:
         rows = {r.name: r for r in doctor.rows()}
-    assert (rows["providers"].state, rows["providers"].detail) == ("ok", "comms, 4 tools")
+    assert rows["providers"].state == "ok"
+    assert "comms, 4 tools" in rows["providers"].detail.split("; ")
     assert (rows["mint gate"].state, rows["mint gate"].detail) == ("ok", "from comms")
     identity = rows["comms identity"]
     assert identity.state == "ok" and ME in identity.detail

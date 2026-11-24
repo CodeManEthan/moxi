@@ -17,9 +17,12 @@ The fence, around every test (the autouse fixture `fence`):
   every harness home a package reads is pointed into the test's tmp: `HOME` and the XDG
   homes under `tmp_path / "home"`, `CLAUDE_CONFIG_DIR` and `CODEX_HOME` inside it, and
   `XDG_RUNTIME_DIR` and each installed module's `MOXI_<MODULE>_HOME` in a short
-  per-test directory (see `short_dir`), so a socket under them keeps a short path.
+  per-test directory (see `short_dir`), so a socket under them keeps a short path (on
+  Windows the module homes are in the test's profile instead; see below).
   `TMPDIR`, and `tempfile`'s own default with it, point into that short directory too,
   so a temp file the test or a child makes lands in the test's tmp and goes with it.
+  `MOXI_TEST_FENCED` holds the same directory: a pytest run that starts with it in its
+  environment is nested in this test (Temp files, below).
   OpenCode reads its homes through `XDG_*`; its content variables (`OPENCODE_*`) are
   cleared with the rest. A package that starts reading another home adds it to
   `HARNESS_HOMES`.
@@ -28,9 +31,15 @@ The fence, around every test (the autouse fixture `fence`):
   are that home split at its drive, `LOCALAPPDATA` and `APPDATA` are under it, and so
   is each per-user folder platformdirs reads through a `WIN_PD_OVERRIDE_*` variable
   (without one it asks Windows for the real folder, whatever `APPDATA` says); see
-  `WINDOWS_HOMES`. `TEMP` and `TMP` point where `TMPDIR` does. The system's own
-  variables a process needs (`SYSTEMROOT`, `PATHEXT`, `COMSPEC` and the rest of
-  `WINDOWS_KEPT_ENV`) are kept. Off Windows none of these is set or kept.
+  `WINDOWS_HOMES`. Each module's `MOXI_<MODULE>_HOME` is `moxi\\<module>` under the
+  test's `LOCALAPPDATA`, so whatever a module keeps only inside the user's profile (comms'
+  token store) is inside the test's own. Every directory the fence gives is spelled in
+  its long form, its real path: the runner's `TEMP` may be spelled with an 8.3 short name
+  (`C:\\Users\\RUNNER~1\\...`, noqa: MX6 -- GitHub's Windows runner profile), and a
+  test compares the fence's directories with paths Windows hands back resolved. `TEMP`
+  and `TMP` point where `TMPDIR` does. The system's own variables a process needs
+  (`SYSTEMROOT`, `PATHEXT`, `COMSPEC` and the rest of `WINDOWS_KEPT_ENV`) are kept.
+  Off Windows none of these is set or kept.
   `MOXI_ANCHOR_HOME` stands in for the account's own folder, which the core reads from
   the user database or the shell and no other variable moves: it is the test's home (on
   Windows the test's `LOCALAPPDATA`), so the core's anchor, and the record of the
@@ -92,6 +101,32 @@ or `~/.local/share/uv/python`; on Windows `%LOCALAPPDATA%\\uv\\cache` and
 is there). It
 also sets `UV_PYTHON_DOWNLOADS=never`, so a child finds the Pythons already installed
 and never adds one to the real directory. The test's own process stays fenced.
+
+Temp files. `MOXI_TEST_TEMP` (`disk`, the default, or `ram`) decides where a run keeps
+pytest's temp root and its short directories (`moxi_dev.temp` holds the rules: on
+Linux `/var/tmp` or `/dev/shm`; macOS and Windows keep the system's own, and `ram` there
+runs as `disk` and says so). Only the controlling process of a top-level run chooses,
+at its configure, after a sweep of what earlier runs left (`moxi_dev.temp.sweep`). It
+puts its root in `PYTEST_DEBUG_TEMPROOT` for pytest and hands the whole choice to each
+xdist worker through `workerinput`, so a worker never reads the setting, and the
+`--basetemp` xdist gives it never counts as one given to the run. A `--basetemp` given
+to the controller leaves the run to pytest: no root is set, nothing of pytest's is
+removed and nothing is swept. A run is nested when a fence is active in its process
+(pytester's in-process run) or its environment carries `MOXI_TEST_FENCED` (a child a
+fenced test started): it chooses nothing, records nothing, sweeps nothing and puts its
+short directories in the outer test's short directory. pytest's header gets one
+`moxi-dev temp:` line saying where the temp is and why, and one more for what a sweep
+removed. The durations file gets the choice as its `temp` entry.
+
+Each process of a run that isn't nested makes one short process dir at its configure,
+`mx-` and 6 characters under the short root, with its owner record beside it (see
+`moxi_dev.temp`), and removes it at its end, the record last. Outside a fence
+`short_root()` names it, so each test's short directory, and every `short_dir` a wider
+fixture makes, is made inside it. When the root is in memory, a test's `tmp_path` is
+removed once its teardown ends unless a phase of the test failed, and the controller
+removes the whole basetemp at the run's end, failed tests' files and browser traces
+with it; the basetemp and each worker's are recorded so a later sweep can remove them
+if the run is killed. On disk pytest's own retention stands.
 
 Symlinks: Windows lets an account make one only with the symlink privilege or with
 Developer Mode on. `can_symlink()` tries a real one once per process and keeps the
@@ -227,6 +262,7 @@ import json
 import math
 import ntpath
 import os
+import random
 import re
 import shutil
 import socket
@@ -238,14 +274,24 @@ import time
 from collections.abc import Callable, Generator, Iterable, Iterator, Mapping, Sequence
 from enum import Enum
 from pathlib import Path, PurePath
-from typing import Any
+from typing import Any, TypeVar
 from urllib.parse import parse_qs, urlsplit
 
 import pytest
 from moxi.paths import ANCHOR_HOME_ENV
 
+from moxi_dev import temp
+from moxi_dev.temp import FENCED_ENV as FENCED_ENV
+from moxi_dev.temp import TEMP_ENV as TEMP_ENV
+
 #: How often a served server looks for its shutdown request, in seconds.
 SHUTDOWN_POLL = 0.05
+
+#: Seconds a test's positive wait on a process may take before it fails: a process starts,
+#: a binding appears, a row shows, a stream opens, a server is gone. It bounds a wait for
+#: what must happen, so it is long: a passing wait returns as soon as its state holds. A
+#: wait that checks something does not happen keeps its own short bound.
+PROC_WAIT_S = 20.0
 
 #: The tiers a package's `addopts` deselects, so a plain `pytest` runs units and seams.
 TIERS = ("browser", "slow", "build", "live")
@@ -362,6 +408,9 @@ WINDOWS_HOMES = {
 WINDOWS_KEPT_ENV = ("SYSTEMROOT", "SYSTEMDRIVE", "WINDIR", "COMSPEC", "PATHEXT", "OS",
                     "PROCESSOR_ARCHITECTURE", "NUMBER_OF_PROCESSORS", "USERNAME")
 
+#: A path of either flavour, kept as the caller's.
+_P = TypeVar("_P", bound=PurePath)
+
 #: What `uv_env` adds to the fenced environment, besides uv's two directories.
 _UV_NO_DOWNLOADS = {"UV_PYTHON_DOWNLOADS": "never"}
 
@@ -396,7 +445,15 @@ class Fence:
 
     def module_home(self, module: str) -> Path:
         """Where `MOXI_<MODULE>_HOME` points for `module`."""
-        return self.short / module
+        return _module_home(self.home, self.short, module)
+
+    def profile_dir(self, name: str) -> Path:
+        """A new directory `name` inside the test's own profile, its home (`USERPROFILE`
+        on Windows), for a file a module keeps only inside the user's profile there, such
+        as comms' token store. The test owns it; it goes with the test's tmp."""
+        path = self.home / name
+        path.mkdir(parents=True)
+        return path
 
 
 # --- the audit hook --------------------------------------------------------------------
@@ -659,13 +716,54 @@ def _install() -> None:
 _SESSION: dict[str, Any] = {}
 
 
-def _short_root() -> str:
+#: This process's short root outside a fence, under `"root"`: its short process dir, or
+#: in a nested run's child process the outer test's short directory.
+_SHORT: dict[str, str] = {}
+
+
+def short_root() -> str:
     """Where short directories go: inside the current test's short directory while a
-    test is fenced, else /tmp where it is a directory, else the temp dir."""
+    test is fenced, else this process's short process dir (module doc, Temp files), else
+    the system temp directory."""
     if _GUARD.active and _GUARD.short:
         return _GUARD.short
-    return "/tmp" if os.path.isdir("/tmp") and os.access("/tmp", os.W_OK) \
-        else tempfile.gettempdir()
+    return _SHORT.get("root") or tempfile.gettempdir()
+
+
+#: The characters of a test's short directory's one-character name.
+_SHORT_NAME_CHARS = "abcdefghijklmnopqrstuvwxyz0123456789"
+
+#: The one-character names this process's fence has still to give, in a shuffled turn.
+_SHORT_NAMES: list[str] = []
+
+
+def _make_test_short_dir(root: str) -> Path:
+    """Make the test's short directory, private, in `root`: `short_root()`, the process
+    dir, or in a nested run the outer test's short directory.
+
+    Its name is one character, so a fenced test's short path is as short as a short dir
+    `mx-` and 8 characters made straight in the root: on macOS `/tmp/mx-<6>/<1>`, 16
+    bytes, and a module's sockets under it keep within macOS's 104-byte limit. The
+    names are given in shuffled turns of 36: no name repeats within a turn, and each
+    turn is a fresh shuffle, so a name may come back as soon as the next turn starts.
+    A name that exists is always passed over, so the directory is always new. When every
+    one-character name exists, the name is `tempfile`'s own."""
+    tried: list[str] = []
+    while len(tried) < len(_SHORT_NAME_CHARS):
+        if not _SHORT_NAMES:
+            _SHORT_NAMES.extend(random.SystemRandom().sample(_SHORT_NAME_CHARS,
+                                                             len(_SHORT_NAME_CHARS)))
+        name = _SHORT_NAMES.pop()
+        if name in tried:
+            continue
+        tried.append(name)
+        path = os.path.join(root, name)
+        try:
+            os.mkdir(path, 0o700)
+        except FileExistsError:
+            continue
+        return Path(path)
+    return Path(tempfile.mkdtemp(prefix="", dir=root))
 
 
 def _modules() -> list[str]:
@@ -676,8 +774,24 @@ def _modules() -> list[str]:
     return sorted(name for name in found if _MODULE_NAME.fullmatch(name))
 
 
+def _spelled_long(path: _P) -> _P:
+    """On Windows, `path` in its long form: its real path, each part spelled in full
+    (`C:\\Users\\RUNNER~1` reads `C:\\Users\\runneradmin`; noqa: MX6 -- GitHub's
+    Windows runner profile). Elsewhere `path` as it is."""
+    return type(path)(ntpath.realpath(path)) if WINDOWS else path
+
+
+def _module_home(home: _P, short: _P, module: str) -> _P:
+    """Where the fence points `MOXI_<MODULE>_HOME` for `module`: in the short directory,
+    or on Windows under the test's `LOCALAPPDATA`, inside its profile."""
+    if WINDOWS:
+        return home / WINDOWS_HOMES["LOCALAPPDATA"] / "moxi" / module
+    return short / module
+
+
 def _fenced_env(source: Mapping[str, str], home: Path, runtime: Path, short: Path,
                 modules: Iterable[str]) -> dict[str, str]:
+    home, runtime, short = (_spelled_long(path) for path in (home, runtime, short))
     env = {key: value for key, value in source.items()
            if key in KEPT_ENV or key.startswith(_KEPT_PREFIXES)
            or (WINDOWS and key.upper() in WINDOWS_KEPT_ENV)}
@@ -685,7 +799,7 @@ def _fenced_env(source: Mapping[str, str], home: Path, runtime: Path, short: Pat
         env[key] = str(home if rel == "." else home / rel)
     env["XDG_RUNTIME_DIR"] = str(runtime)
     for module in modules:
-        env[f"MOXI_{module.upper()}_HOME"] = str(short / module)
+        env[f"MOXI_{module.upper()}_HOME"] = str(_module_home(home, short, module))
     if WINDOWS:
         for key, rel in WINDOWS_HOMES.items():
             env[key] = str(home if rel == "." else home / rel)
@@ -745,6 +859,8 @@ def pytest_configure(config: pytest.Config) -> None:
         config.addinivalue_line("markers", f"{name}: {line}")
     config.addinivalue_line("markers", f"{LIFTED}: set by the kit on a tier test this "
                                        "run puts back; not for tests to use")
+    config.stash[_TEMP_RUN] = run = _TempRun.start(config)
+    config.pluginmanager.register(run, "moxi-dev-temp")
     # Per run, from the environment this pytest started with; a pytest run inside a
     # fenced test sees the fenced one, so the outer run's selection never reaches it.
     config.stash[_SELECTION] = selection(os.environ)
@@ -1016,9 +1132,151 @@ class _Durations:
         gate = self.config.stash.get(_GATE, None)
         if gate is not None:
             body["gate"] = gate.summary()
+        run = self.config.stash.get(_TEMP_RUN, None)
+        if run is not None:
+            body["temp"] = run.choice.as_dict()
         part.write_text(json.dumps(body, indent=1, sort_keys=True) + "\n",
                         encoding="utf-8")
         os.replace(part, path)
+
+
+# --- temp files ------------------------------------------------------------------------
+
+#: The key a controller hands its temp choice to its xdist workers under.
+_TEMP_KEY = "moxi_dev_temp"
+_TMP_PATH = pytest.StashKey[Path]()
+_FAILED = pytest.StashKey[bool]()
+
+
+def _workers(config: pytest.Config) -> int:
+    """The run's xdist worker count, 1 without workers."""
+    count = getattr(config.option, "numprocesses", None)
+    if isinstance(count, int) and count > 0:
+        return count
+    if count in ("auto", "logical"):
+        return os.cpu_count() or 1
+    return 1
+
+
+class _TempRun:
+    """Where one pytest process keeps its temp, and its cleanup (module doc, Temp
+    files)."""
+
+    def __init__(self, config: pytest.Config, choice: temp.Choice,
+                 swept: temp.Swept | None) -> None:
+        self.config = config
+        self.choice = choice
+        self.swept = swept
+        self.process_dir: temp.Held | None = None
+        self.basetemp: temp.Held | None = None
+
+    @classmethod
+    def start(cls, config: pytest.Config) -> _TempRun:
+        """Choose (a top-level controller), take the controller's choice (a worker) or
+        leave it all to the outer run (a nested run); then make the process dir."""
+        workerinput = getattr(config, "workerinput", None)
+        swept = None
+        if workerinput is not None:
+            data = workerinput.get(_TEMP_KEY)
+            choice = (temp.Choice.from_dict(data) if data
+                      else temp.nested(tempfile.gettempdir()))
+        elif not temp.top_level(os.environ):
+            outer = _GUARD.short if _GUARD.active and _GUARD.short \
+                else temp.outer_short_dir(os.environ)
+            choice = temp.nested(outer or tempfile.gettempdir())
+        else:
+            basetemp = config.option.basetemp
+            if not basetemp:
+                swept = temp.sweep(own_root=temp.given_root(os.environ))
+            try:
+                choice = temp.choose(os.environ, basetemp=str(basetemp) if basetemp else None,
+                                     workers=_workers(config))
+            except temp.TempError as exc:
+                raise pytest.UsageError(str(exc)) from exc
+            temp.put_root(choice, os.environ)
+        run = cls(config, choice, swept)
+        if not choice.is_nested:
+            run.process_dir = temp.make_process_dir(choice.short_root)
+            _SHORT["root"] = str(run.process_dir.path)
+        elif not _GUARD.active:
+            _SHORT["root"] = choice.short_root
+        return run
+
+    @pytest.hookimpl(optionalhook=True)
+    def pytest_configure_node(self, node: Any) -> None:
+        """An xdist worker starts: hand it the whole choice."""
+        node.workerinput[_TEMP_KEY] = self.choice.as_dict()
+
+    @pytest.hookimpl(tryfirst=True)
+    def pytest_sessionstart(self, session: pytest.Session) -> None:
+        """Record the basetemp (a worker's own, under xdist) when it is in memory."""
+        factory = getattr(self.config, "_tmp_path_factory", None)
+        if not self.choice.is_in_memory or factory is None:
+            return
+        try:
+            self.basetemp = temp.hold(factory.getbasetemp())
+        except temp.TempError as exc:
+            raise pytest.UsageError(str(exc)) from exc
+
+    def pytest_report_header(self, config: pytest.Config) -> list[str]:
+        lines = [f"moxi-dev temp: {self.choice.header()}"]
+        removed = self.swept.line() if self.swept is not None else None
+        if removed:
+            lines.append(f"moxi-dev temp: {removed}")
+        return lines
+
+    @pytest.hookimpl(wrapper=True)
+    def pytest_runtest_setup(self, item: pytest.Item) -> Iterator[None]:
+        try:
+            return (yield)
+        finally:
+            path = (getattr(item, "funcargs", None) or {}).get("tmp_path")
+            if self.choice.is_in_memory and isinstance(path, Path):
+                item.stash[_TMP_PATH] = path
+
+    @pytest.hookimpl(wrapper=True)
+    def pytest_runtest_makereport(self, item: pytest.Item,
+                                  call: pytest.CallInfo[None]) -> Iterator[None]:
+        """In memory, remove a test's `tmp_path` once its teardown ends, unless a phase
+        of it failed."""
+        report = yield
+        if report.failed:
+            item.stash[_FAILED] = True
+        if call.when == "teardown" and not item.stash.get(_FAILED, False):
+            path = item.stash.get(_TMP_PATH, None)
+            if path is not None:
+                shutil.rmtree(path, ignore_errors=True)
+        return report
+
+    @pytest.hookimpl(trylast=True)
+    def pytest_unconfigure(self, config: pytest.Config) -> None:
+        """The run ends: the controller removes a basetemp in memory, then its record; a
+        worker lets go of its record; each process removes its process dir."""
+        if self.basetemp is not None:
+            is_controller = not hasattr(config, "workerinput")
+            self.basetemp.release(remove=is_controller)
+            if is_controller:
+                _drop_user_dir(self.basetemp.path)
+            self.basetemp = None
+        if self.process_dir is not None:
+            self.process_dir.release()
+            self.process_dir = None
+            _SHORT.pop("root", None)
+
+
+_TEMP_RUN = pytest.StashKey[_TempRun]()
+
+
+def _drop_user_dir(basetemp: Path) -> None:
+    """After a removed basetemp: pytest's `<prefix>current` link to it, and the
+    `pytest-of-<user>` directory it was in once that is empty."""
+    user_dir = basetemp.parent
+    with contextlib.suppress(OSError):
+        for link in user_dir.iterdir():
+            if link.is_symlink() and link.name.endswith("current") \
+                    and os.path.basename(os.readlink(link)) == basetemp.name:
+                link.unlink()
+        user_dir.rmdir()
 
 
 # --- the idle gate ---------------------------------------------------------------------
@@ -1479,14 +1737,15 @@ def fence(request: pytest.FixtureRequest, tmp_path: Path,
     # one back when it ends; the outermost leaves the hook idle.
     outer = _GUARD.save()
     basetemp = tmp_path_factory.getbasetemp()
-    short = Path(tempfile.mkdtemp(prefix="mx-", dir=_short_root()))
+    short = _spelled_long(_make_test_short_dir(short_root()))
     home = tmp_path / "home"
     runtime = short / "run"
     home.mkdir()
+    home = _spelled_long(home)
     runtime.mkdir(mode=0o700)
     env = _fenced_env(os.environ, home, runtime, short,
                       _SESSION.get("modules") or _modules())
-    env["TMPDIR"] = str(short)
+    env["TMPDIR"] = env[FENCED_ENV] = str(short)
     for key in [k for k in os.environ if k not in env]:
         monkeypatch.delenv(key)
     for key, value in env.items():
@@ -1561,7 +1820,8 @@ def terminal_record(fence: Fence) -> Callable[..., Path]:
 def wait_for(predicate: Callable[[], Any], timeout: float = 5.0, *, interval: float = 0.01,
              what: str | Callable[[], str] = "the condition") -> Any:
     """Call `predicate` until it returns something true and return that; fail with
-    `AssertionError` naming `what` after `timeout` seconds."""
+    `AssertionError` naming `what` after `timeout` seconds. A positive wait on a process
+    passes `timeout=PROC_WAIT_S`."""
     deadline = time.monotonic() + timeout
     while True:
         value = predicate()
@@ -1581,7 +1841,7 @@ def short_dir(prefix: str = "mx-") -> Iterator[Path]:
     longer than that. In a fenced test it is made inside the test's short directory;
     made elsewhere (by a fixture of wider scope), it is one of the fence's allowed roots
     until it is removed, so a test may reach a server whose socket is in it."""
-    path = Path(tempfile.mkdtemp(prefix=prefix, dir=_short_root()))
+    path = Path(tempfile.mkdtemp(prefix=prefix, dir=short_root()))
     real = os.path.realpath(path)
     _SHORT_DIRS.add(real)
     try:
@@ -1775,9 +2035,10 @@ __all__ = ["ANCHOR_HOME_ENV", "CHANGED_ENV", "DURATIONS_ENV", "FINDING_ENV",
            "GATE_CHAIN_S", "GATE_RESAMPLE_S", "GATE_SAMPLE_S", "GAUGES", "Fence",
            "FenceError", "Gauge", "GaugeReading", "HARNESS_HOMES", "IDLE_ENV", "Idle",
            "KEPT_ENV", "LEAVE_OUT_ENV", "LIFTED", "LIVE_ENV", "MARKERS", "NOT_MEASURED",
-           "PROC_STAT", "REAL_SUPERVISOR_ENV", "RECORD_FORMAT", "SHUTDOWN_POLL", "Seam",
-           "Selection", "TIERS", "TIERS_ENV", "TIMED", "TIMED_CLOCKS", "TIMED_ENV",
-           "TIMED_LOCK_FD_ENV", "TIMED_SLACK_ENV", "WINDOWS_HOMES", "WINDOWS_KEPT_ENV",
-           "console_script", "fence", "findings_of", "idle", "param_id", "selection",
-           "served", "short_dir", "stat_counts", "terminal_record", "timed_reading",
-           "timed_slack", "touches_match", "uv_env", "wait_for", "write_sqlite"]
+           "PROC_STAT", "PROC_WAIT_S", "REAL_SUPERVISOR_ENV", "RECORD_FORMAT",
+           "SHUTDOWN_POLL", "Seam", "Selection", "TIERS", "TIERS_ENV", "TIMED",
+           "TIMED_CLOCKS", "TIMED_ENV", "TIMED_LOCK_FD_ENV", "TIMED_SLACK_ENV",
+           "WINDOWS_HOMES", "WINDOWS_KEPT_ENV", "console_script", "fence", "findings_of",
+           "idle", "param_id", "selection", "served", "short_dir", "stat_counts",
+           "terminal_record", "timed_reading", "timed_slack", "touches_match", "uv_env",
+           "wait_for", "write_sqlite"]

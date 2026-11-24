@@ -14,6 +14,7 @@ from dataclasses import dataclass, field
 
 from moxi_connector.provider import Provider, Result, StatusRow, Tool
 from moxi_connector.signin import GRANT, Grant, Mount, unauthorized
+from moxi_dev.testing import PROC_WAIT_S
 
 HOST = "door.example.net"
 CLAUDE = "Claude-User"
@@ -263,7 +264,7 @@ class Running:
         self._thread.join(10)
 
 
-def wait_for(found, *, within: float = 5.0, every: float = 0.01):
+def wait_for(found, *, within: float = PROC_WAIT_S, every: float = 0.01):
     """Poll `found()` until it gives something truthy, and return that; fail after
     `within` seconds. For what another thread writes after it answers."""
     import time
@@ -280,7 +281,7 @@ def wait_for(found, *, within: float = 5.0, every: float = 0.01):
 def hang_up(port: int, body: dict, *, token: str = TOKEN, host: str = HOST,
             until=None, within: float = 0.2) -> None:
     """`POST /mcp` to a door on loopback as Claude does, then hang up before the answer,
-    as Funnel or Claude's own tool timeout does: once `until()` holds (polled, at most 10
+    as Funnel or Claude's own tool timeout does: once `until()` holds (polled, at most 20
     s), else after `within` seconds. A real socket, so uvicorn sees the peer go."""
     import socket
     import time
@@ -294,7 +295,7 @@ def hang_up(port: int, body: dict, *, token: str = TOKEN, host: str = HOST,
     try:
         sock.sendall(head + data)
         if until is not None:
-            wait_for(until, within=10)
+            wait_for(until, within=PROC_WAIT_S)
         else:
             time.sleep(within)
     finally:

@@ -1337,3 +1337,9 @@ def test_the_page_states_its_group_and_order_among_the_pages():
 
     page_decl = module.COMPONENTS["page"]
     assert (page_decl["group"], page_decl["order"]) == ("daily", 25)
+
+
+def test_the_page_leaves_the_band_where_sessions_is_installed():
+    from moxi_turns import module
+
+    assert module.COMPONENTS["page"]["band_unless"] == ["sessions"]

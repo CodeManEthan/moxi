@@ -60,7 +60,7 @@ from moxi import files
 
 from . import events as event_types
 from . import index, log, paths, state
-from .errors import Locked, NoLog, Refused, Unmet
+from .errors import Locked, NoLog, Refused, UnfencedTest, Unmet
 
 #: How long a verb waits for a lock before it refuses, in seconds.
 WAIT_S = 30.0
@@ -384,6 +384,8 @@ def _append(view: View, entries: list[Entry], result: object, *, by: str,
     closed = None
     try:
         closed = _close(where, after[ROUND], by=by, at=at)
+    except UnfencedTest:
+        raise
     except Exception as exc:  # the verb's events are on disk; the next write closes
         failed.append((_close, exc))
     if closed is not None:
@@ -394,6 +396,8 @@ def _append(view: View, entries: list[Entry], result: object, *, by: str,
     for callback in callbacks:
         try:
             callback(done)
+        except UnfencedTest:
+            raise
         except Exception as exc:  # the events are on disk; nothing here undoes them
             failed.append((callback, exc))
     done = dataclasses.replace(done, failed=tuple(failed)) if failed else done

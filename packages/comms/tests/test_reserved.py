@@ -19,8 +19,8 @@ LAUNCHER = {"launcher": ["console"]}
 
 
 @pytest.fixture
-def store(tmp_path):
-    return TokenStore(tmp_path / "tokens")
+def store(profile):
+    return TokenStore(profile / "tokens")
 
 
 @pytest.fixture

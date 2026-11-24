@@ -21,6 +21,7 @@ line of doc and, for a few, the one variable that overrides it for one process:
     [policy]
     cache_callers = ["operator"]            # the identities `moxi comms cache` answers
     labels = { "notifier@proj" = "the notifier, which only sends" }
+    directors = ["fleet-lead"]              # direct every session that doesn't opt out
 
     [provision]
     operator = "operator"                   # the human's identity name
@@ -137,11 +138,14 @@ class CredentialsConfig:
 
 @dataclass
 class PolicyConfig:
-    """`[policy]`: the identities `moxi comms cache` answers, and each send-only
-    identity's refusal words, by qualified name."""
+    """`[policy]`: the identities `moxi comms cache` answers, each send-only
+    identity's refusal words, by qualified name, and the policy directors: the names
+    that direct every comms session on this box that doesn't opt out, qualified as
+    `--director` is (`directors.declare`)."""
 
     cache_callers: tuple = tuple(_default("policy.cache_callers"))
     labels: dict = field(default_factory=dict)
+    directors: tuple = tuple(_default("policy.directors"))
 
 
 @dataclass
@@ -224,6 +228,15 @@ class ReplayConfig:
 
 
 @dataclass
+class ArchiveConfig:
+    """`[archive]`: an older comms' record and identities files, read in place
+    (`archive.py`). An empty path names none."""
+
+    record: str = ""
+    identities: str = ""
+
+
+@dataclass
 class CommsConfig:
     backend: str = _default("backend")
     local: LocalConfig = field(default_factory=LocalConfig)
@@ -234,6 +247,7 @@ class CommsConfig:
     cache: CacheConfig = field(default_factory=CacheConfig)
     delivery: DeliveryConfig = field(default_factory=DeliveryConfig)
     replay: ReplayConfig = field(default_factory=ReplayConfig)
+    archive: ArchiveConfig = field(default_factory=ArchiveConfig)
     mcp: McpConfig = field(default_factory=McpConfig)
     connector: ConnectorConfig = field(default_factory=ConnectorConfig)
     block: bool = _default("block")
@@ -458,11 +472,14 @@ def _typed(settings, path: Path | None) -> CommsConfig:
                               roles=_roles(bad, v["credentials.roles"])),
         policy=PolicyConfig(cache_callers=_names(bad, "policy.cache_callers",
                                                  v["policy.cache_callers"]),
-                            labels=_labels(bad, v["policy.labels"])),
+                            labels=_labels(bad, v["policy.labels"]),
+                            directors=_policy_directors(bad, v["policy.directors"])),
         provision=ProvisionConfig(operator=operator),
         cache=CacheConfig(required=v["cache.required"]),
         delivery=DeliveryConfig(expiry=str(v["delivery.expiry"]).strip().lower()),
         replay=ReplayConfig(messages=v["replay.messages"], hours=v["replay.hours"]),
+        archive=ArchiveConfig(record=str(v["archive.record"] or ""),
+                              identities=str(v["archive.identities"] or "")),
         mcp=McpConfig(enabled=v["mcp.enabled"], port=v["mcp.port"]),
         connector=connector,
         block=v["block"],
@@ -528,6 +545,19 @@ def _names(bad, key: str, value) -> tuple:
     return tuple(names)
 
 
+def _policy_directors(bad, value) -> tuple:
+    """`[policy] directors`: each name qualified once, as `--director` qualifies it (a
+    bare name is the global identity, `name@global` is bare), de-duplicated in order."""
+    from .directors import BadDirector, declare
+
+    try:
+        return tuple(declare(value))
+    except BadDirector as exc:
+        raise bad("policy.directors", f"holds a bad name: {exc}",
+                  "write each as name or name@scope (letters, digits, dots, dashes, "
+                  "underscores), or remove it") from None
+
+
 def _roles(bad, value) -> tuple:
     """`[credentials] roles`: each a token-store name of its own, and none of comms' own."""
     from .tokens import COMPONENT_RE
@@ -591,7 +621,7 @@ def refuse_secrets(path: Path | None, raw: dict) -> None:
 
 
 __all__ = ["Config", "ConfigError", "LocalConfig", "ThreadsConfig", "CredentialsConfig", "PolicyConfig",
-           "ProvisionConfig", "ReplayConfig", "CommsConfig",
+           "ProvisionConfig", "ArchiveConfig", "ReplayConfig", "CommsConfig",
            "BUILTIN_ROLES", "check_text", "config_path", "load", "load_file",
            "refuse_secrets", "schema",
            "LOCAL_RETAIN_DAYS"]

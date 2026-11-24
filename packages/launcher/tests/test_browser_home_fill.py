@@ -1,11 +1,16 @@
 """The fill from the last launch on Home in a browser, through a real shell that starts the
 launcher's real page server: each last launch is a launch made from Home itself, then Home
-is opened again. A value it typed fills the row, is named on `From last launch` on the line
-above the box with `Clear`, and under its row in the panel; it is no change, and the request
-names it in `filled`. An edit makes it the user's change, `Clear` puts the form's value
+is opened again, but for the two tests that answer `/api/last` themselves (below). A value
+it typed fills the row, is named on `From last launch` on the line above the box with
+`Clear`, and under its row in the panel; it is no change, and the request names it in
+`filled`. An edit makes it the user's change, `Clear` puts the form's value
 back. Two seats with one home fill nothing from each other. A value that can do harm is
 filled in the warning colour, asks nothing and launches with its flag. Another harness fills
-first, and the form is read again for it.
+first, and the form is read again for it. A harness picked by hand in the chip lets go of the
+launch's values and fills that harness's comms identity, with comms' refusal and a live
+namesake's note beside it, and does so too when the answer filled nothing for the form Home
+opened on; the shell runs no comms, so those tests answer `/api/last` themselves and show the
+identity rows `/api/catalog` hides without comms.
 
 The shell runs the fake slots in slots' place and fake `claude` and `codex` first on its
 `PATH`, so no launch starts a real session.
@@ -16,10 +21,11 @@ from __future__ import annotations
 import json
 import re
 import sys
+from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
-from moxi_dev.testing import wait_for
+from moxi_dev.testing import PROC_WAIT_S, wait_for
 from playwright.sync_api import expect
 
 import launcher_page_kit as kit
@@ -30,6 +36,8 @@ pytestmark = [pytest.mark.browser, pytest.mark.timeout(120),
                                  reason="projects' picker is checked in a browser on Linux")]
 
 PREVIEW = "/m/launcher/api/preview"
+CATALOG = "/m/launcher/api/catalog"
+LAST = "/m/launcher/api/last"
 
 #: Two seats whose home is the same project.
 PRESETS = """\
@@ -165,7 +173,7 @@ def launch(page, piece, brief: str) -> dict:
 
 def argv_of(harness, brief: str) -> list[str]:
     [run] = wait_for(lambda: [run for run in harness.runs() if brief in " ".join(run["argv"])],
-                     10, what="the fake harness's run with the brief")
+                     PROC_WAIT_S, what="the fake harness's run with the brief")
     return run["argv"]
 
 
@@ -335,3 +343,93 @@ def test_another_harness_the_last_launch_ran_fills_first_and_clear_takes_the_for
     open_list(piece).get_by_role("button", name="Clear Harness").click()
     expect(item(piece)).to_have_count(0)
     expect(chip).to_have_text(re.compile(r"^claude · default model\s*▾$"))
+
+
+def pick_harness(piece, label: str) -> None:
+    chip = piece.locator(".chip")
+    chip.click()
+    piece.locator('[data-menu="chip"] [data-list="harness"] .row', has_text=label).click()
+    expect(chip).to_have_text(re.compile(rf"^{label.lower()} · default model\s*▾$"))
+    piece.page.keyboard.press("Escape")
+
+
+def comms_shown(route) -> None:
+    """`/api/catalog`'s answer with the comms identity and scope rows shown, as with comms."""
+    answer = route.fetch()
+    data = answer.json()
+    for harness in data["harnesses"]:
+        for row in harness["fields"]:
+            if row["name"] in ("identity", "scope"):
+                row["shown"] = True
+    route.fulfill(response=answer, json=data)
+
+
+def test_a_harness_picked_by_hand_fills_its_comms_identity_with_comms_refusal_and_a_namesakes_note(page):
+    at = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
+    held = {"code": "identity-taken", "row": "identity", "problem": "identity cdx is held by slot 1",
+            "hint": "pick another identity, or wait until that session ends"}
+    namesake = ("cdx@proj-a is live in its project scope; the global name is the one filled. "
+                "Pick that scope only if you mean that binding")
+    last = {"state": "up", "detail": None, "at": at, "harness": "claude",
+            "values": [{"name": "native_name", "value": "helper-1", "items": None}],
+            "identities": [{"harness": "claude", "identity": "scout", "at": at, "refused": None, "note": None},
+                           {"harness": "codex", "identity": "cdx", "at": at, "refused": held, "note": namesake}]}
+    page.route("**" + CATALOG, comms_shown)
+    page.route(re.compile(re.escape(LAST) + r"\?"), lambda route: route.fulfill(json=last))
+    piece = kit.open_home(page)
+    # The Claude launch's own value and Claude's identity fill.
+    expect(item(piece)).to_have_text("2 settings▾")
+    listed = open_list(piece)
+    expect(listed.locator("[data-fill]")).to_have_text(["Comms identityscoutClear", "Native namehelper-1Clear"])
+    item(piece).click()
+    # Codex picked by hand: the Claude launch's value goes, Codex's identity fills, and
+    # comms' refusal and the live namesake's note go beside it.
+    pick_harness(piece, "Codex")
+    expect(item(piece)).to_have_text("Comms identity▾")
+    expect(piece.locator(".where .k").last).to_have_text("From last launch")
+    listed = open_list(piece)
+    expect(listed.locator("[data-fill]")).to_have_count(1)
+    filled = listed.locator('[data-fill="identity"]')
+    expect(filled).to_contain_text("Comms identitycdxClear")
+    expect(filled.locator('[data-refused="identity-taken"]')).to_have_text(
+        "identity cdx is held by slot 1. pick another identity, or wait until that session ends.")
+    expect(filled.locator("[data-namesake]")).to_have_text(namesake + ".")
+    item(piece).click()
+    panel = open_options(piece)
+    open_sub(panel, "seat", "Comms")
+    expect(control(panel, "identity")).to_have_value("cdx")
+    expect(panel.locator('[data-from="identity"]')).to_have_text(re.compile(r"^from the last launch, today .+Clear$"))
+    expect(panel.locator('[data-refused="identity-taken"]')).to_have_count(1)
+    expect(panel.locator("[data-namesake]")).to_have_text(namesake + ".")
+    # Back to Claude: Claude's identity, still none of the launch's values, nothing beside it.
+    pick_harness(piece, "Claude")
+    expect(item(piece)).to_have_text("Comms identity▾")
+    expect(control(panel, "identity")).to_have_value("scout")
+    expect(panel.locator("[data-refused], [data-namesake]")).to_have_count(0)
+    # An identity set by hand stays the user's across a harness picked.
+    control(panel, "identity").fill("mine")
+    control(panel, "identity").blur()
+    expect(item(piece)).to_have_count(0)
+    pick_harness(piece, "Codex")
+    expect(control(panel, "identity")).to_have_value("mine")
+    expect(item(piece)).to_have_count(0)
+    expect(panel.locator("[data-refused], [data-namesake]")).to_have_count(0)
+
+
+def test_a_harness_picked_by_hand_fills_its_comms_identity_when_the_opening_form_filled_nothing(page):
+    at = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
+    last = {"state": "up", "detail": None, "at": at, "harness": "codex",
+            "values": [{"name": "native_name", "value": "helper-1", "items": None}],
+            "identities": [{"harness": "codex", "identity": "cdx", "at": at, "refused": None, "note": None}]}
+    page.route("**" + CATALOG, comms_shown)
+    page.route(re.compile(re.escape(LAST) + r"\?seat=planner"), lambda route: route.fulfill(json=last))
+    piece = kit.open_home(page)
+    # The seat sets Claude, which the Codex launch gives no identity: nothing fills.
+    pick_seat(piece, "planner")
+    expect(piece.locator(".go")).to_be_enabled()
+    expect(item(piece)).to_have_count(0)
+    # Codex picked by hand: its identity fills all the same.
+    pick_harness(piece, "Codex")
+    expect(item(piece)).to_have_text("Comms identity▾")
+    listed = open_list(piece)
+    expect(listed.locator("[data-fill]")).to_have_text(["Comms identitycdxClear"])

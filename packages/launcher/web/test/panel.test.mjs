@@ -2,10 +2,10 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
-  choiceKey, choiceOf, chosenPreset, commandLine, emptyGroups, fieldsFor, filledFields, followedOf, formPath,
+  choiceKey, choiceOf, chosenPreset, commandLine, dropsShown, emptyGroups, fieldsFor, filledFields, followedOf, formPath,
   HARNESS, keepLabel, launchBody, launchesView, leaveOutChoice, NO_PRESET, olderPath, outcomeOf, parseCatalog,
   parseForm, parsePasts, parsePresets, parsePreview, pastItem, pastView, presetLines, presetProblems, presetsOf,
-  quote, refusalLine, requestOf, shownValue, sourceNote, statusOf,
+  quote, refusalLine, requestOf, resumeBody, shownValue, sourceNote, statusOf,
 } from "../src/panel.ts";
 
 const T = "2026-10-31T10:01:02.123456Z";
@@ -223,6 +223,15 @@ test("each field kind's empty state goes in leave_out, and the harness never doe
                 "effort", "remote_control", "max_turns"],
   });
   assert.deepEqual(requestOf(fields, { harness: null }, WITHHELD, new Set()), { values: {}, leave_out: [] });
+});
+
+test("a bool whose default is true sends unticked as false, since left out it would launch ticked", () => {
+  const fields = [field("takes_policy_directors", { type: "bool", default: "true" }),
+                  field("scratch", { type: "bool", default: "false" })];
+  assert.deepEqual(requestOf(fields, { takes_policy_directors: "false", scratch: "false" }, new Set(), new Set()),
+                   { values: { takes_policy_directors: "false" }, leave_out: ["scratch"] });
+  assert.deepEqual(requestOf(fields, { takes_policy_directors: "true" }, new Set(), new Set()),
+                   { values: { takes_policy_directors: "true" }, leave_out: [] });
 });
 
 test("a kept withheld text is in neither list; unticked it is left out; typed it is the user's own", () => {
@@ -466,4 +475,22 @@ test("the past sessions add the older pages after the first, each launch once", 
   assert.equal(pastView(feed(null, { loading: true })).state, "loading");
   assert.deepEqual(parsePasts({ state: "up", detail: null, sessions: [PAST, { nope: 1 }] }).sessions, [PAST]);
   assert.equal(parsePasts({ state: "up", detail: null }), null);
+});
+
+test("a resume's body carries the brief or brief file typed beside it, and nothing blank", () => {
+  assert.deepEqual(resumeBody("s1", "", ""), { session: "s1" });
+  assert.deepEqual(resumeBody("s1", "  \n", " "), { session: "s1" });
+  assert.deepEqual(resumeBody("s1", "Carry on.\n", ""), { session: "s1", brief: "Carry on.\n" });
+  assert.deepEqual(resumeBody("s1", "", " /w/brief.md "), { session: "s1", brief_file: "/w/brief.md" });
+  assert.deepEqual(resumeBody("s1", "Go.", "/w/brief.md"), { session: "s1", brief: "Go.", brief_file: "/w/brief.md" });
+});
+
+test("a launches topic value that leaves out a shown launch is read again, not drawn", () => {
+  const up = (...ids) => ({ state: "up", detail: null, launches: ids.map((id) => ({ ...ROW, request_id: id })) });
+  assert.equal(dropsShown(up("q1", "q2"), up("q1")), true);
+  assert.equal(dropsShown(up("q1"), up("q2", "q1")), false, "a new launch is drawn");
+  assert.equal(dropsShown(up("q1"), up("q1")), false);
+  assert.equal(dropsShown(null, up()), false, "nothing shown yet");
+  assert.equal(dropsShown(up("q1"), { state: "error", detail: "x", launches: [] }), false);
+  assert.equal(dropsShown(up("q1"), null), false);
 });

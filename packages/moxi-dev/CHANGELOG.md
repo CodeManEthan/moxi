@@ -2,6 +2,61 @@
 
 ## Unreleased
 
+- `MOXI_TEST_TEMP` (`disk` or `ram`, unset meaning `disk`) decides where a test run keeps
+  its temp: on Linux `/var/tmp` or `/dev/shm`, elsewhere the system's own, where `ram`
+  runs as `disk` and says so. The kit's short directories leave `/tmp` for the same root,
+  inside one recorded directory per pytest process, where a test's own has a
+  one-character name to keep its socket paths short. A run in memory removes a passed
+  test's files when it ends and the whole run's at the run's end, and goes to disk when
+  RAM is short. Each top-level run sweeps what killed runs of the kit left, by the owner
+  records they hold locked, and touches nothing else. A run nested in a test (the fence's
+  new `MOXI_TEST_FENCED` mark, or a fence active in its process) chooses and sweeps
+  nothing. `moxi-dev check` and `moxi-dev timed` keep their tests' temp on disk whatever
+  is set, and the check's summary gains a `temp` field. `moxi-dev check --static`
+  starts no test, so it reads no `MOXI_TEST_TEMP`, sweeps nothing and says `temp not run`.
+- `moxi-dev check --pick [--base REV]` prints the packages the change picks as one JSON
+  line, `{"packages": [...]}`, and runs no step, so a workflow can run only the picked
+  packages' jobs.
+- On Windows the test fence places each module's `MOXI_<MODULE>_HOME` at
+  `moxi\<module>` under the test's own `LOCALAPPDATA`, inside the test's profile, so a
+  file a module keeps only inside the user's profile (comms' token store) is inside the
+  test's. It spells every directory it gives in its long form, its real path, so a
+  runner whose `TEMP` has an 8.3 short name no longer hands tests a short spelling to
+  compare with resolved paths. Elsewhere the module homes stay in the test's short
+  directory.
+- `Fence.profile_dir(name)` makes a new directory inside the test's own profile (its
+  home, `USERPROFILE` on Windows) for a file that must live there.
+- The naming check reads a file's path with `/` separators on every platform, so a
+  Windows contributor's `# noqa: MX...` marks count there too.
+- `moxi-dev check` has a pronoun step, after the release step among the static steps,
+  so `--static` runs it too: it refuses he, his, him and himself, as whole words in any case, in each
+  package's Python string literals and docstrings, its web sources' strings and comments,
+  and its README, docs and bundled skills, and prints each as `path:line: word` with the
+  fix. A genuine use stands with `noqa: MX5 -- <why>` on its line. The summary line says
+  `pronouns pass`, `fail` or `not run`, and `--only pronouns` runs it alone.
+- `moxi-dev check` has a machine-text step, the last of the static steps, so `--static`
+  runs it too: it refuses a path into one user's home folder in shipped text, a name
+  from the running contributor's own private-names list (secrets') in any file, and a
+  package-manager command in any file, and prints each as `path:line: machine text: ...`
+  with the fix, never printing a private name. A genuine use of a home folder or a
+  command stands with `noqa: MX6 -- <why>` on its line. The summary line says
+  `machine pass`, `fail` or `not run`, `--only machine` runs it alone, and a
+  private-names list secrets can't read exits 2. moxi-dev now requires moxi-secrets.
+- `moxi-dev check` picks fewer packages. Closing over dependents leaves out edges to
+  `moxi-dev`, which every package lists in its dev group, so a change to a package
+  `moxi-dev` requires no longer picks them all; other dev-group edges still count (a ui
+  change picks connector). A change in `moxi-dev` still picks every package, except one
+  to its rename table alone, which picks `moxi-dev`. A root path a package's tests read
+  picks that package: `README.md` picks memory, `.github/workflows/publishing.yml`
+  and `release.yml` pick publishing, and `.github/workflows/ci.yml` and `queue.yml`
+  pick `moxi-dev` alone, whose tests read them. The rest of `.github/`, `docs/` and
+  `CONTRIBUTING.md` pick no package; the lock, the root `pyproject.toml` and the other
+  root files still pick every one.
+- `moxi-dev check --static` runs only the whole-tree static steps (tags, comment
+  references, naming, Ruff, renames, release), with the same lines, summary line and
+  exit codes as a full check gives them, and no lock check, package picking, sync, lint
+  or tests. It takes about 80 to 140 s on this repository. It refuses `--only`, `--full`,
+  `--base` and `--finding`.
 - The test fence keeps `MOXI_TEST_REAL_SUPERVISOR` as pytest started with it, and leaves
   it unset when it was. Before, a fenced test lost it at call time, so every proof row on
   a real supervisor failed with `SupervisorRefused` (or skipped, where the row read it in

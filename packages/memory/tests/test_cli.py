@@ -7,7 +7,7 @@ import time
 
 import pytest
 from moxi import files
-from moxi_dev.testing import wait_for
+from moxi_dev.testing import PROC_WAIT_S, wait_for
 from moxi_sessions import api as sessions
 
 from moxi_memory import clock, cli, index, ingest, links, start, state
@@ -221,7 +221,7 @@ def test_ingest_and_reindex_return_before_their_child_finishes(capsys, slow_chil
     code, out, _ = memory(capsys, *argv)
     assert code == 0 and time.monotonic() - began < 1 and not slow_child.exists()
     assert out.splitlines()[-1] == "watch it with: moxi memory status"
-    wait_for(slow_child.exists, timeout=10)
+    wait_for(slow_child.exists, timeout=PROC_WAIT_S)
     assert slow_child.read_text().strip() == args
 
 
@@ -238,6 +238,26 @@ def test_reindex_says_what_a_rebuild_drops_before_it_starts_the_child(capsys, mo
     assert ("drops each session whose transcript is gone from every folder of its "
             "harness" in printed[0])
     assert "process 4242" in out
+
+
+def test_reindex_over_rows_an_older_redact_stored_says_what_it_keeps(capsys, monkeypatch):
+    t = claude()
+    t.user("a prompt")
+    t.write()
+    run()
+    with index.writer() as w:
+        conn = w.connect()
+        try:
+            conn.execute("DELETE FROM meta WHERE key = ?", (index.REDACT_VERSION_KEY,))
+        finally:
+            conn.close()
+    monkeypatch.setattr(start, "spawn", lambda args: 4242)
+    code, out, _ = memory(capsys, "reindex")
+    assert code == 0
+    assert "stored under secrets' redact version 1" in out
+    assert "drops no session, and no row of a source it can't read to its end" in out
+    assert "that the source no longer gives leaves" in out
+    assert "drops each session whose transcript is gone from every folder" not in out
 
 
 def test_reindex_while_a_rebuild_runs_is_queued_behind_it(capsys, monkeypatch):

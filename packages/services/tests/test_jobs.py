@@ -10,6 +10,7 @@ import time
 
 import pytest
 
+from moxi_dev.testing import PROC_WAIT_S
 from moxi_services import jobs
 from moxi_services.acts import Outcome
 
@@ -49,7 +50,7 @@ def done(ident: str = "services/web", act: str = "stop", code: int = 0, **extra)
     return Outcome(ident, act, code, **extra)
 
 
-def until(check, within: float = 10.0) -> None:
+def until(check, within: float = PROC_WAIT_S) -> None:
     deadline = time.monotonic() + within
     while not check():
         assert time.monotonic() < deadline, "timed out"
@@ -149,6 +150,7 @@ def test_the_table_keeps_the_newest_ended_jobs_and_every_running_one():
         assert [j for j in ("slow", "j0", "j1", "j2", "j3") if table.get(j)] == [
             "j2", "j3"]
     finally:
+        gate.set()
         table.close()
 
 
@@ -163,3 +165,27 @@ def test_an_act_that_raises_ends_failed_and_the_thread_runs_on(table, caplog):
     assert found.lines == (jobs.RAISED.format("RuntimeError"),)
     assert ended(table, "next").state == "done"
     until(lambda: table.holds.held() == 0)
+
+
+def test_close_waits_for_the_jobs_queued_before_it_and_its_thread_to_end():
+    table = jobs.Jobs(Holds())
+    gate = threading.Event()
+    ran: list[int] = []
+    table.submit("slow", "stop", "services/web", lambda: gate.wait(30) and done())
+    table.submit("next", "stop", "services/web", lambda: ran.append(1) or done())
+    threading.Timer(0.2, gate.set).start()
+    table.close()
+    assert ran == [1] and table.get("next").state == "done"
+    assert not table._thread.is_alive()
+
+
+def test_close_says_so_when_a_job_never_ends():
+    table = jobs.Jobs(Holds())
+    gate = threading.Event()
+    table.submit("stuck", "stop", "services/web", lambda: gate.wait(30) and done())
+    try:
+        with pytest.raises(TimeoutError, match="never ended"):
+            table.close(wait_s=0.2)
+    finally:
+        gate.set()
+        table.close()

@@ -65,8 +65,8 @@ export function costWords(sum: Pick<Sum, "cost" | "complete">): string {
   return sum.complete ? fmtCost(sum.cost) : `at least ${fmtCost(sum.cost)}`;
 }
 
-/** Why a sum is not whole, for the hover over an `at least` figure and a table's
- * column; null for a whole one. A token count is not whole only for a count the
+/** Why a sum is not whole, for the hover over an `at least` figure and a table's mark in
+ * a cost cell; null for a whole one. A token count is not whole only for a count the
  * harness did not report; a cost also for tokens with no price. */
 export function whyNotWhole(sum: Sum, measure: "cost" | "tokens" = "cost"): string | null {
   const out: string[] = [];

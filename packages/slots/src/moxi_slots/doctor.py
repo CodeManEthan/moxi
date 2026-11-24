@@ -19,6 +19,9 @@ declared stores. These rows add what only slots knows, and write no doctor recor
                   drift row (a registered slot with no session, a session with no row,
                   a slot with two run windows)
     holds         warn on holds in the registry that have run out
+    hooks         warn when the `pane-died` hook failed to write a run's end, or did not
+                  start, in the last `HOOK_FAILURES_DAYS` days (`hooks.log`): those runs
+                  read crashed after the next server start
 
 Further rows come from `CHECKS`, each a function returning rows, run after these.
 """
@@ -42,6 +45,8 @@ STALE_LAUNCH = 60.0
 TRAMPOLINE = "moxi-slots-exec"
 #: Seconds the linger read gets.
 LINGER_TIMEOUT = 3.0
+#: Days back the hooks row looks for failed run-end writes.
+HOOK_FAILURES_DAYS = 7
 
 
 def _row(name: str, state: str, detail: str, fix: str | None = None) -> Row:
@@ -272,8 +277,33 @@ def holds_rows() -> list[Row]:
                  "--holder H`")]
 
 
+def hooks_rows() -> list[Row]:
+    import time
+
+    from moxi import files
+
+    path = places.hooks_log()
+    try:
+        records = files.read_records(path)
+    except FileNotFoundError:
+        records = []
+    except (OSError, ValueError) as exc:
+        return [_row("hooks", "warn", f"{path} cannot be read: {exc}")]
+    since = time.time() - HOOK_FAILURES_DAYS * 86400
+    recent = [r for r in records if isinstance(r.get("at"), (int, float)) and r["at"] >= since]
+    if not recent:
+        return [_row("hooks", "ok", f"no failed run-end writes in {HOOK_FAILURES_DAYS} days")]
+    last = recent[-1]
+    return [_row("hooks", "warn",
+                 f"the pane-died hook failed to write {len(recent)} run end(s) in "
+                 f"{HOOK_FAILURES_DAYS} days, the last for slot {last.get('slot')}: "
+                 f"{last.get('error')}",
+                 f"each run it missed reads crashed after the next server start; {path} "
+                 "has every one")]
+
+
 #: The checks after the fixed rows, in order; each returns rows.
-CHECKS: list[Callable[[], Iterable[Row]]] = [registry_rows, holds_rows]
+CHECKS: list[Callable[[], Iterable[Row]]] = [registry_rows, holds_rows, hooks_rows]
 
 
 def rows() -> Iterator[Row]:
@@ -298,4 +328,4 @@ def rows() -> Iterator[Row]:
 __all__ = ["STALE_LAUNCH", "TRAMPOLINE", "CHECKS", "system_row", "tmux_row",
            "server_mode_row", "linger_row", "options_row", "socket_row",
            "launch_files_row", "trampoline_row", "mismatches_row", "registry_rows",
-           "holds_rows", "rows"]
+           "holds_rows", "hooks_rows", "HOOK_FAILURES_DAYS", "rows"]

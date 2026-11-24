@@ -21,6 +21,8 @@ export interface RosterRow {
    * `opencode`); null for any other row. */
   harness: string | null;
   directors: string[];
+  /** The part of `directors` only the box's `[policy] directors` gave. */
+  policy_directors: string[];
   session_id: string | null;
   /** When the session took the name, on the server's clock, epoch seconds. */
   bound_at: number | null;
@@ -84,6 +86,7 @@ export function parseRoster(data: unknown): Roster | null {
   const kept = rows
     .filter((row) => typeof row === "object" && row !== null && typeof row.qualified === "string")
     .map((row): RosterRow => ({ ...row, live: row.live === true, directors: strings(row.directors),
+                                policy_directors: strings(row.policy_directors),
                                 awaiting: strings(row.awaiting), cache: parseCacheFact(row.cache),
                                 holder: typeof row.holder === "string" ? row.holder : null,
                                 via: typeof row.via === "string" && row.via !== "" ? row.via : null }));

@@ -1,7 +1,63 @@
 # Changelog
 
-## Unreleased
+## 0.2.8 (2026-11-23)
 
+- On the modules view, each block's card says `Reading…` until its block first takes up
+  height, rather than showing an empty card while the block's script and first read
+  are out.
+- While reads that decide a page's layout are out, `client.js` marks the page root (the
+  shell's `#moxi-panel`) with `data-reading="<n>"`, their count, and takes the mark away
+  at none: each `api` read until its answer has been drawn, each `subscribe` until its
+  first value (at most 5 s), each `place` until its element is placed. A user sees no
+  change. For module authors, `moxi_ui.testing` gains the `ui_press` fixture
+  (`moxi_ui.testing.browser.press`), a click that waits for the mark to go first, and
+  `settled(page)`: press through it and a late answer can't move a control under the
+  click. A page that never settles fails the press with the mark's count.
+- `client.js` gains `readLater(read, ms)`, for a read a page decides on but sends after a
+  wait (a list read again after a topic value, a field read once typing stops): the
+  page root's `data-reading` mark counts it from the moment it is scheduled until its
+  answer has been drawn, and the function it gives cancels it. A user sees no change.
+
+## 0.2.7 (2026-11-22)
+
+- Past its 20 sessions, the shell's sign-in store now evicts the least recently used
+  session, not the oldest made, and never one that holds an open push stream or proxied
+  request. Twenty sign-ins (CLI tickets, a phone) no longer sign out a desktop tab in use
+  and end its live updates. When every session holds a stream, a sign-in still succeeds
+  and the store keeps more than 20 until a stream closes. A session's last use is the
+  last request it made, or the end of a stream it held. The gateway's phone sessions (4
+  per device, 16 in all) are evicted least recently used first too.
+- Settings compares a `path` key's value with its default as paths: a default under the
+  home folder is joined with the platform's separator, and both sides are normalised
+  (and case-folded on Windows) before the comparison. On Windows a path key left at its
+  default no longer counts as changed in the list's counts and the changed view.
+
+## 0.2.6 (2026-11-22)
+
+- `client.js` gains `WaitClock`, the wait a page shows a line after (`Reading…` once its
+  first read has been out 400 ms). It measures on the monotonic clock, and once its
+  timer has fired it reads as due, so the render that timer asks for draws the line in
+  every browser. A page that compared `Date.now()` with its start could miss it in
+  Firefox, which coarsens that clock and can fire the timer a millisecond early by it.
+
+## 0.2.5 (2026-11-22)
+
+- A page may announce `band_unless`, a list of module names: while any of them is
+  installed, the page has no entry in the band of pages, and its address still opens it.
+  `/m/ui/api/modules` and `ComponentInfo` carry it on a page (`[]` when it names none) and
+  null on any other component. A value that is not a list of module names reads as none.
+- `<moxi-ui-rail>` sizes its small and vertical forms with custom element states, so it
+  draws as designed from Chrome 125, Firefox 126 and Safari 17.4. Below that a mark no
+  longer throws: an engine with no custom states, or one that takes only names starting
+  with `--` (Chrome 123 and 124), draws each mark plainly, at a full cell's size, where
+  before the whole rail failed to draw.
+
+## 0.2.4 (2026-11-20)
+
+- On the Modules view the Page servers block now sits last, under the Installed list, and
+  its list is mostly drawn with the rest of the page. When the list arrives late it no
+  longer pushes the blocks and links already on the page down by a few hundred pixels, so
+  a click that lands on a link just as the list arrives opens what it pressed.
 - A page's push stream closes as the page leaves. In Firefox, a reload or a navigation
   within about 50 ms of the view's topics changing could leave the shell holding a push
   stream no page read, beside the new page's own, for 30 s and more. Each such stream
@@ -200,6 +256,23 @@
   beside line one's button, not inside it, and is never cut; a click or key in it sends
   no `moxi-row-toggle`, as for `acts`. A page that leaves it empty draws as before. A page
   that fills it needs a ui with this slot.
+- New element `<moxi-ui-rail>`, defined by `client.js`: a line of step markers, each
+  `<moxi-ui-mark>` child one cell. A mark's `state` is one of eight shapes (`done`,
+  `none`, `yours`, `failed`, `owed`, `waiting`, `todo`, `child`), with a `word` under it,
+  a `count`, a `label` for its accessible name and an opaque `key`; the flags `settled`,
+  `here`, `open`, `quiet` and `wide`. The line is solid from the first marker through
+  each settled one up to and including the first not settled, and dashed after. A click,
+  Enter or Space on a marker sends `moxi-rail-mark` from the rail with `{key}`; the page
+  sets `open`. `size="small"` draws a picture with no buttons, and `vertical` stacks the
+  marks with their labels and words. Cells take `--moxi-rail-cell` (56 px) and
+  `--moxi-rail-label` (132 px). `docs/rail.md` has the list. `client.d.ts` gains
+  `RailElement`, `MarkElement` and `RailMark`.
+- New colour tokens `state-done`, `state-yours`, `state-yours-soft` and `state-failed`:
+  a green, an amber, an amber tint and a red in every colour set, `plain` included, for
+  a step's state on the rail. In calm-workbench and midnight-neon they are those sets'
+  `ok`, `attention`, `attention-soft` and `error`; in `plain`, where those are the text
+  colour and a grey, they are colours of their own. The two `plain` sets' descriptions
+  say so. Each is held to the text floor, 4.5:1, on every background.
 
 ## 0.2.3 (2026-11-08)
 

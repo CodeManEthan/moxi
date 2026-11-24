@@ -136,7 +136,7 @@ export interface ViewRow extends Row {
   edited: boolean;
   /** On the Codex rules file's row, the permission items it holds; else null. */
   covers: string[] | null;
-  /** An entry the user had before loadout, which loadout keeps as his. */
+  /** An entry the user had before loadout, which loadout keeps as the user's. */
   prior: boolean;
   /** The sections under which `install` applies the row: `section`, `whole`, or null when
    * no run does. */

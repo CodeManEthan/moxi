@@ -154,7 +154,7 @@ def test_a_job_that_waits_past_the_core_lock_exits_75_with_the_waiting_line(
         holder.wait(timeout=30)
     record = end("j1")
     assert record["exit"] == 75
-    assert any("waiting for an install or uninstall" in line
+    assert any("waiting for the core lock, which pid " in line
                for line in record["outcome"]["lines"]), record
 
 

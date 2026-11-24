@@ -82,15 +82,34 @@ def _when(epoch: float | None) -> str:
     return time.strftime("%Y-%m-%d %H:%M", time.localtime(epoch))
 
 
+def _until_text(hold) -> str:
+    if hold.until is None:
+        return "until released by hand"
+    return f"until {_when(hold.until)}"
+
+
 def _hold_text(slot) -> str:
     if slot.hold is None:
         return "-"
-    return f"{slot.hold.holder} until {_when(slot.hold.until)}"
+    return f"{slot.hold.holder} {_until_text(slot.hold)}"
+
+
+def _ended_text(ended) -> str:
+    """How the last run ended, for `show`: its status or signal, or why it was settled,
+    and when; `-` while no end is recorded."""
+    if ended is None:
+        return "-"
+    if ended.settled is not None:
+        return f"settled ({ended.settled}) at {_when(ended.at)}"
+    how = f"signal {ended.signal}" if ended.signal is not None else (
+        f"status {ended.status}" if ended.status is not None else "no status")
+    return f"{how} at {_when(ended.at)}"
 
 
 def _row_text(slot) -> list[str]:
     last = "-" if slot.last is None else f"{slot.last.label} at {_when(slot.last.at)}"
-    return [str(slot.number), slot.name or "-", slot.state,
+    state = f"{slot.state}, crashed" if slot.crashed else slot.state
+    return [str(slot.number), slot.name or "-", state,
             str(slot.attached), _hold_text(slot), slot.label or "-", last]
 
 
@@ -159,7 +178,8 @@ def _run_show(args) -> int:
                "drift": [d.words for d in listing.drift if d.number == number]})
         return codes.OK
     pairs = [("slot", str(found.number)), ("name", found.name or "-"),
-             ("state", found.state), ("launchable", "yes" if found.launchable else "no"),
+             ("state", f"{found.state}, crashed" if found.crashed else found.state),
+             ("launchable", "yes" if found.launchable else "no"),
              ("idle", "yes" if found.idle else "no"), ("attached", str(found.attached)),
              ("hold", _hold_text(found)), ("label", found.label or "-")]
     if found.pane_id:
@@ -172,6 +192,8 @@ def _run_show(args) -> int:
         pairs.append(("last launch", f"{found.last.label} at {_when(found.last.at)}"))
         if found.last.meta:
             pairs.append(("last meta", json.dumps(found.last.meta, sort_keys=True)))
+        if found.last.run is not None:
+            pairs.append(("ended", _ended_text(found.last.ended)))
     pairs.append(("created", _when(found.created) if found.created else "(no row)"))
     pairs += [("drift", d.words) for d in listing.drift if d.number == number]
     width = max(len(k) for k, _ in pairs)
@@ -272,18 +294,23 @@ def _run_attach(args) -> int:
 
 
 def _add_hold(verbs) -> None:
-    p = verbs.add_parser("hold", help="reserve a slot for a holder, for a while")
+    p = verbs.add_parser("hold", help="reserve a slot for a holder, for a while or until "
+                                      "released")
     p.add_argument("slot", metavar="N|NAME")
     p.add_argument("--holder", required=True, metavar="H")
-    p.add_argument("--for", dest="seconds", required=True, type=float, metavar="S",
-                   help="seconds, at most a day")
+    how_long = p.add_mutually_exclusive_group(required=True)
+    how_long.add_argument("--for", dest="seconds", type=float, metavar="S",
+                          help="seconds, at most a day")
+    how_long.add_argument("--until-released", action="store_true",
+                          help="hold until `moxi slots release` ends it")
 
 
 def _run_hold(args) -> int:
     from .slots import hold
 
-    found = hold(_number(args.slot), args.holder, args.seconds)
-    print(f"slot {args.slot} held by {found.holder} until {_when(found.until)}")
+    found = hold(_number(args.slot), args.holder,
+                 None if args.until_released else args.seconds)
+    print(f"slot {args.slot} held by {found.holder} {_until_text(found)}")
     return codes.OK
 
 

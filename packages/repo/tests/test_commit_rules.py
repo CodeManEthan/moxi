@@ -130,6 +130,59 @@ def test_the_trailer_block_comments_and_scissors_are_not_tag_checked():
                     comment=";") == []
 
 
+#: A tag on a line that also quotes a passage, the shape Core's public-repo policy refused
+#: for its own ruling tags.
+QUOTED_RULING = r'^(?=.*(?:"[^"]*\w[^"]*"|“[^”]*\w[^”]*”)).*?\bTAG-[0-9]+\b'
+#: An indented Round: or Reconciles: line, any case, which Core refused like the trailer.
+INDENTED_ROUND = r"(?i)^\s+(?:Round|Reconciles)\s*:"
+#: A message with Core's usual trailers, which Core passed.
+SIGNED = ("Fix the parser\n\nIt read one byte too many.\n\n"
+          "Commit-Check: 3fa1c2d4e5b6\n"
+          "Co-Authored-By: Sample Bot <bot@example.invalid>\n")
+
+
+def test_a_quoted_ruling_written_as_a_trailer_is_refused_only_with_tag_check_trailers():
+    text = 'Fix the parser\n\nBody.\n\nNote: "keep the folder" TAG-7\n'
+    assert problems(text, patterns=[QUOTED_RULING]) == []
+    assert problems(text, patterns=[QUOTED_RULING], tag_check_trailers=True) == [
+        'no tags: line 5 has "Note: "keep the folder" TAG-7"; say it in plain words']
+
+
+def test_with_tag_check_trailers_a_continuation_line_is_checked_too():
+    text = "Fix it\n\nBody.\n\nAcked-by: someone\n  Round: proj-a/one\n"
+    assert problems(text, patterns=[INDENTED_ROUND]) == []
+    assert problems(text, patterns=[INDENTED_ROUND], tag_check_trailers=True) == [
+        'no tags: line 6 has "  Round:"; say it in plain words']
+    # In the body the line is read either way.
+    body = "Fix it\n\nBody.\n\tRECONCILES : proj-a/one\n"
+    assert problems(body, patterns=[INDENTED_ROUND]) == [
+        'no tags: line 4 has "\tRECONCILES :"; say it in plain words']
+
+
+def test_an_unindented_round_trailer_is_the_refused_trailers_alone():
+    text = "Fix it\n\nBody.\n\nRound: proj-a/one\n"
+    assert problems(text, patterns=[INDENTED_ROUND], refused=["Round"],
+                    tag_check_trailers=True) == [
+        "refused trailer: line 5 has Round, which this repo refuses; remove it"]
+
+
+def test_commit_check_and_co_authored_by_trailers_pass_with_tag_check_trailers():
+    assert problems(SIGNED, patterns=[QUOTED_RULING, INDENTED_ROUND], refused=["Round"],
+                    tag_check_trailers=True) == []
+
+
+def test_tag_check_trailers_reads_as_git_spells_a_bool():
+    read = commit_rules.read_tag_check_trailers
+    assert read({}) == (False, None)
+    assert read({"tag-check-trailers": [""]}) == (False, None)
+    for word in ("true", "YES", "on", "1"):
+        assert read({"tag-check-trailers": [word]}) == (True, None)
+    for word in ("false", "No", "off", "0"):
+        assert read({"tag-check-trailers": [word]}) == (False, None)
+    # Neither reads as true, so the piece checks more, and says why.
+    assert read({"tag-check-trailers": ["maybe"]}) == (True, "'maybe' is not true or false")
+
+
 def test_no_tag_pattern_means_no_tag_check():
     assert problems("Fix TAG-12\n", patterns=[]) == []
     assert problems("Fix TAG-12\n", patterns=[""]) == []
@@ -252,7 +305,7 @@ def test_it_is_declared_and_off_unless_added(demo, capsys):
     code, out, _ = run(capsys, "git-hooks", "available")
     assert code == 0
     assert ("repo/commit-rules  commit-msg, closed, order 10, settings: refused-trailer "
-            "(multi), rule (multi), tag-pattern (multi)") in out
+            "(multi), rule (multi), tag-check-trailers (one), tag-pattern (multi)") in out
     repo = demo.repo()
     write_config("[commit_rules]\ntag_patterns = ['\\bTAG-[0-9]+\\b']\n")
     assert run(capsys, "git-hooks", "add", str(repo), "demo/msg")[0] == 0
@@ -338,6 +391,53 @@ def test_no_tag_pattern_set_means_no_tag_check_through_git(demo, capsys):
     change(repo, text="x\n")
     done = commit(repo, message="Fix\n\nAcked-by:")
     assert done.returncode != 0 and "the trailer Acked-by has no value" in done.stderr
+
+
+@POSIX_ONLY
+def test_tag_check_trailers_through_git(demo, capsys):
+    repo = demo.repo()
+    assert run(capsys, "git-hooks", "add", str(repo), PIECE,
+               "--set", f"tag-pattern={QUOTED_RULING}",
+               "--set", f"tag-pattern={INDENTED_ROUND}")[0] == 0
+    ruled = 'Fix the parser\n\nBody.\n\nNote: "keep the folder" TAG-7'
+    change(repo)
+    assert commit(repo, message=ruled).returncode == 0
+    assert run(capsys, "git-hooks", "add", str(repo), PIECE,
+               "--set", "tag-check-trailers=true")[0] == 0
+    assert piece_config(repo)["tag-check-trailers"] == ["true"]
+    change(repo, text="more\n")
+    done = commit(repo, message=ruled)
+    assert done.returncode != 0
+    assert refused_line(done) == [
+        'repo: commit-msg refused by repo/commit-rules: no tags: line 5 has "Note: "keep the '
+        'folder" TAG-7"; say it in plain words']
+    done = commit(repo, message="Fix it\n\nBody.\n\nAcked-by: someone\n  round: proj-a/one")
+    assert done.returncode != 0 and 'no tags: line 6 has "  round:"' in done.stderr
+    before = head(repo)
+    done = commit(repo, message=SIGNED)
+    assert done.returncode == 0, done.stderr
+    assert head(repo) != before
+
+
+@POSIX_ONLY
+def test_a_tag_check_trailers_value_that_is_not_a_bool(demo, capsys):
+    repo = demo.repo()
+    code, _, err = run(capsys, "git-hooks", "add", str(repo), PIECE,
+                       "--set", "tag-check-trailers=maybe")
+    assert code != 0
+    assert ("repo/commit-rules: --set tag-check-trailers: 'maybe' is not true or false; "
+            "nothing was written") in err
+    assert PIECE not in gitconf.read(gitconf.resolve(repo)).pieces
+    # Written by hand, it refuses every commit and names the fix.
+    assert run(capsys, "git-hooks", "add", str(repo), PIECE)[0] == 0
+    git(repo, "config", "moxi-repo.piece.repo/commit-rules.tag-check-trailers", "maybe")
+    change(repo)
+    done = commit(repo, message="Fix the parser")
+    assert done.returncode != 0
+    assert refused_line(done) == [
+        "repo: commit-msg refused by repo/commit-rules: tag-check-trailers 'maybe' is not "
+        f"true or false; fix it with: moxi repo git-hooks add {repo} repo/commit-rules --set "
+        "tag-check-trailers=true"]
 
 
 @POSIX_ONLY
@@ -536,3 +636,16 @@ def test_commit_rules_problems_reads_the_piece_settings_of_the_repo(demo):
     assert moxi_repo.commit_rules_problems(repo, f"Fix it\n{scissors}\nTAG-12\n") != []
     api.disable(repo, PIECE)
     assert moxi_repo.commit_rules_problems(repo, message) == []
+
+
+def test_commit_rules_problems_reads_tag_check_trailers_as_the_hook_does(demo):
+    import moxi_repo
+
+    repo = demo.repo("alpha-notes")
+    ruled = 'Fix it\n\nBody.\n\nNote: "keep the folder" TAG-7\n'
+    api.add(repo, PIECE, sets=[f"tag-pattern={QUOTED_RULING}"])
+    assert moxi_repo.commit_rules_problems(repo, ruled) == []
+    api.add(repo, PIECE, sets=["tag-check-trailers=yes"])
+    assert moxi_repo.commit_rules_problems(repo, ruled) == [
+        'no tags: line 5 has "Note: "keep the folder" TAG-7"; say it in plain words']
+    assert moxi_repo.commit_rules_problems(repo, SIGNED) == []

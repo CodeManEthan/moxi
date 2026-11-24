@@ -20,6 +20,8 @@ import sys
 import textwrap
 import threading
 import time
+import tomllib
+from importlib import metadata
 from pathlib import Path
 from types import SimpleNamespace
 from urllib.parse import urlencode
@@ -28,6 +30,7 @@ import pytest
 
 import moxi.store
 from moxi import modules
+from moxi_dev.testing import PROC_WAIT_S
 from moxi_sessions import api as sessions
 from moxi_usage import index, limits, models, page, pagehandlers, readings, reports, store
 from moxi_usage.readings import Reading
@@ -232,7 +235,7 @@ class Stream:
             await self.task
 
 
-async def until(check, timeout: float = 5.0) -> None:
+async def until(check, timeout: float = PROC_WAIT_S) -> None:
     async with asyncio.timeout(timeout):
         while not check():
             await asyncio.sleep(0.01)
@@ -254,7 +257,7 @@ def test_each_route_declares_exactly_the_keys_it_reads_and_one_is_the_gateways()
         "/api/limits": ("read", set(), False),
         "/api/window": ("read", {"harness", "limit_id", "minutes"}, False),
         "/api/daily": ("read", {"by", *FILTERS}, False),
-        "/api/sessions": ("read", {"top", "skip", *FILTERS}, False),
+        "/api/sessions": ("read", {"top", "skip", "sort", "order", *FILTERS}, False),
         "/api/session": ("read", {"session", *FILTERS}, False),
         "/api/projects": ("read", {"by", *FILTERS}, False),
         "/api/models": ("read", FILTERS, False),
@@ -454,9 +457,12 @@ def test_a_bad_argument_is_refused_with_the_reports_words(seeded):
                                        until="2026-10-01")
     assert "1 or more" in refused("/api/sessions", top="0")
     assert "0 or more" in refused("/api/sessions", skip="-1")
-    for top in ("201", "1001"):
+    for top in ("501", "1001"):
         status, body = asyncio.run(ask(served(), "/api/sessions", {"top": top}))
         assert status == 400
+    # a page reads up to 500 sessions
+    status, _body = asyncio.run(ask(served(), "/api/sessions", {"top": "500"}))
+    assert status == 200
 
 
 def test_sessions_send_the_top_by_cost_and_how_many_more(seeded):
@@ -466,8 +472,8 @@ def test_sessions_send_the_top_by_cost_and_how_many_more(seeded):
     assert costs == sorted(costs, reverse=True) and len(costs) == 3
     first = body["rows"][0]
     assert set(first) == {"harness", "session_id", "name", "folder", "started", "known",
-                          "cwd", "project", "models", "first_ts", "last_ts", "context",
-                          *ROW_KEYS}
+                          "cwd", "project", "models", "first_ts", "last_ts", "turns",
+                          "subagent_share", "context", *ROW_KEYS}
     s1 = next(row for row in body["rows"] if row["session_id"] == "s1")
     assert (s1["cwd"], s1["harness"]) == ("/w/app", "claude")
     assert s1["models"] == ["m-a", "m-b", "mystery-9"]
@@ -510,12 +516,12 @@ def keys_of(body):
     return [(row["harness"], row["session_id"] or row["cwd"]) for row in body["rows"]]
 
 
-ORDER = [("claude", "dear"), ("claude", "mid"), ("claude", "tie-a"), ("claude", "tie-b"),
-         ("claude", "/w/loose-a"), ("claude", "/w/loose-b"), ("codex", "tie-a"),
+ORDER = [("claude", "dear"), ("claude", "mid"), ("claude", "tie-a"), ("codex", "tie-a"),
+         ("claude", "tie-b"), ("claude", "/w/loose-a"), ("claude", "/w/loose-b"),
          ("claude", "unpriced")]
 
 
-def test_sessions_come_by_cost_then_tokens_then_harness_and_id(many):
+def test_sessions_come_by_cost_then_session_id_then_harness(many):
     body = get("/api/sessions", utc="true")
     assert keys_of(body) == ORDER
     assert (body["count"], body["more"], body["skip"]) == (8, 0, 0)
@@ -524,9 +530,11 @@ def test_sessions_come_by_cost_then_tokens_then_harness_and_id(many):
     assert costs[0] > costs[1] > costs[2]
     # an unpriced session is last however many tokens it holds
     assert body["rows"][-1]["tokens"] > body["rows"][0]["tokens"]
+    # no request carries a turn id: each session counts 0 turns
+    assert [row["turns"] for row in body["rows"]] == [0] * 8
 
 
-def test_fewer_tokens_at_the_same_cost_come_after_more(monkeypatch):
+def test_sessions_of_one_cost_come_by_session_id_whatever_their_tokens(monkeypatch):
     monkeypatch.setattr(models, "table", lambda *a, **k: table())
     t = at("2026-10-01T12:00")
     conn = store.open_index()
@@ -539,7 +547,7 @@ def test_fewer_tokens_at_the_same_cost_come_after_more(monkeypatch):
         conn.close()
     body = get("/api/sessions", utc="true")
     assert [row["cost"] for row in body["rows"]] == [pytest.approx(0.0045)] * 2
-    assert [row["session_id"] for row in body["rows"]] == ["z-more", "a-few"]
+    assert [row["session_id"] for row in body["rows"]] == ["a-few", "z-more"]
 
 
 def test_skip_and_top_cut_the_order_and_count_and_more_say_what_is_left(many):
@@ -558,6 +566,47 @@ def test_skip_and_top_cut_the_order_and_count_and_more_say_what_is_left(many):
     # the total is the range's whichever rows are sent
     assert past["total"] == get("/api/sessions", utc="true")["total"]
     assert get("/api/sessions", folder="/w/tool", top="1", skip="1")["count"] == 3
+
+
+def test_sessions_sort_by_a_column_either_way_and_page_in_that_order(many):
+    assert keys_of(get("/api/sessions", sort="cost", order="desc", utc="true")) == ORDER
+    # least first, ties by session id then harness either way, and an unpriced row last
+    # either way
+    assert keys_of(get("/api/sessions", sort="cost", order="asc", utc="true")) == [
+        ("claude", "tie-a"), ("codex", "tie-a"), ("claude", "tie-b"), ("claude", "/w/loose-a"),
+        ("claude", "/w/loose-b"), ("claude", "mid"), ("claude", "dear"), ("claude", "unpriced")]
+    started = [("claude", "dear"), ("claude", "mid"), ("claude", "tie-b"), ("claude", "tie-a"),
+               ("codex", "tie-a"), ("claude", "unpriced"), ("claude", "/w/loose-a"),
+               ("claude", "/w/loose-b")]
+    assert keys_of(get("/api/sessions", sort="started", order="asc", utc="true")) == started
+    assert keys_of(get("/api/sessions", sort="started", utc="true")) == started[::-1]
+    assert keys_of(get("/api/sessions", sort="active", utc="true"))[0] == ("claude", "dear")
+    assert keys_of(get("/api/sessions", sort="project", order="asc", utc="true")) == [
+        ("claude", "dear"), ("claude", "mid"), ("claude", "unpriced"), ("claude", "/w/loose-a"),
+        ("claude", "/w/loose-b"), ("claude", "tie-a"), ("codex", "tie-a"), ("claude", "tie-b")]
+    tokens = [row["tokens"] for row in get("/api/sessions", sort="tokens", order="asc")["rows"]]
+    assert tokens == sorted(tokens)
+    seen = []
+    for skip in (0, 3, 6):
+        body = get("/api/sessions", sort="started", order="asc", top="3", skip=str(skip), utc="true")
+        assert body["count"] == 8
+        seen += keys_of(body)
+    assert seen == started
+    for bad in ({"sort": "title"}, {"order": "up"}):
+        status, _ = asyncio.run(ask(served(), "/api/sessions", bad))
+        assert status == 400
+
+
+def test_the_place_filters_take_several_one_to_a_line(many):
+    def count(**query):
+        return get("/api/sessions", utc="true", **query)["count"]
+
+    assert count(folder="/w/tool") == 3 and count(folder="/w/loose-a") == 1
+    assert count(folder="/w/tool\n/w/loose-a") == 4
+    assert count(project="/w/tool\n/w/loose-a\n") == 4
+    assert count(folder="\n") == count() == 8
+    body = get("/api/daily", folder="/w/tool\n/w/app", utc="true")
+    assert body["filters"] == [{"name": "folder", "value": "/w/tool, /w/app"}]
 
 
 def test_a_file_with_no_session_id_is_a_row_with_a_null_id_and_no_context(many):
@@ -951,6 +1000,25 @@ def test_requests_send_one_row_per_request_with_the_marks_between_them(requests_
     assert resumed["total"]["claimed_elsewhere"] == 3 and resumed["total"]["copied_marks"] == 1
 
 
+def test_sessions_carry_their_turns_and_subagent_share_and_sort_by_both(requests_seeded):
+    rows = {row["session_id"]: row for row in get("/api/sessions", utc="true")["rows"]}
+    assert rows["s1"].keys() == page.SESSION_ROW.keys()
+    assert (rows["s1"]["turns"], rows["s2"]["turns"]) == (2, 3)
+    agent = [row for row in get("/api/session", session="s1", harness="claude", utc="true")["rows"]
+             if row["agent"] == "a"]
+    share = sum(row["cost"] for row in agent) / rows["s1"]["cost"]
+    assert rows["s1"]["subagent_share"] == pytest.approx(share) and 0 < share < 1
+    assert rows["s2"]["subagent_share"] == 0.0
+
+    def order(**query):
+        return [row["session_id"] for row in get("/api/sessions", utc="true", **query)["rows"]]
+
+    assert order(sort="turns") == ["s2", "s1"]
+    assert order(sort="turns", order="asc") == ["s1", "s2"]
+    assert order(sort="subagent_share") == ["s1", "s2"]
+    assert order(sort="subagent_share", order="asc") == ["s2", "s1"]
+
+
 def test_requests_need_a_session_and_answer_empty_for_an_unknown_one(requests_seeded):
     status, _body = asyncio.run(ask(served(), "/api/requests", {}))
     assert status == 400
@@ -1089,11 +1157,12 @@ def test_the_restart_point_is_the_first_mark_of_the_models_main_sessions(priced_
     before = path.read_bytes(), path.stat().st_mtime_ns, sorted(path.parent.iterdir())
     for model in MARKS_EXACT:
         assert get("/api/restart-point", model=model) == {
-            "model": model, "tokens": MARKS_EXACT[model]["1x"], "reason": None}
+            "model": model, "tokens": MARKS_EXACT[model]["1x"], "borrowed_from": None,
+            "reason": None}
     # a bracket or date suffix reads the base model's row, and the answer names that row
     assert get("/api/restart-point", model="claude-opus-5-5[1m]") == {
         "model": "claude-opus-5-5", "tokens": MARKS_EXACT["claude-opus-5-5"]["1x"],
-        "reason": None}
+        "borrowed_from": None, "reason": None}
     assert (path.read_bytes(), path.stat().st_mtime_ns,
             sorted(path.parent.iterdir())) == before
 
@@ -1113,7 +1182,7 @@ def test_the_restart_point_is_null_with_its_reason_for_a_model_the_measure_lacks
         priced_marks):
     write_params()
     body = get("/api/restart-point", model="gpt-x")
-    assert body == {"model": "gpt-x", "tokens": None,
+    assert body == {"model": "gpt-x", "tokens": None, "borrowed_from": None,
                     "reason": "the restart-point measure has no main row for gpt-x"}
     # a measure's file that does not read is a reason too, not a refusal
     body = get("/api/restart-point", model="claude-opus-5")
@@ -1127,8 +1196,19 @@ def test_the_restart_point_needs_a_model():
     status, _ = asyncio.run(ask(served(), "/api/restart-point", {}))
     assert status == 400
     body = get("/api/restart-point", model="")
-    assert body == {"model": "", "tokens": None,
+    assert body == {"model": "", "tokens": None, "borrowed_from": None,
                     "reason": "no model is known for the session"}
+
+
+def test_the_restart_point_of_a_model_that_borrows_a_row_names_the_lender(monkeypatch):
+    from test_thresholds import borrow_table, with_opus
+
+    monkeypatch.setattr(models, "table", lambda *a, **k: borrow_table())
+    write_params(with_opus())
+    assert get("/api/restart-point", model="claude-fable-5-2[1m]") == {
+        "model": "claude-fable-5-2", "tokens": 140_380,
+        "borrowed_from": "claude-opus-5-5", "reason": None}
+    assert get("/api/restart-point", model="claude-opus-5-5")["borrowed_from"] is None
 
 
 # --- limits ---------------------------------------------------------------------------------
@@ -1205,7 +1285,7 @@ def test_the_limits_route_makes_no_pull_and_the_poller_does(pulls, monkeypatch):
     async def go():
         stream = Stream(served(), "limits")
         try:
-            return (await stream.next(5))[1]
+            return (await stream.next(PROC_WAIT_S))[1]
         finally:
             await stream.close()
             pagehandlers._current.poller.cancel()
@@ -1509,6 +1589,23 @@ def test_a_scoped_limit_opens_with_its_readings_and_no_sessions(seeded):
     assert body["opened"] == limits.iso(now - 6 * 86400)
     assert body["readings"]["count"] == 2 and body["readings"]["first"] is not None
     assert body["used"] is None
+    assert "model_family" not in body
+
+
+def test_a_limit_that_is_not_the_main_one_lists_no_sessions(seeded):
+    now = time.time()
+    put_readings(Reading("claude", "oauth_apps", 10080, "seven_day_oauth_apps", 4.0,
+                         now + 86400, now - 60, "session-usage", "s1"),
+                 Reading("codex", "codex_other", 300, "primary", 30.0, now + HOUR, now - 60,
+                         "rollout", "thread-1"),
+                 codex_window(20.0, 60, now=now))
+    apps = get("/api/window", harness="claude", limit_id="oauth_apps", minutes=10080)
+    other = get("/api/window", harness="codex", limit_id="codex_other", minutes=300)
+    main = get("/api/window", harness="codex", limit_id="codex", minutes=300)
+    for body in (apps, other):
+        assert body["opened"] is not None
+        assert body["used"] is None
+    assert main["used"] is not None
 
 
 def test_a_main_window_lists_the_sessions_that_used_it_since_it_opened(monkeypatch):
@@ -1717,8 +1814,15 @@ def test_the_page_asks_for_sessions_names_through_interface_5():
     found = modules.load("sessions", interface=5)
     assert found.ok, found.reason
     assert callable(found.api.session_facts)
-    declared = (ROOT / "pyproject.toml").read_text(encoding="utf-8")
-    assert '"moxi-sessions>=0.2.8,<0.3"' in declared
+    # usage never admits a sessions older than 0.2.8, the first with interface 5, and
+    # admits the one installed.
+    project = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))["project"]
+    [needed] = [line for line in project["dependencies"] if line.startswith("moxi-sessions")]
+    floor = re.fullmatch(r"moxi-sessions>=(\d+)\.(\d+)\.(\d+),<0\.3", needed)
+    assert floor is not None, needed
+    least = tuple(int(part) for part in floor.groups())
+    assert least >= (0, 2, 8)
+    assert tuple(int(part) for part in metadata.version("moxi-sessions").split(".")[:3]) >= least
 
 
 def test_an_answer_of_200_rows_asks_the_sessions_module_once(monkeypatch, names):
@@ -1896,12 +2000,12 @@ def test_the_poller_publishes_limits_only_when_they_change(monkeypatch):
     async def go():
         stream = Stream(served(), "limits")
         try:
-            name, first = await stream.next(5)
+            name, first = await stream.next(PROC_WAIT_S)
             assert name == "limits" and stream.status == 200
             assert set(first) == {"today", "rows", "pull", "notes"}
             assert await stream.none_within(0.6)
             put_readings(codex_reading(55.0, observed=time.time() - 5))
-            _, later = await stream.next(5)
+            _, later = await stream.next(PROC_WAIT_S)
             five = [r for r in later["rows"] if (r["harness"], r["label"]) == ("codex", "5h")]
             assert five[0]["used_percent"] == 55.0
             assert await stream.none_within(0.6)
@@ -1927,7 +2031,7 @@ def test_the_poller_starts_with_the_first_stream_and_runs_for_the_servers_life(m
         await ask(app, "/api/pass", method="POST")        # a pass alone starts no poller
         assert pagehandlers._current.poller is None and gathered == []
         one, two = Stream(app, "limits"), Stream(app, "index")
-        await one.next(5)
+        await one.next(PROC_WAIT_S)
         feed = pagehandlers._current
         poller = feed.poller
         assert poller is not None and not poller.done()
@@ -1940,7 +2044,7 @@ def test_the_poller_starts_with_the_first_stream_and_runs_for_the_servers_life(m
         assert feed.poller is poller and not poller.done()
         assert len(gathered) > count
         again = Stream(app, "limits")
-        assert (await again.next(5))[0] == "limits"
+        assert (await again.next(PROC_WAIT_S))[0] == "limits"
         assert feed.poller is poller
         await again.close()
         poller.cancel()
@@ -1964,7 +2068,7 @@ def test_the_poller_outlives_a_gather_that_raises(monkeypatch, caplog):
     async def go():
         stream = Stream(served(), "limits")
         try:
-            assert (await stream.next(5))[0] == "limits"
+            assert (await stream.next(PROC_WAIT_S))[0] == "limits"
         finally:
             await stream.close()
 
@@ -2018,16 +2122,17 @@ def test_the_pass_runs_once_at_a_time_holds_busy_and_publishes_index_at_start_an
             assert await stream.none_within(0.2)
             assert await ask(app, "/api/pass", method="POST") == (
                 200, {"started": True, "running": True})
-            assert await stream.next(5) == ("index", {"running": True, "last_pass": LAST_PASS,
-                                                      "note": None})
+            assert await stream.next(PROC_WAIT_S) == ("index", {"running": True,
+                                                                "last_pass": LAST_PASS,
+                                                                "note": None})
             assert await ask(app, "/api/pass", method="POST") == (
                 200, {"started": False, "running": True})
             _, health = await ask(app, "/api/health")
             assert health["open"]["busy"] == ["pass"]
             release.set()
-            assert await stream.next(5) == ("index", {"running": False,
-                                                      "last_pass": LAST_PASS + 60,
-                                                      "note": None})
+            assert await stream.next(PROC_WAIT_S) == ("index", {"running": False,
+                                                                "last_pass": LAST_PASS + 60,
+                                                                "note": None})
             await until(lambda: not pagehandlers._current.running())
             _, health = await ask(app, "/api/health")
             assert health["open"]["busy"] == []
@@ -2055,8 +2160,8 @@ def test_a_pass_that_fails_ends_with_its_reason_on_the_index_topic(seeded, monke
         stream = Stream(app, "index")
         try:
             assert (await ask(app, "/api/pass", method="POST"))[0] == 200
-            assert (await stream.next(5))[1]["running"]
-            _, end = await stream.next(5)
+            assert (await stream.next(PROC_WAIT_S))[1]["running"]
+            _, end = await stream.next(PROC_WAIT_S)
             assert end == {"running": False, "last_pass": LAST_PASS,
                            "note": "the pass failed (OSError); the page server's log has "
                                    "the details"}
@@ -2097,7 +2202,7 @@ def test_a_catch_up_pass_over_many_new_sources_reads_them_on_the_pool(monkeypatc
         try:
             assert await ask(app, "/api/pass", method="POST") == (
                 200, {"started": True, "running": True})
-            assert (await stream.next(5))[1]["last_pass"] == first.finished_at
+            assert (await stream.next(PROC_WAIT_S))[1]["last_pass"] == first.finished_at
             _, end = await stream.next(120)
             await pagehandlers._current.pass_task
             return end

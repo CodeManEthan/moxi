@@ -15,8 +15,10 @@ events and hands each digest to it, named by the digest's id as its `ref`.
     finding            turns.find(pid=<claude>), once a second until an endpoint answers
     the stop handler   Session.handle_stops(on_stop): the decision is ClaudeShim.on_stop
     release points     each TurnEnded, and an idle session (no turn open, mail queued)
-    a digest           Session.deliver(text, ref=<digest>), settled from its turn's end
-    interrupt mail     Session.steer(text, ref=<digest>) into the running turn
+    a digest           Session.deliver(text, ref=<digest>, by="comms", senders=<its
+                       senders>), settled from its turn's end
+    interrupt mail     Session.steer(text, ref=<digest>, by="comms", senders=<its
+                       senders>) into the running turn
 
 **Finding the endpoint.** Turns' Claude runner starts the endpoint at the session's
 start, and it answers once it has its session id. Until this adapter has found it, mail
@@ -32,15 +34,18 @@ turn has `turned` set.
 **Delivery.** Plain mail goes one digest at a time, at turn boundaries only: when a turn
 ends (any turn: the person's, or the one that took the digest before it) or when the
 session is idle with mail queued and the queue has stopped growing. turns' `deliver`
-starts the turn now if the session is idle and else when the running turn ends.
+starts the turn now if the session is idle and else when the running turn ends. Every
+hand-in, by `deliver` or `steer`, carries `by="comms"` and the names of the digest's
+senders (`claude_shim.digest_senders`), which the session's `prompt` listeners read as
+the prompt's `delivery_by` and `delivery_senders`.
 
 **Interrupt mail.** A queued message whose sender asked to interrupt, while a turn runs
 on a session that offers `steer`, goes at once: the shim opens a digest of the interrupt
 mail alone, marks its frames `[interrupt]`, and the adapter steers it into the turn. A
 steer refused `idle` (the turn ended between the check and the call) or `loading` falls
-back to `deliver` with the same text and ref, once; turns runs the text once whichever
-way the race went. A session without `steer` takes interrupt mail at the boundary like
-any other.
+back to `deliver` with the same text, ref and senders, once; turns runs the text once
+whichever way the race went. A session without `steer` takes interrupt mail at the
+boundary like any other.
 
 **Settling.** The ack is the end of the turn that took the digest. turns' `turn.ended`
 names every delivery the turn took, the opening one and each steered one, by ref, so each
@@ -72,7 +77,14 @@ whether the digest was handled.
 **What ends it.** `claude`'s exit, seen on the handle the wrapper took before it forked
 (a pidfd, so a reused pid cannot stand in for it). The adapter closes its binding, which
 deregisters the name, and removes its claim socket and claim file. An adapter that dies
-first leaves the session unbound until it is relaunched.
+first leaves its claim file (an adapter whose watch on `claude` fails keeps it too): a
+socket that answers no one under a live `claude` (`claimfile.adapter_gone`). The daemon
+sees its connection drop and starts a new adapter for the same session at once
+(`respawn`), and the session's next start or prompt does if that one didn't bind; it
+takes `claude`'s handle again, reads the claim file and binds the same name: no
+relaunch. A respawned adapter serves unbound while the daemon is
+away and binds when it returns, and one whose bind is refused keeps the claim file, so
+the listener and `moxi comms doctor` say that mail has stopped.
 """
 
 from __future__ import annotations
@@ -84,7 +96,7 @@ import threading
 import time
 
 from .. import constants
-from .claude_shim import ClaudeShim
+from .claude_shim import DELIVERY_BY, ClaudeShim
 
 log = logging.getLogger("comms.claude.adapter")
 
@@ -130,14 +142,15 @@ class _Unsent:
 
 class Hand:
     """One digest handed to turns: its `ref` (the digest's id as a string), the
-    `digest`, the `text`, whether it went by `steer`, and the library's `delivery`.
-    `boundary` is the shim's one boundary digest; a steered digest is not, nor is its
-    fallback `deliver`."""
+    `digest`, the `text`, the `senders` of its messages, whether it went by `steer`, and
+    the library's `delivery`. `boundary` is the shim's one boundary digest; a steered
+    digest is not, nor is its fallback `deliver`."""
 
-    def __init__(self, ref, digest, text: str, delivery, *, steer: bool):
+    def __init__(self, ref, digest, text: str, delivery, *, steer: bool, senders=()):
         self.ref = ref
         self.digest = digest
         self.text = text
+        self.senders = tuple(senders)
         self.delivery = delivery
         self.steer = steer
         self.boundary = not steer
@@ -402,9 +415,10 @@ class ClaudeAdapter:
                 self.shim.on_turn_boundary(answered=handled)
 
     # ------------------------------------------------------------------ delivery
-    def _handover(self, text: str, digest, *, steer: bool = False) -> None:
-        """The shim's hand-over: one digest to the endpoint, named by its id. Called from
-        a flush, under the adapter's lock. Never raises."""
+    def _handover(self, text: str, digest, *, steer: bool = False, senders=()) -> None:
+        """The shim's hand-over: one digest to the endpoint, named by its id, with
+        `by="comms"` and its messages' `senders`. Called from a flush, under the
+        adapter's lock. Never raises."""
         t = self.turns
         s = self.session
         ref = None if digest is None else str(digest)
@@ -413,13 +427,13 @@ class ClaudeAdapter:
         else:
             try:
                 if steer and self._can_steer():
-                    d = s.steer(text, ref=ref)
+                    d = s.steer(text, ref=ref, by=DELIVERY_BY, senders=senders)
                 else:
-                    d = s.deliver(text, ref=ref)
+                    d = s.deliver(text, ref=ref, by=DELIVERY_BY, senders=senders)
             except Exception as exc:                                 # noqa: BLE001
                 log.warning("the hand-in of digest %s failed: %s", digest, exc)
                 d = _Unsent(t.Lost(f"the hand-in failed: {type(exc).__name__}: {exc}"), ref)
-        hand = Hand(ref, digest, text, d, steer=steer)
+        hand = Hand(ref, digest, text, d, steer=steer, senders=senders)
         log.info("handed digest %s to turns by %s as delivery %s", digest,
                  "steer" if steer else "deliver", d.id)
         self.hands[ref] = hand
@@ -462,7 +476,8 @@ class ClaudeAdapter:
 
     def _fall_back(self, hand: Hand, generation: int, reason: str) -> bool:
         """A steer refused `idle` or `loading`: `deliver` the same text with the same
-        ref, once. False when the hand settled or the endpoint went meanwhile."""
+        ref, `by` and senders, once. False when the hand settled or the endpoint went
+        meanwhile."""
         t = self.turns
         with self._lock:
             if not self._live(hand, generation):
@@ -471,7 +486,8 @@ class ClaudeAdapter:
             log.info("the steer of digest %s was refused %s; delivering it instead",
                      hand.digest, reason)
             try:
-                hand.delivery = s.deliver(hand.text, ref=hand.ref)
+                hand.delivery = s.deliver(hand.text, ref=hand.ref, by=DELIVERY_BY,
+                                          senders=hand.senders)
             except Exception as exc:                                 # noqa: BLE001
                 hand.delivery = _Unsent(t.Lost(f"the hand-in failed: {type(exc).__name__}: "
                                                f"{exc}"), hand.ref)
@@ -621,7 +637,7 @@ def ended(fd: int) -> bool:
 
 
 def serve(shim: ClaudeShim, harness_pid: int, harness_fd: int, *, say=None,
-          turns=None) -> int:
+          turns=None, respawned: bool = False) -> int:
     """The adapter process's life: bind, give the wrapper its word, deliver until
     `claude` ends, close.
 
@@ -643,12 +659,19 @@ def serve(shim: ClaudeShim, harness_pid: int, harness_fd: int, *, say=None,
     environment: the shim keeps its hash (the value leaves the environment) and registers
     it after every bind, the first before `BOUND` is said, so `claude` starts after it.
     The form of layer one the session was taught is read first, while the token is still
-    there to show it."""
+    there to show it.
+
+    `respawned` is a new adapter for a session whose adapter is gone while `claude` runs
+    (`respawn`). Nobody waits to exec anything on its word: comms' listener reads it if
+    it comes in time, and an undelivered `BOUND` changes nothing. A daemon that is not
+    there is no failure (the supervisor binds when it returns, as an MCP shim respawned
+    by Claude Code did), said as `OFFLINE`. A bind that fails keeps the claim file, since
+    `claude` still runs and the file is how its session learns that mail has stopped."""
     from moxi import exit as moxi_exit
 
     from ..context import layer_one_form
     from .binding import ToolToken
-    from .word import BOUND, exit_of, word_for
+    from .word import BOUND, OFFLINE, exit_of, word_for
 
     say = say or (lambda code, reason="": None)
     if ended(harness_fd):
@@ -660,24 +683,40 @@ def serve(shim: ClaudeShim, harness_pid: int, harness_fd: int, *, say=None,
         shim.tool_token = ToolToken.from_env()
     adapter = ClaudeAdapter(shim, harness_pid, turns=turns)
     try:
-        adapter.start()
+        adapter.start(tolerate_offline=respawned)
     except Exception as exc:                                  # noqa: BLE001
-        log.warning("the launch of this session failed: %s", exc)
+        log.warning("the %s of this session failed: %s",
+                    "respawn" if respawned else "launch", exc)
         word = word_for(exc)
         say(word, str(exc))
-        shim.stop(remove_claim_file=True)
+        shim.stop(remove_claim_file=not respawned)
         return exit_of(word)
-    if say(BOUND) is False:
+    if respawned:
+        if shim.offline:
+            say(OFFLINE, "the comms daemon is not running; this adapter binds when it "
+                         "returns")
+        else:
+            say(BOUND)
+    elif say(BOUND) is False:
         log.warning("the wrapper of claude pid %d stopped waiting before the bind was "
                     "answered; letting the name go", harness_pid)
         adapter.stop(remove_claim_file=True)
         return moxi_exit.TEMPFAIL
-    log.info("adapter for claude pid %d is up (pid %d)", harness_pid, os.getpid())
+    log.info("%sadapter for claude pid %d is up (pid %d)",
+             "respawned " if respawned else "", harness_pid, os.getpid())
+    claude_ended = False
     try:
         wait_for_exit(harness_fd)
+        claude_ended = True
     finally:
-        log.info("claude pid %d has ended; closing this session's comms", harness_pid)
-        adapter.stop(remove_claim_file=True)
+        if claude_ended:
+            log.info("claude pid %d has ended; closing this session's comms", harness_pid)
+        else:
+            # The claim file stays: it is how the session and doctor learn that this
+            # session's mail has stopped (`claimfile.adapter_gone`).
+            log.error("this adapter is ending while claude pid %d runs: its mail stops "
+                      "until a new one binds", harness_pid)
+        adapter.stop(remove_claim_file=claude_ended)
     return 0
 
 

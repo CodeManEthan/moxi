@@ -410,7 +410,7 @@ def test_a_session_ends_after_twelve_hours_unused_or_seven_days(phone):
     assert phone.access.store.live() == 0
 
 
-def test_four_sessions_per_device_and_sixteen_in_all_the_oldest_first(phone):
+def test_four_sessions_per_device_and_sixteen_in_all_least_recently_used_first(phone):
     authenticator = Authenticator()
     phone.pair(authenticator, keep=False)
     cookies = []

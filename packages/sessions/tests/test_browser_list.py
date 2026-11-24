@@ -190,7 +190,7 @@ def filter_button(view, key: str):
 
 
 def test_the_page_keeps_the_contract_and_has_no_heading(seeded, ui_page, ui_component_check):
-    check = ui_component_check(ui_page, "sessions", "page", keep=True, allow=("launcher",))
+    check = ui_component_check(ui_page, "sessions", "page", keep=True, allow=("launcher", "turns"))
     assert check.element == "moxi-sessions-page"
     view = check.locator.locator("moxi-sessions-list")
     expect(count_line(view)).to_have_text(f"{ALL} sessions")
@@ -549,6 +549,13 @@ def test_a_machine_with_no_session_says_so_and_draws_no_field_or_filter(bare_she
     launcher = page.evaluate("async () => (await import('/m/ui/client.js')).installed('launcher')")
     home = view.get_by_role("link", name="Start one from Home")
     expect(home).to_have_count(1 if launcher else 0)
+    # With no filter line, turns' page is linked on a line of its own.
+    turns = page.evaluate("async () => (await import('/m/ui/client.js')).installed('turns')")
+    link = view.locator('[data-line="turns"] a[data-action="turns"]')
+    expect(link).to_have_count(1 if turns else 0)
+    if turns:
+        expect(link).to_have_text("Live sessions")
+        expect(link).to_have_attribute("href", "/m/turns/")
 
 
 def test_a_harness_whose_sessions_cannot_be_read_gets_a_line_under_the_list(broken_shell, ui_contexts, ui_width_check):

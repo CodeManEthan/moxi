@@ -72,4 +72,4 @@ def test_the_dirs_are_the_cores_for_memory():
 def test_the_announcement_names_the_schema_and_its_check():
     assert module.SETTINGS == "settings.toml"
     assert module.CONFIG_CHECK == "moxi_memory.settings:check_text"
-    assert set(module.OPTIONAL) == {"comms", "launcher"}
+    assert set(module.OPTIONAL) == {"comms", "launcher", "connector", "secrets"}

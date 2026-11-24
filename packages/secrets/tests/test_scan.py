@@ -75,6 +75,120 @@ def test_the_local_header_rules_hit_in_each_form(engine_name):
             ("private-key-header", 5, 5 + len(header))], kind
 
 
+# -- the slash run ---------------------------------------------------------------------------
+
+def slash_secret(r, size=40, *, floor=4.5):
+    """A random base64 run of `size` that holds a `/`, every case and a digit, no `//`,
+    and entropy above `floor`."""
+    while True:
+        value = corpus.chars(r, size, corpus.ALNUM + "+/")
+        if ("/" in value and "//" not in value and any(c.isupper() for c in value)
+                and any(c.islower() for c in value) and any(c.isdigit() for c in value)
+                and scan_mod._entropy(value) > floor):
+            return value
+
+
+def test_a_bare_random_run_holding_a_slash_hits_in_broad(engine_name):
+    r = corpus.rng(11)
+    for _ in range(20):
+        value = slash_secret(r)
+        for text in (value, f"export {value}\n", f'"{value}"', f"key ({value}==) ok"):
+            hits = [h for h in scan(text, ("broad",)) if h.rule == "high-entropy-slash-run"]
+            assert hits and value in text[hits[0].start:hits[0].end], text
+            assert "high-entropy-slash-run" in redact(text, ("broad",))
+
+
+def test_the_slash_run_misses_few_random_runs_by_its_floor(engine_name):
+    # A random 40-character base64 run falls at or under the 4.5 floor about 2% of the
+    # time; its shape holds nothing else that would keep it whole.
+    r = corpus.rng(13)
+    values = [slash_secret(r, floor=0.0) for _ in range(300)]
+    text = " \n".join(values)
+    found = {text[h.start:h.end] for h in scan(text, ("broad",))
+             if h.rule == "high-entropy-slash-run"}
+    assert len(set(values) - found) <= 15
+    assert "high-entropy-slash-run" in redact("".join(("aws ", "wJalrXUtnFEMI/K7MDENG/bPxRfiCY",
+                                                       "EXAMPLEKEY")), ("broad",))
+
+
+def test_the_slash_run_leaves_paths_urls_digests_and_uuids_alone(engine_name):
+    r = corpus.rng(12)
+    hexd = "0123456789abcdef"
+    words = "alpha beta gamma delta notes home moxi designs packages src tests".split()
+    quiet = [
+        "/" + "/".join(r.choice(words) for _ in range(12)),
+        "/usr/lib/python3/site/packages/Something/Else/More/Things",
+        "src/Moxi/Packages/Secrets/Tests/Test1/Corpus2/Data3/Files4",
+        "see https://example.com/a/b/c/d/e/f/g/h/i/j/k/l/m/n/o/p/q/r/s",
+        "https://github.com/moxihq/moxi/blob/main/packages/secrets/README.md",
+        "/Users/Alex/Library/Application/Support/Code2/User/workspaceStorage/a1",
+        "sha " + corpus.chars(r, 64, hexd) + "/" + corpus.chars(r, 40, hexd),
+        "id " + "-".join(corpus.chars(r, n, hexd) for n in (8, 4, 4, 4, 12)),
+        slash_secret(r, 24) + "//" + slash_secret(r, 24),
+        corpus.chars(r, 50, corpus.ALNUM),
+    ]
+    for text in quiet:
+        assert not [h for h in scan(text, ("broad",))
+                    if h.rule == "high-entropy-slash-run"], text
+
+
+def slash_hits(text, *, strict):
+    return [text[h.start:h.end] for h in scan(text, ("broad",), strict=strict)
+            if h.rule == "high-entropy-slash-run"]
+
+
+# Each character a run may start after, beside the text's start: whitespace (ASCII and
+# Unicode's), quotes, a backtick, = : ( [ { , < and >.
+SLASH_LEADS = [" ", "\t", "\n", "\r", "\x0b", "\x0c", "\x85", "\xa0", " ", " ",
+               " ", " ", " ", " ", " ", "　",
+               '"', "'", "`", "=", ":", "(", "[", "{", ",", "<", ">"]
+
+
+@pytest.mark.parametrize("strict", [False, True])
+def test_the_slash_run_hits_alone_and_after_each_listed_character(engine_name, strict):
+    r = corpus.rng(14)
+    value = slash_secret(r)
+    assert slash_hits(value, strict=strict) == [value]
+    for lead in SLASH_LEADS:
+        text = f"x{lead}{value} end"
+        assert value in "".join(slash_hits(text, strict=strict)), repr(lead)
+    for text in (f"FOO={value}", f"FOO={value}\n", f"https://example.test/p?a=1&sig={value}&b=2",
+                 f'{{"k": "{value}"}}', f"key: {value}", f"<{value}>"):
+        assert value in "".join(slash_hits(text, strict=strict)), text
+        assert value not in redact(text, ("broad",), strict=strict), text
+
+
+@pytest.mark.parametrize("strict", [False, True])
+def test_the_slash_run_misses_a_value_after_a_dot_a_dash_or_an_underscore(engine_name, strict):
+    r = corpus.rng(15)
+    value = slash_secret(r)
+    for lead in (".", "-", "_"):
+        assert slash_hits(f"x{lead}{value} end", strict=strict) == [], lead
+
+
+@pytest.mark.parametrize("strict", [False, True])
+def test_the_slash_run_leaves_ci_links_document_links_hosts_and_hashes_alone(engine_name,
+                                                                            strict):
+    r = corpus.rng(16)
+    sri = slash_secret(r, 64)
+    # Each path mixes upper case, lower case and digits, so the same run written after a
+    # space hits; only the character before it keeps the link or hash quiet.
+    cases = [
+        ("https://github.com/CodeOwner7/moxi/actions/runs/19283746501/job/54928374651",
+         "".join(("com/CodeOwner7/moxi/actions/runs/", "19283746501/job/54928374651"))),
+        ("https://github.com/CodeOwner7/moxi/actions/runs/19283746501",
+         "".join(("com/CodeOwner7/moxi/actions/runs/", "19283746501"))),
+        ("https://docs.google.com/document/d/1Xk9QzB7vLmN3pRtY5wA2sDfGhJ8kLzXcVbNm4QwErTy/edit",
+         "".join(("com/document/d/1Xk9QzB7vLmN3pRtY5", "wA2sDfGhJ8kLzXcVbNm4QwErTy/edit"))),
+        ("see https://ci-runner/Kx9mQ2vL7pR4tY8wB3nZ/Fj6hD1sA5gC0eU2iO9 now",
+         "".join(("runner/Kx9mQ2vL7pR4tY8wB3nZ/", "Fj6hD1sA5gC0eU2iO9"))),
+        (f'<script integrity="sha384-{sri}"></script>', sri),
+    ]
+    for text, run in cases:
+        assert slash_hits(f"x {run} end", strict=strict), run
+        assert slash_hits(text, strict=strict) == [], text
+
+
 # -- no-hit cases ---------------------------------------------------------------------------
 
 def every_placeholder():
@@ -114,11 +228,13 @@ def pat(text):
     return {"pattern": text, "fallback": text}
 
 
-def rule(rid, regex, *, keywords=(), entropy=0.0, group=0, path=None, allowlists=()):
+def rule(rid, regex, *, keywords=(), entropy=0.0, group=0, path=None, allowlists=(),
+         requires=()):
     return {"id": rid, "description": rid, "source": "local",
             "regex": pat(regex) if regex else None, "secretGroup": group,
             "entropy": entropy, "keywords": list(keywords),
             "path": pat(path) if path else None, "tags": [],
+            "requires": [pat(x) for x in requires],
             "allowlists": list(allowlists)}
 
 
@@ -250,6 +366,13 @@ def test_global_and_rule_allowlists(small):
     assert run_and("tok_aa1", "tests/a.txt") == [("r", "aa1")]
 
 
+def test_a_secret_must_match_each_regex_a_rule_requires(small):
+    run = small([rule("r", r"v=([a-z0-9]+)", requires=[r"[0-9]", r"^[a-z]"])])
+    assert run("v=abc1") == [("r", "abc1")]
+    assert run("v=abcd") == []                          # no digit
+    assert run("v=1abc") == []                          # starts with a digit
+
+
 def test_path_scoped_and_path_only_rules(small):
     run = small([rule("scoped", r"pw=([a-z]+)", path=r"\.ya?ml$"),
                  rule("file", None, path=r"\.p12$")])
@@ -277,6 +400,37 @@ def test_gitleaks_allow_keeps_its_line_out_for_the_gitleaks_sets_only(engine_nam
     assert {"private-names", "personal-data"} <= {h.set for h in hits}
     assert any(h.rule == "github-pat" for h in scan(f"t = {token}\n# gitleaks:allow",
                                                    ("credentials",)))
+
+
+def test_scan_keeps_what_the_mark_and_the_line_allowlists_keep(engine_name):
+    r = corpus.rng(57)
+    token = corpus.github(r)
+    assert not any(h.set in GITLEAKS for h in scan(
+        '{"text": "t = ' + token + '  # gitleaks:allow"}', GITLEAKS))
+    for form, path in corpus.LINE_ALLOWED:
+        text = form.format(value=corpus.generic_value(r))
+        assert scan(text, ("broad",), path=path) == [], form
+        # Without the line, the same value is a hit.
+        assert any(h.rule == "generic-api-key" for h in scan(
+            text.split(" ")[-1].strip('"'), ("broad",), path=path)), form
+
+
+def test_scan_reads_past_see_through_characters_and_still_keeps_the_mark(engine_name):
+    token = corpus.github(corpus.rng(58))
+    chars = corpus.see_through()
+    lines = ["k " + corpus.split(token, c) + " end" for c in chars]
+    hits = [h for h in scan("\n".join(lines), ("credentials",)) if h.rule == "github-pat"]
+    assert [h.line for h in hits] == list(range(1, len(chars) + 1))
+    for h, c in zip(hits, chars):
+        line_start = sum(len(x) + 1 for x in lines[:h.line - 1])
+        assert (h.start - line_start, h.end - line_start) == (2, 2 + len(token) + 1)
+        assert h.fingerprint == scan_mod.fingerprint(token)
+    marked = "t = " + corpus.split(token, "\u200b") + "  # gitleaks:allow"
+    assert scan(marked, ("credentials",)) == []
+    # A token no character splits gives the same hit as without one beside it.
+    plain = scan("x " + token, ("credentials",))
+    assert [(h.start, h.end) for h in scan("x " + token + "\r\u200b", ("credentials",))] \
+        == [(h.start, h.end) for h in plain]
 
 
 # -- hits -----------------------------------------------------------------------------------
@@ -334,7 +488,7 @@ def test_hits_are_sorted_and_a_pair_on_one_span_both_come_back(engine_name):
 def test_describe_counts_the_sets():
     info = {i.name: i for i in describe()}
     assert set(info) == set(SETS)
-    assert len(info["credentials"].rules) == 231 and len(info["broad"].rules) == 3
+    assert len(info["credentials"].rules) == 231 and len(info["broad"].rules) == 4
     assert info["credentials"].pin["tag"] == "v8.30.1"
     assert info["credentials"].dropped == ()
 
@@ -373,12 +527,22 @@ def test_the_import_pulls_in_no_engine_config_or_stdnum():
 #: The import's cost is these modules; one more here is a cost someone chose. hashlib,
 #: pathlib, datetime and typing load at first use instead.
 IMPORT_LOADS = frozenset({
-    "moxi_secrets", "moxi_secrets._folds", "moxi_secrets.allow", "moxi_secrets.engine",
+    "moxi_secrets", "moxi_secrets._folds", "moxi_secrets.allow", "moxi_secrets.chat",
+    "moxi_secrets.engine",
     "moxi_secrets.names", "moxi_secrets.paths", "moxi_secrets.scan",
-    "__future__", "bisect", "_bisect", "copyreg", "enum", "fnmatch", "json",
+    "__future__", "bisect", "_bisect", "collections.abc", "copyreg", "enum", "fnmatch",
+    "json",
     "json.decoder", "json.encoder", "json.scanner", "_json", "platform", "re",
     "re._casefix", "re._compiler", "re._constants", "re._parser", "_sre", "struct",
     "_struct",
+    # What those modules import in turn. A Linux venv's startup (its `site`) has loaded
+    # these already, so the import adds none of them there; under `python -S` none are
+    # loaded, and on Windows the import loads them itself.
+    "operator", "_operator", "collections", "_collections", "functools", "_functools",
+    "itertools", "keyword", "types", "reprlib",
+    # On Windows `platform` loads `_wmi`, and `fnmatch` loads `posixpath`, which is not
+    # `os.path` there.
+    *(("_wmi", "posixpath") if sys.platform == "win32" else ()),
 })
 
 

@@ -3,6 +3,8 @@ refuses, and a setting read for a round or for a build."""
 
 from __future__ import annotations
 
+import json
+
 import pytest
 from moxi import config
 
@@ -37,9 +39,10 @@ def test_an_empty_config_gives_a_build_a_local_merge_and_no_check():
     read = settings.load()
     assert {key: settings.build_setting(read, "proj-a", key)
             for key in settings.BUILD_KEYS} == {
-        "into": None, "check": None, "ci": None, "finish": [{"do": "merge", "id": "merge"}],
+        "into": None, "land": "finish", "check": None, "ci": None,
+        "finish": [{"do": "merge", "id": "merge"}],
         "check_on": "merged", "shared_paths": [], "keep_branch": False,
-        "lock_ref": None, "brief": [],
+        "lock_ref": None, "brief": [], "director": "", "private_files": [],
         "disposable": [".venv", "__pycache__", "*.pyc", ".pytest_cache", ".ruff_cache",
                        ".mypy_cache", "node_modules", "*.egg-info"]}
 
@@ -71,6 +74,7 @@ BOTH = """\
     keep_branch = true
     lock_ref = "refs/locks/finish"
     brief = ["Run only your own tests."]
+    private_files = ["AGENTS.md", "notes/local.md"]
 """
 
 
@@ -88,6 +92,8 @@ def test_a_projects_own_value_is_read_over_the_default(write_config):
     assert settings.build_setting(read, "proj-a", "keep_branch") is True
     assert settings.build_setting(read, "proj-a", "lock_ref") == "refs/locks/finish"
     assert settings.build_setting(read, "proj-a", "brief") == ["Run only your own tests."]
+    assert settings.build_setting(read, "proj-a", "private_files") == [
+        "AGENTS.md", "notes/local.md"]
 
 
 def test_a_key_the_project_leaves_out_reads_the_defaults_table(write_config):
@@ -146,7 +152,7 @@ def test_two_tables_that_name_one_project_in_two_cases_are_refused():
 
 def test_the_keys_for_a_round_and_for_a_build_share_none():
     assert not set(settings.ROUND_KEYS) & set(settings.BUILD_KEYS)
-    assert set(settings.ROUND_KEYS) | {"check_on", "disposable"} >= {
+    assert set(settings.ROUND_KEYS) | {"check_on", "disposable", "director"} >= {
         key.name.removeprefix("defaults.") for key in settings.schema().live()
         if key.name.startswith("defaults.")}
 
@@ -347,10 +353,55 @@ def test_a_sitting_count_of_zero_is_accepted():
     ('shared_paths = "*.lock"', "shared_paths", "is not a list of strings"),
     ("brief = [1]", "brief", "is not a list of strings"),
     ("lock_ref = false", "lock_ref", "is a boolean, not a name"),
+    ('private_files = "AGENTS.md"', "private_files", "is not a list of strings"),
+    ("private_files = [1]", "private_files", "is not a list of strings"),
 ])
 def test_a_project_value_of_the_wrong_type_is_refused(body, key, words):
     error = refusal(project(body))
     assert error.key == f"projects.proj-a.{key}" and words in error.problem
+
+
+@pytest.mark.parametrize("entry, words", [
+    ("", "which is empty"),
+    ("notes\\local.md", "write / between the parts"),
+    ("/etc/AGENTS.md", "not relative"),
+    ("~/AGENTS.md", "not relative"),
+    ("C:/AGENTS.md", "not relative"),
+    ("C:AGENTS.md", "not relative"),
+    ("notes/", "an empty, . or .. part"),
+    ("notes//local.md", "an empty, . or .. part"),
+    ("./AGENTS.md", "an empty, . or .. part"),
+    ("notes/../AGENTS.md", "an empty, . or .. part"),
+    (".git/info/exclude", "a .git part"),
+    ("sub/.GIT/x", "a .git part"),
+    ("*.md", "not a glob"),
+    ("AGENTS?.md", "not a glob"),
+    ("[A]GENTS.md", "not a glob"),
+    (":AGENTS.md", "pathspec magic"),
+    ("AGENTS.md\n", "a control character"),
+    ("AGENTS\t.md", "a control character"),
+])
+def test_a_private_file_that_is_no_literal_relative_path_is_refused(entry, words):
+    error = refusal(project(f"private_files = [{json.dumps(entry)}]"))
+    assert error.key == "projects.proj-a.private_files"
+    assert repr(entry) in error.problem and words in error.problem
+    assert "relative to the project's root" in error.fix
+
+
+def test_a_private_file_given_twice_is_refused():
+    error = refusal(project('private_files = ["AGENTS.md", "notes/x", "AGENTS.md"]'))
+    assert error.key == "projects.proj-a.private_files"
+    assert error.problem == "holds 'AGENTS.md' twice"
+
+
+def test_a_private_file_that_is_missing_from_the_repo_passes_the_check():
+    assert settings.check_text(project(
+        'private_files = ["AGENTS.md", "notes/local.md", "é.md"]')) is None
+
+
+def test_private_files_is_a_projects_own_key_with_no_default():
+    error = refusal('[defaults]\nprivate_files = ["AGENTS.md"]\n')
+    assert error.key == "defaults.private_files"
 
 
 def test_a_project_that_is_not_a_table_is_refused():

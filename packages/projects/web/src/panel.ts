@@ -7,8 +7,8 @@
 // and says under the field whether the folder exists and is a git repository, or that
 // nothing is there yet, with the box that makes it (hidden for a kind whose mint is
 // `refuse`), and how the path stands to a project that holds it. Only the answer for what
-// the field holds now is drawn. `Name` fills from the folder's last part until he types
-// in it, and says when a project already has the name. `More` folds `Kind`, `Lead` and,
+// the field holds now is drawn. `Name` fills from the folder's last part until the user
+// types in it, and says when a project already has the name. `More` folds `Kind`, `Lead` and,
 // while notes is installed, `Notes folder`, with their values on its line. `Add project`
 // sends `/api/add` with the paths as typed, `~` included; until the folder has been read,
 // a name it would fill is not sent. What the answer came to shows under the button: the
@@ -24,15 +24,16 @@
 // off, then `/api/set` with the fields, then the names added. It stops at the first
 // refusal and says what was saved before it; a save that stopped sends only the rest next
 // time. With no answer, it says the project may have been saved. When the project changes
-// elsewhere, a form he hasn't changed starts again from it; one he has keeps his values
-// and says so. The where note and a broken kind or contribution show as in Add.
+// elsewhere, a form the user hasn't changed starts again from it; one the user has
+// changed keeps those values and says so. The where note and a broken kind or contribution
+// show as in Add.
 //
 // After an act that was done or may have been, it sends `CHANGED` on the document, so the
 // page and every projects component read again.
 
 import { css, html, LitElement, nothing } from "lit";
 import { live } from "lit/directives/live.js";
-import { api } from "/m/ui/client.js";
+import { api, readLater } from "/m/ui/client.js";
 
 import { CHANGED, parseAdded, parseOne, parseWhere, parseWritten } from "./feed.ts";
 import type { Kinds, Listing, Project } from "./feed.ts";
@@ -133,7 +134,8 @@ export class ProjectsPanel extends LitElement {
   #asked: Asked | null = null;
   /** The folder field's value whose read is waited for, or null. */
   #waiting: string | null = null;
-  #timer: ReturnType<typeof setTimeout> | null = null;
+  /** Cancels the folder's read waiting to be sent. */
+  #cancelFolder = (): void => {};
   #note: string | null = null;
   #sending = false;
   #said: PanelSaid | null = null;
@@ -153,8 +155,7 @@ export class ProjectsPanel extends LitElement {
   disconnectedCallback(): void {
     super.disconnectedCallback();
     this.#connected += 1;
-    if (this.#timer !== null) clearTimeout(this.#timer);
-    this.#timer = null;
+    this.#cancelFolder();
   }
 
   protected firstUpdated(): void {
@@ -199,19 +200,16 @@ export class ProjectsPanel extends LitElement {
     this.requestUpdate();
   }
 
-  /** Reads what is at `typed` after the wait, unless the field moves on first. */
+  /** Reads what is at `typed` after the wait, unless the field moves on first. The page
+   * root counts the read as out from now, so a press waits for what it fills in. */
   #readFolder(typed: string, waitMs = 0): void {
-    if (this.#timer !== null) clearTimeout(this.#timer);
-    this.#timer = null;
+    this.#cancelFolder();
     if (typed.trim() === "") {
       this.#waiting = null;
       return;
     }
     this.#waiting = typed;
-    this.#timer = setTimeout(() => {
-      this.#timer = null;
-      void this.#askFolder(typed);
-    }, waitMs);
+    this.#cancelFolder = readLater(() => this.#askFolder(typed), waitMs);
   }
 
   async #askFolder(typed: string): Promise<void> {

@@ -48,6 +48,7 @@ import uuid
 from pathlib import Path
 
 from moxi import ipc
+from moxi_dev.testing import PROC_WAIT_S
 
 VERSION = 2
 
@@ -119,8 +120,9 @@ class FakeEndpoint:
         #: The open turn: {"id", "opening" (a delivery id or None), "deliveries"
         #: [(delivery id, how)]}, or None.
         self.turn: dict | None = None
-        #: Every delivery the endpoint recorded, by id: {"text", "ref", "method",
-        #: "started", "ended"} (the values as they go on the wire, None while pending).
+        #: Every delivery the endpoint recorded, by id: {"text", "ref", "method", "by",
+        #: "senders", "started", "ended"} (the values as they go on the wire, None while
+        #: pending or not sent).
         self.deliveries: dict[str, dict] = {}
         self.waiting: list[str] = []           # deliveries held for the turn's end
         self.texts: list[str] = []             # every text recorded, in order
@@ -400,7 +402,8 @@ class FakeEndpoint:
             if step is not None and step[0] == "gone":
                 raise ipc.RpcError(ERROR_GONE, "the endpoint is ending")
             recorded = step[2] if step is not None and step[0] == "late" else step
-            answer = self._record(method, text, ref, recorded)
+            answer = self._record(method, text, ref, recorded,
+                                  by=params.get("by"), senders=params.get("senders"))
         if step is not None and step[0] == "drop":
             conn.close()
             return answer
@@ -408,11 +411,13 @@ class FakeEndpoint:
             await asyncio.sleep(step[1])
         return answer
 
-    def _record(self, method: str, text: str, ref, step) -> dict:
+    def _record(self, method: str, text: str, ref, step, *, by=None,
+                senders=None) -> dict:
         did = f"d{next(self._ids)}"
         self.texts.append(text)
         self.calls.append((method, did, ref, text))
         self.deliveries[did] = {"text": text, "ref": ref, "method": method,
+                                "by": by, "senders": senders,
                                 "started": None, "ended": None}
         answer = {"delivery": did, "ref": ref}
         kind = step[0] if step is not None else None
@@ -480,7 +485,7 @@ class FakeEndpoint:
         with self._lock:
             return [i for i, d in self.deliveries.items() if d["ref"] == ref]
 
-    def wait_for(self, predicate, timeout: float = 3.0) -> None:
+    def wait_for(self, predicate, timeout: float = PROC_WAIT_S) -> None:
         deadline = time.monotonic() + timeout
         while not predicate():
             if time.monotonic() > deadline:

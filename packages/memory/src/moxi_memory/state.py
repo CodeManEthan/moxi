@@ -13,7 +13,12 @@ index. It holds these tables:
   the time it was first asked (`ask`, `take_request`, `read_request`);
 - `unfinished`, at most one row: the start time of a rebuild that ended without
   finishing (killed), written by the tidy that clears its entry and cleared by the next
-  rebuild that finishes.
+  rebuild that finishes;
+- `waiting`, one row per source an ingest couldn't read because its folder raised (an
+  archive folder offline, a permission or read error): every later walk reads it again
+  from its start, whatever its time, until a read reaches its end or the source is gone
+  (`read_waiting`, `write_waiting`, `waiting_sessions`). A compressed Codex rollout,
+  which sessions never reads, is never one.
 
 **Requests.** A walk, a full read, a rebuild or a relabel someone asked for is never lost
 to a held writer lock. The child started for it records it here before it tries the
@@ -35,9 +40,10 @@ from __future__ import annotations
 
 import os
 import time
-from collections.abc import Iterator, Mapping
+from collections.abc import Iterable, Iterator, Mapping
 from contextlib import contextmanager
 from pathlib import Path
+from typing import NamedTuple
 
 TYPE_CHECKING = False
 if TYPE_CHECKING:
@@ -92,6 +98,18 @@ SCHEMA = (
         one INTEGER PRIMARY KEY CHECK (one = 1),
         started REAL NOT NULL
     );
+    """,
+    """
+    CREATE TABLE waiting (
+        harness TEXT NOT NULL,
+        source TEXT NOT NULL,
+        session_id TEXT NOT NULL,
+        lookup TEXT NOT NULL,
+        root_dir TEXT NOT NULL,
+        why TEXT NOT NULL,
+        since REAL NOT NULL,
+        PRIMARY KEY (harness, source)
+    ) WITHOUT ROWID;
     """,
 )
 
@@ -295,6 +313,65 @@ def read_unfinished(conn: sqlite3.Connection) -> float | None:
     return None if row is None else float(row[0])
 
 
+# -- the sources waiting on a folder ---------------------------------------------------
+
+class Waiting(NamedTuple):
+    """A source an ingest couldn't read because its folder raised: its harness, its name
+    in the index's `sources` (`source`), the main session its rows go under, the id
+    sessions' `find` takes for it (`lookup`), the folder that holds it (`root_dir`), why
+    it wasn't read, and since when it has waited (seconds since the epoch)."""
+
+    harness: str
+    source: str
+    session_id: str
+    lookup: str
+    root_dir: str
+    why: str
+    since: float
+
+
+def read_waiting(conn: sqlite3.Connection) -> list[Waiting]:
+    """Every source waiting on a folder. Reads only."""
+    return [Waiting(*row) for row in conn.execute(
+        "SELECT harness, source, session_id, lookup, root_dir, why, since FROM waiting "
+        "ORDER BY harness, root_dir, lookup, source")]
+
+
+def write_waiting(conn: sqlite3.Connection, add: Iterable[Waiting],
+                  cleared: Iterable[tuple[str, str]], *, replace: bool = False) -> None:
+    """In one transaction: with `replace`, forget every source waiting first; record each
+    of `add` (one already waiting keeps its `since`); and forget each `(harness, source)`
+    of `cleared`."""
+    from moxi import store
+
+    with store.transaction(conn):
+        if replace:
+            conn.execute("DELETE FROM waiting")
+        conn.executemany(
+            "INSERT INTO waiting (harness, source, session_id, lookup, root_dir, why, since) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?) ON CONFLICT (harness, source) DO UPDATE SET "
+            "session_id = excluded.session_id, lookup = excluded.lookup, "
+            "root_dir = excluded.root_dir, why = excluded.why", list(add))
+        conn.executemany("DELETE FROM waiting WHERE harness = ? AND source = ?",
+                         list(cleared))
+
+
+def has_waiting(conn: sqlite3.Connection, schema: str = "main") -> bool:
+    """Whether the store `schema` names (one attached to an index reader, say) holds the
+    `waiting` table: a store from before it doesn't until memory next opens it to write."""
+    return conn.execute(f"SELECT 1 FROM {schema}.sqlite_master WHERE type = 'table' "
+                        "AND name = 'waiting'").fetchone() is not None
+
+
+def waiting_sessions(conn: sqlite3.Connection, schema: str = "main") -> int:
+    """How many main sessions have a source waiting on a folder; 0 for a store from
+    before the table."""
+    if not has_waiting(conn, schema):
+        return 0
+    return conn.execute(f"SELECT count(*) FROM (SELECT DISTINCT harness, session_id "
+                        f"FROM {schema}.waiting)").fetchone()[0]
+
+
 def peek(env: Mapping[str, str] | None = None) -> tuple[Request | None, float | None]:
     """The waiting request and the start of the last unfinished rebuild, read without
     creating the store, migrating it or taking a lock; None for each it can't read."""
@@ -337,4 +414,5 @@ def attach(conn: sqlite3.Connection, alias: str = "state",
 __all__ = ["STATE_DB", "SCHEMA", "KINDS", "Late", "Entry", "Request", "path", "connect",
            "bounded", "write_entry", "clear_entry", "read_entry", "ask", "read_request",
            "take_request", "peek", "write_unfinished", "clear_unfinished",
-           "read_unfinished", "attach"]
+           "read_unfinished", "attach", "Waiting", "read_waiting", "write_waiting",
+           "has_waiting", "waiting_sessions"]

@@ -2,7 +2,8 @@
 
     moxi-turns-codex-host --cwd DIR [--model M] [--sandbox MODE | --permissions PROFILE]
                           [--option KEY=VALUE]... [--options-file F]
-                          [--instructions-file F] [--resume THREAD_ID] [--no-window]
+                          [--instructions-file F]
+                          [--resume THREAD_ID | --fork THREAD_ID] [--no-window]
 
 An internal entry, spawned and never typed: a launcher spawns it (or execs it in a
 terminal pane), and comms' Codex wrapper execs it once it has bound its name and forked
@@ -10,13 +11,14 @@ its adapter, so every Codex launch takes this one path. It runs `turns.codex.lau
 with the keywords `launch_args` reads from the flags, and the session is the host
 process itself: a caller finds it with `turns.wait_ready(pid=<the host's pid>)`, which
 returns the `Session` once the first load is accepted, with Codex's thread id as its
-`session_id`.
+`session_id`. With `--fork` that thread is a new one, forked from THREAD_ID with
+`thread/fork`: a copy of its conversation, live or not, which every later load resumes.
 
-The flags build the thread parameters each `thread/start` and `thread/resume` sends:
-top-level `sandbox` or `permissions` (one or the other) and `model`, and a nested
-`config` of Codex config overrides. `--option KEY=VALUE` sets one entry of `config`:
+The flags build the thread parameters each `thread/start`, `thread/resume` and
+`thread/fork` sends: top-level `sandbox` or `permissions` (one or the other) and `model`,
+and a nested `config` of Codex config overrides. `--option KEY=VALUE` sets one entry of `config`:
 `KEY` is a TOML dotted key, each dot outside quotes a nesting level, so a quoted part
-keeps its dots and loses its quotes (`projects."/home/x/my.dir".trust_level`); `VALUE`
+keeps its dots and loses its quotes (`projects."/home/you/my.dir".trust_level`); `VALUE`
 is read as TOML, as `codex -c` reads it (text that is not TOML is a string). `--options-file` holds those parameters whole
 as one JSON object; flags beside it replace its keys, and `--sandbox` or
 `--permissions` replaces the file's choice of either. The sandbox has one spelling,
@@ -96,8 +98,11 @@ def _parser() -> _Parser:
                         help="a JSON object of thread parameters")
     parser.add_argument("--instructions-file", metavar="F",
                         help="the thread's developer instructions")
-    parser.add_argument("--resume", metavar="THREAD_ID",
+    thread = parser.add_mutually_exclusive_group()
+    thread.add_argument("--resume", metavar="THREAD_ID",
                         help="resume this thread instead of starting one")
+    thread.add_argument("--fork", metavar="THREAD_ID",
+                        help="fork this thread into a new one instead of starting one")
     parser.add_argument("--no-window", dest="window", action="store_false",
                         help="run no Codex window in this terminal")
     return parser
@@ -105,7 +110,7 @@ def _parser() -> _Parser:
 
 def launch_args(argv) -> dict:
     """The keywords of `turns.codex.launch()` from the host's flags: `cwd`, `options`,
-    `instructions`, `resume` and `window`. Reads the options and instructions files.
+    `instructions`, `resume`, `fork` and `window`. Reads the options and instructions files.
     Raises `UsageError` for any flag the host refuses."""
     from .codex import OWNED_OPTIONS
 
@@ -160,8 +165,10 @@ def launch_args(argv) -> dict:
                              f"{_why(exc)}") from None
     if args.resume is not None and not args.resume.strip():
         raise UsageError("--resume names a thread id")
+    if args.fork is not None and not args.fork.strip():
+        raise UsageError("--fork names a thread id")
     return {"cwd": str(cwd), "options": options, "instructions": instructions,
-            "resume": args.resume, "window": args.window}
+            "resume": args.resume, "fork": args.fork, "window": args.window}
 
 
 def _options_file(name: str) -> dict:

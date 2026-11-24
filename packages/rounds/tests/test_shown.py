@@ -1,5 +1,5 @@
 """Showing the operator what was recorded: what `rule` prints for whoever recorded a
-ruling, `moxi rounds mark --shown` and what it refuses, his read-back of a project's
+ruling, `moxi rounds mark --shown` and what it refuses, the operator's read-back of a project's
 list, and the list of rulings not yet shown."""
 
 from __future__ import annotations
@@ -76,7 +76,7 @@ def everything(tmp_path):
 
 # -- what rule prints --------------------------------------------------------------------
 
-def test_a_ruling_is_printed_as_recorded_with_the_mark_that_says_he_saw_it(
+def test_a_ruling_is_printed_as_recorded_with_the_mark_that_says_the_operator_saw_it(
         rounds, capsys):
     said = "  Two  spaces; a tab\there, and “quotes”.  "
 
@@ -86,7 +86,7 @@ def test_a_ruling_is_printed_as_recorded_with_the_mark_that_says_he_saw_it(
                   if event["type"] == "ruling.recorded"]
     assert capsys.readouterr().out == (
         f"Recorded as C1: {recorded['text']}\n"
-        'show him this under "Recorded as" in your next message, then:\n'
+        'show the operator this under "Recorded as" in your next message, then:\n'
         f"  moxi rounds mark {ROUND} C1 --shown --record <pointer to that message>\n")
     assert recorded["text"] == said
 
@@ -123,7 +123,7 @@ def test_a_correction_is_printed_the_same_way_and_is_not_shown(rounds, capsys):
 
     assert capsys.readouterr().out == (
         "Recorded as C2: Said better.\n"
-        'show him this under "Recorded as" in your next message, then:\n'
+        'show the operator this under "Recorded as" in your next message, then:\n'
         f"  moxi rounds mark {ROUND} C2 --shown --record <pointer to that message>\n")
     found = shown.unshown("proj-a", now="9999-01-01T00:00:00Z").rows
     assert [(row.id, row.supersedes) for row in found] == [("C2", "C1")]
@@ -191,7 +191,7 @@ def test_a_ruling_is_on_the_list_until_a_read_back_covers_its_time(rounds):
     rule(at=T1)
     rule(OTHER, at=T2)
     rule("proj-a", at=T3)
-    rule(at=T4, text="After what he read.")
+    rule(at=T4, text="After what the operator read.")
 
     read_back(T3)
 
@@ -326,10 +326,62 @@ def test_a_message_numbered_lower_than_a_page_or_session_ruling_is_not_compared(
     assert mark(ROUND, "C1", record="comms:1").marked == ("C1",)
 
 
+def page(act, at):
+    """A page's pointer for one act at `at`."""
+    return f"page:rounds/{act}@{at}"
+
+
+@pytest.mark.parametrize("at", [T1, T2, LATER])
+def test_a_page_act_at_or_after_the_ruling_is_a_showing(rounds, at):
+    rule(at=T1, record="comms:12")
+
+    marked = mark(ROUND, "C1", record=page("readback0001", at))
+
+    assert marked.marked == ("C1",)
+    assert last(round_log(rounds))["record"] == page("readback0001", at)
+
+
+def test_a_page_act_before_the_ruling_is_refused_and_says_when_it_was_recorded(
+        rounds, capsys):
+    rule(at=T2, record="comms:12")
+    before = logs(rounds)
+    early = page("readback0001", T1)
+
+    assert main(["mark", ROUND, "C1", "--shown", "--record", early]) == 3
+
+    err = capsys.readouterr().err
+    assert (f"{early} is before C1 was recorded at {T2}: a page can only show a "
+            "ruling on record") in err
+    assert f"run: moxi rounds mark {ROUND} C1 --shown --record PTR" in err
+    assert logs(rounds) == before
+
+
+def test_a_page_act_is_compared_with_each_ruling_it_marks(rounds):
+    rule(at=T1, record="comms:12")
+    rule(at=T3, record="comms:40", text="A second.")
+
+    with pytest.raises(Refused) as refused:
+        mark(ROUND, "C1,C2", record=page("readback0001", T2))
+
+    [unmet] = refused.value.unmet
+    assert unmet.reason.startswith(f"{page('readback0001', T2)} is before C2 was "
+                                   f"recorded at {T3}")
+
+
+def test_the_rulings_own_page_pointer_is_no_showing_of_it(rounds):
+    said = page("pickoption01", T1)
+    rule(at=T1, record=said)
+
+    with pytest.raises(Refused, match=f"{said} is the pointer of C1 itself"):
+        mark(ROUND, "C1", record=said)
+    # A read-back in the same second is another act, so another pointer.
+    assert mark(ROUND, "C1", record=page("readback0001", T1)).marked == ("C1",)
+
+
 @pytest.mark.parametrize("target, ids, pointer, says, fix", [
-    (ROUND, "C1", None, "a mark needs a pointer to where he was shown the sentence",
+    (ROUND, "C1", None, "a mark needs a pointer to where the operator was shown the sentence",
      f"moxi rounds mark {ROUND} C1 --shown --record PTR"),
-    (ROUND, "C1", "not-a-pointer", "'not-a-pointer' is not a pointer to where he was "
+    (ROUND, "C1", "not-a-pointer", "'not-a-pointer' is not a pointer to where the operator was "
      "shown", f"moxi rounds mark {ROUND} C1 --shown --record PTR"),
     (ROUND, "C1", "file:design.md#rulings", "a file is not a showing",
      f"moxi rounds mark {ROUND} C1 --shown --record PTR"),
@@ -339,9 +391,9 @@ def test_a_message_numbered_lower_than_a_page_or_session_ruling_is_not_compared(
      f"moxi rounds mark {ROUND} C1 --shown --record PTR"),
     (ROUND, "C1,C2", "comms:00040", "comms:00040 is the pointer of C2 itself",
      f"moxi rounds mark {ROUND} C1,C2 --shown --record PTR"),
-    (ROUND, "C1", "comms:11", "comms:11 came before comms:12, where he said C1",
+    (ROUND, "C1", "comms:11", "comms:11 came before comms:12, where the operator said C1",
      f"moxi rounds mark {ROUND} C1 --shown --record PTR"),
-    (ROUND, "C1,C2", "comms:13", "comms:13 came before comms:40, where he said C2",
+    (ROUND, "C1,C2", "comms:13", "comms:13 came before comms:40, where the operator said C2",
      f"moxi rounds mark {ROUND} C1,C2 --shown --record PTR"),
     (ROUND, "C1,C2", "comms:40", "comms:40 is the pointer of C2 itself",
      f"moxi rounds mark {ROUND} C1,C2 --shown --record PTR"),
@@ -413,7 +465,7 @@ def test_a_mark_names_only_the_rulings_that_were_not_shown_yet(rounds, capsys):
         f"{ROUND} C1: shown already; nothing is written for it\n")
 
 
-def test_a_ruling_his_read_back_covers_takes_no_mark(rounds):
+def test_a_ruling_the_operators_read_back_covers_takes_no_mark(rounds):
     rule(at=T1)
     read_back(T1)
     before = logs(rounds)
@@ -440,7 +492,7 @@ def test_a_mark_stays_when_its_ruling_is_replaced_or_taken_back(rounds):
     assert listed() == [(ROUND, "C2"), ("proj-a", "S2")]
 
 
-def test_a_read_back_is_his_own_word_and_takes_no_mark(rounds):
+def test_a_read_back_is_the_operators_own_word_and_takes_no_mark(rounds):
     rule(at=T1)
     read_back(T1)
     before = logs(rounds)
@@ -502,7 +554,7 @@ def test_a_read_back_is_a_ruling_of_the_project_and_an_act_on_the_process(
     assert capsys.readouterr().out == (
         f"Recorded as S1: readback={T1}\n"
         f"it covers every ruling of proj-a recorded at or before {T1}; a read-back "
-        "is his own word, and is not itself shown to him\n")
+        "is the operator's own word, and is not itself shown to the operator\n")
     assert listed() == []
 
 
@@ -624,11 +676,11 @@ def test_an_earlier_time_read_back_later_uncovers_nothing(rounds):
     assert shown.through(state.fold(log.read(log.project_log(rounds)))) == T2
 
 
-def test_a_read_back_needs_his_pointer(rounds):
+def test_a_read_back_needs_the_operators_pointer(rounds):
     rule(at=T1)
     before = logs(rounds)
 
-    with pytest.raises(Refused, match="needs a pointer to where he said it"):
+    with pytest.raises(Refused, match="needs a pointer to where the operator said it"):
         read_back(T1, record=None)
 
     assert logs(rounds) == before
@@ -715,7 +767,7 @@ def test_the_index_keeps_the_rulings_no_mark_names_and_the_read_backs(rounds):
         "text": SAID, "rules": None, "record": "https://example.test/said",
         "supersedes": None, "revokes": None, "at": T2}),)
     register = index.read("proj-a", rounds)
-    # A ruling his read-back covers has no mark, so it stays a row; a read-back is
+    # A ruling the operator's read-back covers has no mark, so it stays a row; a read-back is
     # a row of its own kind and never one of the rulings.
     assert [item.id for item in register.of(index.RULING)] == ["S1"]
     assert register.of(index.READ_BACK) == (

@@ -135,6 +135,14 @@ def _order(value: object) -> int:
     return _ORDER
 
 
+def _band_unless(value: object) -> list[str]:
+    """`value` when it is a list of module names, else none: the modules whose presence
+    takes a page's entry out of the band."""
+    if isinstance(value, (list, tuple)) and all(isinstance(v, str) and _NAME.match(v) for v in value):
+        return list(dict.fromkeys(value))
+    return []
+
+
 def _component(module: str, name: object, decl: object,
                assets: Sequence[str] | None) -> tuple[dict[str, Any] | None, str | None]:
     if not isinstance(name, str) or not _NAME.match(name):
@@ -200,6 +208,7 @@ def _component(module: str, name: object, decl: object,
         "home_as": home_as,
         "group": (group if group in _GROUPS else _GROUPS[-1]) if place == "page" else None,
         "order": _order(decl.get("order")) if place == "page" or home_as else None,
+        "band_unless": _band_unless(decl.get("band_unless")) if place == "page" else None,
         "attributes": checked,
     }, None
 
@@ -215,12 +224,14 @@ def check_components(module: str, components: object, *, has_page: bool,
     this shell doesn't know is ignored, since a newer contract 1 may add optional ones.
 
     A page carries its `group` in the band and its `order` there; a wrong or absent one
-    reads as `setup` and 500, so the page keeps its place in the band. A home block may
-    carry `home_as`, `main` or `row`, and then an `order` read the same way; any other
-    `home_as`, or one on a component that is not a home block, refuses the component.
-    A component the fields do not apply to carries them as None. Lower `order` comes
-    first. Home shows the one `main` piece with the lowest `order`: under 100 is for a
-    piece that is the reason most people open Moxi.
+    reads as `setup` and 500, so the page keeps its place in the band. A page may carry
+    `band_unless`, the modules whose presence takes its entry out of the band (its address
+    still opens it); a value that is not a list of module names reads as none, so the page
+    keeps its entry. A home block may carry `home_as`, `main` or `row`, and then an `order`
+    read the same way; any other `home_as`, or one on a component that is not a home
+    block, refuses the component. A component the fields do not apply to carries them as
+    None. Lower `order` comes first. Home shows the one `main` piece with the lowest
+    `order`: under 100 is for a piece that is the reason most people open Moxi.
     """
     placed: list[dict[str, Any]] = []
     refused: list[dict[str, str]] = []

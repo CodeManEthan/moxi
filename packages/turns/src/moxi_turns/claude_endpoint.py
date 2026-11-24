@@ -8,7 +8,8 @@ endpoint socket (`contracts/socket-protocol.md`).
 
 The tie rule: each plugin submit has one window, opened when the endpoint hands
 the runner its `submit` line and closed exactly once, at the first end it accepts: the
-runner's `submit.close` report (`resolve`, `drop` or `fail`), the runner's `submit.bound`
+runner's `submit.close` report (`resolve`, `drop`, `fail`, or `carried` for a held steer),
+the runner's `submit.bound`
 report while the prompt is not admitted, a report the runner could not deliver, the
 core's expiry, or the endpoint's own end. Inside the window the endpoint holds the events
 of the last main-loop turn whose `turn.start` was reported there; a later `turn.start`
@@ -19,7 +20,10 @@ releases the held one as the person's. At the close:
 - drop: a held turn is released; the delivery reads `Refused` with the reason the
   endpoint recorded, else the plugins' own code from the runner's report (`gone`,
   `unsupported`), else `dropped` for another plugin's drop;
-- fail: a held turn is released; the delivery reads `Lost` (`untied: …`).
+- fail: a held turn is released; the delivery reads `Lost` (`untied: …`);
+- carried: a held turn is released; the held steer, which the runner did not submit, goes
+  to the core's `on_steer_carried`, and reads `Lost` (`untied: …`) where that takes it
+  nowhere.
 
 The endpoint hands the next submit only once the window has closed. The ledger opens and
 closes turns on the reports at once; only the events and the delivery's answers wait.
@@ -44,8 +48,11 @@ a caller that will not wait that long frees itself with its own `wait_*` timeout
 The endpoint's life, a rule: it ends on its own SIGTERM, an EPIPE on its stdout, or
 a change of parent, and never on a `session.end` hook. It takes its session id from the
 runner on every load, and opens its caller socket (answers `hello`) once it has the id.
+The first id it learns raises the `load` listener event, once per endpoint process: at
+the runner's `session` line, or, when that line carries no id, just before the next
+SessionStart's `ready`.
 
-Lines and the adapter's lock: `submit`, `append` and `command` come from the endpoint's
+Lines and the adapter's lock: `submit`, `append`, `fork` and `command` come from the endpoint's
 ordered worker, and each writes a line through `LineWriter.write`, which blocks while the
 runner's pipe is full. No line is written while the adapter's lock is held, so a write
 the runner does not read holds the worker and nothing else: the reports, the gate's asks
@@ -68,11 +75,36 @@ the floors let through on the main loop (every row for an agent's call), and the
 endpoint asks those rows (`Endpoint.after_tool`), with the call's `record_path`: the
 `transcript_path` of the last `ready`. It posts `/report/usage` with each
 `session.measure` that moved the context or the rate limits and at each main turn's end;
-the endpoint hands the reading to the `usage` rows. A prompt's ask carries its text and
-its origin's kind, which go on the `prompt` event.
+the endpoint hands the reading to the `usage` rows. A prompt's ask carries its text, its
+origin's kind and `opens` (no main-loop turn was open in the runner), which go on the
+`prompt` event. A prompt with no origin asked while a window's prompt is admitted is that
+window's delivery, whose `by` and `senders` the event carries.
 
 A steer reads `Started`, and its turn names it, once the runner reports `append.done`
-(`$.session.append` resolved without a deny); `append.failed` refuses it `idle`.
+(`$.session.append` resolved without a deny); `append.failed` refuses it `idle`. A steer
+the runner reports `append.held` (its turn ended before any request carried the note, and
+Claude Code holds the note for the next request) goes to the core's `on_steer_held`: it
+leaves its turn and opens one of its own. Its submit line carries `HELD_PROMPT` in place
+of its text, since Claude Code sends the held note beside that prompt, so the model reads
+the note once; the core hands the prompt listeners the steer's text as the prompt's. The
+line carries the steer's text as `note`, and the runner reads where the note stands before
+it submits: when another request carried it first, it submits nothing and closes the window
+`carried`; when the note is gone (a /clear or a compaction dropped it), it submits the
+steer's text in place of `HELD_PROMPT`. When it submitted `HELD_PROMPT` and no request of
+the turn that followed carried the note, it reports `append.held` for the steer again
+ahead of that turn's end, and the core opens one more turn for it, once
+(`on_steer_held`); that submit carries `note` too, so the runner reads again where the
+note stands.
+
+A fork goes to the runner on a `fork` line, and a fork's further round
+(`fork.continue`) on a `fork.continue` line naming the fork's agent id; neither holds a
+window. It reads `Started`, with
+the fork's agent id, at the runner's `fork.started`; `Ended`, with the answer of the
+fork's task round, at `fork.done`; and `Lost` at `fork.lost`, its reason starting
+`denied` or `gone` (one starting with neither is read as `gone`). The runner bounds the
+fork's warm-up and its round (`claude_leg`, the `fork` line), the round by the asker's
+`round_timeout_s` when it set one, so an open fork always settles; the endpoint's own end
+settles one still open `gone`.
 
 Session commands: the runner runs `/clear`, `/exit` and `/compact` through
 `$.command.run`, and the gate re-checks each (`/gate/command`). `exit` settles `passed` at
@@ -105,7 +137,7 @@ from . import listeners as turns_listeners
 from .guards import ToolCall
 from .guards.run import GuardRunner, prompts_of
 from .harness import CommandRequest, Delivery, Harness, Live
-from .results import (Agent, Agents, COMMAND_REFUSALS, LOST_UNTIED, OUTCOMES, SHELL_UNLISTED, Failed,
+from .results import (Agent, Agents, COMMAND_REFUSALS, LOST_DENIED, LOST_GONE, LOST_UNTIED, OUTCOMES, SHELL_UNLISTED, Failed,
                       LeftShell, Passed, Ran, Refused, Shells, StopFacts)
 
 log = logging.getLogger("moxi.turns.claude")
@@ -118,6 +150,10 @@ LIVE_WAIT_S = 1.0
 PARENT_POLL_S = 0.5
 #: How many closed windows the endpoint remembers, to name a late entry's delivery.
 CLOSED_KEPT = 64
+#: The prompt of the turn a held steer opens. Claude Code sends the held note with the
+#: session's next request, beside this prompt, so the prompt does not repeat its text.
+HELD_PROMPT = ("A note came in as your last turn ended, after its last request, so it "
+               "comes with this prompt. Read it and act on it.")
 
 
 @dataclass
@@ -147,7 +183,7 @@ class ClaudeHarness(Harness):
     name = "claude"
     can = frozenset({"deliver", "only-if-idle", "steer", "stop-handler", "clear", "exit",
                      "compact", "agents", "stop-shells", "guards", "after-tool", "usage",
-                     "environ"})
+                     "environ", "fork", "keep"})
     live_wait_s = LIVE_WAIT_S
 
     @staticmethod
@@ -180,7 +216,11 @@ class ClaudeHarness(Harness):
         self._gate_refused: set[str] = set()
         #: Closed windows by nonce: (delivery, how it closed), to name a late entry.
         self._closed: OrderedDict[str, tuple[str, str]] = OrderedDict()
+        #: The fork deliveries handed to the runner and not yet settled by a report.
+        self._forks: set[str] = set()
         self.session_known = threading.Event()
+        #: Set once this process raised `load`.
+        self._loaded = False
         self.server: leg.LegServer | None = None
 
     # -- the leg ------------------------------------------------------------------------
@@ -205,6 +245,7 @@ class ClaudeHarness(Harness):
             "op": leg.LINE_HELLO, "leg": leg.LEG, "mod_sock": str(self.server.path),
             "stop_wait_ms": int(ep.stop_wait_s * 1000),
             "listen_wait_ms": int(ep.listen_wait_s * 1000),
+            "prompt_wait_ms": int(round(ep.prompt_wait_s * 1000)),
             "endpoint_version": ep.version, "pid": os.getpid(),
             "stop_after_clear": leg.STOP_AFTER_CLEAR, "guards": self.guards.reload(),
             "after_tool_wait_ms": int(ep.after_tool_wait_s * 1000),
@@ -313,6 +354,23 @@ class ClaudeHarness(Harness):
                                   "text": delivery.text}):
             raise OSError("the runner's line is closed")
 
+    def fork(self, delivery: Delivery) -> None:
+        """The runner spawns the fork, or gives a fork that answered its next round
+        (`delivery.agent_id`), and reports the delivery's start and end (`fork.*`)."""
+        with self._lock:
+            self._forks.add(delivery.id)
+        if delivery.agent_id is None:
+            line = {"op": leg.LINE_FORK, "delivery": delivery.id, "text": delivery.text}
+        else:
+            line = {"op": leg.LINE_FORK_CONTINUE, "delivery": delivery.id,
+                    "agent_id": delivery.agent_id, "text": delivery.text}
+        if delivery.round_timeout_s is not None:
+            line["round_timeout_ms"] = max(1, round(delivery.round_timeout_s * 1000))
+        if not self._lines.write(line):
+            with self._lock:
+                self._forks.discard(delivery.id)
+            raise OSError("the runner's line is closed")
+
     def command(self, request: CommandRequest) -> None:
         with self._lock:
             self._commands[request.id] = request
@@ -333,8 +391,11 @@ class ClaudeHarness(Harness):
                 if w is None:
                     return
                 d = w.spec
-            if self._lines.write({"op": leg.LINE_SUBMIT, "delivery": d.id,
-                                  "kind": w.kind, "text": d.text, "nonce": w.nonce}):
+            line = {"op": leg.LINE_SUBMIT, "delivery": d.id, "kind": w.kind,
+                    "text": HELD_PROMPT if d.kind == "steer" else d.text, "nonce": w.nonce}
+            if d.kind == "steer":
+                line["note"] = d.text
+            if self._lines.write(line):
                 return
             with self._lock:
                 if self._window is not w:
@@ -382,6 +443,10 @@ class ClaudeHarness(Harness):
                                else "dropped")
                 log.info("submit %s dropped%s: %s", w.delivery,
                          " by the gate" if refused_by_gate else "", reason)
+            elif end == leg.END_CARRIED:
+                if not ep.on_steer_carried(w.delivery):
+                    ep.lost(w.delivery, f"{LOST_UNTIED}: the runner submitted nothing, "
+                                        "and no turn carried the delivery")
             else:
                 ep.lost(w.delivery, f"{LOST_UNTIED}: the submit failed"
                                     + (f": {reason}" if reason else ""))
@@ -424,7 +489,10 @@ class ClaudeHarness(Harness):
             ep.turn_started(turn_id, held=True)
             w.held, w.held_set = turn_id, True
         elif kind == leg.R_TURN_COMPLETE:
-            ep.turn_ended(_opt_str(body, "turn_id"), _outcome(body))
+            # A turn with no final text ends with no answer (None), as on Codex.
+            answer = body.get("answer")
+            ep.turn_ended(_opt_str(body, "turn_id"), _outcome(body),
+                          answer=answer if isinstance(answer, str) and answer else None)
         elif kind == leg.R_SUBMIT_CLOSE:
             delivery, end = body.get("delivery"), body.get("end")
             if end not in leg.ENDS:
@@ -452,13 +520,47 @@ class ClaudeHarness(Harness):
             delivery = body.get("delivery")
             if isinstance(delivery, str):
                 ep.on_refused(delivery, "idle")
+        elif kind == leg.R_APPEND_HELD:
+            delivery = body.get("delivery")
+            if isinstance(delivery, str):
+                ep.on_steer_held(delivery)
         elif kind == leg.R_COMMAND_DONE:
             self._command_done(body)
+        elif kind in (leg.R_FORK_STARTED, leg.R_FORK_DONE, leg.R_FORK_LOST):
+            self._fork_report(kind, body)
+
+    def _fork_report(self, kind: str, body: dict[str, Any]) -> None:
+        """Under the lock: a `fork.*` report settles the fork delivery it names."""
+        ep, delivery = self.endpoint, body.get("delivery")
+        if not isinstance(delivery, str) or delivery not in self._forks:
+            log.info("%s for %r, which is no open fork; it changes nothing", kind, delivery)
+            return
+        if kind == leg.R_FORK_STARTED:
+            agent_id = body.get("agent_id")
+            if not isinstance(agent_id, str) or not agent_id:
+                raise leg.BadRequest('fork.started needs "agent_id", a non-empty string')
+            ep.fork_started(delivery, agent_id)
+            return
+        self._forks.discard(delivery)
+        if kind == leg.R_FORK_DONE:
+            answer = body.get("answer")
+            ep.fork_ended(delivery, answer if isinstance(answer, str) and answer else None,
+                          outcome=_outcome(body))
+            return
+        reason = _opt_str(body, "reason") or "the runner gave no reason"
+        if not reason.startswith((LOST_DENIED, LOST_GONE)):
+            reason = f"{LOST_GONE}: {reason}"
+        ep.lost(delivery, reason)
 
     def _learn(self, session_id: str | None) -> None:
-        if session_id:
-            self.endpoint.learn_session(session_id)
-            self.session_known.set()
+        if not session_id:
+            return
+        self.endpoint.learn_session(session_id)
+        self.session_known.set()
+        with self._lock:
+            first, self._loaded = not self._loaded, True
+        if first:
+            self.endpoint.load()
 
     # -- asks ---------------------------------------------------------------------------
 
@@ -490,9 +592,22 @@ class ClaudeHarness(Harness):
             return context
         if event == "prompt":
             text = body.get("text")
-            return self.endpoint.prompt(text if isinstance(text, str) else None,
-                                        _opt_str(body, "origin"))
+            origin = _opt_str(body, "origin")
+            opens = body.get("opens")
+            return self.endpoint.prompt(text if isinstance(text, str) else None, origin,
+                                        delivery_id=self._prompt_delivery(origin),
+                                        opens=opens if isinstance(opens, bool) else None)
         raise leg.BadRequest(f"unknown context event {event!r}")
+
+    def _prompt_delivery(self, origin: str | None) -> str | None:
+        """The delivery a prompt with `origin` is: the open window's, once the gate
+        admitted its prompt, for a prompt with no origin (the runner's own submits reach
+        the ask with none). A prompt with an origin is never a delivery."""
+        if origin is not None:
+            return None
+        with self._lock:
+            w = self._window
+            return w.delivery if w is not None and w.admitted else None
 
     def _guard(self, body: dict[str, Any]) -> dict[str, Any]:
         """`/ask/guard`: judge one tool call, or at `step` `ask` one permission ask, by the

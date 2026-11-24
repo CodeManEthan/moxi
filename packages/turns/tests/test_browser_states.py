@@ -14,19 +14,15 @@ from __future__ import annotations
 
 import json
 import re
-import sys
 
 import pytest
 from playwright.sync_api import expect
 
 from moxi_turns.results import Agent
-from panel_kit import (T, address, copied, group, harness, key_of, on, open_panel, own_panel, row, rows,
-                       small, started)
+from panel_kit import (MARKS, T, address, copied, group, harness, key_of, on, open_panel,
+                       own_panel, row, rows, small, started)
 
-pytestmark = [pytest.mark.browser, pytest.mark.timeout(120),
-              pytest.mark.skipif(not sys.platform.startswith("linux"),
-                                 reason="turns' panel is checked in a browser on Linux; the "
-                                        "Windows and macOS runs are owed")]
+pytestmark = MARKS
 
 __all__ = ["own_panel", "small"]
 
@@ -167,6 +163,11 @@ def test_a_first_read_that_fails_has_no_rows_and_no_last_read(panel, ui_contexts
 
 def test_a_failed_scan_leads_with_its_detail_over_the_rows(panel, make_endpoint, ui_contexts):
     first, _ = two(panel, make_endpoint)
+    # The page reads the list from its route and then from the `turns.sessions` topic, whose
+    # first value replaces the route's: both carry the scan's detail, as the page server's do.
+    held = panel.list()
+    held.pop("now", None)
+    held["detail"] = SCAN_DETAIL
 
     def answer(route):
         fetched = route.fetch()
@@ -174,8 +175,12 @@ def test_a_failed_scan_leads_with_its_detail_over_the_rows(panel, make_endpoint,
         data["detail"] = SCAN_DETAIL
         route.fulfill(response=fetched, body=json.dumps(data))
 
-    _, root = open_panel(panel, ui_contexts, before=lambda page: page.route(
-        "**/m/turns/api/sessions", answer))
+    def before(page):
+        page.route("**/m/turns/api/sessions", answer)
+        page.add_init_script(f"window.heldTopics = Object.assign(window.heldTopics || {{}}, "
+                             f"{{'turns.sessions': {json.dumps(json.dumps(held))}}});")
+
+    page, root = open_panel(panel, ui_contexts, before=before)
     expect(root.locator("div[data-state]")).to_have_attribute("data-state", "up")
     alert = root.locator('[data-part="alert"]')
     expect(alert.locator('[data-line="lead"]')).to_have_text("Moxi couldn't look for sessions")
@@ -183,6 +188,9 @@ def test_a_failed_scan_leads_with_its_detail_over_the_rows(panel, make_endpoint,
     expect(alert.locator('[data-line="last-read"]')).to_have_count(0)
     expect(rows(root)).to_have_count(2)
     expect(row(root, first).locator('[data-action="open"]')).to_have_text("Open")
+    # The alert outlasts the topic's first value.
+    page.wait_for_function("() => window.pushed.includes('turns.sessions')")
+    expect(alert.locator('[data-line="lead"]')).to_have_text("Moxi couldn't look for sessions")
 
 
 def test_with_no_session_the_page_says_so_with_the_reach_line(panel, ui_contexts):

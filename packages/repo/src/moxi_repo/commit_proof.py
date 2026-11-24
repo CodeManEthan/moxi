@@ -27,7 +27,14 @@ the two heads, which adds nothing of its own.
 
 **What is refused**: no line, more than one, one that isn't 12 hex characters, and one
 that doesn't match the tree being committed. Each refusal names `moxi repo rules` and the
-work tree to run it in.
+work tree to run it in. A refused message is left as it is.
+
+**The line once read**: the line means nothing once the piece has read it, so the piece
+drops it from the message file, with the lines that continue its value, and the commit
+is made without it. A message that matched loses every line read; a replay loses every
+line read too; a clean merge loses the lines that hold the value for its tree. Lines in
+the subject's paragraph or in a prose paragraph are not read, so they stay. A commit
+the repo's committer makes is left as it is.
 
 The tree is read with the environment git gave the hook. Under `git commit <path>` and
 `git commit -a` git commits a temporary index and names it in `GIT_INDEX_FILE`; the tree
@@ -153,28 +160,54 @@ def read_lines(text: str, *, comment: str = "#", separators: str = ":"
     trailer paragraph after the subject's, [line numbers] of those that are not read: in
     the subject's paragraph or in one with a prose line). The key is matched ignoring
     case, as git matches a trailer's. Line numbers count the message as written."""
+    read, unread = _read(text, comment, separators)
+    return [(n, value) for n, value, _ in read], unread
+
+
+def without_lines(text: str, *, value: str | None = None, comment: str = "#",
+                  separators: str = ":") -> str:
+    """`text` without the `Commit-Check` lines `read_lines` reads and the lines that
+    continue their values: every one, or with `value`, those holding it (case ignored).
+    Every other line stays as written."""
+    read, _ = _read(text, comment, separators)
+    gone = {n for n, held, lines in read
+            if value is None or held.lower() == value.lower() for n in lines}
+    if not gone:
+        return text
+    return "\n".join(line for n, line in enumerate(text.split("\n"), 1) if n not in gone)
+
+
+def _read(text: str, comment: str, separators: str
+          ) -> tuple[list[tuple[int, str, list[int]]], list[int]]:
+    """`read_lines`, each line read with the line numbers it spans: its own and those of
+    the lines that continue its value."""
     shape = _Shape(separators or ":", set())
-    read: list[tuple[int, str]] = []
+    read: list[tuple[int, str, list[int]]] = []
     unread: list[int] = []
     for at, paragraph in enumerate(_paragraphs(_kept_lines(text, comment))):
-        found = []
+        found: list[tuple[int, str, list[int]]] = []
         trailers = at > 0
         continues = False  # a trailer above this line, for a continuation to belong to
+        spans: list[int] | None = None  # the lines of the Commit-Check line above, if any
         for n, line in paragraph:
             if line[:1] in (" ", "\t"):
                 trailers = trailers and continues
+                if spans is not None:
+                    spans.append(n)
                 continue
             trailer = shape.trailer(line)
+            spans = None
             if trailer is None:
                 trailers = continues = False
                 continue
             continues = True
             if trailer[0].lower() == KEY.lower():
-                found.append((n, trailer[1]))
+                spans = [n]
+                found.append((n, trailer[1], spans))
         if trailers:
             read += found
         else:
-            unread += [n for n, _ in found]
+            unread += [n for n, _, _ in found]
     return read, unread
 
 
@@ -238,31 +271,53 @@ def clean_merge(ctx, tree: str) -> bool:
 
 def commit_msg(ctx) -> Outcome:
     """The piece: pass the commits that need no line, then refuse a message whose line is
-    missing, doubled, malformed or not this tree's."""
+    missing, doubled, malformed or not this tree's. A message it passes loses the lines
+    it read, as the module's docstring says."""
     if ctx.committer:
         return Outcome.ok()
+    comment, _, separators = git_settings(ctx)
+    text = _message(ctx)
     if ctx.git_dir and replaying(ctx.git_dir):
-        return Outcome.ok()
+        return _passed(ctx, text, comment, separators)
     top = ctx.root or os.getcwd()
     tree, why = index_tree(top, hook_env=True)
     if tree is None:
         return Outcome.refuse(f"commit proof: in {top}, {why}, so there is no tree to "
                               f"check the {KEY} line against")
-    if ctx.git_dir and clean_merge(ctx, tree):
-        return Outcome.ok()
     salt = salt_of(ctx.settings)
+    if ctx.git_dir and clean_merge(ctx, tree):
+        if not salt:
+            # No line can hold this tree's value, so none is dropped.
+            return Outcome.ok()
+        return _passed(ctx, text, comment, separators, value=proof_value(salt, tree))
     if not salt:
         return Outcome.refuse(f"commit proof: {_no_salt(top)}")
-    with open(ctx.message_path, "rb") as fh:
-        text = fh.read().decode("utf-8", "replace")
-    comment, _, separators = git_settings(ctx)
     problems = check_message(text, proof_value(salt, tree), top, comment=comment,
                              separators=separators)
     if problems:
         return Outcome.refuse(*problems)
+    return _passed(ctx, text, comment, separators)
+
+
+def _message(ctx) -> str:
+    with open(ctx.message_path, "rb") as fh:
+        return fh.read().decode("utf-8", "surrogateescape")
+
+
+def _passed(ctx, text: str, comment: str, separators: str, *,
+            value: str | None = None) -> Outcome:
+    """Pass the commit whose message is `text`, rewriting its message file without the
+    lines `without_lines` drops for `value` when there are any."""
+    from moxi.files import atomic_write
+
+    kept = without_lines(text, value=value, comment=comment, separators=separators)
+    if kept != text:
+        atomic_write(ctx.message_path, kept.encode("utf-8", "surrogateescape"),
+                     mode=os.stat(ctx.message_path).st_mode & 0o777)
     return Outcome.ok()
 
 
 __all__ = ["COMMIT_PROOF", "PIECE_ID", "KEY", "check_message", "clean_merge", "commit_msg",
            "index_tree", "merge_heads", "new_salt", "proof_line", "proof_value",
-           "read_lines", "replaying", "rule_lines", "salt_of", "salt_problem"]
+           "read_lines", "replaying", "rule_lines", "salt_of", "salt_problem",
+           "without_lines"]

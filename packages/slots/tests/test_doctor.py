@@ -7,10 +7,10 @@ import time
 
 import pytest
 
-from moxi import units
+from moxi import files, units
 from moxi.doctor import Row
 from moxi.units import UnitState
-from moxi_slots import doctor, health, places, server, support, tmux
+from moxi_slots import doctor, health, places, runs, server, support, tmux
 
 from slots_kit import record, write_tool
 
@@ -40,7 +40,7 @@ def test_the_rows_on_a_system_slots_runs_on(fake_tmux, monkeypatch):
     monkeypatch.setattr(units, "backend", lambda: None)
     names = [row.name for row in doctor.rows()]
     assert names == ["system", "tmux", "server mode", "options", "socket", "launch files",
-                     "trampoline", "mismatches", "registry", "holds"]
+                     "trampoline", "mismatches", "registry", "holds", "hooks"]
 
 
 def test_the_tmux_row(fake_tmux, fence):
@@ -184,3 +184,24 @@ def test_health_without_a_supervisor_compares_the_recorded_pid(monkeypatch):
 def test_health_is_off_on_windows(monkeypatch):
     monkeypatch.setattr(support, "system", lambda *a: support.WINDOWS)
     assert health.check().state == "off"
+
+
+def test_a_run_end_the_hook_failed_to_write_is_logged_and_the_doctor_warns():
+    assert doctor.hooks_rows()[0].state == "ok"
+    places.state_dir().mkdir(parents=True, exist_ok=True)
+    places.registry().write_text("not json")
+    assert runs.main([str(places.state_dir()), "2", "t-1", "0", "", "5"]) == 0
+    [logged] = files.read_records(places.hooks_log())
+    assert (logged["slot"], logged["run"]) == ("2", "t-1")
+    assert logged["error"].startswith("RegistryError")
+    [row] = doctor.hooks_rows()
+    assert row.state == "warn" and "slot 2" in row.detail
+    assert "reads crashed" in row.fix
+
+
+def test_failed_hook_writes_older_than_the_days_looked_back_are_not_reported():
+    places.state_dir().mkdir(parents=True, exist_ok=True)
+    old = time.time() - (doctor.HOOK_FAILURES_DAYS + 1) * 86400
+    files.append_record(places.hooks_log(), {"at": old, "slot": "2", "run": "t",
+                                             "error": "TryAgain: lock"})
+    assert doctor.hooks_rows()[0].state == "ok"

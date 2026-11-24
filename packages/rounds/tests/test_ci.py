@@ -16,7 +16,7 @@ import pytest
 from moxi.config import ConfigError
 
 from moxi_rounds import (checking, ci, commissioning, doctor, log, opening, paths,
-                         settings, showing, steps)
+                         queue_ci, settings, showing, steps)
 from moxi_rounds import state as states
 from moxi_rounds.cli import main
 from moxi_rounds.errors import Refused
@@ -159,6 +159,294 @@ def test_a_workflow_read_by_its_jobs_with_no_run_at_the_tip_reads_absent_unasked
 
     assert (flow["reading"], whole, asked) == (ci.ABSENT, ci.ABSENT, [])
     assert flow["jobs"] == [{"name": "linux", "reading": ci.ABSENT, "url": None}]
+
+
+# -- a scoped run: the pick job, a matrix by name pattern, skipped jobs --------------------
+
+QUEUE = ci.Workflow(FLOW, ("pick", "scoped", "web (ubuntu-latest)"), ("browser (*)",),
+                    "pick", reads_candidates=True)
+
+
+def scoped(jobs, picked=("ui",), flow=QUEUE, picked_for=None, **fields):
+    asked = []
+
+    def picked_of(one):
+        asked.append(one["name"])
+        return {None: list(picked), **(picked_for or {})}
+
+    each, whole = ci.reading([flow], IDS, [run(**fields)], TIP, jobs_of=lambda one: jobs,
+                             picked_of=picked_of)
+    return each[0], whole, asked
+
+
+def readings(flow) -> list[tuple[str, str]]:
+    return [(one["name"], one["reading"]) for one in flow["jobs"]]
+
+
+FIXED = [job("pick"), job("scoped"), job("web (ubuntu-latest)")]
+
+
+def test_a_matrix_is_read_by_its_pattern_and_the_picked_packages_recorded():
+    jobs = [*FIXED, job("browser (ui, chromium)"), job("browser (ui, firefox)"),
+            job("browserish")]
+
+    flow, whole, asked = scoped(jobs)
+
+    assert (flow["reading"], whole, asked) == (ci.GREEN, ci.GREEN, ["pick"])
+    assert readings(flow)[3:] == [("browser (ui, chromium)", ci.GREEN),
+                                  ("browser (ui, firefox)", ci.GREEN)]
+    assert flow["jobs"][3]["matrix"] == "browser (*)"
+    assert (flow["picked"], flow["pick"], flow["matrix"]) == (["ui"], "pick",
+                                                               ["browser (*)"])
+    # What the record names is what the setting names, so CI's form of the gate agrees.
+    assert ci._named(flow) == QUEUE.named
+    jobs[4] = job("browser (ui, firefox)", conclusion="failure")
+    assert scoped(jobs)[1] == ci.RED
+
+
+def test_a_matrix_job_the_pick_did_not_run_reads_skipped_and_counts_green():
+    skipped = job("browser", conclusion="skipped")
+
+    flow, whole, _asked = scoped([*FIXED, skipped], picked=())
+
+    assert whole == ci.GREEN and flow["picked"] == []
+    assert readings(flow)[3] == ("browser (*)", ci.SKIPPED)
+    flow, whole, _asked = scoped([*FIXED, job("browser (, )", conclusion="skipped")])
+    assert (readings(flow)[3], whole) == (("browser (, )", ci.SKIPPED), ci.GREEN)
+
+
+@pytest.mark.parametrize("picked, picked_for, reading", [
+    ((), None, ci.SKIPPED),
+    (("ui",), None, ci.ABSENT),
+    (("repo",), {"browser (*)": []}, ci.SKIPPED),
+    ((), {"browser (*)": ["ui"]}, ci.ABSENT),
+])
+def test_an_unmatched_pattern_reads_skipped_only_where_the_pick_picked_nothing_for_it(
+        picked, picked_for, reading):
+    flow, whole, _asked = scoped(FIXED, picked=picked, picked_for=picked_for)
+
+    assert readings(flow)[3] == ("browser (*)", reading)
+    assert whole == (ci.GREEN if reading == ci.SKIPPED else ci.ABSENT)
+
+
+def test_a_pattern_with_no_match_in_a_failed_run_reads_absent():
+    # A matrix that failed to expand: GitHub names its one failed job `browser`.
+    jobs = [*FIXED, job("browser", conclusion="failure")]
+
+    flow, whole, _asked = scoped(jobs, conclusion="failure",
+                                 picked_for={"browser (*)": ["ui"]})
+
+    assert (readings(flow)[3], whole) == (("browser (*)", ci.ABSENT), ci.ABSENT)
+
+
+@pytest.mark.parametrize("name", ["scoped", "web (ubuntu-latest)"])
+def test_a_job_the_entry_names_as_itself_concluded_skipped_reads_red(name):
+    jobs = [job(name, conclusion="skipped") if one["name"] == name else one
+            for one in FIXED]
+
+    flow, whole, _asked = scoped([*jobs, job("browser (ui, chromium)")])
+
+    assert (dict(readings(flow))[name], flow["reading"], whole) == (ci.RED, ci.RED,
+                                                                     ci.RED)
+
+
+def test_a_job_the_pick_ran_that_is_missing_reads_absent():
+    flow, whole, _asked = scoped([job("pick"), job("web (ubuntu-latest)")])
+
+    assert (readings(flow)[1], whole) == (("scoped", ci.ABSENT), ci.ABSENT)
+
+
+@pytest.mark.parametrize("pick", [{"conclusion": "failure"}, {"conclusion": "skipped"}])
+def test_with_the_pick_not_green_nothing_reads_skipped_and_nothing_is_picked(pick):
+    jobs = [job("pick", **pick), job("scoped", conclusion="skipped"),
+            job("web (ubuntu-latest)")]
+
+    flow, whole, asked = scoped(jobs)
+
+    assert whole == ci.RED and asked == [] and "picked" not in flow
+    assert readings(flow)[1] == ("scoped", ci.RED)
+    assert readings(flow)[3] == ("browser (*)", ci.ABSENT)
+
+
+def test_with_no_pick_a_skipped_job_reads_red_and_an_unmatched_pattern_absent():
+    flow = ci.Workflow(FLOW, ("web",), ("browser (*)",))
+
+    found, whole, asked = scoped([job("web", conclusion="skipped")], flow=flow)
+
+    assert readings(found) == [("web", ci.RED), ("browser (*)", ci.ABSENT)]
+    assert (whole, asked) == (ci.RED, [])
+
+
+def test_while_the_run_goes_an_unmatched_pattern_is_pending_and_the_log_unread():
+    flow, whole, asked = scoped(FIXED, status="in_progress", conclusion="")
+
+    assert (readings(flow)[3], whole, asked) == (("browser (*)", ci.PENDING),
+                                                 ci.PENDING, [])
+
+
+@pytest.mark.parametrize("pattern, name, matched", [
+    ("browser (*)", "browser (ui, chromium)", True),
+    ("browser (*)", "browser", False),
+    ("browser (*, firefox)", "browser (ui, chromium)", False),
+    ("a.b", "axb", False),
+    ("*", "anything", True),
+])
+def test_a_pattern_s_star_stands_for_any_text_and_the_rest_for_itself(pattern, name,
+                                                                       matched):
+    assert ci.matches(pattern, name) is matched
+
+
+def test_the_picks_are_the_last_picked_lines_of_the_log():
+    log = "\n".join([
+        'pick\tthe packages\t2026-11-23T10:00:00Z echo "picked: $picked"',
+        'pick\tthe packages\t2026-11-23T10:00:00Z echo "picked for browser (*): $b"',
+        'pick\tthe packages\t2026-11-23T10:00:01Z picked: ["moxi"]',
+        'pick\tthe packages\t2026-11-23T10:00:02Z picked: ["moxi", "rounds"]',
+        'pick\tthe packages\t2026-11-23T10:00:02Z picked for browser (*): ["ui"]',
+        'pick\tthe packages\t2026-11-23T10:00:02Z picked for browser (*): ["rounds"]',
+        "pick\tthe packages\t2026-11-23T10:00:03Z picked: [not json]"])
+
+    assert ci.picks_in(("gh",), log) == {None: ["moxi", "rounds"],
+                                         "browser (*)": ["rounds"]}
+    with pytest.raises(ci.ReadFailed) as caught:
+        ci.picks_in(("gh", "run"), "pick\tstep\tnothing here")
+    assert "printed no line picked:" in str(caught.value)
+    with pytest.raises(ci.ReadFailed):
+        ci.picks_in(("gh", "run"), 'pick\tstep\tpicked for browser (*): []')
+
+
+def printing(data) -> list[str]:
+    return [PY, "-c", f"print({json.dumps(json.dumps(data))})"]
+
+
+def test_a_candidate_is_read_by_its_workflows_and_a_full_run_by_the_rest(monkeypatch):
+    full = ci.Workflow(OTHER, ("linux",))
+    queue = ci.Workflow(FLOW, ("pick", "scoped"), ("browser (*)",), "pick",
+                        reads_candidates=True, stands_for=(("scoped", "linux"),))
+    jobs = [{**job("pick"), "databaseId": 5}, job("scoped"), job("linux"),
+            job("browser (rounds, chromium)")]
+    found = ci.Declared(
+        workflows=(full, queue), local=None, local_timeout_s=None, remote=None,
+        status=tuple(printing([run(), run(workflowDatabaseId=12, url="u2")])),
+        ids=tuple(printing([{"id": 11, "path": FLOW}, {"id": 12, "path": OTHER}])),
+        jobs=tuple(printing(jobs)), status_timeout_s=30)
+    monkeypatch.setattr(ci, "PICK_LOG", (PY, "-c", "import sys; print(sys.argv[1:])",
+                                         ci.JOB))
+    with pytest.raises(ci.ReadFailed) as caught:
+        ci.read_runs(found, values={"tip": TIP}, cwd=None, is_candidate=True)
+    assert caught.value.command[-1] == "5"
+    assert "printed no line picked:" in str(caught.value)
+    monkeypatch.setattr(ci, "PICK_LOG", (PY, "-c", "print('x\\tpicked: [\"rounds\"]')"))
+
+    candidate, _runs = ci.read_runs(found, values={"tip": TIP}, cwd=None, is_candidate=True)
+    whole, _runs = ci.read_runs(found, values={"tip": TIP}, cwd=None)
+
+    assert [one["path"] for one in candidate.workflows] == [FLOW]
+    assert candidate.workflows[0]["picked"] == ["rounds"]
+    assert candidate.workflows[0]["stands_for"] == {"scoped": "linux"}
+    assert [one["path"] for one in whole.workflows] == [OTHER]
+    assert ci.now_of(found, {}).workflows == (full,)
+    # With no workflow marked, a candidate is read as a full run is.
+    plain = ci.Declared(**{**found.__dict__, "workflows": (full,)})
+    assert plain.candidate_workflows == plain.full_workflows == (full,)
+
+
+def whole_runs(*runs: dict) -> ci.Declared:
+    """A setting reading `FLOW` and `OTHER` whole, its `status` printing `runs`."""
+    return ci.Declared(
+        workflows=(ci.Workflow(FLOW), ci.Workflow(OTHER)), local=None,
+        local_timeout_s=None, remote=None, status=tuple(printing(list(runs))),
+        ids=tuple(printing([{"id": 11, "path": FLOW}, {"id": 12, "path": OTHER}])),
+        status_timeout_s=30)
+
+
+def test_read_runs_names_runs_with_no_url():
+    found = whole_runs({**run(databaseId=7), "url": None},
+                       {key: value for key, value in run(databaseId=8,
+                                                          workflowDatabaseId=12).items()
+                        if key != "url"})
+    _reading, runs = ci.read_runs(found, values={"tip": TIP}, cwd=None)
+    assert [one["databaseId"] for one in runs] == [7, 8]
+
+
+@pytest.mark.parametrize("second", [
+    {"conclusion": "cancelled"},
+    {"conclusion": "failure"},
+], ids=["cancelled", "red"])
+def test_a_queue_read_is_pending_while_any_run_it_names_has_not_completed(second):
+    going = run(databaseId=7, status="in_progress", conclusion="")
+    found = whole_runs(going, run(databaseId=8, workflowDatabaseId=12, **second))
+    read = queue_ci.QueueCi(found, local_log=Path("local.log")).read_full(None, TIP)
+    assert (read.word, read.runs, read.running) == (ci.PENDING, ("7", "8"), ("7",))
+
+
+def test_a_queue_read_absent_while_a_run_it_names_goes_is_pending():
+    # The other workflow's run may start later, so it is not absent yet.
+    going = run(databaseId=7, status="in_progress", conclusion="")
+    read = queue_ci.QueueCi(whole_runs(going), local_log=Path("local.log")).read_full(
+        None, TIP)
+    assert (read.word, read.runs, read.running) == (ci.PENDING, ("7",), ("7",))
+
+
+def test_failures_refuses_a_running_read(monkeypatch):
+    ran = []
+    monkeypatch.setattr(ci, "run_jobs", lambda *args, **kwargs: ran.append(args))
+    monkeypatch.setattr(queue_ci, "_said", lambda *args, **kwargs: ran.append(args))
+    read = queue_ci.Read(ci.RED, ("7",), running=("7",))
+    with pytest.raises(ci.ReadFailed) as caught:
+        queue_ci.QueueCi(whole_runs(), local_log=Path("local.log")).failures(
+            None, TIP, read)
+    assert "7 has not completed" in str(caught.value) and ran == []
+
+
+def test_the_setting_reads_a_scoped_entry(write_config):
+    write_config(
+        '[projects.proj-a]\ncheck = { command = "make" }\nci = { workflows = ['
+        '".github/workflows/ci.yml", { path = ".github/workflows/queue.yml", '
+        'jobs = ["pick", "scoped"], matrix = ["browser (*)"], pick = "pick", '
+        'reads_candidates = true, stands_for = { scoped = "linux" } }, '
+        '{ path = "b.yml", matrix = ["x (*)"] }], local = "none" }\n')
+    declared = ci.declared(settings.load(), "proj-a")
+
+    assert declared.candidate_workflows == (ci.Workflow(
+        ".github/workflows/queue.yml", ("pick", "scoped"), ("browser (*)",), "pick",
+        reads_candidates=True, stands_for=(("scoped", "linux"),)),)
+    assert declared.full_workflows == (ci.Workflow(".github/workflows/ci.yml"),
+                                       ci.Workflow("b.yml", (), ("x (*)",)))
+
+
+@pytest.mark.parametrize("entry, key, said", [
+    ('{ path = "q.yml", jobs = ["a"], pick = "b" }', "ci.workflows.pick",
+     "which jobs does not name"),
+    ('{ path = "q.yml", matrix = ["x"], pick = "x" }', "ci.workflows.pick",
+     "which jobs does not name"),
+    ('{ path = "q.yml", matrix = [] }', "ci.workflows.matrix",
+     "is not a list of name patterns"),
+    ('{ path = "q.yml", matrix = ["x", "x"] }', "ci.workflows.matrix", "names a job twice"),
+    ('{ path = "q.yml", jobs = ["a"], reads_candidates = "yes" }',
+     "ci.workflows.reads_candidates", "not true or false"),
+    ('{ path = "q.yml", jobs = ["a"], stands_for = "linux" }',
+     "ci.workflows.stands_for", "not a table of job names"),
+    ('{ path = "q.yml", jobs = ["a"], stands_for = { a = 1 } }',
+     "ci.workflows.stands_for", "not a table of job names"),
+    ('{ path = "q.yml", jobs = ["a"], stands_for = { a = "" } }',
+     "ci.workflows.stands_for", "not a table of job names"),
+])
+def test_the_config_check_refuses_a_scoped_entry_it_can_t_read(entry, key, said):
+    with pytest.raises(ConfigError) as caught:
+        settings.check_text(f'[projects.proj-a]\n{CHECK}ci = {{ workflows = ["a.yml", '
+                            f'{entry}], local = "none" }}\n')
+
+    assert key in str(caught.value) and said in str(caught.value)
+
+
+def test_the_config_check_refuses_workflows_that_all_read_candidates():
+    with pytest.raises(ConfigError) as caught:
+        settings.check_text(f'[projects.proj-a]\n{CHECK}ci = {{ workflows = [{{ path = '
+                            f'"q.yml", jobs = ["a"], reads_candidates = true }}], '
+                            f'local = "none" }}\n')
+
+    assert "none reads a full run" in str(caught.value)
 
 
 # -- the setting -------------------------------------------------------------------------

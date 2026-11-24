@@ -66,7 +66,9 @@ def test_served_serves_and_stops_within_its_poll(kind):
         where = None
         if kind is _Unix:
             where = Path(server.server_address).parent
-            assert len(server.server_address) < 40
+            # The test's short dir sits in its process's short process dir:
+            # /var/tmp/mx-<6>/<1>, 20 characters, and a short_dir inside it.
+            assert len(server.server_address) < 44
             assert where.is_dir()
         began = time.monotonic()
     stopped = time.monotonic() - began
@@ -88,11 +90,14 @@ def test_short_dir_is_short_and_goes():
     with short_dir() as where:
         assert where.is_dir()
         if hasattr(socket, "AF_UNIX"):
-            assert len(str(where)) < 30
+            # <root>/mx-<6>/<1>/mx-<8>: 24 bytes past the temp root, however the system
+            # spells the root (macOS's /tmp is /private/tmp).
+            root = where.parents[2]
+            assert len(str(where)) - len(str(root)) == 24, where
         else:
             # The bound is for a Unix socket's path, and Python has no Unix sockets here
             # (Windows): the directory is a short name right in the short root.
-            assert where.parent == Path(testing._short_root()) and len(where.name) < 16
+            assert where.parent == Path(testing.short_root()) and len(where.name) < 16
     assert not where.exists()
 
 
@@ -263,16 +268,16 @@ def test_an_honest_fsync_reaches_the_disk(tmp_path):
     os.fsync; the kernel accepts it on the file and on its directory; then the file's
     cached pages are dropped (POSIX_FADV_DONTNEED drops clean pages only, so they had
     been written back) and a fresh descriptor reads every byte back. The file is in
-    tmp_path, so it is skipped when pytest's temp root is in memory (tmpfs, as /tmp
-    often is): there a pass would show nothing reached a disk. Run with a disk-backed
-    root (PYTEST_DEBUG_TEMPROOT=/var/tmp) and the read comes from the device. It does
-    not prove the bytes survive a power cut: the drive's own cache is beyond what a test
-    can see. On Windows a directory can't be opened as a file, so its fsync is left out,
+    tmp_path, so it is skipped when pytest's temp root is in memory (tmpfs, as a
+    MOXI_TEST_TEMP=ram run's is): there a pass would show nothing reached a disk. Run
+    with the temp on disk (MOXI_TEST_TEMP=disk, the default) and the read comes from the
+    device. It does not prove the bytes survive a power cut: the drive's own cache is
+    beyond what a test can see. On Windows a directory can't be opened as a file, so its fsync is left out,
     and there is no call that drops the file's cached pages."""
     kind = filesystem_type(tmp_path)
     if kind in MEMORY_FILESYSTEMS:
-        pytest.skip(f"tmp_path is on {kind}, which has no disk; set PYTEST_DEBUG_TEMPROOT "
-                    "to a disk-backed directory")
+        pytest.skip(f"tmp_path is on {kind}, which has no disk; set {testing.TEMP_ENV}=disk "
+                    "to keep the run's temp on disk")
     assert os.fsync is testing._REAL_FSYNC
     data = os.urandom(256 * 1024)
     path = tmp_path / "durable"

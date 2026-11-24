@@ -292,7 +292,8 @@ def test_check_fails_a_stale_stamp_before_the_sync(repo, capsys):
     assert result.code == 1
     assert calls == [["uv", "lock", "--check"]]
     assert ("| packages: alpha | lock pass | tags pass | refs pass | names pass | ruff pass | "
-            "renames none | release pass | stamps fail | web not run | sync not run |") in result.line()
+            "renames none | release pass | pronouns pass | machine pass | stamps fail | web not run | "
+            "sync not run |") in result.line()
     assert "npm run build" in capsys.readouterr().err
     rebuild(repo)
     result = check.check(repo, env={"PATH": "/usr/bin"}, run=lambda cmd, cwd, env: 0)

@@ -95,6 +95,7 @@ roles = ["calendar"]                  # role holders this box adds
 [policy]
 cache_callers = ["operator", "planner@proj"]
 labels = { "notifier@proj" = "the notifier, which only sends" }
+directors = ["fleet-lead"]            # direct every session that doesn't opt out
 
 [provision]
 operator = "operator"                 # the human's identity name
@@ -113,6 +114,7 @@ expiry = "24h"                        # how long a send waits before it is dropp
 | `[credentials] store` | `STATE/comms/tokens` | `MOXI_COMMS_TOKEN_STORE` | the token store's directory |
 | `[credentials] roles` | `[]` | | role holders this box adds to comms' own four (`reader`, `daemon`, `provisioner`, `operator`). Each keys the token store under its own name; a role not listed is unknown. |
 | `[policy] cache_callers` | `["operator"]` | | the identities `moxi comms cache` answers, by qualified name. The list is whole: a box that adds a caller lists `operator` too. |
+| `[policy] directors` | `["fleet-lead"]` | | names that direct every comms session on this box that doesn't opt out (`--no-policy-directors`, a roster row's or a launcher seat's `takes_policy_directors = false`), after its launch's own directors. Each directs only while it holds a standing row (`moxi-comms-provision --standing NAME`); `moxi comms doctor` warns for one that doesn't. Written as `--director` is: a bare name is the global identity, `name@scope` is that scope's. A session takes the list as it stands at its launch. Empty turns it off. |
 | `[policy] labels` | `{}` | | send-only identities by qualified name, each mapped to the words the send and reply verbs use when they refuse it as a recipient. Without a label it is "a send-only identity". |
 | `[provision] operator` | `operator` | | the human's identity name, provisioned at first start |
 | `[delivery] expiry` | `24h` | `MOXI_COMMS_DELIVERY_EXPIRY` | how long a sent message may wait undelivered before it is dropped, when the send names no `--expires`: a whole number with `s`, `m`, `h` or `d` (`30m`, `6h`, `3d`), or `never`. The send verb writes the expiry on the message's first line, so a change touches only later sends. Nothing goes back to the sender when a message expires; `moxi comms explain` says `expired`. Read at each send. |
@@ -124,6 +126,8 @@ expiry = "24h"                        # how long a send waits before it is dropp
 | `[connector] wait_max_s` | `90` | | the longest a `send_and_wait` call waits, 1 to 99 seconds (Cloudflare ends an answer at 100); a call that asks longer waits this long |
 | `[replay] messages` | `50` | | read only when comms 0.2's files move: a name with no cursor gets at most this many of its messages as waiting mail; 1 or more |
 | `[replay] hours` | `24` | | read only when comms 0.2's files move: a name with no cursor gets none of its messages older than this; 0 or more |
+| `[archive] record` | `""` | | an older comms' record file (its `record.db`), read in place and never written. `moxi comms history` and a session's `history` tool list its `#names` messages before comms.db's (the tool's state for one is `archived`, and its `skip` pages back past the newest messages it reads at once), and `reply` and every read of one message by id find a message whose id comms.db skipped for it: at its start the daemon moves comms.db's message counter past the older record's last id once, and records the range in comms.db. `moxi comms explain <name> <id>` of such a message, once the older record holds it as a `#names` message, reads the older record's queue for the name and the name's cursor file beside it (`cursors/local/<name>.json`, read only), says whether that cursor stood at or past the message or short of it, and says that the older daemon's memory of its delivery is gone. An older id that comms.db had already used before the move names comms.db's own message by id: `reply`, `explain` and every other read by that id reach comms.db's message, and a reply copies its audience. The older message under such an id is reached through `history` only. Read at the daemon's start, and by each verb. |
+| `[archive] identities` | `""` | | an older comms' identities file (its `directory.db`), read in place and never written: every identity it marks retired is refused at bind and as a recipient, as one comms.db retired is. Read at the daemon's start, and by each verb. |
 | `block` | `false` | | stops all routing: while it is true the daemon neither delivers to nor routes from any identity, and `moxi comms send` says so and sends nothing. Read at every use, so a change needs no restart. |
 | `[codex] defaults`, `[codex] agents` | `{}` | | the Codex roster (experimental, below) |
 | `[opencode] defaults`, `[opencode] agents` | `{}` | | the OpenCode roster (experimental, below) |
@@ -171,9 +175,13 @@ model = "opencode/big-pickle"
 cwd  = "/home/me/proj-a"
 ```
 
+A row's `takes_policy_directors = false` opts that agent out of `[policy] directors`; it
+keeps its own `directors`. A roster launch takes `[policy] directors` from the box's own
+config even when `--config PATH` names another file.
+
 `[codex.defaults]` holds only `sandbox`, and `[opencode.defaults]` only `model`; a row
-that names its own takes none from the defaults. Every other key, `directors` included,
-is set on each row. The key lists are in `adapters/codex_roster.py` and
+that names its own takes none from the defaults. Every other key, `directors` and
+`takes_policy_directors` included, is set on each row: each is one recipient's grant. The key lists are in `adapters/codex_roster.py` and
 `adapters/opencode_roster.py`.
 
 ## Other variables
@@ -200,7 +208,8 @@ nothing. You don't set these by hand, except to drive a test identity from a she
 | `MOXI_COMMS_NAME` | the identity's name |
 | `MOXI_COMMS_SCOPE` | its scope (a project name), or `global` |
 | `MOXI_COMMS_GLOBAL` | `1` for a global identity |
-| `MOXI_COMMS_DIRECTORS` | the identity's declared directors, qualified, comma-separated |
+| `MOXI_COMMS_DIRECTORS` | the identity's directors, qualified, comma-separated: its launch's own, then the box's policy directors it takes |
+| `MOXI_COMMS_POLICY_DIRECTORS` | the part of `MOXI_COMMS_DIRECTORS` only `[policy] directors` gave |
 | `MOXI_COMMS_PROJECT` | the project key the wrapper computed; also an override of it |
 
 A Claude session's adapter states the session id the launch named to `claude` from the
@@ -212,7 +221,8 @@ session without naming its id states none until that look.
 
 comms' listener gives a Claude session its start context and roster changes through Moxi
 turns, which waits at most its `listen.wait_ms` (2000 by default) for every listener of an
-event and drops a late answer. The listener's own query to comms' daemon waits at most
-1.5 s, so keep `listen.wait_ms` above 1500. Set lower, a slow or stopped daemon costs a
+event and drops a late answer. The listener's own answer, its query to comms' daemon and
+any wait for a new adapter's word together, takes at most 1.5 s, so keep
+`listen.wait_ms` above 1500. Set lower, a slow or stopped daemon costs a
 session its whole start context, where it would have had the context block and a line
 saying comms was offline.

@@ -24,6 +24,7 @@ import roster_kit
 import shim_drive
 from moxi_comms import claimfile
 from moxi_comms.daemon import Daemon
+from moxi_dev.testing import PROC_WAIT_S
 from roster_kit import STANDING, holding, put_clock, wait_for
 from test_reply_enforcement import PLANNER, REVIEWER, P, R, indexed, send
 
@@ -82,7 +83,7 @@ def shell(ui_shell, monkeypatch):
 
 def bound(rig, *names):
     wait_for(lambda: all(n in rig.daemon.bindings and rig.daemon.bindings[n].session_id
-                         for n in names), 5, what=f"{names} to bind")
+                         for n in names), PROC_WAIT_S, what=f"{names} to bind")
 
 
 def awaits(data: dict, qualified: str) -> list[str]:
@@ -137,8 +138,11 @@ def test_the_page_keeps_the_contract(shell, rig, ui_contexts, ui_component_check
     roster_kit.current(shell, holding([]))
     page = ui_contexts().pages[0]
     # The page's accent is in the roster it places, whose script the home view loaded. It
-    # reads launcher's running sessions, with launcher installed.
-    check = ui_component_check(page, "comms", "page", allow=("cache", "launcher"))
+    # reads launcher's running sessions, with launcher installed, and projects' list while
+    # an idle name is in `Other names` (the rig's standing names), with projects installed.
+    # sessions and turns it reads only for a live session and an open send box, and this
+    # page has neither.
+    check = ui_component_check(page, "comms", "page", allow=("cache", "launcher", "projects"))
     assert check.element == "moxi-comms-page"
     assert any(roster_kit.ROSTER in url for url in check.requests), check.requests
 

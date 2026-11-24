@@ -1,8 +1,8 @@
 """The generated files: what the logs say, written out as markdown for people and
 agents to read beside the logs.
 
-    <rounds folder>/<slug>/round-note.md   one round: the flow it follows now, the
-                                           skips that stand, its design's newest
+    <rounds folder>/<slug>/round-note.md   one round: its lead, the flow it follows
+                                           now, the skips that stand, its design's newest
                                            version and standing, the lead's
                                            decisions on threads, its stages, its
                                            builds with their state, its
@@ -21,9 +21,10 @@ write to the project's log. Nothing reads one back.
 A note also says which of its round's rulings the operator has read back, and that is
 in the project's log. So a read-back, when it is recorded, writes again the note of
 every round of the project, open or ended, each under its round's lock. A round another
-process holds for longer than `NOTE_WAIT_S` is left to it and named as not written. A file is made from its log alone, so a hand edit is lost at the next write, and
-the same log gives the same bytes: the only date in a file is that of the log's newest
-event. Someone's own notes on a round go in any other file of its folder, which nothing
+process holds for longer than `NOTE_WAIT_S` is left to it and named as not written. A
+file is made from its logs alone, and a note also from its project's lead as the
+projects record names it then, so a hand edit is lost at the next write, and the same
+logs give the same bytes: the only date in a file is that of the log's newest event. Someone's own notes on a round go in any other file of its folder, which nothing
 here touches.
 
 A file that can't be written leaves the record as it is; the next write to the log
@@ -55,10 +56,10 @@ from pathlib import Path
 from moxi import files
 
 from . import questions as asked
-from . import closing, folders, log, readback, ruling, showing, write
+from . import closing, folders, leads, log, readback, ruling, showing, write
 from . import numbers as counted
 from . import state as states
-from .errors import Locked, NoLog, Unreadable
+from .errors import Locked, NoLog, RoundsError, UnfencedTest, Unreadable
 
 #: The names of the four files.
 NOTE_FILE = "round-note.md"
@@ -113,7 +114,8 @@ def on_append(written) -> None:
     # ours, and a note there may be another tool's.
     if where.slug is not None and log.exists(log.round_log(rounds_dir / where.slug)):
         work.append(put(rounds_dir / where.slug / NOTE_FILE, lambda: note(
-            where.project, where.slug, written.round_events, written.project_events)))
+            where.project, where.slug, written.round_events, written.project_events,
+            **_project_lead(where.project))))
         if any(one.get("type") in _ENDINGS for one in written.round_events):
             work.append(lambda: _put_retro(rounds_dir / where.slug, where.project,
                                            where.slug, written.round_events))
@@ -133,6 +135,8 @@ def on_append(written) -> None:
     for step in work:
         try:
             step()
+        except UnfencedTest:
+            raise
         except Exception as exc:
             failed.append(exc)
     if failed:
@@ -159,7 +163,8 @@ def _note_again(project: str, rounds_dir: Path, slug: str,
             except (NoLog, Unreadable):
                 return
             files.atomic_write(rounds_dir / slug / NOTE_FILE,
-                               note(project, slug, events, project_events), mode=0o644)
+                               note(project, slug, events, project_events,
+                                    **_project_lead(project)), mode=0o644)
     except files.LockTimeout as exc:
         raise Locked(path, exc.holder, NOTE_WAIT_S) from None
 
@@ -167,12 +172,16 @@ def _note_again(project: str, rounds_dir: Path, slug: str,
 # -- a round's note ----------------------------------------------------------------------
 
 def note(project: str, slug: str, events: Iterable[dict],
-         project_events: Iterable[dict] = (), *, on_closed: Closed | None = None) -> str:
+         project_events: Iterable[dict] = (), *, on_closed: Closed | None = None,
+         project_lead: str | None = None, lead_unknown: str | None = None) -> str:
     """The note of the round `<project>/<slug>`, as text: `events` is its whole log and
     `project_events` its project's, which says what the operator has read back.
     `on_closed` answers whether a round, by name, is closed, for a parked question that
-    waits for one; the logs answer when it is left out."""
-    found = _read(project, events, project_events, on_closed, slug=slug)
+    waits for one; the logs answer when it is left out. `project_lead` is the lead the
+    project's record names, which a round with no lead of its own reads, and
+    `lead_unknown` why that can't be read, when it can't."""
+    found = _read(project, events, project_events, on_closed, slug=slug,
+                  project_lead=project_lead)
     shown_as = showing.data(found)
     lines = [*_header("round-note", project, shown_as["description"],
                       ["round", slug], shown_as["history"],
@@ -182,7 +191,7 @@ def note(project: str, slug: str, events: Iterable[dict],
              "are lost: write your own notes on the round in another file of this "
              "folder.",
              "", f"# {found.name}", "", *_lines(shown_as["description"]), "",
-             f"- status: {shown_as['status']}"]
+             f"- status: {shown_as['status']}", _lead(shown_as["lead"], lead_unknown)]
     if shown_as["parent"] is not None:
         lines.append(f"- parent: {shown_as['parent']}")
     if shown_as["ended"] is not None:
@@ -190,6 +199,25 @@ def note(project: str, slug: str, events: Iterable[dict],
     for part in PARTS:
         lines += ["", f"## {part.title}", "", *part.lines(shown_as)]
     return "\n".join(lines) + "\n"
+
+
+def _project_lead(project: str) -> dict:
+    """What `note` is given of the lead the record of `project` names: the lead, or
+    why the projects list can't say. A note is written either way."""
+    try:
+        return {"project_lead": folders.lead(project)}
+    except RoundsError as exc:
+        return {"lead_unknown": exc.reason}
+
+
+def _lead(lead: dict | None, unknown: str | None = None) -> str:
+    """The note's line of the round's lead: its own, or its project's, said so, or
+    with neither why the project's is not known when it is not."""
+    if lead is None:
+        return "- lead: none" if unknown is None else f"- lead: not known ({unknown})"
+    if lead["from"] == leads.PROJECT:
+        return f"- lead: {lead['name']} (the project's)"
+    return f"- lead: {lead['name']}"
 
 
 def _flow(shown_as: dict) -> list[str]:
@@ -505,7 +533,8 @@ def questions(project: str, project_events: Iterable[dict], *,
 # -- shared ------------------------------------------------------------------------------
 
 def _read(project: str, events: Iterable[dict], project_events: Iterable[dict],
-          on_closed: Closed | None, *, slug: str | None = None) -> showing.Shown:
+          on_closed: Closed | None, *, slug: str | None = None,
+          project_lead: str | None = None) -> showing.Shown:
     """The logs as `showing` reads a round, so a file lists what `show` shows. A
     project's own log is read as a round with no slug. No folder is named: a file
     says nothing of the machine it was written on."""
@@ -513,7 +542,8 @@ def _read(project: str, events: Iterable[dict], project_events: Iterable[dict],
         name=project if slug is None else f"{project}/{slug}", project=project,
         slug=slug or "", round_dir=Path(),
         state=states.fold(events), register=states.fold(project_events),
-        on_closed=asked.is_closed if on_closed is None else on_closed)
+        on_closed=asked.is_closed if on_closed is None else on_closed,
+        project_lead=project_lead)
 
 
 def _header(kind: str, project: str, description: str | None, tags: list[str],

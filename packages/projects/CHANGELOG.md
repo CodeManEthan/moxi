@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+- `Add a project` reads what is at the typed folder through moxi-ui's `readLater`, so the
+  page root's `data-reading` mark counts that read from the keystroke until what it fills
+  in is drawn, and a test's press waits for it. A user sees no change. The `ui` extra asks
+  for moxi-ui 0.2.8 or later.
+- With no project, `Add a project` sits under `No projects yet.` and the empty
+  sentence under it. The sentence grows as other modules' facts report, and it used to
+  push the button down a line, under a click that was already on its way.
+- The page's `Reading…` line, while its first read is out, shows once that read has
+  been out 400 ms in every browser. In Firefox it could stay blank until something
+  else redrew the page, since the page checked the wait against `Date.now()`, which
+  Firefox coarsens. It now takes the wait from moxi-ui's `WaitClock`, so the `ui` extra
+  asks for moxi-ui 0.2.6 or later.
 - The read API offers interface 2: interface 1 and `for_paths(paths)`, which answers the
   key of the project each path is in (or None) with one read of the store, by
   `for_path`'s rules. A module that calls it loads projects with `interface=2`.

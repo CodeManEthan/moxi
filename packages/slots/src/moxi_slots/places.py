@@ -13,6 +13,7 @@ State directory:
     slots.lock     the module lock around every change
     mismatches/    the regions of screens that did not match, the last 20
     server.log     the output of a server started on demand
+    hooks.log      one JSON line per run end the `pane-died` hook failed to write
 """
 
 from __future__ import annotations
@@ -22,6 +23,8 @@ from pathlib import Path
 from moxi import paths
 
 MODULE = "slots"
+#: The file, in the state directory, where the `pane-died` hook logs a write it failed.
+HOOKS_LOG = "hooks.log"
 #: The socket's name, as `moxi.paths.socket_path` takes it.
 SOCKET_NAME = "tmux"
 
@@ -76,6 +79,12 @@ def server_log() -> Path:
     return state_dir() / "server.log"
 
 
+def hooks_log(state_dir_given: Path | None = None) -> Path:
+    """The log of the `pane-died` hook's failed writes, in `state_dir_given` or the state
+    directory."""
+    return (state_dir() if state_dir_given is None else Path(state_dir_given)) / HOOKS_LOG
+
+
 __all__ = ["MODULE", "SOCKET_NAME", "layout", "runtime_dir", "state_dir", "socket",
            "server_conf", "server_pid", "server_lock", "launch_dir", "registry",
-           "module_lock", "mismatches_dir", "server_log"]
+           "module_lock", "mismatches_dir", "server_log", "HOOKS_LOG", "hooks_log"]

@@ -19,7 +19,7 @@ import re
 import sys
 
 import pytest
-from moxi_dev.testing import wait_for
+from moxi_dev.testing import PROC_WAIT_S, wait_for
 from playwright.sync_api import expect
 
 import launcher_page_kit as kit
@@ -225,7 +225,7 @@ def test_slots_that_cant_be_read_are_said_under_the_box_and_no_slots_are_not(fak
     expect(piece.locator(".said")).not_to_contain_text("slots")
 
 
-def test_the_menu_lists_each_slot_with_its_state_and_only_a_free_one_can_be_picked(
+def test_the_menu_lists_each_slot_with_its_state_and_only_a_choosable_one_can_be_picked(
         fake, ui_page, ui_shell):
     # The launch in slot 1 is another user's, so it is no place of this shell's user.
     with kit.launch_log(ui_shell) as conn:
@@ -257,12 +257,12 @@ def test_the_menu_lists_each_slot_with_its_state_and_only_a_free_one_can_be_pick
     expect(words("Slot 3")).to_have_text("free")
     expect(words("Slot 4")).to_have_text("taken")
     expect(words("Slot 5")).to_have_text(re.compile(f"^held for reviewer until {HOUR}$"))
-    expect(words("Slot 6")).to_have_text("not running")
+    expect(words("Slot 6")).to_have_text("missing, made again at launch")
     expect(words("Your terminal")).to_have_text("copies the command for you to paste")
     expect(words("Headless")).to_have_text("no terminal, runs in the background")
-    for lead in ("Slot 1", "Slot 4", "Slot 5", "Slot 6"):
+    for lead in ("Slot 1", "Slot 4", "Slot 5"):
         assert menu.locator(f'[data-run="{lead}"]').evaluate("row => row.localName") == "div"
-    for lead in ("Slot 2", "Slot 3", "Your terminal", "Headless"):
+    for lead in ("Slot 2", "Slot 3", "Slot 6", "Your terminal", "Headless"):
         expect(menu.locator(f'button[data-run="{lead}"]')).to_be_enabled()
     # The tick is on the default, and a hairline parts the slots from the rest.
     current = menu.locator('.row[data-current="true"]')
@@ -333,7 +333,7 @@ def test_headless_is_a_choice_and_never_where_a_load_starts(fake, ui_page, ui_sh
     row = kit.newest_launch(ui_shell)
     assert (row.target, row.slot) == ("headless", None), row
     [run] = wait_for(lambda: [run for run in harness.runs() if BRIEF in " ".join(run["argv"])],
-                     10, what="the fake harness's run with the brief")
+                     PROC_WAIT_S, what="the fake harness's run with the brief")
     assert run["argv"][1] == "-p", run["argv"]
     assert len(fake.starts()) == before, "a headless launch asks slots for nothing"
     kit.open_home(ui_page)
@@ -477,7 +477,7 @@ def test_a_handoff_the_defaults_name_shows_under_the_box_is_sent_alone_and_clear
         assert "handoff" in body["leave_out"], body
         expect(said(piece, "started")).to_have_text(re.compile(r"^Started headless · "))
         [run] = wait_for(lambda: [run for run in harness.runs() if typed in " ".join(run["argv"])],
-                         10, what="the fake harness's run with the typed brief")
+                         PROC_WAIT_S, what="the fake harness's run with the typed brief")
         assert unsent(run["argv"]), run["argv"]
         row = kit.newest_launch(ui_shell)
         assert (row.brief, row.handoff_path) == (typed, None), row
@@ -495,7 +495,7 @@ def test_the_text_in_the_box_is_the_brief_sent_whatever_the_defaults_set(
     assert body["values"]["brief"] == typed, body
     expect(said(piece, "started")).to_have_text(re.compile(r"^Started headless · "))
     [run] = wait_for(lambda: [run for run in harness.runs() if typed in " ".join(run["argv"])],
-                     10, what="the fake harness's run with the typed brief")
+                     PROC_WAIT_S, what="the fake harness's run with the typed brief")
     assert DEFAULT_BRIEF not in " ".join(run["argv"]), run["argv"]
     assert kit.newest_launch(ui_shell).brief == typed
 
@@ -590,7 +590,7 @@ def test_a_launch_followed_to_the_end_of_its_watch_says_it_stopped_watching(fake
     expect(box).to_have_value(BRIEF)
     expect(go).to_be_enabled()
     expect(go).to_have_text("Launch in slot 2")
-    wait_for(lambda: placed(fake, 2), 15, what="the held start to end")
+    wait_for(lambda: placed(fake, 2), PROC_WAIT_S, what="the held start to end")
     # The watch is over: the row starting later changes nothing on Home.
     ui_page.clock.fast_forward("00:10")
     expect(said(piece, "stopped")).to_have_text(STOPPED)
@@ -695,7 +695,7 @@ def test_a_press_on_an_old_reading_reads_again_and_names_the_slot_the_launch_tak
     body = press(ui_page, piece)
     assert body["values"]["target"] == "slot" and "slot" not in body["values"], body
     expect(said(piece, "starting")).to_have_text("Starting in slot 3…")
-    wait_for(lambda: placed(fake, 3), 15, what="the held start to end")
+    wait_for(lambda: placed(fake, 3), PROC_WAIT_S, what="the held start to end")
     ui_page.clock.fast_forward("00:03")
     expect(said(piece, "started")).to_have_text(re.compile(r"^Started in slot 3 · "))
     assert kit.newest_launch(ui_shell).slot == "3"
@@ -735,7 +735,7 @@ def test_a_reading_is_as_old_as_its_asking_so_a_press_after_a_slow_answer_reads_
     body = press(ui_page, piece)
     assert body["values"]["target"] == "slot" and "slot" not in body["values"], body
     expect(said(piece, "starting")).to_have_text("Starting in slot 4…")
-    wait_for(lambda: placed(fake, 4), 15, what="the held start to end")
+    wait_for(lambda: placed(fake, 4), PROC_WAIT_S, what="the held start to end")
     ui_page.clock.fast_forward("00:03")
     expect(said(piece, "started")).to_have_text(re.compile(r"^Started in slot 4 · "))
 
@@ -770,7 +770,7 @@ def test_a_press_whose_read_a_later_read_passes_names_the_slot_the_later_read_gi
     first.value.finished()
     held[1].continue_()
     expect(said(piece, "starting")).to_have_text("Starting in slot 3…")
-    wait_for(lambda: placed(fake, 3), 15, what="the held start to end")
+    wait_for(lambda: placed(fake, 3), PROC_WAIT_S, what="the held start to end")
     ui_page.clock.fast_forward("00:03")
     expect(said(piece, "started")).to_have_text(re.compile(r"^Started in slot 3 · "))
     assert kit.newest_launch(ui_shell).slot == "3"

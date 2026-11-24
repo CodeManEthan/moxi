@@ -64,10 +64,14 @@ export interface BandEntry {
  * The band's entries, in the order shown: the shell's own Home first in `daily`, each
  * module's placed page by its `order` and then its title within its group, and the
  * shell's own Modules last in `setup`. A group that is not `daily` reads as `setup` and
- * an order that is no number as 500. Settings is not in the band; the top line holds it.
+ * an order that is no number as 500. A page whose `band_unless` names a module of
+ * `modules` is left out; its address still opens it. Settings is not in the band; the top
+ * line holds it.
  */
 export function bandEntries(modules: PanelModule[]): BandEntry[] {
-  const pages = modules.filter((item) => item.name !== "ui" && item.page !== null).map((item) => {
+  const present = new Set(modules.map((item) => item.name));
+  const shown = (page: ComponentInfo): boolean => !(page.band_unless ?? []).some((name) => present.has(name));
+  const pages = modules.filter((item) => item.name !== "ui" && item.page !== null && shown(item.page)).map((item) => {
     const page = item.page as ComponentInfo;
     const group: Group = page.group === "daily" ? "daily" : "setup";
     return { module: item.name, route: "", title: page.title, group,

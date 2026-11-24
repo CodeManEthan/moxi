@@ -28,6 +28,7 @@ from moxi_comms.adapters.codex_roster import record_write_root
 from moxi_comms.adapters.codex_wrapper import Refused, build_parser, plan
 from moxi_comms.claimhold import CLAIM_SOCKET_ENV
 from moxi_comms.context import CONTEXT_BLOCK
+from moxi_dev.testing import PROC_WAIT_S
 
 NAME = "coder"
 
@@ -78,7 +79,8 @@ def test_the_launchers_line_reads_whole(tmp_path):
     assert config["check_for_update_on_startup"] is False
     assert config["sandbox_workspace_write"] == {
         "writable_roots": [str(extra), str(root)], "network_access": True}
-    assert launch.agent.directors == ["lead"]
+    assert launch.agent.directors == ["lead", "fleet-lead"]
+    assert launch.agent.policy_directors == ["fleet-lead"]
 
 
 def test_a_launch_that_sets_network_access_keeps_its_own(tmp_path):
@@ -213,12 +215,14 @@ def test_the_hosts_env_carries_this_identity_alone_and_no_lifeline(
         tmp_path, monkeypatch):
     launch = plan(args("--name", NAME, "--scope", "proj-a"), cwd=str(tmp_path))
     base = {"PATH": "/bin", "MOXI_LIFELINE_FD": "7", "STAMPED_BY_CALLER": "kept",
-            "MOXI_COMMS_DIRECTORS": "someone-else", CLAIM_SOCKET_ENV: "/parent.sock"}
+            "MOXI_COMMS_DIRECTORS": "someone-else",
+            "MOXI_COMMS_POLICY_DIRECTORS": "someone-else", CLAIM_SOCKET_ENV: "/parent.sock"}
     env = launch.env(base)
     assert env["PATH"] == "/bin" and env["STAMPED_BY_CALLER"] == "kept"
     assert (env["MOXI_COMMS_NAME"], env["MOXI_COMMS_SCOPE"]) == (NAME, "proj-a")
     assert env[CLAIM_SOCKET_ENV] == str(launch.claim_socket)
-    assert "MOXI_COMMS_DIRECTORS" not in env, "no director is handed by proximity"
+    # No director is handed by proximity: only the box's own policy director is stamped.
+    assert env["MOXI_COMMS_DIRECTORS"] == env["MOXI_COMMS_POLICY_DIRECTORS"] == "fleet-lead"
     assert "MOXI_LIFELINE_FD" not in env, "an exec'd host gets no lifeline"
 
 
@@ -308,9 +312,10 @@ def test_the_launch_binds_then_execs_the_host_which_keeps_the_pid(
         fake_host.release.touch()
         proc.communicate(timeout=20)
     assert proc.returncode == 0
-    assert wait_until(lambda: "coder@proj-a" not in rig.daemon.bindings, 15), \
+    assert wait_until(lambda: "coder@proj-a" not in rig.daemon.bindings, PROC_WAIT_S), \
         "the adapter ends with the host"
-    assert wait_until(lambda: not any(codex_wrapper.sessions_dir().glob("codex-*")), 10)
+    assert wait_until(lambda: not any(codex_wrapper.sessions_dir().glob("codex-*")),
+                      PROC_WAIT_S)
 
 
 def test_a_launch_told_to_resume_binds_the_name_to_that_thread(rig, fake_host):
@@ -335,7 +340,7 @@ def test_a_launch_told_to_resume_binds_the_name_to_that_thread(rig, fake_host):
         fake_host.release.touch()
         proc.communicate(timeout=20)
     assert proc.returncode == 0
-    assert wait_until(lambda: "coder@proj-a" not in rig.daemon.bindings, 15)
+    assert wait_until(lambda: "coder@proj-a" not in rig.daemon.bindings, PROC_WAIT_S)
 
 
 def test_a_held_name_is_refused_before_the_host_starts(rig, fake_host):
@@ -409,7 +414,7 @@ def test_an_adapter_whose_bound_cant_be_delivered_lets_the_name_go(rig, tmp_path
         os.close(handle)
     assert bound_when_told == [True]
     assert looked == [], "no session is looked for, and nothing delivered"
-    assert wait_until(lambda: "planner@proj-a" not in rig.daemon.bindings, 10), \
+    assert wait_until(lambda: "planner@proj-a" not in rig.daemon.bindings, PROC_WAIT_S), \
         "the daemon sees the unbind"
     assert claimfile.read(adapter.claims.key) is None
 
@@ -585,13 +590,16 @@ def test_the_host_holds_the_lifeline_and_ends_when_the_adapter_dies(
         brief = session_dir / codex_wrapper.BRIEF_NAME
         assert brief.read_text() == "go" and brief.stat().st_mode & 0o777 == 0o600
         os.kill(adapter_pid, signal.SIGKILL)
-        assert wait_until(lambda: host_said(headless_host, "lifeline-closed"), 15)
+        assert wait_until(lambda: host_said(headless_host, "lifeline-closed"), PROC_WAIT_S)
+        # The wrapper exits a moment after its host wrote that line: its exit is what the
+        # test asserts, so wait for it here, before the `finally` may kill it.
+        proc.wait(PROC_WAIT_S)
     finally:
         if proc.poll() is None:
             proc.kill()
         proc.communicate(timeout=20)
     assert proc.returncode == 0
-    assert wait_until(lambda: "coder@proj-a" not in rig.daemon.bindings, 15)
+    assert wait_until(lambda: "coder@proj-a" not in rig.daemon.bindings, PROC_WAIT_S)
 
 
 def test_exit_session_ends_the_host_through_its_pidfd_and_releases_the_name(
@@ -608,6 +616,6 @@ def test_exit_session_ends_the_host_through_its_pidfd_and_releases_the_name(
             proc.kill()
         proc.communicate(timeout=20)
     assert proc.returncode == 0
-    assert wait_until(lambda: "coder@proj-a" not in rig.daemon.bindings, 15)
+    assert wait_until(lambda: "coder@proj-a" not in rig.daemon.bindings, PROC_WAIT_S)
     log = next(iter(codex_wrapper.log_dir().glob("codex-*.log"))).read_text()
     assert "headless session ended: exit-session" in log

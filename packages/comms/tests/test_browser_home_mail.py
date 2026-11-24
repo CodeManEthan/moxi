@@ -21,6 +21,7 @@ from playwright.sync_api import expect
 
 import roster_kit
 from moxi_comms import api, claimfile
+from moxi_dev.testing import PROC_WAIT_S
 from roster_kit import wait_for
 
 pytestmark = [pytest.mark.browser, pytest.mark.timeout(180),
@@ -82,7 +83,7 @@ def send_mail(rig) -> None:
     rig.shim(name="planner", scope="proj-a")
     code, out = rig.cli(["send", "--posture", "none", TO, TEXT], name="planner", scope="proj-a")
     assert code == 0, out
-    wait_for(lambda: api.roster().waiting, 5, what="mail to wait")
+    wait_for(lambda: api.roster().waiting, PROC_WAIT_S, what="mail to wait")
 
 
 def home_of(ui_contexts, shell=None):

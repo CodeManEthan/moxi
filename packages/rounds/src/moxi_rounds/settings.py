@@ -24,7 +24,7 @@ from __future__ import annotations
 
 from moxi.config import ConfigError, Schema
 
-from . import flows
+from . import flows, paths
 from .paths import MODULE
 
 SCHEMA_RESOURCE = "settings.toml"
@@ -41,9 +41,13 @@ def schema() -> Schema:
 
 
 def load():
-    """rounds' settings as they stand. Raises `moxi.config.ConfigError`."""
+    """rounds' settings as they stand. Raises `moxi.config.ConfigError`, or
+    `UnfencedTest` under a test whose rounds config directory no Moxi variable places:
+    the core reads the file through a layout of its own, so rounds' config directory is
+    resolved first, through `paths`."""
     from moxi import config
 
+    paths.config_dir()
     return check(config.load(MODULE, schema()))
 
 
@@ -65,6 +69,7 @@ def check(settings):
     _check_disposable(settings.file, "defaults.disposable",
                       settings["defaults.disposable"])
     _check_grace(settings.file, "sweep.grace_hours", settings["sweep.grace_hours"])
+    _check_director(settings.file, "defaults.director", settings["defaults.director"])
     named: dict[str, str] = {}
     for name, table in settings["projects"].items():
         first = named.setdefault(name.casefold(), name)
@@ -85,8 +90,17 @@ def check(settings):
 ROUND_KEYS = ("flow", "dir", "ratify", "trace", "idle_days", "dormant_days",
               "slice_minutes", "sitting_at")
 #: The keys read for a build, from the build's repo.
-BUILD_KEYS = ("into", "check", "ci", "finish", "check_on", "shared_paths", "keep_branch",
-              "lock_ref", "brief", "disposable")
+BUILD_KEYS = ("into", "land", "check", "ci", "finish", "check_on", "shared_paths",
+              "keep_branch", "lock_ref", "brief", "disposable", "director",
+              "private_files")
+
+#: How a repo's builds land (`land`): each by its own finish, or through the repo's
+#: queue, where a finish joins the queue and the lander merges.
+LAND_FINISH = "finish"
+LAND_QUEUE = "queue"
+#: What `{base}` in a check's `scoped` command line is filled in with: the merge-base of
+#: the build's tip and its target.
+BASE_FIELD = "{base}"
 
 #: What a finish action does.
 MERGE = "merge"
@@ -98,8 +112,9 @@ DEFAULT_FINISH = ({"do": MERGE},)
 #: A project's own keys, which `defaults` does not hold, each with what it reads when the
 #: project's table leaves it out. No `into` means the branch checked out at the repo's
 #: root, and no `lock_ref` rounds' own name for the lock.
-_PROJECT_ONLY = {"into": None, "check": None, "ci": None, "finish": DEFAULT_FINISH,
-                 "shared_paths": (), "keep_branch": False, "lock_ref": None, "brief": ()}
+_PROJECT_ONLY = {"into": None, "land": LAND_FINISH, "check": None, "ci": None, "finish": DEFAULT_FINISH,
+                 "shared_paths": (), "keep_branch": False, "lock_ref": None, "brief": (),
+                 "private_files": ()}
 
 
 def round_setting(settings, project: str, key: str):
@@ -172,8 +187,16 @@ def _check_project(file, name, table) -> None:
             "check is the way past a CI run that is red or absent",
             f'declare the full check too: check = {{ command = "...", timeout_s = N }} '
             f"in [{key}]")
+    if table.get("land") == LAND_QUEUE and "scoped" not in (table.get("check") or {}):
+        raise ConfigError(
+            file, f"{key}.land", "is \"queue\" in a project whose check names no scoped "
+            "command, and a queued build is checked by that command alone",
+            f'give the check its scoped command too: check = {{ command = "...", '
+            f'scoped = "... --base {BASE_FIELD}", timeout_s = N }} in [{key}]')
     if "sitting_at" in table:
         _check_sitting_at(file, f"{key}.sitting_at", table["sitting_at"])
+    if "director" in table:
+        _check_director(file, f"{key}.director", table["director"])
     if "disposable" in table:
         _check_disposable(file, f"{key}.disposable", table["disposable"])
     if "dir" in table:
@@ -205,6 +228,23 @@ def _check_sitting_at(file, where, value) -> None:
         raise ConfigError(file, where, f"is {value}, below 0",
                           "give the count of open questions at which a sitting is "
                           "suggested, or 0 to suggest none")
+
+
+def _check_director(file, where, value) -> None:
+    """The director's comms name: empty, or a name with a lead's name's shape."""
+    from . import leads
+
+    if value and not leads.is_name(value):
+        raise ConfigError(file, where, f"is {value!r}, which is not a comms name",
+                          "give the director's comms name: letters, digits, . _ -, and "
+                          'at most one @scope; or "" to name nobody')
+
+
+def _check_land(file, where, value) -> None:
+    if value not in (LAND_FINISH, LAND_QUEUE):
+        raise ConfigError(file, where, f"is {value!r}, which it cannot be",
+                          f'use "{LAND_FINISH}" (each build lands by its own finish) or '
+                          f'"{LAND_QUEUE}" (a finish joins the repo\'s queue)')
 
 
 def _check_grace(file, where, value) -> None:
@@ -341,39 +381,94 @@ def _check_strings(file, where, value) -> None:
                           "give each item as a string")
 
 
-def _check_check(file, where, value) -> None:
-    """The repo's check: a command line that splits into a command, and its time limit."""
-    import shlex
+def _check_private_files(file, where, value) -> None:
+    """Refuse a `private_files` value that is not a list of literal paths, each relative
+    to the project's root, written with `/`, and named once. Whether a file is there,
+    tracked or ignored is the repo's state, read by `commission` and the doctor."""
+    _check_strings(file, where, value)
+    seen = set()
+    for entry in value:
+        problem = _private_file_problem(entry)
+        if problem:
+            raise ConfigError(file, where, f"holds {entry!r}, {problem}",
+                              "give each private file as a path relative to the "
+                              "project's root, with / between its parts, such as "
+                              "AGENTS.md or notes/local.md")
+        if entry in seen:
+            raise ConfigError(file, where, f"holds {entry!r} twice",
+                              "give each private file once")
+        seen.add(entry)
 
+
+def _private_file_problem(entry: str) -> str:
+    """What makes `entry` no literal relative path to a file, or "" when nothing does."""
+    if not entry:
+        return "which is empty"
+    if any(ord(char) < 32 or ord(char) == 127 for char in entry):
+        return "which holds a control character"
+    if "\\" in entry:
+        return "which holds a \\; write / between the parts"
+    if entry.startswith(("/", "~")) or (len(entry) > 1 and entry[1] == ":"):
+        return "which is not relative to the project's root"
+    if any(char in entry for char in "*?["):
+        return "which holds *, ? or [; each entry is a literal path, not a glob"
+    if entry.startswith(":"):
+        return "which starts with :, which git reads as pathspec magic"
+    parts = entry.split("/")
+    if any(part in ("", ".", "..") for part in parts):
+        return "which has an empty, . or .. part"
+    if any(part.casefold() == ".git" for part in parts):
+        return "which has a .git part"
+    return ""
+
+
+def _check_check(file, where, value, *, keys=("command", "timeout_s")) -> None:
+    """The repo's check: a command line that splits into a command, and its time limit.
+    The project's own check also takes `scoped`, the command line a queue project's
+    build is checked by, `{base}` in it filled in at each run (`_check_project_check`);
+    `ci.local` takes the first two alone."""
     if not isinstance(value, dict):
         raise ConfigError(file, where, f"is {flows.kind_of(value)}, not a table",
                           'write it as { command = "make check", timeout_s = 600 }')
     for other in value:
-        if other not in ("command", "timeout_s"):
+        if other not in keys:
             raise ConfigError(file, f"{where}.{other}", "is not a key of a check",
-                              "remove it; a check takes `command` and `timeout_s`")
-    command = value.get("command")
+                              "remove it; a check takes "
+                              + ", ".join(f"`{key}`" for key in keys))
+    _check_command_line(file, f"{where}.command", value.get("command"))
+    if "scoped" in value:
+        _check_command_line(file, f"{where}.scoped", value["scoped"])
+    flows.check_timeout(file, f"{where}.timeout_s", value.get("timeout_s"))
+
+
+def _check_project_check(file, where, value) -> None:
+    _check_check(file, where, value, keys=("command", "scoped", "timeout_s"))
+
+
+def _check_command_line(file, where, command) -> None:
+    """A check's command line: one string that splits into a command."""
+    import shlex
+
     if not isinstance(command, str):
-        raise ConfigError(file, f"{where}.command",
+        raise ConfigError(file, where,
                           "is missing" if command is None else "is not a command line",
                           "give the check's command line as one string")
     try:
         words = shlex.split(command)
     except ValueError as exc:
-        raise ConfigError(file, f"{where}.command",
+        raise ConfigError(file, where,
                           f"does not split into a command and its arguments ({exc})",
                           "close every quote, as you would in a shell") from None
     if not words:
-        raise ConfigError(file, f"{where}.command", "splits into no command",
+        raise ConfigError(file, where, "splits into no command",
                           "name the command to run, or remove `check`")
-    flows.check_timeout(file, f"{where}.timeout_s", value.get("timeout_s"))
 
 
 #: The keys of `ci`.
 _CI_KEYS = ("workflows", "local", "remote", "ref", "full_ref", "status", "ids", "jobs",
             "status_timeout_s")
 #: The keys of a `ci.workflows` entry written as a table.
-_WORKFLOW_KEYS = ("path", "jobs")
+_WORKFLOW_KEYS = ("path", "jobs", "matrix", "pick", "reads_candidates", "stands_for")
 
 
 def _check_ci(file, where, value) -> None:
@@ -396,6 +491,11 @@ def _check_ci(file, where, value) -> None:
                           'workflows = [".github/workflows/ci.yml"]')
     for entry in workflows:
         _check_workflow(file, f"{where}.workflows", entry)
+    if all(isinstance(entry, dict) and entry.get("reads_candidates") is True
+           for entry in workflows):
+        raise ConfigError(file, f"{where}.workflows",
+                          "marks every workflow reads_candidates, so none reads a full run",
+                          "name the full run's workflow too, with no reads_candidates key")
     local = value.get("local")
     if local is None:
         raise ConfigError(file, f"{where}.local", "is missing",
@@ -425,9 +525,22 @@ def _check_ci(file, where, value) -> None:
     flows.check_timeout(file, f"{where}.status_timeout_s", value.get("status_timeout_s"))
 
 
+def _names_problem(value) -> str | None:
+    """Why `value` is not a list of names, each once; None when it is."""
+    if (not isinstance(value, list) or not value
+            or not all(isinstance(one, str) and one.strip() for one in value)):
+        return "is not a list of job names"
+    if len(set(value)) != len(value):
+        return "names a job twice"
+    return None
+
+
 def _check_workflow(file, where, entry) -> None:
-    """One `ci.workflows` entry: a path inside the repo, or a table of the `path` and
-    the `jobs` read of its run."""
+    """One `ci.workflows` entry: a path inside the repo, or a table of the `path`, the
+    `jobs` read of its run by name, the `matrix` patterns of the jobs read by pattern
+    (one of the two at least), the `pick` job among `jobs`, `reads_candidates`, true
+    for the workflow a queue's candidate is read by, and `stands_for`, a table of job
+    names: each job of its run to the job of the target's full run it stands for."""
     from pathlib import PurePosixPath
 
     path = entry
@@ -438,16 +551,41 @@ def _check_workflow(file, where, entry) -> None:
                                   "is not a key of a workflow entry",
                                   "remove it; an entry takes " + ", ".join(_WORKFLOW_KEYS))
         path = entry.get("path")
-        jobs = entry.get("jobs")
-        if (not isinstance(jobs, list) or not jobs
-                or not all(isinstance(one, str) and one.strip() for one in jobs)):
-            raise ConfigError(file, f"{where}.jobs",
-                              "is missing" if jobs is None else "is not a list of job names",
-                              'name each job read as its run names it: jobs = ["linux"], '
-                              "or give the entry as its path alone to read the whole run")
-        if len(set(jobs)) != len(jobs):
-            raise ConfigError(file, f"{where}.jobs", "names a job twice",
-                              "name each job once")
+        jobs, matrix = entry.get("jobs"), entry.get("matrix")
+        if jobs is not None or matrix is None:
+            why = "is missing" if jobs is None else _names_problem(jobs)
+            if why is not None:
+                raise ConfigError(file, f"{where}.jobs", why,
+                                  'name each job read once, as its run names it: '
+                                  'jobs = ["linux"], or give the entry as its path '
+                                  "alone to read the whole run")
+        if matrix is not None:
+            why = _names_problem(matrix)
+            if why is not None:
+                raise ConfigError(file, f"{where}.matrix", why.replace("job names",
+                                                                       "name patterns"),
+                                  "give each pattern once, * for any text in a name: "
+                                  'matrix = ["browser (*)"]')
+        pick = entry.get("pick")
+        if pick is not None and (not isinstance(pick, str) or pick not in (jobs or ())):
+            raise ConfigError(file, f"{where}.pick", f"is {pick!r}, which jobs does not name",
+                              'name the job that picks the others, and list it in jobs: '
+                              'pick = "pick", jobs = ["pick", ...]')
+        reads = entry.get("reads_candidates")
+        if reads is not None and not isinstance(reads, bool):
+            raise ConfigError(file, f"{where}.reads_candidates",
+                              f"is {reads!r}, not true or false",
+                              "write reads_candidates = true on the workflow a queue's "
+                              "candidate is read by")
+        stands_for = entry.get("stands_for")
+        if stands_for is not None and (
+                not isinstance(stands_for, dict)
+                or not all(isinstance(one, str) and one.strip()
+                           for pair in stands_for.items() for one in pair)):
+            raise ConfigError(file, f"{where}.stands_for",
+                              f"is {stands_for!r}, not a table of job names",
+                              "map each job of this run to the job of the target's full "
+                              'run it stands for: stands_for = { scoped = "linux" }')
     parts = PurePosixPath(path).parts if isinstance(path, str) else ()
     if (not isinstance(path, str) or not path.strip() or path.startswith(("/", "\\"))
             or ".." in parts or ":" in path.split("/")[0]):
@@ -537,15 +675,15 @@ _ACTION_KEYS = {MERGE: ("do", "id"), PUSH: ("do", "id", "remote"),
 
 _PROJECT_CHECKS = {
     "into": lambda file, where, value: _check_string(file, where, value, "a branch's name"),
-    "check": _check_check, "ci": _check_ci, "finish": _check_finish,
+    "land": _check_land, "check": _check_project_check, "ci": _check_ci, "finish": _check_finish,
     "shared_paths": _check_strings, "keep_branch": _check_bool,
     "lock_ref": lambda file, where, value: _check_string(file, where, value, "a git ref"),
-    "brief": _check_strings}
+    "brief": _check_strings, "private_files": _check_private_files}
 
 _KIND_WORDS = {"string": "a string", "bool": "a boolean", "int": "an int"}
 
 
 __all__ = ["MODULE", "SCHEMA_RESOURCE", "schema", "load", "check_text", "check",
-           "ROUND_KEYS", "BUILD_KEYS", "MERGE", "PUSH", "COMMAND", "DEFAULT_FINISH",
+           "ROUND_KEYS", "BUILD_KEYS", "LAND_FINISH", "LAND_QUEUE", "BASE_FIELD", "MERGE", "PUSH", "COMMAND", "DEFAULT_FINISH",
            "round_setting", "build_setting", "project_table", "finish_actions",
            "has_notes_dir"]

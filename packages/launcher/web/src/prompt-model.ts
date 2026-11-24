@@ -12,8 +12,8 @@
 //
 // The button says where the launch runs and nothing else decides it: the request always
 // carries `target`, and `slot` only for a slot picked by its number. A launch in the slot
-// the button names by default sends no slot, so the launcher takes the lowest free one when
-// it starts, and a number that went stale between two reads can only mislabel the button.
+// the button names by default sends no slot, so the launcher takes the lowest slot with no
+// session running when it starts, and a number that went stale between two reads can only mislabel the button.
 //
 // Every string here goes into the page as text.
 
@@ -398,15 +398,20 @@ export function chipMenu(fields: readonly FieldDescriptor[], harness: string, mo
 
 // --- where it runs -------------------------------------------------------------------------
 
-/** One slot of `/api/targets`. `taken` is what the session in it is called, when the launch
- * log knows it; `holder` and `until` (seconds since the epoch) are a live hold's. */
+/** One slot of `/api/targets`. `choosable` is whether a launch may name it now, a missing
+ * one made again at launch; `crashed` that the next launch reserves it for the session that
+ * was running in it. `taken` is what the session in it is called, when the launch log knows
+ * it; `holder` and `until` (seconds since the epoch) are a live hold's, and `parked` what
+ * the session a park reservation keeps the slot for is called. */
 export interface Slot {
   number: number;
   state: string;
-  launchable: boolean;
+  choosable: boolean;
+  crashed: boolean;
   holder: string | null;
   until: number | null;
   taken: string | null;
+  parked: string | null;
 }
 
 /** Where a launch runs: a slot (by number, or a new one with `slot` null), the user's own
@@ -446,16 +451,17 @@ export function parseTargets(data: unknown): Targets {
     if (!isTable(row) || typeof row.number !== "number" || !Number.isInteger(row.number)) continue;
     slots.push({
       number: row.number, state: typeof row.state === "string" ? row.state : "",
-      launchable: row.launchable === true,
+      choosable: row.choosable === true, crashed: row.crashed === true,
       holder: typeof row.holder === "string" && row.holder !== "" ? row.holder : null,
       until: typeof row.until === "number" ? row.until : null,
       taken: isTable(row.taken_by) && typeof row.taken_by.label === "string" ? row.taken_by.label : null,
+      parked: isTable(row.parked) && typeof row.parked.label === "string" ? row.parked.label : null,
     });
   }
   slots.sort((a, b) => a.number - b.number);
   const first = isTable(data.default) ? data.default : {};
   if (first.target !== "slot" || data.new_slot !== true) return { slots, default: { target: "terminal" }, unread: false };
-  const free = slots.find((slot) => slot.launchable && slot.number === first.slot);
+  const free = slots.find((slot) => slot.choosable && slot.number === first.slot);
   return { slots, default: { target: "slot", slot: free ? free.number : null, named: false }, unread: false };
 }
 
@@ -475,14 +481,20 @@ function sameRun(a: Run, b: Run): boolean {
 export function runOf(targets: Targets, picked: Run | null): Run {
   if (picked === null) return targets.default;
   if (picked.target !== "slot") return picked;
-  return targets.slots.some((slot) => slot.number === picked.slot && slot.launchable) ? picked : targets.default;
+  return targets.slots.some((slot) => slot.number === picked.slot && slot.choosable) ? picked : targets.default;
+}
+
+/** Where a launch runs, as the words after its verb: `in slot 3`, `in a new slot`, `in your
+ * terminal` or `headless`. */
+export function runWords(run: Run): string {
+  if (run.target === "terminal") return "in your terminal";
+  if (run.target === "headless") return "headless";
+  return run.slot === null ? "in a new slot" : `in slot ${run.slot}`;
 }
 
 /** The button's words: the act and where it runs. */
 export function buttonWords(run: Run): string {
-  if (run.target === "terminal") return "Copy command";
-  if (run.target === "headless") return "Launch headless";
-  return run.slot === null ? "Launch in a new slot" : `Launch in slot ${run.slot}`;
+  return run.target === "terminal" ? "Copy command" : `Launch ${runWords(run)}`;
 }
 
 /** One row of the button's menu. `run` is what a pick of it sets, null for a slot that
@@ -500,27 +512,30 @@ export interface RunMenu {
   others: RunRow[];
 }
 
-/** What a slot's row says: `free`, `taken · <label>`, `held for <holder> until <time>` or
- * `not running`. */
+/** What a slot's row says: `free`, `taken · <label>`, `crashed, reserved at the next
+ * launch`, `held for <holder> until <time>` (with ` · parked <label>` for a park's
+ * reservation), `missing, made again at launch` or `not running`. */
 export function slotWords(slot: Slot, hour: Clock = HOUR): string {
   if (slot.state === "occupied") return slot.taken === null ? "taken" : `taken · ${slot.taken}`;
-  if (slot.state === "missing") return "not running";
+  if (slot.crashed) return "crashed, reserved at the next launch";
   if (slot.holder !== null) {
-    return `held for ${slot.holder}${slot.until === null ? "" : ` until ${hour(new Date(slot.until * 1000))}`}`;
+    const until = slot.until === null ? "" : ` until ${hour(new Date(slot.until * 1000))}`;
+    return `held for ${slot.holder}${until}${slot.parked === null ? "" : ` · parked ${slot.parked}`}`;
   }
-  return slot.launchable ? "free" : "not free";
+  if (slot.state === "missing") return slot.choosable ? "missing, made again at launch" : "not running";
+  return slot.choosable ? "free" : "not free";
 }
 
 /**
  * The menu for the listing and the choice made now. Each slot in number order, clickable
- * while it can be launched in. `A new slot` is offered only while no slot is free: a
- * launch that names no slot takes the lowest free one, so with one free the row would
+ * while a launch may name it. `A new slot` is offered only while no slot can be chosen: a
+ * launch that names no slot takes the lowest such one, so with one there the row would
  * not do what it says. Then the terminal and the background, which need no slot.
  */
 export function runMenu(targets: Targets, run: Run, hour: Clock = HOUR): RunMenu {
   const slots: RunRow[] = targets.slots.map((slot) => ({
     lead: `Slot ${slot.number}`, words: slotWords(slot, hour),
-    run: slot.launchable ? { target: "slot", slot: slot.number, named: true } : null,
+    run: slot.choosable ? { target: "slot", slot: slot.number, named: true } : null,
     current: run.target === "slot" && run.slot === slot.number,
   }));
   if (targets.default.target === "slot" && targets.default.slot === null) {

@@ -1,4 +1,5 @@
-"""`moxi-comms-opencode <identity>` -- an OpenCode session the person sits in, with comms mail.
+"""`moxi comms opencode <identity>` (and `moxi-comms-opencode`) -- an OpenCode session the
+person sits in, with comms mail.
 
 One wrapper process per identity, an ordinary daemon-socket client whose connection is
 its liveness, like `moxi-comms-codex`. What it owns:
@@ -840,8 +841,13 @@ class OpenCodeAdapter(HarnessAdapter):
         path = self.layer_one_path()
         path.parent.mkdir(parents=True, exist_ok=True)
         os.chmod(path.parent, 0o700)
+        from ..directors import launch_declared
+
+        # The director sentence keys on the launch's own directors, not the policy ones.
+        declared = launch_declared(getattr(self.agent, "directors", ()),
+                                   getattr(self.agent, "policy_directors", ()))
         text = layer_one_text(fetch_roster(self.socket_path), self.comms_path,
-                              directors=getattr(self.agent, "directors", ()),
+                              directors=declared,
                               form=layer_one_form(getattr(self, "added_env", {})))
         path.write_text(text)
 
@@ -1571,11 +1577,15 @@ class OpenCodeAdapter(HarnessAdapter):
 
 # --------------------------------------------------------------------------- main
 
-def build_parser():
+#: The wrapper's script name; `moxi comms opencode` runs it under its own.
+PROG = "moxi-comms-opencode"
+
+
+def build_parser(prog: str = PROG):
     import argparse
 
     ap = argparse.ArgumentParser(
-        prog="moxi-comms-opencode", allow_abbrev=False,
+        prog=prog, allow_abbrev=False,
         description="an OpenCode session with comms mail, in this terminal: one wrapper "
                     "per identity; closing the window takes the identity offline")
     ap.add_argument("identity", help="qualified roster identity, e.g. coder@proj-a")
@@ -1637,19 +1647,19 @@ def print_plan(agent, roster, *, binary, version, comms_path, tools_url=None,
     say(f"  log        {wrapper_log_file(agent.qualified)}")
 
 
-def main(argv=None) -> int:  # pragma: no cover - exercised end to end by the window tests
+def main(argv=None, prog: str = PROG) -> int:  # pragma: no cover - the window tests run it
     import signal
 
     from .opencode_window import EXIT_GAVE_UP, GaveUp, OpenCodeWindow
     from .session import tools_endpoint, tools_off
     from .terminal import JOB_CONTROL_SIGNALS, Terminal, in_terminal_foreground, terminal_fd
 
-    args = build_parser().parse_args(argv)
+    args = build_parser(prog).parse_args(argv)
     try:
         roster = opencode_roster.load(path=args.config)
         agent = roster.require(args.identity)
     except ConfigError as exc:
-        print(f"moxi-comms-opencode: {exc}", file=sys.stderr)
+        print(f"{prog}: {exc}", file=sys.stderr)
         return 2
     binary = opencode_roster.resolve_binary(args.opencode or agent.binary)
     comms_path = own_comms()
@@ -1661,21 +1671,21 @@ def main(argv=None) -> int:  # pragma: no cover - exercised end to end by the wi
                tools_url=tools_url)
     sys.stdout.flush()
     if binary is None:
-        print("moxi-comms-opencode: no opencode binary resolves (the roster's `binary`, "
+        print(f"{prog}: no opencode binary resolves (the roster's `binary`, "
               "`opencode` on PATH, or the installer's directory); install OpenCode or "
               "name it with --opencode.", file=sys.stderr)
         return 2
     if comms_path is None:
-        print("moxi-comms-opencode: this environment has no `moxi` script, so the agent "
+        print(f"{prog}: this environment has no `moxi` script, so the agent "
               "could not be told which comms to run.", file=sys.stderr)
         return 2
     if args.dry_run:
         if tools_url is None:
-            print(f"moxi-comms-opencode: {tools_off(tools_why)}", file=sys.stderr)
+            print(f"{prog}: {tools_off(tools_why)}", file=sys.stderr)
         return 0
     tty = terminal_fd()
     if not in_terminal_foreground(tty):
-        print("moxi-comms-opencode: run this in the foreground of a terminal: the OpenCode "
+        print(f"{prog}: run this in the foreground of a terminal: the OpenCode "
               "window takes that terminal.", file=sys.stderr)
         return 2
     log_path = wrapper_log_file(agent.qualified)
@@ -1683,13 +1693,13 @@ def main(argv=None) -> int:  # pragma: no cover - exercised end to end by the wi
     os.chmod(log_path.parent, 0o700)
     logging.basicConfig(level=args.log_level, filename=str(log_path),
                         format="%(asctime)s %(levelname)s %(name)s %(message)s")
-    print(f"moxi-comms-opencode: logging to {log_path}", file=sys.stderr, flush=True)
+    print(f"{prog}: logging to {log_path}", file=sys.stderr, flush=True)
 
     adapter = OpenCodeAdapter(agent, binary=binary, comms_path=comms_path,
                               log_path=server_log_file(agent.qualified))
     adapter.prepare_launch(tools_url, tools_why)
     for note in adapter.additions_notes:
-        print(f"moxi-comms-opencode: {note}", file=sys.stderr, flush=True)
+        print(f"{prog}: {note}", file=sys.stderr, flush=True)
     stopping = threading.Event()
     hangup = threading.Event()
 
@@ -1711,29 +1721,31 @@ def main(argv=None) -> int:  # pragma: no cover - exercised end to end by the wi
         try:
             adapter.start()
         except (DaemonOffline, DaemonError, OpenCodeOffline, ConfigError) as exc:
-            print(f"moxi-comms-opencode: {exc}", file=sys.stderr, flush=True)
+            print(f"{prog}: {exc}", file=sys.stderr, flush=True)
             return 4 if isinstance(exc, DaemonOffline) else 2
-        log.info("moxi-comms-opencode running for %s", agent.qualified)
-        show_notice(adapter, args.notice_hold_s, stopping)
+        log.info("%s running for %s", prog, agent.qualified)
+        show_notice(adapter, args.notice_hold_s, stopping, prog=prog)
         session = OpenCodeWindow(adapter, binary=binary, terminal=Terminal(tty),
                                  log_path=log_path, stopping=stopping, hangup=hangup,
-                                 ready_wait=args.ready_wait_s, env=adapter.window_env())
+                                 ready_wait=args.ready_wait_s, env=adapter.window_env(),
+                                 prog=prog)
         try:
             return session.run()
         except GaveUp as exc:
             log.error("gave up: %s", exc)
             if not hangup.is_set():
                 reason = str(exc).rstrip(". ")
-                print(f"moxi-comms-opencode: gave up on {agent.qualified}: {reason}. The log "
+                print(f"{prog}: gave up on {agent.qualified}: {reason}. The log "
                       f"is {log_path}.", file=sys.stderr, flush=True)
             return EXIT_GAVE_UP
     finally:
         adapter.stop()
         if not hangup.is_set():
-            say_after(adapter)
+            say_after(adapter, prog=prog)
 
 
-def show_notice(adapter, hold: float, stopping=None, out=None) -> None:
+def show_notice(adapter, hold: float, stopping=None, out=None, *,
+                prog: str = PROG) -> None:
     """The launch notices, in the wrapper's own terminal before the window opens, held
     on screen for `hold` seconds so it can be read before the window covers it. The
     window runs on its own screen, so the line is there again when the window closes."""
@@ -1741,26 +1753,26 @@ def show_notice(adapter, hold: float, stopping=None, out=None) -> None:
         return
     out = out or sys.stderr
     for notice in adapter.launch_notices:
-        print(f"moxi-comms-opencode: {adapter.agent.qualified}: {notice}", file=out,
+        print(f"{prog}: {adapter.agent.qualified}: {notice}", file=out,
               flush=True)
     if hold > 0:
-        print(f"moxi-comms-opencode: the window opens in {hold:g}s", file=out, flush=True)
+        print(f"{prog}: the window opens in {hold:g}s", file=out, flush=True)
         if stopping is not None:
             stopping.wait(hold)
         else:
             time.sleep(hold)
 
 
-def say_after(adapter, out=None) -> None:
+def say_after(adapter, out=None, *, prog: str = PROG) -> None:
     """After the window: what the window covered, said where the person now looks."""
     out = out or sys.stderr
     for note in adapter.model_notes:
-        print(f"moxi-comms-opencode: {adapter.agent.qualified}: {note}", file=out, flush=True)
+        print(f"{prog}: {adapter.agent.qualified}: {note}", file=out, flush=True)
     if adapter.fatal:
-        print(f"moxi-comms-opencode: {adapter.fatal}", file=out, flush=True)
+        print(f"{prog}: {adapter.fatal}", file=out, flush=True)
 
 
-__all__ = ["ADAPTER_KIND", "FALLBACK_MODEL", "MODELS_STALE", "NO_FREE_MODEL",
+__all__ = ["ADAPTER_KIND", "FALLBACK_MODEL", "MODELS_STALE", "NO_FREE_MODEL", "PROG",
            "SHIPPED_DEFAULT", "OpenCodeAdapter",
            "OpenCodeOffline", "additions_clash", "build_parser", "choose_default",
            "free_models", "idle_from_status", "launch_config", "main", "merge_additions",

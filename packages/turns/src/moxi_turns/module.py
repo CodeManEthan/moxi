@@ -50,10 +50,12 @@ TEARDOWN = "moxi_turns.claude_setup:teardown"
 SEGMENT = None
 #: turns' page server, which the browser UI shell starts. Nothing here imports it.
 PAGE = "moxi_turns.page:PAGE"
-#: What turns offers the browser UI shell: its panel, and no other component.
+#: What turns offers the browser UI shell: its panel, and no other component. Where sessions
+#: is installed its page shows the running sessions with turns' live state, so the panel
+#: leaves the band; its address still opens it.
 COMPONENTS = {
     "page": {"script": "page.js", "title": "Live sessions", "contract": 1, "place": "page",
-             "group": "daily", "order": 25,
+             "group": "daily", "order": 25, "band_unless": ["sessions"],
              "doc": "Every running session turns can reach: its turn, its agents and its "
                     "trouble, read-only"},
 }

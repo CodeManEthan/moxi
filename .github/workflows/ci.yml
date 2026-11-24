@@ -1,5 +1,7 @@
 # The same check a contributor runs before asking for a merge: `moxi-dev check`.
-# Linux runs on every push to any branch; Windows and macOS run on pushes to main,
+# A merge queue's candidate, pushed to a ci/queue- branch, is checked by queue.yml
+# instead, and this workflow ignores those branches; it runs on every other one.
+# Linux runs on every push to any of them; Windows and macOS run on pushes to main,
 # after the merge, and to a ci-full/ branch, and gate nothing while the packages are
 # Linux-only. secrets' tests also run in a Windows job of their own, on the same terms:
 # on pushes to main and to a ci-full/ branch, gating nothing, with only secrets and what
@@ -25,7 +27,7 @@ name: check
 
 on:
   push:
-    branches: ["**"]
+    branches-ignore: ["ci/queue-*"]
 
 concurrency:
   group: ${{ (startsWith(github.ref, 'refs/heads/ci/') || startsWith(github.ref, 'refs/heads/ci-full/')) && github.ref || github.run_id }}
@@ -81,6 +83,13 @@ jobs:
       - name: install tmux, which the slots tests drive
         if: runner.os == 'macOS'
         run: brew install tmux
+      # macOS's own TMPDIR is long, under /var/folders: a socket under the tests' temp
+      # root exceeds Unix sockets' path limit, and the short path the code falls back
+      # to, in /private/tmp, is outside the test fence. With TMPDIR=/tmp the temp root
+      # and its sockets stay short and inside it.
+      - name: keep the temp root short
+        if: runner.os == 'macOS'
+        run: echo "TMPDIR=/tmp" >> "$GITHUB_ENV"
       - run: uv sync --locked
       - run: uv run --locked moxi-dev check --full
 
@@ -127,7 +136,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        package: [ui, cache, comms, launcher, usage, loadout, projects, sessions, turns, services, connector]
+        package: [ui, cache, comms, launcher, usage, loadout, projects, sessions, turns, services, connector, rounds]
         engine: [chromium, firefox]
     runs-on: ubuntu-latest
     timeout-minutes: 30

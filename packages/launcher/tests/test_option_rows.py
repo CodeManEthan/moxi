@@ -30,7 +30,7 @@ def test_the_rows_their_values_and_needs():
     assert rows["keep_warm"].values == ("off", "on") and rows["keep_warm"].default == "off"
     assert rows["recycle_on_expiry"].values == ("off", "clear", "compact")
     assert rows["recycle_at_limit"].values == ("off", "relaunch", "compact")
-    assert rows["limit_at"].values == ("1x", "1.5x", "2x") and rows["limit_at"].default == "1x"
+    assert rows["limit_at"].values == ("1x", "1.5x", "2x") and rows["limit_at"].default == ""
     assert rows["keep_warm"].required == ("turns", "cache")
     assert rows["recycle_at_limit"].required == ("turns", "usage")
     assert rows["limit_at"].offered_with == "recycle_at_limit"

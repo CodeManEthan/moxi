@@ -50,6 +50,13 @@ A module whose `ui` is an optional extra uses these fixtures by name and never i
     Each context closes when the test ends.
 `ui_context`, `ui_page`
     One `ui_contexts()` context, and its first page, signed in on `ui_shell`.
+`ui_days` (module scope)
+    A `moxi_ui.testing.days.Days`: dates `days_ago` days before one today, the module's
+    anchor, read the first time it is asked and past midnight when that was less than two
+    minutes away. `ui_days.noon(2)` seeds a fixture's data and `ui_days.key(2)` names the
+    day the page groups it under, and the two agree even when the run crosses midnight.
+    `ui_days.wait_out_midnight()` waits out a midnight less than two minutes away, for
+    steps of a test that must fall on one date.
 `ui_component_check`
     `check(page, module, name, attrs=None, *, tokens=("accent",), allow=(), keep=False,
     token_ms=TOKEN_MS)`: the contract check on one component (see
@@ -61,6 +68,12 @@ A module whose `ui` is an optional extra uses these fixtures by name and never i
     `check(page, *, module=None, name="page", attrs=None, route="", width=360)`: the
     document has no horizontal scroll at 360 CSS px, with the module's panel open or its
     component placed (see `moxi_ui.testing.browser.check_width`).
+`ui_press`
+    `press(locator, *, wait_ms=WAIT_MS, **click_args)`: clicks `locator` once it is
+    visible and no read that decides its page's layout is out, which `client.js` marks
+    on the page root as `data-reading="<n>"` (see `moxi_ui.testing.browser.press`). A
+    test presses through it, so a late answer never moves a control under the click. A
+    page that doesn't settle within `wait_ms` fails the press with the mark's count.
 
 A module's browser test, for example:
 
@@ -80,7 +93,8 @@ A test that reads back what its page copied readies its context with
 the page passed to `navigator.clipboard.writeText`, since Firefox refuses a
 `clipboard-read` grant and WebKit a `clipboard-write` one.
 
-Without a browser, `ui_shell.session()` is a signed-in session over plain HTTP, and
+Without a browser, `ui_shell.session()` is a signed-in session over plain HTTP (one
+sign-in, reused by every call while the shell honours it), and
 `ui_shell.servers()` and `ui_shell.kill(module)` reach the page servers the shell runs.
 """
 
@@ -407,12 +421,28 @@ def ui_page(ui_context: Any) -> Any:
     return ui_context.pages[0]
 
 
+@pytest.fixture(scope="module")
+def ui_days() -> Any:
+    """The module's `Days`, one anchored today (`moxi_ui.testing.days`)."""
+    from .days import Days
+
+    return Days()
+
+
 @pytest.fixture
 def ui_component_check() -> Callable[..., Any]:
     """The contract check on one component (`browser.check_component`)."""
     from .browser import check_component
 
     return check_component
+
+
+@pytest.fixture
+def ui_press() -> Callable[..., Any]:
+    """The click that waits for the page to settle first (`browser.press`)."""
+    from .browser import press
+
+    return press
 
 
 @pytest.fixture

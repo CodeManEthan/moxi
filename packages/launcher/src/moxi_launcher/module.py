@@ -8,10 +8,13 @@ is an optional link, asked through `moxi.modules.load` where the feature needs i
 """
 
 #: The API module: `launch`, `check` and `preview`. Interface 1 is `launch_kind` and
-#: `launch_kinds`: the launch kind (`scratch`, `seat`, `project` or `one-off`) of a
+#: `launch_kinds`: the launch kind (`fork`, `scratch`, `seat`, `project` or `one-off`) of a
 #: session the launcher started, read from the launch log by session id. Interface 2 adds
 #: `running`: the launches running now, read from the launch log and the process table.
-INTERFACES = frozenset({1, 2})
+#: Interface 3 adds `fork`, a new session from a copy of another's conversation, with the
+#: caller's own `SESSION_ENV` stamps set on it, and `exit_session`, which exits a quiet
+#: launched session.
+INTERFACES = frozenset({1, 2, 3})
 API = "moxi_launcher.api"
 #: What `moxi launcher` runs, in process, as `main(argv, prog="moxi launcher")`.
 CLI = "moxi_launcher.cli:main"
@@ -38,7 +41,8 @@ OPTIONAL = {
           "it the launcher is its command only.",
     "notes": "Handoffs in notes: a launch's handoff folder is the one notes keeps for its "
              "directory (or its notes_dir), where the handoff pointer looks and a "
-             "relaunch's handoff must be. Without it the launcher keeps its own folder.",
+             "relaunch's handoff must be; a launch with no notes directory has no "
+             "handoff folder. Without it the launcher keeps its own folder.",
     "cache": "Prompt cache timing: keep_warm nudges a waiting session before its cache "
              "expires, as Keep warm on a running session's row does from the press on, "
              "and recycle_on_expiry clears or compacts an idle session once it has. "
@@ -80,8 +84,8 @@ SEGMENT = None
 PAGE = "moxi_launcher.page:PAGE"
 #: What the launcher offers the browser UI shell: its panel, the piece for Home's main spot
 #: that starts a session, Home's Sessions row with the launches running now, a block for
-#: the modules view with each launched session's state, and one session's state that any
-#: host may place.
+#: the modules view with each launched session's state, one session's state that any host
+#: may place, and its facts for the Projects page.
 #: Each script is a file the page's web build writes beside the page's assets.
 COMPONENTS = {
     "page": {"script": "page.js", "title": "Launcher", "contract": 1, "place": "page",
@@ -102,6 +106,14 @@ COMPONENTS = {
               "place": "inline", "doc": "One session's state",
               "attributes": {"session": {"type": "string", "required": True,
                                          "doc": "a session id"}}},
+    "project-facts": {"script": "project-facts.js", "title": "Launcher",
+                      "doc": "Each project's running launches, and the opened one's preset, "
+                             "last launch and session names, for the Projects page",
+                      "contract": 1, "place": "inline",
+                      "attributes": {"projects": {"type": "string",
+                                                  "doc": "the projects the page holds, JSON"},
+                                     "open": {"type": "string",
+                                              "doc": "the key of the opened project"}}},
 }
 
 # The announcement's version, and the optional names it declares.

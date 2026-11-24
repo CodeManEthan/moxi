@@ -106,8 +106,29 @@ def test_help_says_what_ask_does(capsys):
     out = " ".join(capsys.readouterr().out.split())
     for word in ("ROUND|PROJECT", "TEXT", "--from PTR", "--record PTR",
                  "--blocks LIST|none", "--as NAME", "file:design.md#<anchor>",
-                 "--adopt P<n>", "--move ROUND:Q<n>"):
+                 "--adopt P<n>", "--move ROUND:Q<n>", "--prepared FILE"):
         assert word in out
+
+
+@pytest.mark.parametrize("flag", ["--adopt", "--move"])
+def test_prepared_is_not_given_with_a_carry(rounds, capsys, flag, tmp_path):
+    source = "P1" if flag == "--adopt" else "proj-a/a-round:Q1"
+    target = "proj-a/a-round" if flag == "--adopt" else "proj-a"
+    before = logs(rounds)
+
+    assert main(["ask", target, flag, source, "--prepared",
+                 str(tmp_path / "answer.md")]) == 2
+
+    assert "--prepared is not for it" in capsys.readouterr().err
+    assert logs(rounds) == before
+
+
+def test_prepared_with_a_sentence_is_a_usage_error(rounds, capsys, tmp_path):
+    assert run("proj-a/a-round", "--prepared", str(tmp_path / "answer.md")) == 2
+
+    err = capsys.readouterr().err
+    assert "--prepared records an answer for a question on record" in err
+    assert "proj-a/a-round ID --prepared FILE" in err
 
 
 # -- the origin --------------------------------------------------------------------------
@@ -122,7 +143,7 @@ def test_an_origin_of_each_shape_is_recorded_as_given(rounds, pointer):
     assert event["from"] == pointer and "record" not in event
 
 
-def test_the_operators_own_question_has_his_pointer_as_its_origin(rounds, capsys):
+def test_the_operators_own_question_has_the_operators_pointer_as_its_origin(rounds, capsys):
     assert run("proj-a/a-round", "--record", "comms:77", origin=None) == 0
 
     [event] = asked(round_log(rounds))
@@ -153,7 +174,7 @@ def test_no_origin_is_refused_wherever_the_command_is_run(rounds, tmp_path, monk
         asking.ask("proj-a/a-round", SAID, by="scout")
 
 
-@pytest.mark.parametrize("pointer", ["he asked in chat", "comms:twelve", "comms:",
+@pytest.mark.parametrize("pointer", ["the operator asked in chat", "comms:twelve", "comms:",
                                      "http://example.com/x", "file:design.md",
                                      "file:../other/design.md#q", ""])
 @pytest.mark.parametrize("flag", ["--from", "--record"])

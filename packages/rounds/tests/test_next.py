@@ -11,8 +11,9 @@ from pathlib import Path
 
 import pytest
 
-from moxi_rounds import (asking, closing, dropping, freezing, log, next_step, opening,
-                         report_block, ruling, showing, steps, verdicts)
+from moxi_rounds import (answer_block, asking, closing, dropping, freezing, log,
+                         next_step, opening, report_block, ruling, showing, steps,
+                         verdicts)
 from moxi_rounds.cli import main
 
 ROUND = "proj-a/a-round"
@@ -708,6 +709,57 @@ def test_a_step_given_a_row_and_its_lines_is_printed_like_the_others(
         "waits: nothing"]
 
 
+# -- the groups from steps read once ------------------------------------------------------
+
+def test_the_step_a_round_is_at_is_taken_from_the_steps_read_once(
+        opened, capsys, monkeypatch):
+    round_dir = opened(config=ONE_HARNESS)
+    fold(round_dir, stage("B1"), stage("B2"))
+    before = next_step.read(ROUND)
+    monkeypatch.setattr(steps, "current",
+                        lambda *_a, **_k: pytest.fail("the steps were read again"))
+
+    assert next_step.read(ROUND) == before
+    assert before["groups"][0]["step"] == "verify-design"
+
+
+def test_the_groups_from_the_steps_given_are_the_reading_s_groups(opened, capsys):
+    round_dir = opened(config=ONE_HARNESS)
+    fold(round_dir, stage("B1"), stage("B2"))
+    verdict(round_dir)
+    fold(round_dir, stage("B1"), stage("B2"))
+    found = showing.show(ROUND, refresh=False)
+    every = steps.of(found.state, name=ROUND, on_closed=found.on_closed,
+                     register=found.register)
+    models = {"second": {"claude": "model-two"}, "third": {"claude": "model-three"}}
+
+    assert (next_step.groups(found, every, models)
+            == next_step.read(ROUND)["groups"])
+
+
+def test_groups_left_unfilled_read_no_step_s_lines_and_keep_the_rest(
+        opened, capsys, monkeypatch):
+    round_dir = opened(config=ONE_HARNESS)
+    fold(round_dir, stage("B1"))
+    verdict(round_dir)
+    fold(round_dir, stage("B1"))
+    found = showing.show(ROUND, refresh=False)
+    every = steps.of(found.state, name=ROUND, on_closed=found.on_closed,
+                     register=found.register)
+    filled = next_step.groups(found, every, {})
+    for name in list(next_step.LINES):
+        monkeypatch.setitem(next_step.LINES, name,
+                            lambda *_a: pytest.fail("a step's lines were read"))
+
+    bare = next_step.groups(found, every, {}, fill=False)
+
+    assert [(one["step"], one["stage"], one["state"]) for one in bare] == [
+        (one["step"], one["stage"], one["state"]) for one in filled]
+    assert all(one["then"] == [] and one["reads"] == [] and one["write"] is None
+               for one in bare)
+    assert [one["waits"] for one in bare] == [one["waits"] for one in filled]
+
+
 # -- nothing is written ------------------------------------------------------------------
 
 def test_no_file_changes_whatever_is_printed(opened, tmp_path, capsys):
@@ -737,18 +789,16 @@ def test_the_empty_block_of_each_kind_of_report_is_printed(kind, capsys):
     assert run(capsys, "next", "--schema", kind) == report_block.empty(kind)
 
 
-def test_the_block_of_a_prepared_answer_is_not_built(capsys):
-    assert main(["next", "--schema", "answer"]) == 2
-
-    err = capsys.readouterr().err
-    assert "the block of a prepared answer is not built in this version" in err
-    assert "name one of design, build, step, majors, retro" in err
+def test_the_empty_block_of_a_prepared_answer_is_printed(capsys):
+    assert run(capsys, "next", "--schema", "answer") == answer_block.empty()
 
 
 def test_a_word_that_is_no_kind_of_block_is_bad_arguments(capsys):
     assert main(["next", "--schema", "sketch"]) == 2
 
-    assert "'sketch' is no kind of report" in capsys.readouterr().err
+    err = capsys.readouterr().err
+    assert "'sketch' is no kind of block" in err
+    assert "name one of design, build, step, majors, retro, answer" in err
 
 
 # -- which round -------------------------------------------------------------------------

@@ -9,7 +9,9 @@ import threading
 import time
 
 import pytest
+from moxi_dev.testing import wait_for
 
+from moxi_dev.testing import PROC_WAIT_S
 from moxi_turns import codex_hooks
 from moxi_turns import codex_protocol as proto
 from moxi_turns import codex as codex_module
@@ -82,6 +84,9 @@ class FakeClient:
         if method == "thread/start":
             return {"thread": {"id": "thread-1"}}
         if method == "thread/resume":
+            return {"thread": {"id": "thread-1", "status": {"type": "idle"}}}
+        if method == "thread/fork":
+            # The new thread is `thread-1`, as every other answer here names it.
             return {"thread": {"id": "thread-1", "status": {"type": "idle"}}}
         if method == "thread/inject_items":
             assert params["items"], "Codex refuses an empty item list"
@@ -180,6 +185,36 @@ def test_a_submitted_delivery_is_tied_to_the_app_servers_turn(turns_env):
         end_endpoint(endpoint)
 
 
+def test_a_deliverys_end_carries_its_turns_last_agent_message(turns_env):
+    endpoint, harness, app = _host(turns_env)
+    session = Session(endpoint.address, endpoint.session(), endpoint_dir=endpoint.dir)
+
+    def message(turn_id, text, thread="thread-1"):
+        app.on_notification("item/completed", {
+            "threadId": thread, "turnId": turn_id,
+            "item": {"type": "agentMessage", "id": "m", "text": text}}, None)
+
+    try:
+        first = session.deliver("hello", only_if_idle=True)
+        assert first.wait_started(2).turn_id == "turn-1"
+        message("turn-1", "looking")
+        message("turn-1", "found it")
+        message("turn-1", "a subagent's words", thread="thread-sub")
+        app.complete()
+        assert first.wait_ended(2).answer == "found it"
+        second = session.deliver("again", only_if_idle=True)
+        second.wait_started(2)
+        app.complete()                        # no agent message in this turn
+        assert second.wait_ended(2).answer is None
+        third = session.deliver("once more", only_if_idle=True)
+        third.wait_started(2)
+        message(third.wait_started(2).turn_id, "")
+        app.complete()                        # an empty one is no answer either
+        assert third.wait_ended(2).answer is None
+    finally:
+        end_endpoint(endpoint)
+
+
 def test_a_steer_uses_turn_steer_and_ends_with_that_turn(turns_env):
     endpoint, harness, app = _host(turns_env)
     session = Session(endpoint.address, endpoint.session(), endpoint_dir=endpoint.dir)
@@ -223,7 +258,7 @@ def test_supervision_reconnects_and_resumes_the_same_thread(turns_env):
     try:
         harness.app_server.alive = False
         first.connected = False
-        deadline = time.monotonic() + 3
+        deadline = time.monotonic() + PROC_WAIT_S
         while harness.ws is first and time.monotonic() < deadline:
             time.sleep(0.02)
         assert harness.ws is not first
@@ -1053,7 +1088,9 @@ def test_an_unturned_threads_session_start_resume_reads_startup_once(
         assert delivery.wait_started(2).turn_id == "turn-1"   # turn/started came first
         assert _session_start(monkeypatch, harness, "resume") == "context at startup"
         assert asked == ["startup"]
-        assert not harness._unturned            # cleared once the answer was out
+        # Cleared once the answer was out, on the hook server's thread, after the reply
+        # this test's call returned on.
+        wait_for(lambda: not harness._unturned, what="the unturned mark to clear")
         # A later SessionStart of the same thread is what Codex says it is.
         assert _session_start(monkeypatch, harness, "resume") == "context at resume"
         assert asked == ["startup", "resume"]
@@ -1671,3 +1708,86 @@ def test_a_long_runtime_root_puts_the_codex_sockets_on_the_short_path(
     finally:
         end_endpoint(endpoint)
     assert not os.path.lexists(harness.hook_server.socket_path)
+
+
+# -- a fork launch ----------------------------------------------------------------------
+
+
+def _forked_host(turns_env, client=None, **kwargs):
+    harness = None
+    made = []
+
+    def clients(**kw):
+        made.append((client or FakeClient)(harness, **kw))
+        return made[-1]
+
+    harness = CodexHarness(turns_env, window=False, ping=["/env/bin/moxi-turns-ping"],
+                           client_factory=clients, app_server_factory=FakeAppServer,
+                           fork="parent-7", **kwargs)
+    endpoint = Endpoint(harness, session_id=None).open()
+    return endpoint, harness, made
+
+
+def test_a_fork_launch_forks_the_thread_and_loads_the_new_one_as_resumed(turns_env):
+    endpoint, harness, made = _forked_host(turns_env)
+    harness._fake_ran = ["turn-0"]          # the parent's turn, copied
+    try:
+        harness.start()
+        methods = [m for m, _ in made[0].calls]
+        assert ("thread/fork", {"threadId": "parent-7", "cwd": harness.cwd,
+                                "excludeTurns": True, "approvalPolicy": "never"}) \
+            in made[0].calls
+        assert "thread/start" not in methods and "thread/resume" not in methods
+        assert _injects(made[0]) == [] and "thread/turns/list" in methods
+        assert harness.session_id == "thread-1" and harness._fork is None
+        assert endpoint.facts().ready.source == "resume"
+        assert endpoint.session()["session_id"] == "thread-1"
+    finally:
+        end_endpoint(endpoint)
+
+
+def test_a_fork_of_an_unturned_thread_raises_ready_startup(turns_env):
+    endpoint, harness, _ = _forked_host(turns_env)
+    try:
+        harness.start()
+        assert endpoint.facts().ready.source == "startup"
+    finally:
+        end_endpoint(endpoint)
+
+
+class _FirstListFails(FakeClient):
+    """The fake client, whose first `thread/turns/list` across clients fails."""
+
+    def call(self, method, params=None, timeout=None):
+        if method == "thread/turns/list" and not getattr(self.harness, "_listed", False):
+            self.harness._listed = True
+            self.calls.append((method, params))
+            raise proto.CodexError(-32603, "the list failed")
+        return super().call(method, params, timeout)
+
+
+def test_a_load_that_fails_after_the_fork_resumes_the_fork_and_never_forks_again(
+        turns_env):
+    endpoint, harness, made = _forked_host(
+        turns_env, client=_FirstListFails, backoff_factory=lambda: iter(lambda: 0.01, None))
+    try:
+        harness.start()
+        deadline = time.monotonic() + 3
+        while endpoint.facts().ready is None and time.monotonic() < deadline:
+            time.sleep(0.02)
+        calls = [call for client in made for call in client.calls]
+        assert [m for m, _ in calls].count("thread/fork") == 1
+        assert ("thread/resume", {"threadId": "thread-1", "excludeTurns": True,
+                                  "approvalPolicy": "never"}) in calls
+        assert endpoint.facts().ready is not None and harness.session_id == "thread-1"
+    finally:
+        end_endpoint(endpoint)
+
+
+@pytest.mark.parametrize("given, words", [
+    ({"fork": ""}, "fork names a Codex thread id"),
+    ({"fork": "t-1", "resume": "t-2"}, "not both"),
+])
+def test_a_fork_names_one_thread_and_never_beside_a_resume(turns_env, given, words):
+    with pytest.raises(ValueError, match=words):
+        CodexHarness(turns_env, window=False, **given)

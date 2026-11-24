@@ -88,7 +88,8 @@ def test_the_check_syncs_its_own_env_and_runs_the_picked_suites(workspace, capsy
     assert check.main([]) == 0
     line = last_line(capsys)
     assert ("packages: low, high | lock pass | tags pass | refs pass | names pass | ruff pass | "
-            "renames none | release pass | stamps none | web none | sync pass | lint none | low pass") \
+            "renames none | release pass | pronouns pass | machine pass | stamps none | web none | "
+            "sync pass | lint none | low pass") \
         in line, line
     assert ", high pass " in line and line.endswith("exit 0")
     assert check.venv_program(workspace / ".moxi-dev/env-3.12", "python").exists()
@@ -104,7 +105,8 @@ def test_the_check_syncs_its_own_env_and_runs_the_picked_suites(workspace, capsy
     assert check.main(["--base", "mark"]) == 1
     line = last_line(capsys)
     assert ("packages: high | lock pass | tags pass | refs pass | names pass | ruff pass | "
-            "renames none | release pass | stamps none | web none | sync pass | lint none | high fail ") \
+            "renames none | release pass | pronouns pass | machine pass | stamps none | web none | "
+            "sync pass | lint none | high fail ") \
         in line, line
     assert line.endswith("exit 1")
 
@@ -115,6 +117,6 @@ def test_a_stale_lock_fails_the_check(workspace, capsys):
         .replace("dependencies = []", 'dependencies = ["iniconfig"]'))
     assert check.main(["--full"]) == 1
     assert ("lock fail | tags not run | refs not run | names not run | ruff not run | "
-            "renames not run | release not run | "
+            "renames not run | release not run | pronouns not run | machine not run | "
             "stamps not run | web not run | sync not run") in (
         last_line(capsys))

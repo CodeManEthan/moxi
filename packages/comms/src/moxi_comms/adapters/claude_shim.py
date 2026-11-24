@@ -17,17 +17,19 @@ mid-turn means the call never comes; the binding's end puts the rows back to wai
 and the whole digest replays at the next bind. Replay is the safe direction. The idle
 tick is not a turn and sends no `kind`.
 
-Authority: the frame line is where a recipient's
-launch-declared directors become visible. The declaration arrives as `--director`
-(qualified by `moxi-comms-claude`) or the `MOXI_COMMS_DIRECTORS` stamp; nothing about it touches
-the daemon, the payload or the record. `frame_line` / `render_digest` are the shared
-seam -- `adapters/codex` renders through the same two functions.
+Authority: the frame line is where a recipient's directors become visible: the
+launch-declared ones and the box's policy ones, a policy one only once provisioned. They
+arrive as `--director` (qualified by `moxi-comms-claude`) or the `MOXI_COMMS_DIRECTORS`
+stamp, with `MOXI_COMMS_POLICY_DIRECTORS` naming the policy part; nothing about them
+touches the daemon, the payload or the record. `frame_line` / `render_digest` are the
+shared seam -- `adapters/codex` renders through the same two functions.
 
 Injection seam: `injector(text)` is the ONE place the harness is touched. In a session
 `moxi comms claude` launches, the session's adapter process (`claude_adapter`) sets
-`handover(text, digest, steer=)` in its place, which hands the digest to turns with the
-digest's id as its ref (`deliver`, or `steer` for interrupt mail into a running turn) and
-settles it from the turn's outcome; `--inject-file` fills `injector` with a file writer,
+`handover(text, digest, steer=, senders=)` in its place, which hands the digest to turns
+with the digest's id as its ref (`deliver`, or `steer` for interrupt mail into a running
+turn), `by="comms"` and the digest's senders (`digest_senders`), and settles it from the
+turn's outcome; `--inject-file` fills `injector` with a file writer,
 which the tests read. While bound, the shim holds the
 binding's posting credential in memory and hands it only to sends inside its session.
 
@@ -104,6 +106,10 @@ log = logging.getLogger("comms.shim")
 ACTIVITY_READY, ACTIVITY_TURN = "ready", "turn"
 #: The daemon method each kind is sent as; no kind is a plain `activity`.
 ACTIVITY_METHODS = {ACTIVITY_READY: "ready", "look": "look"}
+
+#: The module name comms gives turns as `by` on every digest it hands in, by `deliver`
+#: or `steer`. A session's `prompt` listeners read it as the prompt's `delivery_by`.
+DELIVERY_BY = "comms"
 
 #: Exit codes, `moxi.exit`'s: a claim that was refused, and a daemon that was not there.
 EXIT_REFUSED, EXIT_OFFLINE = moxi_exit.REFUSED, moxi_exit.TEMPFAIL
@@ -228,13 +234,14 @@ def frame_marks(author: dict, *, suppress_unverified: bool = False) -> str:
 
 
 def frame_line(payload: dict, directors=(), *, suppress_unverified: bool = False,
-               now: float | None = None, steered: bool = False) -> str:
+               now: float | None = None, steered: bool = False, policy=()) -> str:
     """ONE attributed frame line per message: who is speaking is never inferred.
 
-    `directors` is the RECIPIENT's launch-time declaration, already qualified. A verified
-    message from one of them -- or any operator-tier message -- leads with `directive
-    from`; a declared director whose attribution is not verified stays information standing
-    and the line says why.
+    `directors` is the RECIPIENT's launch-time list, already qualified, and `policy` the
+    part of it only the box's `[policy] directors` gave. A verified message from one of
+    them -- or any operator-tier message -- leads with `directive from`; a director whose
+    attribution is not verified, or a policy director whose name isn't provisioned, stays
+    information standing and the line says why (`directors.standing_of`).
 
     Silence is the common case and it is load-bearing: no parenthetical means chosen
     and verified, both of which the machinery guarantees rather than guesses.
@@ -243,7 +250,7 @@ def frame_line(payload: dict, directors=(), *, suppress_unverified: bool = False
     interrupt says so (`[interrupt]`), so the reader knows why mail came mid-turn.
     """
     a = payload["author"]
-    standing = standing_of(a, directors)
+    standing = standing_of(a, directors, policy=policy)
     marks = frame_marks(a, suppress_unverified=suppress_unverified)
     bits = [f"[comms] {standing.lead} {a['name']}{marks}"]
     if standing.note:
@@ -328,7 +335,7 @@ def end_line(payload: dict) -> str:
 
 def render_message(payload: dict, directors=(), *,
                    suppress_unverified: bool = False, now: float | None = None,
-                   steered: bool = False) -> str:
+                   steered: bool = False, policy=()) -> str:
     """ONE delivered message: the frame line, the body inside it, the closing line.
 
     The body is somebody else's prose arriving in a context comms does not own, so it gets
@@ -338,7 +345,7 @@ def render_message(payload: dict, directors=(), *,
     """
     return "\n".join([
         frame_line(payload, directors, suppress_unverified=suppress_unverified, now=now,
-                   steered=steered),
+                   steered=steered, policy=policy),
         *envelope.body(str(payload.get("text") or "")),
         end_line(payload),
     ])
@@ -434,8 +441,20 @@ def digest_header(payloads: list, *, clock=time.time) -> str | None:
     return f"== comms catch-up: {len(payloads)} message(s){said} =="
 
 
+def digest_senders(payloads: list) -> tuple[str, ...]:
+    """The names a digest speaks for, which comms gives turns as the delivery's
+    `senders`: each message's sender, its author's qualified name, once each, in the
+    digest's order. A payload with no author name adds none."""
+    names: list[str] = []
+    for p in payloads:
+        name = (p.get("author") or {}).get("name")
+        if isinstance(name, str) and name and name not in names:
+            names.append(name)
+    return tuple(names)
+
+
 def render_digest(payloads: list, notice: str | None = None, directors=(), *,
-                  clock=time.time, steered: bool = False) -> str:
+                  clock=time.time, steered: bool = False, policy=()) -> str:
     # The header's attribution note and the per-frame `(unverified)` marks are ONE
     # statement: whichever place says it, the other stays quiet. The note only ever
     # speaks for the REPLAYED frames (`replay_is_unverified`), so it can only silence
@@ -456,7 +475,7 @@ def render_digest(payloads: list, notice: str | None = None, directors=(), *,
     for p in payloads:
         suppress = note and bool(p.get("backlog"))
         parts.append(render_message(p, directors, suppress_unverified=suppress,
-                                    now=clock(), steered=steered))
+                                    now=clock(), steered=steered, policy=policy))
     return "\n\n".join(parts)
 
 
@@ -478,7 +497,7 @@ class ClaudeShim:
                  clock=time.time, session_id=None, owed_query=None,
                  projects_root=None,
                  claim_key=None, claim_socket=None, claim_roots=None,
-                 listen_claims: bool = False, claim_proc=None):
+                 listen_claims: bool = False, claim_proc=None, policy_directors=()):
         #: The live Claude session behind this shim, the latest it has been told. It
         #: starts from the environment Claude
         #: Code spawned the shim with, which is right at spawn and goes stale after a
@@ -512,12 +531,15 @@ class ClaudeShim:
         self.scope = scope
         self.global_ = global_
         self.project = project if project is not None else project_key()
-        # the recipient's grant, qualified at launch and never re-qualified here
+        # the recipient's grant, qualified at launch and never re-qualified here: the
+        # whole list, and the part of it only the box's `[policy] directors` gave
         self.directors = tuple(directors or ())
+        self.policy_directors = tuple(policy_directors or ())
         self.injector = injector or (lambda text: None)
-        #: `handover(text, digest, *, steer)`: when set, a flush hands its digest here
-        #: instead of to `injector`, with the digest's id, so the caller can name it to
-        #: the harness. The Claude adapter sets it.
+        #: `handover(text, digest, *, steer, senders)`: when set, a flush hands its
+        #: digest here instead of to `injector`, with the digest's id, so the caller can
+        #: name it to the harness, and the names of its messages' senders
+        #: (`digest_senders`). The Claude adapter sets it.
         self.handover = None
         self.socket_path = socket_path
         self.status_sink = status_sink or (lambda text: log.warning("%s", text))
@@ -624,17 +646,19 @@ class ClaudeShim:
         scope = GLOBAL if self.global_ else (self.scope or GLOBAL)
         claim = {"name": name, "scope": scope, "global": bool(self.global_),
                  "qualified": qualify(name, scope) if name else None,
-                 "tier": None, "directors": list(self.directors)}
+                 "tier": None, "directors": list(self.directors),
+                 "policy_directors": list(self.policy_directors)}
         self.claims.start_launch(claim)
 
     def _apply_claim(self, claim: dict) -> None:
         """Register what the claim file holds, for a shim respawned inside its session:
-        the name with its declared directors."""
+        the name with its directors, both lists as the launch merged them."""
         self.name = claim.get("name")
         self.global_ = bool(claim.get("global"))
         self.scope = claim.get("scope")
         if claim.get("directors") is not None:
             self.directors = tuple(claim["directors"])
+            self.policy_directors = tuple(claim.get("policy_directors") or ())
 
     # ------------------------------------------------------------------ lifecycle
     @property
@@ -1266,9 +1290,10 @@ class ClaudeShim:
         batch, digest = self._open(batch)
         if not batch:
             return None
-        text = render_digest(batch, notice, self.directors, clock=self.clock)
+        text = render_digest(batch, notice, self.directors, clock=self.clock,
+                             policy=self.policy_directors)
         if self.handover is not None:
-            self.handover(text, digest, steer=False)
+            self.handover(text, digest, steer=False, senders=digest_senders(batch))
         else:
             self.injector(text)
         high = max(int(p["message_id"]) for p in batch)
@@ -1278,7 +1303,8 @@ class ClaudeShim:
             # each payload.
             now = self.clock()
             for p in batch:
-                self.ledger.open(p, self.directors, self.session_id, now)
+                self.ledger.open(p, self.directors, self.session_id, now,
+                                 policy=self.policy_directors)
         # The injection site, and the instant this adapter knows it injected. Armed
         # after the injector returns, because an injector that raised injected nothing.
         self.stall.arm(identity, high)
@@ -1322,15 +1348,17 @@ class ClaudeShim:
         batch, digest = self._open(batch)
         if not batch:
             return None
-        text = render_digest(batch, None, self.directors, clock=self.clock, steered=True)
+        text = render_digest(batch, None, self.directors, clock=self.clock, steered=True,
+                             policy=self.policy_directors)
         if self.handover is not None:
-            self.handover(text, digest, steer=True)
+            self.handover(text, digest, steer=True, senders=digest_senders(batch))
         else:
             self.injector(text)
         with self._lock:
             now = self.clock()
             for p in batch:
-                self.ledger.open(p, self.directors, self.session_id, now)
+                self.ledger.open(p, self.directors, self.session_id, now,
+                                 policy=self.policy_directors)
             self.injected.append(text)
             if digest is not None:
                 self.steered[digest] = (tuple(str(p["message_id"]) for p in batch),
@@ -1363,7 +1391,9 @@ def build_parser():
     ap.add_argument("--director", action="append", default=[],
                     help="an ALREADY-QUALIFIED director name (repeatable). moxi-comms-claude "
                          "qualifies at launch and passes them here; a hand-run shim must "
-                         f"write `name@scope` itself. Default: ${directors_mod.DIRECTORS_ENV}")
+                         "write `name@scope` itself. Default: "
+                         f"${directors_mod.DIRECTORS_ENV}, with "
+                         f"${directors_mod.POLICY_DIRECTORS_ENV} naming its policy part")
     ap.add_argument("--inject-file",
                     help="the injection seam: write each digest to this file")
     ap.add_argument("--boundary-file", help="touch-file poll: each change = a Stop hook")
@@ -1374,6 +1404,21 @@ def build_parser():
                          "as this shim's claim; without it, nothing sends as this shim's "
                          "name")
     return ap
+
+
+def seam_directors(flagged, env=None) -> tuple[tuple, tuple]:
+    """The hand-run seam's directors, `(full, policy)`, with nothing merged.
+
+    `--director` names (`flagged`) are taken as given, with no policy part. Without them
+    the seam reads the stamps: the full list, and the part of it only the box's setting
+    gave, kept to names in the full list. The policy part gets the provisioning guard at
+    every render, as in a launched session. Raises `BadDirector` for a malformed name.
+    """
+    if flagged:
+        return directors_mod.validated(flagged), ()
+    full = directors_mod.validated(directors_mod.from_env(env))
+    policy = tuple(name for name in directors_mod.policy_from_env(env) if name in full)
+    return full, policy
 
 
 def main(argv=None) -> int:  # pragma: no cover - exercised by the smoke runs
@@ -1389,14 +1434,14 @@ def main(argv=None) -> int:  # pragma: no cover - exercised by the smoke runs
               "a live session is the turns module's; comms carries none.", file=sys.stderr)
         return 2
     try:
-        declared = directors_mod.validated(args.director or directors_mod.from_env())
+        declared, policy = seam_directors(args.director)
     except directors_mod.BadDirector as exc:
         print(f"moxi-comms-shim: {exc}", file=sys.stderr)
         return 2
     if declared:
-        log.info("directors declared for this session: %s", ", ".join(declared))
+        log.info("directors for this session: %s", directors_mod.describe(declared, policy))
     common = dict(name=args.name, scope=args.scope, global_=args.global_,
-                  autoreconnect=True, directors=declared)
+                  autoreconnect=True, directors=declared, policy_directors=policy)
     if args.project:
         common["project"] = args.project
     return _serve_inject_file(args, common)
@@ -1452,9 +1497,10 @@ def _serve_inject_file(args, common) -> int:  # pragma: no cover - the smoke run
 
 
 __all__ = ["ClaudeShim", "frame_line", "frame_marks", "render_digest", "digest_header",
+           "digest_senders", "DELIVERY_BY",
            "held_mark", "humanize_age", "is_catch_up", "parse_timestamp",
            "replay_is_unverified",
-           "backlog_frames",
+           "backlog_frames", "seam_directors",
            "OFFLINE_MESSAGE", "DEFAULT_ROOM", "REPLAY_ATTRIBUTION_NOTE", "SILENT_TIERS",
            "REFUSED_PREFIX",
            "EXIT_REFUSED", "EXIT_OFFLINE",

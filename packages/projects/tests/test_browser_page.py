@@ -46,6 +46,9 @@ MINT_GLOBS = ("packages/projects/src/moxi_projects/acts.py",
               "packages/projects/tests/test_browser_page.py")
 
 BROKEN = "INTERFACE = 1\nimport fake_module_that_is_not_there\n"
+#: The empty list's sentence once every facts component in a test shell has reported.
+FULL_SENTENCE = ("A project is a folder with a short name. "
+                 "Its sessions and services are then gathered under that name.")
 
 
 def fake_site(base: Path, package: str, entry: str, source: str) -> Path:
@@ -211,9 +214,9 @@ def reads_of(page, path: str) -> list[str]:
 # --- the contract, the store and the git -----------------------------------------------------
 
 def test_the_page_keeps_the_contract(seeded, ui_page, ui_component_check):
-    # With services installed, the page places its `project-facts` component, which reads
-    # services' routes.
-    check = ui_component_check(ui_page, "projects", "page", keep=True, allow=("services", "sessions", "loadout"))
+    # With services, sessions, launcher and loadout installed, the page places each one's
+    # `project-facts` component, which reads that module's routes.
+    check = ui_component_check(ui_page, "projects", "page", keep=True, allow=("services", "sessions", "launcher", "loadout"))
     assert check.element == "moxi-projects-page"
     for route in ("projects", "kinds"):
         assert any(url.endswith(f"/m/projects/api/{route}") for url in check.requests), check.requests
@@ -237,6 +240,8 @@ def test_a_terminal_whose_store_is_elsewhere_refuses_the_add_with_the_store_line
     line = f"the projects store here is {here}, but the last run in a terminal used {there}"
     # The list still reads: the shell's store, which has no rows.
     expect(panel.locator('section[data-part="list"]')).to_have_attribute("data-state", "empty")
+    # The empty sentence is whole once the facts components have reported.
+    expect(panel.locator('[data-line="sentence"]')).to_have_text(FULL_SENTENCE)
 
     aside = add_panel(panel)
     # The panel says above its button that a change would be refused, and why.

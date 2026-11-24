@@ -19,8 +19,9 @@ live. Numbers named here are in `src/moxi_comms/constants.py`.
 - **Delivery adapters** connect to the daemon, bind a name, and put mail in front of a
   model at a turn boundary: `claude-shim` (a Claude Code session), `codex` (a Codex
   app-server) and `opencode` (an OpenCode server). The kind `connector` is comms'
-  provider in the connector, which serves the Claude apps; it is a person kind, so its
-  mail is never held.
+  provider in the connector, which serves the Claude apps, and `speech` is a person
+  speaking through voice, which binds the operator's name as it. Both are person kinds,
+  so their mail is never held and their cache is never read.
   A send-only name is one a module or a registered program sends under and nobody binds
   or mails ([adapters.md](adapters.md#send-only-names)).
 - **The CLI**, `moxi comms`, sends and reads through the daemon. With the daemon down
@@ -120,9 +121,8 @@ file and send a pointer to it.
 
 Every new `moxi comms send` (no `--reply-to`) states what it wants back with `--posture none`,
 `optional`, `once` or `open`; without it the verb refuses, exit 2 (usage), posting nothing. The operator
-(any lane whose sender is `operator`) is exempt from every posture refusal: a new send of
-his with no `--posture` is open with no cap, and what he passes is written
-as passed.
+(any lane whose sender is `operator`) is exempt from every posture refusal: the operator's new
+send with no `--posture` is open with no cap, and a posture passed is written as passed.
 
 A reply (`moxi comms reply <id>`, or `moxi comms send --reply-to <id>`) needs no `--posture`; it
 takes its posture from the message it answers, read top to bottom:
@@ -147,7 +147,7 @@ whose `re:` names the root or a member; the verified ones count. It is closed wh
    `[threads] reply_cap` in comms' config file (default 8);
 2. its newest message has been readable by the replier for an hour. The daemon's
    `readable` read says when it handed each message over, and which it still
-   has in its queue for him; mail not yet handed over starts no clock;
+   has in its queue for the replier; mail not yet handed over starts no clock;
 3. a verified member carries `[no reply]`.
 
 A reply in a closed thread is refused with a text that names a new send as the cure,
@@ -232,14 +232,20 @@ and for how long:
 `sent` is the time alone on the day it was sent; the wait is minutes under an hour,
 hours under two days, then days.
 
-Directors are granted by the recipient at launch (`moxi comms claude --director`, the
-`directors` key in the Codex and OpenCode rosters), never claimed by the sender. A
-declared director's verified message renders as a directive. The operator's messages
-always do.
+Directors are granted by the recipient's side, never claimed by the sender: at launch
+(`moxi comms claude --director`, the `directors` key in the Codex and OpenCode rosters),
+and through the box's own comms config, `[policy] directors`, whose names every session
+takes after its launch's own unless its launch opts out (`--no-policy-directors`, a
+roster row's `takes_policy_directors = false`). A launch-declared director's verified
+message renders as a directive. A policy director's does only while its name holds a
+standing row, which only provisioning writes (the author's tier reads `standing`); until
+then its messages are information, and the frame line says `policy director, not
+provisioned`. The operator's messages always do.
 
 The first thing a Claude session is shown at start is the agent context block
-(`context.CONTEXT_BLOCK`, with `context.DIRECTOR_LINE` after it for a session that
-declared a director) and the current roster. Everything else an agent meets only
+(`context.CONTEXT_BLOCK`, with `context.DIRECTOR_LINE` after it for a session whose
+launch declared a director; a policy director changes standing, not who the agent
+reports to) and the current roster. Everything else an agent meets only
 sometimes is explained on demand by `moxi comms help <term>`.
 
 ## Delivery rules

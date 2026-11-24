@@ -71,10 +71,11 @@ RESOLVING_SOURCES = ("startup", "resume", "clear")
 REMINDER_LIST = 3
 
 
-def owing_branch(payload: dict, directors=()) -> str | None:
+def owing_branch(payload: dict, directors=(), *, policy=()) -> str | None:
     """The "who from" and "which mark" tests on one delivered payload: the branch `M`
     owes through, or None when it owes nothing. `directors` is the recipient's own
-    declaration.
+    list, and `policy` the part of it only the box's `[policy] directors` gave; a
+    director debt opens only for a message `standing_of` makes a directive.
 
     The operator test is the name OR the tier: the name covers a forwarder that
     posts on the standing `operator` bundle, and the tier covers the terminal lane.
@@ -90,7 +91,7 @@ def owing_branch(payload: dict, directors=()) -> str | None:
         return BRANCH_OPERATOR                                         # 2
     if payload.get("posture") != POSTURE_ONCE:
         return None                                                    # 5
-    if standing_of(author, directors).directive:
+    if standing_of(author, directors, policy=policy).directive:
         return BRANCH_DIRECTOR                                         # 3
     if author.get("attribution") == VERIFIED:
         return BRANCH_PEER                                             # 4
@@ -152,9 +153,10 @@ class Ledger:
         self.hwm: str | None = None
 
     # ------------------------------------------------------------------ opening
-    def open(self, payload: dict, directors, session_id, now: float) -> Debt | None:
+    def open(self, payload: dict, directors, session_id, now: float, *,
+             policy=()) -> Debt | None:
         """Open a debt at injection, when the payload owes one."""
-        branch = owing_branch(payload, directors)
+        branch = owing_branch(payload, directors, policy=policy)
         if branch is None:
             return None
         at = epoch_of(payload.get("timestamp"))

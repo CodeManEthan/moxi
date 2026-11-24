@@ -1,6 +1,7 @@
 """The browser checks every module runs on its own components: the contract check and the
-360 px width check; and the two helpers a test uses to read back what its page copied,
-`ready_copying` and `copied`, in any engine.
+360 px width check; the two helpers a test uses to read back what its page copied,
+`ready_copying` and `copied`, in any engine; and `press`, the click that waits until no
+read that decides the page's layout is out (`settled`).
 
 Both checks take a Playwright page (the sync API) already on the shell's document, signed
 in (`TestShell.sign_in`). They call only the page's own methods, so this module imports
@@ -31,6 +32,13 @@ QUIET_S = 0.3
 SETTLE_S = 3.0
 #: The shell's push channel, which `subscribe` reaches through.
 PUSH_PATH = "/m/ui/api/push"
+#: The attribute `client.js` keeps on the page root (the shell's `#moxi-panel`) while reads
+#: that decide the page's layout are out: their count. It is gone when none is.
+READING_MARK = "data-reading"
+#: Milliseconds between two looks at the mark while a read is out.
+_LOOK_MS = 20
+_READING = ("() => (document.getElementById('moxi-panel') ?? document.documentElement)"
+            f".getAttribute('{READING_MARK}')")
 
 # The colour properties a token can reach: a component that takes a token shows it in one
 # of these somewhere in its shadow tree.
@@ -431,3 +439,35 @@ def copied(page: Any) -> str | None:
     if _on_chromium(page.context):
         return page.evaluate("navigator.clipboard.readText()")
     return page.evaluate("window.__copied ?? null")
+
+
+def settled(page: Any, *, wait_ms: int = WAIT_MS) -> None:
+    """Wait until the page root of `page` has no `READING_MARK`: no read that decides the
+    page's layout is out. Raises `AssertionError` naming the mark and its count when one
+    is still out after `wait_ms`."""
+    _settle_by(page, time.monotonic() + wait_ms / 1000, wait_ms)
+
+
+def _settle_by(page: Any, deadline: float, wait_ms: int) -> None:
+    """`settled` until `deadline` (on `time.monotonic`), saying `wait_ms` when it fails."""
+    while True:
+        count = page.evaluate(_READING)
+        if count is None:
+            return
+        if time.monotonic() >= deadline:
+            raise AssertionError(
+                f"the page never settled: its root still has {READING_MARK}=\"{count}\" after "
+                f"{wait_ms} ms, so {count} read(s) that decide its layout are out and the "
+                "press did not click")
+        page.wait_for_timeout(_LOOK_MS)
+
+
+def press(locator: Any, *, wait_ms: int = WAIT_MS, **click_args: Any) -> None:
+    """Click `locator` (Playwright's sync API) once it is visible and its page has settled
+    (`settled`), so no late answer moves another control under the click. `click_args` go
+    to `locator.click`. Raises `AssertionError` naming `READING_MARK` when the page has
+    not settled within `wait_ms`, the visible wait included."""
+    deadline = time.monotonic() + wait_ms / 1000
+    locator.wait_for(state="visible", timeout=wait_ms)
+    _settle_by(locator.page, deadline, wait_ms)
+    locator.click(**click_args)

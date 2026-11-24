@@ -12,12 +12,14 @@ OPENED = {"description": "a placeholder round", "flow": "fix",
 
 def test_the_types_are_the_ones_a_log_holds():
     assert sorted(events.TYPES) == sorted([
-        "round.opened", "flow.changed", "design.frozen", "verdict.recorded",
+        "round.opened", "flow.changed", "lead.changed", "design.frozen", "verdict.recorded",
         "question.asked", "question.changed", "stage.declared", "stage.changed",
         "ruling.recorded", "ruling.shown", "build.commissioned", "check.ran", "ci.read",
         "finding.marked", "wait.marked", "brief.sized", "finish.action", "finish.done",
+        "queue.join", "queue.left", "queue.batch", "queue.landed", "queue.ejected",
+        "queue.requeued",
         "lock.cleared", "build.dropped", "round.dropped", "thread.decided", "repair",
-        "round.closed"])
+        "round.closed", "decision.settled", "decision.raised"])
 
 
 @pytest.mark.parametrize("name", sorted(events.TYPES))
@@ -61,3 +63,14 @@ def test_an_opening_without_a_required_field_is_refused(key):
     fields = {name: value for name, value in OPENED.items() if name != key}
     with pytest.raises(ValueError, match=f"round.opened needs {key}"):
         events.check("round.opened", fields)
+
+
+def test_an_opening_may_name_its_lead():
+    events.check("round.opened", {**OPENED, "lead": "atlas"})
+
+
+def test_a_change_of_lead_needs_the_new_lead_and_may_name_the_one_before():
+    events.check("lead.changed", {"lead": "atlas", "was": None})
+    events.check("lead.changed", {"lead": "atlas"})
+    with pytest.raises(ValueError, match="lead.changed needs lead"):
+        events.check("lead.changed", {"was": "kestrel"})

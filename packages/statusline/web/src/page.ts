@@ -9,7 +9,7 @@
 import { css, html, LitElement, nothing } from "lit";
 import { live } from "lit/directives/live.js";
 import { repeat } from "lit/directives/repeat.js";
-import { api } from "/m/ui/client.js";
+import { api, readLater } from "/m/ui/client.js";
 
 import { moveDown, moveUp, turnOff, turnOn } from "./draft.ts";
 import type { Key, Values } from "./draft.ts";
@@ -95,7 +95,8 @@ export class StatuslinePage extends LitElement {
 
   route = "";
   #sync: Sync | null = null;
-  #timer: ReturnType<typeof setTimeout> | undefined;
+  /** Cancels the preview waiting to be asked for. */
+  #cancelPreview = (): void => {};
   #pending = false;
   #copied: string | null = null;
   #focused = (): void => {
@@ -120,7 +121,7 @@ export class StatuslinePage extends LitElement {
   disconnectedCallback(): void {
     super.disconnectedCallback();
     this.#sync = null;
-    clearTimeout(this.#timer);
+    this.#cancelPreview();
     window.removeEventListener("focus", this.#focused);
     document.removeEventListener("visibilitychange", this.#shown);
   }
@@ -133,8 +134,10 @@ export class StatuslinePage extends LitElement {
     sync.message = null;
     this.#pending = true;
     this.requestUpdate();
-    clearTimeout(this.#timer);
-    this.#timer = setTimeout(() => void sync.previewNow(), SETTLE_MS);
+    // The page root counts the preview as out from the change, so a press waits for the
+    // lines it draws.
+    this.#cancelPreview();
+    this.#cancelPreview = readLater(() => sync.previewNow(), SETTLE_MS);
   }
 
   #show(edit: (show: string[], drawn: (item: string) => boolean) => string[]): void {

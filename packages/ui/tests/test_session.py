@@ -18,6 +18,7 @@ from moxi_ui.session import (
     IDLE,
     LIMIT,
     MAX_AGE,
+    TOUCH_EVERY,
     OwnerCheck,
     Tickets,
     clear_stored,
@@ -390,16 +391,71 @@ def test_idle_and_absolute_expiry(tmp_path):
     assert store.use([used_id], used_key, need_key=True) is None
 
 
-def test_the_oldest_is_evicted_past_the_limit(tmp_path):
+def _id_hash(session_id):
+    return hashlib.sha256(session_id.encode()).hexdigest()
+
+
+def _minted(store, clock, count):
+    made = []
+    for _ in range(count):
+        clock.now += 1
+        made.append(store.mint()[0])
+    return made
+
+
+def test_the_least_recently_used_is_evicted_past_the_limit(tmp_path):
     clock = Clock()
     store = open_store(tmp_path, None, clock=clock)
-    made = []
-    for _ in range(LIMIT + 1):
-        clock.now += 1
-        made.append(store.mint())
+    made = _minted(store, clock, LIMIT)
+    # The oldest made is used last, so the second oldest is the least recently used.
+    clock.now += 1
+    assert store.use([made[0]], need_key=False) is not None
+    _minted(store, clock, 1)
     assert store.live() == LIMIT
-    assert store.use([made[0][0]], need_key=False) is None
-    assert all(store.use([sid], need_key=False) for sid, _ in made[1:])
+    assert store.use([made[1]], need_key=False) is None
+    assert all(store.use([sid], need_key=False) for sid in [made[0], *made[2:]])
+
+
+def test_a_session_holding_a_stream_is_never_evicted(tmp_path):
+    clock = Clock()
+    store = open_store(tmp_path, None, clock=clock)
+    made = _minted(store, clock, LIMIT)
+    ended = []
+    store.watch(_id_hash(made[0]), lambda: ended.append(made[0]))
+    _minted(store, clock, LIMIT)
+    assert store.live() == LIMIT and ended == []
+    assert store.use([made[0]], need_key=False) is not None
+
+
+def test_with_every_session_streaming_a_mint_goes_over_until_a_stream_closes(tmp_path):
+    clock = Clock()
+    store = open_store(tmp_path, None, clock=clock)
+    made = _minted(store, clock, LIMIT)
+    stops = [store.watch(_id_hash(sid), lambda: None) for sid in made]
+    (extra,) = _minted(store, clock, 1)
+    assert store.live() == LIMIT + 1
+    assert all(store.use([sid], need_key=False) for sid in [*made, extra])
+    # The stream that closes marks its session used then; the next mint evicts down to
+    # the limit, the sessions that still stream kept.
+    clock.now += 1
+    stops[0]()
+    (last,) = _minted(store, clock, 1)
+    assert store.live() == LIMIT
+    assert store.use([made[0]], need_key=False) is None
+    assert store.use([extra], need_key=False) is None
+    assert all(store.use([sid], need_key=False) for sid in [*made[1:], last])
+
+
+def test_the_use_stamp_survives_a_reload(tmp_path):
+    clock = Clock()
+    store = open_store(tmp_path, "e", clock=clock)
+    made = _minted(store, clock, LIMIT)
+    clock.now += TOUCH_EVERY
+    assert store.use([made[0]], need_key=False) is not None
+    store = open_store(tmp_path, "e", clock=clock)
+    _minted(store, clock, 1)
+    assert store.use([made[1]], need_key=False) is None
+    assert store.use([made[0]], need_key=False) is not None
 
 
 def test_last_used_is_written_at_most_once_an_hour(tmp_path):
@@ -435,16 +491,10 @@ def test_a_watch_is_called_once_however_its_session_ends(tmp_path):
     second = watched()
     store.clear()
     assert called == [first, second]
-    # Evicted past the limit.
-    third = watched()
-    for _ in range(LIMIT):
-        store.mint()
-    assert called[-1] == third
     # Found expired.
-    store.clear()
-    fourth = watched()
+    third = watched()
     clock.now += IDLE
-    assert store.live() == 0 and called[-1] == fourth
+    assert store.live() == 0 and called[-1] == third
     # Already gone: called at once. A dropped watch is never called.
     store.watch("0" * 64, lambda: called.append("gone"))
     assert called[-1] == "gone"
@@ -453,7 +503,7 @@ def test_a_watch_is_called_once_however_its_session_ends(tmp_path):
                        lambda: called.append("dropped"))
     stop()
     store.clear()
-    assert "dropped" not in called and len(called) == 5
+    assert "dropped" not in called and len(called) == 4
 
 
 def test_signout_while_no_shell_runs_keeps_the_epoch(tmp_path):

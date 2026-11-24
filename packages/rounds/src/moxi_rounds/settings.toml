@@ -76,6 +76,14 @@ read = "use"
 label = "A build finishes once its check passed on"
 choices = { merged = "its tip merged with the target", tip = "its tip alone" }
 
+[defaults.director]
+type = "string"
+default = ""
+doc = "The comms name of the project's director, told about a queue project's queue as a whole and about a red main whose owner has no running session. Empty names nobody."
+read = "use"
+label = "The project's director"
+line = "A comms name, told about the queue and a red main nobody else can take. Empty: nobody."
+
 [defaults.idle_days]
 type = "int"
 default = 14
@@ -148,7 +156,7 @@ unit = "hours"
 [projects]
 type = "table"
 default = {}
-doc = "Per-project tables, [projects.<key>]: any key of defaults, and the project's own dir, into, check, ci, finish, shared_paths, keep_branch, lock_ref and brief."
+doc = "Per-project tables, [projects.<key>]: any key of defaults, and the project's own dir, into, land, check, ci, finish, shared_paths, keep_branch, lock_ref, brief and private_files."
 read = "use"
 label = "Each project's own settings"
-line = "[projects.<key>] tables: any key of defaults, and the project's own dir, into, check, finish and more."
+line = "[projects.<key>] tables: any key of defaults, and the project's own dir, into, land, check, finish, private_files and more."

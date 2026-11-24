@@ -58,23 +58,25 @@ tier a re-check is held to.
 from __future__ import annotations
 
 import json
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 
-from . import (brake, builds, checking, ci, closing, commission_block, drift, flows,
-               model_tiers, rendering, report_block, showing, sizing, stages, steps,
-               tracing, versions)
+from . import (answer_block, brake, builds, checking, ci, closing, commission_block, drift, flows,
+               leads, log, model_tiers, places, queue_file, queue_view, rendering,
+               report_block, showing, sizing, stages, steps, tracing, versions)
 from . import numbers as counted
 from . import settings as own
 from . import shown as showings
 from . import state as states
 from .errors import BadArgument
 
-#: Who does a step that takes no `by`: the questions and the ratifying are his.
+#: Who does a step that takes no `by`: the questions and the ratifying are the
+#: operator's.
 OPERATOR = "operator"
-_HIS = (steps.QUESTIONS, "ratify")
+_OPERATOR_STEPS = (steps.QUESTIONS, "ratify")
 
-#: The kind of prepared block that has no schema in this version.
-ANSWER = "answer"
+#: The kinds of block whose empty text `schema` prints: the reports', and a prepared
+#: answer's.
+ANSWER = answer_block.KIND
 SCHEMAS = (*report_block.KINDS, ANSWER)
 
 #: The kinds of warning.
@@ -95,11 +97,12 @@ MANY_BUILDS = 5
 
 def schema(kind: str) -> str:
     """The empty data block of `kind`, one of `SCHEMAS`. Raises `BadArgument` for a
-    word that is no kind, and for the prepared answer, whose block this version does
-    not have."""
+    word that is no kind."""
     if kind == ANSWER:
-        raise BadArgument("the block of a prepared answer is not built in this version",
-                          f"name one of {', '.join(report_block.KINDS)}")
+        return answer_block.empty()
+    if kind not in report_block.KINDS:
+        raise BadArgument(f"{kind!r} is no kind of block",
+                          f"name one of {', '.join(SCHEMAS)}")
     return report_block.empty(kind)
 
 
@@ -170,7 +173,8 @@ def _build(found: showing.Shown, step: steps.Step) -> dict:
     build = builds.current(found.state, step.stage)
     if build is None or build.ended is not None:
         return {"reads": _named(step)}
-    worktree = checking.commission_of(found.state, build).get("worktree")
+    commissioned = checking.commission_of(found.state, build)
+    worktree = places.expand_home(commissioned.get("worktree"))
     return {"reads": _named(step),
             "write": f"the work, committed on {build.branch} in {worktree}"}
 
@@ -181,6 +185,10 @@ def _check(found: showing.Shown, step: steps.Step) -> dict:
                      "in the build's worktree"]}
     build = builds.current(found.state, step.stage)
     settings = own.load() if found.settings is None else found.settings
+    if build is not None and checking.queued(settings, build.repo):
+        said["then"] = [f"{said['then'][0]}: it runs the scoped local check, pushes "
+                        "nothing and reads no CI, or with --full the full check"]
+        return said
     if build is None or ci.declared(settings, build.repo) is None:
         return said
     newest = ci.newest(found.state, step.stage)
@@ -229,19 +237,43 @@ def _report(found: showing.Shown, step: steps.Step) -> dict:
 
 
 def _finish(found: showing.Shown, step: steps.Step) -> dict:
-    """A build's finish: the command that runs it, by name or in the build's worktree."""
-    return {"then": [f"moxi rounds finish {found.name} {step.stage}, or moxi rounds "
+    """A build's finish: the command that runs it, by name or in the build's worktree.
+    In a queue project the command joins the queue, and the group holds the member's
+    place as the queue file reads now (`queue`), while it is in the queue."""
+    said = {"then": [f"moxi rounds finish {found.name} {step.stage}, or moxi rounds "
                      "finish in the build's worktree"]}
+    build = builds.current(found.state, step.stage)
+    settings = own.load() if found.settings is None else found.settings
+    if build is None or not checking.queued(settings, build.repo):
+        return said
+    said["then"] = [f"{said['then'][0]}: it joins {build.repo}'s queue, and the lander "
+                    "merges it"]
+    queue = queue_file.read(build.repo)
+    member = queue.member(found.name, step.stage)
+    if member is not None and member.waiting:
+        said["queue"] = {"repo": build.repo, "position": queue.position(found.name,
+                                                                        step.stage),
+                         "batch": member.batch if member.state == queue_file.IN_BATCH
+                         else None, "paused": queue.paused,
+                         "lead": leads.of(found.state, found.project_lead) is not None,
+                         "red": queue_view.spell_line(queue)}
+    return said
 
 
 def _retro(found: showing.Shown, step: steps.Step) -> dict:
     """The round's retrospective: the numbers as they stand, which the round's ending
     will hold, the note and the reports, the report's block, and the verdict."""
     settings = own.load() if found.settings is None else found.settings
+    return {**_retro_uncounted(found, step),
+            "numbers": counted.of(found.state, now=log.stamp(),
+                                  ratify=closing.ratify_of(settings, found.name))}
+
+
+def _retro_uncounted(found: showing.Shown, step: steps.Step) -> dict:
+    """The retrospective's lines without its numbers, which take a count of the whole
+    log."""
     return {"reads": ["the numbers below", str(found.round_dir / rendering.NOTE_FILE),
                       f"the reports in {found.round_dir}", *_named(step)],
-            "numbers": counted.of(found.state,
-                                  ratify=closing.ratify_of(settings, found.name)),
             "write": (f"a report in {found.round_dir} with the block from: moxi rounds "
                       f"next --schema {report_block.RETRO}"),
             "then": [f"moxi rounds verdict {found.name} <your report>"]}
@@ -292,11 +324,18 @@ def _drift_pass(group: dict, step: steps.Step, seen) -> None:
                       *group["reads"]]
 
 
-def _group(found: showing.Shown, step: steps.Step, models, seen=None) -> dict:
+def group(found: showing.Shown, step: steps.Step, models, seen=None, *,
+          fill: bool = True, count_numbers: bool = True) -> dict:
+    """The group of `step`: its head, its waits and, with `fill`, the step's own lines
+    (`LINES`, or a step of the user's own), which `then` and `reads` are made of. With
+    `fill` false the lines are left empty and nothing of them is read: a reader that
+    wants one step's lines asks for that step alone. With `count_numbers` false the
+    retrospective's lines leave out its `numbers`, a count of the whole log. `models`
+    is the `models` setting and `seen` what `checking.seen_of` read."""
     entry = step.entry or {}
     group = {"step": step.step, "stage": step.stage, "state": step.state,
              "built": step.state != steps.NOT_BUILT,
-             "by": OPERATOR if step.step in _HIS else entry.get("by"),
+             "by": OPERATOR if step.step in _OPERATOR_STEPS else entry.get("by"),
              "tier": entry.get("model"), "model": None, "reads": [], "write": None,
              "then": [], "questions": list(step.questions), "waits": _waits(step)}
     if step.owes:
@@ -305,7 +344,9 @@ def _group(found: showing.Shown, step: steps.Step, models, seen=None) -> dict:
     if lines is None and step.entry is not None and flows.is_user_step(step.entry):
         lines = {flows.COMMAND: _command, flows.REPORT: _report}.get(
             step.entry.get("does"))
-    if group["built"] and lines is not None:
+    if lines is _retro and not count_numbers:
+        lines = _retro_uncounted
+    if fill and group["built"] and lines is not None:
         group.update(lines(found, step))
         if step.step == steps.VERIFY_BUILD or lines is _report:
             _drift_pass(group, step, seen)
@@ -317,26 +358,37 @@ def _group(found: showing.Shown, step: steps.Step, models, seen=None) -> dict:
     return group
 
 
-def _groups(found: showing.Shown, models, seen) -> list[dict]:
-    every = steps.of(found.state, name=found.name, on_closed=found.on_closed,
-                     register=found.register, seen=seen)
-    at = steps.current(found.state, name=found.name, on_closed=found.on_closed,
-                       register=found.register, seen=seen)
+def groups(found: showing.Shown, every: Sequence[steps.Step], models, seen=None, *,
+           fill: bool = True) -> list[dict]:
+    """The groups of the round `found`, from `every`, its steps as `steps.of` read them
+    with `seen`: one for the step it is at, then one for each stage of the plan whose
+    own first step not settled is another step, then one for each other step of the
+    round's own that is ready. With `fill` false no step's lines are read (see
+    `group`), so `then` and `reads` are empty."""
+    at = None
+    if found.state.status == states.OPEN:
+        at = next((step for step in every if not step.settled), None)
     if at is None:
         return []
-    groups = [_group(found, at, models, seen)]
+    found_groups = [group(found, at, models, seen, fill=fill)]
     for stage in stages.in_plan(found.state):
         first = next((step for step in every
                       if step.stage == stage.id and not step.settled), None)
         if first is not None and (first.step, first.stage) != (at.step, at.stage):
-            groups.append(_group(found, first, models, seen))
+            found_groups.append(group(found, first, models, seen, fill=fill))
     # A step of the round's own that is ready gets its group too, though a stage's
     # step comes before it in the flow: ratifying can go on while a stage builds.
     for step in every:
         if (step.stage is None and step.state == steps.READY
                 and (step.step, step.stage) != (at.step, at.stage)):
-            groups.append(_group(found, step, models, seen))
-    return groups
+            found_groups.append(group(found, step, models, seen, fill=fill))
+    return found_groups
+
+
+def _groups(found: showing.Shown, models, seen) -> list[dict]:
+    every = steps.of(found.state, name=found.name, on_closed=found.on_closed,
+                     register=found.register, seen=seen)
+    return groups(found, every, models, seen)
 
 
 # -- the warnings ------------------------------------------------------------------------
@@ -362,7 +414,7 @@ def _warnings(found: showing.Shown) -> list[dict]:
                         "held to"))
     if found.register is None:
         warnings.append(_warning(
-            READ_BACK_UNKNOWN, "what he has read back is not known: "
+            READ_BACK_UNKNOWN, "what the operator has read back is not known: "
                                f"{found.register_unreadable.reason}"))
     else:
         unseen = [one for one in state.rulings
@@ -475,6 +527,21 @@ def _pass_line(group: dict) -> str:
     return f"pass:  {group['pass']} of v{group['version']}: {group['why']}"
 
 
+def _queue_line(place: dict) -> str:
+    """A member's place in its queue, as the queue file reads now."""
+    said = [f"position {place['position']} in {place['repo']}'s queue"]
+    if place.get("batch") is not None:
+        said.append(f"in batch {place['batch']}, CI pending")
+    if place.get("paused") is not None:
+        said.append(f"queue paused: {place['paused']}")
+    if place.get("red"):
+        said.append(place["red"])
+    if place.get("lead") is False:
+        said.append("the round has no lead: the lander tells the builder when it can "
+                    "receive, else the director")
+    return "; ".join(said)
+
+
 def _group_lines(said: dict, group: dict) -> list[str]:
     lines = [_head(said, group)]
     lines += [commission_block.line(one) for one in group.get("changed", ())]
@@ -498,6 +565,8 @@ def _group_lines(said: dict, group: dict) -> list[str]:
             for one in (read or {}).get("workflows") or ():
                 url = "" if one.get("url") is None else f"   {one['url']}"
                 lines.append(f"         {one['path']}: {one['reading']}{url}")
+        if group.get("queue") is not None:
+            lines.append(f"queue: {_queue_line(group['queue'])}")
         lines += [f"owes:  {line}" for line in group.get("owes", ())]
         if "numbers" in group:
             lines += ["numbers:", *(f"  {line}" for line in
@@ -547,6 +616,7 @@ def as_json(said: dict) -> str:
     return json.dumps(said, indent=2, ensure_ascii=False) + "\n"
 
 
-__all__ = ["ANSWER", "SCHEMAS", "LINES", "OPERATOR", "schema", "model_of", "read",
+__all__ = ["ANSWER", "SCHEMAS", "LINES", "OPERATOR", "schema", "model_of", "group",
+           "groups", "read",
            "as_text", "as_json", "DESIGN_MOVED", "BELOW_TIER", "NOT_SHOWN", "STALE_ROW",
            "HOLDS_STAGE", "READ_BACK_UNKNOWN"]

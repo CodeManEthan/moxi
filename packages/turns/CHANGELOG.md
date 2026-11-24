@@ -1,7 +1,147 @@
 # Changelog
 
-## Unreleased
+## 0.2.7 (unreleased)
 
+- On Claude Code, a steer that lands while the model writes its last answer no longer
+  waits for the next prompt. Claude Code holds such a note for the session's next
+  request when the turn makes no further one; the runner now reads that at the turn's end
+  and reports the steer held, and the steer opens a turn of its own, ahead of every queued
+  delivery. That turn's prompt is a short line saying a note came with it, since Claude
+  Code sends the held note beside it, so the model reads the note once; the session's
+  `prompt` listeners read the steer's text as the prompt's `text`. The steer's
+  `turn.steered` names the first turn, whose `turn.ended` no longer names it; the new
+  turn's `turn.started` and `turn.ended` name it as the delivery that opened it, and its
+  `ended` is that turn's end. When another turn's request carried the held note first
+  (the person's prompt, or a delivery that went ahead), the steer opens no turn: it joins
+  that turn as a steer while it runs, or ends with it once it has ended. When a /clear
+  or a compaction dropped the held note before the steer's turn, the steer's own text is
+  that turn's prompt, so the message is not lost. When no request of the steer's own
+  turn carried the held note (a compaction inside that turn's first request dropped it),
+  the runner reads that at the turn's end, and the steer opens one more turn, once, with
+  its own text as the prompt where the note is gone; the first turn's `turn.ended` then
+  does not name it. A steer a request carried ends with its turn as before. The runner is version 0.3.1, so
+  `moxi install turns` updates an install at user scope.
+- A new request, `fork {text, by, ref?}` (the client's `fork(text, by=, ref=)`), and a new
+  capability, `fork`: start a fork of the session's main loop with `text` as its task. It
+  runs beside the main loop's turns and holds no slot. Its `started` value carries the
+  fork's `agent_id` (a new field of `started`, null for every other delivery), its
+  `ended` the fork's answer, and a fork the harness refused or that went away reads
+  `lost` with a reason starting `denied` or `gone`.
+- Claude Code sessions offer `fork`. The runner spawns a background fork of the main
+  loop with a one-word warm-up, then sends the task as the fork's first resumed round,
+  whose answer Claude Code announces to the main loop as it announces any finished
+  subagent; the runner leaves that notice as Claude Code sends it. The delivery's answer
+  is that round's. A refused spawn reads `lost` `denied`; a warm-up that does not
+  complete within 30 s or ends other than with an answer, a task Claude Code does not
+  deliver, and a round with no end within its bound (120 s when the asker sets none) read
+  `lost` `gone`.
+- The Claude runner tells a fork's tool calls from its own by the call's `agentId`. A
+  call counts as the runner's own, judged by no guard, only when it carries no `agentId`;
+  every call of a fork the runner started is judged by the guards at the call step and
+  the ask step, and gets no after-tool ask. The runner holds a fork's id until the fork's
+  own turn.complete for its open round; a /clear, a compaction or a resume lets go of
+  nothing, and only the end of the Claude Code process drops it. A round its bound ends
+  reads `lost` `gone` at once, but the fork may still be running, so its id stays held
+  until that late turn.complete, which lets it go and reports nothing; its calls
+  meanwhile are still the fork's, and a `fork.continue` for it is refused. A call with
+  an id the runner does not hold is judged and asked after as any agent's. The runner
+  speaks leg 5 and is version 0.3.0, so `moxi install turns` updates an install at user
+  scope.
+- A new request, `fork.continue {delivery, text, ref?}` (the client's
+  `fork_continue(delivery, text, ref=)`): give a fork that has answered its next round, a
+  new delivery whose `ended` carries the round's answer. It reads `lost` `gone` when the
+  endpoint knows no such fork, the fork never started or its round was lost, and `denied`
+  while a round of the fork is still open. On Claude Code the runner sends the text to the
+  finished fork, which answers again in its own conversation.
+- `fork` and `fork.continue` take `round_timeout_ms` (the client's `round_timeout_s=`): how
+  long the harness's half waits for the round's answer before the delivery reads `lost`
+  `gone`. With none, Claude Code's runner waits 120 s. An endpoint of an older turns
+  ignores it and waits its default.
+- A new option, `keep` (with a `ref`), on `deliver`, `fork` and `fork.continue`, a new
+  request, `ack {ref}`, and a new capability, `keep`, which every session of this version
+  offers. A kept delivery's end is written to turns' state folder when it settles, the
+  endpoint's own end included, and stays out of the settled deliveries the endpoint drops
+  for space, so `wait` reads the same end at every read, after the endpoint has ended too
+  (the client reads the state folder then, and a later endpoint of the session answers a
+  `wait` by that `ref` from it). `ack` removes it; an ack of a `ref` with no kept end does
+  nothing. Nothing removes a kept end by age: `moxi doctor turns` lists each one older than
+  a day with its `ref` and asker. The client gains `keep=`, `Session.ack(ref)`, and
+  `turns.wait_ref(ref, session_id=)` and `turns.ack(ref, session_id=)` for a caller that
+  holds no `Delivery`. An endpoint of an older turns does not offer `keep`, and the client
+  refuses to send `keep` to it. One `ref` holds one kept end: a `keep` under a `ref` whose
+  kept end in the session is not acked yet is answered invalid params, so no kept end
+  replaces another.
+
+## 0.2.6 (unreleased)
+
+- The Codex host takes `--fork THREAD_ID` (`codex.launch(fork=...)`), beside and never
+  with `--resume`: its first load forks that thread with `thread/fork`, live or not, into a
+  new thread that holds a copy of its conversation, and hosts the new one. The new thread
+  is loaded as a resumed one, with no item injected, and its id names the session from
+  the fork on, so a later load resumes it and the thread is never forked twice. Ready is
+  `resume`, or `startup` when the forked thread has had no turn.
+- The page's `Reading…` line, while its first read is out, shows once that read has
+  been out 400 ms in every browser. In Firefox it could stay blank until the page's
+  next redraw, up to a minute later, since the page checked the wait against
+  `Date.now()`, which Firefox coarsens. It now takes the wait from moxi-ui's
+  `WaitClock`, so the `ui` extra asks for moxi-ui 0.2.6 or later.
+- With `moxi-sessions` installed, `Live sessions` leaves the browser UI shell's band of
+  pages: the Sessions page shows the running sessions with turns' live state. `/m/turns/`
+  still opens the panel. It needs ui 0.2.5 or later, which reads `band_unless`; an older
+  ui keeps the entry.
+
+## 0.2.5 (2026-11-22)
+
+- A new listener event, `load`, observe only like `ready`: a Claude Code endpoint raises
+  it once per endpoint process, the first time it learns its session's id. That is
+  normally the runner's `session` line at the endpoint's own start, so a module hears of
+  an endpoint that replaced another (Claude Code ends and restarts every endpoint when
+  its plugins reload) without waiting for the session's next start, resume, clear or
+  compaction. When that line carries no id, `load` comes just before the first `ready`.
+  Every row naming it is called with the session's id, harness and environment, and its
+  answer is ignored. A turns older than this refuses a registration that names `load`.
+- `question_mode.origins` is retired and replaced by `prompt.own_origins`, default still
+  `["composer", "bridge"]`: the prompt origins that count as the person's own. Each
+  `prompt` event carries `own`, true when its origin is on that list, and question mode's
+  reminder reads it. The old key is not read as an alias: while a turns config file still
+  sets `question_mode.origins`, every turns endpoint refuses to start (a session then has
+  no guards and takes no deliveries) and names the key to set. Move the value to
+  `prompt.own_origins`, or, when it is the default `["composer", "bridge"]`, delete the
+  old key.
+  On Codex a prompt typed in the window now carries the origin `composer`, and one the
+  host handed in for a delivery carries none. The host places a prompt by its text: one
+  that matches no hand-in of its own while any is still out carries no origin either.
+- `deliver` and `steer` take `by`, the module that asked, and `senders`, the names the
+  text speaks for (the client's `deliver(..., by=, senders=)` and `steer(...)` too). A
+  `prompt` event carries `delivery_by` and `delivery_senders` from the delivery that is
+  the prompt, both None for a prompt turns did not hand in, and `opens`, false when the
+  prompt joins a main-loop turn already running.
+- A delivery's `ended` value carries `answer`, the final text of the turn that took it:
+  on Claude Code the assistant's final visible text, on Codex the turn's last agent
+  message; null when the turn had no text, on both, and where the harness gave none.
+- A listener row takes the option `wait_ms`, a function of the session's environment that
+  returns the row's own bound on `prompt` for that session, in milliseconds. The session's
+  prompt bound, decided at its start, is the longest of `listen.wait_ms` and those: the
+  endpoint asks the prompt listeners within it, the Claude runner waits it plus its margin
+  (the endpoint's first line carries `prompt_wait_ms`), and a Codex launch bakes it into
+  its UserPromptSubmit hook command. The runner plugin is version 0.2.2, so `moxi install
+  turns` updates an install at user scope.
+- A guard takes `sessions`, `"package.module:function"`: a function of the session's
+  environment that answers True to turn the guard on in that session, beside
+  `guards.run` and its switch. An endpoint asks it once, at the session's start, and keeps
+  the answer through every `ready`. One that does not import, raises or answers something
+  other than a bool reads off, is logged, and fails its `moxi doctor turns` row. A custom
+  guard file can name none, since the list already turns its guards on.
+- Question mode's prompt reminder leaves the agent to judge whether the questions are
+  wanted now ("If they are asking now, ..."), and asks it to count any new questions at the
+  end of its output once they are answered. "pros", as voice input spells "prose", now
+  asks for prose too: the default of `question_mode.prose_words` is `["prose", "pros"]`.
+  Question mode's judge may take up to 3000 ms on a call, still clamped by
+  `guards.max_wait_ms`, before the call is refused.
+- Until a Claude Code session's endpoint has sent its guard table, the runner refuses
+  every `AskUserQuestion` call, a subagent's too, with "turns' guards aren't loaded, so
+  question mode can't check this call; ask in prose", since it can't tell whether
+  question mode is on. Other tools pass as before, and a headless session is not refused.
 - Question mode counts a prompt sent from the Claude apps through Remote Control
   (origin `bridge`) as the person's own: the default of `question_mode.origins` is now
   `["composer", "bridge"]`, so such a prompt that mentions a question lets

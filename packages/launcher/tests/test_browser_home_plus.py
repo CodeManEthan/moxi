@@ -1,8 +1,10 @@
 """The `+` on Home in a browser, through a real shell that starts the launcher's real page
 server. `Continue the last session` offers only a session the shell's own user made in the
-place the line names, and resumes it in a slot with the lines under the box while the box
-keeps its text; a brief from a file turns the box off and launches with that file as the
-first turn; a handoff from a file, or one a preset names, is on its line under the box,
+place the line names, and resumes it in a slot with the lines under the box, the box's text
+as the resume's brief, and the box emptied once the resume starts, or, from an empty box, with
+no first turn, a `go` session too, and for a session that ran in a terminal copies the resume
+command with `--plain`; a brief from a file turns the box off and launches with
+that file as the first turn; a handoff from a file, or one a preset names, is on its line under the box,
 goes in the launch beside the box's text, and `Clear` takes it out of the next launch or
 copied command only: after that, or once a preset is picked, the preset's handoff is back
 on the line and in the launch.
@@ -18,7 +20,7 @@ import re
 import sys
 
 import pytest
-from moxi_dev.testing import wait_for
+from moxi_dev.testing import PROC_WAIT_S, wait_for
 from playwright.sync_api import expect
 
 import launcher_page_kit as kit
@@ -97,7 +99,8 @@ def entry(menu, name: str):
 
 def started(fake, count: int) -> dict:
     """The fake's start once it has had `count` of them."""
-    wait_for(lambda: len(fake.starts()) >= count, 10, what=f"start {count} in the fake slots")
+    wait_for(lambda: len(fake.starts()) >= count,
+             PROC_WAIT_S, what=f"start {count} in the fake slots")
     return fake.starts()[count - 1]
 
 
@@ -114,12 +117,14 @@ def test_continue_the_last_session_is_not_offered_for_another_actors_session(pag
     expect(entry(menu, "Continue the last session")).to_have_count(0)
 
 
-def test_his_own_last_session_is_offered_and_resumes_in_a_slot_keeping_the_box(page, shell, fake, work_dir):
-    sid = kit.seed(shell, "his-own-in-folder", target="slot", cwd=str(work_dir), by=kit.actor(shell))
+def test_his_own_last_session_is_offered_and_resumes_in_a_slot_with_the_box_as_its_brief(
+        page, shell, fake, work_dir):
+    sid = kit.seed(shell, "his-own-in-folder", target="slot", cwd=str(work_dir), by=kit.actor(shell),
+                   posture="go")
     # A newer session of another actor in the same folder is passed over.
     kit.seed(shell, "worker-after-him", target="slot", cwd=str(work_dir), by="planner")
     piece = kit.open_home(page)
-    piece.locator("textarea").fill("a draft that stays")
+    piece.locator("textarea").fill("Carry on from the login form.")
     menu = plus_menu(page, piece)
     found = entry(menu, "Continue the last session")
     expect(found).to_be_visible()
@@ -128,15 +133,57 @@ def test_his_own_last_session_is_offered_and_resumes_in_a_slot_keeping_the_box(p
     before = len(fake.starts())
     with page.expect_request(lambda request: request.url.endswith(RESUME)) as sent:
         found.click()
-    assert json.loads(sent.value.post_data) == {"session": sid}
+    assert json.loads(sent.value.post_data) == {"session": sid, "brief": "Carry on from the login form."}
     expect(menu).to_have_count(0)
     expect(piece.locator('.said [data-line="started"]')).to_have_text(re.compile(r"^Resumed in slot 3 · "),
                                                                     timeout=20_000)
     start = started(fake, before + 1)
     assert start["slot"] == 3 and start["cwd"] == str(work_dir), start
     assert "--resume" in start["argv"] and sid in start["argv"], start["argv"]
-    expect(piece.locator("textarea")).to_have_value("a draft that stays")
+    row = kit.newest_launch(shell)
+    assert (row.resume_of, row.brief) == ("his-own-in-folder", "Carry on from the login form."), row
+    # The resume that started with the box's text lets go of it, as a launch does.
+    expect(piece.locator("textarea")).to_have_value("")
     expect(piece.locator(".go")).to_be_enabled()
+
+
+def test_his_own_go_session_continued_with_an_empty_box_resumes_with_no_first_turn(
+        page, shell, fake, work_dir):
+    sid = kit.seed(shell, "his-go-in-folder", target="slot", cwd=str(work_dir), by=kit.actor(shell),
+                   posture="go")
+    piece = kit.open_home(page)
+    expect(piece.locator("textarea")).to_have_value("")
+    menu = plus_menu(page, piece)
+    before = len(fake.starts())
+    with page.expect_request(lambda request: request.url.endswith(RESUME)) as sent:
+        entry(menu, "Continue the last session").click()
+    assert json.loads(sent.value.post_data) == {"session": sid, "plain": True}
+    expect(piece.locator('.said [data-line="started"]')).to_have_text(re.compile(r"^Resumed in slot 3 · "),
+                                                                    timeout=20_000)
+    expect(piece.locator('.said [data-line="refused"]')).to_have_count(0)
+    start = started(fake, before + 1)
+    assert "--resume" in start["argv"] and sid in start["argv"], start["argv"]
+    assert not any(word.startswith("Brief from launcher") for word in start["argv"]), start["argv"]
+    row = kit.newest_launch(shell)
+    assert (row.resume_of, row.brief) == ("his-go-in-folder", None), row
+
+
+def test_his_own_go_session_from_a_terminal_continued_with_an_empty_box_copies_a_plain_resume(
+        context, shell, work_dir):
+    _copying.ready_copying(context)
+    page = context.pages[0]
+    sid = kit.seed(shell, "his-go-in-terminal", target="terminal", cwd=str(work_dir),
+                   by=kit.actor(shell), posture="go")
+    piece = kit.open_home(page)
+    expect(piece.locator("textarea")).to_have_value("")
+    menu = plus_menu(page, piece)
+    found = entry(menu, "Continue the last session")
+    expect(found.locator(".d")).to_have_text("copies the resume command")
+    with page.expect_request(lambda request: request.url.endswith(RESUME)) as sent:
+        found.click()
+    assert json.loads(sent.value.post_data) == {"session": sid, "plain": True}
+    expect(piece.locator('.said [data-line="copied"]')).to_have_text(COPIED)
+    assert _copying.copied(page) == f"moxi launcher resume {sid} --plain"
 
 
 def test_a_brief_from_a_file_turns_the_box_off_and_launches_with_that_file(page, work_dir):
@@ -258,7 +305,8 @@ def launch(page, piece, shell, brief: str) -> tuple[dict, object]:
     with page.expect_request(lambda request: request.url.endswith(PREVIEW)) as sent:
         piece.locator(".go").click()
     expect(piece.locator('.said [data-line="started"]')).to_have_text(re.compile(r"^Started "))
-    wait_for(lambda: kit.newest_launch(shell).brief == brief, 10, what=f"the launch row of {brief!r}")
+    wait_for(lambda: kit.newest_launch(shell).brief == brief,
+             PROC_WAIT_S, what=f"the launch row of {brief!r}")
     return json.loads(sent.value.post_data), kit.newest_launch(shell)
 
 

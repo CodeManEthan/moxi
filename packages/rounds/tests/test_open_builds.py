@@ -217,8 +217,8 @@ def test_builds_of_two_rounds_that_share_commits_name_each_other(repo, logs):
     found = api.builds()["builds"]
 
     assert [(one["round"], one["state"], one["shares"]) for one in found] == [
-        (A, "building", [{"round": B, "stage": "B1"}]),
-        (B, "building", [{"round": A, "stage": "B1"}])]
+        (A, "building", [{"round": B, "stage": "B1", "relation": "overlaps"}]),
+        (B, "building", [{"round": A, "stage": "B1", "relation": "overlaps"}])]
 
 
 def test_builds_of_one_repo_into_two_targets_never_share(repo, logs):

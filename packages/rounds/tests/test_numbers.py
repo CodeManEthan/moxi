@@ -157,7 +157,8 @@ def test_a_dropped_round_holds_its_numbers_in_its_drop(round_dir):
 
     event = log.read(log.round_log(round_dir))[-1]
     assert event["type"] == "round.dropped"
-    assert event["numbers"] == {**before, "step_time_s": event["numbers"]["step_time_s"]}
+    assert event["numbers"] == {**before, **{key: event["numbers"][key] for key in (
+        "step_time_s", "round_time_s", "longest_gap")}}
     assert before["folds"] == 1
 
 
@@ -179,6 +180,77 @@ def test_each_step_s_time_runs_from_the_event_that_reached_it_to_the_next(built)
                      "verify-build B1": 70, "finish B1": 70}
     assert list(found) == ["commission", "commission B1", "build B1", "verify-build B1",
                            "finish B1"]
+
+
+def _of(events, **given) -> dict:
+    return numbers.of(state.fold(events), **given)
+
+
+def test_the_round_s_time_runs_from_its_first_event_to_its_end(built):
+    events = timed(log.read(log.round_log(built)), 0, 10, 30)
+
+    assert _of(events, ended_at=log.stamp(1_000_000 + 100))["round_time_s"] == 100
+    assert _of(events, now=log.stamp(1_000_000 + 250))["round_time_s"] == 250
+    assert _of(events)["round_time_s"] == 30
+
+
+def test_the_longest_stretch_with_nothing_logged_names_when_and_what_was_due(built):
+    events = timed(log.read(log.round_log(built)), 0, 10, 30)
+
+    found = _of(events, ended_at=log.stamp(1_000_000 + 100))["longest_gap"]
+
+    # The stretch from the commission to the end is the longest, and the build's steps
+    # were due across it.
+    assert found == {"since": log.stamp(1_000_030), "until": log.stamp(1_000_100),
+                     "due": ["build B1", "verify-build B1", "finish B1"]}
+
+
+def test_of_equal_stretches_the_earliest_is_the_longest(built):
+    events = timed(log.read(log.round_log(built)), 0, 20, 40)
+
+    found = _of(events)["longest_gap"]
+
+    assert found == {"since": log.stamp(1_000_000), "until": log.stamp(1_000_020),
+                     "due": ["commission"]}
+
+
+def test_the_clocks_read_as_lines():
+    found = numbers.lines({"step_time_s": {}, "round_time_s": 7_505, "longest_gap": {
+        "since": "2026-11-17T08:00:00Z", "until": "2026-11-21T08:00:12Z",
+        "due": ["finish B1"]}})
+
+    assert found[3:5] == [
+        "time open: 2h 5m 5s, open to close (to now while the round is open)",
+        "longest stretch with nothing logged: 96h 12s, since 2026-11-17T08:00:00Z, "
+        "while finish B1 was due"]
+    assert numbers.lines({"longest_gap": {
+        "since": "2026-11-17T08:00:00Z", "until": "2026-11-17T08:00:01Z",
+        "due": []}})[3] == ("longest stretch with nothing logged: 1s, since "
+                            "2026-11-17T08:00:00Z, while no step was due")
+
+
+def test_the_longest_stretch_is_not_summed_and_the_round_s_time_is():
+    gap = {"since": "a", "until": "b", "due": ["build B1"]}
+    total = numbers.summed([{"round_time_s": 10, "longest_gap": gap},
+                            {"round_time_s": 5, "longest_gap": gap}, {}])
+    assert total == {"round_time_s": 15}
+
+
+def test_a_round_that_ended_before_its_clocks_were_kept_gets_them_from_its_log(
+        built):
+    append(built, "round.dropped", {"by": "operator", "record": PTR, "numbers": {}})
+    append(built, "repair", {"what": "digest", "version": 1, "fields": {}})
+    events = timed(log.read(log.round_log(built)), 0, 10, 30, 100, 900)
+    folded = state.fold(events)
+
+    found = numbers.with_clocks(folded, folded.ended.numbers or {})
+
+    assert found["round_time_s"] == 100
+    assert found["longest_gap"] == {"since": log.stamp(1_000_030),
+                                    "until": log.stamp(1_000_100),
+                                    "due": ["build B1", "verify-build B1", "finish B1"]}
+    kept = {"round_time_s": 1, "longest_gap": None}
+    assert numbers.with_clocks(folded, kept) == kept
 
 
 def check_ran(commit, code=0):
@@ -330,11 +402,13 @@ def test_the_numbers_read_as_one_line_a_group():
     assert found == [
         "design: passes 2, folds 3 (records only 1), lead decisions 1",
         "reports sent back (fold-first, of any kind): 1",
-        "time in steps: design 1h 2m 5s, build B1 0s",
+        "time in steps, overlapping (steps due side by side each count the same time): "
+        "design 1h 2m 5s, build B1 0s",
         "findings: blocker 0, major 2, minor 1, note 0; re-checks 1, drift re-checks 0; "
         "check runs failed 1",
         "questions by origin: comms 2",
-        "decisions: accepted 1, rejected 0",
+        "decisions: accepted 1, rejected 0; settled by the lead: accepted 0, "
+        "rejected 0",
         "skips 1, step-ups 0, repairs 0, corrections 1, dropped builds 1, cleared locks 0",
         "flags: extra-full-pass 0, model-below-tier 1",
         "a_later_count: 4"]
@@ -344,7 +418,8 @@ def test_numbers_missing_a_key_read_as_none_counted():
     assert numbers.lines({})[:3] == [
         "design: passes 0, folds 0 (records only 0), lead decisions 0",
         "reports sent back (fold-first, of any kind): 0",
-        "time in steps: none"]
+        "time in steps, overlapping (steps due side by side each count the same time): "
+        "none"]
 
 
 def test_numbers_are_summed_key_by_key_and_group_by_group():

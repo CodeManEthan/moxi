@@ -43,6 +43,7 @@ from moxi import paths as moxi_paths
 from moxi.store import transaction
 from moxi_comms import machine_line, store
 from moxi_comms.paths import daemon_socket
+from moxi_dev.testing import PROC_WAIT_S
 from roster_kit import holding, wait_for
 from test_reply_enforcement import PLANNER, REVIEWER, P, R, indexed, last, reply, send
 
@@ -101,7 +102,7 @@ def page_shell(ui_shells, rig):
 
 def bound(rig, *names: str) -> None:
     wait_for(lambda: all(n in rig.daemon.bindings and rig.daemon.bindings[n].session_id
-                         for n in names), 5, what=f"{names} to bind")
+                         for n in names), PROC_WAIT_S, what=f"{names} to bind")
 
 
 def cold_shim(rig, who: dict) -> Any:
@@ -354,6 +355,13 @@ def test_on_the_small_install_every_message_is_read_live(page_shell, rig, ui_con
     expect(root.locator('[data-part="box"] [data-line="deliver"]')).to_have_count(0)
 
 
+def settled(opened) -> None:
+    """Wait until the drawn opened row's `Session` line, where one comes, has its words: it
+    reads `Reading…` while the reads that fill it are out, and a click before they answer
+    races their redraw."""
+    expect(opened.locator('[data-line="session"]').filter(has_text="Reading…")).to_have_count(0)
+
+
 @needs_turns
 def test_the_dry_run_says_a_recipient_is_working_while_its_turn_is_open(page_shell, rig, ui_contexts):
     planner = rig.shim(**PLANNER)
@@ -369,6 +377,7 @@ def test_the_dry_run_says_a_recipient_is_working_while_its_turn_is_open(page_she
     expect(dry).to_contain_text("Delivered. planner is working; it reads this when its turn ends.")
     # Its turn ends: the next check reads turns again and the line says so.
     turns.open[planner.session_id] = False
+    settled(root.locator('[data-part="opened"][data-to="planner"]'))
     root.locator('[data-part="box"] [data-action="posture"]').click()
     root.locator('[data-part="box"] [data-choice="once"]').click()
     expect(dry).to_contain_text("Delivered. planner reads it at its next turn boundary.")
@@ -492,6 +501,7 @@ def test_who_owes_a_reply_to_him_and_between_agents(page_shell, rig, ui_contexts
     planner.locator('[data-action="message"]').click()
     waits = root.locator('[data-part="opened"][data-to="planner"] [data-line="waits:reviewer"]')
     expect(waits).to_contain_text(re.compile(rf"Waits onreviewer · for one reply to its {T} message"))
+    settled(root.locator('[data-part="opened"][data-to="planner"]'))
     waits.locator('[data-action="thread"]').click()
     header = root.locator('[data-part="thread"] [data-line="thread-header"]')
     expect(header).to_have_text("planner and reviewer · 1 message today · reviewer owes one reply")
@@ -562,7 +572,8 @@ def app_link(rig):
 
     link = Link(APP, backoff=lambda: iter(lambda: 0.05, None), held_retry=0.2)
     link.start()
-    wait_for(lambda: link.bound and APP in rig.daemon.bindings, 5, what=f"{APP} to bind")
+    wait_for(lambda: link.bound and APP in rig.daemon.bindings,
+             PROC_WAIT_S, what=f"{APP} to bind")
     yield link
     link.stop()
 
@@ -747,7 +758,8 @@ def test_a_cache_comms_cannot_read_refuses_the_check_until_check_again(
     bound(rig, R)
     shim_drive.turn_started(reviewer)
     shim_drive.turn_ended(reviewer)
-    wait_for(lambda: rig.daemon.bindings[R].turned, 5, what="reviewer's turn to reach the daemon")
+    wait_for(lambda: rig.daemon.bindings[R].turned,
+             PROC_WAIT_S, what="reviewer's turn to reach the daemon")
     shell = page_shell()
     roster_kit.current(shell, holding([R]))
     _, root, _ = open_page(shell, ui_contexts, [])

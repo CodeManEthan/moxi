@@ -156,8 +156,8 @@ def test_the_page_declares_every_route_and_only_the_running_launches_for_the_gat
 
 def test_the_export_lists_the_built_assets():
     exported = loopback().export(page.PAGE)
-    assert exported["assets"] == ["build-stamp.txt", "page.js", "prompt.js", "running.js",
-                                  "sessions.js", "state.js"]
+    assert exported["assets"] == ["build-stamp.txt", "page.js", "project-facts.js", "prompt.js",
+                                  "running.js", "sessions.js", "state.js"]
 
 
 def test_no_answer_declares_an_env_a_brief_or_a_process():
@@ -823,14 +823,17 @@ def test_targets_list_each_slot_in_number_order_with_its_state_and_hold(fake_slo
         "10": {"state": "free", "launchable": True}})
     said = targets_answer()
 
-    def slot(number, state, launchable, holder=None, until=None):
+    def slot(number, state, launchable, holder=None, until=None, choosable=None):
         return {"number": number, "state": state, "launchable": launchable,
-                "holder": holder, "until": until, "taken_by": None}
+                "choosable": launchable if choosable is None else choosable,
+                "crashed": False, "holder": holder, "until": until, "taken_by": None,
+                "parked": None}
 
     assert said["slots"] == [
         slot(1, "occupied", launchable=False), slot(2, "ended", launchable=True),
         slot(3, "free", launchable=False, holder="planner", until=1900000000.5),
-        slot(4, "missing", launchable=False), slot(10, "free", launchable=True)]
+        slot(4, "missing", launchable=False, choosable=True),
+        slot(10, "free", launchable=True)]
     assert said["new_slot"] is True
     assert said["default"] == {"target": "slot", "slot": 2}
 
@@ -885,8 +888,69 @@ def test_a_slot_a_launch_started_in_reads_taken_by_that_launch(fake_slots, log, 
                           meta={"request_id": "r1"}, create=True)
     said = targets_answer()
     assert said["slots"] == [{"number": 1, "state": "occupied", "launchable": False,
+                              "choosable": False, "crashed": False,
                               "holder": None, "until": None,
-                              "taken_by": {"request_id": "r1", "label": "coder"}}]
+                              "taken_by": {"request_id": "r1", "label": "coder"},
+                              "parked": None}]
+    assert said["default"] == {"target": "slot", "slot": None}
+
+
+def test_the_default_is_the_lowest_slot_a_launch_naming_none_takes(fake_slots):
+    # A missing slot with no hold is made again at launch, so it is the default before a
+    # free one above it; a held missing slot is passed over.
+    fake_slots(slots={"1": {"state": "missing", "launchable": False,
+                            "hold": {"holder": "planner", "until": None}},
+                      "2": {"state": "missing", "launchable": False},
+                      "3": {"state": "free", "launchable": True}})
+    said = targets_answer()
+    assert [(s["number"], s["choosable"]) for s in said["slots"]] == [
+        (1, False), (2, True), (3, True)]
+    assert said["default"] == {"target": "slot", "slot": 2}
+    fake_slots(slots={"1": {"state": "missing", "launchable": False,
+                            "hold": {"holder": "planner", "until": None}}})
+    assert targets_answer()["default"] == {"target": "slot", "slot": None}
+
+
+def crashed_slot(request_id: str, **more) -> dict:
+    return {"state": "missing", "launchable": False, "crashed": True,
+            "last": {"at": 1.0, "label": f"launcher:{request_id}",
+                     "meta": {"request_id": request_id}}, **more}
+
+
+def test_a_slot_the_next_launch_reserves_for_its_crashed_session_is_not_choosable(
+        fake_slots, log):
+    sid = "5f0c3a1e-7f43-4c8e-9e0a-1d2b3c4d5e6f"
+    launched(log, "r1", "2026-01-01T09:00:00.000000Z", target="slot", slot="1",
+             session_id=sid)
+    store.set_state(log, "r1", "ready")
+    launched(log, "r2", "2026-01-01T09:00:00.000000Z", target="slot", slot="2")
+    fake_slots(slots={"1": crashed_slot("r1"), "2": crashed_slot("r2"),
+                      "3": {"state": "free", "launchable": True}})
+    said = targets_answer()
+    # Slot 1's session can be restored, so the next launch reserves it; slot 2's launch
+    # never learned a session id, so the next launch settles it and may take it.
+    assert [(s["number"], s["crashed"], s["choosable"]) for s in said["slots"]] == [
+        (1, True, False), (2, False, True), (3, False, True)]
+    assert said["default"] == {"target": "slot", "slot": 2}
+    # The page's read writes nothing: no hold, no settle, no entry.
+    assert fake_slots.calls("hold") == [] and fake_slots.calls("settle") == []
+    assert store.open_entries(log) == []
+
+
+def test_a_park_reservation_names_the_session_it_keeps_the_slot_for(fake_slots, log):
+    launched(log, "r1", "2026-01-01T09:00:00.000000Z", target="slot", slot="1",
+             identity="planner", session_id="s1")
+    entry = store.add_entry(log, park_id="p1", kind="park", by="ann", slot=1,
+                            request_id="r1", session_id="s1", harness="codex",
+                            outcome="exited")
+    fake_slots(slots={"1": {"state": "missing", "launchable": False,
+                            "hold": {"holder": entry.holder, "until": None}},
+                      "2": {"state": "missing", "launchable": False,
+                            "hold": {"holder": "park-other", "until": None}}})
+    said = targets_answer()
+    assert [(s["holder"], s["until"], s["choosable"], s["parked"]) for s in said["slots"]] == [
+        ("park-p1", None, False, {"session_id": "s1", "label": "planner"}),
+        ("park-other", None, False, None)]
     assert said["default"] == {"target": "slot", "slot": None}
 
 
@@ -960,10 +1024,15 @@ def test_the_announcement_names_the_page_and_the_ui_link():
 def test_the_announcement_declares_the_panel_the_home_pieces_the_block_and_the_state():
     from moxi_launcher import module
 
-    assert set(module.COMPONENTS) == {"page", "prompt", "running", "sessions", "state"}
+    assert set(module.COMPONENTS) == {"page", "prompt", "running", "sessions", "state",
+                                      "project-facts"}
     assert {name: decl["place"] for name, decl in module.COMPONENTS.items()} == {
         "page": "page", "prompt": "block", "running": "block", "sessions": "block",
-        "state": "inline"}
+        "state": "inline", "project-facts": "inline"}
+    facts = module.COMPONENTS["project-facts"]
+    assert facts["script"] == "project-facts.js" and "home" not in facts
+    assert {name: attr["type"] for name, attr in facts["attributes"].items()} == {
+        "projects": "string", "open": "string"}
     assert module.COMPONENTS["sessions"]["home"] is True
     assert "home_as" not in module.COMPONENTS["sessions"]
     assert "attributes" not in module.COMPONENTS["sessions"]
@@ -979,7 +1048,7 @@ def test_the_announcement_declares_the_panel_the_home_pieces_the_block_and_the_s
         assert decl["title"].strip() and "\n" not in decl["doc"]
     found = modules.load("launcher")
     assert found.ok and set(found.components) == {"page", "prompt", "running", "sessions",
-                                                  "state"}
+                                                  "state", "project-facts"}
 
 
 def test_each_components_script_is_a_built_asset_that_defines_its_element():
@@ -995,8 +1064,9 @@ def test_each_components_script_is_a_built_asset_that_defines_its_element():
         assert re.findall(r'from"([^"]+)"', text) == ["/m/ui/client.js"]
         assert re.search(r"\bimport\s*\(", text) is None
         assert f'"moxi-launcher-{name}"' in text and "customElements.get(" in text
-        # Its own Lit, with Lit's licence kept at the end.
-        assert "lit-html" in text and "SPDX-License-Identifier: BSD-3-Clause" in text
+        # Its own Lit, with Lit's licence kept at the end, in each that draws.
+        if name != "project-facts":
+            assert "lit-html" in text and "SPDX-License-Identifier: BSD-3-Clause" in text
 
 
 def test_the_components_reach_data_only_through_their_routes_and_topics():
@@ -1013,6 +1083,13 @@ def test_the_components_reach_data_only_through_their_routes_and_topics():
     assert '"api/running"' in running and '"launcher","running"' in running
     assert "fetch(" not in running and "WebSocket" not in running
     assert "EventSource" not in running
+    # The Projects page's facts read the launcher's own routes through the client and
+    # follow only its own topic.
+    facts = (WEB / "project-facts.js").read_text(encoding="utf-8")
+    for route in ("api/running", "api/presets", "api/catalog", "api/last?", "api/name?"):
+        assert f'"{route}' in facts or f"`{route}" in facts, route
+    assert '"launcher",' in facts and '"running"' in facts
+    assert "fetch(" not in facts and "WebSocket" not in facts and "EventSource" not in facts
     # The panel reads and acts only through its own routes, follows both topics, draws the
     # launch form with the shell's one form renderer and places a state per live row.
     panel = (WEB / "page.js").read_text(encoding="utf-8")

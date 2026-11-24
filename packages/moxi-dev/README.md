@@ -9,15 +9,18 @@ repository's `uv sync` installs it, and no Moxi module depends on it at run time
   deptry) and the tests of the packages the change reaches. A test in the `slow`,
   `browser` or `build` tier runs when a path its `touches` mark names changed; `--full`
   runs every package and every tier but `live`; `--finding L<n>` runs only the tests
-  marked with that finding (see "The tag check" below). It runs no `timed` test, in any
+  marked with that finding (see "The tag check" below); `--static` runs only the
+  whole-tree static steps (see "The code checks" below); `--pick` prints the packages
+  the change picks and runs nothing (see below). It runs no `timed` test, in any
   form: it holds each one back and its last line counts them as `timed held <n>`;
   `moxi-dev timed` runs them. A finding whose tests are all timed counts as found, with
   a line that says so. Its last line also gives the tests' seconds, the slowest 5 %'s
   share of them and the change against the newest record on `main` (one record per
   commit, kept under git's own directory).
 - `moxi_dev.testing` is the test kit every package loads from its root `conftest.py`:
-  the fence around each test, the tier markers, the durations each run writes and the
-  helpers tests share (`Seam` for a seam with two implementations among them).
+  the fence around each test, the tier markers, the durations each run writes, where a
+  run keeps its temp files (see below) and the helpers tests share (`Seam` for a seam
+  with two implementations among them).
 - `moxi_dev.contract` holds the module contract check each package's
   `tests/test_contract.py` runs. `moxi-dev contract [--staged] [PATH]` runs it from a
   shell over any module's directory, inside the repository or not; `--staged` judges
@@ -89,9 +92,82 @@ leftover and any row the script refuses, and prints the first ten with their sta
 table of about 16,400 rows, and reads the whole tree whatever the change picks. A tree
 with no `packages/moxi-dev/renames.tsv` counts as `none`.
 
+The pronoun step reads what each package shows or ships: the string literals and
+docstrings of its Python under `src/` (by token, so names and comments are not read), the
+string literals, template text and comments of its web sources under `web/src/`, and its
+`README.md`, `docs/*.md` and bundled `SKILL.md` files. It refuses he, his, him and himself <!-- noqa: MX5 -- names the words the step refuses -->
+as whole words in any case; a word joined by a dot to the name before it is code and
+passes. Tests, CHANGELOGs, built bundles and the core's vendored code are not read. Each
+hit prints as `path:line: word` with the fix. A genuine use carries `noqa: MX5 -- <why>`
+on the same line, in the file's comment syntax (`#`, `//` or `<!-- -->`); the step
+refuses a mark with no reason and a mark on a line it would not refuse.
+
+The machine-text step refuses text that holds on one machine only. It reads every file
+git lists (tracked, or untracked and not ignored) that is UTF-8 text, every line of it,
+comments included, but `.github/`, the core's vendored code, each package's built page
+folder, `uv.lock` and `package-lock.json`, the rename table, the allow and path lists
+(`.residue-allow`, `.refs-allow`, `.secrets-allow`, `.public-paths`) and LICENSE files.
+A file under a package is a test when a directory below the package is named `tests` or
+`test`, or its name is `conftest.py`, starts with `test_` or holds `.test.`. It refuses:
+
+- a path into one user's home folder (`/home/<user>`, `/var/home/<user>`,
+  `/Users/<user>`, `<drive>:\Users\<user>`, and WSL's `/mnt/<drive>/Users/<user>`) in
+  shipped text, the user starting with a letter or digit in any script. A placeholder,
+  an example user (`you`, `me`, `user`, `username` or `name`, in any case, with or
+  without digits) and a folder that is no one person's pass: Windows' `Public`,
+  `Default` and `All Users` (in any case, as Windows reads them), macOS' `Shared` and
+  `Guest`, and `linuxbrew`, the account Homebrew on Linux installs into, each as the
+  whole segment (`Public.x` is a user's name). So does a path from the reader's own
+  home (`~/...`). Tests pass this rule: a test's made-up home is data no machine
+  resolves.
+- a name from your own private-names list, the one secrets keeps in its config, in any
+  file. No line the step prints names it: on a line that holds one, the home-folder
+  line prints the root alone (`home folder /home/`), and a segment of a file's path
+  that holds one prints as `<private name>`. An empty list finds nothing; a
+  list secrets can't read stops the check with exit 2 (`moxi config secrets check`
+  says why).
+- a package-manager command in any file: apt-get, apt, aptitude, dnf, yum, zypper,
+  pacman, apk, brew, port, snap, flatpak, choco, winget or scoop, by its name or called
+  from a folder (`/usr/bin/apt-get`), followed by a verb such as install, remove,
+  update or dist-upgrade (options allowed, with their values, as in `-o K=V`), or
+  pacman with its operation flag, or the same as an argv list. It counts anywhere on a
+  line, in a sentence or a string as much as in a shell line. port, snap and apk are
+  ordinary words too, so they count only where a command starts: at the start of a line
+  (past a comment's opening, a shell prompt such as `$ ` or `PS C:\> `, a Dockerfile's
+  `RUN `, and any `NAME=value` assignments), or after `sudo` and its options
+  (`sudo -u root `), `&&`, `||`, `;`, `&`, `|` or a backtick that opens inline code, not
+  one that closes it; as an argv list, when the quoted manager comes first. "each port
+  update is logged" and "the `host` port update is logged" pass. A sentence that only
+  names a manager passes, and service managers (systemctl, launchctl and the like) are
+  not in the rule.
+
+Each hit prints as `path:line: machine text: ...` with the fix. A genuine use, a line
+written for one platform or naming a place every machine of a kind has, carries
+`noqa: MX6 -- <why>` on the same line, in the file's comment syntax or in a docstring's
+text; a JSON line takes none. The mark lets the line's home folder and command stand,
+never a private name: text that is public on purpose goes in secrets'
+`private_names.allowed`, which publishing's commit check reads too. The step refuses a
+mark with no reason and a mark on a line with nothing for it to let stand.
+
+`moxi-dev check --static` runs the tag, comment-reference, naming, Ruff, renames,
+release, pronoun and machine-text steps alone, over the whole repository, with the lines, summary line and exit
+codes they give in a full check, and nothing else: no lock check, no package picking, no
+stamps, web compare, sync, lint or tests, and nothing that needs the network. It takes
+about 80 to 140 s on this repository, the renames step about 60 s of it, so it suits a
+gate run before a push.
+
+`moxi-dev check --pick [--base REV]` reads the workspace and the changed paths as the
+check does, picks the packages the same way, prints one line, the JSON object
+`{"packages": [...]}` with the picked packages' folders under `packages/` in the
+workspace's order, and runs no step. It exits 0, or 2 with the reason on stderr and
+nothing on stdout when the workspace or the base can't be read. The repository's
+`queue.yml` workflow reads it to check a merge queue's candidate: its browser jobs run
+only for the picked packages.
+
 Run one step without the lock, release, package, lint or test steps with
 `moxi-dev check --only refs [PATH...]`, `moxi-dev check --only names [PATH...]`,
-`moxi-dev check --only ruff [PATH...]` or `moxi-dev check --only renames [PATH...]`.
+`moxi-dev check --only ruff [PATH...]`, `moxi-dev check --only renames [PATH...]`,
+`moxi-dev check --only pronouns [PATH...]` or `moxi-dev check --only machine [PATH...]`.
 Each step still reads the whole tree, but paths limit the findings it prints.
 
 `moxi-dev rename [--table PATH] [--dry-run] [--main REF] [ROOT]` reads tab-separated
@@ -227,6 +303,36 @@ stopped by one. To install it, put this in `.git/hooks/pre-commit` and make it e
 #!/bin/sh
 exec uv run --locked moxi-dev stamp --staged
 ```
+
+## Where tests keep their temp files
+
+`MOXI_TEST_TEMP` decides where a test run keeps pytest's temp root and the kit's short
+directories (sockets, per-test homes). Set it once in your shell profile or your
+harness's environment; nothing else needs setting.
+
+| | Linux | macOS | Windows |
+|---|---|---|---|
+| `disk` (the default, and what unset means) | `/var/tmp` | pytest's own (`$TMPDIR`) | pytest's own (`%TEMP%`) |
+| `ram` | `/dev/shm` | as `disk`, saying so | as `disk`, saying so |
+
+Any other value stops the run before a test runs. A `ram` run on Linux goes to disk, and
+says why, when `/dev/shm` isn't tmpfs, has too little free space, or the machine or the
+run's memory limit can't spare what the run needs. In memory, a passed test's files go
+when it ends and the whole run's, failed tests' and browser traces included, when the
+run ends; keep `disk` to look at them afterwards. pytest's header says where the temp is
+and why (`moxi-dev temp: ...`).
+
+A check keeps its tests' temp on disk whatever is set, so `ram` serves only runs
+outside a check (a plain `pytest`, a targeted run): `moxi-dev check` gives its suites
+`MOXI_TEST_TEMP=disk` and names the reason in its summary's `temp` field, and
+`moxi-dev timed`, whose results the checks are held to, does the same.
+
+A `--basetemp` you pass is pytest's alone. A `PYTEST_DEBUG_TEMPROOT` you set is used when
+`MOXI_TEST_TEMP` is unset; a set `MOXI_TEST_TEMP` overrides it, and the header says so.
+
+Each run sweeps, at its start, what earlier runs that were killed left behind: only
+directories this kit made, beside its own owner record, once no process holds that
+record's lock and the directory is over a minute old. It never touches anything else.
 
 ## Timed tests
 

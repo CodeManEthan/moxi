@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- The page's `Reading…` line, while its first read is out, shows once that read has
+  been out 400 ms in every browser. In Firefox it could stay blank until something
+  else redrew the page, since the page checked the wait against `Date.now()`, which
+  Firefox coarsens. It now takes the wait from moxi-ui's `WaitClock`, so the `ui` extra
+  asks for moxi-ui 0.2.6 or later.
 - With the `ui` extra and projects, a `project-facts` component gives a project opened
   on the Projects page a `Loadout` row of the items its sections list, linked to
   `/m/loadout/project/<key>`. It reads only `/api/list`.
