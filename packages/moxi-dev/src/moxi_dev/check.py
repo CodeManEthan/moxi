@@ -84,7 +84,8 @@ worker count or base stops it there, before any step runs. Then, in order:
 
    A check ended by SIGINT, SIGTERM or SIGHUP (Ctrl-Break on Windows) ends the run under
    way with its tree before it exits, with 128 plus the signal's number for the others
-   than SIGINT. One killed outright (SIGKILL, or TerminateProcess on Windows) can do
+   than SIGINT; a signal the check was started ignoring (as `nohup` leaves SIGHUP) stays
+   ignored. One killed outright (SIGKILL, or TerminateProcess on Windows) can do
    nothing, so the run watches it (the kit's `MOXI_TEST_PARENT_PID`) and ends itself and
    every process under it within a few seconds.
 
@@ -660,16 +661,22 @@ def _ended_by(signum: int, frame: object) -> None:
 @contextlib.contextmanager
 def _signals_end_the_check() -> Iterator[None]:
     """While the check runs, a signal of `END_SIGNALS` raises `SystemExit` (128 plus its
-    number) in it, as Ctrl-C raises KeyboardInterrupt; the handlers before are put back
-    after. Off the main thread, where Python takes no handler, nothing changes."""
+    number) in it, as Ctrl-C raises KeyboardInterrupt, and each handler it replaced is put
+    back after. Only a signal still at its default is taken: one the check was started
+    ignoring (as `nohup` leaves SIGHUP) stays ignored, and one with a handler of its own,
+    Python's or not, keeps it. Off the main thread, where Python takes no handler,
+    nothing changes."""
     if threading.current_thread() is not threading.main_thread():
         yield
         return
-    before = {one: signal.signal(one, _ended_by) for one in END_SIGNALS}
+    taken = [one for one in END_SIGNALS if signal.getsignal(one) == signal.SIG_DFL]
+    replaced = {}
     try:
+        for one in taken:
+            replaced[one] = signal.signal(one, _ended_by)
         yield
     finally:
-        for one, handler in before.items():
+        for one, handler in replaced.items():
             signal.signal(one, handler)
 
 

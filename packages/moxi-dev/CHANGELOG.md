@@ -14,7 +14,8 @@
   saw a failed or errored test too: the kit arms the dump again after pytest's
   faulthandler plugin cancels it.
 - The run ends with the check: a check stopped by SIGTERM or SIGHUP (Ctrl-Break on
-  Windows) ends the run's tree as Ctrl-C does, and exits 128 plus the signal's number;
+  Windows) ends the run's tree as Ctrl-C does, and exits 128 plus the signal's number
+  (a signal the check was started ignoring, as `nohup` leaves SIGHUP, stays ignored);
   for a check killed outright, the test kit ends the run and every process under it
   once the process `MOXI_TEST_PARENT_PID` names is gone (`watch_parent`).
 - moxi-dev requires moxi 0.1.7 or later, and psutil 5.9 or later, which the test kit's

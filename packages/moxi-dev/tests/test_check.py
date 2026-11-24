@@ -670,6 +670,9 @@ def run(cmd, cwd, env, /, *, timeout_s=None):
     return 0
 
 
+if len(sys.argv) > 3:
+    import signal
+    signal.signal(getattr(signal, sys.argv[3]), signal.SIG_IGN)
 result = check.check(Path(sys.argv[1]), run=run, full=True, env=dict(os.environ),
                      plan=lambda package, work, members: [])
 sys.exit(result.code)
@@ -709,6 +712,55 @@ def test_the_check_puts_back_the_signal_handlers_it_found(repo):
     before = {one: signal.getsignal(one) for one in check.END_SIGNALS}
     run_check(repo, Runs(), full=True)
     assert {one: signal.getsignal(one) for one in check.END_SIGNALS} == before
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="Windows has no SIGHUP")
+def test_a_check_started_ignoring_sighup_survives_it_and_its_run_goes_on(repo, tmp_path):
+    import signal
+
+    pids_file = tmp_path / "pids"
+    checker = subprocess.Popen(
+        [sys.executable, "-c", SIGNALLED, str(repo), str(pids_file), "SIGHUP"],
+        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    try:
+        wait_for(lambda: pids_file.exists() and " " in pids_file.read_text(),
+                 testing.PROC_WAIT_S, what="the package run to start")
+        run_pid, child = (int(one) for one in pids_file.read_text().split())
+        checker.send_signal(signal.SIGHUP)
+        with pytest.raises(subprocess.TimeoutExpired):
+            checker.wait(timeout=1)
+        assert _running(run_pid) and _running(child)
+        checker.send_signal(signal.SIGTERM)
+        assert checker.wait(timeout=testing.PROC_WAIT_S) == 128 + signal.SIGTERM
+        wait_for(lambda: not _running(run_pid) and not _running(child), testing.PROC_WAIT_S,
+                 what="the package run and its child to be ended")
+    finally:
+        checker.kill()
+        checker.wait()
+        for pid in (pids_file.read_text().split() if pids_file.exists() else ()):
+            with contextlib.suppress(OSError):
+                os.kill(int(pid), signal.SIGKILL)
+
+
+def test_the_check_leaves_a_handler_python_did_not_install_in_place(repo, monkeypatch):
+    import signal
+
+    foreign = check.END_SIGNALS[0]
+    getsignal, install = signal.getsignal, signal.signal
+    installed = []
+
+    def recording(signum, handler):                       # as Python's own does for one
+        installed.append(signum)                          # it did not install: None back
+        was = install(signum, handler)
+        return None if signum == foreign else was
+
+    monkeypatch.setattr(signal, "getsignal",
+                        lambda signum: None if signum == foreign else getsignal(signum))
+    monkeypatch.setattr(signal, "signal", recording)
+    before = {one: getsignal(one) for one in check.END_SIGNALS}
+    run_check(repo, Runs(), full=True)
+    assert foreign not in installed
+    assert {one: getsignal(one) for one in check.END_SIGNALS} == before
 
 
 @pytest.mark.parametrize(("written", "said"), [

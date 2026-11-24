@@ -574,7 +574,10 @@ epoch>` arm it in a run started by hand too.
 
 The run ends with the check, however the check ends. A check stopped by Ctrl-C,
 SIGTERM or SIGHUP (Ctrl-Break on Windows) ends the run's tree before it exits; the
-signals other than Ctrl-C give exit code 128 plus their number. A check killed outright
+signals other than Ctrl-C give exit code 128 plus their number. The check takes only a
+signal still at its default and puts each one back as it was when it ends: one it was
+started ignoring stays ignored, so a check under `nohup` still outlives its terminal, and
+one with a handler of its own keeps that handler. A check killed outright
 (SIGKILL, or `TerminateProcess` on Windows) can do nothing itself, so the test kit in
 the run's first process watches the check, named in `MOXI_TEST_PARENT_PID`, and once it
 is gone ends every process under it, SIGTERM and two seconds later SIGKILL, then on
