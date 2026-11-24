@@ -1,3 +1,4 @@
 {
-  "entries": {"page.js": "src/page.ts", "drift.js": "src/drift.ts"}
+  "entries": {"page.js": "src/page.ts", "drift.js": "src/drift.ts",
+              "project-facts.js": "src/project-facts.ts"}
 }

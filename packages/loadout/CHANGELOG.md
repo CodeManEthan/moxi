@@ -7,6 +7,9 @@
   else redrew the page, since the page checked the wait against `Date.now()`, which
   Firefox coarsens. It now takes the wait from moxi-ui's `WaitClock`, so the `ui` extra
   asks for moxi-ui 0.2.6 or later.
+- With the `ui` extra and projects, a `project-facts` component gives a project opened
+  on the Projects page a `Loadout` row of the items its sections list, linked to
+  `/m/loadout/project/<key>`. It reads only `/api/list`.
 - The page is redrawn around what needs you. Placed comes first: each problem is an
   item and one word (`changed`, `in the way`, `not placed`, `out of date`, `would be
   committed`, `can't be read`), with its section, harnesses and why, and the fix with

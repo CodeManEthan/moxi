@@ -13,7 +13,7 @@
 // each one loads when it is reloaded, pasted or opened from a bookmark. A part read back is
 // percent-decoded first, so a link that URI-encodes its parts opens the same thing.
 
-import type { Project, View } from "./feed.ts";
+import type { Project, Section, View } from "./feed.ts";
 import { itemsView } from "./items-model.ts";
 import type { GroupView } from "./items-model.ts";
 import { placedView } from "./placed-model.ts";
@@ -205,8 +205,9 @@ export function projectNamed(projects: readonly Project[], key: string): Project
 }
 
 /** The project's section: the key section matching its key ignoring case, or the path
- * section whose root is the project's root exactly; null when it has none. */
-export function sectionFor(project: Project, view: View): string | null {
+ * section whose root is the project's root exactly; null when it has none. `view` is
+ * `/api/view`'s or `/api/list`'s: only its sections are read. */
+export function sectionFor(project: Project, view: { sections: readonly Section[] }): string | null {
   const lower = project.key.toLowerCase();
   const keyed = view.sections.find((s) => s.where === "key" && s.name.toLowerCase() === lower);
   if (keyed !== undefined) return keyed.name;

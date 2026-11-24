@@ -5581,6 +5581,11 @@ loadout	packages/loadout/tests/test_browser_drift.py	test_the_blocks_link_on_the
 loadout	packages/loadout/tests/test_browser_drift.py	test_the_count_is_the_items_not_ok_and_goes_once_the_user_installs	name	folder	loadout_dir
 loadout	packages/loadout/tests/test_browser_drift.py	test_the_drift_block_keeps_the_contract	name	folder	loadout_dir
 loadout	packages/loadout/tests/test_browser_drift.py	test_the_page_keeps_the_contract_and_draws_no_heading_of_its_own	name	folder	loadout_dir
+loadout	packages/loadout/tests/test_browser_project_facts.py	(Path(shell.env["HOME"]) / "code" / "kestrel-web").mkdir(parents=True)	keep	HOME	HOME
+loadout	packages/loadout/tests/test_browser_project_facts.py	assert set(loadout_reads(page)) <= {"/m/loadout/project-facts.js", "/m/loadout/api/list"}, page.asked	keep	set	set
+loadout	packages/loadout/tests/test_browser_project_facts.py	manifest = Path(full.env["HOME"]) / "my-loadout" / "loadout.toml"	keep	HOME	HOME
+loadout	packages/loadout/tests/test_browser_project_facts.py	root = Path(shell.env["HOME"]) / "code" / "atlas-api"	keep	HOME	HOME
+loadout	packages/loadout/tests/test_browser_project_facts.py	str(Path(shell.env["HOME"]) / "code" / "kestrel-web"))	keep	HOME	HOME
 loadout	packages/loadout/tests/test_browser_questions.py	expect(changed.locator('[data-line="word"]')).to_have_text("changed")	keep	changed	changed
 loadout	packages/loadout/tests/test_browser_questions.py	("agent", "code-reviewer"): ["placed", "changed", "placed"],	keep	changed	changed
 loadout	packages/loadout/tests/test_browser_small.py	timeout=30_000)	keep	timeout	timeout
@@ -5729,6 +5734,8 @@ loadout	packages/loadout/tests/test_page.py	assert any(f["changes"] for f in bod
 loadout	packages/loadout/tests/test_page.py	assert not any(r["gateway"] or r["stream"] for r in routes.values())	keep	any	any
 loadout	packages/loadout/tests/test_page.py	assert says in answer["refused"]	keep	refused	refused
 loadout	packages/loadout/tests/test_page.py	assert status == 422 and "other arguments" in answer["refused"]	keep	refused	refused
+loadout	packages/loadout/tests/test_page.py	assert facts["place"] == "inline" and set(facts["attributes"]) == {"projects", "open"}	keep	set	set
+loadout	packages/loadout/tests/test_page.py	assert set(module.COMPONENTS) == {"page", "drift", "project-facts"}	keep	set	set
 loadout	packages/loadout/tests/test_page.py	entered.set()	keep	set	set
 loadout	packages/loadout/tests/test_page.py	inner = LB.app(page.PAGE, module="loadout", server_id=SERVER_ID, strict=True)	keep	strict	strict
 loadout	packages/loadout/tests/test_page.py	lo	name	folder	loadout_dir
