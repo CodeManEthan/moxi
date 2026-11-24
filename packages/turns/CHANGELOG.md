@@ -2,6 +2,11 @@
 
 ## 0.2.8 (unreleased)
 
+- A `project-facts` component for the Projects page. It reads turns' own `/api/sessions`
+  and `sessions` topic, and reports, by session claim, whether each session turns can read
+  is in a turn (`live`, `{in_turn, state}`), so the page can mark a running line
+  `working`. It names no project. A session turns can't read now, or one whose claim two
+  sessions share, is left out; a failed read reports nothing.
 - A new capability, `stale-agents`, which Claude Code sessions offer: the endpoint judges
   each `waiting` subagent Claude Code lists, and one whose transcript's last timestamped
   line is at least an hour old, whose last turn record is an assistant `end_turn`, and
