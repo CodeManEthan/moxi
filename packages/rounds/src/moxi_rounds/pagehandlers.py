@@ -73,8 +73,8 @@ from typing import Any
 
 from moxi import aio, modules
 
-from . import board, builds, checking, export, folders, index, listing, log, open_builds
-from . import pageacts, paths, questions, showing
+from . import board, builds, checking, corrections, export, folders, index, listing, log
+from . import open_builds, pageacts, paths, questions, showing
 from . import settings as own
 from . import state as states
 from .errors import RoundsError, UnfencedTest
@@ -416,6 +416,8 @@ class Board:
         held = self.held
         if what == board.QUESTION:
             return self._question(name, item_id)
+        if what == board.RULING:
+            return self._ruling(name, item_id)
         if what in (board.DECISION, board.WAIT, board.SHOWN):
             entry = _item(held.waiting, what, name, item_id)
             if entry is None:
@@ -456,28 +458,46 @@ class Board:
         made["ruling"] = None if found is None else board.ruling_of(*found[:3])
         return cut(made)
 
+    def _ruling(self, name: str, item_id: str | None) -> dict | None:
+        """A ruling's record from its log, whatever its shown state, with the newest
+        ruling that replaces it. None when the log isn't held or has no such ruling."""
+        found = _log_of(self.held, name) if item_id else None
+        if found is None:
+            return None
+        logged, register, _on_closed = found
+        ruling = corrections.find(logged, item_id)
+        if ruling is None:
+            return None
+        return cut(board.ruling_record(name, ruling, logged, register))
+
+
+def _log_of(held: Held, name: str):
+    """The log of the round or project `name` as it reads now: `(the log's state, the
+    project's state, on_closed)`, or None. A round's comes from its part; a project's
+    from the project's log as the part of one of its open rounds holds it, else read
+    now. A closed round's part is kept while its own log is unchanged, so the project's
+    log it holds may be older than the gather."""
+    part_ = held.parts.get(name)
+    if part_ is not None:
+        return part_.state, part_.found.register, part_.found.on_closed
+    if "/" in name:
+        return None
+    register = next((one.found.register for one in held.parts.values()
+                     if one.found.project.casefold() == name.casefold()
+                     and one.state.ended is None and one.found.register is not None),
+                    None)
+    if register is None:
+        register = _register(name, held.settings)
+    return None if register is None else (register, register, None)
+
 
 def _question_of(held: Held, name: str, item_id: str | None):
     """The question `item_id` of the round or project `name` as its log gives it:
-    `(question, the log's state, the project's state, on_closed)`, or None. A round's
-    comes from its part; a project's from the project's log as a part of one of its
-    rounds holds it, else read now."""
-    if not item_id:
+    `(question, the log's state, the project's state, on_closed)`, or None."""
+    found = _log_of(held, name) if item_id else None
+    if found is None:
         return None
-    part_ = held.parts.get(name)
-    if part_ is not None:
-        logged, register, on_closed = part_.state, part_.found.register, part_.found.on_closed
-    elif "/" not in name:
-        register = next((one.found.register for one in held.parts.values()
-                         if one.found.project.casefold() == name.casefold()
-                         and one.found.register is not None), None)
-        if register is None:
-            register = _register(name, held.settings)
-        logged, on_closed = register, None
-    else:
-        return None
-    if logged is None:
-        return None
+    logged, register, on_closed = found
     question = questions.find(logged, item_id)
     return None if question is None else (question, logged, register, on_closed)
 

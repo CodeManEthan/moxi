@@ -1588,7 +1588,7 @@ command. Its routes, none open to the phone gateway:
 | Route | Gives |
 |---|---|
 | `GET /api/rounds` | the whole board, with the server's clock |
-| `GET /api/record` | one marker's record, a waiting item's or a round's card; `{"gone": true}` for a round no longer open. A question answers in every state, with the ruling that put it there |
+| `GET /api/record` | one marker's record, a waiting item's or a round's card; `{"gone": true}` for a round no longer open. A question answers in every state, with the ruling that put it there; a ruling (`what=ruling`) answers whether or not it was shown, with the newest ruling that replaces it |
 | `GET /api/events` | the stream, topic `rounds`: the board, published when it changes |
 | `GET /api/agents` | the agents comms knows, for the To picker, and whether the server sends through comms |
 | `GET /api/drop` | what dropping one open build would remove and keep, read now |
