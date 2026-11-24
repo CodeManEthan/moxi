@@ -25,7 +25,9 @@
 - A replay keeps whether its session can recycle itself: it records where
   `recycle_at_limit` came from, so an opted-out seat stays out after its relaunch, and a
   launch from before the default comes back set to `relaunch` and is told. A replay sets
-  an option row the install can no longer run to `off`.
+  an option row the install can no longer run to `off`. A replay of a Claude launch that
+  recorded no `warn_at` (a seat launch from before seats kept the shipped mark) takes the
+  shipped `2x`, as a fresh launch of the seat would.
 - The relaunch line is Core's instruction with Moxi's verb: "write a handoff with the
   handoff skill, stop your background shells, then run `moxi launcher relaunch --self
   --handoff <file>`". It no longer names the mark (usage's notice, which it is appended

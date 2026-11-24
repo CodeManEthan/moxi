@@ -45,9 +45,12 @@ replay keeps its row's name.
 names in `filled`: a value the caller filled in from an earlier launch), and `filled`,
 those rows' names. A row the request leaves out that the launch's harness doesn't offer
 is there as `left-out` too. From them the request can be told from what its preset and
-the defaults gave. A replay takes neither and records no `filled`; its `sources` hold
+the defaults gave. A replay takes neither and records no `filled`. Its `sources` hold
 only where `recycle_at_limit` came from, carried from the row it replays
-(`_replayed_recycle`), so a replay never changes whether its session can recycle itself.
+(`_replayed_recycle`), and `warn_at`'s when the replay gave it the shipped mark
+(`_replayed_mark`). So a replayed row reads as a fresh launch of the same seat with the
+same typed and preset values would, for `warn_at`, `recycle_at_limit` and whether its
+session can recycle itself.
 
 **A request id is a launch's idempotency key.** A request whose id is already in the
 launch log starts nothing: `launch` returns the stored row's outcome, `duplicate` set. It
@@ -663,6 +666,7 @@ def _replayed(request: ReplayRequest) -> Replayed:
         warnings.append(f"identity {identity} is ignored: comms is not installed")
         identity = scope = None
         values["identity"], values["scope"] = "", ""
+    mark_source = _replayed_mark(harness, values, stored)
     recycle_source = selfrecycle.source_of(stored)
     for name in _OPTION_ROWS:
         dropped = _unoffered_option(harness, target, values, name)
@@ -691,7 +695,9 @@ def _replayed(request: ReplayRequest) -> Replayed:
         ("projects", bool(row.project_key)), ("slots", target == "slot"),
         ("notes", catalog.is_set(values.get("notes_dir"))),
         ("usage", catalog.is_set(values.get("warn_at")))) if on}
-    sources = {selfrecycle.RECYCLE_AT_LIMIT: recycle_source} if recycle_source else {}
+    sources = {name: source for name, source in (
+        (selfrecycle.RECYCLE_AT_LIMIT, recycle_source), (selfrecycle.WARN_AT, mark_source))
+        if source}
     return Replayed(
         harness=harness, mode=mode, values=MappingProxyType(values),
         sources=MappingProxyType(sources), chosen=frozenset(),
@@ -702,6 +708,25 @@ def _replayed(request: ReplayRequest) -> Replayed:
         warnings=tuple(warnings), hold=request.hold, model_pin=model_pin,
         replacing=request.replacing,
         replacing_pane=row.pane_id if request.replacing else None)
+
+
+def _replayed_mark(harness: str, values: dict, stored: Mapping[str, object]) -> str | None:
+    """Give a replay the `warn_at` a fresh launch would get where its row has none of its
+    own, and return its source (`shipped`), else None. A seat launch made before every
+    Claude seat kept the shipped mark recorded `warn_at` empty when nothing set one (its
+    source the shipped default, left out, or not recorded); a fresh launch of that seat
+    now holds the shipped mark, so the replay does too, and its session is warned and told
+    at it. A Codex launch still warns only at a mark it sets (`presets.resolve`), and a
+    row this install doesn't offer is left alone. `values` is changed in place."""
+    if catalog.is_set(values.get(selfrecycle.WARN_AT)) or selfrecycle.source_of(
+            stored, selfrecycle.WARN_AT) not in (presets.SHIPPED, presets.LEFT_OUT, None):
+        return None
+    row_ = catalog.row(harness, selfrecycle.WARN_AT)
+    if (row_ is None or row_.unoffered(slots.links, harness) is not None
+            or presets.drops_default_mark(harness, source=presets.SHIPPED)):
+        return None
+    values[selfrecycle.WARN_AT] = row_.default
+    return presets.SHIPPED
 
 
 def _replayed_recycle(row, values: dict, source: str | None) -> str | None:

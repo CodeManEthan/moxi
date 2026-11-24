@@ -626,7 +626,9 @@ own reads:
     was the default holds the shipped `off`: its agent may still relaunch itself, and
     `show` says `at limit relaunch (default)`. A replay keeps whether its session can
     recycle itself: an opted-out launch stays out, and a launch from before the default
-    comes back set to `relaunch`.
+    comes back set to `relaunch`. A seat launch from before every Claude seat kept the
+    shipped `warn_at` recorded none; its replay takes the shipped `2x`, as a fresh launch
+    of the seat would, so its session is warned and told.
 
   `compact` compacts the session once it is idle, waiting up to `recycle.limit_wait_s`,
   each time the context climbs past `--limit-at 1x|1.5x|2x`, and it is open to a scratch

@@ -1092,7 +1092,7 @@ def resolve(request, *, presets: Presets | None = None,
     """Resolve one launch's values: shipped defaults, then `[defaults]`, then the one
     preset named, then the flags typed (`layered`), each row the request leaves out
     holding its shipped default, except that a Codex launch that sets no `warn_at` holds
-    none (`_no_default_mark`). A scratch launch holds `recycle_at_limit = off`, with the
+    none (`drops_default_mark`). A scratch launch holds `recycle_at_limit = off`, with the
     `SCRATCH_RECYCLE_OFF` warning, when `relaunch` came from `[defaults]`; typed or set by
     the preset, the pair is refused (`catalog.ScratchRecycle`). Then `_settle_recycle`:
     the shipped default never refuses a launch, and a relaunch set for one that can't act
@@ -1123,7 +1123,7 @@ def resolve(request, *, presets: Presets | None = None,
             and sources.get(RECYCLE_AT_LIMIT) == DEFAULTS):
         values[RECYCLE_AT_LIMIT], sources[RECYCLE_AT_LIMIT] = "off", LEFT_OUT
         warnings.append(SCRATCH_RECYCLE_OFF)
-    if _no_default_mark(harness, source=sources.get(WARN_AT)):
+    if drops_default_mark(harness, source=sources.get(WARN_AT)):
         values[WARN_AT] = ""
     warnings += _settle_recycle(harness, values, sources, cwd=cwd, available=avail)
 
@@ -1240,7 +1240,7 @@ def _settle_recycle(harness: str, values: dict, sources: dict, *, cwd: str | Non
 WARN_AT = "warn_at"
 
 
-def _no_default_mark(harness: str, *, source: str | None) -> bool:
+def drops_default_mark(harness: str, *, source: str | None) -> bool:
     """Whether the launch drops `warn_at`'s shipped default: a Codex launch warns only at
     a mark it sets (in `[defaults]`, its preset or a flag), since nothing can relaunch a
     Codex session. Every other launch keeps the default."""
@@ -1581,7 +1581,7 @@ __all__ = [
     "UnknownPreset", "UnknownProject", "WARNING", "check", "check_resume_brief", "comms_api",
     "comms_bind_wait",
     "comms_codex", "comms_codex_resume", "comms_ends_on_bind_timeout", "comms_has_policy",
-    "comms_headless", "harness_of",
+    "comms_headless", "drops_default_mark", "harness_of",
     "layered", "mode_of", "needed", "off_posture_rows", "path", "project_agents",
     "projects_api", "read",
     "resolve", "roles", "schema",
