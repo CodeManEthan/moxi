@@ -7,14 +7,30 @@ Every act of part 2 (relaunch, exit-session, resume, recycle, keep-warm) finds i
 this one way, from the launch log and turns:
 
 1. `store.resolve` gives the launch row holding the id, with the id it was last known by.
-   No row: refused `not-launched`.
+   No row: the id's live session resolves by its process (below), else refused
+   `not-launched`.
 2. The claim: the turns endpoint that claimed the launch. A row no endpoint claimed is
    refused `unclaimed`: turns never saw its session.
 3. turns' `find(session_id=<the newest id>)` gives the live session, or None, and then the
    target is not live. A live session must be served by the endpoint process the claim
-   names, else refused `changed`.
+   names, or by a replacement for it (below), else refused `changed`.
 4. From the row, the slot and pane, and for a slot launch slots' view of the slot, unless
    the caller asked for none (`slot=False`).
+
+**A Claude launch is its `claude` process.** The row records that process (`pid`,
+`pid_started`), and `store.is_launch_parent` tests it, the same test the claim's move
+uses, so the two rules below trust nothing new:
+
+- **A replaced endpoint is accepted.** When the claimed endpoint is gone and the one
+  serving the session is a child of the launch's own `claude`, it is the launch's
+  endpoint whether or not it has claimed the launch yet (`check_claim`).
+- **An id no launch knows resolves by process** (`resolve`). A session's id moves with
+  a `/clear`, a `/resume` or a reload the launch never recorded, while its `claude`
+  process stays. When no launch holds the id, the live session turns finds for it (or
+  the caller's own) is the newest Claude launch whose `pid` and `pid_started` name the
+  session's harness process, its `newest_session_id` the live id, so a later `find` of
+  that id resolves the same way. A session nested in a launched one runs in its own
+  `claude`, which no row records, so it stays `not-launched`.
 
 **The claim is compared with the process it recorded.** A claim names the endpoint
 process, `<pid>@<start time>` (`listeners.endpoint_id`). For Claude that process is a child
@@ -23,16 +39,17 @@ turns' Codex host the two are one process. The pid must be the one the claim nam
 that process must still be the one that claimed it: `moxi.proc.alive` on the claim's pid
 and start time, which allows for a start time read a little apart. Never string equality.
 
-**A claim moves at the new endpoint's `load`, by parent.** Claude Code starts a new
+**The claim itself moves at the new endpoint's `load`, by parent.** Claude Code starts a new
 endpoint for a session when its plugins reload, a child of the same `claude`. The new
 endpoint raises `load` as soon as it learns its session id, and takes the launch over then
 because its parent is the launch's own `claude` (`store.claim`). When the old endpoint is
 still ending, the new one waits for it for up to `listen_ready.OVERLAP_WAIT_S`; when the old
 one outlives the wait, the claim moves at the new endpoint's next session event (a start, a
-resume, a clear or a compaction). Until it moves, a live endpoint the claim does not name
-serves the session; `find` refuses that `changed` too, with `reclaim_pending` set (once the
-held endpoint is gone) and words that say so, and does not wait. Nothing here writes the
-claim; only the endpoint itself does, from its own event.
+resume, a clear or a compaction, or a context crossing: `recycle.crossing_line`). Until it
+moves, readers accept the replacement by its parent, above. A live endpoint of any other
+parent is refused `changed`, with `reclaim_pending` set when the held endpoint is gone,
+and `find` does not wait. Nothing here writes the claim; only the endpoint itself does,
+from its own event.
 
 turns and slots are optional links, reached as part 1 reaches them (`first.turns_api`,
 `slots.api`), so a test gives fakes on the same seams.
@@ -40,6 +57,7 @@ turns and slots are optional links, reached as part 1 reaches them (`first.turns
 
 from __future__ import annotations
 
+import dataclasses
 import os
 import re
 import sqlite3
@@ -184,7 +202,8 @@ def caller(*, pid: int | None = None, conn: sqlite3.Connection | None = None,
     walking up from `pid` (this process by default), then checked as `find` checks it.
 
     A process inside no session turns serves, and a session nested inside a launched one
-    (its id is in no launch's row), are refused `not-launched`.
+    (its id is in no launch's row and its `claude` is no launch's), are refused
+    `not-launched`.
     """
     turns = turns if turns is not None else _turns()
     try:
@@ -223,11 +242,66 @@ def _with_store(conn: sqlite3.Connection | None, run):
         store_conn.close()
 
 
+def resolve(conn: sqlite3.Connection, session_id: str, *,
+            turns: Any | None = None) -> store.LaunchRow | None:
+    """The launch `session_id` belongs to, with `newest_session_id` the id to act on, or
+    None: `store.resolve`, else the Claude launch whose `claude` serves the live session of
+    that id (`by_process`). turns is asked only when no launch holds the id; when it is not
+    installed or can't answer, the id resolves to None. `turns` stands in for its API.
+    For the callers that read a launch before `find`, so they find the launch `find`
+    does."""
+    row = store.resolve(conn, session_id)
+    if row is not None:
+        return row
+    session = _live(session_id, turns)
+    if session is None:
+        return None
+    try:
+        return by_process(conn, session)
+    finally:
+        session.close()
+
+
+def by_process(conn: sqlite3.Connection, session: Any) -> store.LaunchRow | None:
+    """The Claude launch whose own process (`pid`, `pid_started`) is the live `session`'s
+    harness process, newest first, with `newest_session_id` the session's id; None when no
+    launch's is, or the session names no id or no process."""
+    sid = getattr(session, "session_id", None)
+    pid = getattr(session, "pid", None)
+    if not sid or not isinstance(pid, int) or isinstance(pid, bool):
+        return None
+    harness = proc.identity(pid)
+    if harness is None:
+        return None
+    found = store.launch_of_process(conn, harness)
+    return None if found is None else dataclasses.replace(found, newest_session_id=sid)
+
+
+def _live(session_id: str, turns: Any | None) -> Any | None:
+    """turns' live session of `session_id`, or None: none, or turns is absent or can't
+    answer (an id no launch holds is then not the launcher's, as it was before the
+    process was asked)."""
+    try:
+        turns = turns if turns is not None else _turns()
+        return turns.find(session_id=session_id)
+    except Exception:  # noqa: BLE001  (no answer: the id resolves to no launch)
+        return None
+
+
 def _find(conn: sqlite3.Connection, session_id: str, session: Any | None, turns: Any | None,
           slots_api: Any | None, *, slot: bool = True) -> Target:
     row = store.resolve(conn, session_id)
     if row is None:
-        raise NotLaunched()
+        # The session a caller passed is the caller's to close; one asked for here is ours.
+        asked = session is None
+        if asked:
+            session = _live(session_id, turns)
+        row = by_process(conn, session) if session is not None else None
+        if row is None or not row.endpoint:
+            if asked and session is not None:
+                session.close()
+            if row is None:
+                raise NotLaunched()
     if not row.endpoint:
         raise Unclaimed(row.request_id)
     if session is None:
@@ -249,16 +323,32 @@ def _find(conn: sqlite3.Connection, session_id: str, session: Any | None, turns:
 
 def check_claim(row: store.LaunchRow, session: Any) -> None:
     """Refuse `changed` unless `session` is served by the endpoint process `row`'s claim
-    names."""
+    names, or, for a Claude launch whose claimed endpoint is gone, by a child of the
+    launch's own `claude` (`replaces`)."""
     claimed = row.endpoint or ""
     serving = getattr(session, "endpoint_pid", None)
     if isinstance(serving, int) and claims(claimed, serving):
         return
     serving_id = proc.identity(serving) if isinstance(serving, int) else None
     pending = serving_id is not None and store.endpoint_gone(claimed)
+    if pending and replaces(row, serving_id):
+        return
     named = (f"{serving_id.pid}@{serving_id.started:.6f}" if serving_id is not None
              else (str(serving) if serving is not None else None))
     raise Changed(row.request_id, claimed, named, reclaim_pending=pending)
+
+
+def replaces(row: store.LaunchRow, endpoint: Any) -> bool:
+    """Whether the endpoint process `endpoint` (a `moxi.proc.ProcId`) is one Claude Code
+    started for the Claude launch `row`'s session: its parent is the launch's own `claude`
+    (`store.is_launch_parent`), a parent that started before it."""
+    if row.harness != "claude" or endpoint is None:
+        return False
+    parent_pid = proc.parent(endpoint.pid)
+    parent = proc.identity(parent_pid) if parent_pid else None
+    if parent is None or parent.started > endpoint.started:
+        return False
+    return store.is_launch_parent(row, parent)
 
 
 def claims(endpoint: str, pid: int) -> bool:
@@ -295,4 +385,5 @@ def _turns() -> Any:
 
 
 __all__ = ["SESSION_ID_SHAPE", "Changed", "NoTurns", "NotLaunched", "Target", "TurnsFailed",
-           "Unclaimed", "caller", "check_claim", "claims", "find", "session_id_shaped"]
+           "Unclaimed", "by_process", "caller", "check_claim", "claims", "find", "replaces",
+           "resolve", "session_id_shaped"]

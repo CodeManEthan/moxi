@@ -686,6 +686,60 @@ def test_the_stale_check_reads_the_sessions_current_id(conn, tmp_path):
     assert "stale" in caught.value.problem
 
 
+class BeganSessions:
+    """sessions' `find` and `records`: the id's main transcript, whose first records have
+    no time and then `first`, beside a subagent's that began earlier."""
+
+    def __init__(self, first):
+        self.first, self.asked = first, []
+
+    def find(self, harness, session_id, *, root=None):
+        self.asked.append(session_id)
+        return SimpleNamespace(hits=(
+            SimpleNamespace(source=SimpleNamespace(name="agent", agent_id="a1"),
+                            compressed=False),
+            SimpleNamespace(source=SimpleNamespace(name="main", agent_id=None),
+                            compressed=False)))
+
+    def records(self, source, *, kinds=None):
+        if source.name == "agent":
+            return iter([SimpleNamespace(time=self.first - 3600)])
+        return iter([SimpleNamespace(time=object()),  # sessions' UNKNOWN
+                     SimpleNamespace(time=self.first), SimpleNamespace(time=self.first + 9)])
+
+
+def test_an_id_the_launch_never_learned_began_at_its_transcripts_first_record(conn,
+                                                                             tmp_path):
+    # A session found by its process: the stale test reads when its own transcript began,
+    # not when the launch was made.
+    path = handoff(tmp_path)
+    written = path.stat().st_mtime
+    conn.execute("UPDATE launches SET created_at = ? WHERE request_id = 'r1'",
+                 (store.stamp(datetime.fromtimestamp(written - 3600, timezone.utc)),))
+    row = store.get(conn, "r1")
+    later = BeganSessions(written + 60)
+    with pytest.raises(relaunch.Refused) as caught:
+        relaunch.check_handoff(str(path), conn, row, CLEARED, sessions=later)
+    assert "stale" in caught.value.problem and later.asked == [CLEARED]
+    assert relaunch.check_handoff(str(path), conn, row, CLEARED,
+                                  sessions=BeganSessions(written - 60)) == path
+
+
+@pytest.mark.parametrize("sessions", [None, "unread"])
+def test_with_no_transcript_read_an_unlearned_id_began_with_the_launch(conn, tmp_path,
+                                                                       sessions):
+    path = handoff(tmp_path)
+    written = path.stat().st_mtime
+    conn.execute("UPDATE launches SET created_at = ? WHERE request_id = 'r1'",
+                 (store.stamp(datetime.fromtimestamp(written + 60, timezone.utc)),))
+    row = store.get(conn, "r1")
+    if sessions == "unread":
+        sessions = SimpleNamespace(find=lambda *a, **k: (_ for _ in ()).throw(OSError("no")))
+    with pytest.raises(relaunch.Refused) as caught:
+        relaunch.check_handoff(str(path), conn, row, CLEARED, sessions=sessions)
+    assert "stale" in caught.value.problem
+
+
 def test_a_relative_handoff_is_read_from_the_working_dir(conn, tmp_path):
     handoff(tmp_path)
     row = store.get(conn, "r1")

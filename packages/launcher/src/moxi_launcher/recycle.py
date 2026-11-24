@@ -49,8 +49,11 @@ and one that would end `blocked` says so and writes no run. A stale open run is 
 
 **Recycle at limit.** `on_crossing` is the launcher's entry on usage's `moxi.usage.crossings`
 group. usage calls it in turns' endpoint once per rise of the main session's context past
-the launch's `limit_at` mark, with at most 200 ms to answer. It
-reads the store, writes at most one row, and returns; it never waits on the session.
+the launch's crossing mark (`warn_at` for `relaunch`, `limit_at` for `compact`), with at
+most 200 ms to answer. The endpoint first takes its launch, claiming it or moving it to
+itself by parent and learning the session's id, as its `load` does, so a session whose
+endpoint was replaced is still found. Then it reads the store, writes at most one row more,
+and returns; it never waits on the session.
 `relaunch` writes an event and returns a line that tells the agent its launch lets it
 recycle itself, at its next pause point and only when it is mid-work (`RELAUNCH_LINE`),
 once per session id: a crossing that fires again in the same session id, after a
@@ -78,7 +81,7 @@ from moxi import exit as codes
 from moxi import modules, paths, proc
 from moxi.paths import Layout
 
-from . import catalog, quiet, selfrecycle, slots, store, target
+from . import catalog, listeners, quiet, selfrecycle, slots, store, target
 
 log = logging.getLogger("moxi.launcher.recycle")
 
@@ -224,7 +227,7 @@ def _expiry(conn: sqlite3.Connection, session_id: str, turns: Any, slots_api: An
             env: Mapping[str, str], *, dry_run: bool) -> Verdict:
     from . import exits, job
 
-    row = store.resolve(conn, session_id)
+    row = target.resolve(conn, session_id, turns=turns)
     if row is None:
         return Verdict(None, "not-launched", f"no launch holds session {session_id}")
     command = row.values.get("recycle_on_expiry")
@@ -489,8 +492,8 @@ def sweep_log(conn: sqlite3.Connection | None) -> Iterator[sqlite3.Connection | 
 
 def on_crossing(crossing: Any) -> str | None:
     """usage's crossing of a session's `limit_at` mark: the line for the session, or None.
-    Reads the store, writes at most one row, never waits on the session, and never
-    raises."""
+    Reads the store, writes at most its claim, the session's id and one row, never waits
+    on the session, and never raises."""
     try:
         conn = store.connect(create=False, timeout=CROSSING_BUSY_S)
     except Exception:  # noqa: BLE001  (no launch log: not a launched session)
@@ -506,10 +509,18 @@ def on_crossing(crossing: Any) -> str | None:
 
 def crossing_line(conn: sqlite3.Connection, crossing: Any, *, pid: int,
                   spawn: Any | None = None) -> str | None:
-    """`on_crossing` over an open launch log, for the endpoint process `pid`."""
+    """`on_crossing` over an open launch log, for the endpoint process `pid`.
+
+    The endpoint takes its launch first: the launch its session's stamp names
+    (`listeners.REQUEST_ENV`) is claimed, or moved to this endpoint by parent
+    (`listeners.claim`), and the crossing's session id is learned for it with source
+    `load`. So a session whose endpoint was replaced, and whose new endpoint had no session
+    event to claim at, is still told at its mark. A session nested in the launched one
+    carries the stamp but never takes the launch, and gets nothing."""
     session_id = str(getattr(crossing, "session_id", "") or "")
     if not session_id:
         return None
+    _take_launch(conn, crossing, session_id)
     row = store.resolve(conn, session_id)
     if row is None or not row.endpoint or not target.claims(row.endpoint, pid):
         return None
@@ -540,6 +551,17 @@ def crossing_line(conn: sqlite3.Connection, crossing: Any, *, pid: int,
         return None
     start_compact(conn, run, spawn=spawn)
     return COMPACT_LINE
+
+
+def _take_launch(conn: sqlite3.Connection, crossing: Any, session_id: str) -> None:
+    """Claim the launch the crossing's endpoint carries the stamp of, or move it here by
+    parent, and learn `session_id` for it, as the endpoint's `load` does. Only the
+    endpoint writes its claim, and this runs in it."""
+    if not listeners.event_env(crossing).get(listeners.REQUEST_ENV):
+        return
+    row = listeners.claim(crossing, conn)
+    if row is not None:
+        store.learn_session(conn, row.request_id, session_id, "load")
 
 
 def is_scratch_relaunch(values: Mapping[str, Any]) -> bool:

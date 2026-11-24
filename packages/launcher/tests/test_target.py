@@ -1,6 +1,8 @@
 """Finding the session an act acts on: the launch row, the claim, liveness through turns,
 the claim compared with the endpoint process it recorded (never the harness), a claim
-waiting to move after an endpoint was replaced, the slot, and the caller of a self act."""
+waiting to move after an endpoint was replaced, the slot, the caller of a self act, and a
+launch as its claude process: a replaced endpoint accepted by its parent and an id no
+launch knows resolved by the session's process."""
 
 from __future__ import annotations
 
@@ -316,3 +318,114 @@ def test_the_caller_check_refuses_another_endpoint(conn):
     with pytest.raises(target.Changed):
         target.caller(conn=conn, turns=FakeTurns(session))
     assert session.closed >= 1
+
+
+# -- a launch is its claude process -------------------------------------------------------
+
+#: A session id no launch knows: the one a session took after a reload the launch never
+#: recorded.
+UNKNOWN = "f02723f6-1a2b-4c3d-8e4f-5a6b7c8d9e0f"
+GONE = f"{DEAD}@1761728401.500000"
+
+
+def owned_by(conn, pid, request_id="r1"):
+    """Record `pid` as the launch's own `claude` process, as the launcher records it."""
+    ident = proc.identity(pid)
+    conn.execute("UPDATE launches SET pid = ?, pid_started = ? WHERE request_id = ?",
+                 (ident.pid, ident.started, request_id))
+
+
+def test_a_gone_claim_with_an_endpoint_of_the_launchs_claude_is_accepted(conn):
+    # This process is the new endpoint, a child of the launch's claude (its parent).
+    launched(conn, endpoint=GONE)
+    owned_by(conn, os.getppid())
+    session = FakeSession()
+    found = target.find(SID, conn=conn, turns=FakeTurns(session), slots_api=FakeSlots())
+    assert found.live and found.session is session and found.row.request_id == "r1"
+    # A reader writes no claim.
+    assert store.get(conn, "r1").endpoint == GONE
+    assert session.closed == 0
+
+
+def test_a_gone_claim_with_an_endpoint_of_another_parent_is_changed(conn):
+    # The launch's claude is this process: the serving endpoint is no child of it, as a
+    # nested `claude -p`'s endpoint is no child of the launched one.
+    launched(conn, endpoint=GONE)
+    owned_by(conn, os.getpid())
+    with pytest.raises(target.Changed) as caught:
+        target.find(SID, conn=conn, turns=FakeTurns(FakeSession()))
+    assert caught.value.reclaim_pending
+
+
+def test_a_live_claim_on_another_endpoint_is_changed_even_with_the_same_parent(conn):
+    # The claimed endpoint still runs: no replacement, whoever's child the new one is.
+    launched(conn, endpoint=f"{os.getppid()}@{proc.identity(os.getppid()).started:.6f}")
+    owned_by(conn, os.getppid())
+    with pytest.raises(target.Changed) as caught:
+        target.find(SID, conn=conn, turns=FakeTurns(FakeSession()))
+    assert not caught.value.reclaim_pending
+
+
+def test_an_unknown_id_is_resolved_by_the_live_sessions_harness_process(conn):
+    launched(conn, endpoint=GONE)
+    owned_by(conn, os.getppid())
+    before = store.session_ids(conn, "r1")
+    session = FakeSession(session_id=UNKNOWN)
+    found = target.caller(conn=conn, turns=FakeTurns(session), slots_api=FakeSlots())
+    assert found.live and found.row.request_id == "r1"
+    assert found.session_id == UNKNOWN
+    # `find` of the live id resolves the same way, asking turns for that id.
+    turns = FakeTurns(FakeSession(session_id=UNKNOWN))
+    again = target.find(UNKNOWN, conn=conn, turns=turns, slots_api=FakeSlots())
+    assert again.row.request_id == "r1" and again.session_id == UNKNOWN
+    assert turns.asked == [{"session_id": UNKNOWN, "pid": None}]
+    # The early resolver finds the same launch, and closes what it asked for.
+    asked = FakeSession(session_id=UNKNOWN)
+    row = target.resolve(conn, UNKNOWN, turns=FakeTurns(asked))
+    assert row.request_id == "r1" and row.newest_session_id == UNKNOWN
+    assert asked.closed == 1
+    # Nothing was written: no id, no claim.
+    assert store.session_ids(conn, "r1") == before
+    assert store.get(conn, "r1").endpoint == GONE
+
+
+def test_the_newest_launch_of_the_process_is_the_one(conn):
+    launched(conn, endpoint=GONE)
+    launched(conn, endpoint=GONE, request_id="r2", session_id=CLEARED)
+    conn.execute("UPDATE launches SET created_at = '2026-11-01T00:00:00Z' "
+                 "WHERE request_id = 'r1'")
+    owned_by(conn, os.getppid())
+    owned_by(conn, os.getppid(), request_id="r2")
+    row = target.resolve(conn, UNKNOWN, turns=FakeTurns(FakeSession(session_id=UNKNOWN)))
+    assert row.request_id == "r2"
+
+
+@pytest.mark.parametrize("started_off_s", [None, -5.0])
+def test_a_nested_sessions_process_resolves_to_nothing(conn, started_off_s):
+    # Its claude is its own (this process, which no row records), or the pid the row
+    # records now names another process.
+    launched(conn, endpoint=GONE)
+    if started_off_s is None:
+        owned_by(conn, os.getppid())
+        nested = FakeSession(session_id=UNKNOWN, pid=os.getpid())
+    else:
+        ident = proc.identity(os.getppid())
+        conn.execute("UPDATE launches SET pid = ?, pid_started = ?",
+                     (ident.pid, ident.started + started_off_s))
+        nested = FakeSession(session_id=UNKNOWN)
+    with pytest.raises(target.NotLaunched):
+        target.caller(conn=conn, turns=FakeTurns(nested))
+    assert target.resolve(conn, UNKNOWN, turns=FakeTurns(nested)) is None
+
+
+def test_an_unknown_id_with_no_live_session_or_no_turns_is_not_launched(conn, monkeypatch):
+    launched(conn, endpoint=GONE)
+    owned_by(conn, os.getppid())
+    with pytest.raises(target.NotLaunched):
+        target.find(UNKNOWN, conn=conn, turns=FakeTurns(None))
+    with pytest.raises(target.NotLaunched):
+        target.find(UNKNOWN, conn=conn, turns=FakeTurns(error=RuntimeError("socket broke")))
+    monkeypatch.setattr(target.first, "turns_api", lambda quiet=False: None)
+    with pytest.raises(target.NotLaunched):
+        target.find(UNKNOWN, conn=conn)
+    assert target.resolve(conn, UNKNOWN) is None

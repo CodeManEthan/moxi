@@ -674,6 +674,42 @@ def test_a_relaunch_launch_is_told_once_per_session_id(conn):
     assert [e.session_id for e in told] == [SID, NEW]
 
 
+def test_a_crossing_on_a_launch_held_by_a_gone_endpoint_moves_the_claim_and_is_told(
+        conn, monkeypatch):
+    # The endpoint was replaced on a reload and the session took an id the launch never
+    # learned; the new endpoint (this process, a child of the launch's claude) had no
+    # session event to claim at. The crossing claims, learns the id and tells it.
+    from moxi_launcher import listeners
+
+    gone = "4194999@1761728401.500000"
+    ident = proc.identity(os.getppid())
+    conn.execute("UPDATE launches SET endpoint = ?, pid = ?, pid_started = ? "
+                 "WHERE request_id = 'r1'", (gone, ident.pid, ident.started))
+    limit(conn, "relaunch")
+    monkeypatch.setenv("MOXI_LAUNCHER_REQUEST", "r1")
+    line = recycle.crossing_line(conn, crossing(session_id=NEW), pid=os.getpid())
+    assert line == recycle.RELAUNCH_LINE
+    row = store.get(conn, "r1")
+    assert row.endpoint == listeners.endpoint_id()
+    [moved] = [e for e in store.events(conn, "r1") if e.kind == store.RECLAIMED]
+    assert moved.detail == {"endpoint": row.endpoint, "was": gone, "by": "parent"}
+    assert (NEW, "load") in store.session_ids(conn, "r1")
+    assert store.resolve(conn, NEW).request_id == "r1"
+
+
+def test_a_crossing_of_a_nested_session_takes_nothing(conn, monkeypatch):
+    # It carries the launch's stamp, but its endpoint is no child of the launch's claude.
+    gone = "4194999@1761728401.500000"
+    ident = proc.identity(os.getpid())
+    conn.execute("UPDATE launches SET endpoint = ?, pid = ?, pid_started = ? "
+                 "WHERE request_id = 'r1'", (gone, ident.pid, ident.started))
+    limit(conn, "relaunch")
+    monkeypatch.setenv("MOXI_LAUNCHER_REQUEST", "r1")
+    assert recycle.crossing_line(conn, crossing(session_id=NEW), pid=os.getpid()) is None
+    assert store.get(conn, "r1").endpoint == gone
+    assert NEW not in [sid for sid, _ in store.session_ids(conn, "r1")]
+
+
 def test_a_crossing_of_a_launch_off_unknown_or_claimed_elsewhere_is_none(conn):
     limit(conn, "off")
     assert recycle.crossing_line(conn, crossing(), pid=os.getpid()) is None

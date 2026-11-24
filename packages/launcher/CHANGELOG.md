@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- A Claude launch is found by its `claude` process. An act accepts a session served by a
+  new endpoint whose parent is the launch's `claude` when the claimed endpoint is gone,
+  where it said `changed`; a session id no launch knows resolves to the launch whose
+  `claude` serves it, where it said `not-launched`, in `relaunch --self`, exit-session,
+  keep-warm and recycle on expiry. A context crossing claims the launch for its endpoint
+  (moving it by parent) and learns the session's id before it answers. A self relaunch's
+  handoff of an id the launch never learned is checked against the first record of the
+  id's transcript.
 - `recycle_at_limit` ships `relaunch`: every launch whose session can recycle itself is
   told at its `warn_at` mark that it may, and its self relaunch is armed. That is a Claude
   launch in a slot, where slots run, not in a scratch folder, with a handoff folder, and
