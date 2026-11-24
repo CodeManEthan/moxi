@@ -64,8 +64,9 @@ def _code_literals(path):
 
 def test_l1_the_suite_needs_no_env():
     """Gauge: the suite needs no environment. Driven as the harness drives it, in a
-    process handed nothing at all (no HOME, no PATH, no PYTHONPATH), because every fact
-    the kit uses crossed the boundary as an argument."""
+    process handed an empty environment (no PATH, no PYTHONPATH), because every fact the
+    kit uses crossed the boundary as an argument. The test kit adds its own keys to it (a
+    home, a temp directory, uv's folders, byte code off), which no hook reads (law 2)."""
     code, out, err = drive(
         """
         import sys

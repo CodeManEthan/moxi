@@ -17,8 +17,10 @@ The fence, around every test (the autouse fixture `fence`):
   every harness home a package reads is pointed into the test's tmp: `HOME` and the XDG
   homes under `tmp_path / "home"`, `CLAUDE_CONFIG_DIR` and `CODEX_HOME` inside it, and
   `XDG_RUNTIME_DIR` and each installed module's `MOXI_<MODULE>_HOME` in a short
-  per-test directory (see `short_dir`), so a socket under them keeps a short path (on
-  Windows the module homes are in the test's profile instead; see below).
+  per-test directory, made inside the run's short directory (see `short_dir` and The
+  run, below), so a socket under them keeps a short path (on Windows the module homes
+  are in the test's profile instead; see below). The run's child keys and
+  `PLAYWRIGHT_BROWSERS_PATH` are carried over from the run's environment (The run).
   `TMPDIR`, and `tempfile`'s own default with it, point into that short directory too,
   so a temp file the test or a child makes lands in the test's tmp and goes with it.
   `MOXI_TEST_FENCED` holds the same directory: a pytest run that starts with it in its
@@ -81,26 +83,100 @@ The fence, around every test (the autouse fixture `fence`):
 
 The hook can't be removed, so it checks a flag the fixture raises for the test's setup,
 call and teardown and lowers after. The fixture is function-scoped, so a fixture of any
-wider scope (class, module, package or session) runs unfenced: it sees the real
-environment and may write anywhere. A pytest run inside a test, in process
+wider scope (class, module, package or session) runs outside every test's fence: it sees
+the run's environment (The run, below), and the hook doesn't judge the writes it makes in
+process. A pytest run inside a test, in process
 (`pytester.runpytest()`), fences its own tests and puts the outer test's fence back
 when it ends. A refusal
 raises `FenceError` (a `PermissionError`) where the write or connect was tried and is
 also recorded, so a test that catches the error still fails. The hook sees this process
-only: a subprocess gets the fenced environment but not the hook. Paths are judged after
+only: a subprocess gets the fenced environment, through the seam (The run), but not the
+hook. Paths are judged after
 symlinks resolve (a link inside tmp to a place outside is outside); a name relative to a
 `dir_fd` is resolved through `/proc/self/fd` and let through where that can't be read.
 
-uv in a child: a test whose subprocess runs uv asks for the `uv_env` fixture and passes
-it as that child's environment. It is the fenced environment plus uv's real cache
-(`UV_CACHE_DIR`) and installed Pythons (`UV_PYTHON_INSTALL_DIR`), read when pytest
-starts, before any test empties the environment; where neither is set, uv's own default
-under the real home (`$XDG_CACHE_HOME/uv` or `~/.cache/uv`, `$XDG_DATA_HOME/uv/python`
-or `~/.local/share/uv/python`; on Windows `%LOCALAPPDATA%\\uv\\cache` and
-`%APPDATA%\\uv\\python`, or `%APPDATA%\\uv\\data\\python` where uv's older `data` folder
-is there). It
-also sets `UV_PYTHON_DOWNLOADS=never`, so a child finds the Pythons already installed
-and never adds one to the real directory. The test's own process stays fenced.
+The run. When the test loop starts, after collection and before the first fixture of any
+scope sets up (a wrapper on `pytest_runtestloop`), the kit puts the run's environment in
+its own process, and puts the started one back when the loop ends. So every fixture of any
+scope, and every process it starts, sees the run's environment, never the account's. It
+is what a test's fence builds, from the environment pytest started with: the homes under
+run-home in the run's pytest temp root (under xdist, the worker's), and the runtime
+directory, each module's home and the temp directory (`TMPDIR`, `tempfile`'s default,
+and on Windows `TEMP` and `TMP`) in the run's short directory, which `MOXI_TEST_FENCED`
+names, so a pytest a fixture starts as a child is nested (Temp files). It also carries
+the child keys below, and `PLAYWRIGHT_BROWSERS_PATH`, the browsers folder the started
+environment finds, which Playwright reads and no test writes. Collection runs before the
+loop and sees the started environment; `started_env()` gives it, inside the loop too, to
+a test or fixture that reads the account's environment on purpose (an opt-in tier).
+
+The run's roots are its pytest temp root, its short directory and its one uv cache. The
+short directory holds every short directory the loop makes: each test's, and each
+`short_dir()` a fixture of wider scope makes (`short_root()` names it outside a test). It
+is removed when the loop ends. A process that outlives the test that started it still
+writes inside the roots, since every place its environment names is in them until then.
+
+The child keys, made once when the loop starts:
+
+- `UV_CACHE_DIR`, the run's one uv cache, and `UV_PYTHON_INSTALL_DIR`,
+  `UV_PYTHON_BIN_DIR`, `UV_TOOL_DIR` and `UV_TOOL_BIN_DIR`, folders under run-uv in the
+  run's temp root, so uv never falls back to a default (on Windows uv may take one from
+  the shell's known folders, whatever `LOCALAPPDATA` says);
+- `UV_PYTHON`, the suite's interpreter, and `UV_PYTHON_DOWNLOADS=never`, so every uv a
+  test reaches, the product's own included, runs the suite's Python and installs none;
+- `PYTHONDONTWRITEBYTECODE=1`, so a Python child writes no byte code, unless the same
+  environment sets `PYTHONPYCACHEPREFIX` to a folder under the roots.
+
+The run's uv cache is the run's own, new each run, in the run's temporary folder: uv-cache
+in its pytest temp root, or under xdist in the controller's, beside the workers' own temp
+roots. The controller makes it and hands its path to each worker, so the workers share it
+(uv locks its cache) and a run downloads each package once. It goes when pytest removes
+that temp root (pytest keeps the last three runs'). No setting points a run at the
+account's uv cache, so a test that installs a third-party package needs the network.
+
+uv in a child: the `uv_env` fixture is the fenced environment, a copy, which holds the
+child keys; a test may pass it as its child's environment, or pass none. An environment a
+fixture builds itself keeps any uv folder it sets under the roots.
+
+The seam. While the loop runs, `subprocess.Popen` starts every child through the kit, so
+every `subprocess` and `asyncio` child passes it. A child given no `env` inherits the
+run's environment or the test's, which holds every key, and so does whatever it starts
+from its own. To an `env` the caller passes, the seam adds each child key it lacks, a
+temp directory and `HOME` it lacks, and on Windows each folder of `WINDOWS_HOMES` it
+lacks, laid out under its own home where it names one (`USERPROFILE`, else `HOME`), else
+this process's. It refuses, with `FenceError`, an `env` that:
+
+- sets a uv folder of the child keys outside the roots;
+- turns byte code on (`PYTHONDONTWRITEBYTECODE` unset or empty) with no
+  `PYTHONPYCACHEPREFIX` under the roots;
+- sets a variable the fence moves (a home, `XDG_RUNTIME_DIR`, the temp directory,
+  `MOXI_HOME`, a module's home) to a path that exists outside the roots. A path that
+  names nothing on disk (`/nowhere`) passes. A `live` test, and a run that started with
+  `MOXI_TEST_REAL_SUPERVISOR=1`, may name the account's own here; the rest still holds.
+
+A Python child started isolated (`-I` or `-E` among its interpreter options) ignores both
+byte-code variables. So to an argument list whose first word is a Python interpreter (the
+suite's, or a file whose name starts with `python`) with such an option, the seam adds
+`-X pycache_prefix=` naming the pycache folder in the run's temp root after the
+interpreter, unless the list gives `-B` or a prefix of its own; a prefix of its own
+outside the roots is refused. A shell command string gets no prefix.
+
+For the whole loop, not only a test's span, the audit hook judges an environment passed
+to `os.exec*`, `os.spawn*` or `os.posix_spawn` as the seam judges one, and also refuses
+one that lacks a child key; it can add nothing there.
+
+The first loop in a process owns the run. A loop that starts while it runs (pytester's
+in-process run) borrows it: it makes and removes nothing, and puts the kit's state and
+this process's environment back when it ends; `started_env()` inside it is the outer
+test's environment when it started the inner run. xdist's controller runs the loop but
+no test, so it puts nothing in place.
+
+What the run leaves out: byte code the pytest process writes beside the source it imports
+outside a test (chiefly at collection); an isolated Python child started some way the
+seam doesn't see (a shell string, `tmux`, `os.exec*`); a process whose parent built its
+environment afresh (`env -i`) rather than from the one it was handed; what a fixture of
+wider scope writes in process to a path it names itself; processes started outside the
+loop (collection, xdist's workers); and a program that asks Windows for a known folder
+itself, with no variable that moves it, other than uv, platformdirs and the core.
 
 Temp files. `MOXI_TEST_TEMP` (`disk`, the default, or `ram`) decides where a run keeps
 pytest's temp root and its short directories (`moxi_dev.temp` holds the rules: on
@@ -113,16 +189,17 @@ xdist worker through `workerinput`, so a worker never reads the setting, and the
 to the controller leaves the run to pytest: no root is set, nothing of pytest's is
 removed and nothing is swept. A run is nested when a fence is active in its process
 (pytester's in-process run) or its environment carries `MOXI_TEST_FENCED` (a child a
-fenced test started): it chooses nothing, records nothing, sweeps nothing and puts its
-short directories in the outer test's short directory. pytest's header gets one
+fenced test, or a fixture under the run's environment, started): it chooses nothing,
+records nothing, sweeps nothing and puts its short directories in the outer test's short
+directory, or the outer run's. pytest's header gets one
 `moxi-dev temp:` line saying where the temp is and why, and one more for what a sweep
 removed. The durations file gets the choice as its `temp` entry.
 
 Each process of a run that isn't nested makes one short process dir at its configure,
 `mx-` and 6 characters under the short root, with its owner record beside it (see
-`moxi_dev.temp`), and removes it at its end, the record last. Outside a fence
-`short_root()` names it, so each test's short directory, and every `short_dir` a wider
-fixture makes, is made inside it. When the root is in memory, a test's `tmp_path` is
+`moxi_dev.temp`), and removes it at its end, the record last. The run's short directory is made inside it
+(The run), and every short directory the loop makes inside that; outside the loop
+`short_root()` names the process dir. When the root is in memory, a test's `tmp_path` is
 removed once its teardown ends unless a phase of the test failed, and the controller
 removes the whole basetemp at the run's end, failed tests' files and browser traces
 with it; the basetemp and each worker's are recorded so a later sweep can remove them

@@ -42,9 +42,10 @@ import sys
 from pathlib import Path
 
 import pytest
+from moxi_dev.testing import started_env
 
-#: The environment pytest started with, read before any test fences its own.
-_REAL = dict(os.environ)
+#: The environment pytest started with, before the run's or any test's fence.
+_REAL = started_env()
 REAL_SUPERVISOR = "MOXI_TEST_REAL_SUPERVISOR"
 
 

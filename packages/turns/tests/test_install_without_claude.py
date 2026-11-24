@@ -19,9 +19,9 @@ temp home, and a PATH of the venv, a stand-in `systemctl` that records any call,
 and the system's own folders. The test checks that PATH finds no `claude`. The runtime
 dir holds no `systemd/private`, so the core finds no supervisor and writes no unit, and
 no D-Bus address is set. The test asserts the stand-in `systemctl` was never called.
-uv inside an install gets uv's real cache and installed Pythons (the kit's `uv_env`),
-so the third-party requirements come from the warm cache or the index; every Moxi
-distribution comes from the wheel this tree built, given with `--from`.
+uv inside an install gets the run's own uv cache and folders and the suite's Python (the
+kit's `uv_env`), so the third-party requirements come from that cache or the index; every
+Moxi distribution comes from the wheel this tree built, given with `--from`.
 
 It needs `uv` and builds wheels, so it is a `build` test: a plain pytest run leaves it
 out, and `pytest -m build tests/test_install_without_claude.py` runs it.
@@ -152,7 +152,7 @@ class Box:
             "XDG_CACHE_HOME": str(self.home / ".cache"),
             "XDG_RUNTIME_DIR": str(runtime),
             "PYTHONUNBUFFERED": "1",
-            # uv run by `moxi install` reads the real cache, as the build did.
+            # uv run by `moxi install` reads the run's cache, as the build did.
             **{key: uv_env[key] for key in ("UV_CACHE_DIR", "UV_PYTHON_INSTALL_DIR",
                                             "UV_PYTHON_DOWNLOADS") if key in uv_env},
         }

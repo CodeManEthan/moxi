@@ -37,9 +37,10 @@ with a turn that runs `moxi comms send`). Neither sets the backend or the slots.
     socket bind, a temp file -- and the test fails on any path outside the home.
 
 It needs `uv` and builds a wheel, so it is a `build` test: a plain pytest run leaves it
-out, and `pytest -m build tests/test_clean_home.py` runs it. Its uv calls get uv's real
-cache and installed Pythons (the kit's `uv_env`); everything the install runs gets the
-environment built from nothing.
+out, and `pytest -m build tests/test_clean_home.py` runs it. Its uv calls get the kit's
+`uv_env`: the run's own uv cache and folders, and the suite's Python; everything the
+install runs gets the environment built from nothing, to which the kit adds the same uv
+keys.
 """
 
 from __future__ import annotations

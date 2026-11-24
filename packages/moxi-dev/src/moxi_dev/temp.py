@@ -20,7 +20,9 @@ given to the run leaves it to pytest; a set `MOXI_TEST_TEMP` decides, over any
 `PYTEST_DEBUG_TEMPROOT`; a `PYTEST_DEBUG_TEMPROOT` naming another root than the
 default's is honoured; else the default, `disk`. Only a top-level run chooses
 (`top_level`): a run inside a fenced test, in process or as a child carrying the fence's
-`MOXI_TEST_FENCED` mark, is nested and leaves everything to the outer run.
+`MOXI_TEST_FENCED` mark, is nested and leaves everything to the outer run. The run's own
+environment carries the mark too, so a run a fixture of wider scope starts as a child is
+nested as well.
 
 A check keeps its temp on disk whatever is set (`for_check`).
 
@@ -60,8 +62,9 @@ from typing import Any
 
 #: The setting: `disk` or `ram`; unset or empty is `disk`.
 TEMP_ENV = "MOXI_TEST_TEMP"
-#: The fence's mark in every fenced test's environment: the test's short directory. A
-#: run whose environment carries it is nested in a test.
+#: The fence's mark in every fenced test's environment, the test's short directory, and
+#: in the run's environment, the run's short directory. A run whose environment carries
+#: it is nested in a test or in the run.
 FENCED_ENV = "MOXI_TEST_FENCED"
 #: pytest's own variable for its temp root.
 TEMPROOT_ENV = "PYTEST_DEBUG_TEMPROOT"

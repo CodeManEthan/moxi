@@ -335,11 +335,11 @@ def offline_uv_env(tmp_path, uv_env):
     """Environment variables for an offline uv that writes nothing outside `tmp_path`.
 
     Its cache is a new one in tmp, so the tests that ask for it see only the wheels they
-    build. The kit's `uv_env` is the other kind: the real cache, for a child that needs
-    what is installed. One thing is taken from it, uv's installed Pythons
-    (`UV_PYTHON_INSTALL_DIR`): the fence points the homes uv would find them under into
-    tmp, so without it a machine whose only Python is one uv installed, off PATH, would
-    have none to build with. Downloads stay off, so uv only reads that directory."""
+    build. The kit's `uv_env` is the other kind: the run's one uv cache, which its
+    workers share. One thing is taken from it, the run's folder for uv's installed
+    Pythons (`UV_PYTHON_INSTALL_DIR`). Downloads stay off, and the kit's seam adds
+    `UV_PYTHON`, the suite's interpreter, which this environment drops, so uv builds with
+    the suite's Python and installs none."""
     import os
     import shutil
 

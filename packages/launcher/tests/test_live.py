@@ -39,7 +39,7 @@ from pathlib import Path
 
 import pytest
 from moxi import config, modules, paths
-from moxi_dev.testing import short_dir, wait_for
+from moxi_dev.testing import short_dir, started_env, wait_for
 
 from moxi_launcher import (api, catalog, compose, first, handoffs, presets, startup,
                            store, targets)
@@ -61,9 +61,14 @@ _ESCAPES = re.compile(r"\x1b\[[0-?]*[ -/]*[@-~]|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\
 
 @pytest.fixture(scope="session")
 def real_home() -> str:
-    """The user's home. A session-wide fixture runs outside the fence, so it reads the
-    real environment."""
-    return os.path.expanduser("~")
+    """The user's home, from the environment pytest started with: the run's own, which
+    every fixture sees, has its home in the run's temp root."""
+    env = started_env()
+    if os.name == "nt":
+        return env.get("USERPROFILE") or env.get("HOMEDRIVE", "") + env.get("HOMEPATH", "")
+    import pwd
+
+    return env.get("HOME") or pwd.getpwuid(os.getuid()).pw_dir
 
 
 @pytest.fixture

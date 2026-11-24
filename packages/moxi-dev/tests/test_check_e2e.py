@@ -1,8 +1,8 @@
 """`moxi-dev check` run for real on a two-package workspace: the lock, the sync, the suites.
 
-One real `uv lock` and `uv sync` (a few seconds from uv's cache), and real pytest
-sessions under xdist workers. uv runs only in child processes, with the kit's `uv_env`:
-the fenced environment plus uv's real cache and installed Pythons.
+One real `uv lock` and `uv sync`, and real pytest sessions under xdist workers. uv runs
+only in child processes, with the kit's `uv_env`: the fenced environment, which holds the
+run's own uv cache and folders and the suite's Python.
 """
 
 from __future__ import annotations
@@ -94,7 +94,7 @@ def test_the_check_syncs_its_own_env_and_runs_the_picked_suites(workspace, capsy
     assert ", high pass " in line and line.endswith("exit 0")
     assert check.venv_program(workspace / ".moxi-dev/env-3.12", "python").exists()
     assert not (workspace / ".venv").exists()
-    assert not (Path(os.environ["HOME"]) / ".cache" / "uv").exists()  # the real cache served
+    assert not (Path(os.environ["HOME"]) / ".cache" / "uv").exists()  # the run's cache served
 
     git(workspace, "add", "-A")
     git(workspace, "commit", "-q", "-m", "more")

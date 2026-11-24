@@ -108,7 +108,7 @@ def test_every_render_import_is_a_module_here():
         assert importlib.util.find_spec(name) is not None, name
 
 
-def test_the_hook_is_in_before_the_config_is_read():
+def test_the_hook_is_in_before_the_config_is_read(tmp_path):
     probe = """
 import sys
 from moxi import render as hook
@@ -123,5 +123,8 @@ main([])
 """
     done = subprocess.run([sys.executable, "-c", probe], input=json.dumps(INPUT).encode(),
                           capture_output=True, timeout=60, check=True,
-                          env={**os.environ, "PYTHONDONTWRITEBYTECODE": ""})
+                          # Byte code on, so the render must turn it off itself; the
+                          # prefix keeps whatever the child compiles first in tmp.
+                          env={**os.environ, "PYTHONDONTWRITEBYTECODE": "",
+                               "PYTHONPYCACHEPREFIX": str(tmp_path / "pycache")})
     assert "HOOKED True True" in done.stderr.decode()
