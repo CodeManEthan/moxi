@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import json
 import os
+import sys
 from datetime import datetime, timezone
 from pathlib import Path
 from types import SimpleNamespace
@@ -1346,7 +1347,9 @@ def test_a_stop_sends_the_runs_job_sigterm_and_says_what_it_does(conn, child):
     assert result.lines == (f"stop sent to run {run.run_id}: it ends stopped before the "
                             "exit; from the exit on, it ends after the relaunch is tried",)
     assert result.data == {"run_id": run.run_id, "outcome": "stop-sent", "pid": child.pid}
-    assert child.wait(PROC_WAIT_S) == -relaunch.STOP_SIGNAL
+    # Windows ends it outright, with the signal's number as its exit code.
+    assert child.wait(PROC_WAIT_S) == (relaunch.STOP_SIGNAL if sys.platform == "win32"
+                                       else -relaunch.STOP_SIGNAL)
 
 
 def test_a_repair_run_is_stopped_too(conn, child):

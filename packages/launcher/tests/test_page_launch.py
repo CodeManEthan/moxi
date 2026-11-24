@@ -861,7 +861,9 @@ def test_the_ticket_key_is_made_once_private_and_replaced_when_bad(work, harness
     previewed(headless(work))
     key = Path(store.path()).parent / pagehandlers.KEY_FILE
     first_key = key.read_bytes()
-    assert len(first_key) == 32 and stat.S_IMODE(key.stat().st_mode) == 0o600
+    assert len(first_key) == 32
+    if os.name == "posix":
+        assert stat.S_IMODE(key.stat().st_mode) == 0o600
     previewed(headless(work))
     assert key.read_bytes() == first_key
     key.write_bytes(b"short")
@@ -927,7 +929,8 @@ def test_a_launch_writes_its_request_file_and_spawns_its_job_detached(work, harn
     assert call["output"] == targets.run_log(rid)
     assert "MOXI_LAUNCHER_REQUEST" not in call["env"]
     path = targets.request_file(rid)
-    assert stat.S_IMODE(path.stat().st_mode) == 0o600
+    if os.name == "posix":
+        assert stat.S_IMODE(path.stat().st_mode) == 0o600
     data = json.loads(path.read_text())
     assert data["act"] == "launch" and data["request_id"] == rid
     assert data["typed"]["model"] == "opus" and data["typed"]["cwd"] == str(work)
@@ -1028,7 +1031,8 @@ def request_file(request_id: str = "r1", **data) -> Path:
 @POSIX
 def test_the_job_launches_the_request_and_deletes_its_file(work, harness):
     path = request_file(typed={"target": "headless", "cwd": str(work), "brief": BRIEF})
-    assert stat.S_IMODE(path.stat().st_mode) == 0o600
+    if os.name == "posix":
+        assert stat.S_IMODE(path.stat().st_mode) == 0o600
     assert job.main(["launch", "r1"]) == 0
     got = row("r1")
     assert got.state == "started" and got.cwd == str(work)

@@ -1209,7 +1209,8 @@ def test_the_sweep_cuts_a_long_run_log_from_the_front():
     assert rest.endswith(b"line 000299\n") and rest.startswith(b"line ")
     assert lines.endswith(rest)
     assert int(head.split()[3]) == len(lines) - len(rest)
-    assert stat.S_IMODE(path.stat().st_mode) == 0o600
+    if os.name == "posix":
+        assert stat.S_IMODE(path.stat().st_mode) == 0o600
     # A log at or under the cap, and a prompt file of any size, are left as they are.
     small = runs_file("small.log", b"y" * 1000)
     prompt = runs_file("p.prompt.md", b"z" * 5000)

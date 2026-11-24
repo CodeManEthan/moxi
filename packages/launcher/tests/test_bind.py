@@ -494,7 +494,9 @@ def test_ending_the_wrapper_sends_sigterm_and_leaves_a_process_already_gone(
     child = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(60)"])
     try:
         targets._end_process(child.pid)
-        assert child.wait(PROC_WAIT_S) == -signal.SIGTERM
+        # Windows ends it outright, with SIGTERM's number as its exit code.
+        assert child.wait(PROC_WAIT_S) == (signal.SIGTERM if sys.platform == "win32"
+                                           else -signal.SIGTERM)
     finally:
         if child.poll() is None:
             child.kill()

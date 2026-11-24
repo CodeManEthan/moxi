@@ -162,7 +162,8 @@ def test_a_bypass_slot_launch_writes_its_run_file_with_the_key(work, harness, ri
     [start] = rig.calls("start")
     assert settings_args(start["argv"]) == [str(run_file())]
     assert json.loads(run_file().read_text()) == {KEY: True}
-    assert run_file().stat().st_mode & 0o777 == 0o600
+    if os.name == "posix":
+        assert run_file().stat().st_mode & 0o777 == 0o600
 
 
 @pytest.mark.slot_target

@@ -352,7 +352,8 @@ def test_a_slot_launch_is_resumed_by_the_launch_job_202(monkeypatch):
     status, said = post("/api/resume", {"session": SID, "slot": " 5 "})
     assert (status, said) == (202, {"status": "/api/launches?request=r9"})
     path = targets.request_file("r9")
-    assert stat.S_IMODE(path.stat().st_mode) == 0o600
+    if os.name == "posix":
+        assert stat.S_IMODE(path.stat().st_mode) == 0o600
     assert json.loads(path.read_text()) == {"act": "resume", "request_id": "r9",
                                             "session": SID, "slot": "5"}
     [call] = spawned.calls

@@ -175,7 +175,8 @@ def test_the_write_is_a_rename_beside_the_file_and_keeps_the_mode(tmp_path, env,
     assert seed.seed(repo, env).outcome == seed.SEEDED
     [(src, dst)] = renames
     assert dst == path and src.parent == path.parent and src != path
-    assert path.stat().st_mode & 0o7777 == mode
+    if os.name == "posix":
+        assert path.stat().st_mode & 0o7777 == mode
     assert sorted(p.name for p in path.parent.iterdir()) == [path.name]
 
 

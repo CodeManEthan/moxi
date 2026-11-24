@@ -571,7 +571,8 @@ def test_the_detached_deliverer_sends_writes_the_row_and_logs(turns, conn, monke
     assert given["ref"] == "launcher:r-1"
     log_path = first.run_log("r-1")
     wait_for(lambda: log_path.exists() and "delivered" in log_path.read_text(), timeout=30)
-    assert oct(log_path.stat().st_mode & 0o777) == oct(0o600)
+    if os.name == "posix":
+        assert oct(log_path.stat().st_mode & 0o777) == oct(0o600)
 
 
 def test_the_detached_deliverer_takes_the_launcher_s_own_pid(monkeypatch):
