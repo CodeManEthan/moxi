@@ -840,9 +840,11 @@ def _head(found: Shown) -> dict:
 def _marks(state: states.State, home: str, settings) -> dict | None:
     """The round's checklist marks and where they come from (`checklist.marks_of`);
     None when it made none, or when it has no marks and no project it is weighed
-    against has a checklist (`checklist.is_said`), as `next` says nothing then."""
+    against, a stage's repo included, has a checklist (`checklist.is_said`), as `next`
+    says nothing then."""
     marks = checklist.marks_of(state)
-    if marks.source is None or not checklist.is_said(state, home, settings):
+    repos = [stage.repo for stage in state.stages if stage.repo is not None]
+    if marks.source is None or not checklist.is_said(state, home, settings, repos=repos):
         return None
     return {"marked": list(marks.marked), "from": marks.source}
 

@@ -246,6 +246,21 @@ def test_a_fix_round_building_in_a_project_it_did_not_weigh_lists_that_project_s
     assert "brief: Review check: a home path is a finding." not in text
 
 
+def test_show_gives_a_fix_round_s_marks_once_it_builds_in_a_project_with_a_checklist(
+        repos, write_config):
+    command = shlex.join([sys.executable, "-c", "print('the check passed')"])
+    write_config('[projects.proj-b]\nchecklist = [{ id = "core-code", text = "t", '
+                 'skills = ["s"] }]\n' + f"check = {{ command = {json.dumps(command)} }}\n")
+    opening.open_round(FIX, description="a fix", by="lead", flow="fix", checklist=())
+    assert showing.data(showing.show(FIX))["checklist"] is None
+
+    commissioning.commission(FIX, repo="proj-b", branch="work", builder="coder", by="lead")
+
+    found = showing.show(FIX)
+    assert showing.data(found)["checklist"] == {"marked": [], "from": "opening"}
+    assert "checklist: none marked (from the opening)" in showing.as_text(found)
+
+
 def test_a_design_round_s_build_is_told_its_marks_above_the_repo_s_brief(repos, tmp_path,
                                                                         capsys):
     name = "proj-b/a-round"
