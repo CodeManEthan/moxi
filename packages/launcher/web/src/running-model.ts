@@ -253,12 +253,16 @@ export function leadOf(entry: RunningEntry): string | null {
   return caseOf(entry) === "uncovered" ? `waiting on ${waited(entry.waits as Waits)}` : null;
 }
 
-/** Where a session runs, as its row says it: `slot N`, `terminal` or `headless`, then its
- * project's key, else its folder. */
+/** How a session runs, as its row says it: `slot N`, `slot`, `terminal` or `headless`. */
+export function runsWhere(where: Where): string {
+  return where.target === "slot" ? (where.slot ? `slot ${where.slot}` : "slot") : where.target;
+}
+
+/** Where a session runs, as its row says it: `runsWhere`, then its project's key, else its
+ * folder. */
 export function whereText(where: Where): string {
-  const runs = where.target === "slot" ? (where.slot ? `slot ${where.slot}` : "slot") : where.target;
   const place = where.project_key || where.folder;
-  return [runs, place].filter(Boolean).join(" · ");
+  return [runsWhere(where), place].filter(Boolean).join(" · ");
 }
 
 function stamp(at: string | null): number {

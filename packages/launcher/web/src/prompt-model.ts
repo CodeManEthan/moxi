@@ -484,11 +484,17 @@ export function runOf(targets: Targets, picked: Run | null): Run {
   return targets.slots.some((slot) => slot.number === picked.slot && slot.choosable) ? picked : targets.default;
 }
 
+/** Where a launch runs, as the words after its verb: `in slot 3`, `in a new slot`, `in your
+ * terminal` or `headless`. */
+export function runWords(run: Run): string {
+  if (run.target === "terminal") return "in your terminal";
+  if (run.target === "headless") return "headless";
+  return run.slot === null ? "in a new slot" : `in slot ${run.slot}`;
+}
+
 /** The button's words: the act and where it runs. */
 export function buttonWords(run: Run): string {
-  if (run.target === "terminal") return "Copy command";
-  if (run.target === "headless") return "Launch headless";
-  return run.slot === null ? "Launch in a new slot" : `Launch in slot ${run.slot}`;
+  return run.target === "terminal" ? "Copy command" : `Launch ${runWords(run)}`;
 }
 
 /** One row of the button's menu. `run` is what a pick of it sets, null for a slot that

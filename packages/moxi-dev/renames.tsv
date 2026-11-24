@@ -4210,6 +4210,13 @@ launcher	packages/launcher/tests/test_browser_phone_running.py	return any(entry[
 launcher	packages/launcher/tests/test_browser_phone_running.py	return any(entry["request_id"] == request_id and entry["coverable"]	keep	any	any
 launcher	packages/launcher/tests/test_browser_phone_running.py	shell = gateway_shell(tmp_path_factory.mktemp("gw"), options["site"], env=options["env"])	keep	env	env
 launcher	packages/launcher/tests/test_browser_phone_running.py	turns.script(sessions=sessions)	keep	sessions	sessions
+launcher	packages/launcher/tests/test_browser_project_facts.py	Path(root(shell, project.key)).mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
+launcher	packages/launcher/tests/test_browser_project_facts.py	assert set(kestrel) == {"sections"}, kestrel	keep	set	set
+launcher	packages/launcher/tests/test_browser_project_facts.py	assert set(report["projects"]) == {"atlas-api", "harbor-infra", "kestrel-web"}	keep	set	set
+launcher	packages/launcher/tests/test_browser_project_facts.py	expect(line_two(kestrel)).to_be_hidden(timeout=WAIT_S * 1000)	keep	timeout	timeout
+launcher	packages/launcher/tests/test_browser_project_facts.py	expect(line_two(kestrel)).to_have_text("1 running", timeout=WAIT_S * 1000)	keep	timeout	timeout
+launcher	packages/launcher/tests/test_browser_project_facts.py	file.parent.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
+launcher	packages/launcher/tests/test_browser_project_facts.py	return str(Path(shell.env["HOME"]) / found.root)	keep	HOME	HOME
 launcher	packages/launcher/tests/test_browser_slot.py	expect(said.locator('[data-follow="row"]')).to_be_visible(timeout=30_000)	keep	timeout	timeout
 launcher	packages/launcher/tests/test_browser_slot.py	expect(started).to_have_text(re.compile(r"^Started in slot \d+ · "), timeout=30_000)	keep	timeout	timeout
 launcher	packages/launcher/tests/test_browser_slot.py	server.wait(timeout=10)	keep	timeout	timeout
@@ -4587,6 +4594,7 @@ launcher	packages/launcher/tests/test_page.py	assert said["refused"]["code"] == 
 launcher	packages/launcher/tests/test_page.py	assert said["refused"]["code"] == "no-preset" and said["rows"] == []	keep	refused	refused
 launcher	packages/launcher/tests/test_page.py	assert set(first) == set(page.LAUNCH.items)	keep	set	set
 launcher	packages/launcher/tests/test_page.py	assert set(form_modes(f"harness={harness}").values()) <= known	keep	set	set
+launcher	packages/launcher/tests/test_page.py	assert set(module.COMPONENTS) == {"page", "prompt", "running", "sessions", "state",	keep	set	set
 launcher	packages/launcher/tests/test_page.py	assert set(module.COMPONENTS) == {"page", "prompt", "running", "sessions", "state"}	keep	set	set
 launcher	packages/launcher/tests/test_page.py	assert set(module.COMPONENTS) == {"page", "prompt", "sessions", "state"}	keep	set	set
 launcher	packages/launcher/tests/test_page.py	assert set(page.VALUES) == set(settable)	keep	set	set
