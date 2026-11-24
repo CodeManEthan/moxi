@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import os
 from pathlib import Path
 
 import pytest
@@ -131,7 +132,8 @@ def test_a_release_install_writes_the_daemon_through_the_writer(box, how):
     done = box.apply(changes)
     assert all(d.ok for d in done), [d.lines for d in done]
     assert box.unit.read_text() == change.text
-    assert oct(box.unit.stat().st_mode & 0o777) == "0o644"
+    if os.name == "posix":  # Windows keeps no mode bits
+        assert oct(box.unit.stat().st_mode & 0o777) == "0o644"
     assert ("enable", "--now", box.unit.name) in box.sup.calls
     assert box.sup.units[box.unit.name] == {"active": True, "enabled": True}
     assert {again.action for again in units.plan(box.module)} == {"keep"}

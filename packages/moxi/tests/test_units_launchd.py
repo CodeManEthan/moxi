@@ -426,9 +426,11 @@ def test_a_new_daemon_is_written_enabled_and_bootstrapped(mac):
     assert done.ok, done.lines
     plist = str(mac.agents / f"{RELAY}.plist")
     assert mac.ctl.calls == [("enable", f"{DOMAIN}/{RELAY}"), ("bootstrap", DOMAIN, plist)]
-    assert oct(os.stat(plist).st_mode & 0o777) == "0o644"
     logs = moxi.paths.Layout("demo").state_dir() / "logs"
-    assert logs.is_dir() and oct(logs.stat().st_mode & 0o777) == "0o700"
+    assert logs.is_dir()
+    if os.name == "posix":  # Windows keeps no mode bits
+        assert oct(os.stat(plist).st_mode & 0o777) == "0o644"
+        assert oct(logs.stat().st_mode & 0o777) == "0o700"
     assert mac.ctl.loaded[RELAY][0]
     assert mac.plan()[("relay", "daemon")].action == "keep"
 

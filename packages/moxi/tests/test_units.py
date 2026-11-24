@@ -742,7 +742,8 @@ def test_units_json_entries_hold_digest_and_time(w):
     assert _state.recorded("demo", "snapshot") == "abc"
     _state.forget("demo")
     assert _state.recorded("demo", "snapshot") is None
-    assert os.stat(_state.path()).st_mode & 0o777 == 0o600
+    if os.name == "posix":  # Windows keeps no mode bits
+        assert os.stat(_state.path()).st_mode & 0o777 == 0o600
 
 
 def test_the_fake_backend_is_not_part_of_the_installed_package():

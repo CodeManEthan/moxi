@@ -429,7 +429,8 @@ def test_a_new_daemon_is_written_reloaded_and_enabled_now(w):
                            ("loginctl", "show-user", "ana", "-p", "Linger")]
     path = w.root / "moxi-demo-relay.service"
     assert path.read_text().startswith("# moxi unit: demo/relay\n")
-    assert oct(path.stat().st_mode & 0o777) == "0o644"
+    if os.name == "posix":  # Windows keeps no mode bits
+        assert oct(path.stat().st_mode & 0o777) == "0o644"
     assert units.plan("demo")[0].action == "keep"
 
 
@@ -1993,7 +1994,8 @@ def test_wrap_writes_the_marked_drop_in_and_reloads_once(unit_root, bin_dir):
         ExecCondition={bin_dir}/moxi run --if services.backup.enabled --record services/backup --condition
         ExecStopPost={bin_dir}/moxi run --record services/backup --result
         """)
-    assert oct(path.stat().st_mode & 0o777) == "0o644"
+    if os.name == "posix":  # Windows keeps no mode bits
+        assert oct(path.stat().st_mode & 0o777) == "0o644"
     assert manager.calls == [
         ("show", "--property=Version"), ("show", "--property=Id,LoadState,Triggers",
                                          "backup.timer"),

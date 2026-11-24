@@ -97,8 +97,12 @@ def test_the_hook_refuses_effects_and_passes_reads(tmp_path):
         t("subprocess", lambda: subprocess.run(["true"]))
         t("system", lambda: os.system("true"))
         t("kill", lambda: os.kill(os.getpid(), 0))
-        t("connect", lambda: socket.socket(socket.AF_UNIX).connect(str(d / "sock")))
-        t("bind", lambda: socket.socket(socket.AF_UNIX).bind(str(d / "sock")))
+        if hasattr(socket, "AF_UNIX"):
+            family, there, here = socket.AF_UNIX, str(d / "sock"), str(d / "sock")
+        else:  # Windows' Python has no Unix sockets: a TCP one there
+            family, there, here = socket.AF_INET, ("127.0.0.1", 9), ("127.0.0.1", 0)
+        t("connect", lambda: socket.socket(family).connect(there))
+        t("bind", lambda: socket.socket(family).bind(here))
         t("sqlite rw", lambda: sqlite3.connect(str(d / "x.db")))
         t("sqlite memory", lambda: sqlite3.connect(":memory:"))
         t("sqlite uri rw", lambda: sqlite3.connect(f"file:{d}/x.db?mode=rwc", uri=True))

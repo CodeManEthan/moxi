@@ -64,18 +64,18 @@ def run():
     if how == "exit":
         return 4
     if how == "signal":
-        os.kill(os.getpid(), signal_number())
+        stop()
         return None
     if how == "catch":
         from moxi._settle import Interrupted
         try:
-            os.kill(os.getpid(), signal_number())
+            stop()
         except Interrupted:
             return None
 
-def signal_number():
+def stop():
     import signal
-    return signal.SIGTERM
+    signal.raise_signal(getattr(signal, "SIGBREAK", signal.SIGTERM))
 """
 
 
@@ -161,6 +161,9 @@ def settle(w, capsys, monkeypatch, *, setup="ok", replace=False):
 
 
 SERVICE = "moxi-demo-relay.service"
+#: The stop signal a test raises besides SIGINT: SIGTERM, or on Windows, which handles no
+#: SIGTERM here, SIGBREAK (`moxi._settle.signals`).
+TERM = getattr(signal, "SIGBREAK", signal.SIGTERM)
 POSIX = pytest.mark.skipif(sys.platform == "win32",
                            reason="symbolic links need a privilege on Windows")
 
@@ -1073,7 +1076,7 @@ def test_a_signal_inside_a_held_span_lets_the_move_finish(w, capsys, monkeypatch
 
     def runner(cmd, **kw):
         if cmd[2:5] == ["stop", "--", SERVICE]:
-            os.kill(os.getpid(), signal.SIGINT)
+            signal.raise_signal(signal.SIGINT)
         return w.sup(cmd, **kw)
     monkeypatch.setattr(w.backend, "runner", runner)
     code, out = settle(w, capsys, monkeypatch)
@@ -1090,7 +1093,7 @@ def test_a_signal_after_the_steps_flag_is_cleared_cannot_skip_the_restart(
     w.legacy()
     _settle.install_handlers()
     monkeypatch.setattr(_settle, "_after_steps",
-                        lambda: os.kill(os.getpid(), signal.SIGTERM))
+                        lambda: signal.raise_signal(TERM))
     code, out = settle(w, capsys, monkeypatch)
     assert code == _settle.INTERRUPTED, out
     assert w.calls("start") == [("start", SERVICE)]
@@ -1103,8 +1106,8 @@ def test_signals_during_the_restart_only_set_the_request(w, capsys, monkeypatch)
     real = units.resume
 
     def resume(stopped, **kw):
-        os.kill(os.getpid(), signal.SIGINT)
-        os.kill(os.getpid(), signal.SIGINT)
+        signal.raise_signal(signal.SIGINT)
+        signal.raise_signal(signal.SIGINT)
         return real(stopped, **kw)
     monkeypatch.setattr(units, "resume", resume)
     code, out = settle(w, capsys, monkeypatch)
@@ -1116,10 +1119,15 @@ def test_signals_during_the_restart_only_set_the_request(w, capsys, monkeypatch)
 def test_a_signal_ignored_at_start_stays_ignored(monkeypatch):
     saved = {s: signal.getsignal(s) for s in _settle.signals()}
     try:
-        signal.signal(signal.SIGHUP, signal.SIG_IGN)
+        # A `nohup` start's SIGHUP; Windows has none, so SIGBREAK stands in there.
+        if hasattr(signal, "SIGHUP"):
+            ignored, handled = signal.SIGHUP, signal.SIGTERM
+        else:
+            ignored, handled = signal.SIGBREAK, signal.SIGINT
+        signal.signal(ignored, signal.SIG_IGN)
         _settle.install_handlers()
-        assert signal.getsignal(signal.SIGHUP) == signal.SIG_IGN
-        assert signal.getsignal(signal.SIGTERM) == _settle._on_signal
+        assert signal.getsignal(ignored) == signal.SIG_IGN
+        assert signal.getsignal(handled) == _settle._on_signal
     finally:
         for signum, handler in saved.items():
             signal.signal(signum, handler)
@@ -1246,12 +1254,12 @@ def on_install(module, found):
         raise SystemExit(2)
     if how == "signal":
         import signal
-        os.kill(os.getpid(), signal.SIGTERM)
+        signal.raise_signal(getattr(signal, "SIGBREAK", signal.SIGTERM))
     if how == "catch":
         import signal
         from moxi._settle import Interrupted
         try:
-            os.kill(os.getpid(), signal.SIGTERM)
+            signal.raise_signal(getattr(signal, "SIGBREAK", signal.SIGTERM))
         except Interrupted:
             _note("caught", module)
 
@@ -1480,7 +1488,7 @@ def test_ctrl_c_at_a_question_writes_neither_setting_nor_record(w, capsys, monke
     _settle.install_handlers()
 
     def ctrl_c(question):
-        os.kill(os.getpid(), signal.SIGINT)
+        signal.raise_signal(signal.SIGINT)
         return "y"
     monkeypatch.setattr(sys, "stdin", Tty())
     monkeypatch.setattr("builtins.input", ctrl_c)
@@ -1501,7 +1509,7 @@ def test_a_question_s_setting_and_record_are_one_held_span(w, capsys, monkeypatc
 
     def set_then_signal(*a, **k):
         done = real(*a, **k)
-        os.kill(os.getpid(), signal.SIGTERM)
+        signal.raise_signal(TERM)
         return done
     monkeypatch.setattr(config, "set_value", set_then_signal)
     code, out = settle(w, capsys, monkeypatch)
@@ -2247,7 +2255,7 @@ def test_the_placer_s_apply_is_a_held_span(sk, capsys, monkeypatch):
     real = sk.place.apply
 
     def apply(steps, **k):
-        os.kill(os.getpid(), signal.SIGTERM)
+        signal.raise_signal(TERM)
         return real(steps, **k)
     monkeypatch.setattr(sk.place, "apply", apply)
     monkeypatch.setattr(_settle, "_ask_questions", lambda step: pytest.fail("asked"))

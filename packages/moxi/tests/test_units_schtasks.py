@@ -414,7 +414,8 @@ def test_a_new_daemon_is_written_utf16_created_and_run(w):
     assert raw[:2] == b"\xff\xfe"
     assert ET.fromstring(raw).find("t:RegistrationInfo/t:Source", N).text == (
         "moxi unit: demo/relay")
-    assert oct(change.paths[0].stat().st_mode & 0o777) == "0o644"
+    if os.name == "posix":  # Windows keeps no mode bits
+        assert oct(change.paths[0].stat().st_mode & 0o777) == "0o644"
     assert (moxi.paths.Layout("demo").state_dir() / "logs").is_dir()
     assert w.plan()["relay"].action == "keep"
     [ref] = w.backend.marked("demo")
