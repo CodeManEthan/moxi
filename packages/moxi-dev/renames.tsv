@@ -17893,3 +17893,33 @@ rounds	packages/rounds/tests/test_private_files.py	path.parent.mkdir(parents=Tru
 rounds	packages/rounds/tests/test_private_files.py	assert not any(one.startswith("brought in") for one in made.block.lines)	keep	any	any
 rounds	packages/rounds/tests/test_private_files.py	assert any(all(part in one for part in said) for one in reasons), reasons	keep	any	any
 rounds	packages/rounds/tests/test_private_files.py	tree.commit("notes/readme.md", "changed")	keep	changed	changed
+rounds	packages/rounds/src/moxi_rounds/brake.py	was, now = (set(entry.get("checklist") or ()) for entry in (before, current))	keep	set	set
+rounds	packages/rounds/src/moxi_rounds/checklist.py	seen = set()	keep	set	set
+rounds	packages/rounds/src/moxi_rounds/checklist.py	return any(items(settings, one) for one in projects)	keep	any	any
+rounds	packages/rounds/src/moxi_rounds/checklist.py	and not any(one.project.casefold() == repo.casefold() for one in found)):	keep	any	any
+rounds	packages/rounds/src/moxi_rounds/checklist.py	gone = set(said["gone"])	keep	set	set
+rounds	packages/rounds/src/moxi_rounds/cli.py	help="for a flow with no design step, the checklist items that "	keep	help	help
+rounds	packages/rounds/src/moxi_rounds/events.py	("description", "flow", "steps", "parent", "inherits", "record", "lead",	keep	record	record
+rounds	packages/rounds/src/moxi_rounds/freezing.py	if any(checklist.items(settings, project) for project in projects):	keep	any	any
+rounds	packages/rounds/src/moxi_rounds/guards.py	name=NAME, calls=CALLS, who="any", judge="moxi_rounds.watching:judge",	keep	any	any
+rounds	packages/rounds/src/moxi_rounds/settings.py	if any(ord(char) < 32 or ord(char) == 127 for char in pattern):	keep	any	any
+rounds	packages/rounds/src/moxi_rounds/settings.py	if any(part == "" for part in parts):	keep	any	any
+rounds	packages/rounds/src/moxi_rounds/settings.py	if any(part in (".", "..") for part in parts):	keep	any	any
+rounds	packages/rounds/src/moxi_rounds/settings.py	at = part.find("[")	keep	find	find
+rounds	packages/rounds/src/moxi_rounds/settings.py	end = part.find("]", end)	keep	find	find
+rounds	packages/rounds/src/moxi_rounds/settings.py	at = part.find("[", end + 1)	keep	find	find
+rounds	packages/rounds/src/moxi_rounds/watching.py	_named: set[tuple] = set()	keep	set	set
+rounds	packages/rounds/src/moxi_rounds/watching.py	_said: set[str] = set()	keep	set	set
+rounds	packages/rounds/src/moxi_rounds/watching.py	return any(matched(pattern[1:], parts[n:]) for n in range(len(parts) + 1))	keep	any	any
+rounds	packages/rounds/src/moxi_rounds/watching.py	__all__ = ["NAME", "SWITCH", "CALLS", "WRITES", "Match", "judge", "said", "matches",	keep	NAME	NAME
+rounds	packages/rounds/tests/test_checklist_settings.py	assert set(module.QUESTIONS) == {settings.GUARD_SWITCH}	keep	set	set
+rounds	packages/rounds/tests/test_checklist_step_up.py	shows in `open`, `next`, `show`, the round note and the numbers."""	keep	show	show
+rounds	packages/rounds/tests/test_checklist_step_up.py	assert any("step-ups 0, checklist step-ups 1," in line	keep	any	any
+rounds	packages/rounds/tests/test_checklist_step_up.py	assert any("checklist step-ups 0," in line for line in numbers.lines({}))	keep	any	any
+rounds	packages/rounds/tests/test_checklist_told.py	assert not any("a stage in another project" in line	keep	any	any
+rounds	packages/rounds/tests/test_checklist_told.py	assert not any(line.startswith(("checklist:", "brief:")) for line in lines)	keep	any	any
+rounds	packages/rounds/tests/test_checklist_told.py	assert cli.main(["projects", "set", "proj-b", "--notes-root",	keep	set	set
+rounds	packages/rounds/tests/test_watched_paths.py	input={"file_path": str(path), field: "x"},	keep	input	input
+rounds	packages/rounds/tests/test_watched_paths.py	tool="apply_patch", input={"command": text}, cwd=str(cwd))	keep	input	input
+rounds	packages/rounds/tests/test_watched_paths.py	input={"command": "mkdir x"}))):	keep	input	input
+rounds	packages/rounds/tests/test_watched_paths.py	"allow", "any")	keep	any	any

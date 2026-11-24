@@ -7,8 +7,9 @@ folders, the scratch folder said to be for logs and probes only; each private fi
 copied into the worktree, with what an edit of it does and how to let it go; the
 commands the builder runs and the one way a question reaches the operator (through the
 lead); who finishes and what must be true first; what the build step reads; the rulings
-the build follows; the stage's slices; the operator's skips that reach it; and the
-repo's own `brief` lines.
+the build follows; the stage's slices; the operator's skips that reach it; the round's
+checklist marks and the skills they name, with the items of a repo the round could not
+weigh (`checklist.told`); and the repo's own `brief` lines.
 
 **The rulings a build follows** are the ones `tracing.given` gives for the stage, each
 as it stands now. In a flow with a design step they are exactly the ones its rows cite
@@ -37,7 +38,7 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
-from . import corrections, flows, ruling, skips, stages, tracing
+from . import checklist, corrections, flows, ruling, skips, stages, tracing
 from . import settings as own
 from . import shown as showings
 from . import state as states
@@ -193,6 +194,7 @@ def block(state: states.State, register: states.State, *, name: str, stage: str,
     is the event's private files copied into the worktree."""
     planned = stages.find(state, stage)
     gives = tracing.given(state, register, stage)
+    project = name.partition("/")[0]
     commands = _commands(state, settings, repo)
     lines = [
         f"round {name}   stage {stage}   flow {state.flow}",
@@ -210,9 +212,9 @@ def block(state: states.State, register: states.State, *, name: str, stage: str,
         *(_ruling_line(one) for one in gives),
         f"slices: {'none' if planned is None else _slices(planned)}",
         f"skipped by the operator: {_skipped(state, stage)}",
+        *_checklist_lines(state, settings, project=project, repo=repo),
         *(str(line) for line in own.build_setting(settings, repo, "brief")),
     ]
-    project = name.partition("/")[0]
     unshown = tuple(
         Unshown(holder=name if one.ruling.id.startswith(_ROUND) else project,
                 ruling=one.ruling)
@@ -220,6 +222,14 @@ def block(state: states.State, register: states.State, *, name: str, stage: str,
     uncited = (() if planned is None or planned.repo is None
                else _uncited(state, register, planned, gives))
     return Block(lines=tuple(lines), gives=gives, unshown=unshown, uncited=uncited)
+
+
+def _checklist_lines(state: states.State, settings, *, project: str,
+                     repo: str) -> list[str]:
+    """The round's checklist marks and their skills, as a build is told them, and the
+    items of a repo the round could not weigh; nothing when there is nothing to tell."""
+    said = checklist.told(state, project, settings, kind=checklist.BUILDING, repo=repo)
+    return [] if said is None else checklist.lines(said, checklist.BUILDING)
 
 
 def _brought_line(one: Mapping) -> str:

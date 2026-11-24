@@ -11,7 +11,9 @@ what a flow and a project table may hold is checked here.
 A setting is read for a round or for a build. `round_setting` reads one of `ROUND_KEYS`
 for the round's home project; `build_setting` reads one of `BUILD_KEYS` for the build's
 repo. Each takes the project's own table first, then `defaults`.
-The `sweep` keys are this machine's and belong to no project, so they are read as
+`project_setting` reads one of `PROJECT_KEYS`, which only a project's own table holds:
+its checklist, its watched paths and its verifier's brief lines.
+The `sweep` and `watched_paths_guard` keys are this machine's and belong to no project, so they are read as
 they stand (`settings["sweep.armed"]`).
 
 A project's table is `[projects.<key>]`, and its name finds the project the way the
@@ -21,6 +23,8 @@ differ only in case are refused, since both would be the one project's.
 """
 
 from __future__ import annotations
+
+import re
 
 from moxi.config import ConfigError, Schema
 
@@ -93,6 +97,11 @@ ROUND_KEYS = ("flow", "dir", "ratify", "trace", "idle_days", "dormant_days",
 BUILD_KEYS = ("into", "land", "check", "ci", "finish", "check_on", "shared_paths",
               "keep_branch", "lock_ref", "brief", "disposable", "director",
               "private_files")
+#: The keys only a project's own table holds, with no `defaults` form: what the project's
+#: code is checked against belongs to that project.
+PROJECT_KEYS = ("checklist", "watched_paths", "verifier_brief")
+#: The switch of the watched-paths guard, a key of this machine's.
+GUARD_SWITCH = "watched_paths_guard.enabled"
 
 #: How a repo's builds land (`land`): each by its own finish, or through the repo's
 #: queue, where a finish joins the queue and the lander merges.
@@ -135,6 +144,16 @@ def build_setting(settings, repo: str, key: str):
     return finish_actions(value) if key == "finish" else value
 
 
+def project_setting(settings, project: str, key: str) -> list:
+    """The value of `key`, one of `PROJECT_KEYS`, in the project `project`'s own table:
+    a copy, empty when the table leaves it out."""
+    import copy
+
+    if key not in PROJECT_KEYS:
+        raise KeyError(f"{key!r} is not a project's own setting")
+    return copy.deepcopy(list(project_table(settings, project).get(key, ())))
+
+
 def project_table(settings, project: str) -> dict:
     """The table of `settings` for the project `project`, empty when it has none. A
     table's name matches the key ignoring case, as the projects list matches a key."""
@@ -172,12 +191,12 @@ def _check_project(file, name, table) -> None:
                           f"write the project's settings as a [{key}] table")
     for other, value in table.items():
         where = f"{key}.{other}"
-        if other not in ROUND_KEYS and other not in BUILD_KEYS:
+        if other not in ROUND_KEYS and other not in BUILD_KEYS and other not in PROJECT_KEYS:
             raise ConfigError(
                 file, where, "is not a key of a project table",
                 "remove it; a project table takes "
-                + ", ".join((*ROUND_KEYS, *BUILD_KEYS)))
-        if other in _PROJECT_ONLY:
+                + ", ".join((*ROUND_KEYS, *BUILD_KEYS, *PROJECT_KEYS)))
+        if other in _PROJECT_ONLY or other in PROJECT_KEYS:
             _PROJECT_CHECKS[other](file, where, value)
         elif other != "dir":
             _check_as_default(file, where, other, value)
@@ -464,6 +483,149 @@ def _check_command_line(file, where, command) -> None:
                           "name the command to run, or remove `check`")
 
 
+#: A checklist item's id: lower-case words of letters and digits joined by `-`.
+_ITEM_ID = re.compile(r"[a-z0-9]+(-[a-z0-9]+)*")
+#: The longest checklist item id.
+_ITEM_ID_CHARS = 32
+#: A skill's name as a harness lists it, optionally `<plugin>:<skill>`.
+_SKILL_PART = r"[A-Za-z0-9][A-Za-z0-9._-]*"
+_SKILL = re.compile(rf"{_SKILL_PART}(:{_SKILL_PART})?")
+#: The keys of a checklist item, and of a watched-paths entry (`only_new` may be left out).
+_ITEM_KEYS = ("id", "text", "skills")
+_WATCH_KEYS = ("pattern", "note", "skills", "only_new")
+
+
+def _check_line(file, where, value, what: str) -> None:
+    """One line of plain text, not empty."""
+    if not isinstance(value, str) or not value.strip() or "\n" in value or "\r" in value:
+        raise ConfigError(file, where,
+                          "is missing" if value is None else "is not one line of text",
+                          f"give {what} as one line of plain language")
+
+
+def _check_skills(file, where, value) -> None:
+    """A list of at least one skill name, each named once and as a harness lists it."""
+    if not isinstance(value, list) or not value:
+        raise ConfigError(file, where,
+                          "is missing" if value is None else "is not a list of skill names",
+                          'name at least one skill to load: skills = ["layout-review"]')
+    seen = set()
+    for name in value:
+        if not isinstance(name, str) or not _SKILL.fullmatch(name):
+            raise ConfigError(file, where, f"holds {name!r}, which is not a skill's name",
+                              "name the skill as the harness lists it, as layout-review")
+        if name in seen:
+            raise ConfigError(file, where, f"names {name!r} twice",
+                              "name each skill once")
+        seen.add(name)
+
+
+def _check_table_keys(file, where, entry, keys, what: str) -> None:
+    if not isinstance(entry, dict):
+        raise ConfigError(file, where, f"is {flows.kind_of(entry)}, not a table",
+                          f"write each {what} as a table of " + ", ".join(keys))
+    for other in entry:
+        if other not in keys:
+            raise ConfigError(file, f"{where}.{other}", f"is not a key of a {what}",
+                              f"remove it; a {what} takes " + ", ".join(keys))
+
+
+def _check_checklist(file, where, value) -> None:
+    """The project's checklist: a list of items, each `id`, `text` and `skills`, every id
+    used once."""
+    if not isinstance(value, list):
+        raise ConfigError(file, where, f"is {flows.kind_of(value)}, not a list",
+                          'write it as a list of items: [ { id = "public-surface", text = '
+                          '"...", skills = ["layout-review"] } ]')
+    seen = set()
+    for index, item in enumerate(value):
+        here = f"{where}[{index}]"
+        _check_table_keys(file, here, item, _ITEM_KEYS, "checklist item")
+        item_id = item.get("id")
+        if (not isinstance(item_id, str) or len(item_id) > _ITEM_ID_CHARS
+                or not _ITEM_ID.fullmatch(item_id)):
+            raise ConfigError(file, f"{here}.id",
+                              "is missing" if item_id is None
+                              else f"is {item_id!r}, which is not an item id",
+                              f"give lower-case words of letters and digits joined by -, "
+                              f"at most {_ITEM_ID_CHARS} characters, as public-surface")
+        if item_id in seen:
+            raise ConfigError(file, f"{here}.id", f"is {item_id!r}, an id used before",
+                              "give each item an id of its own")
+        seen.add(item_id)
+        _check_line(file, f"{here}.text", item.get("text"), "the item")
+        _check_skills(file, f"{here}.skills", item.get("skills"))
+
+
+def _check_watched_paths(file, where, value) -> None:
+    """The project's watched paths: a list of entries, each `pattern`, `note`, `skills`
+    and optionally `only_new`."""
+    if not isinstance(value, list):
+        raise ConfigError(file, where, f"is {flows.kind_of(value)}, not a list",
+                          'write it as a list of entries: [ { pattern = "packages/*/", '
+                          'note = "...", skills = ["layout-review"] } ]')
+    for index, entry in enumerate(value):
+        here = f"{where}[{index}]"
+        _check_table_keys(file, here, entry, _WATCH_KEYS, "watched-paths entry")
+        pattern = entry.get("pattern")
+        problem = _pattern_problem(pattern)
+        if problem:
+            raise ConfigError(file, f"{here}.pattern",
+                              "is missing" if pattern is None else f"is {pattern!r}, {problem}",
+                              "write / between parts; it matches a path written with \\ too"
+                              if isinstance(pattern, str) and "\\" in pattern else
+                              "give a path relative to the project's root, with / between "
+                              "its parts and a / at the end for a folder, as packages/*/")
+        _check_line(file, f"{here}.note", entry.get("note"), "the note")
+        _check_skills(file, f"{here}.skills", entry.get("skills"))
+        if "only_new" in entry:
+            _check_bool(file, f"{here}.only_new", entry["only_new"])
+
+
+def _pattern_problem(pattern) -> str:
+    """What makes `pattern` no watched-paths pattern, or "" when nothing does. One `/` at
+    its end is the folder mark, taken off before its parts are read; every other `/`
+    stands between two parts that are not empty."""
+    if not isinstance(pattern, str) or not pattern:
+        return "which is empty"
+    if any(ord(char) < 32 or ord(char) == 127 for char in pattern):
+        return "which holds a control character"
+    if "\\" in pattern:
+        return "which holds a \\"
+    if pattern.startswith("/"):
+        return "which is not relative to the project's root"
+    body = pattern[:-1] if pattern.endswith("/") else pattern
+    parts = body.split("/")
+    if re.match(r"[A-Za-z]:", parts[0]):
+        return "which names a drive"
+    if any(part == "" for part in parts):
+        return "which has an empty part"
+    if any(part in (".", "..") for part in parts):
+        return "which has a . or .. part"
+    for part in parts:
+        if "**" in part and part != "**":
+            return "which holds ** inside a part; ** stands alone, as a whole part"
+        if _unclosed(part):
+            return "which holds a [ with no closing ]"
+    return ""
+
+
+def _unclosed(part: str) -> bool:
+    """Whether `part` holds a `[` with no `]` closing it, read as `fnmatch` reads one."""
+    at = part.find("[")
+    while at != -1:
+        end = at + 1
+        if end < len(part) and part[end] == "!":
+            end += 1
+        if end < len(part) and part[end] == "]":
+            end += 1
+        end = part.find("]", end)
+        if end == -1:
+            return True
+        at = part.find("[", end + 1)
+    return False
+
+
 #: The keys of `ci`.
 _CI_KEYS = ("workflows", "local", "remote", "ref", "full_ref", "status", "ids", "jobs",
             "status_timeout_s")
@@ -678,12 +840,14 @@ _PROJECT_CHECKS = {
     "land": _check_land, "check": _check_project_check, "ci": _check_ci, "finish": _check_finish,
     "shared_paths": _check_strings, "keep_branch": _check_bool,
     "lock_ref": lambda file, where, value: _check_string(file, where, value, "a git ref"),
-    "brief": _check_strings, "private_files": _check_private_files}
+    "brief": _check_strings, "private_files": _check_private_files,
+    "checklist": _check_checklist, "watched_paths": _check_watched_paths,
+    "verifier_brief": _check_strings}
 
 _KIND_WORDS = {"string": "a string", "bool": "a boolean", "int": "an int"}
 
 
 __all__ = ["MODULE", "SCHEMA_RESOURCE", "schema", "load", "check_text", "check",
-           "ROUND_KEYS", "BUILD_KEYS", "LAND_FINISH", "LAND_QUEUE", "BASE_FIELD", "MERGE", "PUSH", "COMMAND", "DEFAULT_FINISH",
-           "round_setting", "build_setting", "project_table", "finish_actions",
-           "has_notes_dir"]
+           "ROUND_KEYS", "BUILD_KEYS", "PROJECT_KEYS", "GUARD_SWITCH", "LAND_FINISH", "LAND_QUEUE", "BASE_FIELD", "MERGE", "PUSH", "COMMAND", "DEFAULT_FINISH",
+           "round_setting", "build_setting", "project_setting", "project_table",
+           "finish_actions", "has_notes_dir"]
