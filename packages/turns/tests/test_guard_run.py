@@ -14,6 +14,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
+from moxi_dev.testing import toml_string
 
 import moxi_turns
 from claude_runner import FakeRunner, pipe_pair, post
@@ -507,7 +508,8 @@ def test_the_table_comes_from_turns_config_and_custom_files(turns_env, tmp_path)
                   "def j(call):\n    return Deny('judged ' + call.input['command'])\n"
                   "GUARDS = (Guard(name='j', calls={'claude': ('Bash',), 'codex': ('Bash',)},"
                   " judge=':j', deadline_ms=900),)\n")
-    write_config(turns_env, f'[guards]\nrun = ["{toml}", "{py}"]\nmax_wait_ms = 250\n')
+    write_config(turns_env, f'[guards]\nrun = [{toml_string(toml)}, {toml_string(py)}]\n'
+                            'max_wait_ms = 250\n')
     runner = GuardRunner("claude", env=dict(os.environ))
     try:
         table = runner.reload()

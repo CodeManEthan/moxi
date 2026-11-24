@@ -10,7 +10,7 @@ import types
 
 import pytest
 
-from moxi_dev.testing import PROC_WAIT_S
+from moxi_dev.testing import PROC_WAIT_S, toml_string
 import moxi_turns as turns
 from fake_harness import FakeHarness
 import listener_targets
@@ -563,11 +563,11 @@ def test_the_start_plan_limits_to_the_harness_and_reads_a_file_up_to_the_total(
 
     brief = tmp_path / "brief.md"
     brief.write_text("x" * 20_000)
-    write_config(turns_env, f'[start]\norder = ["{brief}"]\nlimit_chars = 50000\n')
+    write_config(turns_env, f'[start]\norder = [{toml_string(brief)}]\nlimit_chars = 50000\n')
     got = turns.start_plan("codex")
     assert (got.total, got.limit, got.ceiling) == (9000, 50000, 9000)
     assert got.entries == (turns.StartEntry(str(brief), "file", 9000, 9000),)
-    write_config(turns_env, f'[start]\norder = ["{brief}"]\nlimit_chars = 100\n')
+    write_config(turns_env, f'[start]\norder = [{toml_string(brief)}]\nlimit_chars = 100\n')
     assert turns.start_plan("opencode").entries[0] == turns.StartEntry(str(brief), "file",
                                                                        100, 100)
 

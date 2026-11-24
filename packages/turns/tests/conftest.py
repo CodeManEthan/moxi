@@ -14,11 +14,11 @@ import dataclasses
 import json
 import os
 import shutil
-import stat
 import tempfile
 from pathlib import Path
 
 import pytest
+from moxi_dev.testing import console_script
 
 from fake_harness import FakeHarness
 from moxi_turns import listeners
@@ -52,14 +52,19 @@ def state_home(monkeypatch, tmp_path_factory):
 
 #: The stand-in `claude`: it logs each call's arguments and answers the calls turns makes
 #: from files in `$FAKE_CLAUDE_DIR`.
-FAKE_CLAUDE = """#!/bin/sh
-echo "$*" >> "$FAKE_CLAUDE_DIR/log"
-case "$*" in
-  "--version") echo "$FAKE_CLAUDE_VERSION (Claude Code)" ;;
-  "plugin marketplace list --json") cat "$FAKE_CLAUDE_DIR/markets.json" ;;
-  "plugin list --json") cat "$FAKE_CLAUDE_DIR/plugins.json" ;;
-esac
-exit 0
+FAKE_CLAUDE = """\
+import os, sys
+said = " ".join(sys.argv[1:])
+state = os.environ["FAKE_CLAUDE_DIR"]
+with open(os.path.join(state, "log"), "a", encoding="utf-8") as log:
+    log.write(said + "\\n")
+answers = {"plugin marketplace list --json": "markets.json",
+           "plugin list --json": "plugins.json"}
+if said == "--version":
+    print(os.environ["FAKE_CLAUDE_VERSION"] + " (Claude Code)")
+elif said in answers:
+    with open(os.path.join(state, answers[said]), encoding="utf-8") as answer:
+        sys.stdout.write(answer.read())
 """
 
 
@@ -70,9 +75,7 @@ def stub_claude(monkeypatch, tmp_path_factory):
     root = tmp_path_factory.mktemp("claude-stub")
     bin_dir = root / "bin"
     bin_dir.mkdir()
-    exe = bin_dir / "claude"
-    exe.write_text(FAKE_CLAUDE)
-    exe.chmod(exe.stat().st_mode | stat.S_IXUSR)
+    console_script(bin_dir, "claude", FAKE_CLAUDE)
     state = root / "state"
     state.mkdir()
     (state / "markets.json").write_text("[]")

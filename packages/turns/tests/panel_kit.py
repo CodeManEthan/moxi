@@ -24,7 +24,6 @@ import contextlib
 import json
 import os
 import re
-import stat
 import sys
 import time
 from pathlib import Path
@@ -37,7 +36,7 @@ from moxi.paths import Layout
 
 from conftest import FAKE_CLAUDE
 from fake_harness import FakeHarness
-from moxi_dev.testing import short_dir
+from moxi_dev.testing import console_script, short_dir
 
 #: The modules the small install keeps: the core's own, ui and turns.
 SMALL = ("moxi", "ui", "turns")
@@ -81,14 +80,9 @@ class Stub:
         (self.state / "markets.json").write_text("[]")
         self.plugins([])
 
-    @property
-    def exe(self) -> Path:
-        return self.bin / "claude"
-
-    def put(self) -> None:
-        """Puts the stand-in on the shell's PATH."""
-        self.exe.write_text(FAKE_CLAUDE)
-        self.exe.chmod(self.exe.stat().st_mode | stat.S_IXUSR)
+    def put(self) -> Path:
+        """Puts the stand-in on the shell's PATH, and returns its path."""
+        return console_script(self.bin, "claude", FAKE_CLAUDE)
 
     def plugins(self, listed: list[dict]) -> None:
         """What `plugin list --json` prints from now on."""
