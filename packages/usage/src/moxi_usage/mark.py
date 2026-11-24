@@ -9,20 +9,16 @@ the endpoint is ending.
 its own context and its own marks. A reader carries up to two purposes, each with a mark
 (`1x`, `1.5x`, `2x`, a multiple of the restart point, `moxi_usage.thresholds`):
 
-* the **notice**, one line to the model. Its mark is the launch's `MOXI_USAGE_WARN_AT`;
-  with nothing stamped, config `marks.default` (default `off`). A stamp of `off`, or one
-  that names no mark, is off.
+* the **notice**, one line to the model. Its mark is the launch's `MOXI_USAGE_WARN_AT`.
+  With nothing stamped, a stamp of `off`, or one that names no mark, it is off: a session
+  its launch warned at no mark, and one no launcher started, get no notice.
 * the **crossing**, for the main session only: handlers other modules register on the
   group `moxi.usage.crossings` are called with a `Crossing`. Its mark is
   `MOXI_USAGE_CROSSING_AT`, which the launcher stamps when its recycle at limit is on;
   there is no config default.
 
-With both stamped off the listener returns at once, having imported nothing beyond this
-module. A launch with no `MOXI_USAGE_WARN_AT` stamp reads `marks.default` instead, which
-imports usage's settings module and the core's config reader once per endpoint (beside
-turns' endpoint, which holds the core already, that is `moxi_usage.settings` and the
-standard library's TOML and resource readers, a few milliseconds); the file is then read
-again only when it changes.
+With both off the listener returns at once, having imported nothing beyond this module
+and read no config.
 
 **The measure.** The reader's newest request, by sessions' `last_request`: its input
 tokens are the whole prompt. turns hands the file the harness writes (`record_path`);
@@ -62,9 +58,8 @@ that re-arms it is seen); otherwise the smallest threshold among the main sessio
 purposes for the models it has used, or over every model the measure has a row for when
 it has used none yet. A fired notice counts for nothing, since nothing can arm it again.
 With no threshold known it is 0; with both purposes off, or the notice fired and the
-crossing off, it is `NEVER`, since the listener has nothing to do. turns reads the floor again at each
-`ready` and after each call, so a change to `marks.default` reaches a main loop held off
-by `NEVER` at its next start, resume, clear or compaction, or after an agent's call.
+crossing off, it is `NEVER`, since the listener has nothing to do. turns reads the floor
+again at each `ready` and after each call.
 
 **Fail open.** Every error is logged once per kind and the listener answers None. A
 crossing handler's error, or one that runs past `marks.handler_wait_ms`, costs only its
@@ -105,14 +100,8 @@ LOGGER = "moxi.usage"
 
 # --- selection --------------------------------------------------------------------------
 
-_UNSTAMPED = object()
-
-
-def _stamped(value) -> object:
-    """A stamp's mark, None for off (or a value that names no mark), `_UNSTAMPED` for no
-    stamp."""
-    if value is None or value == "":
-        return _UNSTAMPED
+def _stamped(value) -> str | None:
+    """A stamp's mark; None for off, for no stamp, and for a value that names no mark."""
     return value if value in MARKS else None
 
 
@@ -123,44 +112,8 @@ def _env(event) -> dict:
 
 def selected(env) -> tuple[str | None, str | None]:
     """The notice's mark and the crossing's, each None for off, from a session's
-    environment and, for a notice nothing stamped, config `marks.default`."""
-    notice = _stamped(env.get(WARN_AT_ENV))
-    if notice is _UNSTAMPED:
-        notice = config_default()
-    crossing = _stamped(env.get(CROSSING_AT_ENV))
-    if crossing is _UNSTAMPED:
-        crossing = None
-    return notice, crossing
-
-
-_default_cache: list = [None, None]
-
-
-def config_default() -> str | None:
-    """Config `marks.default` as a mark, None for off; read again only when usage's
-    config file changes. A config that cannot be read is off, logged once."""
-    from moxi.paths import Layout
-
-    path = Layout("usage").config_file()
-    key = (str(path), _stat(path))
-    if _default_cache[0] != key:
-        try:
-            from .settings import current
-
-            value = current()["marks.default"]
-        except Exception:  # noqa: BLE001 - fail open: a config usage can't read is off
-            _fail("config", "usage's config could not be read; marks.default is off")
-            value = OFF
-        _default_cache[:] = [key, value if value in MARKS else None]
-    return _default_cache[1]
-
-
-def _stat(path) -> tuple | None:
-    try:
-        st = os.stat(path)
-    except OSError:
-        return None
-    return (st.st_size, st.st_mtime_ns, st.st_ino)
+    environment alone: an unstamped purpose is off."""
+    return _stamped(env.get(WARN_AT_ENV)), _stamped(env.get(CROSSING_AT_ENV))
 
 
 # --- the crossing -----------------------------------------------------------------------
@@ -277,7 +230,6 @@ def reset() -> None:
     _thresholds_stamp[:] = [None]
     _said.clear()
     _handlers_cache[:] = [None]
-    _default_cache[:] = [None, None]
 
 
 # --- the file of fired purposes ---------------------------------------------------------
@@ -794,6 +746,6 @@ def _warn(message: str) -> None:
 
 __all__ = ["WARN_AT_ENV", "CROSSING_AT_ENV", "MARKS", "OFF", "NOTICE", "CROSSING", "PURPOSES",
            "GROUP", "STATE_DIR", "SCHEMA", "NEVER", "MAIN_READER", "Crossing", "selected",
-           "config_default", "on_tool", "observe", "floor", "gone", "handlers",
+           "on_tool", "observe", "floor", "gone", "handlers",
            "handler_wait", "run_handlers", "notice_line", "thousands", "agent_label", "safe_id",
            "state_dir", "state_file", "read_record", "reset"]

@@ -237,31 +237,18 @@ def test_on_windows_the_whole_line_is_limited():
 # -- the limit mark -------------------------------------------------------------------------
 
 
-@pytest.fixture
-def usage_default(monkeypatch):
-    """usage's config `marks.default` as the launcher reads it, set per test."""
-    def set_to(mark):
-        monkeypatch.setattr(common, "usage_default_mark", lambda: mark)
-    return set_to
-
-
-@pytest.mark.parametrize("values, default, mark", [
+@pytest.mark.parametrize("values, mark", [
     # limit_at set to a mark wins over everything.
-    ({"limit_at": "1.5x", "warn_at": "2x"}, "2x", "1.5x"),
+    ({"limit_at": "1.5x", "warn_at": "2x"}, "1.5x"),
     # Unset, it follows the launch's warn_at.
-    ({"limit_at": "", "warn_at": "2x"}, "1x", "2x"),
-    ({"warn_at": "1.5x"}, None, "1.5x"),
-    # No warn_at: usage warns at its config default, so the line comes with it.
-    ({"limit_at": "", "warn_at": ""}, "1.5x", "1.5x"),
-    ({}, "2x", "2x"),
-    # warn_at off, or usage warns at none: 1x.
-    ({"warn_at": "off"}, "2x", "1x"),
-    ({"warn_at": ""}, None, "1x"),
-    ({}, "off", "1x"),
+    ({"limit_at": "", "warn_at": "2x"}, "2x"),
+    ({"warn_at": "1.5x"}, "1.5x"),
+    # warn_at off or unset: usage warns at no mark, and no config stands in; 1x.
+    ({"warn_at": "off"}, "1x"),
+    ({"limit_at": "", "warn_at": ""}, "1x"),
+    ({}, "1x"),
 ])
-def test_the_compact_mark_follows_limit_at_then_warn_at_then_usage(usage_default, values,
-                                                                   default, mark):
-    usage_default(default)
+def test_the_compact_mark_follows_limit_at_then_warn_at(values, mark):
     compact = {"recycle_at_limit": "compact", **values}
     assert common.limit_mark(compact) == mark
     assert common.option_stamps(compact) == {"MOXI_USAGE_CROSSING_AT": mark}
@@ -285,10 +272,8 @@ def slot_here(monkeypatch):
 
 @pytest.mark.parametrize("warn_at", ["1x", "1.5x", "2x"])
 @pytest.mark.parametrize("limit_at", ["", "1x"])
-def test_a_relaunch_launch_crosses_at_its_warn_at(slot_here, usage_default, warn_at,
-                                                  limit_at):
+def test_a_relaunch_launch_crosses_at_its_warn_at(slot_here, warn_at, limit_at):
     # The relaunch line rides on usage's warning; a limit_at never moves it.
-    usage_default("1x")
     values = {**SLOT_LAUNCH, "warn_at": warn_at, "limit_at": limit_at}
     assert common.limit_mark(values) == warn_at
     assert common.relaunch_holds(values)
@@ -322,17 +307,10 @@ def test_a_relaunch_launch_with_no_notes_dir_is_not_stamped(slot_here, monkeypat
     assert common.option_stamps({**SLOT_LAUNCH, "warn_at": "2x"}) == {}
 
 
-def test_usage_s_default_mark_is_read_from_its_config():
+def test_a_config_naming_a_default_mark_moves_no_launch_mark():
+    # usage keeps no default mark; a config still naming one is refused by usage and read
+    # by no launch.
     path = Layout("usage").config_file()
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text('[marks]\ndefault = "1.5x"\n', encoding="utf-8")
-    assert common.usage_default_mark() == "1.5x"
-    assert common.limit_mark({"warn_at": ""}) == "1.5x"
-    path.write_text('[marks]\ndefault = "off"\n', encoding="utf-8")
-    assert common.limit_mark({"warn_at": ""}) == "1x"
-
-
-def test_without_usage_there_is_no_default_mark(monkeypatch):
-    real = modules.available
-    monkeypatch.setattr(modules, "available", lambda name: name != "usage" and real(name))
-    assert common.usage_default_mark() is None
+    assert common.limit_mark({"recycle_at_limit": "compact", "warn_at": ""}) == "1x"

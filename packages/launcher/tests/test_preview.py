@@ -493,7 +493,6 @@ def test_preview_gives_the_resolvers_warnings_as_launch_does(tmp_path, monkeypat
 
 
 def test_a_preview_shows_the_limit_mark_it_stamps(tmp_path, monkeypatch):
-    monkeypatch.setattr(common, "usage_default_mark", lambda: "2x")
     Harness.on_path(tmp_path, monkeypatch)
     work = tmp_path / "work"
     work.mkdir()

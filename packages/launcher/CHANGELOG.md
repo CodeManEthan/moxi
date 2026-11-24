@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- A `compact` launch with `limit_at` unset and no `warn_at` mark crosses at `1x`; it no
+  longer reads usage's `marks.default`, which usage no longer has, and
+  `compose.common.usage_default_mark` is removed.
 - A Claude launch is found by its `claude` process. An act accepts a session served by a
   new endpoint whose parent is the launch's `claude` when the claimed endpoint is gone,
   where it said `changed`; a session id no launch knows resolves to the launch whose

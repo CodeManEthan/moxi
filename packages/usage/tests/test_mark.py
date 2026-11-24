@@ -104,20 +104,23 @@ def notice(tokens, mark_name="1x", model=MODEL):
 
 # --- selection --------------------------------------------------------------------------
 
-def test_the_notice_is_the_launchs_stamp_else_the_config_default():
+def test_the_notice_is_the_launchs_stamp_and_an_unstamped_session_is_off():
     assert mark.selected({"MOXI_USAGE_WARN_AT": "1.5x"}) == ("1.5x", None)
     assert mark.selected({}) == (None, None)
-    write_config(CONFIG + '\n[marks]\ndefault = "2x"\n')
-    assert mark.selected({}) == ("2x", None)
+    assert mark.selected({"MOXI_USAGE_WARN_AT": ""}) == (None, None)
     assert mark.selected({"MOXI_USAGE_WARN_AT": "off"}) == (None, None)
     assert mark.selected({"MOXI_USAGE_WARN_AT": "3x"}) == (None, None)
 
 
-def test_the_crossing_is_its_own_stamp_with_no_config_default():
-    write_config(CONFIG + '\n[marks]\ndefault = "2x"\n')
+def test_no_config_stands_in_for_a_missing_stamp():
+    assert mark.selected({}) == (None, None)
     assert mark.selected({"MOXI_USAGE_CROSSING_AT": "1x", "MOXI_USAGE_WARN_AT": "off"}) == (
         None, "1x")
-    assert mark.selected({"MOXI_USAGE_CROSSING_AT": "soon"}) == ("2x", None)
+    assert mark.selected({"MOXI_USAGE_CROSSING_AT": "soon"}) == (None, None)
+    s = Session()
+    s.context(400_000)
+    assert mark.on_tool(s.event(env={})) is None
+    assert mark.floor(s.event(env={})) == mark.NEVER
 
 
 def test_with_both_off_the_listener_reads_nothing_and_holds_no_state():
@@ -141,12 +144,9 @@ def test_off_imports_nothing_beyond_the_mark_module():
     assert out == ["moxi_usage", "moxi_usage.mark"]
 
 
-def test_unstamped_beside_turns_endpoint_imports_only_usages_settings():
-    """With no stamp the first call reads `marks.default`. In turns' endpoint, the one
-    caller, the core is loaded already, so of Moxi's modules only usage's settings
-    module is new; `marks.default` is off, so the listener answers None."""
+def test_unstamped_imports_nothing_beyond_the_mark_module():
+    """With no stamp the session is off, as with a stamp of off: no config is read."""
     code = ("import sys; from types import SimpleNamespace as N; import __future__; "
-            "import moxi_turns.endpoint, moxi_turns.listeners; "
             "before = set(sys.modules); import moxi_usage.mark as m; "
             "e = N(event='after-tool', harness='claude', session_id='s', agent_id=None, "
             "env={}, record_path='/nowhere'); "
@@ -154,8 +154,7 @@ def test_unstamped_beside_turns_endpoint_imports_only_usages_settings():
             "print(' '.join(sorted(set(sys.modules) - before)))")
     out = subprocess.run([sys.executable, "-I", "-c", code], capture_output=True,
                          text=True, check=True).stdout.split()
-    assert [name for name in out if name.startswith("moxi")] == [
-        "moxi_usage", "moxi_usage.mark", "moxi_usage.settings"]
+    assert out == ["moxi_usage", "moxi_usage.mark"]
 
 
 # --- firing -----------------------------------------------------------------------------
@@ -667,11 +666,11 @@ def test_api_mark_reads_the_fired_purposes_and_the_marks_recorded():
     assert doc["purposes"][0]["state"] == "fired" and "unknown" not in doc
 
 
-def test_api_mark_with_nothing_on_disk_reads_the_config_default():
+def test_api_mark_with_nothing_on_disk_is_off():
     s = Session()
     s.context(50_000)
     found = api.mark(SESSION, live=False)
-    assert found.marks_from == "config"
+    assert found.marks_from == "nothing"
     assert [p.state for p in found.purposes] == ["off", "off"]
 
 

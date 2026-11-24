@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- `marks.default` is gone: a session with no `MOXI_USAGE_WARN_AT` stamp gets no notice,
+  whether the launcher started it with no `warn_at` (a Codex launch that sets none) or
+  did not start it. Nothing reads a config default; the key is retired, and a config that
+  still sets it is refused, saying to set `warn_at` on the launch instead. `moxi usage
+  marks` says `marks from nothing` where it said `marks from config`, and
+  `mark.config_default` is removed.
 - The warn-at notice reads `context 412k: past the 1x mark for <model>`, the context in
   thousands rounded halves up, in place of `context 412,330 passed the 1x restart point
   (398,112) for <model>`. A crossing handler's line on the same call is appended to the
