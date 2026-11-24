@@ -46,7 +46,8 @@
 - The lander tells a member's builder only while comms reads the builder's name as held
   by a live session; a builder passed over is neither sent to nor recorded. A member's
   notice that no name received goes once to the project's director, saying who it could
-  not reach. A message counts as undelivered only when no name got its text, and
+  not reach, also when that is known only once a send comms could not take ends
+  `unsent`. A message counts as undelivered only when no name got its text, and
   `moxi rounds queue` names each send and a fix for a never-bound name and for a refused
   credential.
 - `moxi rounds check --full` runs in a queue project: it runs and records the repo's

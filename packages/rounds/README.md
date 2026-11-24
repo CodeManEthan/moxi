@@ -1059,8 +1059,9 @@ owner nor the director has a running session and the notice waits.
 (landed, ejected, left) to its round's lead (the round's own, else the project's), and
 to its builder, the name its commission recorded, only while comms reads that name as
 held by a live session; a builder not held is neither sent to nor recorded. A member's
-notice that no name received (no lead, the builder not held, every send refused or
-failed) goes once to the project's `director`, naming who it could not reach and why; a member ejected for a conflict, once
+notice that no name received (no lead, the builder not held, every send refused,
+failed or, after an hour of tries, unsent) goes once to the project's `director`, naming
+who it could not reach and why; a member ejected for a conflict, once
 the member it conflicts with lands, is ejected or leaves, with what to do now; a pause or
 a wait on the target's checkout to the project's `director`. Each message is recorded in
 the queue file as `told`, with what comms did with it. One comms could not take (its

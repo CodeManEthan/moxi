@@ -190,6 +190,45 @@ def test_a_notice_no_name_received_goes_to_the_director_once(
         f"landed:{ROUND} B1:{queue().member(ROUND, 'B1').line}:director"]
 
 
+def test_a_notice_whose_send_ends_unsent_goes_to_the_director_once(
+        repo, ready, lander_pass, comms, write_config):
+    write_config(config_text(table='director = "dir-a"'))
+    ready()
+    leads.mark(ROUND, "lead-a", by="planner")
+    comms.states["coder"] = "free"
+    comms.outcome["lead-a"] = "offline"
+    lander_pass()
+    lander_pass()
+    lander_pass(60.0)
+    assert comms.to("dir-a") == []
+    lander_pass(telling.UNSENT_S + 1)
+    notice = comms.to("dir-a")
+    assert len(notice) == 1
+    assert ("It reached nobody: lead-a: unsent (comms could not take it for "
+            f"{int(telling.UNSENT_S)} s: the daemon is down); coder: not sent (comms "
+            "reads no running session for it: free).") in notice[0]
+    lander_pass(telling.UNSENT_S + 60)
+    assert len(comms.to("dir-a")) == 1
+    assert [one["key"] for one in told("director")] == [
+        f"landed:{ROUND} B1:{queue().member(ROUND, 'B1').line}:director"]
+
+
+def test_a_notice_one_send_of_which_reached_its_name_is_not_sent_to_the_director(
+        repo, ready, lander_pass, comms, write_config):
+    write_config(config_text(table='director = "dir-a"'))
+    ready()
+    leads.mark(ROUND, "lead-a", by="planner")
+    comms.outcome.update({"lead-a": "offline", "coder": "offline"})
+    lander_pass()
+    lander_pass()
+    del comms.outcome["coder"]
+    lander_pass(60.0)
+    lander_pass(telling.UNSENT_S + 1)
+    assert [one["delivery"] for one in told("landed") if one["to"] == "lead-a"][-1] == (
+        telling.UNSENT)
+    assert comms.to("dir-a") == [] and told("director") == []
+
+
 def test_without_comms_the_member_lands_and_nothing_is_sent(repo, ready, lander_pass):
     ready()
     leads.mark(ROUND, "lead-a", by="planner")

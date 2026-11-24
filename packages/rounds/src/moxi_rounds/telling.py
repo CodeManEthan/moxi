@@ -100,6 +100,12 @@ def undelivered(queue: queue_file.Queue) -> list[dict]:
             and message_of(one) not in reached]
 
 
+def sends_of(queue: queue_file.Queue, key: str) -> list[dict]:
+    """The newest record of each send of the message `key`, each send's key being
+    `<key>:<to>`, oldest first."""
+    return [one for one in _newest(queue) if str(one.get("key")).startswith(f"{key}:")]
+
+
 def trying(queue: queue_file.Queue) -> list[dict]:
     """The sends still being tried: those whose newest record is `offline`."""
     return [one for one in _newest(queue) if one.get("delivery") == OFFLINE]
@@ -171,31 +177,36 @@ class Teller:
         why = f"{code}: {words}" if code and words != code else words
         return self.record(key, to, about, text, REFUSED, why=why, **fields)
 
-    def retry(self, *, reread: Callable[[dict, dict], str | None] | None = None) -> None:
+    def retry(self, *,
+              reread: Callable[[dict, dict], str | None] | None = None) -> list[dict]:
         """Try again each message comms could not take, until `UNSENT_S` after its first
         try; past that it is recorded `unsent` and no longer tried. `reread(record,
         fields)`, before each try, reads again what the message depends on: it updates
         the `fields` the try is recorded with, and gives why the message is no longer
-        owed (recorded `unsent`, not tried again), or None to try it."""
+        owed (recorded `unsent`, not tried again), or None to try it. The `unsent`
+        records this wrote, oldest first."""
+        ended: list[dict] = []
         if self.comms is None:
-            return
+            return ended
         for one in trying(queue_file.read(self.repo, self.env)):
             first_s = float(one.get("first_s") or 0)
             fields = {name: value for name, value in one.items()
                       if name not in ("event", "at", "key", "to", "about", "text",
                                       "delivery", "why", "first_s", "message_id")}
             if self.clock() - first_s >= UNSENT_S:
-                self.record(one["key"], one.get("to"), one.get("about"), one.get("text"),
-                            UNSENT, why=f"comms could not take it for {int(UNSENT_S)} s: "
-                            f"{one.get('why')}", **fields)
+                ended.append(self.record(
+                    one["key"], one.get("to"), one.get("about"), one.get("text"), UNSENT,
+                    why=f"comms could not take it for {int(UNSENT_S)} s: {one.get('why')}",
+                    **fields))
                 continue
             gone = None if reread is None else reread(one, fields)
             if gone is not None:
-                self.record(one["key"], one.get("to"), one.get("about"), one.get("text"),
-                            UNSENT, why=gone, **fields)
+                ended.append(self.record(one["key"], one.get("to"), one.get("about"),
+                                         one.get("text"), UNSENT, why=gone, **fields))
                 continue
             self.send(one["key"], one["to"], one.get("about"), one.get("text"),
                       first_s=first_s, **fields)
+        return ended
 
     def record(self, key: str, to: str | None, about: str, text: str, delivery: str,
                **fields) -> dict:
@@ -212,4 +223,4 @@ class Teller:
 
 __all__ = ["MODULE", "SENDER", "UNSENT_S", "OFFLINE", "UNSENT", "REFUSED", "ERROR",
            "NOBODY", "NOT_DELIVERED", "HELD", "LOAD", "comms_api", "message_of",
-           "undelivered", "trying", "Teller"]
+           "undelivered", "sends_of", "trying", "Teller"]

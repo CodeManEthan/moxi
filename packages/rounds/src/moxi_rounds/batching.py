@@ -220,7 +220,8 @@ class _Pass:
     # -- the pass ------------------------------------------------------------------------
 
     def run(self) -> None:
-        self.teller.retry(reread=self.reread_owner)
+        for ended in self.teller.retry(reread=self.reread_owner):
+            self.tell_unsent(ended)
         queue = queue_file.read(self.repo, self.env)
         if self.ci is None:
             if queue.queued() and queue.paused is None:
@@ -1193,23 +1194,45 @@ class _Pass:
         """Tell the member's round's lead, and its builder only while comms reads that
         name held by a running session (`telling.Teller.can_receive`), each once; a
         builder passed over is neither sent nor recorded. With no lead recorded, that is
-        recorded. When no send reached a name (none was a delivery, and none is still
-        tried), the director is told once, naming who was not reached and why."""
+        recorded. Then the director is told when no send reached a name
+        (`tell_unreached`)."""
         builder, lead = self.people(member.name, member.stage)
         passed = None
         if builder and builder != lead and not self.teller.can_receive(builder):
             passed, builder = builder, None
-        tried: list[dict] = []
         for to in [one for one in dict.fromkeys((lead, builder)) if one]:
-            record = self.teller.tell(to, about, f"{key}:{to}", text,
-                                      member=[member.name, member.stage])
-            tried.append(record or self.teller.record_of(f"{key}:{to}") or {})
+            self.teller.tell(to, about, f"{key}:{to}", text,
+                             member=[member.name, member.stage])
         if lead is None:
-            record = self.teller.tell(None, about, f"{key}:lead", text,
-                                      why_nobody=f"{member.name} has no lead recorded",
-                                      member=[member.name, member.stage])
-            tried.append(record or self.teller.record_of(f"{key}:lead") or {})
-        if self.teller.comms is None or any(
+            self.teller.tell(None, about, f"{key}:lead", text,
+                             why_nobody=f"{member.name} has no lead recorded",
+                             member=[member.name, member.stage])
+        self.tell_unreached(key, text, passed=passed)
+
+    def tell_unsent(self, ended: dict) -> None:
+        """After the send `ended` was recorded `unsent`: when it was a send of a
+        member's notice, tell the director if no send of that notice reached a name."""
+        to, member = ended.get("to"), ended.get("member")
+        if not to or not member or len(member) != 2:
+            return
+        key = str(ended.get("key")).removesuffix(f":{to}")
+        builder, lead = self.people(str(member[0]), str(member[1]))
+        sent = {one.get("to") for one in self.sends(key)}
+        passed = builder if builder and builder != lead and builder not in sent else None
+        self.tell_unreached(key, str(ended.get("text")), passed=passed)
+
+    def sends(self, key: str) -> list[dict]:
+        """The newest record of each send of the member's notice `key`."""
+        return [one for one in telling.sends_of(queue_file.read(self.repo, self.env), key)
+                if one.get("member")]
+
+    def tell_unreached(self, key: str, text: str, *, passed: str | None) -> None:
+        """When no send of the member's notice `key`, whose text is `text`, reached a
+        name (none was a delivery, and none is still tried), tell the director once,
+        under `<key>:director`, naming who was not reached and why; `passed` is the
+        builder passed over, never sent to."""
+        tried = self.sends(key)
+        if self.teller.comms is None or not tried or any(
                 one.get("delivery") not in telling.NOT_DELIVERED
                 or one.get("delivery") == telling.OFFLINE for one in tried):
             return
