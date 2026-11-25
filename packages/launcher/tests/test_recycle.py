@@ -9,6 +9,7 @@ from __future__ import annotations
 import os
 import threading
 import time
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -284,7 +285,8 @@ def test_a_codex_session_reads_its_cache_with_the_codex_sessions_dir(conn):
     verdict = recycle.ask_expiry(NEW, conn=conn, turns=FakeTurns(session),
                                  slots_api=FakeSlots(), cache=cache, settings=SETTINGS)
     assert verdict.outcome == "compacted"
-    assert cache.reads == [("codex", NEW, {"cache_source": "/home/x/.cx/sessions"})]
+    sessions = str(Path("/home/x/.cx") / "sessions")
+    assert cache.reads == [("codex", NEW, {"cache_source": sessions})]
 
 
 def test_a_claude_cache_read_names_the_harness_and_newest_id(conn):

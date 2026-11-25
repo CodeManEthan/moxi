@@ -533,10 +533,14 @@ def test_a_resume_of_a_relaunched_go_launch_is_ruled_by_go_not_the_shown_posture
     assert launch.requests[0].brief == "Carry on."
 
 
+#: A brief file named from the root, absolute on this system (on Windows, this drive).
+W_BRIEF = os.path.abspath("/w/brief.md")
+
+
 @pytest.mark.parametrize("posture, given, code, row", [
     ("with:lead", {"brief": "Go."}, "posture-brief", "brief"),
-    ("with:lead", {"brief_file": "/w/brief.md"}, "posture-brief", "brief"),
-    ("go", {"brief": "Go.", "brief_file": "/w/brief.md"}, "bad-value", "brief"),
+    ("with:lead", {"brief_file": W_BRIEF}, "posture-brief", "brief"),
+    ("go", {"brief": "Go.", "brief_file": W_BRIEF}, "bad-value", "brief"),
     ("go", {"brief_file": "brief.md"}, "bad-value", "brief_file"),
 ])
 def test_a_brief_that_doesnt_fit_the_resume_is_refused(conn, posture, given, code, row):

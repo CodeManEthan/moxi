@@ -92,6 +92,6 @@ def test_the_run_files_declared_age_is_the_keep_days_default():
     from importlib import resources
 
     shipped = tomllib.loads(resources.files("moxi_launcher").joinpath(
-        "settings.toml").read_text())
+        "settings.toml").read_text(encoding="utf-8"))
     days = shipped["runs"]["keep_days"]["default"]
     assert module.STORES["runs"]["retention"] == f"{days}d"

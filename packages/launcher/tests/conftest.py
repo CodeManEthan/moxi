@@ -6,12 +6,12 @@ which skips a test of the slot target on native Windows unless the test is also 
 from __future__ import annotations
 
 import sys
-from datetime import datetime
+from datetime import datetime, timedelta
 
 import pytest
 from moxi import config
 
-from moxi_launcher import names, settings, startup
+from moxi_launcher import names, settings, startup, store
 from moxi_launcher.compose import common
 
 #: Why a test marked `slot_target` is skipped on native Windows.
@@ -32,6 +32,24 @@ def pytest_collection_modifyitems(items):
     for item in items:
         if item.get_closest_marker("slot_target") and not item.get_closest_marker("on_windows"):
             item.add_marker(skip)
+
+
+@pytest.fixture
+def ticking_store_clock(monkeypatch):
+    """`store.now` that never gives one time twice. On Windows the wall clock moves in
+    steps of about 15 ms, so writes a test makes at once can share a time, and a read of
+    what came after a moment (the nudges since a press) misses one made in its step."""
+    real = store.now
+    last: list[str] = []
+
+    def now() -> str:
+        at = real()
+        if last and at <= last[0]:
+            at = store.stamp(datetime.fromisoformat(last[0]) + timedelta(microseconds=1))
+        last[:] = [at]
+        return at
+
+    monkeypatch.setattr(store, "now", now)
 
 
 #: The local time every launch a test makes in its own process is named at.

@@ -599,7 +599,9 @@ def _fifo(tmp_path):
 @pytest.mark.parametrize("make, words", [
     (_missing, "can't be read"),
     (_handoff_dir, "is not a regular file"),
-    (_fifo, "is not a regular file"),
+    pytest.param(_fifo, "is not a regular file",
+                 marks=pytest.mark.skipif(sys.platform == "win32",
+                                          reason="Windows: no named pipe made by mkfifo")),
     (_empty, "is empty"),
     (_blank, "is blank"),
     (_not_utf8, "is not UTF-8 text"),

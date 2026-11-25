@@ -567,7 +567,9 @@ def test_the_detached_deliverer_sends_writes_the_row_and_logs(turns, conn, monke
     assert isinstance(child, int) and child != os.getpid()
     wait_for(lambda: row(conn).state == "first-sent", timeout=30)
     [given] = turns.calls("deliver")
-    assert given["pid"] == child
+    # The deliverer itself, or on Windows the interpreter a venv's python.exe starts as its
+    # child.
+    assert child in (given["pid"], given["ppid"]) and given["pid"] != os.getpid()
     assert given["ref"] == "launcher:r-1"
     log_path = first.run_log("r-1")
     wait_for(lambda: log_path.exists() and "delivered" in log_path.read_text(), timeout=30)

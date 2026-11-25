@@ -25,7 +25,7 @@ from moxi_dev.testing import PROC_WAIT_S
 
 import launcher_fake_slots as fake
 import launcher_fake_turns as fake_turns
-from moxi_launcher import api, first, presets, slots, store, targets
+from moxi_launcher import api, catalog, first, presets, slots, store, targets
 from moxi_launcher.api import LaunchRequest
 
 TESTS = Path(__file__).resolve().parent
@@ -630,7 +630,7 @@ def test_comms_codex_wrapper_takes_the_composed_line(tmp_path):
                          text=True, timeout=60)
     assert run.returncode == 0, run.stderr
     assert f"--cwd {work}" in run.stdout and "--model gpt-5" in run.stdout
-    assert f'projects."{work}".trust_level="trusted"' in run.stdout
+    assert f'projects.{catalog.toml_literal(str(work))}.trust_level="trusted"' in run.stdout
 
 
 def test_comms_codex_wrapper_takes_the_composed_resume_line(tmp_path):

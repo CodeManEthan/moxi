@@ -370,8 +370,10 @@ def test_preview_prints_the_argv_and_the_stamped_env(work, monkeypatch, capsys):
     lines = out.splitlines()
     assert lines[0] == "harness claude, mode interactive, target terminal"
     assert lines[1] == "argv:" and lines[2].startswith("  claude ")
-    # A word with a newline in it is quoted across lines, as a shell reads it back.
-    assert "--model opus" in out and "'Brief from launcher, launched by " in lines[2]
+    # A word with a newline in it is quoted across lines, as this system's shell reads it
+    # back (cmd.exe's double quotes on Windows).
+    quote = '"' if sys.platform == "win32" else "'"
+    assert "--model opus" in out and f"{quote}Brief from launcher, launched by " in lines[2]
     env_lines = lines[lines.index("env:") + 1:]
     assert "  MOXI_USAGE_WARN_AT=2x" in env_lines
     assert any(line.startswith("  MOXI_LAUNCHER_REQUEST=") for line in env_lines)

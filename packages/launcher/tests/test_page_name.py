@@ -110,6 +110,7 @@ def test_the_home_dir_is_named_as_a_launch_there_is_named(tmp_path, monkeypatch)
     home = tmp_path / "shell"
     home.mkdir()
     monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setenv("USERPROFILE", str(home))  # what `~` reads on Windows
     said = name(cwd="~")
     assert said["name"] == previewed_name("~") == "20261108-1245-shell", said
 

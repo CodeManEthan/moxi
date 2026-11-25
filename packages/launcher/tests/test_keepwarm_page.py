@@ -17,6 +17,9 @@ from test_keepwarm import (IN, SETTINGS, SID, FakeCache, FakeSession, Value, age
 
 from moxi_launcher import cachetimers, catalog, joiner, keepwarm, slots, store, waits
 
+#: Each store time is later than the one before (Windows' clock moves in steps).
+pytestmark = pytest.mark.usefixtures("ticking_store_clock")
+
 __all__ = ["conn"]
 
 #: The watcher's tick at cache's default.

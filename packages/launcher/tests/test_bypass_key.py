@@ -90,8 +90,9 @@ def run_file(rid: str = "r1") -> Path:
 
 def test_a_bypass_slot_launch_passes_one_settings_naming_its_run_file():
     got = claude.compose(values(**BYPASS), ctx())
-    assert settings_args(got.argv) == ["/state/runs/r1.settings.json"]
-    assert got.settings_file.path == "/state/runs/r1.settings.json"
+    run_file = str(Path("/state/runs") / "r1.settings.json")
+    assert settings_args(got.argv) == [run_file]
+    assert got.settings_file.path == run_file
     assert json.loads(got.settings_file.text) == {KEY: True}
 
 

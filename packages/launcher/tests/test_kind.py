@@ -10,6 +10,7 @@ from pathlib import Path
 import pytest
 from moxi import modules
 from moxi import store as core_store
+from moxi_dev.testing import toml_string
 
 import launcher_fake_turns as fake_turns
 from launcher_fake_harness import Harness
@@ -185,7 +186,7 @@ def harness(tmp_path, monkeypatch) -> Harness:
     ('[seat.tester]\nscratch = true\n', {}, "scratch"),
     ('[seat.tester]\n', {}, "seat"),
     ('[seat.tester]\n', {"scratch": True}, "scratch"),
-    ('[project.docs]\ncwd = "{work}"\n', {}, "project"),
+    ('[project.docs]\ncwd = {work}\n', {}, "project"),
     ('', {}, "one-off"),
 ])
 def test_a_launch_made_through_the_api_answers_its_kind(harness, tmp_path, preset, typed,
@@ -194,7 +195,7 @@ def test_a_launch_made_through_the_api_answers_its_kind(harness, tmp_path, prese
     work.mkdir()
     file = presets.path()
     file.parent.mkdir(parents=True, exist_ok=True)
-    file.write_text(preset.replace("{work}", str(work)))
+    file.write_text(preset.replace("{work}", toml_string(work)))
     named = {"seat": "tester"} if "seat." in preset else (
         {"project_preset": "docs"} if "project." in preset else {})
     api.launch(LaunchRequest(**named, typed={"target": "headless", "brief": "Go.", **typed}, cwd=str(work),

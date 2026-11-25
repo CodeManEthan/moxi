@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import sys
 from types import SimpleNamespace
 
 import launcher_fake_turns
@@ -97,6 +98,9 @@ def deliveries(turns: kit.FakeTurns) -> list[dict]:
     return [c for c in launcher_fake_turns.calls(turns.dir) if c["call"] == "deliver"]
 
 
+@pytest.mark.skipif(sys.platform == "win32",
+                    reason="Windows: cache can't read a session's environment there, so its "
+                           "timer asks nothing and keep-warm offers no cover")
 def test_a_press_covers_a_waiting_session_whose_asks_nudge_it_until_nobody_is_at_work(chain):
     async def go():
         # 1 and 2: the seeded session waits uncovered, and a press would cover it.

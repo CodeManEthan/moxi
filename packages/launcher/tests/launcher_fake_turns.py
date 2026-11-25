@@ -84,7 +84,8 @@ def script() -> dict:
 
 def record(call: str, **detail) -> None:
     with open(_dir() / "calls.jsonl", "a", encoding="utf-8") as fh:
-        fh.write(json.dumps({"call": call, "pid": os.getpid(), **detail}) + "\n")
+        fh.write(json.dumps({"call": call, "pid": os.getpid(), "ppid": os.getppid(),
+                             **detail}) + "\n")
 
 
 #: Set by `hide`, so a launch a test runs in a process of its own (`launcher_child`) finds

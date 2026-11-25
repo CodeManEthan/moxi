@@ -8,6 +8,7 @@ from __future__ import annotations
 import json
 import os
 import stat
+import sys
 import threading
 from pathlib import Path
 from types import SimpleNamespace
@@ -201,6 +202,10 @@ def test_an_unexpected_failure_names_only_its_class(monkeypatch):
 
 # --- a terminal launch: the command to copy ------------------------------------------------------
 
+#: A brief file named from the root, absolute on this system (on Windows, this drive).
+W_BRIEF = os.path.abspath("/w/brief.md")
+
+
 def test_a_terminal_launch_is_answered_with_the_command_to_copy():
     seed(target_name="terminal")
     said = resumed({"session": SID})
@@ -211,10 +216,13 @@ def test_a_terminal_launch_is_answered_with_the_command_to_copy():
 def test_a_terminal_launchs_command_carries_the_brief_or_brief_file():
     seed(target_name="terminal", posture="go")
     said = resumed({"session": SID, "brief": "Carry on, then report."})
+    # Quoted as this system's shell reads it back (cmd.exe's double quotes on Windows).
+    quoted = ('"Carry on, then report."' if sys.platform == "win32"
+              else "'Carry on, then report.'")
     assert said == {"refused": None, "command": f"moxi launcher resume {SID} --brief "
-                                                "'Carry on, then report.'"}
-    said = resumed({"session": SID, "brief_file": "/w/brief.md"})
-    assert said["command"] == f"moxi launcher resume {SID} --brief-file /w/brief.md"
+                                                f"{quoted}"}
+    said = resumed({"session": SID, "brief_file": W_BRIEF})
+    assert said["command"] == f"moxi launcher resume {SID} --brief-file {W_BRIEF}"
     assert no_request_files()
 
 
@@ -225,7 +233,7 @@ def test_a_terminal_launchs_command_carries_the_brief_or_brief_file():
     ("go", {"plain": False}, "posture-brief"),
     ("with:lead", {"brief": "Go.", "plain": True}, "posture-brief"),
     ("with:lead", {"brief": "Go."}, "posture-brief"),
-    ("go", {"brief": "Go.", "brief_file": "/w/brief.md"}, "bad-value"),
+    ("go", {"brief": "Go.", "brief_file": W_BRIEF}, "bad-value"),
     ("go", {"brief_file": "brief.md"}, "bad-value"),
 ])
 def test_a_brief_that_doesnt_fit_the_resume_is_refused_in_the_route(target_name, posture,
@@ -271,8 +279,8 @@ def test_a_terminal_launchs_command_with_a_brief_has_no_plain():
     seed(target_name="terminal", posture="go")
     said = resumed({"session": SID, "brief": "Go.", "plain": True})
     assert said["command"] == f"moxi launcher resume {SID} --brief Go."
-    said = resumed({"session": SID, "brief_file": "/w/brief.md", "plain": True})
-    assert said["command"] == f"moxi launcher resume {SID} --brief-file /w/brief.md"
+    said = resumed({"session": SID, "brief_file": W_BRIEF, "plain": True})
+    assert said["command"] == f"moxi launcher resume {SID} --brief-file {W_BRIEF}"
 
 
 def test_a_slot_named_for_a_terminal_launch_is_refused():
@@ -440,11 +448,11 @@ def test_the_job_resumes_the_session_under_the_request_id():
 
 def test_the_job_hands_the_requests_brief_to_the_resume():
     seed(posture="go")
-    resume_file(brief_file="/w/brief.md")
+    resume_file(brief_file=W_BRIEF)
     launch = Launch()
     assert job.run_request("r9", launch=launch) == "started"
     assert (launch.requests[0].brief, launch.requests[0].brief_file) == (None,
-                                                                         "/w/brief.md")
+                                                                         W_BRIEF)
     resume_file("r10", brief="Carry on.")
     assert job.run_request("r10", launch=launch) == "started"
     assert (launch.requests[1].brief, launch.requests[1].brief_file) == ("Carry on.", None)
@@ -560,6 +568,7 @@ def harness(tmp_path, monkeypatch) -> Harness:
     return Harness.on_path(tmp_path, monkeypatch)
 
 
+@pytest.mark.slot_target
 def test_a_slot_resume_from_the_page_goes_back_to_its_slot(tmp_path, harness, rig,
                                                            monkeypatch):
     work = tmp_path / "work"
@@ -589,6 +598,7 @@ def test_a_slot_resume_from_the_page_goes_back_to_its_slot(tmp_path, harness, ri
     assert with_store(lambda c: len(store.log(c))) == 2
 
 
+@pytest.mark.slot_target
 def test_a_plain_resume_of_a_go_launch_from_the_page_starts_with_no_first_turn(
         tmp_path, harness, rig, monkeypatch):
     """Home's continue with an empty box on a `go` session: refused without `plain`, and

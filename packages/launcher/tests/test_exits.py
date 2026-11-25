@@ -6,6 +6,7 @@ per exit, and the exit log."""
 from __future__ import annotations
 
 import os
+import sys
 import time
 from types import SimpleNamespace
 
@@ -420,7 +421,7 @@ def _host(tmp_path, *, ignores_term=False):
             + ("signal.signal(signal.SIGTERM, signal.SIG_IGN)\n" if ignores_term else "")
             + "print('ready', flush=True)\ntime.sleep(60)\n")
     child = subprocess.Popen([sys.executable, "-c", code], stdout=subprocess.PIPE)
-    assert child.stdout.readline() == b"ready\n"
+    assert child.stdout.readline().rstrip() == b"ready"
     ident = proc.identity(child.pid)
     conn = store.connect(tmp_path / "launcher.db")
     store.insert(conn, request_id="r1", by="ann", harness="codex", target="slot",
@@ -452,6 +453,8 @@ def test_a_quiet_codex_session_exits_by_its_host_stopping(tmp_path):
         conn.close()
 
 
+@pytest.mark.skipif(sys.platform == "win32",
+                    reason="Windows: SIGTERM is TerminateProcess, which no host can ignore")
 def test_a_codex_host_still_running_at_the_bound_is_not_exited(tmp_path):
     child, conn, session = _host(tmp_path, ignores_term=True)
     try:

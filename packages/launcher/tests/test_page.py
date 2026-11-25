@@ -25,6 +25,8 @@ import pytest
 from moxi import modules
 from moxi import proc
 
+from moxi_dev.testing import toml_string
+
 from moxi_launcher import catalog, first, page, pagehandlers, presets, slots, store
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -253,12 +255,19 @@ def test_a_failed_catalog_read_says_only_the_class(monkeypatch):
 
 # --- /api/presets -------------------------------------------------------------------------
 
-PRESETS_FILE = """\
+#: Absolute paths a presets file names, as this system spells them: on Windows a path
+#: from the root takes this process's drive (`/work` names none, so it isn't absolute).
+A, B, WORK = (os.path.abspath(path) for path in ("/a", "/b", "/work"))
+SRV_DEFAULT, SRV_THERE, SEAT_MD = (os.path.abspath(path)
+                                   for path in ("/srv/default", "/srv/there", "/seat.md"))
+ADD_DIRS = f"[{toml_string(A)}, {toml_string(B)}]"
+
+PRESETS_FILE = f"""\
 [seat.planner]
 harness = "claude"
 model = "opus"
 brief = "the planner's brief, kept off the page"
-add_dir = ["/a", "/b"]
+add_dir = {ADD_DIRS}
 
 [seat.broken]
 harness = "claude"
@@ -266,7 +275,7 @@ effort = "loudest"
 
 [project.moxi]
 harness = "codex"
-cwd = "/work"
+cwd = {toml_string(WORK)}
 search = true
 """
 
@@ -286,11 +295,11 @@ def test_presets_send_each_preset_spelled_with_its_brief_withheld():
     planner = {v["name"]: v for v in named["planner"]["values"]}
     assert named["planner"]["kind"] == "seat" and named["planner"]["harness"] == "claude"
     assert planner["model"] == {"name": "model", "value": "opus", "items": None}
-    assert planner["add_dir"] == {"name": "add_dir", "value": None, "items": ["/a", "/b"]}
+    assert planner["add_dir"] == {"name": "add_dir", "value": None, "items": [A, B]}
     assert planner["brief"] == {"name": "brief", "value": None, "items": None}
     assert b"kept off the page" not in raw
     moxi = {v["name"]: v["value"] for v in named["moxi"]["values"]}
-    assert moxi == {"harness": "codex", "cwd": "/work", "search": "true"}
+    assert moxi == {"harness": "codex", "cwd": WORK, "search": "true"}
     assert [(p["where"], p["key"], p["level"]) for p in said["problems"]] == [
         ("seat.broken", "effort", "error")]
 
@@ -312,21 +321,21 @@ def test_no_presets_file_reads_empty():
 
 # --- /api/form ----------------------------------------------------------------------------
 
-FORM_FILE = """\
+FORM_FILE = f"""\
 [defaults]
 model = "sonnet"
-cwd = "/srv/default"
+cwd = {toml_string(SRV_DEFAULT)}
 instructions = "the default instructions, kept off the page"
 
 [seat.planner]
 harness = "claude"
 effort = "high"
 scratch = true
-add_dir = ["/a", "/b"]
+add_dir = {ADD_DIRS}
 brief = "the planner's brief, kept off the page"
 
 [seat.filed]
-instructions_file = "/seat.md"
+instructions_file = {toml_string(SEAT_MD)}
 
 [seat.coder]
 harness = "codex"
@@ -334,7 +343,7 @@ approval = "never"
 search = true
 
 [project.there]
-cwd = "/srv/there"
+cwd = {toml_string(SRV_THERE)}
 """
 
 
@@ -365,7 +374,7 @@ def test_the_form_spells_each_value_as_a_presets_value_with_its_source():
     rows = form_rows(form("seat=planner"))
     assert rows["effort"] == {"name": "effort", "value": "high", "items": None,
                               "source": "preset", "withheld": False}
-    assert rows["add_dir"] == {"name": "add_dir", "value": None, "items": ["/a", "/b"],
+    assert rows["add_dir"] == {"name": "add_dir", "value": None, "items": [A, B],
                                "source": "preset", "withheld": False}
     assert rows["scratch"]["value"] == "true" and rows["scratch"]["source"] == "preset"
     assert rows["model"] == {"name": "model", "value": "sonnet", "items": None,
@@ -383,9 +392,9 @@ def test_the_form_shows_one_place_whole_from_the_latest_layer():
     assert [(rows[n]["value"], rows[n]["source"]) for n in ("cwd", "project", "scratch")] == [
         (None, "shipped"), (None, "shipped"), ("true", "preset")]
     rows = form_rows(form("project_preset=there"))
-    assert (rows["cwd"]["value"], rows["cwd"]["source"]) == ("/srv/there", "preset")
+    assert (rows["cwd"]["value"], rows["cwd"]["source"]) == (SRV_THERE, "preset")
     rows = form_rows(form())
-    assert (rows["cwd"]["value"], rows["cwd"]["source"]) == ("/srv/default", "defaults")
+    assert (rows["cwd"]["value"], rows["cwd"]["source"]) == (SRV_DEFAULT, "defaults")
     assert (rows["scratch"]["value"], rows["scratch"]["source"]) == ("false", "shipped")
 
 
@@ -401,7 +410,7 @@ def test_a_text_written_inline_comes_withheld_from_either_layer():
     assert rows["instructions"] == {"name": "instructions", "value": None, "items": None,
                                     "source": "shipped", "withheld": False}
     assert (rows["instructions_file"]["value"], rows["instructions_file"]["withheld"]) == (
-        "/seat.md", False)
+        SEAT_MD, False)
 
 
 def test_the_form_is_drawn_for_the_presets_harness_or_the_one_asked():
@@ -777,6 +786,7 @@ def test_a_failed_places_read_says_only_the_class(log, monkeypatch):
 
 def test_places_name_the_home_dir_the_page_server_sees(monkeypatch, tmp_path):
     monkeypatch.setenv("HOME", str(tmp_path / "elsewhere"))
+    monkeypatch.setenv("USERPROFILE", str(tmp_path / "elsewhere"))  # the home on Windows
     assert get("/api/places")[1]["home"] == str(tmp_path / "elsewhere")
 
 

@@ -95,7 +95,8 @@ def test_a_terminal_launch_becomes_the_harness(tmp_path, work, harness, monkeypa
     # exec: the harness has the launcher's pid, its exit code is the launch's, and it
     # runs in the launch's directory with the composed argv.
     assert code == 7, seen["stderr"]
-    assert Path(run["argv"][0]) == harness.bin / "claude"
+    started = Path(run["argv"][0])
+    assert (started.parent, started.stem) == (harness.bin, "claude")
     assert run["argv"][1:] == seen["preview"][1:] and seen["preview"][0] == "claude"
     assert run["cwd"] == str(work)
     assert run["argv"][1].startswith("Brief from launcher, launched by ann")
@@ -110,7 +111,8 @@ def test_a_terminal_launch_becomes_the_harness(tmp_path, work, harness, monkeypa
     assert got.env == {"MOXI_USAGE_WARN_AT": "2x", "MOXI_LAUNCHER_REQUEST": "r1"}
     prompt = common.prompt_path(targets.runs_dir(), "r1")
     assert Path(prompt).exists() and "--append-system-prompt-file" in run["argv"]
-    assert stat.S_IMODE(Path(prompt).stat().st_mode) == 0o600
+    if os.name == "posix":
+        assert stat.S_IMODE(Path(prompt).stat().st_mode) == 0o600
 
 
 def test_a_terminal_launch_records_the_process_that_runs_claude(tmp_path, work, harness):
@@ -383,7 +385,8 @@ def test_a_headless_launch_starts_detached_and_returns(work, harness, harness_na
     # Its output is appended to the run log, readable by its owner only.
     log = targets.run_log("r1")
     wait_for(lambda: log.exists() and "the fake harness ran" in log.read_text(), timeout=30)
-    assert stat.S_IMODE(log.stat().st_mode) == 0o600
+    if os.name == "posix":
+        assert stat.S_IMODE(log.stat().st_mode) == 0o600
     assert str(log) in result.line
 
 
@@ -400,7 +403,9 @@ def test_a_headless_launch_spawns_from_spawning_and_records_its_process(work, ha
     [handed] = seen
     assert handed["detached"] is True and handed["cwd"] == str(work)
     assert handed["output"] == targets.run_log("r1")
-    assert tuple(handed["argv"]) == result.argv
+    # On Windows the program is started by the path found on PATH, not its bare name.
+    assert tuple(handed["argv"][1:]) == result.argv[1:]
+    assert Path(handed["argv"][0]).stem == result.argv[0]
     assert handed["env"]["MOXI_LAUNCHER_REQUEST"] == "r1"
     assert handed["row"].state == "spawning" and handed["row"].pid is None
     got = row()
@@ -914,7 +919,9 @@ def test_a_scratch_launch_makes_its_dir_and_never_removes_it(harness, tmp_path):
     assert not where.exists()
     result = api.launch(req)
     assert row("r9").values["name"] == SCRATCH_NAME
-    assert where.is_dir() and stat.S_IMODE(where.stat().st_mode) == 0o700
+    assert where.is_dir()
+    if os.name == "posix":
+        assert stat.S_IMODE(where.stat().st_mode) == 0o700
     run = harness.one()
     assert run["cwd"] == str(where) and "--skip-git-repo-check" in run["argv"]
     assert row("r9").cwd == str(where) and result.exit_code == exits.OK
@@ -991,6 +998,14 @@ def test_a_scratch_dir_notes_would_give_a_home_is_refused(harness, tmp_path, mon
     assert nothing_written("r9") and not common.scratch_dir(SCRATCH_NAME).exists()
 
 
+#: The scratch parent's checks read a uid and mode bits. On Windows the parent is in the
+#: user's own temporary folder, made with an access list, and nothing is read.
+POSIX_SCRATCH = pytest.mark.skipif(
+    sys.platform == "win32",
+    reason="Windows: the scratch parent is checked by no uid, mode or link read")
+
+
+@POSIX_SCRATCH
 def test_scratch_launches_go_under_tmp_scratch_uid_whatever_tmpdir_says(
         tmp_path, monkeypatch, real_scratch_tmp):
     # The launcher's own parent, not the tests' stand-in: names only, nothing made.
@@ -1002,6 +1017,19 @@ def test_scratch_launches_go_under_tmp_scratch_uid_whatever_tmpdir_says(
         assert common.scratch_dir("planner-1") == Path(f"/tmp/scratch-{os.getuid()}/planner-1")
 
 
+def test_scratch_launches_go_under_temp_by_user_name_where_there_is_no_uid(
+        tmp_path, monkeypatch):
+    # Windows' parent: `scratch-<user name>` in TEMP (or TMP), the name made plain.
+    monkeypatch.delattr(os, "getuid", raising=False)
+    monkeypatch.setattr(common.getpass, "getuser", lambda: "Ada Lovelace")
+    monkeypatch.setenv("TEMP", str(tmp_path / "temp"))
+    assert common.scratch_root() == tmp_path / "temp" / "scratch-Ada_Lovelace"
+    monkeypatch.delenv("TEMP")
+    monkeypatch.setenv("TMP", str(tmp_path / "tmp2"))
+    assert common.scratch_dir("planner-1") == tmp_path / "tmp2" / "scratch-Ada_Lovelace" / "planner-1"
+
+
+@POSIX_SCRATCH
 def test_scratch_launches_go_under_a_parent_of_this_users_own(harness, tmp_path,
                                                               own_scratch_tmp):
     root = common.scratch_root()
@@ -1060,6 +1088,7 @@ def refused_before_the_row(tmp_path, words: str) -> None:
     assert row("r9") is None and not common.scratch_dir(SCRATCH_NAME).exists()
 
 
+@POSIX_SCRATCH
 def test_a_scratch_parent_open_to_other_users_refuses_the_launch_before_the_row(
         harness, tmp_path):
     root = common.scratch_root()
@@ -1070,6 +1099,7 @@ def test_a_scratch_parent_open_to_other_users_refuses_the_launch_before_the_row(
     assert stat.S_IMODE(root.stat().st_mode) == 0o755
 
 
+@POSIX_SCRATCH
 def test_a_scratch_parent_that_is_a_link_refuses_the_launch(harness, tmp_path):
     elsewhere = tmp_path / "elsewhere"
     elsewhere.mkdir(mode=0o700)
@@ -1078,6 +1108,7 @@ def test_a_scratch_parent_that_is_a_link_refuses_the_launch(harness, tmp_path):
     assert list(elsewhere.iterdir()) == []
 
 
+@POSIX_SCRATCH
 def test_a_scratch_parent_another_user_owns_refuses_the_launch(harness, tmp_path,
                                                               monkeypatch):
     # The folder is the real user's; the launcher is told it runs as another uid.
@@ -1087,6 +1118,7 @@ def test_a_scratch_parent_another_user_owns_refuses_the_launch(harness, tmp_path
     refused_before_the_row(tmp_path, f"is owned by another user (uid {other - 1})")
 
 
+@POSIX_SCRATCH
 def test_a_scratch_parent_taken_after_the_check_fails_the_row_and_makes_nothing(
         harness, tmp_path, monkeypatch):
     elsewhere = tmp_path / "elsewhere"

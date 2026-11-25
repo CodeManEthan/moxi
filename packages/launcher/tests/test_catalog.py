@@ -3,6 +3,7 @@ the modes rule, the generated parser, pass-through refusals and the `--help` dif
 
 from __future__ import annotations
 
+import os
 import tomllib
 
 import pytest
@@ -258,6 +259,7 @@ def test_a_string_rows_values_are_suggestions():
 
 def test_a_path_expands_home_and_must_be_absolute(tmp_path, monkeypatch):
     monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setenv("USERPROFILE", str(tmp_path))  # what `~` reads on Windows
     row = catalog.launcher()["brief_file"]
     assert row.check("~/brief.md") == str(tmp_path / "brief.md")
     assert row.check("") is None
@@ -470,7 +472,8 @@ def test_a_host_flag_no_launch_passes_on_is_refused(argv):
 
 def test_the_launchers_own_instructions_file_is_still_taken_before_the_dashes():
     got = catalog.parse(["--instructions-file", "/i.md"], "codex", available=everything)
-    assert got.values["instructions_file"] == "/i.md"
+    # A typed path is read against this process's directory: on Windows, its drive.
+    assert got.values["instructions_file"] == os.path.abspath("/i.md")
 
 
 def test_refusing_the_git_check_skip_says_how_to_run_outside_a_git_repository():

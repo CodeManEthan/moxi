@@ -114,12 +114,13 @@ class Spawned:
 # --- the form's values as typed -------------------------------------------------------------
 
 def test_each_value_becomes_its_rows_option_as_the_command_line_spells_it():
+    a = os.path.abspath("/a")  # on Windows a path from the root takes this drive
     words, direct = pagehandlers.tokens(
         {"harness": "claude", "target": "headless", "scratch": "true",
-         "model": "opus", "remote_control": "true", "add_dir": ["/a", "~/b"],
+         "model": "opus", "remote_control": "true", "add_dir": [a, "~/b"],
          "extra_flags": ["--verbose", "-x"]}, "claude", lambda name: False)
     assert words == ["--harness=claude", "--target=headless", "--scratch", "--model=opus",
-                     "--remote-control", "--add-dir=/a", "--add-dir=~/b",
+                     "--remote-control", f"--add-dir={a}", "--add-dir=~/b",
                      "--", "--verbose", "-x"]
     assert direct == {}
     words, _ = pagehandlers.tokens({"scratch": "false", "remote_control": "mine"}, "claude",
@@ -675,8 +676,13 @@ def test_a_typed_cwd_with_the_presets_project_left_out_launches_in_cwd(tmp_path)
     assert job.placed(request).cwd == str(tmp_path)
 
 
+#: A brief file named from the root, absolute on this system (on Windows, this drive).
+B_MD = os.path.abspath("/b.md")
+
+
 def test_a_typed_brief_with_the_presets_brief_file_carried_is_refused(work):
-    write_presets(f'[seat.filed]\ncwd = {toml_string(work)}\nbrief_file = "/b.md"\n')
+    write_presets(f'[seat.filed]\ncwd = {toml_string(work)}\n'
+                  f'brief_file = {toml_string(B_MD)}\n')
     body = edited(filled({"seat": "filed"}), {"brief": BRIEF}, [])
     with pytest.raises(catalog.BadValue) as refused:
         job.placed(pagehandlers.launch_request(body, "r1")[0])
@@ -692,15 +698,15 @@ def test_a_kept_withheld_brief_with_a_typed_brief_file_takes_the_file(work):
     write_presets(f'[seat.planner]\ncwd = {toml_string(work)}\nbrief = "the planner\'s brief"\n')
     body = filled({"seat": "planner"})
     assert "brief" not in body["values"] and "brief" not in body["leave_out"]
-    typed = edited(body, {"brief_file": "/b.md"}, [])
+    typed = edited(body, {"brief_file": B_MD}, [])
     request, _ = pagehandlers.launch_request(typed, "r1")
-    assert dict(request.typed) == {"brief_file": "/b.md"} and tuple(request.left_out) == ()
+    assert dict(request.typed) == {"brief_file": B_MD} and tuple(request.left_out) == ()
     resolved = job.placed(request)
-    assert resolved.values["brief_file"] == "/b.md" and resolved.values["brief"] == ""
-    unticked = edited(body, {"brief_file": "/b.md"}, ["brief"])
+    assert resolved.values["brief_file"] == B_MD and resolved.values["brief"] == ""
+    unticked = edited(body, {"brief_file": B_MD}, ["brief"])
     request, _ = pagehandlers.launch_request(unticked, "r1")
     assert tuple(request.left_out) == ("brief",)
-    assert job.placed(request).values["brief_file"] == "/b.md"
+    assert job.placed(request).values["brief_file"] == B_MD
 
 
 # --- the comparison at launch, and nothing written to the presets file ---

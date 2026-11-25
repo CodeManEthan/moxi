@@ -190,14 +190,16 @@ def test_a_file_changed_once_between_read_and_rename_is_read_again(tmp_path, env
         calls.append(p)
         if len(calls) == 1:
             doc = json.loads(p.read_text())
-            doc["numStartups"] = 42
+            # A size of its own: the seed sees a change by time and size, and on Windows
+            # two writes at once can share a time.
+            doc["numStartups"] = 4200
             p.write_text(json.dumps(doc, indent=2) + "\n", encoding="utf-8")
 
     got = seed.seed(repo, env, between=writer)
     assert got.outcome == seed.SEEDED and len(calls) == 2
     after = json.loads(path.read_text())
     # The other writer's change is kept, and the key added on top of it.
-    assert after["numStartups"] == 42
+    assert after["numStartups"] == 4200
     assert after["projects"][str(repo)] == {"hasTrustDialogAccepted": True}
 
 
@@ -208,7 +210,9 @@ def test_a_file_changed_twice_is_not_written_and_keeps_the_other_writers_bytes(t
     written = []
 
     def writer(p: Path):
-        text = json.dumps({**CONFIG, "numStartups": 50 + len(written)}, indent=2) + "\n"
+        # Each write a size of its own: on Windows two writes at once can share a time.
+        text = json.dumps({**CONFIG, "numStartups": 500 * 10 ** len(written)},
+                          indent=2) + "\n"
         p.write_text(text, encoding="utf-8")
         written.append(text)
 

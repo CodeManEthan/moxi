@@ -360,7 +360,10 @@ LAUNCHES = [
 ]
 
 
-@pytest.mark.parametrize("name, typed, with_turns", LAUNCHES, ids=[c[0] for c in LAUNCHES])
+@pytest.mark.parametrize("name, typed, with_turns", [
+    pytest.param(*case, id=case[0],
+                 marks=pytest.mark.slot_target if case[1].get("target") == "slot" else ())
+    for case in LAUNCHES])
 def test_preview_argv_is_the_argv_launch_hands_the_target(tmp_path, monkeypatch, no_turns,
                                                           name, typed, with_turns):
     """For each target, with a fake harness on PATH, turns and slots faked on their seams

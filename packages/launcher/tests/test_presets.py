@@ -20,6 +20,19 @@ from moxi_launcher.presets import Request
 from moxi_dev.testing import toml_string
 
 
+def rooted(path: str) -> str:
+    """`path`, written from the root, as an absolute path on this system: itself on
+    POSIX, on this process's drive on Windows (where `/work` names no drive)."""
+    return os.path.abspath(path)
+
+
+#: Absolute paths as a presets file spells them (TOML strings) and as a launch reads them.
+WORK = rooted("/work")
+SRV_DEFAULT = rooted("/srv/default")
+SEAT_MD = rooted("/seat.md")
+X_MD = toml_string(rooted("/x.md"))
+
+
 def write(text: str, file: Path | None = None) -> Path:
     file = file or presets.path()
     file.parent.mkdir(parents=True, exist_ok=True)
@@ -37,7 +50,7 @@ NONE = only()
 
 def resolve(text: str = "", available=NONE, **request):
     found = presets.read(write(text))
-    request.setdefault("cwd", "/work")
+    request.setdefault("cwd", WORK)
     return presets.resolve(Request(**request), presets=found, available=available)
 
 
@@ -182,7 +195,7 @@ def test_a_plain_launch_takes_the_shipped_defaults():
     assert got.values["model"] == ""
     assert got.sources["model"] == presets.SHIPPED
     assert got.preset_kind is None and got.chosen == frozenset()
-    assert got.cwd == "/work" and got.values["cwd"] == "/work"
+    assert got.cwd == WORK and got.values["cwd"] == WORK
     assert got.target == "terminal"
 
 
@@ -303,14 +316,15 @@ def test_a_launch_names_at_most_one_preset():
 
 
 def test_values_are_never_drawn_from_a_second_preset():
+    srv = rooted("/srv")
     text = ('[seat.s]\nmodel = "opus"\n'
-            '[project.p]\ncwd = "/srv"\neffort = "high"\nmodel = "sonnet"\n')
+            f'[project.p]\ncwd = {toml_string(srv)}\neffort = "high"\nmodel = "sonnet"\n')
     got = resolve(text, seat="s")
     assert got.values["model"] == "opus"
-    assert got.values["effort"] == "" and got.cwd == "/work"
+    assert got.values["effort"] == "" and got.cwd == WORK
     assert (got.preset_kind, got.preset_name) == ("seat", "s")
     got = resolve(text, project_preset="p")
-    assert got.values["model"] == "sonnet" and got.cwd == "/srv"
+    assert got.values["model"] == "sonnet" and got.cwd == srv
     assert (got.preset_kind, got.preset_name) == ("project", "p")
 
 
@@ -369,7 +383,7 @@ def test_a_typed_place_drops_the_presets_project(projects):
 
 
 def test_two_places_in_one_preset_are_refused():
-    text = '[seat.s]\ncwd = "/a"\nscratch = true\n'
+    text = f'[seat.s]\ncwd = {toml_string(rooted("/a"))}\nscratch = true\n'
     with pytest.raises(presets.BadPreset):
         resolve(text, seat="s")
     found = errors(text)
@@ -1109,9 +1123,9 @@ def test_a_good_file_checks_clean(tmp_path):
      "takes_policy_directors", "per-seat"),
     ('[seat.s]\ninstructions_file = "rel/x.md"\n', "seat.s", "instructions_file",
      "bad-value"),
-    ('[seat.s]\ninstructions = "a"\ninstructions_file = "/x.md"\n', "seat.s",
+    (f'[seat.s]\ninstructions = "a"\ninstructions_file = {X_MD}\n', "seat.s",
      "instructions", "two-instructions"),
-    ('[seat.s]\nbrief = "a"\nbrief_file = "/x.md"\n', "seat.s", "brief", "two-brief"),
+    (f'[seat.s]\nbrief = "a"\nbrief_file = {X_MD}\n', "seat.s", "brief", "two-brief"),
     ('[seat.s]\nposture = "with:lead"\n', "seat.s", "posture", "needs-module"),
     ('[seat.s]\nposture = "eventually"\n', "seat.s", "posture", "bad-value"),
     ('[seat.s]\nextra_flags = ["--permission-mode", "plan"]\n', "seat.s",
@@ -1137,7 +1151,7 @@ def test_a_good_file_checks_clean(tmp_path):
     ('[seat.s]\nhome = ""\n', "seat.s", "home", "bad-value"),
     ('[seat.s]\nhome = "./rel"\n', "seat.s", "home", "bad-value"),
     ('[seat.s]\nproject = "moxi"\n', "seat.s", "project", "needs-module"),
-    ('[seat.s]\ninstructions_file = "/no/such/file.md"\n', "seat.s",
+    (f'[seat.s]\ninstructions_file = {toml_string(rooted("/no/such/file.md"))}\n', "seat.s",
      "instructions_file", "unreadable"),
 ])
 def test_check_refusals(text, where, key, code):
@@ -1269,20 +1283,21 @@ def test_the_project_listing_refuses_an_unknown_key(projects):
 
 
 def test_a_typed_inline_text_replaces_a_presets_file_and_the_other_way_round():
-    got = resolve('[seat.s]\ninstructions_file = "/seat.md"\n', seat="s",
+    got = resolve(f'[seat.s]\ninstructions_file = {toml_string(SEAT_MD)}\n', seat="s",
                   typed={"instructions": "typed"})
     assert got.values["instructions"] == "typed" and got.values["instructions_file"] == ""
     assert got.sources["instructions_file"] == presets.SHIPPED
     got = resolve('[seat.s]\ninstructions = "seat"\n', seat="s",
                   typed={"instructions_file": "/typed.md"})
     assert got.values["instructions_file"] == "/typed.md" and got.values["instructions"] == ""
-    got = resolve('[defaults]\nbrief = "default"\n[seat.s]\nbrief_file = "/b.md"\n',
+    got = resolve('[defaults]\nbrief = "default"\n[seat.s]\n'
+                  f'brief_file = {toml_string(rooted("/b.md"))}\n',
                   seat="s")
-    assert got.values["brief_file"] == "/b.md" and got.values["brief"] == ""
+    assert got.values["brief_file"] == rooted("/b.md") and got.values["brief"] == ""
     # A later layer that gives neither leaves an earlier one's alone.
-    got = resolve('[seat.s]\ninstructions_file = "/seat.md"\n', seat="s",
+    got = resolve(f'[seat.s]\ninstructions_file = {toml_string(SEAT_MD)}\n', seat="s",
                   typed={"model": "opus"})
-    assert got.values["instructions_file"] == "/seat.md"
+    assert got.values["instructions_file"] == SEAT_MD
 
 
 @pytest.mark.parametrize("typed", [{"brief": "b", "brief_file": "/b.md"},
@@ -1299,10 +1314,10 @@ def test_a_text_given_both_ways_at_once_is_refused(typed):
 
 #: A presets file of many shapes: a place and a text in `[defaults]`, a seat with each
 #: kind of place, both spellings of a text, a Codex seat, and a project key.
-LAYERED = """\
+LAYERED = f"""\
 [defaults]
 model = "sonnet"
-cwd = "/srv/default"
+cwd = {toml_string(SRV_DEFAULT)}
 brief = "the default brief"
 
 [seat.plain]
@@ -1310,11 +1325,11 @@ effort = "high"
 
 [seat.home]
 home = "~/work/x"
-instructions_file = "/seat.md"
+instructions_file = {toml_string(SEAT_MD)}
 
 [seat.scratchy]
 scratch = true
-brief_file = "/b.md"
+brief_file = {toml_string(rooted("/b.md"))}
 
 [seat.coder]
 harness = "codex"
@@ -1326,7 +1341,7 @@ project = "moxi"
 extra_flags = ["--verbose"]
 
 [project.there]
-cwd = "/srv/there"
+cwd = {toml_string(rooted("/srv/there"))}
 instructions = "inline"
 """
 
@@ -1380,14 +1395,14 @@ def test_layered_shows_a_place_whole_and_one_spelling_per_text():
     laid = presets.layered(Request(seat="scratchy"), presets=found, available=NONE)
     assert laid.place == {"scratch": True} and laid.place_source == presets.PRESET
     assert (laid.values["cwd"], laid.sources["cwd"]) == ("", presets.SHIPPED)
-    assert (laid.values["brief_file"], laid.sources["brief_file"]) == ("/b.md",
+    assert (laid.values["brief_file"], laid.sources["brief_file"]) == (rooted("/b.md"),
                                                                        presets.PRESET)
     assert (laid.values["brief"], laid.sources["brief"]) == ("", presets.SHIPPED)
     laid = presets.layered(Request(seat="home"), presets=found, available=NONE)
     assert laid.place == {"home": "~/work/x"}
     assert all(laid.sources[name] == presets.SHIPPED for name in PLACE_ROWS)
     laid = presets.layered(Request(seat="plain"), presets=found, available=NONE)
-    assert laid.place == {"cwd": "/srv/default"} and laid.place_source == "defaults"
+    assert laid.place == {"cwd": SRV_DEFAULT} and laid.place_source == "defaults"
     assert laid.values["brief"] == "the default brief"
 
 
@@ -1439,13 +1454,13 @@ def test_a_left_out_posture_row_that_defaults_set_needs_off_posture():
 
 
 def test_the_place_rule_sees_a_left_out_place_gone(projects):
-    text = '[defaults]\ncwd = "/srv/default"\n[seat.s]\nproject = "moxi"\n'
+    text = f'[defaults]\ncwd = {toml_string(SRV_DEFAULT)}\n[seat.s]\nproject = "moxi"\n'
     got = resolve(text, available=WITH_PROJECTS, seat="s", left_out=("project",))
-    assert got.cwd == "/srv/default" and got.project_key is None
+    assert got.cwd == SRV_DEFAULT and got.project_key is None
     assert got.sources["cwd"] == "defaults"
     # Leaving out the only place falls to the caller's directory on the command line.
     got = resolve(text, available=WITH_PROJECTS, seat="s", left_out=("project", "cwd"))
-    assert got.cwd == "/work" and got.sources["cwd"] == presets.LEFT_OUT
+    assert got.cwd == WORK and got.sources["cwd"] == presets.LEFT_OUT
 
 
 def test_a_seat_with_scratch_left_out_launches_in_the_typed_cwd():
@@ -1762,7 +1777,7 @@ def test_a_typed_relaunch_with_no_handoff_dir_is_warned_of(recyclable, monkeypat
     got = resolve("", SLOTTED, typed={"recycle_at_limit": "relaunch", **IN_SLOT})
     assert got.values["recycle_at_limit"] == "relaunch"
     assert presets.RELAUNCH_NOT_APPLIED.format(
-        problem="has no notes directory (no notes_dir and none for /work), so it has no "
+        problem=f"has no notes directory (no notes_dir and none for {WORK}), so it has no "
                 "handoffs/ to read from",
         hint="launch it with notes_dir set, or in a folder notes keeps notes for",
     ) in got.warnings

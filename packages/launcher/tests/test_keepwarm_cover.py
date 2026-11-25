@@ -18,6 +18,9 @@ from test_page_waits import CAPTAIN, Comms, Turns, directed, live
 
 from moxi_launcher import api, keepwarm, relaunch, store
 
+#: Each store time is later than the one before (Windows' clock moves in steps).
+pytestmark = pytest.mark.usefixtures("ticking_store_clock")
+
 __all__ = ["conn"]
 
 WAITS = {"kind": "subagents", "count": 2}

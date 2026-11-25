@@ -142,13 +142,13 @@ def test_prune_keeps_open_entries_and_deletes_old_closed_ones(conn):
 
 
 HOLD = textwrap.dedent("""
-    import sys, time
+    import os, sys, time
     from moxi_launcher import parks
     kind, done, hold_s = sys.argv[1], sys.argv[2] == "1", float(sys.argv[3])
     with parks.lock(kind) as path:
         if done:
             parks.mark_done(path)
-        print("held", flush=True)
+        print("held", os.getpid(), flush=True)
         time.sleep(hold_s)
 """)
 
@@ -161,7 +161,11 @@ def holder():
         proc = subprocess.Popen([sys.executable, "-c", HOLD, kind, "1" if done else "0",
                                  str(hold_s)], stdout=subprocess.PIPE, text=True)
         started.append(proc)
-        assert proc.stdout.readline().strip() == "held"
+        word, pid = proc.stdout.readline().split()
+        assert word == "held"
+        # The pid the holder reports itself: on Windows a venv's python.exe starts the
+        # interpreter as its child, so `proc.pid` is not the process that holds the lock.
+        proc.own_pid = int(pid)
         return proc
 
     yield hold
@@ -173,7 +177,7 @@ def holder():
 def test_the_lock_file_names_its_holders_kind_and_pid(holder):
     proc = holder("park", done=True)
     found = parks.read_holder(parks.lock_path())
-    assert found == parks.LockHolder(proc.pid, "park", done=True)
+    assert found == parks.LockHolder(proc.own_pid, "park", done=True)
 
 
 def test_a_second_whole_run_holder_waits_then_is_refused(holder):

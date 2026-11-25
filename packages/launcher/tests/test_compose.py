@@ -5,6 +5,7 @@ and system prompt file, and what a launch records."""
 from __future__ import annotations
 
 import sys
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -16,7 +17,7 @@ from moxi_launcher import store
 from moxi_launcher.compose import Additions, Context, claude, codex, common
 
 SID = "5f0c3a1e-7f43-4c8e-9e0a-1d2b3c4d5e6f"
-PF = "/state/runs/r1.prompt.md"
+PF = str(Path("/state/runs") / "r1.prompt.md")
 HOST = "/env/bin/moxi-turns-codex-host"
 CLAUDE_HEAD = ["--session-id", SID, "--append-system-prompt-file", PF]
 CLAUDE_TAIL = ["--permission-mode", "default"]
