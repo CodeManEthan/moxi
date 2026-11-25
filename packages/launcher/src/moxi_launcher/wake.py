@@ -19,10 +19,22 @@ pipelines of simple commands:
 - `pkill` and `pgrep ... | xargs kill`: the pattern, matched the way the tool matches it
   (a regular expression searched in the process name, or in the whole command line with
   `-f`; `-x` for an exact match, `-i` case-blind), narrowed by `-P`, `-u`, `-g` and `-s`.
-- `killall`: the name, matched exactly against the process name (`-r` a regular
-  expression, `-I` case-blind).
-- `taskkill /PID` and `/IM` (wildcards as Windows reads them), and in PowerShell
-  `Stop-Process` (and its aliases `spps` and `kill`) by `-Id` or `-Name`.
+- `killall`: the name, matched exactly against the process name (`-r`, and macOS's `-m`,
+  a regular expression, `-I` case-blind). `-l`, and macOS's dry runs `-s` and `-d`, end
+  nothing.
+- `taskkill /PID` and `/IM` (wildcards as Windows reads them), written `//PID` and `//IM`
+  too as Git Bash needs them, and in PowerShell `Stop-Process` (and its aliases `spps`
+  and `kill`) by `-Id` or `-Name`.
+
+A redirection (`2>/dev/null`, `2>&1`, `>&2`, `&>log`) is no target: its file-descriptor
+number and the word it redirects to are dropped.
+
+**On Windows** Claude's `Bash` tool runs Git Bash, whose `kill` takes the MSYS runtime's
+own pids, not the Windows pids the process table holds; `pkill` and `killall` there read
+MSYS processes too. So on Windows the judge resolves only `taskkill` on the shell, and a
+`kill`, `pkill`, `killall` or `xargs kill` there is let through unjudged rather than read
+against the wrong processes. Codex's shell tool runs PowerShell on Windows, so a Codex
+`Bash` call there is read as PowerShell.
 
 Any other target (a variable, a file read, an option the judge doesn't read) can't be
 resolved, and is let through. A kill written in another language is not seen.
@@ -50,6 +62,7 @@ import fnmatch
 import logging
 import os
 import re
+import sys
 from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Any
@@ -78,6 +91,10 @@ _PREFIXES = frozenset({"sudo", "command", "builtin", "exec", "nohup", "env", "ti
 #: `sudo`'s options that take a value, so the value is not the command.
 _SUDO_VALUED = frozenset({"-u", "-g", "-h", "-p", "-C", "-U", "-r", "-t", "-D", "-R"})
 _OWN_SHELL = frozenset({"$!", "$$", "${!}", "${$}"})
+#: The platforms whose shells read differently (`sys.platform`'s names).
+WINDOWS, MACOS = "win32", "darwin"
+#: The kill commands a Windows shell call isn't judged by: Git Bash's take MSYS pids.
+_MSYS_KILLS = frozenset({"kill", "pkill", "killall"})
 _PID = re.compile(r"\d+")
 _GROUP = re.compile(r"-\d+")
 
@@ -112,10 +129,12 @@ def judge(call: Any) -> Any:
 
 def decide(call: Any, *, procs: Procs | None = None,
            sessions: Callable[[], Sequence[Live]] | None = None,
-           look: Callable[[Live, Mapping[str, str]], Looked] | None = None) -> str | None:
+           look: Callable[[Live, Mapping[str, str]], Looked] | None = None,
+           system: str | None = None) -> str | None:
     """The refusal for `call`, or None to let it run. `procs` is the process table,
     `sessions` lists the live sessions and `look` reads one's cache and name; each is the
-    real one when None."""
+    real one when None. `system` is the platform as `sys.platform` names it, this one's
+    when None."""
     tool, harness = getattr(call, "tool", None), getattr(call, "harness", None)
     if tool not in CALLS.get(harness, ()):
         return None
@@ -123,8 +142,10 @@ def decide(call: Any, *, procs: Procs | None = None,
     command = tool_input.get("command") if isinstance(tool_input, Mapping) else None
     if not isinstance(command, str):
         return None
+    system = system or sys.platform
     table = procs if procs is not None else Procs()
-    pids = targets(command, table, powershell=tool in _POWERSHELL_TOOLS)
+    powershell = tool in _POWERSHELL_TOOLS or (harness == "codex" and system == WINDOWS)
+    pids = targets(command, table, powershell=powershell, system=system)
     if not pids:
         return None
     live = list(sessions() if sessions is not None else live_sessions())
@@ -156,12 +177,15 @@ def refusal(cold: Sequence[tuple[Live, Looked]]) -> str:
         if looked.name:
             who += f" ({looked.name})"
         parts.append(f"{who}, whose cache is cold{_age(looked.age_s)}")
-    which = cold[0][1].name or cold[0][0].session_id
-    it = "it" if len(cold) == 1 else "each"
-    return ("Refused before it ran (launcher wake guard): this would end processes of "
-            + "; ".join(parts) + ". Ending its processes would give it a turn on a cold "
-            f"cache; relaunch {it} (moxi launcher relaunch {which}, as its director), "
-            f"or leave {it}.")
+    said = ("Refused before it ran (launcher wake guard): this would end processes of "
+            + "; ".join(parts) + ".")
+    commands = [f"moxi launcher relaunch {looked.name or session.session_id}"
+                for session, looked in cold]
+    if len(cold) == 1:
+        return (f"{said} Ending its processes would give it a turn on a cold cache; "
+                f"relaunch it ({commands[0]}, as its director), or leave it.")
+    return (f"{said} Ending their processes would give each a turn on a cold cache; "
+            f"relaunch each, as its director ({'; '.join(commands)}), or leave each.")
 
 
 def _age(age_s: float | None) -> str:
@@ -323,8 +347,11 @@ def _read_table() -> Iterator[Proc]:
 
 # -- which processes a command ends ------------------------------------------------------
 
-def targets(command: str, procs: Procs, *, powershell: bool = False) -> list[int]:
-    """The pids `command` would end, as far as they can be resolved, each once."""
+def targets(command: str, procs: Procs, *, powershell: bool = False,
+            system: str | None = None) -> list[int]:
+    """The pids `command` would end, as far as they can be resolved, each once. `system`
+    is the platform as `sys.platform` names it, this one's when None."""
+    system = system or sys.platform
     found: list[int] = []
     pipelines = _ps_split(command) if powershell else _sh_split(command)
     for pipeline in pipelines:
@@ -332,22 +359,28 @@ def targets(command: str, procs: Procs, *, powershell: bool = False) -> list[int
             words = _command_words(words)
             if not words:
                 continue
-            ends = (_ps_command if powershell else _sh_command)(
-                words, procs, pipeline[i - 1] if i else None)
+            before = pipeline[i - 1] if i else None
+            ends = _ps_command(words, procs, before) if powershell else \
+                _sh_command(words, procs, before, system)
             found.extend(pid for pid in ends if pid not in found)
     return found
 
 
-def _sh_command(words: list[Word], procs: Procs, before: list[Word] | None) -> list[int]:
+def _sh_command(words: list[Word], procs: Procs, before: list[Word] | None,
+                system: str) -> list[int]:
     name = _base(words[0])
+    if name in ("taskkill", "taskkill.exe"):
+        return _taskkill(words[1:], procs)
+    if system == WINDOWS and (name in _MSYS_KILLS or name == "xargs"):
+        # Git Bash: these read the MSYS runtime's pids and processes, not the table's.
+        log.info("the wake guard does not judge %s in a Windows shell", name)
+        return []
     if name == "kill":
         return _kill(words[1:], procs)
     if name == "pkill":
         return _pgrep(words[1:], procs)
     if name == "killall":
-        return _killall(words[1:], procs)
-    if name in ("taskkill", "taskkill.exe"):
-        return _taskkill(words[1:], procs)
+        return _killall(words[1:], procs, system)
     if name == "xargs" and before is not None:
         rest = _past_xargs(words[1:])
         if rest and _base(rest[0]) == "kill":
@@ -519,7 +552,7 @@ def _narrowed(p: Proc, values: Mapping[str, str]) -> bool:
     return True
 
 
-def _killall(args: list[Word], procs: Procs) -> list[int]:
+def _killall(args: list[Word], procs: Procs, system: str) -> list[int]:
     names: list[str] = []
     regex = ignore = False
     i = 0
@@ -528,14 +561,16 @@ def _killall(args: list[Word], procs: Procs) -> list[int]:
         i += 1
         if isinstance(word, Sub):
             return []
-        if word in ("-r", "--regexp"):
-            regex = True
+        if word in ("-l", "--list") or (system == MACOS and word in ("-s", "-d")):
+            return []  # lists signals; on macOS -s and -d only show what would be done
+        if word in ("-r", "--regexp", "-m"):
+            regex = True  # -m is macOS's regular expression
         elif word in ("-I", "--ignore-case"):
             ignore = True
         elif word in ("-s", "--signal"):
             i += 1
         elif word in ("-u", "--user", "-o", "--older-than", "-y", "--younger-than",
-                      "-n", "--ns", "-Z", "--context"):
+                      "-n", "--ns", "-Z", "--context", "-c", "-t", "-j"):
             return []  # a narrowing the judge doesn't read
         elif not word.startswith("-"):
             names.append(word)
@@ -567,7 +602,8 @@ def _taskkill(args: list[Word], procs: Procs) -> list[int]:
         i += 1
         if isinstance(word, Sub) or not word[:1] in ("/", "-"):
             continue
-        switch = word[1:].lower()
+        # Git Bash turns a lone /PID into a path, so a switch there is written //PID.
+        switch = (word[2:] if word.startswith("//") else word[1:]).lower()
         if switch in ("pid", "im") and i < len(args) and isinstance(args[i], str):
             value, i = args[i], i + 1
             if switch == "pid":
@@ -686,14 +722,33 @@ class _Lexer:
     word: list[str] = field(default_factory=list)
     sub: Sub | None = None
     started: bool = False
+    #: Whether the word holds quoted or escaped text.
+    quoted: bool = False
+    #: Whether the next word is a redirection's target, dropped when it ends.
+    drop: bool = False
 
     def end_word(self) -> None:
-        if self.sub is not None:
-            self.words.append(self.sub)
-        elif self.started:
-            self.words.append("".join(self.word))
+        if self.sub is not None or self.started:
+            if self.drop:
+                self.drop = False
+            elif self.sub is not None:
+                self.words.append(self.sub)
+            else:
+                self.words.append("".join(self.word))
         self.word.clear()
-        self.sub, self.started = None, False
+        self.sub, self.started, self.quoted = None, False, False
+
+    def redirect(self, *, fds: re.Pattern[str] | None, target: bool) -> None:
+        """A redirection operator: the word written against it is its file-descriptor
+        number when it is plain text `fds` matches, and is dropped; with `target`, the word
+        after the operator is what it redirects to, dropped too."""
+        if fds is not None and self.sub is None and self.started and not self.quoted and \
+                fds.fullmatch("".join(self.word)):
+            self.word.clear()
+            self.started = False
+        else:
+            self.end_word()
+        self.drop = target
 
     def mixed(self) -> None:
         """Text joins a word that holds a substitution, or a substitution joins text: the
@@ -704,6 +759,7 @@ class _Lexer:
 
     def end_command(self) -> None:
         self.end_word()
+        self.drop = False
         if self.words:
             self.pipeline.append(list(self.words))
         self.words.clear()
@@ -743,12 +799,23 @@ def _closing(text: str, i: int) -> int:
     return n
 
 
+#: A shell redirection operator: `>`, `>>`, `<`, `<<`, `<<<`, `<>`, `>|`, `>&`, `<&`, `&>`
+#: and `&>>`.
+_SH_REDIRECT = re.compile(r"&?[<>]+[&|]?")
+#: The file-descriptor word written against a shell redirection: `2` in `2>`, `{fd}`.
+_SH_FD = re.compile(r"[0-9]+|\{[A-Za-z_][A-Za-z0-9_]*\}")
+#: A PowerShell redirection: `>`, `>>`, `2>`, `*>`, `2>&1`; and its stream word.
+_PS_REDIRECT = re.compile(r">>?(&[1-6])?")
+_PS_FD = re.compile(r"[1-6*]")
+
+
 def _sh_split(text: str) -> list[list[list[Word]]]:
     """`text` as pipelines of simple commands of words, quotes taken off. A pipeline ends
     at `;`, `&`, `&&`, `||`, `(`, `)` and a newline outside quotes; `|` joins its
     commands. A word that is one `$(...)` or backtick substitution, bare or alone in
     double quotes, is a `Sub`; a word with one inside other text holds a NUL, so it
-    resolves as nothing."""
+    resolves as nothing. A redirection is no word: its operator, the file-descriptor
+    number written against it (`2>`) and the word it redirects to are dropped."""
     lx = _Lexer(text)
     i, n = 0, len(text)
     while i < n:
@@ -759,12 +826,13 @@ def _sh_split(text: str) -> list[list[list[Word]]]:
             if lx.sub is not None:
                 lx.mixed()
             lx.word.append(text[i + 1:j])
-            lx.started, i = True, j + 1
+            lx.started, lx.quoted, i = True, True, j + 1
             continue
         if c == '"':
             whole = not lx.started and lx.sub is None
             if lx.sub is not None:
                 lx.mixed()
+            lx.quoted = True
             i += 1
             while i < n and text[i] != '"':
                 if text[i] == "$" and text[i + 1:i + 2] == "(":
@@ -791,8 +859,13 @@ def _sh_split(text: str) -> list[list[list[Word]]]:
                 if lx.sub is not None:
                     lx.mixed()
                 lx.word.append(text[i + 1])
-                lx.started = True
+                lx.started = lx.quoted = True
             i += 2
+            continue
+        if c in "<>" or text[i:i + 2] == "&>":
+            op = _SH_REDIRECT.match(text, i)
+            lx.redirect(fds=_SH_FD if c != "&" else None, target=True)
+            i = op.end() if op else i + 1
             continue
         if c == "#" and not lx.started and lx.sub is None:
             j = text.find("\n", i)
@@ -823,7 +896,7 @@ def _sh_split(text: str) -> list[list[list[Word]]]:
             lx.end_pipeline()
             i += 2 if text[i:i + 2] in ("&&", "||") else 1
             continue
-        if c in " \t\r<>":
+        if c in " \t\r":
             lx.end_word()
             i += 1
             continue
@@ -839,7 +912,9 @@ def _sh_split(text: str) -> list[list[list[Word]]]:
 def _ps_split(text: str) -> list[list[list[Word]]]:
     """`text` read as PowerShell: pipelines end at `;` and a newline, `|` joins commands,
     a word ends at a space or tab; quotes are taken off; a `(...)` or `$(...)` group is a
-    `Sub`; a backtick escapes the next character."""
+    `Sub`; a backtick escapes the next character. A redirection (`>`, `>>`, `2>`, `*>`,
+    `2>&1`) is no word: its operator, its stream and the word it redirects to are
+    dropped."""
     lx = _Lexer(text)
     i, n = 0, len(text)
     while i < n:
@@ -850,7 +925,7 @@ def _ps_split(text: str) -> list[list[list[Word]]]:
             if lx.sub is not None:
                 lx.mixed()
             lx.word.append(text[i + 1:j])
-            lx.started, i = True, j + 1
+            lx.started, lx.quoted, i = True, True, j + 1
             continue
         if c == '"':
             j = text.find('"', i + 1)
@@ -858,11 +933,16 @@ def _ps_split(text: str) -> list[list[list[Word]]]:
             if lx.sub is not None:
                 lx.mixed()
             lx.word.append(text[i + 1:j])
-            lx.started, i = True, j + 1
+            lx.started, lx.quoted, i = True, True, j + 1
             continue
         if c == "`" and i + 1 < n:
             lx.word.append(text[i + 1])
-            lx.started, i = True, i + 2
+            lx.started, lx.quoted, i = True, True, i + 2
+            continue
+        if c == ">":
+            op = _PS_REDIRECT.match(text, i)
+            lx.redirect(fds=_PS_FD, target=not op.group(1))
+            i = op.end()
             continue
         if c == "#" and not lx.started:
             j = text.find("\n", i)

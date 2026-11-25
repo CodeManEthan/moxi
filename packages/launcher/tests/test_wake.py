@@ -16,6 +16,8 @@ from moxi_launcher.wake import Live, Looked, Proc, Procs
 ToolCall = modules.load("turns").api.ToolCall
 
 MINE, OTHER, THIRD = "mine-0001", "other-0002", "third-0003"
+#: The platforms as `sys.platform` names them: a test names the one it reads as.
+LINUX, WINDOWS, MACOS = "linux", "win32", "darwin"
 
 #: Two sessions, each with a background shell and its child; and a process under none.
 TABLE = [
@@ -48,7 +50,7 @@ def judged(command: str, kind: str = "cold", **kw) -> tuple[str | None, list]:
         return Looked(kind, 3720.0, "tester@proj")
 
     return wake.decide(bash(command, **kw), procs=table(), sessions=lambda: LIVE,
-                       look=look), asked
+                       look=look, system=LINUX), asked
 
 
 # -- which processes a command ends ------------------------------------------------------
@@ -99,7 +101,103 @@ def judged(command: str, kind: str = "cold", **kw) -> tuple[str | None, list]:
     ("# kill 211", []),
 ])
 def test_each_kill_form_resolves_to_the_processes_it_ends(command, pids):
-    assert wake.targets(command, table()) == pids
+    assert wake.targets(command, table(), system=LINUX) == pids
+
+
+#: A process at pid 2 under a session, so a redirection's fd read as a pid would show.
+FD_TABLE = TABLE + [Proc(2, 210, "sh", ("sh",))]
+
+
+@pytest.mark.parametrize("command, pids", [
+    ("kill $(pgrep python3) 2>/dev/null", [211]),
+    ("kill 211 2>&1", [211]),
+    ("kill 211 >&2", [211]),
+    ("kill 211 1>&2", [211]),
+    ("kill 211 &>/dev/null", [211]),
+    ("kill 211 &>> log", [211]),
+    ("kill 211 2> err.log", [211]),
+    ("kill 211 2>>err.log", [211]),
+    ("kill 211 {fd}>&-", [211]),
+    ("kill 211 <<< 2", [211]),
+    ("kill 211 2>&1 | tee out", [211]),
+    ("kill $(pgrep python3 2>/dev/null)", [211]),
+    ("pgrep python3 2>/dev/null | xargs kill", [211]),
+    ("pkill python3 2>/dev/null", [211]),
+    ("kill 211&>x; kill 111", [211, 111]),
+    ("kill 211 >| out 111", [211, 111]),
+    # Not a redirection's fd: a word apart from the operator, or quoted, is an argument.
+    ("kill 211 2 >/dev/null", [211, 2]),
+    ("kill 211 '2'>/dev/null", [211, 2]),
+])
+def test_a_redirection_is_no_target(command, pids):
+    assert wake.targets(command, Procs(FD_TABLE), system=LINUX) == pids
+
+
+@pytest.mark.parametrize("command, pids", [
+    ("Stop-Process -Id 211 2>$null", [211]),
+    ("Stop-Process -Id 211 2>&1", [211]),
+    ("Stop-Process 211 *> out.txt", [211]),
+    ("Stop-Process 211 >> 2", [211]),
+    ("Stop-Process -Name python3 2>&1 | Out-Null", [211]),
+])
+def test_a_powershell_redirection_is_no_target(command, pids):
+    assert wake.targets(command, Procs(FD_TABLE), powershell=True) == pids
+
+
+# -- Windows and macOS -------------------------------------------------------------------
+
+@pytest.mark.parametrize("command, pids", [
+    ("taskkill //PID 211 //F", [211]),
+    ("taskkill //F //IM pyth*", [211]),
+    ("taskkill //PID 211,111", [211, 111]),
+    ("taskkill /PID 211", [211]),
+])
+def test_git_bash_taskkill_switches_are_read(command, pids):
+    assert wake.targets(command, table(), system=WINDOWS) == pids
+
+
+@pytest.mark.parametrize("command", [
+    "kill 211", "kill -9 211", "kill $(pgrep python3)", "pkill python3",
+    "killall python3", "pgrep python3 | xargs kill",
+])
+def test_a_windows_shells_msys_kill_is_not_judged(command):
+    """Git Bash's kill takes MSYS pids, not the Windows pids the table holds."""
+    assert wake.targets(command, table(), system=WINDOWS) == []
+    assert wake.targets(command, table(), system=LINUX) != []
+
+
+def test_codex_on_windows_is_read_as_powershell():
+    def judged_on(system, command):
+        return wake.decide(bash(command, harness="codex"), procs=table(),
+                           sessions=lambda: LIVE, look=lambda s, env: Looked("cold"),
+                           system=system)
+
+    assert judged_on(WINDOWS, "Stop-Process -Id 211") is not None
+    assert judged_on(WINDOWS, "spps -Name python3 -Force") is not None
+    assert judged_on(LINUX, "Stop-Process -Id 211") is None
+    # Claude's Bash on Windows is Git Bash, not PowerShell.
+    claude = wake.decide(bash("Stop-Process -Id 211"), procs=table(),
+                         sessions=lambda: LIVE, look=lambda s, env: Looked("cold"),
+                         system=WINDOWS)
+    assert claude is None
+
+
+@pytest.mark.parametrize("command, pids", [
+    ("killall -m 'pyth.*'", [211]),
+    ("killall -m pyth", [211]),
+    ("killall -9 -m node", [111]),
+    ("killall -s python3", []),
+    ("killall -d python3", []),
+    ("killall -l", []),
+    ("killall -c python3 node", []),
+    ("killall -t ttys001 node", []),
+])
+def test_macos_killall_forms(command, pids):
+    assert wake.targets(command, table(), system=MACOS) == pids
+
+
+def test_killall_m_is_a_pattern_off_macos_too():
+    assert wake.targets("killall -m 'pyth.*'", table(), system=LINUX) == [211]
 
 
 @pytest.mark.parametrize("command, pids", [
@@ -180,7 +278,7 @@ def test_an_unread_cache_lets_the_call_run():
         raise OSError("no store")
 
     assert wake.decide(bash("kill 211"), procs=table(), sessions=lambda: LIVE,
-                       look=look) is None
+                       look=look, system=LINUX) is None
 
 
 @pytest.mark.parametrize("tool, harness", [("Read", "claude"), ("Bash", "opencode"),
@@ -198,18 +296,23 @@ def test_codex_bash_is_judged():
 def test_two_cold_sessions_are_each_named():
     live = LIVE + [Live(400, THIRD, "codex")]
     procs = Procs(TABLE + [Proc(400, 1, "codex"), Proc(410, 400, "sleep", pgid=410)])
+    names = {OTHER: "tester@proj", THIRD: None}
     reason = wake.decide(bash("kill 211 410"), procs=procs, sessions=lambda: live,
-                         look=lambda s, env: Looked("cold"))
-    assert f"session {OTHER}, whose cache is cold;" in reason
+                         look=lambda s, env: Looked("cold", None, names[s.session_id]),
+                         system=LINUX)
+    assert f"session {OTHER} (tester@proj), whose cache is cold;" in reason
     assert f"session {THIRD}, whose cache is cold." in reason
-    assert "relaunch each" in reason
+    assert ("Ending their processes would give each a turn on a cold cache; relaunch "
+            "each, as its director (moxi launcher relaunch tester@proj; moxi launcher "
+            f"relaunch {THIRD}), or leave each.") in reason
 
 
 def test_a_command_with_no_target_lists_no_sessions():
     def never():
         raise AssertionError("sessions asked for a call that ends nothing")
 
-    assert wake.decide(bash("kill $PID"), procs=table(), sessions=never) is None
+    assert wake.decide(bash("kill $PID"), procs=table(), sessions=never,
+                       system=LINUX) is None
 
 
 # -- the declaration and the switch ------------------------------------------------------
