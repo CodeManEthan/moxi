@@ -374,13 +374,15 @@ def check(file: str | os.PathLike | None = None, *, env: Mapping[str, str] | Non
     avail = _avail(available)
     found = presets if presets is not None else read(file, env=env)
     defaults, problems = _check_defaults(found.defaults, avail)
+    left_out = frozenset(p.key for p in problems if p.code == RETIRED)
     # An empty harness is unset, as `resolve` reads it: the shipped default.
     base_harness = defaults.get("harness") or catalog.launcher()["harness"].default
     for preset in found.all():
         values, more = _check_preset(preset, base_harness, avail)
         problems += more
         if not any(p.level == ERROR for p in more):
-            problems += _value_rules(preset, values, defaults, base_harness, avail)
+            problems += _value_rules(preset, values, defaults, base_harness, avail,
+                                     left_out=left_out)
         if not any(p.level == ERROR for p in more):
             problems += _check_deep(preset, values, defaults, base_harness, avail, env)
     return problems
@@ -388,16 +390,17 @@ def check(file: str | os.PathLike | None = None, *, env: Mapping[str, str] | Non
 
 def _value_rules(preset: Preset, values: Mapping[str, object],
                  defaults: Mapping[str, object], base_harness: str,
-                 avail) -> list[Problem]:
+                 avail, *, left_out: frozenset[str] = frozenset()) -> list[Problem]:
     """The rules between rows (`catalog.refuse_values`) over what a launch of the preset
     resolves to with nothing typed: the shipped defaults, `[defaults]`, then the preset,
     whose place, when it names one, replaces the one `[defaults]` names. As `resolve`
     holds them: on a scratch launch a `[defaults]` relaunch holds `off`, a retired value
-    or row from `[defaults]` is left out (`defaults` as checked holds none), so a
-    `[defaults]` `recycle_at_limit = compact` the preset doesn't override holds `off`, and
-    a seat or Codex launch that sets no `warn_at` holds none, so a `stop_at` it sets is
-    refused here as at its launch. A `stop_at` the preset sets on a launch that can't
-    relaunch itself is warned of (`_stop_way_out`)."""
+    or row from `[defaults]` is left out (`defaults` as checked holds none; `left_out`
+    names those rows), so a `[defaults]` `recycle_at_limit = compact` the preset doesn't
+    override holds `off`, source `left-out`, and a seat or Codex launch that sets no
+    `warn_at` holds none, so a `stop_at` it sets is refused here as at its launch. A
+    `stop_at` the preset sets on a launch that can't relaunch itself is warned of
+    (`_stop_way_out`)."""
     harness = preset.harness if preset.harness in catalog.HARNESSES else base_harness
     rows = catalog.offered(harness, avail)
     effective = {name: row.default for name, row in rows.items()}
@@ -405,7 +408,8 @@ def _value_rules(preset: Preset, values: Mapping[str, object],
     if [k for k in PLACE if catalog.is_set(values.get(k))]:
         effective.update({k: rows[k].default for k in PLACE if k in rows})
     effective.update({k: v for k, v in values.items() if k in rows})
-    recycle_source = None
+    recycle_source = (LEFT_OUT if RECYCLE_AT_LIMIT in left_out
+                      and RECYCLE_AT_LIMIT not in values else None)
     if (effective.get("scratch") and RECYCLE_AT_LIMIT not in values
             and effective.get(RECYCLE_AT_LIMIT) == "relaunch"):
         effective[RECYCLE_AT_LIMIT], recycle_source = "off", LEFT_OUT

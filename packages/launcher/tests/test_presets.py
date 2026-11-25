@@ -1862,11 +1862,9 @@ def test_a_stop_at_or_below_warn_at_or_off_the_form_is_refused(recyclable, stop,
 
 @pytest.mark.parametrize("change, problem", [
     ({"recycle_at_limit": "off"}, "has recycle_at_limit off, so it can't relaunch itself"),
-    ({"recycle_at_limit": "compact"},
-     "recycles at its limit by compacting, so it can't relaunch itself"),
     ({"target": "terminal"}, "runs in its terminal, and only a slot launch is relaunched"),
-    ({"scratch": True, "recycle_at_limit": "compact"},
-     "recycles at its limit by compacting, so it can't relaunch itself"),
+    ({"scratch": True, "recycle_at_limit": "off"},
+     "has recycle_at_limit off, so it can't relaunch itself"),
 ])
 def test_a_stop_chosen_for_a_launch_that_cannot_relaunch_itself_is_refused(
         recyclable, change, problem):
@@ -1876,6 +1874,46 @@ def test_a_stop_chosen_for_a_launch_that_cannot_relaunch_itself_is_refused(
         resolve("", SLOTTED, typed={**TYPED_RELAUNCH, "stop_at": "2.5x", **change})
     assert caught.value.problem == ("stop_at needs a launch that can relaunch itself, its "
                                     f"one way out, and this launch {problem}")
+
+
+@pytest.mark.parametrize("text, asked", [
+    ("", {"typed": {**TYPED_RELAUNCH, "recycle_at_limit": "compact", "stop_at": "2.5x"}}),
+    (RELAUNCH_SEAT.replace('"relaunch"', '"compact"') + 'stop_at = "2.5x"\n',
+     {"seat": "s"}),
+])
+def test_a_stop_beside_a_retired_compact_meets_the_retired_refusal(recyclable, text,
+                                                                   asked):
+    # The retired value is refused for what it is, before the stop is looked at.
+    with pytest.raises(catalog.Refused) as caught:
+        resolve(text, SLOTTED, **asked)
+    refused = caught.value
+    code = refused.found.code if isinstance(refused, presets.BadPreset) else refused.code
+    assert code == "retired" and refused.row == "recycle_at_limit"
+
+
+@pytest.mark.parametrize("typed, problem", [
+    (IN_SLOT, "holds recycle_at_limit off, so it can't relaunch itself"),
+    ({**IN_SLOT, "scratch": True},
+     "works in a scratch folder, and a scratch launch can't recycle itself"),
+])
+def test_a_stop_beside_a_defaults_compact_is_refused_or_left_out(recyclable, typed,
+                                                                 problem):
+    # A [defaults] compact holds off, source left-out, so the launch can't relaunch
+    # itself: a stop chosen for it is refused naming that, one from [defaults] is left
+    # out, each beside the compact's own warning.
+    compact = '[defaults]\nrecycle_at_limit = "compact"\nwarn_at = "2x"\n'
+    with pytest.raises(catalog.StopMark) as caught:
+        resolve(compact, SLOTTED, typed={**typed, "stop_at": "2.5x"})
+    assert caught.value.problem == ("stop_at needs a launch that can relaunch itself, its "
+                                    f"one way out, and this launch {problem}")
+    got = resolve(compact + 'stop_at = "2.5x"\n', SLOTTED, typed=typed)
+    assert got.values["recycle_at_limit"] == "off" and got.values["stop_at"] == ""
+    assert got.sources["stop_at"] == presets.LEFT_OUT
+    assert f"recycle_at_limit compact is left out: {COMPACT_HINT}" in got.warnings
+    assert ("stop_at is left out: a stop needs a launch that can relaunch itself, and this "
+            f"launch {problem}") in got.warnings
+    assert "MOXI_USAGE_STOP_AT" not in common.option_stamps(
+        {**got.values, "harness": got.harness})
 
 
 def test_a_stop_on_a_launch_with_no_handoff_dir_is_refused(recyclable, monkeypatch):
@@ -1933,9 +1971,12 @@ def stop_warnings(text, available=SLOTTED):
 @pytest.mark.parametrize("text, problem", [
     ('[seat.s]\ntarget = "slot"\nwarn_at = "2x"\nstop_at = "2.5x"\n',
      "has recycle_at_limit off, so it can't relaunch itself"),
-    ('[seat.s]\ntarget = "slot"\nwarn_at = "2x"\nrecycle_at_limit = "compact"\n'
-     'stop_at = "2.5x"\n',
-     "recycles at its limit by compacting, so it can't relaunch itself"),
+    ('[defaults]\nrecycle_at_limit = "compact"\n[seat.s]\ntarget = "slot"\n'
+     'warn_at = "2x"\nstop_at = "2.5x"\n',
+     "holds recycle_at_limit off, so it can't relaunch itself"),
+    ('[defaults]\nrecycle_at_limit = "compact"\n[seat.s]\ntarget = "slot"\n'
+     'warn_at = "2x"\nscratch = true\nstop_at = "2.5x"\n',
+     "works in a scratch folder, and a scratch launch can't recycle itself"),
     ('[seat.s]\nharness = "codex"\n' + RELAUNCH_SEAT.removeprefix("[seat.s]\n")
      + 'stop_at = "2.5x"\n',
      "is a codex launch, and only a Claude session can be exited and relaunched"),
@@ -1952,6 +1993,15 @@ def test_the_presets_check_warns_of_a_stop_on_a_launch_that_cannot_relaunch_itse
                            f"out, and a launch of this preset {problem}, so each such "
                            "launch refuses it")
     assert not [p for p in errors(text, SLOTTED) if p.key == "stop_at"]
+
+
+def test_the_presets_check_names_a_preset_compact_beside_a_stop_only_as_retired(
+        recyclable):
+    text = ('[seat.s]\ntarget = "slot"\nwarn_at = "2x"\nrecycle_at_limit = "compact"\n'
+            'stop_at = "2.5x"\n')
+    assert [(p.key, p.code) for p in errors(text, SLOTTED)] == [
+        ("recycle_at_limit", "retired")]
+    assert not [w for w in stop_warnings(text) if w[1] == "stop_at"]
 
 
 @pytest.mark.parametrize("target", ['', 'target = "terminal"\n', 'target = "headless"\n'])
