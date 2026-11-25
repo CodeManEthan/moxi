@@ -11,6 +11,7 @@ Every rig test here runs on the mock and on the local backend (`BOTH_BACKENDS`).
 from __future__ import annotations
 
 import json
+import sys
 
 import pytest
 from conftest import wait_until
@@ -236,6 +237,9 @@ def _holding(rig, name):
                                           "MOXI_COMMS_NAME": name}))
 
 
+@pytest.mark.skipif(sys.platform == "win32",
+                    reason="Windows takes no listing away by a folder's mode; a claim read "
+                           "that fails is tested on every system below")
 def test_an_unreadable_claim_dir_leaves_only_the_directors_empty(rig):
     reviewer = rig.shim(**REVIEWER, directors=(P,))
     bound(rig, R)
