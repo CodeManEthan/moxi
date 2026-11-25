@@ -12,8 +12,8 @@ is an optional link, asked through `moxi.modules.load` where the feature needs i
 #: session the launcher started, read from the launch log by session id. Interface 2 adds
 #: `running`: the launches running now, read from the launch log and the process table.
 #: Interface 3 adds `fork`, a new session from a copy of another's conversation, with the
-#: caller's own `SESSION_ENV` stamps set on it, and `exit_session`, which exits a quiet
-#: launched session.
+#: caller's own `SESSION_ENV` stamps set on it; `exit_session`, which exits a quiet
+#: launched session; and `slots_here`, whether tmux slots run on this machine.
 INTERFACES = frozenset({1, 2, 3})
 API = "moxi_launcher.api"
 #: What `moxi launcher` runs, in process, as `main(argv, prog="moxi launcher")`.

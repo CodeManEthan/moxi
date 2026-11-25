@@ -765,7 +765,7 @@ Two sessions share an identity only when comms' qualified names are the same, so
 | `sets` | memory's redaction sets load in secrets | `fail` for a set secrets doesn't have (fix: the `moxi config` line that removes it) or can't run, which stops every ingest; `off` when memory's config can't be read |
 | `start` | memory is on turns' start list for each harness it reads, and its listener rows import | `warn` when it is off the list; `fail` when a row doesn't import |
 | `sessions` | the session table's sessions, with an identity, settled, and by launch kind; or that no session has started or been read yet | `warn` when the table can't be opened or read |
-| `links` | whether comms, the launcher, notes and slots load, and what memory does without each | `warn` when one is installed but fails to load |
+| `links` | whether comms, the launcher and notes load, and what memory does without each | `warn` when one is installed but fails to load |
 | `retention` | each harness's retention, from sessions | `warn` where sessions warns |
 | `subconscious` | how many live sessions have the subconscious on, and that a recall fork's permission asks are refused; or that none has it on | `warn` for a live session launched with it on where no route can run now, with the reason (fix: `moxi memory subconscious list`); while memory's config is in error, for the recalls it stopped since the config last read cleanly for a recall, with the newest error (fix: `moxi config memory`); for a recall line left at the late wait's last limit, with its fork and age, until the first taker after the fork's round ends settles it; for a recall line whose child and taker are gone, with its age, until the next recall child or session end takes it; for a recall still `sending`, with its wait and comms' last refusal (for one comms will never take: `moxi memory subconscious discard RECALL_ID`); for a slot fork memory did not exit that the launcher still runs (its exit held past the exit's wait or answered with anything but `exited`, or its owner gone before it asked for the exit), with its session, its slot where the launcher can say, how its exit came out and its age, which memory leaves running (`moxi launcher exit-session SESSION_ID` ends it once it is quiet); for recalls in the last day whose child could not start (reason `spawn`), with the newest error; for a recall on any route `starting` or `hurried` 30 seconds on with no fork and no log line naming its child (the child gone before it wrote its line, or with no identity of its own to write); and for one on the subagent route whose holder still runs past its wait for the fork's id, with its state and age |
 
@@ -948,7 +948,7 @@ turns' own setup: see
 `moxi`, Moxi's core; `moxi-turns`, which calls the start line, the lists, the reminder and
 the ingest trigger; `moxi-sessions`, through which memory reads every transcript and each
 harness's retention, and whose `moxi sessions read` opens a session; and `moxi-secrets`,
-the redaction sets. The extras `comms`, `launcher`, `slots` and `notes` add the four links above. The extra
+the redaction sets. The extras `comms`, `launcher` and `notes` add the three links above. The extra
 `connector` adds `moxi-connector`, the public MCP host, and python-stdnum, which
 secrets' personal-data set runs with, and serves `search_memory` ("In the Claude apps").
 The extra `secrets` names that set, `moxi-secrets[personal-data]`, and adds nothing

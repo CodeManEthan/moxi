@@ -9,11 +9,12 @@ sessions with `moxi_memory.api.search` for the keywords and keeping the best
 `subconscious.prefetch_hits` hits, leaving out the session itself (the fork holds its
 whole conversation) and subagent rows, and reading the notes: the Markdown files under
 the part's notes directories whose text holds the most of the keywords, at most
-`NOTES_SHOWN` of each part, each with the lines around its matches, every shown line cut
-at `NOTES_LINE_CHARS` characters. Every file under a directory is read, however many
-there are, and only its score is kept; the files shown are read again for their lines.
-A file larger than `NOTES_FILE_MAX_BYTES` is skipped, and files that match alike are
-ordered by path. A notes directory that doesn't exist is none.
+`NOTES_SHOWN` of each part, each with its first `NOTES_LINES` matching lines and one line
+around each, every shown line cut at `NOTES_LINE_CHARS` characters. Every file under a
+directory is read, however many there are, and only its score is kept; the files shown
+are read again for their lines. Directories and files whose names start with a dot are
+not read; a file larger than `NOTES_FILE_MAX_BYTES`, or one that isn't valid UTF-8, is
+skipped; files that match alike are ordered by path. A notes directory that doesn't exist is none.
 
 `subconscious.scope` says where. `project`: one part, the session's project and its
 notes directory. `everywhere`: one part, the whole index and the notes root.
