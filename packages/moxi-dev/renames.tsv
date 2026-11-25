@@ -18136,6 +18136,21 @@ moxi-dev	packages/moxi-dev/tests/test_check.py	assert checker.wait(timeout=testi
 moxi-dev	packages/moxi-dev/tests/test_check.py	checker.wait(timeout=1)	keep	timeout	timeout
 moxi-dev	packages/moxi-dev/tests/test_check.py	assert checker.wait(timeout=testing.PROC_WAIT_S) == 128 + signal.SIGTERM	keep	timeout	timeout
 moxi-dev	packages/moxi-dev/tests/test_kit.py	wait_for(lambda: not any(_running(pid) for pid in pids), testing.PROC_WAIT_S,	keep	any	any
+loadout	packages/loadout/src/moxi_loadout/cli.py	p.add_argument("--harness", action="append", default=[], metavar="H",	keep	default	default
+loadout	packages/loadout/src/moxi_loadout/cli.py	help="list it for harness H only, a row of the core's harness "	keep	help	help
+loadout	packages/loadout/src/moxi_loadout/page.py	_ADD_BODY = {**_ITEM_BODY, "harnesses": lb.Field("list", required=False, max=LIST_MAX,	keep	required	required
+loadout	packages/loadout/tests/test_page.py	if home.is_dir() and not any(home.iterdir()):	keep	any	any
+loadout	packages/loadout/tests/test_page.py	claude.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
+loadout	packages/loadout/src/moxi_loadout/harness.py	STANDING = frozenset({"ok", "stale", "modified", "blocked"})	keep	stale	stale
+loadout	packages/loadout/src/moxi_loadout/harness.py	here = set(present(names, env))	keep	set	set
+loadout	packages/loadout/tests/test_page.py	harness.home(name).mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
+loadout	packages/loadout/tests/test_page.py	@pytest.mark.parametrize("state", sorted(["ok", "stale", "modified", "blocked"]))	keep	stale	stale
+loadout	packages/loadout/tests/test_page.py	paths.claude_home().mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
+loadout	packages/loadout/src/moxi_loadout/pagehandlers.py	drawn = set(harness.shown(names, [(r.harness, r.state, r.target)	keep	set	set
+loadout	packages/loadout/tests/test_browser_drift.py	harness.home(name, ui_shell.env).mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
+loadout	packages/loadout/tests/test_browser_harnesses.py	yield SimpleNamespace(shell=shell, page=page, dir=loadout_dir, home=Path(shell.env["HOME"]))	keep	HOME	HOME
+loadout	packages/loadout/tests/test_browser_harnesses.py	root.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
+loadout	packages/loadout/tests/test_browser_harnesses.py	web = with_web_section(Path(shell.env["HOME"]), loadout_dir)	keep	HOME	HOME
 launcher	packages/launcher/src/moxi_launcher/compose/common.py	BASE_NAMES = ("HOME", "USER", "LOGNAME", "SHELL", "PATH", "LANG", "TZ", "TMPDIR",	keep	HOME	HOME
 launcher	packages/launcher/src/moxi_launcher/compose/common.py	adds nothing), with each of `CALLER_FIRST_NAMES` that `environ`, the replaying	keep	environ	environ
 launcher	packages/launcher/src/moxi_launcher/compose/common.py	that `environ` holds; for a resume into the caller's own terminal (`terminal`), the	keep	environ	environ

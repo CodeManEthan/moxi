@@ -15,6 +15,9 @@ plans a `remove`.
 - Without projects every key section is refused with "name it by path, or moxi install
   projects" (exit 3).
 
+`project_keys` maps path sections' roots to the projects they sit in, for the page; it
+never refuses anything and changes no plan.
+
 projects' own `exit_code` is not used: the codes above are loadout's, by error class.
 """
 
@@ -26,6 +29,8 @@ from moxi.exit import REFUSED, TEMPFAIL
 
 #: The projects interface loadout reads.
 INTERFACE = 1
+#: The projects interface that maps paths to projects (`for_paths`).
+MAP_INTERFACE = 2
 ABSENT = "a project key needs projects; name it by path, or moxi install projects"
 
 
@@ -73,4 +78,25 @@ def resolve(key: str):
     return Resolution(os.path.abspath(os.path.expanduser(str(root))))
 
 
-__all__ = ["INTERFACE", "ABSENT", "api", "resolve"]
+def project_keys(roots) -> dict[str, str]:
+    """For each path section's root in `roots`, the key of the project it is in, as
+    projects maps a path (`for_paths`, its interface 2): a root at a project's root or
+    anywhere under it. A root in no project is left out. Without projects, an older one
+    without `for_paths`, or one that can't be read now, the answer is empty: the page
+    then maps no path section to a project, as before projects mapped any."""
+    from moxi import modules
+
+    wanted = [os.fspath(r) for r in roots if r]
+    if not wanted or not modules.available("projects"):
+        return {}
+    found = modules.load("projects", interface=MAP_INTERFACE)
+    if not found.ok or found.api is None:
+        return {}
+    try:
+        keys = found.api.for_paths(wanted)
+    except Exception:  # noqa: BLE001 - no mapping is the answer for any failure
+        return {}
+    return {root: key for root, key in keys.items() if isinstance(key, str) and key}
+
+
+__all__ = ["INTERFACE", "MAP_INTERFACE", "ABSENT", "api", "resolve", "project_keys"]

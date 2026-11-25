@@ -206,7 +206,7 @@ export function globalRow(view: View): GlobalRow {
   return { label: "Global file", mode: modeWord(view.global.mode, view.global.chosen), cells };
 }
 
-const USER_SECTION: ViewSection = { name: "user", where: "user", root: null, refused: null };
+const USER_SECTION: ViewSection = { name: "user", where: "user", root: null, project: null, refused: null };
 
 function group(key: string, label: string, section: ViewSection, module: string | null,
                rows: ItemRow[], global: GlobalRow | null, harnesses: readonly string[]): GroupView {
