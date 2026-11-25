@@ -26,7 +26,7 @@ PY = sys.executable
 # A process that uses its working folder until its stdin closes, printing its own pid
 # first: on Windows a venv's python.exe runs the interpreter as its child, and the child
 # is the one using the folder.
-USES_ITS_FOLDER = "import os, sys; print(os.getpid(), flush=True); sys.stdin.read()"
+USES_ITS_DIR = "import os, sys; print(os.getpid(), flush=True); sys.stdin.read()"
 
 
 def set_home(monkeypatch, home: Path) -> Path:
@@ -344,7 +344,7 @@ def in_scratch(rewritten):
     """The rewritten record's B1, with a process whose working folder is its scratch
     folder. Returns `(log, the commission, the process)`."""
     path, made = rewritten
-    proc = subprocess.Popen([PY, "-c", USES_ITS_FOLDER], cwd=made.scratch,
+    proc = subprocess.Popen([PY, "-c", USES_ITS_DIR], cwd=made.scratch,
                             stdin=subprocess.PIPE, stdout=subprocess.PIPE, text=True)
     proc.own_pid = int(proc.stdout.readline())
     try:

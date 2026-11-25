@@ -231,9 +231,9 @@ def test_a_worktree_whose_git_file_names_another_repos_dir_is_kept(made, repo,
             encoding="utf-8"), encoding="utf-8")
     # Rewritten in place: git on Windows marks the file hidden, and a hidden file can't be
     # created over there.
-    with open(tree.root / ".git", "r+", encoding="utf-8") as git_file:
-        git_file.write(f"gitdir: {named}\n")
-        git_file.truncate()
+    with open(tree.root / ".git", "r+", encoding="utf-8") as git_fh:
+        git_fh.write(f"gitdir: {named}\n")
+        git_fh.truncate()
 
     assert kept_by(remove(event)) == "A4"
     assert (tree.root / "work.txt").is_file()

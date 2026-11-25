@@ -30,7 +30,7 @@ LOCK = "refs/rounds/finishing/main"
 # A process that uses its working folder until its stdin closes, printing its own pid
 # first: on Windows a venv's python.exe runs the interpreter as its child, and the child
 # is the one using the folder.
-USES_ITS_FOLDER = "import os, sys; print(os.getpid(), flush=True); sys.stdin.read()"
+USES_ITS_DIR = "import os, sys; print(os.getpid(), flush=True); sys.stdin.read()"
 
 @pytest.fixture
 def repo(git_repo, tmp_path):
@@ -511,7 +511,7 @@ def test_a_process_in_the_builds_scratch_refuses_the_finish_with_nothing_written
     scratch = placed(checking.commission_of(states.fold(events(path)), build_of(path)),
                  "scratch")
     before = events(path)
-    proc = subprocess.Popen([sys.executable, "-c", USES_ITS_FOLDER], cwd=scratch,
+    proc = subprocess.Popen([sys.executable, "-c", USES_ITS_DIR], cwd=scratch,
                             stdin=subprocess.PIPE, stdout=subprocess.PIPE, text=True)
     own_pid = int(proc.stdout.readline())
     try:
@@ -540,7 +540,7 @@ def test_a_scratch_that_came_into_use_after_the_gate_stays_for_the_sweep(
 
     def gate_then_use(*args, **kwargs):
         found = gate(*args, **kwargs)
-        proc = subprocess.Popen([sys.executable, "-c", USES_ITS_FOLDER], cwd=scratch,
+        proc = subprocess.Popen([sys.executable, "-c", USES_ITS_DIR], cwd=scratch,
                                 stdin=subprocess.PIPE, stdout=subprocess.PIPE, text=True)
         proc.own_pid = int(proc.stdout.readline())
         started.append(proc)
