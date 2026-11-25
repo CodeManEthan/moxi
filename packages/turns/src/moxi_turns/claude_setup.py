@@ -7,7 +7,9 @@ The plugin ships inside the package as a folder marketplace, `moxi_turns/claude/
 
 The runner finds the endpoint command it spawns in this order: `MOXI_TURNS_ENDPOINT` in
 its session's environment, else `endpoint.json` beside it. A variable that is set but not
-an absolute path is no endpoint; the runner does not fall back to the file then.
+an absolute path is no endpoint; the runner does not fall back to the file then. It finds
+the record of the last guard table (`moxi_turns.guards.seen`) the same way:
+`MOXI_TURNS_GUARDS_SEEN`, else `guards_seen` in `endpoint.json`.
 
 `SETUP` is one step, Claude's, in three parts:
 
@@ -19,8 +21,9 @@ an absolute path is no endpoint; the runner does not fall back to the file then.
    `.claude-plugin/types/`) are the placement's volatile paths.
 2. Write `endpoint.json` beside the placed runner: the absolute endpoint command, which
    is `claude.endpoint` when the key is set and otherwise this environment's
-   `moxi-turns-endpoint` (`moxi.paths.script`, never a PATH lookup), and the turns
-   version that placed the copy. Every run rewrites it, so a changed key or a moved
+   `moxi-turns-endpoint` (`moxi.paths.script`, never a PATH lookup), the record of the
+   last guard table's path (`guards_seen`), and the turns version that placed the copy.
+   Every run rewrites it, so a changed key or a moved
    environment takes effect at the next `moxi install turns`.
 3. `claude plugin marketplace add <placed folder>`, then install both plugins at user
    scope, skipping each one already done. Claude Code runs a user-scope plugin from its
@@ -37,8 +40,8 @@ succeeds: run `moxi install turns` again once Claude Code is installed.
 Only a user-scope install reads `endpoint.json`: it has no launch to name its endpoint.
 A launch that loads the plugins for itself gets them from
 `moxi_turns.launch_additions("claude", ...)`, which names both folders for `--plugin-dir`
-(`claude_plugin_dirs()`) and the endpoint command in `MOXI_TURNS_ENDPOINT`
-(`launch_endpoint()`). Its folders are the placed copy's when that copy is current and
+(`claude_plugin_dirs()`), the endpoint command in `MOXI_TURNS_ENDPOINT`
+(`launch_endpoint()`) and the record's path in `MOXI_TURNS_GUARDS_SEEN`. Its folders are the placed copy's when that copy is current and
 was placed by this version of turns, else the package's own, so a read-only install with
 no setup run still launches. A launch writes nothing. SETUP is the one writer of
 `endpoint.json`, and it writes through a temp file of its own beside the placed folder
@@ -188,8 +191,10 @@ def write_endpoint_file(root: Path | None = None, env: dict[str, str] | None = N
     if not target.parent.is_dir():
         raise SetupError(f"the runner plugin's folder {target.parent} does not exist")
     from .endpoint import package_version
+    from .guards import seen as guards_seen
 
     data = json.dumps({"command": str(command), "environment": sys.prefix,
+                       "guards_seen": str(guards_seen.record_path(env)),
                        "version": package_version()}, indent=1) + "\n"
     try:
         fd, tmp = tempfile.mkstemp(dir=root.resolve().parent,

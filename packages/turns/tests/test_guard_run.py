@@ -811,3 +811,60 @@ def test_ask_guard_at_the_ask_step_carries_the_mode_and_the_record_path(leg_rig)
     status, _ = post(runner.mod_sock, leg.PATH_GUARD, {"call": {"tool": "Bash"},
                                                         "guards": [], "step": "later"})
     assert status == 400
+
+
+# -- the record of the last table ----------------------------------------------------------
+
+def test_an_ask_step_entry_records_ask_step(leg_rig):
+    from moxi_turns.guards import seen
+
+    g = Guard(name="prompt", calls={"claude": ("*",)}, deny="no", step="ask")
+    leg_rig(Found("t.prompt", g, "py", path="/g/t.py"))
+    record = seen.read_record()
+    assert {k: record[k] for k in seen.FACTS} == {
+        "removal": False, "no_nested_agents": False, "ask_step": True}
+
+
+def test_a_record_that_cant_be_written_costs_no_line(turns_env, rig, tmp_path, caplog):
+    blocked = tmp_path / "a-file"
+    blocked.write_text("")
+    r = rig(data_only("b", "no"))
+    rd, w = pipe_pair()
+    harness = ClaudeHarness(w, pid=os.getpid(), cwd="/work", guards=r.runner,
+                            seen_path=blocked / "guards-seen.json")
+    ep = Endpoint(harness, registry=Registry())
+    try:
+        ep.prepare()
+        harness.serve(str(ep.dir / protocol.MOD_SOCK))
+        runner = FakeRunner(rd)
+        assert harness.first_line()
+        runner.wait_first()
+        assert [e["id"] for e in runner.first["guards"]] == ["t.b"]
+        assert "the record of the guard table was not written" in caplog.text
+    finally:
+        ep.stop("the test ended")
+        w.close()
+
+
+def test_facts_of_reads_ids_and_steps_alone():
+    from moxi_turns.guards import seen
+
+    assert seen.facts_of([]) == dict.fromkeys(seen.FACTS, False)
+    assert seen.facts_of([{"id": "turns.removal", "step": "call"},
+                          {"id": "x.y", "step": "ask"}]) == {
+        "removal": True, "no_nested_agents": False, "ask_step": True}
+
+
+def test_read_record_takes_only_a_whole_record(turns_env, tmp_path):
+    from moxi_turns.guards import seen
+
+    path = tmp_path / "r.json"
+    assert seen.read_record(path) is None
+    path.write_text("not json")
+    assert seen.read_record(path) is None
+    path.write_text('{"removal": true, "no_nested_agents": false}')
+    assert seen.read_record(path) is None
+    seen.write_record([{"id": "turns.no-nested-agents", "step": "call"}], path=path, now=5.0)
+    assert seen.read_record(path) == {"at": 5.0, "removal": False,
+                                      "no_nested_agents": True, "ask_step": False}
+    assert not [p for p in tmp_path.iterdir() if p.name.startswith(".")]

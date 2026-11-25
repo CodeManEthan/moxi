@@ -24,6 +24,8 @@ INTERNAL_ENV = {
                            "when it names one",
     "MOXI_TURNS_ENDPOINT": "the absolute endpoint command a Claude launch names for "
                            "turns' runner plugin to spawn",
+    "MOXI_TURNS_GUARDS_SEEN": "the path of the record of the last guard table a Claude "
+                              "launch names for turns' runner plugin to read",
 }
 #: Per-launch stamps turns' launch additions render, so a launcher scrubs them from what
 #: it inherits and stamps its own. turns also reads them, so they stay in INTERNAL_ENV.
@@ -32,6 +34,8 @@ SESSION_ENV = {
                            "and bound to its session id when it names one",
     "MOXI_TURNS_ENDPOINT": "the endpoint command one Claude launch names, stamped per "
                            "launch",
+    "MOXI_TURNS_GUARDS_SEEN": "the record of the last guard table one Claude launch "
+                              "names, stamped per launch",
 }
 SETTINGS = "settings.toml"
 #: The install questions: one per shipped guard, keyed by its switch, each a noun phrase
@@ -65,4 +69,6 @@ BUDGETS = {"hook_ms": 2.0}
 STORES = {
     "hook-times": {"root": "state", "path": "hook-times.jsonl", "kind": "jsonl",
                    "retention": "7d", "rebuildable": True, "lazy": True},
+    "guards-seen": {"root": "state", "path": "guards-seen.json", "kind": "file",
+                    "retention": "keep", "rebuildable": True, "lazy": True},
 }
