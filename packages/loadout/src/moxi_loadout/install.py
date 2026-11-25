@@ -334,11 +334,15 @@ _GLOBAL_FORMS = {"global-line": "line", "global-block": "block",
 # -- install --------------------------------------------------------------------------------
 
 def install(scope: Scope = Scope(), *, replace: Iterable[str] = (), dry_run: bool = False,
+            accept_diff: bool = False, ask: Callable[[str], bool] | None = None,
             loadout_dir=None, resolver=planner.resolve_key,
             say: Callable[[str], object] | None = None) -> Outcome:
     """Adopt, plan the whole manifest, apply the steps in scope. See the module's docs.
     Every line the run says lands in the outcome's `lines`; `say`, when given, is also
-    told the line that it waits for the core lock, as it waits."""
+    told the line that it waits for the core lock, as it waits. A skill or agent occupant
+    `--replace` names that differs from what would be placed is moved aside only with
+    `accept_diff`, or when `ask` (a terminal's yes-or-no question) answers yes; else it
+    is refused, naming `--accept-diff` (`moxi.place`, "Replacing")."""
     if dry_run:
         out = status(scope, loadout_dir=loadout_dir, resolver=resolver)
         out.code = planner.exit_code(r.code for r in out.rows
@@ -358,7 +362,8 @@ def install(scope: Scope = Scope(), *, replace: Iterable[str] = (), dry_run: boo
     try:
         with files.lock(stores.install_lock(), timeout_s=INSTALL_WAIT):
             with _core_lock(files, paths, tell):
-                out = _install(scope, list(replace), loadout_dir, resolver, lines)
+                out = _install(scope, list(replace), loadout_dir, resolver, lines,
+                               accept_diff=accept_diff, ask=ask)
     except files.LockTimeout as exc:
         lines.append(f"{exc}; another install is running, so try again later")
         return Outcome(lines=lines, code=TEMPFAIL)
@@ -401,7 +406,8 @@ def _core_lock(files, paths, say: Callable[[str], object]):
     return held()
 
 
-def _install(scope: Scope, replace: list[str], loadout_dir, resolver, lines: list[str]) -> Outcome:
+def _install(scope: Scope, replace: list[str], loadout_dir, resolver, lines: list[str], *,
+             accept_diff: bool = False, ask=None) -> Outcome:
     from moxi import place
 
     from moxi_loadout import manifest as manifest_mod
@@ -484,13 +490,16 @@ def _install(scope: Scope, replace: list[str], loadout_dir, resolver, lines: lis
     removes = [s for s in plan.removals if _remove_in_scope(plan, s, scope)]
     moves = _placer_moves(plan, forced, seeded, removes, keeper, say)
     done = {str(p.path): p for p in place.apply(plain + removes, say=moves)}
-    done.update({str(p.path): p for p in place.apply(forced, replace=True, say=moves)})
+    done.update({str(p.path): p for p in place.apply(forced, replace=True,
+                                                     accept_diff=accept_diff, ask=ask,
+                                                     say=moves)})
     now = {str(p.path) for p in place.status(planner.OWNER)}
 
     seeded_done: dict[str, object] = {}
     for want in seeded:
         result = adoption.place_seeded(want.module, want.item,
-                                       replace=id(want) in replaced, say=moves)
+                                       replace=id(want) in replaced,
+                                       accept_diff=accept_diff, ask=ask, say=moves)
         if result.placed is not None:
             seeded_done[str(result.placed.path)] = result.placed
             say(f"placed skill {want.name} for {want.harness} ({result.placed.path})")

@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- `moxi loadout install --replace` asks before it moves aside a skill or agent whose
+  contents differ from what it would place, naming the files only on one side and the
+  files that differ. Without a terminal (or with `--json`) such a replace is refused,
+  naming the new `--accept-diff`, which places over it without asking. An occupant equal
+  to loadout's is replaced as before, with no question. The page's Replace passes
+  `--accept-diff`, since the page shows what it moves aside before it runs. A place that
+  fails after the move puts the occupant back.
 - `moxi loadout add --harness H` (it may repeat) lists an item for those harnesses only,
   in that section alone: the section's `disabled` switches it off for each harness not
   named, and its line names the harnesses it is on for. The page's Add has a `For`

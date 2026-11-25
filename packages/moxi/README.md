@@ -108,7 +108,10 @@ behalf, and `moxi uninstall` removes what it wrote:
 - A module's daemons and timers, written as systemd user units in
   `~/.config/systemd/user` (launchd agents on macOS, Task Scheduler tasks on Windows).
   Each file is marked as Moxi's, and a file Moxi didn't write is never touched unless
-  `--replace` moves it aside.
+  `--replace` moves it aside. A skill or agent file in the way is first compared with the
+  module's: equal, it is replaced; different, `moxi install` asks at a terminal, refuses
+  without one, and replaces it without asking with `--accept-diff`. A place that fails
+  after the move puts the file back.
 - Whatever the module's own setup does, which its README describes.
 
 A shortcut (`moxi shortcut`) is a small script written beside the `moxi` on PATH.

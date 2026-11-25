@@ -1,6 +1,7 @@
 """`moxi loadout`: your skills, agents and settings, placed for each harness.
 
-    moxi loadout install [--user] [--project P]... [--replace ID]... [--dry-run] [--json]
+    moxi loadout install [--user] [--project P]... [--replace ID]... [--accept-diff]
+                         [--dry-run] [--json]
     moxi loadout status [--user] [--project P]... [--json]
     moxi loadout add KIND NAME [--user | --project P] [--harness H]... [--json]
     moxi loadout remove KIND NAME [--user | --project P] [--json]
@@ -13,7 +14,9 @@ applies the steps in scope (all of them without a flag). `--replace` takes a pat
 `<kind>:<name>@<harness>`. No write of loadout's destroys bytes it can't show it wrote:
 whatever a write goes over that isn't loadout's (what `--replace` replaces, an edited copy
 a removal takes away) is kept under the core's `displaced/` folder first, until you delete
-it, and the run names each copy with the command that puts it back (`BACK`).
+it, and the run names each copy with the command that puts it back (`BACK`). A skill or
+agent in the way whose contents differ from what would be placed is asked about at a
+terminal, refused without one, and replaced without a question with `--accept-diff`.
 `status` prints one line per item that is not `ok`, then notes, then a count. `add` and
 `remove` write a section's list (`add --harness` lists the item for those harnesses only,
 through that section's `disabled`, and `remove` takes the item's ids there out with it),
@@ -88,6 +91,10 @@ def _parser(prog: str) -> argparse.ArgumentParser:
     p.add_argument("--replace", action="append", default=[], metavar="ID",
                    help="keep what is in the way under displaced/ and place over it: a "
                         "path, or <kind>:<name>@<harness>; may repeat")
+    p.add_argument("--accept-diff", action="store_true",
+                   help="with --replace, place over a skill or agent whose contents differ "
+                        "without asking; at a terminal you are asked, and without one "
+                        "it is refused")
     p.add_argument("--dry-run", action="store_true", help="plan and print, change nothing")
     p = verb("status", "say what has drifted")
     scopes(p, many=True)
@@ -209,7 +216,25 @@ def _run_install(args, scope, *, written: Sequence[str] = (), **kw) -> int:
 
 
 def _install(args) -> int:
-    return _run_install(args, _scope(args), replace=args.replace, dry_run=args.dry_run)
+    return _run_install(args, _scope(args), replace=args.replace, dry_run=args.dry_run,
+                        accept_diff=args.accept_diff, ask=_terminal_ask(args))
+
+
+def _terminal_ask(args):
+    """A yes-or-no question on stderr, answered on stdin, when both are a terminal and
+    the run prints no JSON; else None, so a different occupant is refused."""
+    if args.json or not (sys.stdin is not None and sys.stdin.isatty()
+                         and sys.stderr is not None and sys.stderr.isatty()):
+        return None
+
+    def ask(question: str) -> bool:
+        print(question, end="", file=sys.stderr, flush=True)
+        try:
+            answer = sys.stdin.readline()
+        except (EOFError, KeyboardInterrupt):
+            return False
+        return answer.strip().lower() in ("y", "yes")
+    return ask
 
 
 def _status(args) -> int:

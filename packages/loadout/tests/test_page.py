@@ -1003,12 +1003,14 @@ def test_a_job_whose_pid_cant_be_recorded_is_still_accepted(lo, spawned, monkeyp
 
 @pytest.mark.parametrize("path, body, verb", [
     ("/api/replace", {"replace": "skill:review@claude", "project": "alpha", "job": JOB},
-     ["install", "--replace=skill:review@claude", "--project=alpha"]),
+     ["install", "--replace=skill:review@claude", "--accept-diff",
+      "--project=alpha"]),
     ("/api/replace", {"replace": "/srv/alpha/.claude/skills/x", "user": True, "job": JOB},
-     ["install", "--replace=/srv/alpha/.claude/skills/x", "--user"]),
+     ["install", "--replace=/srv/alpha/.claude/skills/x", "--accept-diff",
+      "--user"]),
     # A row a whole run applies (the global file's part): no section.
     ("/api/replace", {"replace": "global:global@claude", "job": JOB},
-     ["install", "--replace=global:global@claude"]),
+     ["install", "--replace=global:global@claude", "--accept-diff"]),
     ("/api/global-remove", {"job": JOB}, ["global", "remove"]),
 ])
 def test_a_named_act_runs_its_verb_and_nothing_else_as_the_job_it_names(

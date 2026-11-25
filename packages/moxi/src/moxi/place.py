@@ -7,7 +7,8 @@ a ledger of what each owner placed.
 
     plan(owner, items, form=None, git_s=None)
                                          what placing `items` would do (`Step` per item)
-    apply(steps, replace=False)          carry a plan out (`Placed` per placement left)
+    apply(steps, replace=False, accept_diff=False, ask=None)
+                                         carry a plan out (`Placed` per placement left)
     status(owner)                        each placement of `owner` read against the disk
     remove(owner)                        remove every placement of `owner`
     adopt(from_owner, to_owner, placed, seeded=False)
@@ -116,6 +117,26 @@ counts as named, so nothing removes it. `apply(..., replace=True)` moves a refus
 occupant (cause `occupant` or `tracked`) to
 `DATA/moxi/displaced/<UTC stamp>/<harness>/<name>` and places the item; it never takes
 another owner's placement.
+
+Replacing
+---------
+
+Before it moves an occupant aside, `apply` compares it with what it would place there:
+a file by its bytes, a folder by its files' names and bytes (a link inside by its text,
+the placer's mark and the item's volatile paths left out), and a link or junction by what
+it points to. Equal, it replaces with no question. Different, it replaces only when
+`accept_diff=True`, or when `ask` (a callback given a yes-or-no question, for a run with
+someone at a terminal) answers yes to a question that names the differences: files only
+in one side, and files in both that differ. With neither, it refuses that occupant, naming the
+flag `--accept-diff`; `ask` answering no skips it.
+
+The move is one rename. Where a rename can't cross from one volume or filesystem to
+another (`EXDEV`, or Windows' not-same-device error), the occupant is copied whole, the
+copy checked against it by hash, and then the original removed. Any other failure (a file
+Windows holds locked, say) fails the move, and nothing is placed. When placing the item
+after the move fails, whatever was written at the target is removed and the occupant is
+moved back the same way before the error goes on; a move back that fails says where the
+occupant is kept.
 
 Held items
 ----------
@@ -973,7 +994,8 @@ def _core_lock():
 
 # -- apply --------------------------------------------------------------------------------
 
-def apply(steps: Sequence[Step], *, replace: bool = False,
+def apply(steps: Sequence[Step], *, replace: bool = False, accept_diff: bool = False,
+          ask: Callable[[str], bool] | None = None,
           say: Callable[[str], object] = print) -> list[Placed]:
     """Carry a plan out, in order, under the core lock. Returns the placements the plan
     leaves in place (each `add`, `update` and `keep`, and each refusal `replace` placed
@@ -984,8 +1006,10 @@ def apply(steps: Sequence[Step], *, replace: bool = False,
     places it, and otherwise drops that lapsed hand-over. A `refuse` and a
     `skip` say their line and change nothing, except that `replace=True` moves the
     occupant of a `refuse` with cause `occupant` or `tracked` to
-    `DATA/moxi/displaced/<UTC stamp>/<harness>/<name>` and places the item. An `OSError`
-    on one step says one line and leaves that step's placement as it was; the rest go on.
+    `DATA/moxi/displaced/<UTC stamp>/<harness>/<name>` and places the item, once the
+    occupant is found equal to what would be placed, `accept_diff` is True, or `ask`
+    answers yes (module doc, "Replacing"). An `OSError` on one step says one line and
+    leaves that step's placement as it was; the rest go on.
     """
     import time
 
@@ -1003,7 +1027,8 @@ def apply(steps: Sequence[Step], *, replace: bool = False,
                 notes.append(step.note)
                 say(step.note)
             try:
-                placed = _apply_one(step, ledger, replace=replace, stamp=stamp, say=say)
+                placed = _apply_one(step, ledger, replace=replace, stamp=stamp, say=say,
+                                    accept_diff=accept_diff, ask=ask)
             except OSError as exc:
                 say(f"{step.item.name} for {step.item.harness}: could not "
                     f"{step.action} {step.target}: {exc}")
@@ -1018,7 +1043,8 @@ def apply(steps: Sequence[Step], *, replace: bool = False,
     return done
 
 
-def _apply_one(step: Step, ledger: dict, *, replace: bool, stamp: str, say) -> Placed | None:
+def _apply_one(step: Step, ledger: dict, *, replace: bool, stamp: str, say,
+               accept_diff: bool = False, ask=None) -> Placed | None:
     """One step. A step that places a target this owner handed over first checks the
     hand-over: while any other owner places the target the step is skipped, and once
     the target is placed the lapsed `handed` entry is dropped."""
@@ -1032,22 +1058,31 @@ def _apply_one(step: Step, ledger: dict, *, replace: bool, stamp: str, say) -> P
             to = handed[key].get("to", "another owner")
             say(f"{step.item.name} was handed to {to}; skipped")
             return None
-    placed = _apply_step(step, ledger, replace=replace, stamp=stamp, say=say)
+    placed = _apply_step(step, ledger, replace=replace, stamp=stamp, say=say,
+                         accept_diff=accept_diff, ask=ask)
     if placed is not None:
         ledger.get(step.owner, {}).get("handed", {}).pop(key, None)
     return placed
 
 
-def _apply_step(step: Step, ledger: dict, *, replace: bool, stamp: str, say) -> Placed | None:
+def _apply_step(step: Step, ledger: dict, *, replace: bool, stamp: str, say,
+                accept_diff: bool = False, ask=None) -> Placed | None:
     item, key, owner = step.item, step.target, step.owner
     if step.action == "refuse":
         if not (replace and step.cause in _OCCUPANTS and step.occupant is not None):
             say(f"{item.name} for {item.harness} not placed: {step.reason}")
             return None
-        moved = _displace(str(step.occupant), stamp, item.harness, item.name)
-        say(f"moved {step.occupant} to {moved}")
+        occupant = str(step.occupant)
+        if not accept_diff and not _may_replace(step, occupant, ask, say):
+            return None
+        moved = _displace(occupant, stamp, item.harness, item.name)
+        say(f"moved {occupant} to {moved}")
         _record(ledger, owner)["placed"].pop(str(key), None)
-        return _place(step, ledger)
+        try:
+            return _place(step, ledger)
+        except BaseException:
+            _put_back(str(key), occupant, moved, say)
+            raise
     key = str(key)
     if step.action == "remove":
         entry = _record(ledger, owner)["placed"].get(key)
@@ -1065,6 +1100,69 @@ def _apply_step(step: Step, ledger: dict, *, replace: bool, stamp: str, say) -> 
         _remove_path(key)
         _record(ledger, owner)["placed"].pop(key, None)
     return _place(step, ledger)
+
+
+def _may_replace(step: Step, occupant: str, ask, say) -> bool:
+    """Whether a replace may move `occupant` aside: it is equal to what `step` would
+    place, or `ask` (a terminal's yes-or-no question) answers yes to a question that
+    names the differences. With no `ask` a different occupant is refused, naming
+    `--accept-diff`."""
+    item = step.item
+    differs = _differences(occupant, item)
+    if not differs:
+        return True
+    if ask is None:
+        say(f"{item.name} for {item.harness} not replaced: {occupant} differs from what "
+            f"would be placed ({'; '.join(differs)}); pass --accept-diff to replace it")
+        return False
+    question = "\n".join([f"{occupant} differs from what would be placed for {item.name}:",
+                          *(f"  {line}" for line in differs),
+                          f"Move {occupant} aside and place {item.name} there? [y/N] "])
+    if ask(question):
+        return True
+    say(f"{item.name} for {item.harness} not replaced: {occupant} was kept")
+    return False
+
+
+#: The most paths one line of `_differences` names before it counts the rest.
+_DIFF_NAMES = 8
+
+
+def _differences(occupant: str | os.PathLike, item: Item) -> list[str]:
+    """What differs between the path at `occupant` and what placing `item` puts there, a
+    line each; [] when they are equal (module doc, "Replacing")."""
+    occupant, source = os.fspath(occupant), os.path.abspath(os.fspath(item.source))
+    if _is_link(occupant):
+        pointed = _link_points(occupant)
+        return [] if _same(pointed, source) else [f"it is a link to {pointed}"]
+    is_dir, wants_dir = os.path.isdir(occupant), os.path.isdir(source)
+    if is_dir != wants_dir:
+        return [f"it is a {'folder' if is_dir else 'file'}, and what would be placed "
+                f"is a {'folder' if wants_dir else 'file'}"]
+    if not is_dir:
+        return [] if _hash(occupant) == _hash(source) else ["the file's bytes differ"]
+
+    def tree(root: str) -> dict[str, tuple[str, str]]:
+        return {rel: (kind, full) for rel, kind, full in _entries(root)
+                if kind != "D" and rel != MARK and not any(rel == v or rel.startswith(v + "/")
+                                           for v in item.volatile)}
+
+    theirs, ours = tree(occupant), tree(source)
+    changed = []
+    for rel in sorted(set(theirs) & set(ours)):
+        (kind, full), (want, wanted) = theirs[rel], ours[rel]
+        if kind != want or (kind == "F" and _hash(full) != _hash(wanted)) or (
+                kind == "L" and os.readlink(full) != os.readlink(wanted)):
+            changed.append(rel)
+    lines = []
+    for label, names in (("only there", sorted(set(theirs) - set(ours))),
+                         ("only in what would be placed", sorted(set(ours) - set(theirs))),
+                         ("different", changed)):
+        if names:
+            shown = ", ".join(names[:_DIFF_NAMES])
+            more = len(names) - _DIFF_NAMES
+            lines.append(f"{label}: {shown}" + (f" and {more} more" if more > 0 else ""))
+    return lines
 
 
 def _entry(step: Step, *, in_place: bool = False) -> dict:
@@ -1176,9 +1274,8 @@ def _remove_path(path: str) -> None:
 
 
 def _displace(path: str, stamp: str, harness: str, name: str) -> Path:
-    """Move `path` to `DATA/moxi/displaced/<stamp>/<harness>/<name>` (a free name)."""
-    import shutil
-
+    """Move `path` to `DATA/moxi/displaced/<stamp>/<harness>/<name>` (a free name), by
+    `_move`."""
     from . import paths
 
     base = paths.core().data_dir() / "displaced" / stamp / (harness or "dest") / name
@@ -1187,8 +1284,66 @@ def _displace(path: str, stamp: str, harness: str, name: str) -> Path:
         n += 1
         dest = base.with_name(f"{name}-{n}")
     os.makedirs(dest.parent, exist_ok=True)
-    shutil.move(path, dest)
+    _move(path, str(dest))
     return dest
+
+
+#: Windows' error for a rename from one volume to another (`ERROR_NOT_SAME_DEVICE`).
+_NOT_SAME_DEVICE = 17
+
+
+def _cross_device(exc: OSError) -> bool:
+    import errno
+
+    return exc.errno == errno.EXDEV or getattr(exc, "winerror", None) == _NOT_SAME_DEVICE
+
+
+def _move(path: str, dest: str) -> None:
+    """Move `path` to `dest`, which must not exist: one rename, or, where a rename can't
+    cross volumes or filesystems, a whole copy checked by hash and then the original
+    removed. Any other failure raises with `path` where it was."""
+    try:
+        os.rename(path, dest)
+        return
+    except OSError as exc:
+        if not _cross_device(exc):
+            raise
+    _copy_whole(path, dest)
+    _remove_path(path)
+
+
+def _copy_whole(path: str, dest: str) -> None:
+    """Copy a link, folder or file to `dest`, links as links, and check the copy's hash
+    against the original's; a copy that fails or differs is removed and raises."""
+    import shutil
+
+    try:
+        if _is_link(path):
+            os.symlink(os.readlink(path), dest, target_is_directory=os.path.isdir(path))
+        elif os.path.isdir(path):
+            shutil.copytree(path, dest, symlinks=True)
+        else:
+            shutil.copy2(path, dest)
+        if not _is_link(path) and _hash(dest) != _hash(path):
+            raise OSError(f"the copy of {path} at {dest} does not match it")
+    except BaseException:
+        if os.path.lexists(dest):
+            _remove_path(dest)
+        raise
+
+
+def _put_back(key: str, occupant: str, moved: Path, say) -> None:
+    """After a place over a displaced occupant failed: remove what was written at `key`
+    and move the occupant back from `moved`. A failure says where the occupant is kept."""
+    try:
+        if os.path.lexists(key):
+            _remove_path(key)
+        _move(str(moved), occupant)
+    except OSError as exc:
+        say(f"could not move {occupant} back after the place failed: {exc}; "
+            f"it is kept at {moved}")
+    else:
+        say(f"moved {moved} back to {occupant}: the place failed")
 
 
 def _unplace(owner: str, key: str, entry: dict, stamp: str, say) -> str:

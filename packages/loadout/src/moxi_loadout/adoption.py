@@ -115,14 +115,16 @@ class Seeded:
     line: str = ""
 
 
-def place_seeded(module: str, item, *, replace: bool = False,
+def place_seeded(module: str, item, *, replace: bool = False, accept_diff: bool = False,
+                 ask: Callable[[str], bool] | None = None,
                  say: Callable[[str], object] = print) -> Seeded:
     """Place `item` (a skill of `module`) as `module`, then hand it to loadout seeded.
 
     The module's plan for the item is applied for its own step only, never the `remove`
     steps the plan yields for the module's other placements. With `replace`, a step
     refused for a path in the way (cause `occupant` or `tracked`) is applied with
-    `replace=True`, which moves the path aside. Any other refused step is returned and
+    `replace=True`, which moves the path aside once it is equal to the module's, or
+    `accept_diff` is True, or `ask` answers yes. Any other refused step is returned and
     nothing is adopted. When the placement is made but the hand-over fails, the
     placement is undone: the `remove` step for that target out of `plan(module, [])`,
     applied alone. If that fails too, the line names the target."""
@@ -134,7 +136,7 @@ def place_seeded(module: str, item, *, replace: bool = False,
         return Seeded(step=step)
     target = str(step.target)
     with deferred_signals():
-        done = place.apply([step], replace=forced, say=say)
+        done = place.apply([step], replace=forced, accept_diff=accept_diff, ask=ask, say=say)
         if not any(str(p.path) == target for p in done):
             return Seeded(line=f"could not place {item.name} at {target}")
         try:

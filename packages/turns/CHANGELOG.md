@@ -2,6 +2,9 @@
 
 ## 0.2.8 (unreleased)
 
+- Setup still replaces its own placed Claude plugin copy whatever it holds, moving the
+  old copy to the core's displaced folder: it passes the placer's new `accept_diff`, since
+  the copy is turns' own and setup runs with no one to ask. Needs `moxi>=0.1.11`.
 - A new capability, `stale-agents`, which Claude Code sessions offer: the endpoint judges
   each `waiting` subagent Claude Code lists, and one whose transcript's last timestamped
   line is at least an hour old, whose last turn record is an assistant `end_turn`, and

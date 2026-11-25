@@ -493,8 +493,9 @@ def _job(body: Mapping[str, Any]) -> str:
 
 
 def replace(call: Any) -> Any:
-    """`POST /api/replace`: `moxi loadout install --replace ID [--user | --project P]`, as
-    the job the body names."""
+    """`POST /api/replace`: `moxi loadout install --replace ID --accept-diff [--user |
+    --project P]`, as the job the body names. The page shows what the Replace moves
+    aside before it is pressed, so the job takes a different occupant without asking."""
     from moxi_loadout.install import _is_path
 
     value, body = call.body["replace"], call.body
@@ -508,7 +509,7 @@ def replace(call: Any) -> Any:
     flags = ["--user"] if body.get("user") else []
     if project is not None:
         flags.append(_section(project))
-    return _start(["install", f"--replace={value}", *flags], key=_job(body))
+    return _start(["install", f"--replace={value}", "--accept-diff", *flags], key=_job(body))
 
 
 def global_remove(call: Any) -> Any:

@@ -126,7 +126,12 @@ copy stays until you delete it.
   refused and left as it is.
 - **A placement.** What stands where loadout places something, an edited copy, or a file
   saved over loadout's link is moved aside by the core's placer, which says so on its own
-  line (`moved <it> to <copy>`).
+  line (`moved <it> to <copy>`). A `--replace` first compares what is there with what
+  loadout would place (a file's bytes, a folder's file names and bytes, where a link
+  points). Equal, it goes ahead. Different, `moxi loadout install` asks at a terminal,
+  naming what differs, and refuses without one; `--accept-diff` goes ahead without
+  asking, and the page's Replace, which shows what it moves aside first, passes it. If
+  placing fails after the move, the placer puts what was there back.
 - **An entry in a harness's file** (Claude Code's `settings.json` and `.claude.json`,
   Codex's `hooks.json` and `config.toml`, OpenCode's `opencode.json`, a managed global
   file), when you edited it or loadout didn't write it (one you had before loadout

@@ -2,6 +2,19 @@
 
 ## 0.1.11 (unreleased)
 
+- The skill placer (`moxi.place.apply`) compares an occupant with what it would place
+  before a replace moves it aside: a file by its bytes, a folder by its files' names and
+  bytes, a link by where it points. Equal, it replaces with no question. Different, it
+  replaces only with `accept_diff=True` or when `ask`, a new yes-or-no callback for a run
+  at a terminal, answers yes to a question naming what differs; otherwise it refuses
+  that occupant, naming `--accept-diff`. `moxi install` gains `--accept-diff` and asks at
+  a terminal. A caller that passed `replace=True` and wants today's replace of any
+  occupant passes `accept_diff=True` too; it needs `moxi>=0.1.11`.
+- A replace moves the occupant with one rename. Across volumes or filesystems it copies
+  it whole, checks the copy by hash, then removes the original; any other failure (a
+  file Windows holds locked) fails the move and places nothing. When placing after the
+  move fails, the placer removes what it wrote and moves the occupant back, and a move
+  back that fails names where the occupant is kept.
 - New `moxi.terminal.agent(view=None, run=None)`: the agent test. It names the harness
   (`claude`, `codex` or `opencode`) whose session started the run, or None, by the
   terminal walk's agent signs: a harness's program above the run, Claude Code's or Codex's

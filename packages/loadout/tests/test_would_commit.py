@@ -224,7 +224,7 @@ def test_a_tracked_occupant_reads_would_commit_then_replace_places_over_it(lo, t
     [row] = [r for r in install.status().rows if (r.name, r.harness) == ("review", "codex")]
     assert row.state == "would-commit" and row.replaceable
     assert row.as_json()["replaceable"] is True
-    out = install.install(replace=["skill:review@codex"])
+    out = install.install(replace=["skill:review@codex"], accept_diff=True)
     assert out.code == 0, out.text()
     assert skill_dir.is_symlink()
     assert ignores.listed(skill_dir.parent / ".gitignore") == {"review"}

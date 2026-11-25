@@ -267,7 +267,8 @@ def place_copy() -> tuple[Path, list[str]]:
     It plans this one item and applies only its step: the plan takes its items as the
     owner's whole set, so applying every step would remove turns' other placements. A
     path in the way (a folder the placer did not mark, or a copy changed outside its
-    volatile paths) is moved to the core's displaced folder, never deleted."""
+    volatile paths) is moved to the core's displaced folder, never deleted, whatever it
+    holds: the copy is turns' own, so setup replaces it without the placer's compare."""
     from moxi import files, paths, place
 
     root = placed_root()
@@ -278,7 +279,7 @@ def place_copy() -> tuple[Path, list[str]]:
         step = next(s for s in place.plan(MODULE, [item], form="copy") if s.item == item)
         if step.action == "refuse" and step.cause not in ("occupant", "tracked"):
             raise SetupError(step.reason)
-        done = place.apply([step], replace=True, say=lines.append)
+        done = place.apply([step], replace=True, accept_diff=True, say=lines.append)
     key = Path(place.target_key(root))
     if not any(p.path == key and p.state == "ok" for p in done):
         why = "; ".join(lines) or step.reason

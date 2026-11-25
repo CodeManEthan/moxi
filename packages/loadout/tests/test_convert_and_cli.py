@@ -158,3 +158,29 @@ def test_python_dash_m_runs_the_cli(lo):
                          capture_output=True, text=True, timeout=60)
     assert run.returncode == 1, run.stderr
     assert json.loads(run.stdout)["exit"] == 1
+
+
+def test_install_replace_asks_at_a_terminal_and_accept_diff_skips_the_question(
+        lo, capsys, monkeypatch):
+    import io
+
+    kit.manifest(lo, '[user]\nskills = ["review"]\n')
+    kit.claude().mkdir(parents=True)
+    kit.skill(kit.claude(), "review", "mine\n")
+    target = kit.claude() / "review"
+
+    class Tty(io.StringIO):
+        def isatty(self):
+            return True
+    monkeypatch.setattr(sys, "stdin", Tty("n\n"))
+    monkeypatch.setattr(sys, "stderr", Tty())
+    assert main(["install", "--replace", "skill:review@claude"]) != 0
+    assert "differs from what would be placed" in sys.stderr.getvalue()
+    assert not target.is_symlink()
+    # With --json nothing is asked, and the replace is refused naming the flag.
+    monkeypatch.setattr(sys, "stdin", Tty("y\n"))
+    assert main(["install", "--replace", "skill:review@claude", "--json"]) != 0
+    assert "pass --accept-diff" in capsys.readouterr().out
+    assert main(["install", "--replace", "skill:review@claude", "--accept-diff",
+                 "--json"]) == 0
+    assert target.is_symlink()

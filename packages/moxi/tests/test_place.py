@@ -506,7 +506,13 @@ def test_an_unmarked_path_is_refused_and_replace_moves_it_aside(home, skill):
     assert place.apply([step], say=say) == []
     assert (target / "mine.txt").exists() and "not placed" in said[0]
     said, say = lines()
-    done = place.apply([step], replace=True, say=say)
+    assert place.apply([step], replace=True, say=say) == []
+    assert (target / "mine.txt").exists()
+    assert said == [f"comms-send for claude not replaced: {target} differs from what would "
+                    f"be placed (only there: mine.txt; only in what would be placed: "
+                    f"SKILL.md, scripts/run.sh); pass --accept-diff to replace it"]
+    said, say = lines()
+    done = place.apply([step], replace=True, accept_diff=True, say=say)
     assert [p.state for p in done] == ["ok"] and link_text(target) == str(src)
     displaced = moxi.paths.core().data_dir() / "displaced"
     moved = list(displaced.glob("*/claude/comms-send/mine.txt"))
@@ -697,7 +703,7 @@ def test_an_occupant_git_tracks_is_cause_tracked_with_the_same_reason(
     assert place.apply([step], say=say) == []
     assert said == [f"x for claude not placed: {step.reason}"]
     said, say = lines()
-    done = place.apply([step], replace=True, say=say)
+    done = place.apply([step], replace=True, accept_diff=True, say=say)
     assert [(p.path, p.state) for p in done] == [(target, "ok")]
     assert said[0].startswith(f"moved {target} to ")
     moved = list((moxi.paths.core().data_dir() / "displaced").glob("*/claude/x"))
@@ -1280,3 +1286,168 @@ def test_from_package_reads_the_installed_package_and_an_older_install_of_it(
     gone = types.SimpleNamespace(package="moxi_nowhere")
     assert not place.from_package(gone, tmp_path / "moxi_nowhere" / "skills" / "x")
     assert place.from_package(gone, old.parent / "moxi_nowhere" / "skills" / "x")
+
+
+# -- replacing: the compare, the one move and the move back -------------------------------
+
+def occupy(target: Path, src: Path) -> None:
+    """Put a plain copy of `src` at `target`, as a user would: no mark, no ledger."""
+    target.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copytree(src, target)
+
+
+def test_an_equal_occupant_is_replaced_with_no_question(home, skill):
+    src = skill()
+    target = home / ".claude" / "skills" / "comms-send"
+    occupy(target, src)
+    step = one(place.plan("comms", [Item(src, "claude", "comms-send")]), "refuse")
+    said, say = lines()
+    done = place.apply([step], replace=True, ask=lambda q: pytest.fail("asked"), say=say)
+    assert [p.state for p in done] == ["ok"] and is_link(target)
+    assert said[0].startswith(f"moved {target} to ")
+
+
+def test_a_different_occupant_is_asked_about_and_a_no_keeps_it(home, skill):
+    src = skill()
+    target = home / ".claude" / "skills" / "comms-send"
+    occupy(target, src)
+    (target / "SKILL.md").write_text("# mine\n")
+    (target / "notes.txt").write_text("x\n")
+    (target / "scripts" / "run.sh").unlink()
+    step = one(place.plan("comms", [Item(src, "claude", "comms-send")]), "refuse")
+    asked: list[str] = []
+    said, say = lines()
+    assert place.apply([step], replace=True, ask=lambda q: asked.append(q) or False,
+                       say=say) == []
+    assert asked == [f"{target} differs from what would be placed for comms-send:\n"
+                     "  only there: notes.txt\n"
+                     "  only in what would be placed: scripts/run.sh\n"
+                     "  different: SKILL.md\n"
+                     f"Move {target} aside and place comms-send there? [y/N] "]
+    assert said == [f"comms-send for claude not replaced: {target} was kept"]
+    assert (target / "SKILL.md").read_text() == "# mine\n"
+    said, say = lines()
+    done = place.apply([step], replace=True, ask=lambda q: True, say=say)
+    assert [p.state for p in done] == ["ok"] and is_link(target)
+
+
+def test_a_different_file_or_link_is_named_and_accept_diff_replaces_it(home, tmp_path,
+                                                                       skill):
+    src = tmp_path / "agent.md"
+    src.write_text("# agent\n")
+    target = home / ".claude" / "agents" / "helper.md"
+    target.parent.mkdir(parents=True)
+    target.write_text("# my own\n")
+    item = Item(src, "claude", "helper.md", kind="agent")
+    step = one(place.plan("comms", [item], form="copy"), "refuse")
+    said, say = lines()
+    assert place.apply([step], replace=True, say=say) == []
+    assert "(the file's bytes differ)" in said[0] and "--accept-diff" in said[0]
+    done = place.apply([step], replace=True, accept_diff=True, say=lambda line: None)
+    assert [p.state for p in done] == ["ok"] and target.read_text() == "# agent\n"
+    other = tmp_path / "other"
+    other.mkdir()
+    folder = skill()
+    link_target = home / ".claude" / "skills" / "comms-send"
+    link_target.parent.mkdir(parents=True)
+    link_dir(link_target, other)
+    step = one(place.plan("notes", [Item(folder, "claude", "comms-send")]), "refuse")
+    said, say = lines()
+    assert place.apply([step], replace=True, say=say) == []
+    assert f"(it is a link to {other})" in said[0]
+
+
+def test_a_place_that_fails_after_the_move_puts_the_occupant_back(home, skill,
+                                                                  monkeypatch):
+    src = skill()
+    target = home / ".claude" / "skills" / "comms-send"
+    target.mkdir(parents=True)
+    (target / "mine.bin").write_bytes(bytes(range(256)) * 3)
+    step = one(place.plan("comms", [Item(src, "claude", "comms-send")]), "refuse")
+
+    def half_place(step, ledger):
+        Path(step.target).mkdir()
+        (Path(step.target) / "half").write_text("x")
+        raise OSError("disk full")
+    monkeypatch.setattr(place, "_place", half_place)
+    said, say = lines()
+    assert place.apply([step], replace=True, accept_diff=True, say=say) == []
+    assert sorted(p.name for p in target.iterdir()) == ["mine.bin"]
+    assert (target / "mine.bin").read_bytes() == bytes(range(256)) * 3
+    assert any(line.endswith(f"back to {target}: the place failed") for line in said)
+    assert "disk full" in said[-1]
+
+
+def test_a_move_back_that_fails_says_where_the_occupant_is_kept(home, skill, monkeypatch):
+    src = skill()
+    target = home / ".claude" / "skills" / "comms-send"
+    target.mkdir(parents=True)
+    (target / "mine.txt").write_text("the user's\n")
+    step = one(place.plan("comms", [Item(src, "claude", "comms-send")]), "refuse")
+    real_move = place._move
+    moves = []
+
+    def move(path, dest):
+        moves.append(dest)
+        if len(moves) > 1:
+            raise OSError("no way back")
+        real_move(path, dest)
+    monkeypatch.setattr(place, "_move", move)
+    monkeypatch.setattr(place, "_place", lambda step, ledger: (_ for _ in ()).throw(
+        OSError("disk full")))
+    said, say = lines()
+    place.apply([step], replace=True, accept_diff=True, say=say)
+    kept = Path(moves[0])
+    assert (kept / "mine.txt").read_text() == "the user's\n"
+    assert any(f"it is kept at {kept}" in line and "no way back" in line for line in said)
+
+
+@pytest.mark.parametrize("errno_name, winerror", [("EXDEV", None), ("EACCES", 17)],
+                         ids=["exdev", "not-same-device"])
+def test_a_cross_device_move_copies_checks_and_removes(home, skill, monkeypatch,
+                                                      errno_name, winerror):
+    import errno
+
+    src = skill()
+    target = home / ".claude" / "skills" / "comms-send"
+    target.mkdir(parents=True)
+    (target / "mine.txt").write_text("the user's\n")
+    (target / "deep").mkdir()
+    (target / "deep" / "b.bin").write_bytes(b"\0\1\2")
+    step = one(place.plan("comms", [Item(src, "claude", "comms-send")]), "refuse")
+    real_rename = os.rename
+
+    def rename(a, b):
+        if Path(a) == target:
+            exc = OSError(getattr(errno, errno_name), "cross-device")
+            exc.winerror = winerror
+            raise exc
+        real_rename(a, b)
+    monkeypatch.setattr(place.os, "rename", rename)
+    done = place.apply([step], replace=True, accept_diff=True, say=lambda line: None)
+    assert [p.state for p in done] == ["ok"] and is_link(target)
+    displaced = moxi.paths.core().data_dir() / "displaced"
+    kept = next(displaced.glob("*/claude/comms-send"))
+    assert (kept / "mine.txt").read_text() == "the user's\n"
+    assert (kept / "deep" / "b.bin").read_bytes() == b"\0\1\2"
+
+
+def test_a_move_that_fails_otherwise_places_nothing(home, skill, monkeypatch):
+    # As a file Windows holds locked fails the rename: no copy is tried.
+    src = skill()
+    target = home / ".claude" / "skills" / "comms-send"
+    target.mkdir(parents=True)
+    (target / "mine.txt").write_text("the user's\n")
+    step = one(place.plan("comms", [Item(src, "claude", "comms-send")]), "refuse")
+    real_rename = os.rename
+
+    def rename(a, b):
+        if Path(a) == target:
+            raise PermissionError(13, "in use")
+        real_rename(a, b)
+    monkeypatch.setattr(place.os, "rename", rename)
+    monkeypatch.setattr(place, "_copy_whole", lambda *a: pytest.fail("copied"))
+    said, say = lines()
+    assert place.apply([step], replace=True, accept_diff=True, say=say) == []
+    assert (target / "mine.txt").read_text() == "the user's\n" and not is_link(target)
+    assert "in use" in said[-1]
