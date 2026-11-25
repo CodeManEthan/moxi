@@ -259,6 +259,26 @@ def test_the_project_name_follows_home():
     assert one(f"-home-a-b-x/{ID}", home_dir="/home/a_c") == f"-home-a-b-x/{ID}"
 
 
+def test_a_windows_session_path_is_taken_by_windows_rules():
+    home_dir = "C:\\Users\\ann"
+    f = "C--Users-ann"
+    rules = hp.Rules(home_dir, windows=True)
+    for written in (f"{home_dir}\\.claude\\projects\\{f}-x\\{ID}.jsonl",
+                    f"{home_dir}/.claude/projects/{f}-x/{ID}.jsonl",
+                    f"~\\.claude\\projects\\{f}-x\\{ID}.jsonl",
+                    f"{f}-x\\{ID}"):
+        assert hp.rewrite(f"see {written} here".encode(), rules,
+                          is_json=False).data.decode() == f"see {ID} here"
+    posix = hp.Rules(home_dir, windows=False)
+    text = f"{f}-x\\{ID}"
+    assert hp.rewrite(text.encode(), posix, is_json=False).data.decode() == text
+
+
+def test_a_home_spelled_whole_is_a_root():
+    assert one(f"/home/First Last/.claude/projects/-home-First-Last-x/{ID}.jsonl",
+               home_dir="/home/First Last") == ID
+
+
 def test_si_runs_before_hp():
     out = one(f"{hh()}/.claude/projects/{ff()}-x/{ID}.jsonl")
     assert out == ID
@@ -337,7 +357,8 @@ def test_apply_keeps_the_mode_and_prints_the_commit_and_commits_nothing():
     head = git("rev-parse", "HEAD", cwd=root())
     code, out, err = run("--apply")
     assert code == 0, out + err
-    assert (root() / "a.md").stat().st_mode & 0o777 == 0o640
+    if os.name == "posix":
+        assert (root() / "a.md").stat().st_mode & 0o777 == 0o640
     assert out.rstrip().splitlines()[-1] == (
         'Commit the rewrite: git -C ~/notes commit -am "notes: home paths written as ~, '
         'session paths as ids"')

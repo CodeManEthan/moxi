@@ -3,6 +3,7 @@ the remove refusal, each by local reads only; and the same through projects' own
 
 from __future__ import annotations
 
+import json
 import subprocess
 
 import pytest
@@ -113,7 +114,7 @@ def test_add_kind_topic_create_makes_a_plain_dir():
     assert code == 0, out + err
     notes_dir = topics() / "gardening"
     assert notes_dir.is_dir() and not (notes_dir / ".git").exists()
-    assert str(notes_dir) in out
+    assert json.dumps(str(notes_dir)) in out
 
 
 def test_add_of_a_project_stores_its_computed_notes_dir():
@@ -122,7 +123,7 @@ def test_add_of_a_project_stores_its_computed_notes_dir():
     add_project("alpha", alpha)
     code, out, _err = moxi_cmd("projects", "show", "alpha", "--json")
     assert code == 0
-    assert str(home() / "notes" / "code" / "alpha") in out
+    assert json.dumps(str(home() / "notes" / "code" / "alpha")) in out
 
 
 def test_add_refuses_a_topic_rooted_outside_topics():

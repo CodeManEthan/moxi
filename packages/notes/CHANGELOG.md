@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- `moxi notes home-paths` takes a session path under the home folder on Windows. Rule SI's
+  root had to start with `~` or `/`, so a session path spelled from a home with a drive
+  (`C:\Users\...`) was left whole and only Rule HP wrote its home as `~`, which a second
+  run then took. The root may now start with the home folder itself, and on Windows `\`
+  divides a session path as `/` does.
+
 - `list_notes` and `search_notes` show a note changed near the epoch on Windows, which
   refused that local time in a zone west of UTC; the zone's offset now stands in.
 - `read_note` and `search_notes` read files on Windows. Their open asked for

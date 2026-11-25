@@ -44,11 +44,6 @@ import stat
 from collections.abc import Iterator
 from dataclasses import dataclass
 
-#: Rule 6's open: never follow a link, never wait on a FIFO, never pass the descriptor on,
-#: bytes as they are. Each flag is taken where the system has it.
-_OPEN_FLAGS = (os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0)
-               | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_BINARY", 0))
-
 #: How many leading bytes are checked for a NUL.
 SNIFF_BYTES = 8192
 #: What a PDF opens with; it is refused like any file that isn't text.
@@ -245,8 +240,12 @@ def not_text(head: bytes) -> bool:
 def read_judged(resolved: str, st: os.stat_result, *, cap_bytes: int) -> bytes:
     """Rules 6 and 5 for a file judged as `st`: its bytes, read through a descriptor
     opened without following a link and checked against `st`."""
+    # Rule 6's open: never follow a link, never wait on a FIFO, never pass the descriptor
+    # on, bytes as they are. Each flag is taken where the system has it.
     try:
-        fd = os.open(resolved, _OPEN_FLAGS)
+        fd = os.open(resolved, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
+                     | getattr(os, "O_NONBLOCK", 0) | getattr(os, "O_CLOEXEC", 0)
+                     | getattr(os, "O_BINARY", 0))
     except OSError:
         raise Refused("changed") from None
     try:

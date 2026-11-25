@@ -16,8 +16,9 @@ digit, `_`, `-`, or a `.` followed by one of those.
   session path is, at a token start, an optional root, then a Claude Code project folder
   name for a folder under the home folder, then `/`, then a full session id (8-4-4-4-12 hex
   digits) whose next character is not a letter or digit. The root is `/tmp/claude-<digits>/`,
-  or a run that begins with `~` or `/`, holds no `START` character, `)` or `]`, and ends
-  `/.claude/projects/`, or `.claude/projects/` alone. The folder name is `H` with every
+  or a run that begins with `~`, `/` or `H`, holds no `START` character, `)` or `]` after
+  that, and ends `/.claude/projects/`, or `.claude/projects/` alone. On Windows `\\` divides
+  a session path as `/` does (`H` there starts with a drive). The folder name is `H` with every
   character other than an ASCII letter or digit turned into `-`, alone or followed by `-`
   and a run of letters, digits and `-`. The root and the folder name with its `/` are
   removed, and so is a `.jsonl` right after the id when the character after it does not
@@ -148,21 +149,24 @@ def starts_token(data: bytes, i: int, chars: bytes = START) -> bool:
 
 
 class Rules:
-    """The compiled rules for one home folder `home` (an absolute path)."""
+    """The compiled rules for one home folder `home` (an absolute path). `windows` reads
+    session paths by Windows' rules (`\\` divides too); it is this system's by default."""
 
-    def __init__(self, home: str):
+    def __init__(self, home: str, *, windows: bool = os.name == "nt"):
         self.home = home.rstrip("/") or "/"
         self.h = os.fsencode(self.home)
         self.login = os.path.basename(self.home)
         self.login_bytes = os.fsencode(self.login).lower()
         self.project_name = re.sub(rb"[^A-Za-z0-9]", b"-", self.h)
         self._home_rx = re.compile(_AT_START + re.escape(self.h), re.M)
-        root = (rb"(?:/tmp/claude-[0-9]+/|(?:[~/]" + _ROOT_RUN + rb"*?)?/\.claude/projects/"
-                rb"|\.claude/projects/)")
+        sep = rb"[/\\]" if windows else rb"/"
+        claude = rb"\.claude" + sep + rb"projects" + sep
+        root = (rb"(?:/tmp/claude-[0-9]+/|(?:(?:" + re.escape(self.h) + rb"|[~/])"
+                + _ROOT_RUN + rb"*?)?" + sep + claude + rb"|" + claude + rb")")
         self._session_rx = re.compile(
             _AT_START + rb"(?P<root>" + root + rb")?" + re.escape(self.project_name)
-            + rb"(?:-[A-Za-z0-9-]*)?/(?P<id>" + _ID + rb")(?![A-Za-z0-9])(?P<jsonl>\.jsonl)?",
-            re.M)
+            + rb"(?:-[A-Za-z0-9-]*)?" + sep + rb"(?P<id>" + _ID
+            + rb")(?![A-Za-z0-9])(?P<jsonl>\.jsonl)?", re.M)
 
     def home_spans(self, data: bytes) -> list[tuple[int, int]]:
         """Each occurrence of `H` Rule HP would change, as `(start, end)`."""

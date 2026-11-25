@@ -6,6 +6,7 @@ from __future__ import annotations
 import datetime
 import json
 import os
+from pathlib import Path
 import sys
 
 import pytest
@@ -226,7 +227,7 @@ def test_a_types_setting_elsewhere_is_followed(tree):
     found = backfill.plan()
     assert [p.relative for p in found.proposals] == ["loose.md"]
     assert proposal(found, "loose.md").additions["type"] == "journal"
-    assert v.validate().types.path.endswith(os.path.join("meta", "types.toml"))
+    assert Path(v.validate().types.path).parts[-2:] == ("meta", "types.toml")
 
 
 @pytest.mark.skipif(not backfill.O_NOFOLLOW, reason="the OS has no O_NOFOLLOW")
