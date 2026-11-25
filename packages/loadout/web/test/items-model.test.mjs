@@ -14,6 +14,12 @@ test("the view parses, and a field of the wrong type refuses it", () => {
   assert.equal(parseView({ ...view, rows: [{ ...view.rows[0], applies: 3 }] }), null);
   assert.equal(parseView({ ...view, sections: [{ ...ATLAS, refused: { cause: "busy" } }] }), null);
   assert.equal(parseView({ ...view, global: null }), null);
+  for (const field of ["present", "shown"]) {
+    assert.equal(parseView({ ...view, [field]: undefined }), null, field);
+    assert.equal(parseView({ ...view, [field]: [3] }), null, field);
+  }
+  assert.equal(parseView({ ...view, sections: [{ ...ATLAS, project: undefined }] }), null);
+  assert.equal(parseView({ ...view, sections: [{ ...ATLAS, project: 3 }] }), null);
 });
 
 test("the full install's grid: Your items with the global file last, then atlas-api", () => {

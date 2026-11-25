@@ -3,15 +3,16 @@
 // Lit here, so the Node tests check it directly. projects' README, "Facts on the Projects
 // page", is the contract it fills.
 //
-// The join is loadout's own. An item is in a section when its `scope` is the section's
-// name. A section is the project's when it is the key section named by the project's key
-// ignoring case, or the path section whose root is the project's root exactly; loadout
-// places both into the project's folder, so the row names the items of each, the key
-// section's first. A path section under the root but not at it is not the project's here.
+// The join is loadout's own, the one its filtered view reads (`sectionsFor`). An item is in
+// a section when its `scope` is the section's name. A section is the project's when it is
+// the key section named by the project's key ignoring case, or a path section at the
+// project's root or under it, as projects maps the section's root (or, without that map,
+// at its root exactly). A section under the root is placed into that subfolder, which only
+// sessions there load; the row names the items of each, the key section's first.
 // Loadout's judgment is the answer's `problem`: set, the list can't be read, and nothing is
 // reported, as on a failed read.
 
-import { routeOf } from "./address-model.ts";
+import { routeOf, sectionsFor } from "./address-model.ts";
 import type { Item, Listing } from "./feed.ts";
 import { kindWord } from "./words.ts";
 
@@ -117,18 +118,11 @@ export function itemParts(items: readonly RowItem[]): Part[] {
   return [...parts.slice(0, PARTS_MAX - 1), { text: `${parts.length - (PARTS_MAX - 1)} more` }];
 }
 
-/** The names of the project's sections in `listing`: the key section named by its key
- * ignoring case, then the path section whose root is its root exactly; either may be
- * missing. */
+/** The names of the project's sections in `listing`, by the filtered view's join
+ * (`sectionsFor`): the key section named by its key ignoring case, then each path section
+ * at its root or under it; any may be missing. */
 export function projectSections(project: Given, listing: Pick<Listing, "sections">): string[] {
-  const lower = project.key.toLowerCase();
-  const keyed = listing.sections.find((s) => s.where === "key" && s.name.toLowerCase() === lower);
-  const rooted = listing.sections.find((s) => s.where === "path" && s.root === project.root);
-  const names: string[] = [];
-  for (const found of [keyed, rooted]) {
-    if (found !== undefined && !names.includes(found.name)) names.push(found.name);
-  }
-  return names;
+  return sectionsFor(project, listing);
 }
 
 /** Whether the section that lists `item` switches it off for every harness (`*` in its

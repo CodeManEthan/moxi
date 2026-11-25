@@ -8,7 +8,8 @@ const GIVEN = JSON.stringify([{ key: "atlas-api", root: "/home/me/code/atlas-api
 const item = (kind, name, scope) => ({ kind, name, scope, harnesses: null, source: "/x", disabled: [] });
 const LIST = {
   problem: null, manifest: "/home/me/my-loadout/loadout.toml",
-  sections: [{ name: "user", where: "user", root: null }, { name: "atlas-api", where: "key", root: null }],
+  sections: [{ name: "user", where: "user", root: null, project: null },
+             { name: "atlas-api", where: "key", root: null, project: null }],
   items: [item("skill", "release-checklist", "atlas-api"), item("agent", "api-lead", "atlas-api")],
 };
 const ok = (data = LIST) => ({ status: 200, data });

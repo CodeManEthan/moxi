@@ -1,6 +1,7 @@
 """The manifest's writers: each change is one `moxi.files.edit_toml` block.
 
-`add` and `remove` change one section's list, `disable` and `enable` its `disabled`,
+`add` and `remove` change one section's list (`add` for named harnesses too, below),
+`disable` and `enable` its `disabled`,
 `set_mode` the global mode, and `adopt` lists module skills the user said yes to with the
 harnesses they took. The verbs, the page, `SETUP` and adoption all write through here.
 
@@ -17,6 +18,16 @@ Rules every writer keeps:
 - **A write calls no placer** and takes no other lock, so it can run under the core lock
   and under `install.lock` alike.
 
+**`add` for named harnesses** narrows the item in the section it is added to and nowhere
+else, through that section's `disabled`, the switches `enable` and `disable` already
+change: the section gains `<kind>:<name>@<harness>` for each harness the item is placed
+for (its own `harnesses`, else every row of the harness table) that isn't named. A harness
+named that the item's own list leaves out is refused. A plain `add` is for every harness.
+Either way the new listing's switches in its section are just what the add asked for: any
+the section still held for that item go. `remove` takes the item's switches in its section
+out with the item, so a narrowing never outlives the listing it came with. An item the
+section lists already is left as it is: `enable` and `disable` change its harnesses.
+
 Each writer returns whether it changed the file (`disable` and `enable` the sections
 they changed) and raises `ManifestError` when it refuses, `moxi.files.LockTimeout` when
 the manifest's lock stays held past its wait.
@@ -31,7 +42,7 @@ absolute.
 from __future__ import annotations
 
 import os
-from collections.abc import Callable, Iterable, Mapping
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from pathlib import Path
 
 from moxi_loadout.manifest import (EVERY, GLOBAL, KINDS, LISTS, MODES, PROJECT, USER,
@@ -84,10 +95,16 @@ def edit(change: Callable, *, loadout_dir: str | os.PathLike | None = None,
 
 
 def add(kind: str, name: str, *, project: str | None = None,
+        harnesses: Sequence[str] | None = None, table: Sequence[str] | None = None,
         loadout_dir: str | os.PathLike | None = None) -> bool:
     """List `kind` `name` in the user section, or in project section `project` (made when
-    missing). False when it is listed there already."""
+    missing). False when it is listed there already.
+
+    `harnesses`, when given, are the harnesses it is listed for there (the rule above),
+    each a row of the core's harness table: `table`, its names, read from the core's
+    settings when None. A name that isn't a row is refused."""
     _check_item(kind, name)
+    named, rows = (None, []) if not harnesses else _named(harnesses, table)
     if project is not None and kind in USER_ONLY:
         raise ManifestError(None, [f"{kind} {name}: hooks, permission rules and MCP "
                                    "servers are written at user scope only; add it "
@@ -97,23 +114,72 @@ def add(kind: str, name: str, *, project: str | None = None,
                                    "section only"])
 
     def change(doc, manifest: Manifest) -> bool:
-        table = _section_table(doc, manifest, project, create=True)
+        section = _section_table(doc, manifest, project, create=True)
         key = LISTS[kind]
-        if key not in table:
-            table[key] = [name]
-            return True
-        if name in table[key]:
+        if key in section and name in section[key]:
             return False
-        table[key].append(name)
+        off = [] if named is None else _off(manifest, kind, name, named, rows)
+        if key not in section:
+            section[key] = [name]
+        else:
+            section[key].append(name)
+        _drop_switches(section, kind, name)
+        if off:
+            if "disabled" not in section:
+                section["disabled"] = off
+            else:
+                section["disabled"].extend(off)
         return True
 
     return edit(change, loadout_dir=loadout_dir)
 
 
+def _named(harnesses: Sequence[str], table: Sequence[str] | None) -> tuple[list[str], list[str]]:
+    """`harnesses` once each, in the order given, each checked against the harness
+    table's names; and those names."""
+    if table is None:
+        from moxi import place
+
+        table = list(place.harnesses()[0])
+    named = list(dict.fromkeys(harnesses))
+    unknown = [h for h in named if h not in table]
+    if unknown:
+        rows = ", ".join(table) or "none"
+        raise ManifestError(None, [f"the core's harness table has no row {h}; its rows: "
+                                   f"{rows}" for h in unknown])
+    return named, list(table)
+
+
+def _off(manifest: Manifest, kind: str, name: str, named: list[str],
+         table: list[str]) -> list[str]:
+    """The disabled ids that leave `kind` `name` on for `named` alone, by the rule above:
+    one for each harness it is placed for (its own list, else `table`) that isn't named."""
+    has = manifest.harnesses(kind, name)
+    if has is not None:
+        outside = [h for h in named if h not in has]
+        if outside:
+            raise ManifestError(manifest.path, [
+                f"{kind} {name} is listed for {', '.join(has)} only (its harnesses), so "
+                f"it can't be added for {', '.join(outside)}"])
+    return [str(Id(kind, name, h)) for h in (table if has is None else has)
+            if h not in named]
+
+
+def _drop_switches(section, kind: str, name: str) -> bool:
+    """Take every disabled id of `kind` `name` out of `section` (its document table);
+    whether any went."""
+    held = section.get("disabled", ())
+    drop = [text for text in held if _matches(text, Id(kind, name, EVERY))]
+    for text in drop:
+        section["disabled"].remove(text)
+    return bool(drop)
+
+
 def remove(kind: str, name: str, *, project: str | None = None,
            loadout_dir: str | os.PathLike | None = None) -> bool:
-    """Take `kind` `name` out of the user section's list, or project section `project`'s.
-    False when that section doesn't list it. The item's own table is kept."""
+    """Take `kind` `name` out of the user section's list, or project section `project`'s,
+    with its switches in that section's `disabled`. False when that section doesn't list
+    it. The item's own table is kept."""
     _check_item(kind, name)
 
     def change(doc, manifest: Manifest) -> bool:
@@ -123,6 +189,7 @@ def remove(kind: str, name: str, *, project: str | None = None,
             return False
         while name in table[key]:
             table[key].remove(name)
+        _drop_switches(table, kind, name)
         return True
 
     return edit(change, loadout_dir=loadout_dir)
