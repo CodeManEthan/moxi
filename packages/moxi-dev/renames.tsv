@@ -6173,6 +6173,7 @@ memory	packages/memory/src/moxi_memory/recall_child.py	help="take over the sessi
 memory	packages/memory/src/moxi_memory/recall_child.py	recall.put(record={"holder": me} if me is not None else None, child=child,	keep	record	record
 memory	packages/memory/src/moxi_memory/recall_discard.py	__all__ = ["Refused", "find", "discard"]	keep	find	find
 memory	packages/memory/src/moxi_memory/recall_discard.py	__all__ = ["Refused", "find", "late", "discard"]	keep	find	find
+memory	packages/memory/src/moxi_memory/recall_discard.py	__all__ = ["Refused", "turns_session", "find", "late", "discard"]	keep	find	find
 memory	packages/memory/src/moxi_memory/recall_guard.py	if not command.isprintable() or any(c in REFUSED_CHARS for c in command):	keep	any	any
 memory	packages/memory/src/moxi_memory/recall_guard.py	if not any(argv[:len(entry)] == entry for entry in entries):	keep	any	any
 memory	packages/memory/src/moxi_memory/recall_guard.py	"""Whether the child of recall `record` is known to have ended: its log line names a	keep	record	record

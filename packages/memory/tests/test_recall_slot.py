@@ -320,6 +320,15 @@ def test_a_discard_ends_the_slot_fork_of_a_line_whose_owner_is_gone():
     assert launcher.exited == []
 
 
+def test_a_discard_acks_a_slot_rounds_kept_end_in_the_forks_session():
+    gone = a_dead_line(state=recalls.SENDING, kept=True)
+    gone.put(ref=f"{gone.recall_id}:1")
+    acked = []
+    line = recall_discard.discard(gone.recall_id, launcher=Launcher(),
+                                  ack=lambda session_id, ref: acked.append((session_id, ref)))
+    assert acked == [(FORK, f"{gone.recall_id}:1")] and line["kept"] is False
+
+
 def test_the_doctor_lists_a_line_left_at_the_late_waits_last_limit_with_its_age(
         monkeypatch):
     monkeypatch.setattr(doctor, "live_subconscious", lambda: [])
