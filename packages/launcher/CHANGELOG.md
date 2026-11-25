@@ -14,6 +14,23 @@
   session and whether keep-warm was on for it. One held only by subagents listed waiting,
   on a session whose turns endpoint doesn't judge stale ones (`stale-agents`), is refused
   `old-endpoint`, exit 3, since trying again won't help.
+- A relaunch run follows its session to a new turns endpoint. Claude Code replaces a
+  session's endpoint when its plugins reload, and applies a pending reload as a turn
+  ends, the moment a self relaunch's wait releases; the run used to send its exit to the
+  old endpoint, read `gone`, and end `not-exited` (`no-dialog`). A Claude launch's run
+  that meets its endpoint gone at the exit, at the end of its wait's watch, or before
+  its closing note, while the launch's own `claude` still runs, looks the session up
+  again for up to 5 s and goes on with the new endpoint, writing a `moved` event: the
+  exit waits again for a fresh turn number (a director's run reads it from the new
+  endpoint, whose count restarts), the wait waits on, the note reaches the session. A run
+  moves at most 3 times. With `claude` ended, nothing found in time or another harness,
+  it goes on as before. `exit-session` is unchanged.
+- A launch records the session bus address (`DBUS_SESSION_BUS_ADDRESS`) with its base
+  environment when it has one, and a relaunch restores it, so a relaunched seat and the
+  jobs it starts can still reach the system keychain on Linux. The replaying process's
+  own address wins when it has one, since the address can change at each login.
+  Elsewhere the name is absent and nothing changes. A seat already relaunched without it
+  gets it back at its next launch or relaunch from a process that has it.
 - The `subconscious` row (`off`, `automatic`, `on-demand`; needs turns and memory) turns
   memory's subconscious on for one launch, or for every launch of a preset that sets it:
   a launch with it on stamps the mode under memory's `SUBCONSCIOUS_ENV`, read from
