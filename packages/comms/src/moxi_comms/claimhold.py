@@ -559,6 +559,22 @@ _GATE = ("import os,sys\n"
          "fd=int(sys.argv[1]); os.read(fd,1); os.close(fd)\n"
          "os.execvp(sys.argv[2], sys.argv[2:])\n")
 
+#: Windows' `CREATE_SUSPENDED`: the child's first thread waits until it is resumed.
+_CREATE_SUSPENDED = 0x00000004
+
+
+def _resume(proc: subprocess.Popen) -> None:
+    """Let `proc`, started suspended, run. One that can't be resumed would never run, so
+    it is ended and the failure raised."""
+    import psutil
+
+    try:
+        psutil.Process(proc.pid).resume()
+    except BaseException:
+        proc.kill()
+        proc.wait()
+        raise
+
 
 #: Numbers each `ClaimServer`'s socket in this process.
 _SERVER_SOCKETS = itertools.count(1)
@@ -672,20 +688,35 @@ class ClaimServer:
     def spawn(self, argv, *, env=None, **popen) -> subprocess.Popen:
         """Start a child that is a `tree` root of this binding, written to the claim
         file before the child's program runs, and dropped at its exit. The child's
-        environment carries this binding's claim socket."""
+        environment carries this binding's claim socket. The process returned is the
+        program itself: its pid, its exit code, and `terminate` ends it.
+
+        On POSIX a gate process takes the child's pid, waits until the root is written
+        and execs the program. On Windows, which has no exec, the program starts
+        suspended and is resumed once the root is written (a failed write still lets it
+        run, as on POSIX)."""
         child_env = dict(env if env is not None else os.environ)
         child_env[CLAIM_SOCKET_ENV] = str(self.socket_path)
-        r, w = os.pipe()
-        try:
-            proc = subprocess.Popen([sys.executable, "-c", _GATE, str(r), *argv],
-                                    env=child_env, pass_fds=(r,), **popen)
-        finally:
-            os.close(r)
-        try:
-            self.add_root(proc.pid, TREE)
-        finally:
-            os.write(w, b"x")
-            os.close(w)
+        if sys.platform == "win32":
+            flags = popen.pop("creationflags", 0) | _CREATE_SUSPENDED
+            proc = subprocess.Popen(list(argv), env=child_env, creationflags=flags,
+                                    **popen)
+            try:
+                self.add_root(proc.pid, TREE)
+            finally:
+                _resume(proc)
+        else:
+            r, w = os.pipe()
+            try:
+                proc = subprocess.Popen([sys.executable, "-c", _GATE, str(r), *argv],
+                                        env=child_env, pass_fds=(r,), **popen)
+            finally:
+                os.close(r)
+            try:
+                self.add_root(proc.pid, TREE)
+            finally:
+                os.write(w, b"x")
+                os.close(w)
 
         def reap():
             proc.wait()

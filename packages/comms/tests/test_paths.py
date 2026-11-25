@@ -5,6 +5,7 @@ the guard on a socket path handed in from the environment.
 """
 
 import os
+import sys
 
 import pytest
 
@@ -84,3 +85,32 @@ def test_a_link_inside_the_runtime_dir_that_leaves_it_is_refused(tmp_path):
     os.symlink(outside, link)
     with pytest.raises(paths.OutsideRuntime):
         paths.refuse_outside_runtime(link, "MOXI_COMMS_CLAIM_SOCKET")
+
+
+@pytest.mark.skipif(sys.platform != "win32",
+                    reason="only Windows names comms' sockets as pipes")
+def test_a_pipe_not_comms_own_is_refused_by_its_name_and_never_opened(monkeypatch,
+                                                                       tmp_path):
+    """A stamp naming a pipe of another runtime folder, or any other pipe, is refused as
+    outside; reading such a name as a path would open the pipe (or fail opening it)."""
+    from moxi import ipc
+
+    own = paths.claim_socket("probe")
+    with monkeypatch.context() as moved:
+        moved.setenv("MOXI_COMMS_RUNTIME_DIR", str(tmp_path / "other-runtime"))
+        another = ipc.address("comms", "claim-probe")
+    assert another != str(own)
+
+    real = os.path.realpath
+
+    def opened(path, *args, **kwargs):
+        if str(path).replace("/", "\\").startswith("\\\\.\\"):
+            raise AssertionError(f"resolved the pipe {path}")
+        return real(path, *args, **kwargs)
+
+    monkeypatch.setattr(os.path, "realpath", opened)
+    assert paths.refuse_outside_runtime(own, "MOXI_COMMS_CLAIM_SOCKET") == own
+    for stamped in (another, "\\\\.\\pipe\\elsewhere", "//./pipe/elsewhere"):
+        with pytest.raises(paths.OutsideRuntime) as caught:
+            paths.refuse_outside_runtime(stamped, "MOXI_COMMS_CLAIM_SOCKET")
+        assert "MOXI_COMMS_CLAIM_SOCKET" in str(caught.value)

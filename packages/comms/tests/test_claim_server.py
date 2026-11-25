@@ -166,6 +166,53 @@ def test_a_report_after_stop_writes_no_claim_file(rig):
         child.communicate()
 
 
+def test_a_child_whose_root_cant_be_written_still_runs(rig, monkeypatch, tmp_path):
+    srv = ClaimServer("relay", "proj-a", kind="codex").start()
+    ran = tmp_path / "ran"
+
+    def broken(pid, reach="tree"):
+        raise RuntimeError("the claim file can't be written")
+
+    monkeypatch.setattr(srv, "add_root", broken)
+    try:
+        with pytest.raises(RuntimeError, match="can't be written"):
+            srv.spawn([sys.executable, "-c",
+                       f"open({str(ran)!r}, 'w', encoding='utf-8').close()"])
+        assert wait_for(ran.exists)
+    finally:
+        srv.stop()
+
+
+@pytest.mark.skipif(sys.platform != "win32",
+                    reason="only Windows starts the child suspended; POSIX gates it")
+def test_on_windows_a_child_that_cant_be_resumed_is_ended_and_the_spawn_fails(
+        rig, monkeypatch, tmp_path):
+    import psutil
+
+    srv = ClaimServer("relay", "proj-a", kind="codex").start()
+    ran = tmp_path / "ran"
+    started = []
+    real_popen = subprocess.Popen
+
+    def popen(*args, **kwargs):
+        started.append(real_popen(*args, **kwargs))
+        return started[-1]
+
+    def refused(self):
+        raise psutil.AccessDenied(self.pid)
+
+    monkeypatch.setattr(subprocess, "Popen", popen)
+    monkeypatch.setattr(psutil.Process, "resume", refused)
+    try:
+        with pytest.raises(psutil.AccessDenied):
+            srv.spawn([sys.executable, "-c",
+                       f"open({str(ran)!r}, 'w', encoding='utf-8').close()"])
+    finally:
+        srv.stop()
+    [child] = started
+    assert child.returncode is not None and not ran.exists()
+
+
 # ----------------------------------------------------------------- a claim's line
 
 def line_of(srv) -> str:
@@ -229,7 +276,7 @@ def test_a_held_name_still_says_another_session_holds_it(rig):
 
 
 def test_a_claim_socket_outside_comms_runtime_dir_is_never_asked(
-        rig, servers, tmp_path):
+        rig, servers, tmp_path, monkeypatch):
     """A claim socket from the environment must lie inside RUNTIME/comms: one stamped by
     another copy of comms, or by hand, is refused naming the variable and the directory,
     and it is not asked who this process is, though a live server answers there."""
@@ -238,8 +285,15 @@ def test_a_claim_socket_outside_comms_runtime_dir_is_never_asked(
     operator, _ = servers
     elsewhere = tmp_path / "elsewhere"
     elsewhere.mkdir()
-    stray = ClaimServer("scout", "proj-a", kind="codex",
-                        socket_path=elsewhere / "c.sock").start()
+    if sys.platform == "win32":
+        # A claim socket is a pipe there: the stray one is named for another runtime folder.
+        with monkeypatch.context() as other_home:
+            other_home.setenv("MOXI_COMMS_RUNTIME_DIR", str(elsewhere))
+            stray_at = paths.claim_socket("scout")
+        assert stray_at != paths.claim_socket("scout")
+    else:
+        stray_at = elsewhere / "c.sock"
+    stray = ClaimServer("scout", "proj-a", kind="codex", socket_path=stray_at).start()
     stray.set_bound(tier="chosen", token="scout-token")
     try:
         env = {CLAIM_SOCKET_ENV: str(stray.socket_path)}

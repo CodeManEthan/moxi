@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- On Windows `ClaimServer.spawn` starts its child. It started a gate process that took
+  the pipe by `pass_fds` and exec'd the program, which Windows lacks; there the program
+  now starts suspended, is written to the claim file as a `tree` root and is then
+  resumed, so the root is still in place before the program runs and the process
+  returned is the program itself.
 - On Windows the OpenCode adapter stops its server, and a model-list refresh that runs
   past its bound, by ending the process itself. It signalled a process group with
   `os.killpg`, which Windows lacks.
@@ -16,7 +21,8 @@
   process comms can't read is still refused. Linux and macOS are unchanged.
 - On Windows a claim socket is a `moxi.ipc` pipe throughout: comms tells whether a
   holder serves one by its lock, takes one stamped in `MOXI_COMMS_CLAIM_SOCKET` when it
-  is named for this comms' runtime folder, and removes its lock file from that folder.
+  is named for this comms' runtime folder, refuses any other pipe stamped there by its
+  name without opening it, and removes its lock file from that folder.
 - The launched sessions on the page read launcher's `holds` wait as launcher's Home row
   does: a session whose open holds alone keep it waiting reads `waiting on 1 open hold`,
   or `kept warm while 1 hold is open`, and gets `Keep warm` where a press would cover it.

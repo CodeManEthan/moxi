@@ -5,6 +5,7 @@ stamped with its adapter's own."""
 from __future__ import annotations
 
 from claim_kit import FakeProc, wait_for
+from conftest import LAUNCHES
 from moxi_comms import claimfile, claimhold
 from moxi_comms.adapters import session
 from moxi_comms.adapters.codex import CodexAdapter
@@ -47,6 +48,7 @@ def test_a_session_never_inherits_its_wrappers_claim_socket():
 
 # --------------------------------------------------------------------------- codex
 
+@LAUNCHES
 def test_the_codex_adapter_listens_on_the_wrappers_socket_rooted_at_the_host(
         rig, tmp_path):
     """The wrapper names the claim socket it stamps on the host, and the host (the

@@ -93,22 +93,33 @@ def own_pipe(address) -> str | None:
         return None
 
 
+def _a_pipe(address) -> bool:
+    """Whether `address` names a Windows pipe (`\\\\.\\pipe\\...`, in either slash);
+    always False on Linux and macOS."""
+    if sys.platform != "win32":
+        return False
+    text = str(address).replace("/", "\\").lower()
+    return text.startswith(("\\\\.\\pipe\\", "\\\\?\\pipe\\"))
+
+
 def refuse_outside_runtime(path, variable: str, env=None) -> Path:
     """`path` when it lies under RUNTIME/comms, else raise `OutsideRuntime` naming
     `variable` and the directory.
 
     The check reads both paths with their links resolved, so a link inside RUNTIME/comms
-    that points elsewhere is refused too. On Windows a pipe passes by its name alone
-    (`own_pipe`): one named for this process's comms runtime directory.
+    that points elsewhere is refused too. On Windows a pipe is judged by its name alone
+    and never opened or resolved: it passes when `own_pipe` names it, one named for this
+    process's comms runtime directory, and any other pipe is refused.
     """
     root = runtime_dir(env)
     given = Path(path)
     if own_pipe(path) is not None:
         return given
-    real = Path(os.path.realpath(given))
-    real_root = Path(os.path.realpath(root))
-    if real != real_root and real_root in real.parents:
-        return given
+    if not _a_pipe(path):
+        real = Path(os.path.realpath(given))
+        real_root = Path(os.path.realpath(root))
+        if real != real_root and real_root in real.parents:
+            return given
     raise OutsideRuntime(
         f"{variable} names {given}, which is outside comms' runtime directory {root}; "
         f"comms uses only sockets under {root}. Start the session from `moxi comms` "
