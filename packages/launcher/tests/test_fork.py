@@ -449,3 +449,12 @@ def row_absent(rid: str) -> bool:
         return store.get(conn, rid) is None
     finally:
         conn.close()
+
+
+def test_the_api_says_whether_slots_run_here_as_the_launcher_reads_it(monkeypatch):
+    from moxi_launcher import catalog
+
+    for here in (True, False):
+        monkeypatch.setattr(catalog, "slots_here", lambda here=here: here)
+        assert api.slots_here() is here
+    assert "slots_here" in api.__all__

@@ -735,8 +735,7 @@ cache folder (`~/.cache/moxi/memory/index`). `moxi paths memory` prints both.
 | Link | Extra | With it | Without it |
 |---|---|---|---|
 | comms | `comms` (`moxi-comms`) | each session's comms identity (`name`, or `name@scope`), read from comms' local claim socket at start; the agent's own list; agents named in the project list; the recall sender the slot route answers by | no identities: no agent list, and the project list names each session's harness; no slot route |
-| launcher | `launcher` (`moxi-launcher`) | each session's launch kind; scratch sessions searched only with `--scratch` and fork launches only with `--forks`, and neither in a list; the `subconscious` and `subconscious_route` rows; the slot route's fork into a slot and its exit | no kinds: every session is searched by default and may be listed; no session is launched with the subconscious on |
-| slots | `slots` (`moxi-slots`) | whether tmux slots run here, which the slot route needs | no slot route |
+| launcher | `launcher` (`moxi-launcher`) | each session's launch kind; scratch sessions searched only with `--scratch` and fork launches only with `--forks`, and neither in a list; the `subconscious` and `subconscious_route` rows; the slot route's fork into a slot and its exit, where the launcher says tmux slots run | no kinds: every session is searched by default and may be listed; no session is launched with the subconscious on |
 | notes | `notes` (`moxi-notes`) | a recall's first search reads notes files too | a recall reads past sessions only |
 
 Two sessions share an identity only when comms' qualified names are the same, so

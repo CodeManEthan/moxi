@@ -127,12 +127,41 @@ def places(monkeypatch):
     monkeypatch.setattr(recall_start, "offers_fork", lambda session_id: here.fork)
     monkeypatch.setattr(links, "launcher_forks", lambda: links.Link(
         links.READY if here.launcher else links.NONE))
-    monkeypatch.setattr(recall_start, "slots_here", lambda: here.slots)
+    monkeypatch.setattr(recall_start, "slots_here", lambda launcher=None: here.slots)
     monkeypatch.setattr(recall_start, "comms_why", lambda session_id, env=None: here.comms)
     return here
 
 
 SLOT_STAMP = {recall_start.SUBCONSCIOUS_ROUTE_ENV: "slot"}
+
+
+def test_slots_here_is_the_launchers_read_and_an_older_launcher_has_none(monkeypatch):
+    from moxi_memory import links
+
+    asked = types.SimpleNamespace(slots_here=lambda: True)
+    monkeypatch.setattr(links, "launcher_forks", lambda: links.Link(links.READY, asked))
+    assert recall_start.slots_here() is True
+    asked.slots_here = lambda: False
+    assert recall_start.slots_here() is False
+    assert recall_start.slots_here(types.SimpleNamespace()) is False
+
+    def broke():
+        raise OSError("tmux gone")
+
+    assert recall_start.slots_here(types.SimpleNamespace(slots_here=broke)) is False
+    monkeypatch.setattr(links, "launcher_forks", lambda: links.Link(links.NONE))
+    assert recall_start.slots_here() is False
+
+
+def test_memory_has_no_slots_link_of_its_own():
+    import tomllib
+    from pathlib import Path
+
+    from moxi_memory import links, module
+
+    pyproject = tomllib.loads((Path(__file__).parents[1] / "pyproject.toml").read_text())
+    assert "slots" not in pyproject["project"]["optional-dependencies"]
+    assert "slots" not in module.OPTIONAL and not hasattr(links, "slots")
 
 
 def test_a_claude_session_with_no_endpoint_has_no_route():

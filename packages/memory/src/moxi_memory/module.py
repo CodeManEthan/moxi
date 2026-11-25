@@ -21,8 +21,7 @@ OPTIONAL = {
                 "default search and out of the start lists; the launcher's "
                 "subconscious rows, which turn the subconscious on for a launch and "
                 "pick its route; and the slot route's fork of the session into a slot, "
-                "ended with the recall.",
-    "slots": "Whether tmux slots run here, which the subconscious's slot route needs.",
+                "ended with the recall, where the launcher says tmux slots run.",
     "connector": "search_memory in the Claude apps, through the connector's MCP host, "
                  "each hit redacted for a chat.",
     "notes": "The notes a recall of the subconscious reads beside past sessions: the "

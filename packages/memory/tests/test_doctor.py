@@ -38,8 +38,6 @@ def no_links(monkeypatch):
         links.NONE, reason="launcher is not installed"))
     monkeypatch.setattr(links, "notes", lambda: links.Link(
         links.NONE, reason="notes is not installed"))
-    monkeypatch.setattr(links, "slots", lambda: links.Link(
-        links.NONE, reason="slots is not installed"))
     monkeypatch.setattr(doctor, "live_subconscious", lambda: [])
 
 
@@ -230,7 +228,7 @@ def test_the_links_row_says_what_memory_does_without_each(monkeypatch):
     assert "comms not linked" in detail and "no agent list" in detail
     assert "launcher not linked" in detail and "may be listed" in detail
     assert "notes not linked" in detail and "no notes" in detail
-    assert "slots not linked" in detail and "no slot route" in detail
+    assert "slots" not in detail
     monkeypatch.setattr(links, "comms", lambda: links.Link(links.READY, object()))
     monkeypatch.setattr(links, "launcher",
                         lambda: links.Link(links.FAILING, reason="it broke"))
@@ -257,8 +255,7 @@ def test_the_announcement_names_every_part():
     assert module.SETUP == "moxi_memory.setup:setup"
     assert module.TEARDOWN == "moxi_memory.setup:teardown"
     assert module.DOCTOR == "moxi_memory.doctor:rows"
-    assert set(module.OPTIONAL) == {"comms", "launcher", "connector", "secrets", "notes",
-                                    "slots"}
+    assert set(module.OPTIONAL) == {"comms", "launcher", "connector", "secrets", "notes"}
     assert module.TIMERS["ingest"] == {
         "command": "moxi-memory-ingest", "args": ["--walk"], "every": "1h",
         "switch": "ingest.timer.enabled",

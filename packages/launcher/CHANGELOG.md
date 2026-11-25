@@ -149,8 +149,9 @@
   kind `fork`, first in the order `launch_kind` decides by, and a resume of a fork keeps
   it. A fork is pointed to no handoff and marks none picked. An older launcher refuses
   the log once it is at version 4.
-- Interface 3 adds `fork(session_id, target=, slot=, stamps=)` and
-  `exit_session(session_id, dry_run=)` to the API. A fork's `stamps` are set on its
+- Interface 3 adds `fork(session_id, target=, slot=, stamps=)`,
+  `exit_session(session_id, dry_run=)` and `slots_here()`, whether tmux slots run here
+  as the launcher reads it, to the API. A fork's `stamps` are set on its
   environment after the scrub; each must be listed in the `SESSION_ENV` of the present
   module its own prefix names, and the launcher's and turns' are refused.
 - `exit-session` exits a quiet Codex session under turns' Codex host by stopping the

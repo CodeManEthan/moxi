@@ -18,7 +18,7 @@ at every try, not once. Claude Code's subagent route (`SUBAGENT`) needs a turns 
 that offers `fork`; a Claude Code session whose endpoint offers none falls back to the
 slot route. The slot route (`SLOT`) forks the session into a slot through the
 launcher's interface 3 and needs that launcher, tmux slots here and a way back by comms
-(`slot_why`). A Codex session runs only the slot route, and only where its launch picked
+(`slot_why`; whether slots run here is the launcher's read, `slots_here`). A Codex session runs only the slot route, and only where its launch picked
 it (`CODEX`). Codex's host fork (`HOST_FORK`, `moxi_memory.recall_route.HostFork`), a
 fork of the main thread by turns' Codex host, is picked for no session: turns' Codex
 host offers no `fork` yet, and a Codex session's recall stays off by default. Any other
@@ -186,23 +186,31 @@ def slot_why(session_id: str, env: Mapping[str, str] | None = None) -> str | Non
     session's, as `comms_why` reads it."""
     from . import links
 
-    if not links.launcher_forks().ready:
+    link = links.launcher_forks()
+    if not link.ready:
         return NO_LAUNCHER
-    if not slots_here():
+    if not slots_here(link.api):
         return NO_SLOTS
     return comms_why(session_id, env)
 
 
-def slots_here() -> bool:
-    """Whether tmux slots run here: slots is installed and says so."""
-    from . import links
+def slots_here(launcher=None) -> bool:
+    """Whether tmux slots run here, as the launcher reads it (its interface 3's
+    `slots_here`); False for a launcher without that read or without interface 3, and
+    for one that can't say. `launcher` is the launcher's API when the caller has it."""
+    if launcher is None:
+        from . import links
 
-    link = links.slots()
-    if not link.ready:
+        link = links.launcher_forks()
+        if not link.ready:
+            return False
+        launcher = link.api
+    here = getattr(launcher, "slots_here", None)
+    if here is None:
         return False
     try:
-        return bool(link.api.supported().ok)
-    except Exception:  # noqa: BLE001 - slots that can't say runs nothing here
+        return bool(here())
+    except Exception:  # noqa: BLE001 - a launcher that can't say runs no slot here
         return False
 
 

@@ -27,8 +27,9 @@
   `MOXI_MEMORY_SUBCONSCIOUS_ROUTE`), or on Claude Code when turns offers no `fork`, a
   recall forks the session into a tmux slot through the launcher's interface 3, the
   fork stamped `MOXI_MEMORY_SUBCONSCIOUS_FORK` with the recall's id
-  (`api.SUBCONSCIOUS_FORK_ENV`). It needs the launcher, slots (a new `slots` extra and
-  link) and comms with scoped senders. On Codex only the slot route runs a recall, and
+  (`api.SUBCONSCIOUS_FORK_ENV`). It needs the launcher, tmux slots here (the launcher's
+  interface 3 `slots_here` says so; an older launcher reads as `no slots here`) and
+  comms with scoped senders. On Codex only the slot route runs a recall, and
   only where the launch picks it; on `subagent` a Codex session has the subconscious off
   (`Codex: off unless the launch picks the slot route`). No recall starts inside a slot
   fork, and the on-demand command refuses there. Two turns guards hold a slot fork to
@@ -54,8 +55,7 @@
 - A slot fork is exited through the launcher once its recall's last round is settled,
   by the child, a taker, or a discard of a line whose owner is gone, and the line notes
   how (`fork_exit`). An exit still held after a minute is left: memory's doctor lists
-  the fork with its session, slot and age, and memory never ends it on its own. The
-  doctor's `links` row names slots too.
+  the fork with its session, slot and age, and memory never ends it on its own.
 - memory's side of Codex's host fork (`host-fork` in the log): its rounds through turns'
   Codex `fork` and `fork.continue`, its answers sent by comms, nothing to exit. No
   session is routed to it.

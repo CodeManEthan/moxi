@@ -35,9 +35,6 @@ comms = ["moxi-comms>=0.3,<0.4"]
 # Each session's launch kind, which keeps scratch launches out of default search and the
 # start lists. memory reaches the launcher only through moxi.modules.load("launcher").
 launcher = ["moxi-launcher>=0.1.1,<0.2"]
-# Whether tmux slots run here, which the subconscious's slot route needs. memory reaches
-# slots only through moxi.modules.load("slots").
-slots = ["moxi-slots>=0.1,<0.2"]
 # The notes a recall of the subconscious reads, beside past sessions. memory reaches
 # notes only through moxi.modules.load("notes").
 notes = ["moxi-notes>=0.1,<0.2"]

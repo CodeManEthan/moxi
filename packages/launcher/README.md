@@ -292,15 +292,18 @@ it asks no other module, starts no process, and writes nothing but an older log'
 update. With no launch log it gives none; a log held past `timeout_s` (1 second) raises
 `Busy`.
 
-Interface 3 adds two acts. `fork(session_id, target="terminal", slot=None, stamps=None)`
-forks a session as `moxi launcher fork` does (below) and returns the launch's
-`LaunchResult`, whose `session_id` is the fork's. `stamps` are variables set on the
+Interface 3 adds two acts and a read.
+`fork(session_id, target="terminal", slot=None, stamps=None)` forks a session as `moxi
+launcher fork` does (below) and returns the launch's `LaunchResult`, whose `session_id`
+is the fork's. `stamps` are variables set on the
 fork's environment after the scrub. Each must be one a present module lists in its
 `SESSION_ENV`, and its own prefix (`MOXI_<MODULE>_`) says which module that is; the
 launcher's and turns' are refused, since the launch stamps those itself. A stamp that
 fails is refused, `bad-value`, before anything is written.
 `exit_session(session_id, dry_run=False)` exits a quiet launched session as `moxi
-launcher exit-session` does and returns its verdict; a refusal is raised.
+launcher exit-session` does and returns its verdict; a refusal is raised. It also adds
+one read, `slots_here()`: whether tmux slots run here, as the launcher reads it for a
+slot launch (slots installed, and its `supported()` says so; false on native Windows).
 
 ## Handoffs
 

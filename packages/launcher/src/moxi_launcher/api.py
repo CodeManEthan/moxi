@@ -10,6 +10,7 @@
     running() -> tuple[Running, ...]        # interface 2: the launches running now
     fork(session_id) -> LaunchResult        # interface 3: fork a session, live or not
     exit_session(session_id) -> Result      # interface 3: exit a quiet launched session
+    slots_here() -> bool                    # interface 3: whether tmux slots run here
 
 A request is a `LaunchRequest` (presets and flags, resolved here) or a `ReplayRequest`
 (a stored launch made again: a relaunch, a resume or a fork, its values the stored
@@ -961,6 +962,16 @@ def exit_session(session_id: str, *, dry_run: bool = False,
     return exit_one(session_id, dry_run=dry_run, caller_env=env)
 
 
+def slots_here() -> bool:
+    """Interface 3: whether tmux slots run here, as the launcher reads it for a slot
+    launch and for a launch row's `when.slot` condition: slots is installed and its
+    `supported()` says so. False on native Windows, where slots refuse to run. Never
+    raises."""
+    from .catalog import slots_here as here
+
+    return here()
+
+
 @dataclass(frozen=True)
 class Running:
     """A launch that may be running, as `running` gives it: plain values only.
@@ -1042,4 +1053,4 @@ __all__ = ["KINDS", "LAST", "MODEL_PIN", "TAKEN", "KEEP_WARM_ENV", "RECYCLE_ON_E
            "LaunchResult", "NoDirectory", "Refusal", "ReplayRequest", "Replayed", "Running",
            "ScratchRecycle", "ScratchRoot", "check", "exit_code", "exit_session", "fork",
            "launch", "launch_kind", "launch_kinds", "open_hold", "prepare", "preview",
-           "release_hold", "running"]
+           "release_hold", "running", "slots_here"]

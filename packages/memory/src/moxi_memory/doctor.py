@@ -31,7 +31,7 @@
   doesn't import.
 - sessions: rows in the session table, with an identity, settled, and with each launch
   kind. `warn` when memory's state store can't be opened or read.
-- links: whether comms, the launcher, notes and slots load, and what memory does without each.
+- links: whether comms, the launcher and notes load, and what memory does without each.
 - retention: each harness's transcript retention, from sessions. `warn` where sessions
   warns.
 - subconscious: for each live session whose launch turned the subconscious on, whether a
@@ -406,7 +406,6 @@ _WITHOUT = {
     "comms": "no identities: no agent list, and the project list names harnesses",
     "launcher": "no launch kinds: every session is searched by default and may be listed",
     "notes": "a recall reads past sessions only, no notes",
-    "slots": "no slot route for the subconscious",
 }
 
 
@@ -416,7 +415,7 @@ def _links() -> Row:
     parts = []
     state = "ok"
     for name, link in (("comms", links.comms()), ("launcher", links.launcher()),
-                       ("notes", links.notes()), ("slots", links.slots())):
+                       ("notes", links.notes())):
         if link.ready:
             parts.append(f"{name} loads")
         elif link.state == links.FAILING:
