@@ -43,3 +43,8 @@ tools/web/**/*.ico binary
 tools/web/**/*.woff2 binary
 
 package-lock.json text eol=lf
+
+# publishing's workflow templates and the repo's own workflows are compared byte for
+# byte (the committed files equal the templates), so both keep LF on every checkout.
+packages/publishing/src/moxi_publishing/templates/*.yml text eol=lf
+.github/workflows/*.yml text eol=lf

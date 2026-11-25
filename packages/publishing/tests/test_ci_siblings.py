@@ -148,7 +148,8 @@ def test_the_fence_is_installed_alone_without_its_requirements_after_each_resolu
     assert steps == ["venv", "resolve", "-c", "fence", "pytest"] * 2
     for call in runner.fences():
         argv = call["argv"]
-        assert argv[argv.index("--no-deps"):] == ["--no-deps", str(repo / "packages/moxi-dev")]
+        flag, source = argv[argv.index("--no-deps"):]
+        assert (flag, Path(source)) == ("--no-deps", repo / "packages/moxi-dev")
         assert "--resolution" not in argv
     # The floor report reads the venv before the fence is in it.
     assert any(line.startswith("floor raised: proj-a 0.0.9") for line in result.lines)
@@ -313,8 +314,8 @@ def test_outside_names_a_module_imported_from_elsewhere(tmp_path, monkeypatch):
     (tmp_path / "pkg_here" / "__init__.py").write_text("")
     monkeypatch.syspath_prepend(str(tmp_path))
     found = site_check.outside(["pkg_here", "pluggy", "no_such_pkg"], site_check.site_roots())
-    assert found[0] == (f"pkg_here imports from {os.path.realpath(tmp_path / 'pkg_here')}"
-                        f"/__init__.py, not the installed wheel")
+    where = os.path.realpath(tmp_path / "pkg_here" / "__init__.py")
+    assert found[0] == f"pkg_here imports from {where}, not the installed wheel"
     assert found[1].startswith("no_such_pkg can't be imported")
     assert len(found) == 2
 

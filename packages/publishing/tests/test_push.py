@@ -4,8 +4,10 @@ what is new to the remote and how it is judged, and the log."""
 from __future__ import annotations
 
 import json
+import os
 import shutil
 import subprocess
+from pathlib import Path
 
 import pytest
 from conftest import commit, fingerprint, git, public_repo, token, write_config
@@ -80,7 +82,7 @@ def test_a_branch_moved_forward_or_created_passes_and_is_logged(pub, remote):
     assert last["remote"] == "origin" and last["url"] == str(remote)
     assert last["refs"][0]["remote_ref"] == "refs/heads/topic"
     assert last["commits"] == [head(pub)]
-    assert last["repo"] == str(pub)
+    assert Path(last["repo"]) == pub  # git names the work tree with `/` on Windows
 
 
 def test_a_branch_is_never_rewritten(pub):
@@ -238,6 +240,11 @@ def with_userinfo(scheme: str, secret: str, rest: str) -> str:
     return f"{scheme}:/" + f"/alice:{secret}@{rest}"
 
 
+def on_localhost(path) -> str:
+    """`localhost` and `path` as a file URL's path (`/C:/...` on Windows)."""
+    return "localhost" + Path(path).as_uri()[len("file://"):]
+
+
 def test_a_urls_userinfo_is_never_printed_or_logged(repo, names, remote, tmp_path):
     from moxi_publishing import push as piece
 
@@ -246,16 +253,19 @@ def test_a_urls_userinfo_is_never_printed_or_logged(repo, names, remote, tmp_pat
         "https://example.test/proj-a.git"
     assert piece._shown_url("git@example.test:alice/proj-a.git") == \
         "git@example.test:alice/proj-a.git"
+    if os.name == "nt":
+        pytest.skip("git for Windows reads no file URL with a host: it takes the rest as a "
+                    "local path")
     public_repo(repo, PIECE, sets=("main=main",))
     commit(repo, "Add")
-    done = push(repo, with_userinfo("file", secret, f"localhost{remote}"), "main")
-    refused(done, f"no tracking refs for file://localhost{remote} here")
+    done = push(repo, with_userinfo("file", secret, on_localhost(remote)), "main")
+    refused(done, f"no tracking refs for file://{on_localhost(remote)} here")
     assert secret not in done.stderr
     empty = tmp_path / "empty.git"
     git(tmp_path, "init", "-q", "--bare", str(empty))
-    passed(push(repo, with_userinfo("file", secret, f"localhost{empty}"), "main"))
+    passed(push(repo, with_userinfo("file", secret, on_localhost(empty)), "main"))
     logged = log_lines()[-1]
-    assert logged["url"] == logged["remote"] == f"file://localhost{empty}"
+    assert logged["url"] == logged["remote"] == f"file://{on_localhost(empty)}"
 
 
 def test_a_shown_url_drops_userinfo_up_to_the_last_at_before_the_path():

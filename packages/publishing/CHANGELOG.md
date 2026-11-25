@@ -35,7 +35,9 @@ The first version.
   test fence its conftest loads is there.
 - `moxi publishing workflows write`: the public scan and release workflow files. The
   release workflow's upload job runs only pinned actions, never the repo's code; a
-  verify job before it runs the gate with the build's files.
+  verify job before it runs the gate with the build's files. A workflow file whose lines
+  end CRLF (a Windows checkout with `core.autocrlf`) reads as its template, in `workflows
+  write` and in the doctor, so it is not rewritten or warned on.
 - `moxi publishing github show` and `github apply`: the rulesets, secret scanning and
   `pypi` environment a public repo expects of GitHub, read with `gh` and printed field
   by field, or written. `moxi-main` requires the root `pyproject.toml`'s `check-job`

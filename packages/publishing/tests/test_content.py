@@ -3,6 +3,8 @@ allowlists of the index; and the patch reader under it."""
 
 from __future__ import annotations
 
+import os
+
 import pytest
 from conftest import commit, fingerprint, git, public_repo, token, write_config
 
@@ -261,7 +263,9 @@ def test_the_piece_without_the_flag_refuses(repo, names):
 # -- the patch reader -----------------------------------------------------------------------
 
 def test_the_patch_reader_takes_quoted_paths_and_header_like_lines_as_text(pub):
-    names = ['with space.md', 'tab\there.md', 'quote"d.md', 'café.md', 'plain.md']
+    names = ['with space.md', 'café.md', 'plain.md']
+    if os.name != "nt":  # Windows' file names hold no tab and no double quote
+        names += ['tab\there.md', 'quote"d.md']
     for name in names:
         stage(pub, name, "+++ b/x\ndiff --git a/x b/x\n@@ -1 +1 @@\n")
     done = git(pub, "diff", "--cached", *content.DIFF_FLAGS)

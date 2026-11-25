@@ -302,7 +302,7 @@ def _warn_rows(root: str, name: str) -> Iterator[Row]:
         path = os.path.join(root, *release.WORKFLOW_DIR.split("/"), file)
         try:
             with open(path, "rb") as fh:
-                same = fh.read() == release.template(file)
+                same = release.is_template(fh.read(), file)
         except FileNotFoundError:
             # The scan's file is the server-side check of every push; the release file
             # matters only to a repo that releases.

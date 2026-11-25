@@ -737,6 +737,13 @@ def template(name: str) -> bytes:
     return files("moxi_publishing").joinpath("templates", name).read_bytes()
 
 
+def is_template(data: bytes, name: str) -> bool:
+    """Whether `data`, a workflow file's bytes, is the template of `name`. A file whose
+    lines end CRLF counts as the template (a Windows checkout with `core.autocrlf`
+    writes them so, and commits LF)."""
+    return data.replace(b"\r\n", b"\n") == template(name)
+
+
 def workflows_write(path: str) -> Result:
     """`moxi publishing workflows write PATH`: the two workflow files into the repo's
     `.github/workflows/`, each replaced by its template. Raises `Failure`."""
@@ -752,7 +759,7 @@ def workflows_write(path: str) -> Result:
         data = template(name)
         try:
             with open(target, "rb") as fh:
-                same = fh.read() == data
+                same = is_template(fh.read(), name)
         except FileNotFoundError:
             same = None
         except OSError as exc:
@@ -774,4 +781,4 @@ def workflows_write(path: str) -> Result:
 __all__ = ["REMOTE", "PARTS", "UNRELEASED", "RESOLUTIONS", "WORKFLOWS", "Result",
            "ReleaseTest", "next_version", "bump", "main_branch", "tag", "tag_message",
            "ci_gate", "ci_notes", "ci_siblings", "release_test", "floors_raised",
-           "wheel_imports", "locked_versions", "template", "workflows_write"]
+           "wheel_imports", "locked_versions", "template", "is_template", "workflows_write"]

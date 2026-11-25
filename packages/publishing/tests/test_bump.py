@@ -4,10 +4,10 @@ README links, `uv lock` called, and a dependent's requirement refused."""
 from __future__ import annotations
 
 import os
-import stat
 
 import pytest
 from conftest import git, member_toml, release_files, write
+from moxi_dev.testing import console_script
 
 from moxi_publishing import cli, release
 
@@ -20,9 +20,10 @@ def uv(tmp_path, monkeypatch):
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
     calls = tmp_path / "uv-calls"
-    script = bin_dir / "uv"
-    script.write_text(f'#!/bin/sh\necho "$PWD $*" >> "{calls}"\n', encoding="utf-8")
-    script.chmod(script.stat().st_mode | stat.S_IXUSR)
+    console_script(bin_dir, "uv", (
+        "import os, sys\n"
+        f"with open({str(calls)!r}, 'a', encoding='utf-8') as fh:\n"
+        "    fh.write(' '.join([os.getcwd(), *sys.argv[1:]]) + '\\n')\n"))
     monkeypatch.setenv("PATH", f"{bin_dir}{os.pathsep}{os.environ['PATH']}")
     return calls
 

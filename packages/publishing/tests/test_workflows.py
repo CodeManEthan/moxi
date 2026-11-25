@@ -1,5 +1,6 @@
 """`moxi publishing workflows write`, and the two workflow files it writes."""
 
+import os
 import re
 from pathlib import Path
 
@@ -43,7 +44,8 @@ def test_write_puts_both_files_in_place_then_leaves_them(repo, capsys):
     for each in release.WORKFLOWS:
         target = repo / ".github" / "workflows" / each
         assert target.read_bytes() == release.template(each)
-        assert target.stat().st_mode & 0o777 == 0o644
+        if os.name != "nt":  # mode bits are POSIX's
+            assert target.stat().st_mode & 0o777 == 0o644
         assert f".github/workflows/{each}: written" in out
     assert cli.main(["workflows", "write", str(repo)]) == 0
     assert "publishing.yml: unchanged" in capsys.readouterr().out
@@ -58,6 +60,18 @@ def test_write_replaces_a_changed_file_and_keeps_others(repo, capsys):
     assert ".github/workflows/release.yml: replaced" in capsys.readouterr().out
     assert (workflows / "release.yml").read_bytes() == release.template("release.yml")
     assert (workflows / "ci.yml").read_text() == "name: check\n"
+
+
+def test_a_workflow_file_with_crlf_lines_reads_as_its_template(repo, capsys):
+    workflows = repo / ".github" / "workflows"
+    workflows.mkdir(parents=True)
+    for each in release.WORKFLOWS:
+        (workflows / each).write_bytes(release.template(each).replace(b"\n", b"\r\n"))
+    assert release.is_template((workflows / "release.yml").read_bytes(), "release.yml")
+    assert not release.is_template(b"name: mine\r\n", "release.yml")
+    assert cli.main(["workflows", "write", str(repo)]) == 0
+    out = capsys.readouterr().out
+    assert "publishing.yml: unchanged" in out and "release.yml: unchanged" in out
 
 
 def test_every_action_is_pinned_to_a_commit(name):

@@ -8,6 +8,7 @@ import stat
 
 import pytest
 from conftest import git, write_config
+from moxi_repo.api import quote_arg
 
 from moxi_publishing import doctor, flag, push, release
 
@@ -149,6 +150,8 @@ def test_a_missing_scan_workflow_warns_and_a_missing_release_one_does_not(repo, 
     assert found[0].fix.startswith("moxi publishing workflows write ")
 
 
+@pytest.mark.skipif(os.name == "nt", reason="an unwritable folder made by mode bits is "
+                                             "POSIX's; Windows reads no mode bits")
 def test_an_empty_names_list_and_an_unwritable_push_log_warn_once(repo, tmp_path,
                                                                      monkeypatch):
     enabled(repo)
@@ -197,11 +200,20 @@ def later_hook_row(repo):
                 if row.name == f"repo {repo}" and "runs after the pieces" in row.detail)
 
 
-def apply_fix(repo, fix):
-    """Run the row's `enable` as a person pasting it would, through `flag.enable`."""
+def pasted_words(command):
+    """`command`'s words by the rules `quote_arg` quotes for: sh's on POSIX, and on
+    Windows a word in double quotes with `\\"` for a quote inside."""
     import shlex
 
-    words = shlex.split(fix[fix.index("moxi publishing enable"):])
+    if os.name != "nt":
+        return shlex.split(command)
+    return [w[1:-1].replace('\\"', '"') if len(w) > 1 and w[0] == w[-1] == '"' else w
+            for w in shlex.split(command, posix=False)]
+
+
+def apply_fix(repo, fix):
+    """Run the row's `enable` as a person pasting it would, through `flag.enable`."""
+    words = pasted_words(fix[fix.index("moxi publishing enable"):])
     assert words[3] == str(repo)
     sets = [words[i + 1] for i, word in enumerate(words) if word == "--set"]
     flag.enable(repo, sets=sets)
@@ -240,7 +252,8 @@ def test_with_no_other_key_anywhere_the_fix_says_to_name_one(repo, names):
     write_config("publishing", '[defaults]\ndrop_trailers = ["Commit-Check"]\n')
     fix = later_hook_row(repo).fix
     assert fix.startswith("name a key other than Commit-Check on drop-trailer")
-    assert fix.endswith("--set pass-trailer=Commit-Check --set drop-trailer=KEY")
+    assert fix.endswith(f"--set {quote_arg('pass-trailer=Commit-Check')} "
+                        "--set drop-trailer=KEY")
 
 
 # -- standing branches --------------------------------------------------------------------
@@ -268,8 +281,9 @@ def test_a_bad_standing_pattern_fails_naming_the_fix(repo, names):
     assert row.state == "fail"
     assert "'ci*' is not a fixed prefix" in row.detail
     assert "refuses every push" in row.detail
-    assert row.fix == f"moxi publishing enable {repo} --set 'standing-branch=ci/*' (or " \
-                      "--set standing-branch= to remove it)"
+    assert row.fix == f"moxi publishing enable {quote_arg(repo)} --set " \
+                      f"{quote_arg('standing-branch=ci/*')} (or --set standing-branch= " \
+                      "to remove it)"
 
 
 def test_a_standing_pattern_without_the_github_repo_fails(repo, names):
