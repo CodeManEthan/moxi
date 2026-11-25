@@ -14,6 +14,10 @@ that refuses, for the rest of the process:
 * `sqlite3.connect`, unless its database is a `file:` URI whose query says `mode=ro`:
   SQLite opens its file in C, so no `open` event shows a write it makes.
 
+On Windows, `install()` first reads the user's known folders and keeps them
+(`moxi._win.hold_known_folders`): `moxi.paths` names a module's folders from them, and
+asks the shell through `ctypes`, which the hook then refuses.
+
 A refusal raises `Refused`, a `PermissionError`, so code that copes with a read-only file
 system copes with it: an import that would write its module's bytecode cache goes on
 without it, as it does in a read-only directory. An audit hook cannot be removed, so it
@@ -96,10 +100,15 @@ def _hook(event: str, args: tuple) -> None:
 
 
 def install() -> None:
-    """Stop bytecode writes and add the hook, once per process. It cannot be undone."""
+    """Stop bytecode writes and add the hook, once per process. It cannot be undone. On
+    Windows the user's known folders are read and kept first."""
     global _installed
     sys.dont_write_bytecode = True
     if not _installed:
+        if sys.platform == "win32":
+            from . import _win
+
+            _win.hold_known_folders()
         sys.addaudithook(_hook)
         _installed = True
 

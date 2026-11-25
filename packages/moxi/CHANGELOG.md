@@ -2,6 +2,10 @@
 
 ## 0.1.11 (unreleased)
 
+- On Windows `moxi.render.install()` reads the user's known folders before it adds the
+  hook, and `moxi._win.known_folder` gives those answers from then on. A render could not
+  name a module's folders on Windows, because the shell is asked through `ctypes`, which
+  the hook refuses, so a status line render there showed only `config?`.
 - `moxi.proc.run` takes `end_tree`: with it, whatever the child left running is ended once
   it exits, not only on timeout (POSIX: SIGKILL to its process group; Windows: the job
   the run already puts it in is terminated), so nothing a command started outlives it.

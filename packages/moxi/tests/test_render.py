@@ -217,3 +217,20 @@ def test_install_twice_adds_one_hook():
         print(len(added), render.installed())
     ''')
     assert proc.stdout.split() == ["1", "True"], proc.stderr
+
+
+def test_a_modules_config_dir_is_named_under_the_hook():
+    # With no Moxi home set, Windows names the folders from the shell's known folders,
+    # which it reads through ctypes: install() reads them before the hook refuses that.
+    env = {key: value for key, value in os.environ.items()
+           if key != "MOXI_HOME" and not key.startswith("WIN_PD_OVERRIDE_")}
+    proc = child('''
+        import os
+        from moxi import paths, render
+        env = {key: value for key, value in os.environ.items()
+               if key != "MOXI_HOME" and not key.startswith("WIN_PD_OVERRIDE_")}
+        before = paths.core().config_dir(env)
+        render.install()
+        print(paths.core().config_dir(env) == before, paths.core().state_dir(env).is_absolute())
+    ''', env=env)
+    assert proc.stdout.split() == ["True", "True"], proc.stderr

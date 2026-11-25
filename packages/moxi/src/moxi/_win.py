@@ -10,7 +10,8 @@ calls it needs when first called, so importing this module costs nothing anywher
   `private_file(path)` creates a new file whose access list grants only the current user.
 - `user_sid()` is the current user's SID as text, `S-1-5-21-...`.
 - `known_folder(name)` is one of the user's own folders (roaming and local application
-  data, the profile), asked of the shell and not read from the environment.
+  data, the profile), asked of the shell and not read from the environment;
+  `hold_known_folders()` asks for them all at once and keeps the answers.
 - `pipe_name(handle)` is the name of the pipe a handle is an end of.
 - `console(handle)` says whether a handle is a console's.
 - `pipe_client_pid(handle)` is the pid of the process at the client end of a named pipe,
@@ -232,6 +233,8 @@ KNOWN_FOLDERS = {  # noqa: MX3 -- Windows names these Known Folders
     "profile": "{5E6C858F-0E22-4760-9AFE-EA3317B67173}",  # FOLDERID_Profile
 }
 _KF_FLAG_DONT_VERIFY = 0x00004000
+#: The folders `hold_known_folders` read, by name: `known_folder` gives these from then on.
+_held_folders: dict[str, str] = {}  # noqa: MX3 -- Windows names these Known Folders
 
 
 def known_folder(name: str) -> str:  # noqa: MX3 -- Windows names these Known Folders
@@ -244,8 +247,12 @@ def known_folder(name: str) -> str:  # noqa: MX3 -- Windows names these Known Fo
     own profile, so every process of the account gets the same folders whatever its
     environment says.
 
+    Once `hold_known_folders` has run, the folder it read is given without asking again.
+
     Raises `OSError` when the shell gives none, as for an account with no profile loaded.
     """
+    if name in _held_folders:
+        return _held_folders[name]
     import ctypes
     from ctypes import wintypes as w
 
@@ -282,6 +289,18 @@ def known_folder(name: str) -> str:  # noqa: MX3 -- Windows names these Known Fo
         raise OSError(f"the shell gives no {name} folder for this user "
                       f"(SHGetKnownFolderPath returned {result & 0xFFFFFFFF:#010x})")
     return path
+
+
+def hold_known_folders() -> None:  # noqa: MX3 -- Windows names these Known Folders
+    """Ask the shell for every folder `KNOWN_FOLDERS` names now, and have `known_folder`
+    give these answers for the rest of the process, so it can name them when it may no
+    longer load a library (the render audit hook refuses `ctypes.dlopen`). A folder the
+    shell gives none for is not held, and is asked for again."""
+    for name in KNOWN_FOLDERS:
+        try:
+            _held_folders[name] = known_folder(name)
+        except OSError:
+            continue
 
 
 # -- named pipes --------------------------------------------------------------------------
