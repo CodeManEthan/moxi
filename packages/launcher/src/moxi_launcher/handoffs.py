@@ -2,7 +2,7 @@
 which handoffs are still waiting for their seat.
 
 A handoff is a short file a session writes for the next session of its seat. The launcher
-points a seat to its waiting handoff at the seat's next start or resume (`listen_handoff`),
+points a seat to its waiting handoff at the seat's start, resume or `/clear` (`listen_handoff`),
 and gives a handoff to a launch as its first turn.
 
 **The key.** For a launch, from its row: the comms identity without its `@scope`; else the

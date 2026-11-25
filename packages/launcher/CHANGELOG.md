@@ -7,6 +7,8 @@
   taken, given to a launch, or a newer one of the key is. The pointer now ends "then run:
   moxi launcher handoff take <path>". A handoff an older launcher marked as shown stays
   picked.
+- The handoff lines show after a `/clear` too (a compaction still shows nothing). A
+  launched session keeps its claim across the clear, so it is pointed to its own handoff.
 - New `moxi launcher handoff take [FILE] [--key KEY] [--json]` records a handoff as taken:
   this session's waiting one with no FILE. It refuses, writing nothing, with no key, with
   nothing waiting, and for a FILE that is missing, named for another key, or outside the

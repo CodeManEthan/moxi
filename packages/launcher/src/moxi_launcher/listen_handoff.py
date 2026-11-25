@@ -1,8 +1,10 @@
 """The handoff lines: at a seat's start, the handoff waiting for it, then the ones waiting
 for other seats in the same folder.
 
-A `start` row that answers when a session starts or resumes (source `startup` or
-`resume`), not at a clear or compaction. It answers nothing on a relaunch
+A `start` row that answers when a session starts, resumes or is cleared (source
+`startup`, `resume` or `clear`), not at a compaction. A launched session keeps its claim
+across a `/clear` (`listeners.claim`), so a cleared seat is pointed to its own handoff. It
+answers nothing on a relaunch
 (`MOXI_LAUNCHER_RELAUNCH`, whose first turn carries the handoff), nothing in a headless
 launch, and nothing in a fork (`moxi launcher fork`), a short reader that marks no
 handoff picked.
@@ -34,11 +36,11 @@ import os
 from . import handoffs, listeners
 
 #: The start sources the lines are shown at.
-SOURCES = ("startup", "resume")
+SOURCES = ("startup", "resume", "clear")
 
 
 def answer(event) -> str | None:
-    """The handoff lines for a starting or resuming session, or None."""
+    """The handoff lines for a session that starts, resumes or is cleared, or None."""
     if event.event != "start" or getattr(event, "source", None) not in SOURCES:
         return None
     env = listeners.event_env(event)

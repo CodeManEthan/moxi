@@ -849,13 +849,25 @@ def test_with_notes_and_no_notes_dir_a_seat_is_pointed_to_nothing(conn, endpoint
     assert store.picked(conn, "lead") == []
 
 
-@pytest.mark.parametrize("source", ["clear", "compact"])
-def test_the_lines_answer_not_at_a_clear_or_compaction(conn, endpoint, source):
+def test_the_lines_answer_at_a_clear_and_not_at_a_compaction(conn, endpoint):
     launch_claude(conn)
-    handoff("lead")
-    handoff("planner")
-    assert listen_handoff.answer(start("claude", CLAUDE_ID, "r1", source=source)) is None
+    waiting = handoff("lead")
+    other = handoff("planner", "2026-10-28")
+    assert listen_handoff.answer(start("claude", CLAUDE_ID, "r1")) is not None
+    listen_ready.observe(ready("claude", CLAUDE_ID, "r1"))
+    cleared = listen_handoff.answer(start("claude", CLEARED_ID, "r1", source="clear"))
+    assert cleared == (pointer(waiting, "2026-10-29") + "\n"
+                       + f"Another seat's handoff: {other} (planner, 2026-10-28)")
+    assert listen_handoff.answer(start("claude", CLEARED_ID, "r1", source="compact")) is None
     assert store.picked(conn, "lead") == []
+
+
+def test_a_clear_in_a_session_that_did_not_claim_the_launch_gets_nothing(conn, endpoint):
+    launch_claude(conn)
+    listen_ready.observe(ready("claude", CLAUDE_ID, "r1"))
+    handoff("lead")
+    endpoint(NESTED)
+    assert listen_handoff.answer(start("claude", NESTED_ID, "r1", source="clear")) is None
 
 
 def test_a_resume_of_a_held_launch_is_pointed_and_marks_nothing(conn, endpoint):
