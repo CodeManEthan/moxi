@@ -1,4 +1,5 @@
-"""`moxi publishing list`: every indexed repo marked public, with its pieces."""
+"""`moxi publishing list`: every indexed repo with clean history, push approval or the
+public flag, with its pieces."""
 
 from __future__ import annotations
 
@@ -30,4 +31,37 @@ def test_list_shows_flagged_repos_with_each_piece(repo, names, template, tmp_pat
 
 def test_list_with_none_says_so(capsys):
     assert cli.main(["list"]) == 0
-    assert capsys.readouterr().out.strip() == "no repo is marked public"
+    assert capsys.readouterr().out.strip() == (
+        "no repo keeps a clean history, has push approval or is marked public")
+
+
+def test_list_shows_each_repos_three_choices(repo, names, template, tmp_path, capsys):
+    from moxi_publishing import approval, clean
+
+    private = tmp_path / "proj-b"
+    shutil.copytree(template, private)
+    clean.enable(private)
+    approval.enable(private, ["main", "release/*"])
+    flag.enable(repo)
+    assert cli.main(["list", "--json"]) == 0
+    by_root = {r["root"]: r for r in json.loads(capsys.readouterr().out)}
+    assert (by_root[str(repo)]["public"], by_root[str(repo)]["clean"],
+            by_root[str(repo)]["approval"]) == (True, True, None)
+    mine = by_root[str(private)]
+    assert (mine["public"], mine["clean"], mine["approval"]) == (False, True,
+                                                                ["main", "release/*"])
+    assert set(mine["pieces"]) == {"publishing/message", "publishing/content",
+                                   "publishing/approval"}
+    assert cli.main(["list"]) == 0
+    out = capsys.readouterr().out
+    assert "  public: no; clean history: yes; push approval: main release/*" in out
+    assert "  public: yes; clean history: yes; push approval: off" in out
+
+
+def test_list_shows_a_repo_with_approval_alone(repo, capsys):
+    from moxi_publishing import approval
+
+    approval.enable(repo, ["*"])
+    [entry] = flag.listing()
+    assert (entry["public"], entry["clean"], entry["approval"]) == (False, False, ["*"])
+    assert entry["pieces"] == {"publishing/approval": entry["pieces"]["publishing/approval"]}

@@ -25,8 +25,12 @@ without it refuses, since whoever registered it meant the repo to be guarded.
 `disable` removes the push piece, then the public flag. Where `enable` turned clean
 history on, or the repo was enabled before clean history existed, `disable` turns it off
 too; a repo that kept a clean history before it was made public keeps it, and `disable`
-names `clean-history disable` for it. `list` shows every repo marked public with each
-piece's state and settings.
+names `clean-history disable` for it.
+
+`list` shows every repo that keeps a clean history, has push approval or is marked public:
+a line with its three choices (`public: yes; clean history: yes; push approval: main`),
+then each piece's state and settings. `--json` gives them as `public`, `clean` and
+`approval` (the branch patterns, or null).
 
 `enable` warns when secrets' private names list is empty: add yours with
 `moxi config secrets`.
@@ -106,14 +110,15 @@ the repo for them.
 | message | `pass-trailer` | any number | Trailer keys a later commit-msg git hook in this repo reads: left in place at commit. |
 | push | `main` | one | The repo's main branch. |
 | push | `protected` | any number | Branches beside `main` a push may never delete. |
-| push | `word-required` | one | `true`: a push needs `MOXI_PUBLISHING_PUSH_WORD`. |
+| push | `word-required` | one | Retired: while it holds `true` every push is refused (see [The push piece](#the-push-piece)); `--set word-required=` removes it. |
 | push | `free-ref` | any number | Ref patterns outside branches and release tags a push may create, move or delete. |
-| push | `standing-branch` | any number | Patterns such as `ci/*` naming [standing branches](#standing-branches): pushed at a local branch's tip, with no word to the publishing remote. |
+| push | `standing-branch` | any number | Patterns such as `ci/*` naming [standing branches](#standing-branches): pushed only at a local branch's tip. |
 
 Where `enable` first registers a piece, the piece's settings start from publishing's
-config: `defaults.drop_trailers` (`Claude-Session` and `Commit-Check`), `defaults.main`
-(`main`) and `defaults.word_required` (`false`). Running `enable` again on a repo keeps the
-settings it has; a later change to a default reaches no repo already enabled.
+config: `defaults.drop_trailers` (`Claude-Session` and `Commit-Check`) and `defaults.main`
+(`main`). Running `enable` again on a repo keeps the settings it has; a later change to a
+default reaches no repo already enabled. `defaults.word_required` is retired: a config file
+that still sets it is read as though it didn't.
 
 `--set KEY=VALUE` sets one. Every `--set` for one key together give that key's whole
 list, **replacing** its seed or what the repo had, so `--set drop-trailer=Claude-Session`
@@ -233,14 +238,15 @@ through the message piece's sets and rules. A tag message gets neither the
 tag pattern in an annotated tag you write by hand goes public; `moxi publishing tag`
 writes a release tag's message from the CHANGELOG itself.
 
-With `word-required` set to `true`, a push needs `MOXI_PUBLISHING_PUSH_WORD`, matching
-`push.word_pattern` in full: where the push was approved. It is a record, not a proof; any
-process can set it. A blank one counts as none. The one push that needs no word is a push
-of standing branches only, to the publishing remote ([Standing
-branches](#standing-branches)). A push that passes is logged first, one JSON line in the
-module's state directory, `pushes.jsonl` (time, repo, remote, URL, word, refs, commits);
-`word` is null when none was given, and each ref of a standing branch names the pattern
-that allowed it (`standing`). A log that can't be written refuses the push.
+The push piece asks for no word: the word is [push approval](#push-approval)'s. A repo
+whose push piece still holds the retired `word-required = true` has every push refused,
+naming `moxi publishing approval enable PATH --branch PATTERN` and `moxi publishing enable
+PATH --set word-required=`, so no repo loses its approval silently. A push that passes is
+logged first, one JSON line in the module's state directory, `pushes.jsonl` (time, repo,
+remote, URL, word, refs, commits); `word` is `MOXI_PUBLISHING_PUSH_WORD` as the push
+carried it, or null when none (or a blank one) was given, and each ref of a standing
+branch names the pattern that allowed it (`standing`). A log that can't be written
+refuses the push.
 
 ### Standing branches
 
@@ -256,10 +262,10 @@ What it sends is judged as any push's, with no setting that narrows it; a forced
 what the remote's tracking refs and its old tip lack. A tag under the prefix (`refs/tags/ci/x`)
 is no standing branch.
 
-Where `word-required` is `true`, a push whose every ref is a standing branch needs no word
-when it goes to the publishing remote: the URL git hands the hook reduces to the
-OWNER/REPO in `moxi-publishing.github`. Only the whole URL in one of the three forms git
-sends to GitHub reduces:
+A standing branch needs no word from the push piece, and push approval guards one only
+where a pattern names it. The publishing remote is the URL git hands the hook that
+reduces to the OWNER/REPO in `moxi-publishing.github`; a push of `main` there waits for
+CI (below). Only the whole URL in one of the three forms git sends to GitHub reduces:
 
 - `git@github.com:OWNER/REPO`
 - `ssh://git@github.com[:PORT]/OWNER/REPO`
@@ -267,14 +273,11 @@ sends to GitHub reduces:
   one or more ASCII letters, digits, `.`, `_` and `-`
 
 each with one `.git` stripped (`R.git.git` reduces to `R.git`), OWNER being letters, digits
-and `-`, and REPO letters, digits, `.`, `_` and `-`. Anything else reduces to nothing and
-asks for the word: `http://`, a trailing `/` or newline, `ssh://git@github.com:OWNER/REPO`,
-another host, host letters in another case, an https USER holding any other byte (git sends
+and `-`, and REPO letters, digits, `.`, `_` and `-`. Anything else reduces to nothing:
+`http://`, a trailing `/` or newline, `ssh://git@github.com:OWNER/REPO`, another host, host
+letters in another case, an https USER holding any other byte (git sends
 `https://evil.example#@github.com/O/R` to evil.example), and `git@github.com/OWNER/REPO`,
-which has no colon and so is a local directory to git. A push that carries any other ref
-needs the word as before, and its standing branches are judged by the rules above. A word
-given on a standing push is judged as on any push: a malformed one refuses it, and a valid
-one is logged.
+which has no colon and so is a local directory to git.
 
 While `standing-branch` holds a bad pattern (one written into git config by hand, say),
 the piece refuses every push, naming it and the `enable` command that fixes it; a hand
@@ -307,11 +310,11 @@ passed, and one that passed and then failed on a re-run counts as failed. A read
 fails, or a missing `check-workflow` or `check-job` at C, refuses, naming which. When
 `main` moved on since the run, push the new tip to the standing branch again and wait, or
 move `main` to the commit that passed (`git push origin C:refs/heads/main`). The rule adds
-to the word and to fast-forward only; a push of any other branch or tag reads no CI here.
+to fast-forward only; a push of any other branch or tag reads no CI here.
 
 The rule is a standing-branch repo's, on its way to GitHub. A repo with no
 `standing-branch` pattern pushes `main` as it did before the setting existed: with the
-word where `word-required` is set, forward only, and with no CI read. So does a push of
+forward only, and with no CI read. So does a push of
 `main` to any other URL, a mirror off GitHub or a local remote among them, and so does
 every push while `moxi-publishing.github` is unset, since no URL then reduces to it.
 
@@ -606,14 +609,15 @@ pass key; when `moxi-publishing.github` is unset; when `publishing.yml`, the pub
 GitHub runs on every push, is missing (a missing `release.yml` only means the repo
 doesn't release); and when a workflow file `workflows write` writes is there but differs
 from the template; and, once, when secrets' private names list is empty and when the
-push log can't be written.
+push log can't be written. It fails a push piece that still holds the retired
+`word-required = true` (every push is then refused), naming both commands that move it to
+push approval, and warns where it holds any other value.
 
 For a repo whose push piece sets `standing-branch`, it fails a bad pattern (the piece then
-refuses every push) and an unset `moxi-publishing.github` (no push then goes with no word),
-each with the `enable` command that fixes it. It warns when no push URL of the remote
-`origin` reduces to `moxi-publishing.github` by the rule in [Standing
-branches](#standing-branches), naming each URL: standing pushes there will ask for the
-word. The URLs are git's own (`git remote get-url --push --all origin`): `pushurl` where
+refuses every push) and an unset `moxi-publishing.github` (no push of `main` then waits
+for CI), each with the `enable` command that fixes it. It warns when no push URL of the
+remote `origin` reduces to `moxi-publishing.github` by the rule in [Standing
+branches](#standing-branches), naming each URL: a push of `main` there waits for no CI. The URLs are git's own (`git remote get-url --push --all origin`): `pushurl` where
 set, else `url`, after `insteadOf` and `pushInsteadOf` rewriting, as git hands them to the
 hook. A repo with no `origin` warns the same way. Otherwise the repo's `ok` row names the
 patterns.

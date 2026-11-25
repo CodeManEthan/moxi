@@ -17,8 +17,7 @@ INTERNAL_ENV = {
     "MOXI_PUBLISHING_PUSH_WORD": "set by whoever pushes, per push: where the push was "
                                  "approved, which the approval piece checks against "
                                  "push.word_pattern for an agent's push of a guarded "
-                                 "branch or a tag (and the push piece, in a repo whose "
-                                 "word-required setting is true), and both log",
+                                 "branch or a tag, and which the push log keeps",
     "MOXI_PUBLISHING_GITHUB_API_URL": "where the tag gate reads GitHub's API, when not "
                                       "api.github.com: a test's fake, or a GitHub "
                                       "Enterprise host",

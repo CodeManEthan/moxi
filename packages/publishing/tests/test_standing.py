@@ -1,6 +1,7 @@
-"""Standing branches and `main`'s CI rule in the push piece: the URL a push goes to with no
-word, the pattern rule, each rule for a standing branch and its refusals, the log, and a
-push of `main` that waits for its check on a standing branch."""
+"""Standing branches and `main`'s CI rule in the push piece: the URL main's check reads CI
+for, the pattern rule, each rule for a standing branch and its refusals, the log, the
+retired word-required, and a push of `main` that waits for its check on a standing
+branch."""
 
 from __future__ import annotations
 
@@ -48,7 +49,7 @@ def standing_repo(repo, *sets):
     return public_repo(repo, PIECE, sets=("main=main", "standing-branch=ci/*", *sets))
 
 
-# -- the URL a standing push goes to with no word -----------------------------------------
+# -- the URL main's check reads CI for -----------------------------------------------
 
 @pytest.mark.parametrize("url, reduced", [
     ("git@github.com:O-1/r.x_y-z.git", "O-1/r.x_y-z"),
@@ -295,9 +296,9 @@ def test_the_log_names_the_pattern_of_each_standing_ref(repo, names, remote):
     assert log_lines()[-1]["word"] is None
 
 
-# -- the word, judged on the URL git hands the hook --------------------------------------------
+# -- the push piece asks for no word; a leftover word-required refuses ------------------------
 
-def hook(repo, url, *lines, word=None, monkeypatch):
+def hook(repo, url, *lines, word=None, monkeypatch, leftover=False):
     """The push piece as git's pre-push hook runs it in `repo`, pushing `lines` (each
     `local_ref local_sha remote_ref remote_sha`) to `origin` at `url`."""
     from moxi_repo.api import HookContext
@@ -307,15 +308,17 @@ def hook(repo, url, *lines, word=None, monkeypatch):
         monkeypatch.delenv(piece.WORD_ENV, raising=False)
     else:
         monkeypatch.setenv(piece.WORD_ENV, word)
-    settings = {"main": ["main"], "word-required": ["true"], "standing-branch": ["ci/*"]}
+    settings = {"main": ["main"], "standing-branch": ["ci/*"]}
+    if leftover:
+        settings["word-required"] = ["true"]
     return piece.pre_push(HookContext("pre-push", args=("origin", url),
                                       stdin=("\n".join(lines) + "\n").encode(),
                                       settings=settings))
 
 
 @pytest.fixture
-def worded(repo, names, remote):
-    standing_repo(repo, "word-required=true")
+def standing(repo, names, remote):
+    standing_repo(repo)
     git(repo, "config", "moxi-publishing.github", GITHUB)
     git(repo, "branch", "topic")
     return repo
@@ -329,98 +332,64 @@ def said(outcome):
     return "\n".join(outcome.lines)
 
 
-@pytest.mark.parametrize("url", [URL, f"https://github.com/{GITHUB}",
-                                 f"ssh://git@github.com:22/{GITHUB}.git"])
-def test_a_standing_push_to_the_publishing_remote_needs_no_word(worded, monkeypatch, url):
-    outcome = hook(worded, url, ci_line(worded), monkeypatch=monkeypatch)
+@pytest.mark.parametrize("url", [URL, "git@example.test:operator/proj-a.git",
+                                 "https://evil.example#@github.com/operator/proj-a"])
+def test_a_standing_push_needs_no_word_wherever_it_goes(standing, monkeypatch, url):
+    outcome = hook(standing, url, ci_line(standing), monkeypatch=monkeypatch)
     assert outcome.kind == "ok", said(outcome)
     last = log_lines()[-1]
     assert last["word"] is None and last["refs"][0]["standing"] == "ci/*"
 
 
-def test_a_standing_deletion_needs_no_word(worded, monkeypatch):
-    line = f"(delete) {ZERO} refs/heads/ci/topic {head(worded)}"
-    assert hook(worded, URL, line, monkeypatch=monkeypatch).kind == "ok"
+def test_a_push_of_another_branch_needs_no_word_from_the_push_piece(standing, monkeypatch):
+    other = f"refs/heads/topic {head(standing)} refs/heads/topic {ZERO}"
+    assert hook(standing, URL, other, monkeypatch=monkeypatch).kind == "ok"
 
 
-@pytest.mark.parametrize("url", [
-    "git@github.com/operator/proj-a.git", "http://github.com/operator/proj-a.git",
-    f"{URL}/", "git@github.com:operator/other.git", "git@example.test:operator/proj-a.git",
-    "https://evil.example#@github.com/operator/proj-a",
-])
-def test_a_standing_push_anywhere_else_needs_the_word(worded, monkeypatch, url):
-    outcome = hook(worded, url, ci_line(worded), monkeypatch=monkeypatch)
-    assert outcome.kind == "refuse"
-    assert "this repo wants the word" in said(outcome)
-    assert f"only a push of ci/* to {GITHUB} (moxi-publishing.github) goes with no " \
-           "word" in said(outcome)
-    assert hook(worded, url, ci_line(worded), word="comms:1",
+def test_a_word_given_is_logged_as_given(standing, monkeypatch):
+    assert hook(standing, URL, ci_line(standing), word="comms:7",
                 monkeypatch=monkeypatch).kind == "ok"
-    assert log_lines()[-1]["word"] == "comms:1"
-
-
-def test_a_push_carrying_another_ref_needs_the_word(worded, monkeypatch):
-    other = f"refs/heads/topic {head(worded)} refs/heads/topic {ZERO}"
-    outcome = hook(worded, URL, ci_line(worded), other, monkeypatch=monkeypatch)
-    assert outcome.kind == "refuse"
-    assert "this one carries refs/heads/topic" in said(outcome)
-
-
-def test_a_standing_push_needs_the_word_without_the_github_setting(worded, monkeypatch):
-    git(worded, "config", "--unset", "moxi-publishing.github")
-    outcome = hook(worded, URL, ci_line(worded), monkeypatch=monkeypatch)
-    assert outcome.kind == "refuse"
-    assert "moxi-publishing.github is not set" in said(outcome)
-
-
-def test_a_malformed_word_refuses_a_standing_push(worded, monkeypatch):
-    outcome = hook(worded, URL, ci_line(worded), word="two words", monkeypatch=monkeypatch)
-    assert outcome.kind == "refuse" and "push.word_pattern" in said(outcome)
-
-
-def test_a_blank_word_is_no_word(worded, monkeypatch):
-    assert hook(worded, URL, ci_line(worded), word="  ",
+    assert log_lines()[-1]["word"] == "comms:7"
+    assert hook(standing, URL, ci_line(standing), word="  ",
                 monkeypatch=monkeypatch).kind == "ok"
     assert log_lines()[-1]["word"] is None
 
 
-def test_a_valid_word_on_a_standing_push_is_logged(worded, monkeypatch):
-    assert hook(worded, URL, ci_line(worded), word="comms:7",
-                monkeypatch=monkeypatch).kind == "ok"
-    assert log_lines()[-1]["word"] == "comms:7"
+def test_a_leftover_word_required_refuses_every_push(standing, monkeypatch):
+    for word in (None, "comms:1"):
+        outcome = hook(standing, URL, ci_line(standing), word=word, leftover=True,
+                       monkeypatch=monkeypatch)
+        assert outcome.kind == "refuse"
+        assert "still holds word-required = true, which is retired" in said(outcome)
+        assert f"moxi publishing approval enable {standing} --branch PATTERN" in said(
+            outcome)
+        assert f"moxi publishing enable {standing} --set word-required=" in said(outcome)
+    assert log_lines() == []
 
 
-def test_a_standing_push_to_a_local_remote_asks_for_the_word(worded):
-    done = run(worded, "push", "-q", "origin", "topic:refs/heads/ci/topic")
-    refused(done, "this repo wants the word", "goes to ")
+def test_a_leftover_word_required_refuses_a_real_push(standing):
+    git(standing, "config", "moxi-repo.piece.publishing/push.word-required", "true")
+    refused(run(standing, "push", "-q", "origin", "topic:refs/heads/ci/topic"),
+            "which is retired")
 
 
-def test_a_push_with_no_ref_line_needs_the_word(worded, monkeypatch):
-    outcome = hook(worded, URL, monkeypatch=monkeypatch)
-    assert outcome.kind == "refuse"
-    assert "this repo wants the word" in said(outcome)
-    assert "this push carries no ref line" in said(outcome)
-
-
-def test_a_standing_push_with_no_word_still_goes_out_only_at_the_tip(worded, monkeypatch):
-    base = head(worded)
-    git(worded, "switch", "-q", "topic")
-    commit(worded, "Ahead")
+def test_a_standing_push_still_goes_out_only_at_the_tip(standing, monkeypatch):
+    base = head(standing)
+    git(standing, "switch", "-q", "topic")
+    commit(standing, "Ahead")
     line = f"refs/heads/topic {base} refs/heads/ci/topic {ZERO}"
-    outcome = hook(worded, URL, line, monkeypatch=monkeypatch)
+    outcome = hook(standing, URL, line, monkeypatch=monkeypatch)
     assert outcome.kind == "refuse"
     assert "goes out only at the tip of refs/heads/topic" in said(outcome)
-    assert "wants the word" not in said(outcome)
 
 
-def test_a_standing_push_with_no_word_is_still_scanned(worded, monkeypatch):
-    git(worded, "switch", "-q", "topic")
-    commit(worded, "A name", text="bobsecret\n")
-    named = head(worded)
-    outcome = hook(worded, URL, ci_line(worded), monkeypatch=monkeypatch)
+def test_a_standing_push_is_still_scanned(standing, monkeypatch):
+    git(standing, "switch", "-q", "topic")
+    commit(standing, "A name", text="bobsecret\n")
+    named = head(standing)
+    outcome = hook(standing, URL, ci_line(standing), monkeypatch=monkeypatch)
     assert outcome.kind == "refuse"
     assert f"{named[:12]} note.md:1: private-names/private-name" in said(outcome)
-    assert "wants the word" not in said(outcome)
     assert log_lines() == []
 
 
@@ -546,12 +515,11 @@ def test_a_failed_read_of_github_refuses_main(mainline, served, broken):
             "can't be told")
 
 
-def test_the_check_adds_to_the_word(mainline, served):
+def test_a_leftover_word_required_refuses_main_even_after_its_check(mainline, served):
     git(mainline, "config", "moxi-repo.piece.publishing/push.word-required", "true")
     served.green(head(mainline), branch="ci/main")
-    refused(run(mainline, "push", "-q", "origin", "main"), "this repo wants the word")
-    passed(run(mainline, "push", "-q", "origin", "main",
-               env={piece.WORD_ENV: "comms:1"}))
+    refused(run(mainline, "push", "-q", "origin", "main", env={piece.WORD_ENV: "comms:1"}),
+            "which is retired")
 
 
 def test_only_a_push_of_main_waits_for_the_check(mainline, served):

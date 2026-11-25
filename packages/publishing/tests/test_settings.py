@@ -18,7 +18,7 @@ def test_the_defaults():
     assert values[settings.WORD_PATTERN] == r"^\S+$"
     assert list(values[settings.DROP_TRAILERS]) == ["Claude-Session", "Commit-Check"]
     assert values[settings.MAIN] == "main"
-    assert values[settings.WORD_REQUIRED] is False
+    assert list(values[settings.REFUSED_TRAILERS]) == ["Round", "Reconciles"]
 
 
 @pytest.mark.parametrize("text", [
@@ -49,8 +49,7 @@ def test_show_json_gives_every_key_a_label_and_a_line(capsys):
         "push.word_pattern": "What a push word must look like",
         "defaults.drop_trailers": "Trailers to drop, for a new repo",
         "defaults.refused_trailers": "Trailers a clean repo refuses",
-        "defaults.main": "The main branch, for a new repo",
-        "defaults.word_required": "Push word needed, for a new repo"}
+        "defaults.main": "The main branch, for a new repo"}
     assert all(key["line"] for key in keys.values())
     for key in keys.values():
         assert key["common"] is False and key["group"] is None and key["unit"] is None

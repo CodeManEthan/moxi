@@ -50,9 +50,5 @@ label = "The main branch, for a new repo"
 line = "Copied in when enable first registers the push piece in a repo: the branch deletions are judged against."
 
 [defaults.word_required]
-type = "bool"
-default = false
-doc = "Seeds a repo's word-required setting when enable first registers the push piece there: whether a push needs MOXI_PUBLISHING_PUSH_WORD."
-read = "use"
-label = "Push word needed, for a new repo"
-line = "Copied in when enable first registers the push piece in a repo: whether a push needs a push word."
+retired = "remove it: the push word is push approval's now (moxi publishing approval enable PATH --branch PATTERN)"
+left_out = true

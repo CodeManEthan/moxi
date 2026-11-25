@@ -93,3 +93,13 @@ The first version.
   matching `push.word_pattern`; a push from your own terminal or a Moxi unit needs none.
   It reads no public or clean flag. A passing push is logged in `pushes.jsonl` with the
   word and the agent's harness.
+- The push piece's `word-required` setting and `defaults.word_required` are retired: the
+  word is push approval's. A repo whose push piece still holds `word-required = true` has
+  every push refused, naming `moxi publishing approval enable PATH --branch ...` and
+  `moxi publishing enable PATH --set word-required=`; `enable` takes only that clearing
+  form, and a config file that still sets the default is read without it. A standing
+  branch no longer has a word clause: approval guards it only where a pattern names it.
+  `moxi publishing list` shows every repo with clean history, push approval or the
+  public flag, each with those three choices (`public`, `clean`, `approval` in
+  `--json`); `moxi doctor publishing` fails a leftover `word-required = true` and warns on
+  any other leftover value.

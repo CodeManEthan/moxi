@@ -287,8 +287,8 @@ def test_a_standing_pattern_without_the_github_repo_fails(repo, names):
     git(repo, "config", "--unset", "moxi-publishing.github")
     rows = [r for r in doctor.rows() if r.name == f"repo {repo}"]
     [failed] = [r for r in rows if r.state == "fail"]
-    assert "moxi-publishing.github is unset, so no push of a standing branch goes with " \
-           "no word" in failed.detail
+    assert "moxi-publishing.github is unset, so no push of main waits for CI on a " \
+           "standing branch" in failed.detail
     assert failed.fix == f"moxi publishing enable {repo} --github OWNER/REPO"
 
 
@@ -301,7 +301,7 @@ def test_an_origin_that_does_not_reduce_warns_naming_its_url(repo, names, url):
     assert states(repo)[0] == (
         "warn", f"no push URL of origin ({url}) reduces to operator/proj-a "
                 "(moxi-publishing.github) in one of the three forms git sends to GitHub, "
-                "so a push of ci/* ci-full/* there asks for the word")
+                "so a push of main there waits for no CI on ci/* ci-full/*")
     assert states(repo)[-1][0] == "ok"
 
 
@@ -332,8 +332,8 @@ def test_one_reducing_push_url_of_several_is_enough(repo, names):
 def test_no_origin_warns(repo, names):
     standing(repo, None)
     assert states(repo)[0] == (
-        "warn", "the repo has no remote origin with a URL, so a push of ci/* ci-full/* "
-                "goes with no word nowhere")
+        "warn", "the repo has no remote origin with a URL, so no push of main there "
+                "waits for CI on ci/* ci-full/*")
 
 
 def test_a_shown_push_url_drops_its_userinfo(repo, names):
@@ -341,3 +341,20 @@ def test_a_shown_push_url_drops_its_userinfo(repo, names):
     standing(repo, url)
     detail = states(repo)[0][1]
     assert "pw" not in detail and "(https://example.test/operator/proj-a.git)" in detail
+
+
+def test_a_leftover_word_required_fails_and_names_both_commands(repo, names):
+    enabled(repo)
+    git(repo, "config", "moxi-repo.piece.publishing/push.word-required", "true")
+    [row] = [r for r in doctor.rows() if r.name == f"repo {repo}" and r.state == "fail"]
+    assert "still holds word-required = true, which is retired" in row.detail
+    assert row.fix == (f"moxi publishing approval enable {repo} --branch PATTERN, then "
+                       f"moxi publishing enable {repo} --set word-required=")
+
+
+def test_a_leftover_word_required_that_is_false_warns(repo, names):
+    enabled(repo)
+    git(repo, "config", "moxi-repo.piece.publishing/push.word-required", "false")
+    assert states(repo)[0] == ("warn", "the push piece still holds the retired "
+                                       "word-required (false), which nothing reads")
+    assert states(repo)[-1][0] == "ok"

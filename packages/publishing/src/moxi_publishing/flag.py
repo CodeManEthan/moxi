@@ -221,9 +221,11 @@ def _check_sets(planned: dict[str, list[str]]) -> None:
         if why is not None:
             raise Failure(f"--set {push.FREE_REF}: {why}; nothing was written", 2)
     for value in planned.get(push.WORD_REQUIRED, []):
-        if value not in ("", "true", "false"):
-            raise Failure(f"--set {push.WORD_REQUIRED}: {value!r} is not true or false; "
-                          "nothing was written", 2)
+        if value != "":
+            raise Failure(f"--set {push.WORD_REQUIRED}: the setting is retired, and push "
+                          "approval asks for the word now (moxi publishing approval "
+                          f"enable PATH --branch PATTERN); only --set {push.WORD_REQUIRED}= "
+                          "to remove it is taken; nothing was written", 2)
 
 
 def _check_standing(planned: dict[str, list[str]], current: dict[str, list[str]]) -> None:
@@ -253,9 +255,7 @@ def _seeds() -> dict[str, dict[str, list[str]]]:
     except config.ConfigError as exc:
         raise Failure(f"publishing's config can't be read: {exc}") from None
     return {MESSAGE: {message.DROP_TRAILER: [str(k) for k in values[settings.DROP_TRAILERS]]},
-            PUSH: {push.MAIN: [str(values[settings.MAIN])],
-                   push.WORD_REQUIRED: ["true" if values[settings.WORD_REQUIRED]
-                                        else "false"]}}
+            PUSH: {push.MAIN: [str(values[settings.MAIN])]}}
 
 
 def _names_empty() -> str | None:
@@ -368,10 +368,15 @@ def disable(path: str | os.PathLike) -> list[str]:
 # -- the listing -------------------------------------------------------------------------
 
 def listing() -> list[dict]:
-    """Every repo repo has indexed that carries the flag: {"root", "github",
-    "interpreter", "pieces": {id: {"enabled", "settings"} or None when missing}}, sorted
-    by root. A repo that can't be opened is left out."""
+    """Every repo repo has indexed that keeps a clean history, has push approval or is
+    marked public: {"root", "github", "interpreter", "public", "clean", "approval" (its
+    branch patterns, or None without the piece), "pieces": {id: {"enabled", "settings"}
+    or None when missing}}, sorted by root. `pieces` holds the pieces the repo's choices
+    want (the three for a public repo, message and content for a clean one) and the
+    approval piece where it is registered. A repo that can't be opened is left out."""
     from moxi_repo import api
+
+    from moxi_publishing import approval, clean
 
     try:
         repos = api.indexed_repos()
@@ -382,12 +387,20 @@ def listing() -> list[dict]:
         if repo is None:
             continue
         root = str(repo.root)
-        if not is_public(root):
-            continue
+        public, kept = is_public(root), is_clean(root)
         have = registered(root)
+        approved = have.get(approval.PIECE_ID)
+        if not (public or kept or approved):
+            continue
+        wanted = PIECES if public else clean.PIECES if kept else ()
+        if approved:
+            wanted = (*wanted, approval.PIECE_ID)
         out.append({"root": root, "github": config_get(root, GITHUB),
-                    "interpreter": config_get(root, INTERPRETER),
-                    "pieces": {piece: have.get(piece) for piece in PIECES}})
+                    "interpreter": config_get(root, INTERPRETER), "public": public,
+                    "clean": kept,
+                    "approval": (approval.patterns_of(approved["settings"]) if approved
+                                 else None),
+                    "pieces": {piece: have.get(piece) for piece in wanted}})
     return sorted(out, key=lambda item: item["root"])
 
 

@@ -31,8 +31,8 @@ from moxi import exit as codes
 
 _SETS_HELP = (
     "set a piece's setting in this repo: drop-trailer and pass-trailer (the message "
-    "piece), main, protected, word-required, free-ref and standing-branch (the push "
-    "piece). Every --set for "
+    "piece), main, protected, free-ref and standing-branch (the push piece); "
+    "word-required= removes that retired setting. Every --set for "
     "one key together give that key's whole list, replacing its seed or what the repo "
     "had; KEY= alone removes the key; keys you don't name are kept. A key on pass-trailer "
     "is never dropped, even when drop-trailer holds it too.")
@@ -106,9 +106,11 @@ def _parser(prog: str) -> argparse.ArgumentParser:
     s = steps.add_parser("disable", help="remove push approval",
                          description="Remove the approval piece from the repo at PATH.")
     s.add_argument("path", metavar="PATH")
-    p = verbs.add_parser("list", help="every repo marked public, with its pieces",
-                         description="Every repo repo has indexed that is marked public, "
-                                     "with each piece's state and settings.")
+    p = verbs.add_parser(
+        "list", help="every repo with clean history, push approval or the public flag",
+        description="Every repo repo has indexed that keeps a clean history, has push "
+                    "approval or is marked public: its three choices, then each piece's "
+                    "state and settings.")
     p.add_argument("--json", action="store_true", help="print JSON")
     p = verbs.add_parser(
         "scan", help="scan a commit's whole tree for text a public repo can't hold",
@@ -280,10 +282,14 @@ def _scan(args, prog: str) -> int:
 
 def _print_listing(repos: list[dict]) -> None:
     if not repos:
-        print("no repo is marked public")
+        print("no repo keeps a clean history, has push approval or is marked public")
         return
     for repo in repos:
         print(repo["root"] + (f" (github {repo['github']})" if repo["github"] else ""))
+        approval = (" ".join(repo["approval"]) or "no branch, tags only"
+                    if repo["approval"] is not None else "off")
+        print(f"  public: {'yes' if repo['public'] else 'no'}; clean history: "
+              f"{'yes' if repo['clean'] else 'no'}; push approval: {approval}")
         for piece, state in repo["pieces"].items():
             if state is None:
                 print(f"  {piece}: missing")

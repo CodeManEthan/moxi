@@ -21,14 +21,18 @@ Read-only, and no row uses the network. For each repo repo has indexed:
 - `warn` when `moxi-publishing.github` is unset, when `publishing.yml`, the public scan
   GitHub runs on every push, is missing, and when a workflow file `moxi publishing
   workflows write` writes is there but differs from its template;
+- `fail` when the push piece still holds the retired `word-required` as true (it then
+  refuses every push), and `warn` when it holds it with any other value, naming the
+  commands that move it to push approval and remove it;
 - for a repo whose push piece sets `standing-branch`: `fail` when a pattern is bad (the
-  piece then refuses every push) or `moxi-publishing.github` is unset (no push then goes
-  with no word), and `warn` when no push URL of the remote `origin` reduces, by the push
-  piece's rule (`push.github_repo`), to `moxi-publishing.github`, naming each URL. The
-  URLs are git's own (`git remote get-url --push --all origin`): `pushurl` where set, else
-  `url`, each after `insteadOf` and `pushInsteadOf` rewriting, as git hands them to the
-  pre-push hook. A repo with no `origin`, or an `origin` with no URL, warns too, since
-  `origin` then takes no standing push without the word;
+  piece then refuses every push) or `moxi-publishing.github` is unset (no push of `main`
+  then waits for CI on a standing branch), and `warn` when no push URL of the remote
+  `origin` reduces, by the push piece's rule (`push.github_repo`), to
+  `moxi-publishing.github`, naming each URL. The URLs are git's own (`git remote get-url
+  --push --all origin`): `pushurl` where set, else `url`, each after `insteadOf` and
+  `pushInsteadOf` rewriting, as git hands them to the pre-push hook. A repo with no
+  `origin`, or an `origin` with no URL, warns too, since a push of `main` to `origin`
+  then waits for no CI;
 - `ok`, one row, for a flagged repo with none of the above `fail`s, naming the standing
   patterns where there are some.
 
@@ -119,7 +123,8 @@ def _repo_rows(root: str) -> Iterator[Row]:
                   f"moxi publishing enable {quote_arg(root)}" if missing else
                   f"moxi repo git-hooks enable {quote_arg(root)} {off[0]}")
         return
-    problems = list(_interpreter_rows(root, name)) + list(
+    problems = list(_leftover_rows(root, name, have)) + list(
+        _interpreter_rows(root, name)) + list(
         _later_hook_rows(root, name, have)) + list(_warn_rows(root, name)) + list(
         _standing_rows(root, name, have))
     yield from problems
@@ -159,6 +164,30 @@ def _clean_rows(root: str, name: str, have: dict) -> Iterator[Row]:
                   "keeps a clean history; the message and content pieces are enabled")
 
 
+def _leftover_rows(root: str, name: str, have: dict) -> Iterator[Row]:
+    """The row for a push piece that still holds the retired `word-required`."""
+    from moxi_repo.api import quote_arg
+
+    from moxi_publishing import flag, push
+
+    values = [v.strip() for v in have[flag.PUSH]["settings"].get(push.WORD_REQUIRED, [])
+              if v.strip()]
+    if not values:
+        return
+    fix = (f"moxi publishing approval enable {quote_arg(root)} --branch PATTERN, then "
+           f"moxi publishing enable {quote_arg(root)} --set {push.WORD_REQUIRED}=")
+    if push._true(values[-1]):
+        yield Row(MODULE, name, "fail",
+                  f"the push piece still holds {push.WORD_REQUIRED} = true, which is "
+                  "retired, so it refuses every push; the word is push approval's now",
+                  fix)
+        return
+    yield Row(MODULE, name, "warn",
+              f"the push piece still holds the retired {push.WORD_REQUIRED} "
+              f"({values[-1]}), which nothing reads",
+              f"moxi publishing enable {quote_arg(root)} --set {push.WORD_REQUIRED}=")
+
+
 def _standing_values(have: dict) -> list[str]:
     from moxi_publishing import flag, push
 
@@ -187,23 +216,23 @@ def _standing_rows(root: str, name: str, have: dict) -> Iterator[Row]:
     if not github:
         yield Row(MODULE, name, "fail",
                   f"{push.STANDING_BRANCH} is {names}, but {flag.GITHUB} is unset, so no "
-                  "push of a standing branch goes with no word",
+                  "push of main waits for CI on a standing branch",
                   f"{fix} --github OWNER/REPO")
         return
     done = flag._git(root, "remote", "get-url", "--push", "--all", "origin")
     urls = [u for u in done.stdout.splitlines() if u] if done.returncode == 0 else []
     if not urls:
         yield Row(MODULE, name, "warn",
-                  f"the repo has no remote origin with a URL, so a push of {names} goes "
-                  "with no word nowhere",
+                  "the repo has no remote origin with a URL, so no push of main there "
+                  f"waits for CI on {names}",
                   f"git -C {quote_arg(root)} remote add origin git@github.com:{github}.git")
         return
     if not any(push.github_repo(url) == github for url in urls):
         shown = ", ".join(push._shown_url(url) for url in urls)
         yield Row(MODULE, name, "warn",
                   f"no push URL of origin ({shown}) reduces to {github} ({flag.GITHUB}) "
-                  "in one of the three forms git sends to GitHub, so a push of "
-                  f"{names} there asks for the word",
+                  "in one of the three forms git sends to GitHub, so a push of main "
+                  f"there waits for no CI on {names}",
                   f"git -C {quote_arg(root)} remote set-url --push origin "
                   f"git@github.com:{github}.git")
 
