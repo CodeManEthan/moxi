@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- `moxi loadout status` says when the git hook's last automatic reinstall failed or ran
+  out of time: its first line is `The last automatic reinstall failed (<when>): run moxi
+  doctor loadout` until a clean install clears the record. `--json` and `/api/status`
+  give it as `reinstall_failed`, `{at, text}`, or null.
 - `moxi loadout install --replace` no longer places over a path git tracks, which left a
   deletion in that repo's `git status`. A `--replace` naming one is refused: `<path> is
   tracked by git in <repo>; untracking it is a commit in that repo`. Status shows the

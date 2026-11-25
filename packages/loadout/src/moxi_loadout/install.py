@@ -73,6 +73,8 @@ INSTALL_WAIT = 60.0
 #: How long install waits for a `moxi install` or `moxi uninstall` that holds the core
 #: lock (it may be installing packages), in seconds.
 CORE_WAIT = 600.0
+#: What status's line about a failed automatic reinstall says to run.
+REINSTALL_FIX = "moxi doctor loadout"
 #: How the note naming targets the would-commit check had no time for starts.
 SKIPPED = "the would-commit check skipped"
 
@@ -83,7 +85,9 @@ class Outcome:
     `install`), the `lines` said on the way, `notes`, the exit `code`, and what it `kept`
     under the core's `displaced/` folder (`moxi_loadout.displaced`; none for `status`).
     `status` also gives the generated agent and global files nothing uses (`orphans`, see
-    `orphans`)."""
+    `orphans`), and the git hook's record of a failed reinstall while it stands
+    (`reinstall_failed`, `{at, text}`; None for `install`), whose line its text puts
+    first."""
 
     rows: list[Row] = field(default_factory=list)
     lines: list[str] = field(default_factory=list)
@@ -94,16 +98,21 @@ class Outcome:
     global_lines: list[tuple[str, str]] = field(default_factory=list)
     #: Each copy the run kept, `{target, copy, how, id, back}` (`displaced.Keeper`).
     kept: list[dict] = field(default_factory=list)
+    reinstall_failed: dict | None = None
 
     def as_json(self) -> dict:
         counts: dict[str, int] = {}
         for r in self.rows:
             counts[r.state] = counts.get(r.state, 0) + 1
         return {"rows": [r.as_json() for r in self.rows], "lines": self.lines,
-                "notes": self.notes, "counts": counts, "exit": self.code, "kept": self.kept}
+                "notes": self.notes, "counts": counts, "exit": self.code, "kept": self.kept,
+                "reinstall_failed": self.reinstall_failed}
 
     def text(self) -> list[str]:
-        out = list(self.lines)
+        out = [] if self.reinstall_failed is None else [
+            f"The last automatic reinstall failed ({self.reinstall_failed['at']}): "
+            f"run {REINSTALL_FIX}"]
+        out += self.lines
         out += [r.line() for r in self.rows if r.state != "ok"]
         out += [f"note: {n}" for n in self.notes]
         counts: dict[str, int] = {}
@@ -163,10 +172,31 @@ def status_plan(scope: Scope = Scope(), *, loadout_dir=None, resolver=planner.re
     differ = homes.note()
     if differ is not None:
         notes.append(differ)
-    return Status(plan, run, Outcome(rows, list(plan.lines) + run.lines,
-                                     list(dict.fromkeys(plan.notes + run.notes + notes)),
-                                     code, orphans(plan, plan.ledger), run.global_lines),
-                  [src for _, src in sourced])
+    outcome = Outcome(rows, list(plan.lines) + run.lines,
+                      list(dict.fromkeys(plan.notes + run.notes + notes)),
+                      code, orphans(plan, plan.ledger), run.global_lines,
+                      reinstall_failed=reinstall_failed())
+    return Status(plan, run, outcome, [src for _, src in sourced])
+
+
+def reinstall_failed() -> dict | None:
+    """The git hook's doctor record of a failed or timed-out reinstall, `{at, text}`, or
+    None while there is none (or the records can't be read)."""
+    import json
+
+    from moxi import doctor, paths
+
+    from moxi_loadout.gitpiece import RECORD_KEY, RECORD_MODULE
+
+    path = paths.Layout(RECORD_MODULE).state_dir() / doctor.RECORDS_FILE
+    try:
+        held = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    found = held.get(RECORD_KEY) if isinstance(held, dict) else None
+    if not isinstance(found, dict):
+        return None
+    return {"at": str(found.get("at") or "an unknown time"), "text": str(found.get("text", ""))}
 
 
 def opencode_reads_claude(plan: planner.Plan, run: entries.Run, *,

@@ -67,7 +67,9 @@ and `moxi loadout status` says what has drifted.
    is placed when it reaches the main branch.
    The install runs with git's own variables taken out of its environment; one that
    fails prints the command to run and leaves a doctor record, which the next clean
-   install clears. `moxi config set loadout reinstall_on_commit false` turns it off, and
+   install clears. While the record stands, `moxi loadout status` prints first `The last
+   automatic reinstall failed (<when>): run moxi doctor loadout`, and its `--json` gives
+   the record as `reinstall_failed` (`{at, text}`, else null). `moxi config set loadout reinstall_on_commit false` turns it off, and
    the next install removes the pieces. Without repo, run `moxi loadout install` after a
    commit.
 10. `moxi uninstall loadout` takes out everything it placed or wrote: harness entries, the

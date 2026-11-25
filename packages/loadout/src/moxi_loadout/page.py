@@ -143,7 +143,8 @@ KEPT = lb.Out("table", items={
 })
 
 #: What a run came to, as `--json` prints it: its rows, the lines said on the way, notes,
-#: the counts, the exit code, and what it kept (none for `status`).
+#: the counts, the exit code, what it kept (none for `status`), and, for `status`, the
+#: git hook's record of a failed reinstall, `{at, text}`, while it stands (else null).
 OUTCOME = {
     "rows": lb.Out("list", items=ROW),
     "lines": _LINES,
@@ -151,6 +152,7 @@ OUTCOME = {
     "counts": COUNTS,
     "exit": lb.Out("int"),
     "kept": lb.Out("list", items=KEPT),
+    "reinstall_failed": lb.Out("table", items={"at": _TEXT, "text": _SAYS}, nullable=True),
 }
 
 #: One item a section lists: `harnesses` null for every harness; `source` a path, `module

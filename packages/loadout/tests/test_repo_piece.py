@@ -569,6 +569,26 @@ def test_a_failed_install_prints_the_command_and_leaves_a_record_a_clean_install
 
 @pytest.mark.slow
 @pytest.mark.touches(*GLOBS)
+def test_status_says_first_when_the_last_reinstall_failed_until_a_clean_install(
+        tree, installs):
+    commit(tree, "loadout/loadout.toml", "[user]\n")
+    assert install.status().reinstall_failed is None
+    installs.answer = subprocess.CompletedProcess([], 3, b"", b"")
+    gitpiece.run(Ctx("post-commit", tree))
+    at = records()["reinstall"]["at"]
+    shown = install.status()
+    assert shown.text()[0] == (f"The last automatic reinstall failed ({at}): "
+                               "run moxi doctor loadout")
+    failed = shown.as_json()["reinstall_failed"]
+    assert failed["at"] == at and "exited 3" in failed["text"]
+    assert install.install().code == 0
+    shown = install.status()
+    assert shown.as_json()["reinstall_failed"] is None
+    assert not any(line.startswith("The last automatic reinstall") for line in shown.text())
+
+
+@pytest.mark.slow
+@pytest.mark.touches(*GLOBS)
 def test_an_install_that_runs_out_of_time_is_a_failure(tree, installs):
     commit(tree, "loadout/loadout.toml", "[user]\n")
     installs.answer = subprocess.TimeoutExpired(["python"], 180)
