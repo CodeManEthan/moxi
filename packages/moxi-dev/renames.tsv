@@ -18171,3 +18171,7 @@ ui	packages/ui/tests/test_gateway_listener.py	shell_env = {"HOME": os.path.join(
 ui	packages/ui/tests/test_gateway_rules.py	return {"HOME": str(tmp_path / "home"), "XDG_RUNTIME_DIR": str(tmp_path / "run"),	keep	HOME	HOME
 ui	packages/ui/tests/test_settings.py	env = {"HOME": "/h", "USERPROFILE": "/h"}	keep	HOME	HOME
 ui	packages/ui/tests/test_settings.py	return {"HOME": str(home), "XDG_CONFIG_HOME": str(config_root)}	keep	HOME	HOME
+moxi	packages/moxi/tests/test_config.py	env = {"HOME": str(tmp_path), "USERPROFILE": str(tmp_path),  # `~` on Windows	keep	HOME	HOME
+moxi	packages/moxi/tests/test_install.py	({"name": "moxi-turns", "directory": "/src/turns"},	keep	directory	directory
+moxi	packages/moxi/tests/test_modules.py	assert set(out.stdout.split()) == {"moxi", "moxi._mark"}	keep	set	set
+moxi	packages/moxi/tests/test_proc.py	assert (msvcrt.opened, unread) == ([5, 5], [99, 99])	keep	opened	opened
