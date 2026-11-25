@@ -154,7 +154,6 @@ REFUSED = [
     ["relaunch"],
     ["relaunch", "--self"],
     ["relaunch", "--handoff", "h.md"],
-    ["relaunch", SID, "--handoff", "h.md"],
     ["relaunch", SID, "--self", "--handoff", "h.md"],
     ["relaunch", SID, "--status", "ab12"],
     ["relaunch", "--status", "ab12", "--from-record", "ab12"],
@@ -327,9 +326,11 @@ def test_relaunch_director_calls_with_the_target(monkeypatch, capsys):
                  result(codes.OK, "run ab12: relaunched", outcome="relaunched"))
     status, out, _ = run(["relaunch", "boss@work"], capsys)
     assert (status, out) == (codes.OK, "run ab12: relaunched\n")
-    assert seen == [(("boss@work",), {"dry_run": False})]
+    assert seen == [(("boss@work",), {"handoff": None, "dry_run": False})]
     run(["relaunch", SID, "--dry-run"], capsys)
-    assert seen[-1] == ((SID,), {"dry_run": True})
+    assert seen[-1] == ((SID,), {"handoff": None, "dry_run": True})
+    run(["relaunch", SID, "--handoff", "h.md"], capsys)
+    assert seen[-1] == ((SID,), {"handoff": "h.md", "dry_run": False})
 
 
 @pytest.mark.parametrize("code, outcome", [

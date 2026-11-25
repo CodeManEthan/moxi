@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+- A director's relaunch always carries a handoff, the new session's first turn as a self
+  relaunch's is: `moxi launcher relaunch SESSION_ID|IDENTITY --handoff FILE`, else the
+  seat's newest waiting handoff written since the old session began, checked against the
+  relaunched session's launch; with neither it is refused `handoff`. The new session
+  starts `relaunched`, stamped `MOXI_LAUNCHER_RELAUNCH`, and the line after its header
+  names the old session and whether it went cold or could not take a message, with `moxi
+  sessions read` for it when sessions is installed.
+- A director's call held by subagents names each one, with how long ago it last wrote and
+  when it would read stale, and says that a message or ending its shells would wake the
+  session and whether keep-warm was on for it. One held only by subagents listed waiting,
+  on a session whose turns endpoint doesn't judge stale ones (`stale-agents`), is refused
+  `old-endpoint`, exit 3, since trying again won't help.
 - A relaunch run follows its session to a new turns endpoint. Claude Code replaces a
   session's endpoint when its plugins reload, and applies a pending reload as a turn
   ends, the moment a self relaunch's wait releases; the run used to send its exit to the
@@ -19,7 +31,6 @@
   own address wins when it has one, since the address can change at each login.
   Elsewhere the name is absent and nothing changes. A seat already relaunched without it
   gets it back at its next launch or relaunch from a process that has it.
-
 - The `subconscious` row (`off`, `automatic`, `on-demand`; needs turns and memory) turns
   memory's subconscious on for one launch, or for every launch of a preset that sets it:
   a launch with it on stamps the mode under memory's `SUBCONSCIOUS_ENV`, read from
