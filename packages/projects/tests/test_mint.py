@@ -32,6 +32,12 @@ KINDS = {
 '''
 
 
+def rooted(path: str) -> str:
+    """`path`, written from the root, as an absolute path on this system: on Windows
+    the current drive first and its own separators, elsewhere `path` itself."""
+    return os.path.splitdrive(os.getcwd())[0] + path.replace("/", os.sep)
+
+
 def fake_git(bin_dir, body: str) -> str:
     """A `git` script holding `body`. Returns PATH with its directory first."""
     bin_dir.mkdir(parents=True, exist_ok=True)
@@ -170,7 +176,7 @@ def test_a_row_lost_after_a_git_mint_leaves_the_dir_and_names_the_add(
 
     def overtaken(planned, git, command, **named):
         made = mint(planned, git, command, **named)
-        store.write(lambda conn: store.insert(conn, key="web", root="/srv/elsewhere"))
+        store.write(lambda conn: store.insert(conn, key="web", root=rooted("/srv/elsewhere")))
         return made
 
     monkeypatch.setattr(acts, "_mint", overtaken)
@@ -180,7 +186,7 @@ def test_a_row_lost_after_a_git_mint_leaves_the_dir_and_names_the_add(
     assert f"made {root} and ran git init" in err and "is left as it is" in err
     assert f"moxi projects add web --root {root}` adds its row" in err
     assert (root / ".git").is_dir()
-    assert api.get("web").root == "/srv/elsewhere"
+    assert api.get("web").root == rooted("/srv/elsewhere")
 
 
 @posix_only
@@ -298,7 +304,7 @@ def test_a_row_lost_after_a_dir_mint_leaves_the_dir(tmp_path, site, no_git,
 
     def overtaken(planned, git, command, **named):
         made = mint(planned, git, command, **named)
-        store.write(lambda conn: store.insert(conn, key="t", root="/srv/other"))
+        store.write(lambda conn: store.insert(conn, key="t", root=rooted("/srv/other")))
         return made
 
     monkeypatch.setattr(acts, "_mint", overtaken)

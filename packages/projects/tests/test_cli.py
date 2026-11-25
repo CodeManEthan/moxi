@@ -16,6 +16,12 @@ KINDS = {"topic": ("a notes topic", lambda fields: None)}
 '''
 
 
+def rooted(path: str) -> str:
+    """`path`, written from the root, as an absolute path on this system: on Windows
+    the current drive first and its own separators, elsewhere `path` itself."""
+    return os.path.splitdrive(os.getcwd())[0] + path.replace("/", os.sep)
+
+
 def holds(sentence: str) -> str:
     return f'''
 INTERFACE = 1
@@ -59,6 +65,7 @@ def test_add_makes_a_relative_root_absolute(capsys, tmp_path, monkeypatch):
 
 def test_add_expands_the_home_dir(capsys, tmp_path, monkeypatch):
     monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setenv("USERPROFILE", str(tmp_path))
     assert run(capsys, "add", "h", "--root", "~/h")[0] == 0
     assert api.get("h").root == str(tmp_path / "h")
 
@@ -78,10 +85,10 @@ def test_add_without_a_root_and_no_default_is_exit_2(capsys):
 
 @pytest.mark.parametrize("argv, code", [
     (("add", "bad."), 3),
-    (("add", "con", "--root", "/srv/con"), 3),
-    (("add", "web", "--root", "/srv/web", "--kind", "nosuch"), 3),
-    (("add", "web", "--root", "/srv/web", "--notes-root", "/srv/notes"), 3),
-    (("add", "web", "--root", "/srv/web", "--lead", "two words"), 3),
+    (("add", "con", "--root", rooted("/srv/con")), 3),
+    (("add", "web", "--root", rooted("/srv/web"), "--kind", "nosuch"), 3),
+    (("add", "web", "--root", rooted("/srv/web"), "--notes-root", rooted("/srv/notes")), 3),
+    (("add", "web", "--root", rooted("/srv/web"), "--lead", "two words"), 3),
 ])
 def test_add_refusals_are_exit_3_and_print_the_fix(capsys, argv, code, site):
     got, out, err = run(capsys, *argv)
@@ -91,7 +98,7 @@ def test_add_refusals_are_exit_3_and_print_the_fix(capsys, argv, code, site):
 
 
 def test_add_of_a_taken_key_or_root_is_exit_3(capsys, golden_copy):
-    code, _out, err = run(capsys, "add", "ALPHA", "--root", "/srv/other")
+    code, _out, err = run(capsys, "add", "ALPHA", "--root", rooted("/srv/other"))
     assert code == 3 and "taken" in err and "moxi projects show alpha" in err
     code, _out, err = run(capsys, "add", "new", "--root", os.path.join(golden_copy, "alpha"))
     assert code == 3 and "alpha" in err
@@ -106,7 +113,7 @@ def test_a_usage_error_from_argparse_is_exit_2(capsys):
 
 @pytest.mark.parametrize("argv", [
     ("add", "web", "--root", ""),
-    ("add", "web", "--root", "/srv/web", "--notes-root", ""),
+    ("add", "web", "--root", rooted("/srv/web"), "--notes-root", ""),
     ("set", "gamma", "--root", ""),
     ("set", "gamma", "--notes-root", ""),
 ])
@@ -151,7 +158,7 @@ def test_set_of_an_unknown_key_is_exit_3(capsys, golden_copy):
 
 
 def test_set_refuses_a_notes_root_without_notes_and_clears_one(capsys, golden_copy, site):
-    code, _out, err = run(capsys, "set", "gamma", "--notes-root", "/srv/n")
+    code, _out, err = run(capsys, "set", "gamma", "--notes-root", rooted("/srv/n"))
     assert code == 3 and "moxi install notes" in err
     assert run_json(capsys, "set", "gamma", "--no-notes-root")["notes_root"] is None
 
@@ -240,23 +247,23 @@ def test_remove_past_an_entry_that_wont_load_is_exit_1(capsys, site, golden_copy
 def test_add_past_an_entry_that_wont_load_warns_on_one_line_and_writes_the_row(
         capsys, site, golden_copy):
     site.contribution("broken", "INTERFACE = 9\n")
-    code, out, err = run(capsys, "add", "new", "--root", "/srv/new")
+    code, out, err = run(capsys, "add", "new", "--root", rooted("/srv/new"))
     assert code == 0 and out.startswith("new\n")
     [line] = [line for line in err.splitlines() if line.startswith("warning: ")]
     assert line.startswith("warning: skipped broken, which won't load")
     assert "defaults and checks were not applied" in line
     assert "moxi uninstall broken" in line
-    assert api.get("new").root == "/srv/new"
+    assert api.get("new").root == rooted("/srv/new")
 
 
 def test_a_multi_line_load_failure_warns_and_refuses_on_one_line(capsys, site, golden_copy):
     site.contribution("broken", "raise ImportError('first line\\nsecond line')\n")
-    code, out, err = run(capsys, "add", "new", "--root", "/srv/new")
+    code, out, err = run(capsys, "add", "new", "--root", rooted("/srv/new"))
     assert code == 0 and out.startswith("new\n")
     assert all(line.startswith(("note: ", "warning: ")) for line in err.splitlines())
     [line] = [line for line in err.splitlines() if line.startswith("warning: ")]
     assert line.startswith("warning: skipped broken") and "first line second line" in line
-    assert api.get("new").root == "/srv/new"
+    assert api.get("new").root == rooted("/srv/new")
     code, _out, err = run(capsys, "remove", "gamma")
     assert code == 1 and "first line second line" in err
 
@@ -264,7 +271,7 @@ def test_a_multi_line_load_failure_warns_and_refuses_on_one_line(capsys, site, g
 def test_add_json_past_an_entry_that_wont_load_carries_the_warning(capsys, site,
                                                                    golden_copy):
     site.contribution("broken", "INTERFACE = 9\n")
-    code, out, err = run(capsys, "add", "new", "--root", "/srv/new", "--json")
+    code, out, err = run(capsys, "add", "new", "--root", rooted("/srv/new"), "--json")
     assert code == 0 and "warning: skipped broken" in err
     body = json.loads(out)
     assert {k: v for k, v in body.items() if k != "warnings"} == api.get("new").as_dict()
@@ -273,14 +280,14 @@ def test_add_json_past_an_entry_that_wont_load_carries_the_warning(capsys, site,
 
 
 def test_add_json_that_skips_nothing_is_the_project_alone(capsys, golden_copy):
-    body = run_json(capsys, "add", "new", "--root", "/srv/new")
+    body = run_json(capsys, "add", "new", "--root", rooted("/srv/new"))
     assert body == api.get("new").as_dict()
 
 
 def test_add_or_set_of_an_unknown_kind_past_an_entry_that_wont_load_is_exit_1(
         capsys, site, golden_copy):
     site.contribution("broken", "INTERFACE = 9\n")
-    code, _out, err = run(capsys, "add", "new", "--root", "/srv/new", "--kind", "topic")
+    code, _out, err = run(capsys, "add", "new", "--root", rooted("/srv/new"), "--kind", "topic")
     assert code == 1 and "broken" in err and "moxi uninstall broken" in err
     with pytest.raises(api.NotFound):
         api.get("new")
@@ -408,7 +415,7 @@ def _set_user_version(path, version: int) -> None:
 @pytest.mark.parametrize("argv", [("list",), ("show", "alpha"), ("find", "/"),
                                   ("set", "gamma", "--kind", "agent"),
                                   ("agents", "add", "gamma", "x"),
-                                  ("add", "new", "--root", "/srv/new")])
+                                  ("add", "new", "--root", rooted("/srv/new"))])
 def test_a_newer_store_is_exit_3_on_a_read_and_a_write(capsys, golden_copy, store_path,
                                                        argv):
     _set_user_version(store_path, api._VERSION + 1)

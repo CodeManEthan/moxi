@@ -31,6 +31,12 @@ posix_only = pytest.mark.skipif(sys.platform == "win32",
                                 reason="the fake git is a POSIX shell script")
 
 
+def rooted(path: str) -> str:
+    """`path`, written from the root, as an absolute path on this system: on Windows
+    the current drive first and its own separators, elsewhere `path` itself."""
+    return os.path.splitdrive(os.getcwd())[0] + path.replace("/", os.sep)
+
+
 @pytest.fixture(autouse=True)
 def _fresh_modules():
     moxi.modules.reset()
@@ -154,7 +160,7 @@ def test_a_project_promoted_with_create_mints_its_root_first(git_ok):
 def test_the_project_arm_stores_notes_dir_even_past_another_default():
     one_off()
     other = Contribution("beta", "beta", 2, {}, {}, None,
-                         lambda fields: {"notes_root": "/srv/elsewhere"})
+                         lambda fields: {"notes_root": rooted("/srv/elsewhere")})
     found = contributions_.load()
     both = Contributions([*found.loaded, other], list(found.unloadable))
     root = Path.home() / "code" / "alpha"
@@ -170,9 +176,9 @@ def test_the_project_arm_stores_notes_dir_even_past_another_default():
     (("promote", "Bad_Slug", "gardening"), 3, "not an inbox slug"),
     (("promote", "nosuch", "gardening"), 3, "no inbox one-off is named 'nosuch'"),
     (("promote", "sketch", "bad key"), 3, "not a valid project key"),
-    (("promote", "sketch", "gardening", "--kind", "nosuch", "--root", "/srv/x"), 3,
+    (("promote", "sketch", "gardening", "--kind", "nosuch", "--root", rooted("/srv/x")), 3,
      "unknown"),
-    (("promote", "sketch", "gardening", "--root", "/srv/x"), 3, "drop --root"),
+    (("promote", "sketch", "gardening", "--root", rooted("/srv/x")), 3, "drop --root"),
     (("promote", "sketch", "alpha", "--kind", "project"), 2, "needs the project's root"),
 ])
 def test_refusals_move_nothing_and_print_the_fix(capsys, argv, code, said):
@@ -338,7 +344,7 @@ def test_a_key_lost_to_a_race_moves_the_one_off_back_and_leaves_the_minted_root(
     write = store.write
 
     def overtaken(fn, where=None):
-        write(lambda conn: store.insert(conn, key="alpha", root="/srv/elsewhere"))
+        write(lambda conn: store.insert(conn, key="alpha", root=rooted("/srv/elsewhere")))
         return write(fn, where)
 
     monkeypatch.setattr(store, "write", overtaken)

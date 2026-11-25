@@ -15,7 +15,7 @@ TOPIC = '''
 INTERFACE = 1
 
 def check(fields):
-    if not fields["root"].endswith("/notes/" + fields["key"]):
+    if fields["root"].replace("\\\\", "/").split("/")[-2:] != ["notes", fields["key"]]:
         return "a topic's root is its notes folder"
     return None
 
@@ -30,6 +30,12 @@ def refuse_remove(project):
         return "services still run for held; stop them with `moxi services stop held`"
     return None
 '''
+
+
+def rooted(path: str) -> str:
+    """`path`, written from the root, as an absolute path on this system: on Windows
+    the current drive first and its own separators, elsewhere `path` itself."""
+    return os.path.splitdrive(os.getcwd())[0] + path.replace("/", os.sep)
 
 
 def prepare_source(defaults: str, kinds: str = "{}", interface: int = 2) -> str:
@@ -73,7 +79,7 @@ def test_a_kinds_check_sees_the_row_and_its_refusal_is_exit_3(site, tmp_path):
 def test_an_unknown_kind_is_refused_with_exit_3_when_every_entry_loaded(site):
     site.contribution("notes", TOPIC)
     with pytest.raises(Refused) as caught:
-        contributions.plan_add("x", kind="nosuch", root="/srv/x")
+        contributions.plan_add("x", kind="nosuch", root=rooted("/srv/x"))
     assert caught.value.exit_code == 3
     assert "moxi projects kinds" in caught.value.fix
 
@@ -83,13 +89,13 @@ def test_a_kind_two_modules_declare_blocks_that_kind_only(site, golden_copy):
     site.contribution("other", TOPIC)
     site.contribution("svc", HOLDS)
     with pytest.raises(Broken) as caught:
-        contributions.plan_add("t", kind="topic", root="/srv/notes/t")
+        contributions.plan_add("t", kind="topic", root=rooted("/srv/notes/t"))
     assert caught.value.exit_code == 1
     assert set(caught.value.modules) == {"notes", "other"}
     assert "uninstall all but one" in caught.value.fix
     with pytest.raises(Broken):
         contributions.plan_set("gamma", kind="topic")
-    assert add("plain", root="/srv/plain").kind == "project"
+    assert add("plain", root=rooted("/srv/plain")).kind == "project"
     assert contributions.load().remove_refusals(api.get("gamma")) == []
     kinds = api.kinds()
     assert "topic" not in {k.name for k in kinds.found}
@@ -102,10 +108,10 @@ INTERFACE = 1
 KINDS = {"agent": ("my agents", lambda fields: None)}
 ''')
     with pytest.raises(Broken, match="built in") as caught:
-        contributions.plan_add("a", kind="agent", root="/srv/a")
+        contributions.plan_add("a", kind="agent", root=rooted("/srv/a"))
     assert caught.value.modules == ("mine",)
     assert "agent" not in {k.name for k in api.kinds().found}
-    assert add("p", root="/srv/p").kind == "project"
+    assert add("p", root=rooted("/srv/p")).kind == "project"
 
 
 def test_a_check_that_raises_is_exit_1_naming_the_module(site):
@@ -116,7 +122,7 @@ def check(fields):
 KINDS = {"topic": ("a topic", check)}
 ''')
     with pytest.raises(Broken) as caught:
-        contributions.plan_add("t", kind="topic", root="/srv/t")
+        contributions.plan_add("t", kind="topic", root=rooted("/srv/t"))
     assert caught.value.modules == ("notes",) and "boom" in caught.value.reason
 
 
@@ -126,7 +132,7 @@ INTERFACE = 1
 KINDS = {"topic": ("a topic", lambda fields: 42)}
 ''')
     with pytest.raises(Broken):
-        contributions.plan_add("t", kind="topic", root="/srv/t")
+        contributions.plan_add("t", kind="topic", root=rooted("/srv/t"))
 
 
 @pytest.mark.parametrize("value", ['("doc",)', '("doc", None)', '(1, lambda f: None)',
@@ -138,12 +144,12 @@ INTERFACE = 2
 KINDS = {{"topic": {value}, "good": ("fine", lambda f: None, "dir")}}
 ''')
     with pytest.raises(Broken) as caught:
-        contributions.plan_add("t", kind="topic", root="/srv/t")
+        contributions.plan_add("t", kind="topic", root=rooted("/srv/t"))
     assert caught.value.modules == ("notes",)
     kinds = api.kinds()
     assert api.Kind(name="good", doc="fine", module="notes", mint="dir") in kinds.found
     assert [m for m, _r in kinds.broken] == ["notes"]
-    assert add("g", kind="good", root="/srv/g").kind == "good"
+    assert add("g", kind="good", root=rooted("/srv/g")).kind == "good"
 
 
 def test_a_three_element_value_under_interface_1_is_the_wrong_length(site):
@@ -152,7 +158,7 @@ INTERFACE = 1
 KINDS = {"topic": ("doc", lambda f: None, "dir")}
 ''')
     with pytest.raises(Broken, match="interface 1"):
-        contributions.plan_add("t", kind="topic", root="/srv/t")
+        contributions.plan_add("t", kind="topic", root=rooted("/srv/t"))
 
 
 @pytest.mark.parametrize("mint", ["git", "dir", "refuse"])
@@ -161,7 +167,7 @@ def test_a_kind_carries_its_mint(site, mint):
 INTERFACE = 2
 KINDS = {{"topic": ("doc", lambda f: None, "{mint}")}}
 ''')
-    planned = contributions.plan_add("t", kind="topic", root="/srv/t")
+    planned = contributions.plan_add("t", kind="topic", root=rooted("/srv/t"))
     assert planned.kind.kind.mint == mint
 
 
@@ -214,15 +220,15 @@ def test_an_entry_that_wont_load_blocks_remove_but_not_a_set_of_a_known_kind(
     assert caught.value.exit_code == 1 and caught.value.modules == ("bad",)
     assert "moxi uninstall bad" in caught.value.fix
     assert contributions.plan_set("gamma", kind="agent", lead="someone").name == "agent"
-    assert contributions.plan_set("gamma", root="/srv/elsewhere") is not None
+    assert contributions.plan_set("gamma", root=rooted("/srv/elsewhere")) is not None
 
 
 @pytest.mark.parametrize("source", BROKEN_ENTRIES.values(), ids=BROKEN_ENTRIES.keys())
 def test_an_add_of_a_built_in_kind_skips_an_entry_that_wont_load_with_a_warning(
         site, store_path, source):
     site.contribution("bad", source)
-    planned = contributions.plan_add("new", root="/srv/new")
-    assert planned.row["root"] == "/srv/new" and planned.kind.name == "project"
+    planned = contributions.plan_add("new", root=rooted("/srv/new"))
+    assert planned.row["root"] == rooted("/srv/new") and planned.kind.name == "project"
     [warning] = planned.warnings
     assert warning.startswith("skipped bad, which won't load (bad: the entry bad won't load")
     assert "its defaults and checks were not applied" in warning
@@ -243,7 +249,7 @@ def test_an_add_of_a_loaded_modules_kind_skips_an_entry_that_wont_load(site, tmp
 def test_the_warning_names_every_entry_skipped(site):
     site.contribution("bad", BROKEN_ENTRIES["import"])
     site.contribution("worse", BROKEN_ENTRIES["interface"])
-    [warning] = contributions.plan_add("new", root="/srv/new").warnings
+    [warning] = contributions.plan_add("new", root=rooted("/srv/new")).warnings
     assert warning.startswith("skipped bad and worse, which won't load (bad: ")
     assert "worse: the entry worse won't load" in warning
     assert "their defaults and checks were not applied" in warning
@@ -251,19 +257,19 @@ def test_the_warning_names_every_entry_skipped(site):
 
 
 def test_a_loaded_entrys_prepare_still_runs_past_a_skipped_one(site):
-    entry = site.contribution("svc", prepare_source('{"root": "/srv/from-svc"}'))
+    entry = site.contribution("svc", prepare_source(f'{{"root": {rooted("/srv/from-svc")!r}}}'))
     site.contribution("bad", BROKEN_ENTRIES["import"])
     planned = contributions.plan_add("k")
-    assert planned.row["root"] == "/srv/from-svc" and planned.supplied
+    assert planned.row["root"] == rooted("/srv/from-svc") and planned.supplied
     assert sys.modules[entry].SEEN == [{"key": "k", "kind": "project"}]
     assert planned.warnings
 
 
 def test_a_skipped_entrys_prepare_is_not_called_and_fills_nothing(site):
-    entry = site.contribution("bad", prepare_source('{"root": "/srv/from-bad"}',
+    entry = site.contribution("bad", prepare_source(f'{{"root": {rooted("/srv/from-bad")!r}}}',
                                                     interface=7))
-    planned = contributions.plan_add("typed", root="/srv/typed")
-    assert planned.row["root"] == "/srv/typed" and planned.supplied == {}
+    planned = contributions.plan_add("typed", root=rooted("/srv/typed"))
+    assert planned.row["root"] == rooted("/srv/typed") and planned.supplied == {}
     with pytest.raises(Usage) as caught:
         contributions.plan_add("k")
     assert "bad won't load, and may be the one that would" in caught.value.reason
@@ -272,10 +278,10 @@ def test_a_skipped_entrys_prepare_is_not_called_and_fills_nothing(site):
 
 def test_no_warning_while_every_entry_loads(site):
     site.contribution("svc", HOLDS)
-    assert contributions.plan_add("new", root="/srv/new").warnings == []
+    assert contributions.plan_add("new", root=rooted("/srv/new")).warnings == []
 
 
-@pytest.mark.parametrize("root", ["/srv/new", None])
+@pytest.mark.parametrize("root", [rooted("/srv/new"), None])
 def test_an_add_of_an_unknown_kind_past_an_entry_that_wont_load_is_exit_1(site, root):
     site.contribution("bad", BROKEN_ENTRIES["import"])
     with pytest.raises(Broken) as caught:
@@ -290,9 +296,9 @@ def test_a_blocked_kind_still_blocks_an_add_past_an_entry_that_wont_load(site):
     site.contribution("other", TOPIC)
     site.contribution("bad", BROKEN_ENTRIES["import"])
     with pytest.raises(Broken) as caught:
-        contributions.plan_add("t", kind="topic", root="/srv/t")
+        contributions.plan_add("t", kind="topic", root=rooted("/srv/t"))
     assert set(caught.value.modules) == {"notes", "other"}
-    assert contributions.plan_add("p", root="/srv/p").warnings
+    assert contributions.plan_add("p", root=rooted("/srv/p")).warnings
 
 
 def test_a_set_of_an_unknown_kind_past_an_entry_that_wont_load_is_exit_1(site, golden_copy):
@@ -423,7 +429,7 @@ def refuse_remove(project):
 
 def test_a_default_fills_an_unset_field_and_not_a_passed_one(site, tmp_path):
     site.contribution("notes", prepare_source(
-        f'{{"root": "{tmp_path}/default/" + fields["key"]}}'))
+        f'{{"root": {str(tmp_path / "default")!r} + "/" + fields["key"]}}'))
     planned = contributions.plan_add("auto")
     assert planned.row["root"] == str(tmp_path / "default" / "auto")
     assert planned.supplied == {"root": (str(tmp_path / "default" / "auto"), "notes")}
@@ -433,14 +439,14 @@ def test_a_default_fills_an_unset_field_and_not_a_passed_one(site, tmp_path):
 
 def test_prepare_sees_only_the_users_fields(site):
     site.contribution("notes", prepare_source("None"))
-    contributions.plan_add("k", root="/srv/k", lead="boss")
+    contributions.plan_add("k", root=rooted("/srv/k"), lead="boss")
     assert sys.modules["fake_notes.projects_link"].SEEN == [
-        {"key": "k", "kind": "project", "root": "/srv/k", "lead": "boss"}]
+        {"key": "k", "kind": "project", "root": rooted("/srv/k"), "lead": "boss"}]
 
 
 def test_a_kinds_check_sees_the_defaulted_row_and_names_the_supplier(site, tmp_path):
     site.contribution("notes", prepare_source(
-        f'{{"root": "{tmp_path}/wrong/" + fields["key"]}}', kinds="{}"))
+        f'{{"root": {str(tmp_path / "wrong")!r} + "/" + fields["key"]}}', kinds="{}"))
     site.contribution("topics", TOPIC)
     with pytest.raises(Refused) as caught:
         contributions.plan_add("t", kind="topic")
@@ -449,33 +455,33 @@ def test_a_kinds_check_sees_the_defaulted_row_and_names_the_supplier(site, tmp_p
 
 
 def test_two_modules_defaulting_a_field_differently_is_exit_1_naming_both(site):
-    site.contribution("one", prepare_source('{"root": "/srv/one"}'))
-    site.contribution("two", prepare_source('{"root": "/srv/two"}'))
+    site.contribution("one", prepare_source(f'{{"root": {rooted("/srv/one")!r}}}'))
+    site.contribution("two", prepare_source(f'{{"root": {rooted("/srv/two")!r}}}'))
     with pytest.raises(Broken) as caught:
         contributions.plan_add("k")
     assert caught.value.exit_code == 1
     assert caught.value.modules == ("one", "two")
     assert "--root" in caught.value.fix
-    assert contributions.plan_add("k", root="/srv/mine").row["root"] == "/srv/mine"
+    assert contributions.plan_add("k", root=rooted("/srv/mine")).row["root"] == rooted("/srv/mine")
 
 
 def test_two_modules_defaulting_a_field_alike_agree(site):
-    site.contribution("one", prepare_source('{"root": "/srv/same"}'))
-    site.contribution("two", prepare_source('{"root": "/srv/same/."}'))
-    assert contributions.plan_add("k").row["root"] == "/srv/same"
+    site.contribution("one", prepare_source(f'{{"root": {rooted("/srv/same")!r}}}'))
+    site.contribution("two", prepare_source(f'{{"root": {rooted("/srv/same/.")!r}}}'))
+    assert contributions.plan_add("k").row["root"] == rooted("/srv/same")
 
 
 def test_a_default_naming_another_field_is_exit_1(site):
     site.contribution("notes", prepare_source('{"lead": "boss"}'))
     with pytest.raises(Broken, match="only root and notes_root") as caught:
-        contributions.plan_add("k", root="/srv/k")
+        contributions.plan_add("k", root=rooted("/srv/k"))
     assert caught.value.modules == ("notes",)
 
 
 def test_a_default_naming_another_field_refuses_even_when_typed(site):
     site.contribution("notes", prepare_source('{"kind": "topic"}'))
     with pytest.raises(Broken):
-        contributions.plan_add("k", root="/srv/k")
+        contributions.plan_add("k", root=rooted("/srv/k"))
 
 
 @pytest.mark.parametrize("value", ["5", "b'/srv/x'", '["/srv/x"]'])
@@ -503,7 +509,7 @@ def test_a_relative_default_root_is_exit_1_naming_the_module_and_fix(site):
 def test_prepare_answering_other_than_a_dict_or_none_is_exit_1(site, answer):
     site.contribution("notes", prepare_source(answer))
     with pytest.raises(Broken, match="not a dict"):
-        contributions.plan_add("k", root="/srv/k")
+        contributions.plan_add("k", root=rooted("/srv/k"))
 
 
 def test_a_prepare_that_raises_is_exit_1_naming_the_module(site):
@@ -513,37 +519,37 @@ def prepare(fields):
     raise KeyError("root")
 ''')
     with pytest.raises(Broken, match="prepare raised") as caught:
-        contributions.plan_add("k", root="/srv/k")
+        contributions.plan_add("k", root=rooted("/srv/k"))
     assert caught.value.modules == ("notes",)
 
 
 def test_differing_defaults_for_a_passed_field_raise_nothing(site):
-    site.contribution("one", prepare_source('{"root": "/srv/one"}'))
+    site.contribution("one", prepare_source(f'{{"root": {rooted("/srv/one")!r}}}'))
     site.contribution("two", prepare_source('{"root": "relative"}'))
-    planned = contributions.plan_add("k", root="/srv/typed")
-    assert planned.row["root"] == "/srv/typed" and planned.supplied == {}
+    planned = contributions.plan_add("k", root=rooted("/srv/typed"))
+    assert planned.row["root"] == rooted("/srv/typed") and planned.supplied == {}
 
 
 def test_a_notes_root_default_is_dropped_while_notes_is_absent(site):
-    site.contribution("notes", prepare_source('{"notes_root": "/srv/notes/k"}'))
-    planned = contributions.plan_add("k", root="/srv/k")
+    site.contribution("notes", prepare_source(f'{{"notes_root": {rooted("/srv/notes/k")!r}}}'))
+    planned = contributions.plan_add("k", root=rooted("/srv/k"))
     assert planned.row["notes_root"] is None and planned.supplied == {}
 
 
 def test_a_notes_root_default_is_kept_while_notes_is_installed(site):
     site.module("notes")
-    site.contribution("notes", prepare_source('{"notes_root": "/srv/notes/k"}'),
+    site.contribution("notes", prepare_source(f'{{"notes_root": {rooted("/srv/notes/k")!r}}}'),
                       package="fake_notes_link")
-    planned = contributions.plan_add("k", root="/srv/k")
-    assert planned.row["notes_root"] == "/srv/notes/k"
-    assert planned.supplied == {"notes_root": ("/srv/notes/k", "notes")}
-    assert store.write(planned.insert).notes_root == "/srv/notes/k"
+    planned = contributions.plan_add("k", root=rooted("/srv/k"))
+    assert planned.row["notes_root"] == rooted("/srv/notes/k")
+    assert planned.supplied == {"notes_root": (rooted("/srv/notes/k"), "notes")}
+    assert store.write(planned.insert).notes_root == rooted("/srv/notes/k")
 
 
 @pytest.mark.parametrize("value", ['"relative/notes"', "5"])
 def test_a_notes_root_default_is_dropped_unchecked_while_notes_is_absent(site, value):
     site.contribution("notes", prepare_source(f'{{"notes_root": {value}}}'))
-    planned = contributions.plan_add("k", root="/srv/k")
+    planned = contributions.plan_add("k", root=rooted("/srv/k"))
     assert planned.row["notes_root"] is None and planned.supplied == {}
 
 
@@ -552,17 +558,17 @@ def test_a_relative_notes_root_default_is_exit_1_while_notes_is_installed(site):
     site.contribution("notes", prepare_source('{"notes_root": "relative/notes"}'),
                       package="fake_notes_link")
     with pytest.raises(Broken, match="not an absolute path") as caught:
-        contributions.plan_add("k", root="/srv/k")
+        contributions.plan_add("k", root=rooted("/srv/k"))
     assert caught.value.exit_code == 1 and caught.value.modules == ("notes",)
 
 
 def test_a_typed_notes_root_is_refused_while_notes_is_absent(site):
     with pytest.raises(Refused, match="notes") as caught:
-        contributions.plan_add("k", root="/srv/k", notes_root="/srv/n")
+        contributions.plan_add("k", root=rooted("/srv/k"), notes_root=rooted("/srv/n"))
     assert caught.value.exit_code == 3
     assert "moxi install notes" in caught.value.fix
     with pytest.raises(Refused, match="notes"):
-        contributions.plan_set("k", notes_root="/srv/n")
+        contributions.plan_set("k", notes_root=rooted("/srv/n"))
 
 
 def test_clearing_a_notes_root_needs_no_notes(site, golden_copy):
@@ -578,7 +584,7 @@ def test_add_without_a_root_and_no_default_is_usage(site):
 
 def test_a_defaulted_root_that_is_taken_names_its_supplier(site, golden_copy):
     taken = os.path.join(golden_copy, "alpha")
-    site.contribution("notes", prepare_source(f'{{"root": "{taken}"}}'))
+    site.contribution("notes", prepare_source(f'{{"root": {taken!r}}}'))
     planned = contributions.plan_add("k")
     with pytest.raises(Refused) as caught:
         store.write(planned.insert)
@@ -593,7 +599,7 @@ KINDS = {"legacy": ("old kind", lambda f: None)}
 def prepare(fields):
     raise AssertionError("an interface 1 prepare is never read")
 ''')
-    site.contribution("new", prepare_source(f'{{"root": "{tmp_path}/" + fields["key"]}}',
+    site.contribution("new", prepare_source(f'{{"root": {str(tmp_path)!r} + "/" + fields["key"]}}',
                                             kinds='{"fresh": ("new kind", lambda f: None, '
                                                   '"dir")}'))
     planned = contributions.plan_add("k", kind="legacy")
@@ -604,7 +610,7 @@ def prepare(fields):
 
 
 def test_set_takes_no_defaults(site, golden_copy):
-    site.contribution("notes", prepare_source('{"root": "/srv/elsewhere"}'))
+    site.contribution("notes", prepare_source(f'{{"root": {rooted("/srv/elsewhere")!r}}}'))
     contributions.plan_set("gamma", lead="someone")
     assert sys.modules["fake_notes.projects_link"].SEEN == []
 
@@ -620,9 +626,9 @@ def test_set_of_an_unknown_field_is_usage(site, golden_copy):
 
 
 def test_the_add_rules_apply_before_anything_is_written(site, store_path):
-    for bad in (dict(key="con", root="/srv/x"), dict(key="ok", root="relative"),
-                dict(key="ok", root="/srv/x", lead="two words"),
-                dict(key="ok", root="/srv/x", kind="bad kind")):
+    for bad in (dict(key="con", root=rooted("/srv/x")), dict(key="ok", root="relative"),
+                dict(key="ok", root=rooted("/srv/x"), lead="two words"),
+                dict(key="ok", root=rooted("/srv/x"), kind="bad kind")):
         with pytest.raises(Refused):
             contributions.plan_add(**bad)
     assert not store_path.exists()

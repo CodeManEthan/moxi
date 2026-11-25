@@ -18164,3 +18164,5 @@ sessions	packages/sessions/tests/test_guard.py	input=tool_input, cwd=cwd, env=en
 sessions	packages/sessions/tests/test_guard.py	input=tool_input, cwd=cwd, env=env),	keep	input	input
 sessions	packages/sessions/tests/test_guard.py	assert win_refused("Read", tilde, env={"HOME": WIN_HOME})	keep	HOME	HOME
 sessions	packages/sessions/tests/test_guard.py	assert not win_refused("Read", tilde, env={"HOME": "C:\\elsewhere", "USERPROFILE": WIN_HOME})	keep	HOME	HOME
+projects	packages/projects/tests/test_cli.py	code, _out, err = run(capsys, "set", "gamma", "--notes-root", rooted("/srv/n"))	keep	set	set
+projects	packages/projects/tests/test_contributions.py	entry = site.contribution("bad", prepare_source(f'{{"root": {rooted("/srv/from-bad")!r}}}',	keep	bad	bad

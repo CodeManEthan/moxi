@@ -30,7 +30,7 @@ import pytest
 
 import moxi.modules
 from moxi import modules, paths
-from moxi_dev.testing import PROC_WAIT_S, wait_for
+from moxi_dev.testing import PROC_WAIT_S, console_script, wait_for
 from moxi_projects import (acts, api, cli, page, pagecheck, pagehandlers, pagestat, rules,
                            store)
 
@@ -394,6 +394,7 @@ def test_a_hung_mount_holds_at_most_four_threads(tmp_path):
 
 def test_home_is_where_moxi_paths_places_it(monkeypatch, tmp_path):
     monkeypatch.setenv("HOME", str(tmp_path / "the-home"))
+    monkeypatch.setenv("USERPROFILE", str(tmp_path / "the-home"))
     assert read("/api/projects")["home"] == str(paths.home())
     assert read("/api/projects")["home"] == str(tmp_path / "the-home")
 
@@ -527,6 +528,7 @@ def test_a_tilde_path_is_taken_as_the_home(tmp_path, own_pool, monkeypatch):
     home = tmp_path / "home"
     (home / "code" / "finch").mkdir(parents=True)
     monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setenv("USERPROFILE", str(home))
     assert at_path("~/code/finch")["path"] == str(home / "code" / "finch")
     assert at_path("~/code/finch")["exists"] is True
     assert at_path("~")["path"] == str(home)
@@ -713,10 +715,13 @@ def test_kinds_names_what_loaded_and_what_did_not(site):
 
 
 def test_where_names_the_store_file_and_the_git_found(tmp_path, monkeypatch):
-    monkeypatch.setenv("PATH", fake_git(tmp_path / "bin", "exit 0"))
+    (tmp_path / "bin").mkdir()
+    git = console_script(tmp_path / "bin", "git")
+    monkeypatch.setenv("PATH", str(git.parent))
     body = read("/api/where")
-    assert body == {"store": store.path(), "git": str(tmp_path / "bin" / "git"),
-                    "note": None}
+    found = body.pop("git")
+    assert body == {"store": store.path(), "note": None}
+    assert os.path.normcase(found) == os.path.normcase(str(git))
     empty = tmp_path / "nothing-here"
     empty.mkdir()
     monkeypatch.setenv("PATH", str(empty))
@@ -829,6 +834,7 @@ def home_dir(tmp_path, monkeypatch, terminal_record) -> str:
     home = tmp_path / "the-home"
     home.mkdir()
     monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setenv("USERPROFILE", str(home))
     terminal_record()
     return str(home)
 
@@ -887,7 +893,8 @@ def test_a_tilde_root_is_refused_by_the_comparison_before_any_expansion(
 
 def test_a_home_that_differs_from_the_terminals_refuses_a_tilde_root(
         home_dir, terminal_record, store_path):
-    terminal_record(terminal(HOME=os.path.join(home_dir, "other")))
+    other = os.path.join(home_dir, "other")
+    terminal_record(terminal(HOME=other, USERPROFILE=other))
     said = refused(post("/api/add", {"key": "finch", "root": "~/code/finch"}))
     assert "the home folder" in said
     assert not store_path.exists()
@@ -1246,6 +1253,9 @@ WRITES = (
 WRITE_IDS = ["add", "add-create", "set", "agents-add", "agents-remove", "remove"]
 #: A folder no test makes, under the file system's root.
 ELSEWHERE = os.path.join(os.path.abspath(os.sep), "elsewhere")
+#: The step ui's line names to restart the page on a changed environment.
+UI_STEP = ("log out and back in" if sys.platform in ("darwin", "win32")
+           else "moxi ui stop")
 
 
 def terminal(**changes: str | None) -> dict[str, str]:
@@ -1275,7 +1285,7 @@ def no_record(terminal_record) -> str:
 def home_moved(terminal_record) -> str:
     """A terminal whose home folder is elsewhere, the projects store pinned in both."""
     assert os.environ.get("MOXI_PROJECTS_HOME")
-    terminal_record(terminal(HOME=ELSEWHERE))
+    terminal_record(terminal(HOME=ELSEWHERE, USERPROFILE=ELSEWHERE))
     return f"the home folder here is {paths.home()}, but the last run in a terminal used"
 
 
@@ -1337,7 +1347,7 @@ def test_the_line_names_the_variable_and_the_restart(golden_copy, terminal_recor
     store_moved(terminal_record)
     said = refused(post("/api/set", {"key": "gamma", "lead": "lead-b"}))
     assert f"Set MOXI_PROJECTS_DATA_HOME to {ELSEWHERE}" in said
-    assert "moxi ui stop" in said
+    assert UI_STEP in said
 
 
 def test_the_comparison_comes_before_a_removes_kept_row(golden_copy, terminal_record):

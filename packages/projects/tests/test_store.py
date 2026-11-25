@@ -15,6 +15,12 @@ from moxi_projects import api, store
 from moxi_projects.errors import Refused, Usage
 
 
+def rooted(path: str) -> str:
+    """`path`, written from the root, as an absolute path on this system: on Windows
+    the current drive first and its own separators, elsewhere `path` itself."""
+    return os.path.splitdrive(os.getcwd())[0] + path.replace("/", os.sep)
+
+
 def _bytes(path) -> bytes:
     return path.read_bytes()
 
@@ -42,12 +48,13 @@ def test_the_store_is_in_the_modules_data_dir(fence, store_path):
     import moxi.paths
 
     assert store_path == moxi.paths.Layout("projects").data_dir() / "projects.db"
-    assert str(store_path).startswith(str(fence.short))
+    # On Windows a module's folders are the fenced home's known folders.
+    assert store_path.is_relative_to(fence.home if os.name == "nt" else fence.short)
 
 
 @pytest.mark.skipif(sys.platform == "win32", reason="POSIX file modes")
 def test_the_first_write_creates_a_private_wal_store_at_the_current_version(store_path):
-    store.write(lambda conn: store.insert(conn, key="one", root="/srv/one"))
+    store.write(lambda conn: store.insert(conn, key="one", root=rooted("/srv/one")))
     assert stat.S_IMODE(store_path.stat().st_mode) == 0o600
     conn = sqlite3.connect(store_path)
     try:
@@ -214,7 +221,7 @@ def test_the_migration_runs_outside_the_writes_transaction(store_path, monkeypat
         return migrate(conn, steps)
 
     monkeypatch.setattr(moxi.store, "migrate", watched)
-    store.write(lambda conn: store.insert(conn, key="one", root="/srv/one"))
+    store.write(lambda conn: store.insert(conn, key="one", root=rooted("/srv/one")))
     assert seen == [False]
 
 
@@ -252,9 +259,9 @@ def test_busy_errors_map_to_busy():
 # --- the row writes ----------------------------------------------------------------------
 
 def test_insert_returns_the_row_with_a_utc_birth_time(store_path):
-    project = store.write(lambda conn: store.insert(conn, key="one", root="/srv/one/./x/..",
+    project = store.write(lambda conn: store.insert(conn, key="one", root=rooted("/srv/one/./x/.."),
                                                     lead="boss"))
-    assert project.key == "one" and project.root == "/srv/one" and project.kind == "project"
+    assert project.key == "one" and project.root == rooted("/srv/one") and project.kind == "project"
     assert project.lead == "boss" and project.associated == () and project.notes_root is None
     assert project.created.endswith("Z") and project.created[10] == "T"
     assert api.get("one") == project
@@ -283,8 +290,8 @@ def test_insert_applies_the_rules(store_path):
 
 def test_a_refused_write_leaves_nothing_behind(golden_copy, store_path):
     def two(conn):
-        store.insert(conn, key="first", root="/srv/first")
-        store.insert(conn, key="alpha", root="/srv/again")
+        store.insert(conn, key="first", root=rooted("/srv/first"))
+        store.insert(conn, key="alpha", root=rooted("/srv/again"))
 
     with pytest.raises(Refused):
         store.write(two)
