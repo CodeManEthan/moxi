@@ -18155,3 +18155,12 @@ comms	packages/comms/tests/test_opencode_adapter.py	assert wait_until(lambda: fi
 comms	packages/comms/tests/test_settings.py	assert cfg.local.record == os.path.normpath(os.path.expanduser("~/rec.db"))	keep	record	record
 comms	packages/comms/tests/test_settings.py	patch.setattr(os, "environ", _NoEnvironment())	keep	environ	environ
 moxi-dev	packages/moxi-dev/src/moxi_dev/contract.py	named = set()	keep	set	set
+sessions	packages/sessions/src/moxi_sessions/readguard.py	separator divides it, `~` and `$HOME` take `HOME` (else `USERPROFILE`, as Git Bash does),	keep	HOME	HOME
+sessions	packages/sessions/src/moxi_sessions/readguard.py	home = _absolute(env.get("HOME") or (env.get("USERPROFILE") if _WINDOWS else None))	keep	HOME	HOME
+sessions	packages/sessions/src/moxi_sessions/readguard.py	if any(_within(p, form) for p in forms):	keep	any	any
+sessions	packages/sessions/src/moxi_sessions/readguard.py	return any(sep in text for sep in _SEPS)	keep	any	any
+sessions	packages/sessions/tests/test_archives.py	input={"command": f"cat {arch(home, 'codex', 1).as_posix()}/2026/x.jsonl"}, cwd="/",	keep	input	input
+sessions	packages/sessions/tests/test_guard.py	input=tool_input, cwd=cwd, env=env),	keep	env	env
+sessions	packages/sessions/tests/test_guard.py	input=tool_input, cwd=cwd, env=env),	keep	input	input
+sessions	packages/sessions/tests/test_guard.py	assert win_refused("Read", tilde, env={"HOME": WIN_HOME})	keep	HOME	HOME
+sessions	packages/sessions/tests/test_guard.py	assert not win_refused("Read", tilde, env={"HOME": "C:\\elsewhere", "USERPROFILE": WIN_HOME})	keep	HOME	HOME
