@@ -424,6 +424,10 @@ def run(recall, route: Route, brief: str, *, clock=time.time, send=None,
         if refused is not None:
             break
         if handle is None:
+            launch = getattr(route, "launch", None)
+            if launch is not None:
+                # a fork of its own is named before anything waits on it
+                note_fork(recall, launch())
             handle = route.first(brief, ref=round_ref, round_timeout_s=bound)
         else:
             text = continue_text(recall.record, settings, now=clock())

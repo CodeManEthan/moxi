@@ -24,6 +24,10 @@ FORK = "0190b000-0000-7000-8000-0000000000f1"
 DEAD = {"pid": os.getpid(), "started": 1.0}
 
 
+class Died(BaseException):
+    """The child's death, which no route catches."""
+
+
 class Launcher:
     def __init__(self, session_id=FORK, error=None, exits=("exited",)):
         self.session_id, self.error, self.forks = session_id, error, []
@@ -107,6 +111,36 @@ def test_a_fork_whose_endpoint_never_readies_is_a_lost_round(monkeypatch):
     end = route.ended(route.first("b", ref="r-1:1", round_timeout_s=9.0), 9.0)
     assert type(end).__name__ == "Lost" and "not ready in time" in str(end.reason)
     assert route.started(None) == FORK
+
+
+def test_the_fork_is_named_on_the_line_and_record_before_its_endpoint_is_waited_for(
+        monkeypatch):
+    recall = a_recall(recall_start.SLOT)
+    seen = []
+
+    def died(*, session_id, timeout_s):
+        seen.append((recalls.find_line(SESSION, recall.recall_id)["fork"],
+                     records.read(SESSION, recall.recall_id)["fork"]))
+        raise Died  # the child dies while it waits
+
+    monkeypatch.setattr(moxi_turns, "wait_ready", died)
+    route = recall_route.Slot(SESSION, recall.recall_id, launcher=Launcher())
+    with pytest.raises(Died):
+        recall_stream.run(recall, route, "the brief")
+    assert seen == [(FORK, FORK)]
+    assert records.read(SESSION, recall.recall_id)["state"] == "running"
+    # a taker then reads the round in the fork's session, and so exits that fork
+    taken = recall_route.for_recall(recall_child.Recall(
+        records.read(SESSION, recall.recall_id),
+        line=recalls.find_line(SESSION, recall.recall_id)))
+    assert taken.turns_session == FORK
+
+
+def test_a_launch_the_launcher_refused_names_no_fork_and_is_a_refused_round(turns):
+    route = recall_route.Slot(SESSION, "r-1", launcher=Launcher(error=RuntimeError("no")))
+    assert route.launch() is None
+    end = route.ended(route.first("b", ref="r-1:1", round_timeout_s=9.0), 9.0)
+    assert isinstance(end, Refused) and len(route._launcher.forks) == 1
 
 
 def test_a_later_round_with_no_fork_is_lost():

@@ -27,8 +27,11 @@ record names it runs it.
 (`launcher.api.fork`, target `slot`, the fork stamped `SUBCONSCIOUS_FORK_ENV` with the
 recall's id), waits for the fork's turns endpoint, and delivers the brief to it as a
 turn with the round's ref and `keep`; each later round is the next delivery to the same
-fork. The fork's id is its session id, known once the launcher returns, so a fork the
-child started is named even when its first round never comes back. Each round's end,
+fork. The fork's id is its session id, known once the launcher returns (`launch`), and
+the stream writes it on the record and the line then, before the fork's endpoint is
+waited for and the brief delivered: a fork the child started is named even when the
+child dies before its first round is delivered, so a taker reads the round in the
+fork's session and exits the fork. Each round's end,
 with the fork's last text as its answer, is read from the delivery, and acked by ref
 in the fork's session. Its answers go back to the main agent by comms, sent by the
 child (`recall_stream`). Once the recall's last round is settled, its owner ends the
@@ -189,6 +192,7 @@ class Slot:
         self.fork = fork
         self._launcher = launcher
         self._session_obj = None
+        self._unlaunched = None
 
     @property
     def turns_session(self) -> str:
@@ -216,19 +220,33 @@ class Slot:
             self._session_obj = client.wait_ready(session_id=self.fork, timeout_s=ready_s)
         return self._session_obj.deliver(text, by=BY, ref=ref, keep=True)
 
-    def first(self, text: str, *, ref: str, round_timeout_s: float):
-        """Fork the session into a slot and deliver the brief as the fork's first turn.
-        The round's bound runs from the delivery, which this returns after."""
+    def launch(self) -> str | None:
+        """Fork the session into a slot, once, and return the fork's session id as soon
+        as the launcher returns, before its endpoint is waited for: None when the
+        launcher refused or started no fork with a session id, which `first` then
+        answers. A route with a fork already does nothing."""
+        if self.fork is not None or self._unlaunched is not None:
+            return self.fork
         try:
             result = self._api().fork(self.session_id, target="slot",
                                       stamps={SUBCONSCIOUS_FORK_ENV: self.recall_id})
         except Exception as exc:  # noqa: BLE001 - a fork the launcher refused is lost
             from moxi_turns import Refused
 
-            return _Known(Refused(f"denied: the launcher: {exc}"))
+            self._unlaunched = _Known(Refused(f"denied: the launcher: {exc}"))
+            return None
         self.fork = getattr(result, "session_id", None) or None
         if self.fork is None:
-            return self._gone("the launcher started no fork with a session id")
+            self._unlaunched = self._gone("the launcher started no fork with a session id")
+        return self.fork
+
+    def first(self, text: str, *, ref: str, round_timeout_s: float):
+        """Fork the session into a slot (`launch`, when the caller hasn't) and deliver
+        the brief as the fork's first turn. The round's bound runs from the delivery,
+        which this returns after."""
+        self.launch()
+        if self._unlaunched is not None:
+            return self._unlaunched
         return self._send(text, ref=ref, ready_s=round_timeout_s)
 
     def next(self, prior, text: str, *, ref: str, round_timeout_s: float):
