@@ -264,7 +264,9 @@ one and draws what each reports. This section is that contract, version 1.
 4. **A joined phrase is true by construction.** A phrase that needs two modules' facts is
    one part from each, joined by the page only where they agree. A part that says whether
    something holds carries it as a typed field the page compares without reading words
-   (`runs`, under Agents below). Where two reports disagree, neither half is drawn.
+   (`runs`, under Agents below). Where two reports disagree, neither half is drawn. There
+   are two joined phrases: the phrase after an agent's name, and a running line's turn
+   word (`· working`, under Live below).
 
 A component that is missing, failing, hung or late draws nothing of itself and changes
 nothing else on the page.
@@ -343,6 +345,7 @@ this.dispatchEvent(new CustomEvent("moxi-project-facts", {
 | `projects` | By key, exactly as given in `projects`. Each: `at`, epoch seconds of the newest activity it knows there; `parts`, its phrases for the row's second line; and for the key in `open` only, `sections`, `agents` and `stays` (Remove's `Stays` lines). |
 | `folders` | Optional. Folders, as absolute paths, that no project holds: `{folder, at, parts}`. |
 | `more_folders` | Optional. How many folders it knows past those it lists. |
+| `live` | Optional. By claim, at most 100: what it says of each session it can read, `{in_turn, state}`. It names no project. |
 
 The types the fields use:
 
@@ -351,9 +354,12 @@ Part = { text: string; heavy?: boolean; warn?: boolean; rank?: number; claims?: 
          count?: { one: string; many: string; after_one?: string; after_many?: string } }
 Section = { label: string; rank?: number; lines: Line[];
             link?: { text: string; module: string; route: string } }
-Line = { parts: Part[]; claims?: string[] }
+Line = { parts: Part[]; claims?: string[]; runs?: boolean }
 Say = { runs: boolean; state: string; where?: string }
+Live = { in_turn: boolean; state: string }
 ```
+
+`Part` also takes `idle_only?: boolean`.
 
 - **`rank`** is Home's `needs` scale (10 someone is blocked on you, 20 something waits for
   you, 30 something is broken, 40 something will run out). A ranked part leads its row's
@@ -384,6 +390,18 @@ Say = { runs: boolean; state: string; where?: string }
   report that speaks of it agrees on `runs`: the `state` of the lowest `order`, then, with
   `runs` true, the `where` of the lowest `order` that gives one. Where they disagree it
   draws nothing. A `Say` with a `where` and `runs` false is refused.
+- **Live.** A line's `runs` is its module's word that the line's session runs now; a
+  part's `idle_only` says it holds only while that session is not in a turn (a `last
+  active` time). A report's `live` says, by claim, whether a session is in a turn
+  (`in_turn`) and its words for that (`state`). On the opened project the page joins them:
+  a line with `runs` and exactly one claim, whose session every report's `live` that names
+  it agrees is in a turn, is drawn without its `idle_only` parts and ends with the `state`
+  of the lowest `order` saying so (`planner · headless · working`). A claim the reports
+  disagree on, one that another line of the project's sections also claims, or one the
+  line's own report claims on another project too, is left as given. `live` claims
+  nothing and counts nothing: no count, `agents` phrase or `stays` line changes, and the
+  closed row draws no turn word. A page that doesn't know these fields draws the lines as
+  given, and a component that doesn't send them has nothing joined to it.
 - **Sections** with one `label` from two modules are one row: lines in `order`, the first
   `link` in `order`, the lowest `rank`. A link is drawn only while its `module` is
   installed, and a press is `navigate(module, route)`.
@@ -396,7 +414,8 @@ Say = { runs: boolean; state: string; where?: string }
 **What the page refuses.** Another `version` (the whole report); a key it did not give, or
 an agent that is not the open project's; a field of the wrong type; a text over 200
 characters; more than 8 parts on a row or a line, or 6 lines in a section; `sections`,
-`agents` or `stays` on a project that isn't open. A refused field is dropped and logged
+`agents` or `stays` on a project that isn't open; a `live` of more than 100 sessions (the
+whole of it). A refused field is dropped and logged
 once per module to the console, and the rest of the report is used. Keep a report inside
 these caps: end a section's last line `<n> more` when there is more to say.
 
