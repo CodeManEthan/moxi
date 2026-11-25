@@ -734,6 +734,38 @@ def no_cold_at(text: str) -> str:
     return COLD_AT_RE.sub("", head, count=1) + sep + rest
 
 
+#: What `unreadable` holds until the test ends: (path, mode) on POSIX, the locking handle on
+#: Windows.
+_UNREADABLE: list = []
+
+
+def unreadable(path: Path) -> None:
+    """Make the file `path` one this process can't read, until the test ends: mode 0 on
+    POSIX; on Windows, where a mode never refuses its owner a read, a lock over the whole
+    file that another handle holds, so every read through any other handle fails."""
+    if sys.platform != "win32":
+        _UNREADABLE.append((path, path.stat().st_mode))
+        path.chmod(0)
+        return
+    import msvcrt
+
+    fh = open(path, "r+b")  # noqa: SIM115 -- held open until the test ends
+    _UNREADABLE.append(fh)
+    msvcrt.locking(fh.fileno(), msvcrt.LK_NBLCK, max(path.stat().st_size, 1))
+
+
+@pytest.fixture(autouse=True)
+def _readable_again():
+    """Let go of what `unreadable` made unreadable."""
+    yield
+    while _UNREADABLE:
+        held = _UNREADABLE.pop()
+        if isinstance(held, tuple):
+            held[0].chmod(held[1])
+        else:
+            held.close()  # closing the handle drops its lock
+
+
 def write_transcript(session_id: str, age: float | None = 0, *, root: Path | None = None,
                      lines: list | None = None, project: str = "rig") -> Path:
     """`<root>/<project>/<session_id>.jsonl`. With `lines`, exactly those (dicts are

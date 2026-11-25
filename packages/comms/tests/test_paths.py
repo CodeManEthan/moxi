@@ -6,6 +6,7 @@ the guard on a socket path handed in from the environment.
 
 import os
 import sys
+from pathlib import Path
 
 import pytest
 
@@ -34,7 +35,13 @@ def test_comms_locations(monkeypatch, tmp_path):
     # comms writes only under its own five directories, so its logs are in STATE/comms
     assert p.log_dir() == tmp_path / "state" / "comms" / "logs"
     # and its sockets in RUNTIME/comms
-    assert p.daemon_socket() == tmp_path / "runtime" / "comms" / "daemon.sock"
+    if sys.platform == "win32":
+        # There it is a pipe, named by the core.
+        from moxi import ipc
+
+        assert p.daemon_socket() == Path(ipc.address("comms", "daemon"))
+    else:
+        assert p.daemon_socket() == tmp_path / "runtime" / "comms" / "daemon.sock"
     # comms 0.2's socket, which the move only connects to
     assert p.old_daemon_socket() == tmp_path / "runtime" / "comms" / "moxi-comms-daemon.sock"
     assert not hasattr(p, "codex_socket"), "turns' host owns the app-server's socket"

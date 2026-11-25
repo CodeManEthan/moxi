@@ -42,7 +42,7 @@ import pytest
 from conftest import (assistant_line, cache_absent, cache_api, projects_root, put_cursor,
                       raw_connection,
                       record_rows, send_turn, settle, store_rows, synced, wait_for_queue,
-                      wait_until, write_transcript)
+                      unreadable, wait_until, write_transcript)
 
 from moxi import exit as moxi_exit
 from moxi_comms.store import books as books_mod
@@ -197,7 +197,7 @@ def test_the_guard_fails_a_pipe_of_another_name(tmp_path_factory, a_pipe):
     assert f"probe: the socket pipe {other} is not {a_pipe}" in str(raised.value)
 
 
-def test_the_guard_fails_the_pipe_when_its_runtime_folder_is_outside(
+def test_the_guard_fails_the_pipe_when_its_runtime_dir_is_outside(
         tmp_path_factory, a_pipe, monkeypatch):
     base = tmp_path_factory.getbasetemp()
     with monkeypatch.context() as patched, pytest.raises(AssertionError) as raised:
@@ -396,8 +396,7 @@ def _hold_state(rig, adapters, state, tmp_path=None):
         rig.shim(**REVIEWER, session_id=None)
         return "reviewer@proj-a"
     if state == "unreadable":
-        path = write_transcript(SESS_A, 60)
-        path.chmod(0)
+        unreadable(write_transcript(SESS_A, 60))
         shim(rig, SESS_A)
         return "reviewer@proj-a"
     if state == "no evidence":

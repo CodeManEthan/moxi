@@ -289,8 +289,8 @@ def test_a_claim_socket_outside_comms_runtime_dir_is_never_asked(
         # A claim socket is a pipe there: the stray one is named for another runtime folder.
         with monkeypatch.context() as other_home:
             other_home.setenv("MOXI_COMMS_RUNTIME_DIR", str(elsewhere))
-            stray_at = paths.claim_socket("scout")
-        assert stray_at != paths.claim_socket("scout")
+            stray_at = paths.claim_socket("stray")
+        assert stray_at != paths.claim_socket("stray")
     else:
         stray_at = elsewhere / "c.sock"
     stray = ClaimServer("scout", "proj-a", kind="codex", socket_path=stray_at).start()

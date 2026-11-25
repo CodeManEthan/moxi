@@ -32,7 +32,7 @@ import time
 
 import pytest
 from conftest import (cursor_of, projects_root, put_cursor, raw_connection, record_rows, send_ready, send_turn, settle,
-                      wait_for_queue, wait_until, write_config, write_transcript)
+                      unreadable, wait_for_queue, wait_until, write_config, write_transcript)
 
 from moxi import exit as moxi_exit
 from moxi_comms.store import books as books_mod
@@ -343,12 +343,8 @@ def test_warm_and_fresh_go_through_silently(rig):
 def test_a_failed_read_refuses_the_post(rig):
     """A clock comms cannot read refuses the send, nothing posted, exit 6: the sender sends it again in a moment."""
     reviewer_with_session(rig)
-    path = write_transcript(SESS_REVIEWER, 60)
-    path.chmod(0)
-    try:
-        code, out = send(rig, REVIEWER_Q)
-    finally:
-        path.chmod(0o600)
+    unreadable(write_transcript(SESS_REVIEWER, 60))
+    code, out = send(rig, REVIEWER_Q)
     assert code == moxi_exit.TEMPFAIL and posted(rig) == [], out
     lines = out.splitlines()
     assert lines[0].startswith("Nothing was sent: comms could not read reviewer@proj-a's "
