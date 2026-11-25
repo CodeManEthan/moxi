@@ -77,8 +77,17 @@ def comms_name_env() -> str | None:
 BRIEF_HEADER = "Brief from launcher, launched by {actor}"
 #: The first line of a first turn that carries a handoff, with or without a brief.
 HANDOFF_HEADER = "Handoff from launcher, launched by {actor}: {path}"
-#: The first line of a self relaunch's first turn, which carries its handoff alone.
+#: The first line of a relaunch's first turn, which carries its handoff alone.
 RELAUNCH_HEADER = "Handoff from launcher, relaunched by {actor}: {path}"
+#: The line after a director's relaunch's header when the call read the old session's
+#: cache `cold`.
+WENT_COLD = "Your last session, {old}, went cold and {by} relaunched it."
+#: The same line for any other read (`unknown`, `no-cache`, or none).
+NO_MESSAGE = "Your last session, {old}, could not take a message and {by} relaunched it."
+#: Added to that line when sessions is installed.
+SESSIONS_READ = "`moxi sessions read {old}` shows how it ended."
+#: The run event a director's call records the cache kind it read under (`kind`).
+CACHE_EVENT = "cache"
 _HEADER_STARTS = ("Brief from launcher, launched by ", "Handoff from launcher, launched by ",
                   "Handoff from launcher, relaunched by ")
 
@@ -125,15 +134,17 @@ def actor(env: Mapping[str, str] | None = None) -> str:
 
 
 def text(*, by: str, brief: str | None = None, handoff: str | os.PathLike | None = None,
-         handoff_text: str | None = None, relaunched: bool = False) -> str | None:
+         handoff_text: str | None = None, relaunched: bool = False,
+         note: str | None = None) -> str | None:
     """The first turn a launch sends, or None when it has neither brief nor handoff.
 
     It starts with one header line naming the launcher and `by`. With a handoff the
-    header names its path and the handoff's text follows; a brief comes after the handoff
-    when there are both. `relaunched` marks a relaunch's handoff, whose header says the
-    session was relaunched by `by`. `handoff_text` is the handoff's text when the
-    caller has read it already; otherwise the file is read here, any readable file, and
-    one that can't be read raises `HandoffUnreadable`.
+    header names its path, `note` (a director's relaunch's `relaunch_note`) is the line
+    after it, and the handoff's text follows; a brief comes after the handoff when there
+    are both. `relaunched` marks a relaunch's handoff, whose header says the session was
+    relaunched by `by`. `handoff_text` is the handoff's text when the caller has read it
+    already; otherwise the file is read here, any readable file, and one that can't be
+    read raises `HandoffUnreadable`.
     """
     brief = brief if brief and brief.strip() else None
     if handoff is None and brief is None:
@@ -143,11 +154,40 @@ def text(*, by: str, brief: str | None = None, handoff: str | os.PathLike | None
     path = os.fspath(handoff)
     if handoff_text is None:
         handoff_text = read_handoff(path)
-    header = RELAUNCH_HEADER if relaunched else HANDOFF_HEADER
-    parts = [header.format(actor=by, path=path), handoff_text.strip("\n")]
+    header = (RELAUNCH_HEADER if relaunched else HANDOFF_HEADER).format(actor=by, path=path)
+    if note:
+        header += "\n" + note
+    parts = [header, handoff_text.strip("\n")]
     if brief is not None:
         parts.append(brief)
     return "\n\n".join(parts)
+
+
+def relaunch_note(conn: sqlite3.Connection, row: store.LaunchRow) -> str | None:
+    """The line after the header of the first turn of a launch a director's relaunch
+    made, naming the old session, worded from the cache kind the call read
+    (`CACHE_EVENT`): `WENT_COLD` for `cold`, else `NO_MESSAGE`, then `SESSIONS_READ` when
+    sessions is installed. The run is the one the launch's `RELAUNCH_ENV` stamp names (a
+    repair's, the run it repairs). None for any other launch."""
+    from .listeners import RELAUNCH_ENV
+
+    if not row.relaunch_of or not row.handoff_path:
+        return None
+    run = store.get_run(conn, row.env.get(RELAUNCH_ENV) or "")
+    seen: set[str] = set()
+    while (run is not None and run.mode == "repair" and run.repair_of
+           and run.run_id not in seen):
+        seen.add(run.run_id)
+        run = store.get_run(conn, run.repair_of)
+    if run is None or run.mode != "director":
+        return None
+    kinds = [event.detail.get("kind") for event in store.run_events(conn, run.run_id)
+             if event.kind == CACHE_EVENT]
+    words = WENT_COLD if kinds and kinds[-1] == "cold" else NO_MESSAGE
+    line = words.format(old=run.session_id, by=run.actor)
+    if modules.available("sessions"):
+        line += " " + SESSIONS_READ.format(old=run.session_id)
+    return line
 
 
 def read_handoff(path: str | os.PathLike) -> str:
@@ -288,7 +328,7 @@ def send(conn: sqlite3.Connection, request_id: str, *, pid: int | None = None,
         return Outcome(request_id, "not-claimed", detail=f"the launch is {row.state}")
     try:
         body = text(by=row.actor, brief=row.brief, handoff=row.handoff_path,
-                    relaunched=bool(row.relaunch_of))
+                    relaunched=bool(row.relaunch_of), note=relaunch_note(conn, row))
     except HandoffUnreadable as exc:
         return _fail(conn, row, HANDOFF_UNREADABLE, exc.why, leaving=_CLAIMABLE)
     turns = turns_api() if turns is None else turns
@@ -480,7 +520,8 @@ def deliver(request_id: str, *, pid: int | None = None, out: TextIO | None = Non
     return outcome.exit_code
 
 
-__all__ = ["BRIEF_HEADER", "EVENT", "HANDOFF_HEADER", "HANDOFF_UNREADABLE", "NO_READY",
-           "NO_TURNS", "RELAUNCH_HEADER", "TURNS_INTERFACE", "TURNS_ENV", "UNCONFIRMED", "HandoffUnreadable",
+__all__ = ["BRIEF_HEADER", "CACHE_EVENT", "EVENT", "HANDOFF_HEADER", "HANDOFF_UNREADABLE",
+           "NO_MESSAGE", "NO_READY", "NO_TURNS", "RELAUNCH_HEADER", "SESSIONS_READ",
+           "TURNS_INTERFACE", "TURNS_ENV", "UNCONFIRMED", "WENT_COLD", "HandoffUnreadable",
            "Outcome", "actor", "deliver", "deliverer_argv", "on_argv", "read_handoff", "ref",
-           "run_log", "send", "start_deliverer", "text", "turns_api"]
+           "relaunch_note", "run_log", "send", "start_deliverer", "text", "turns_api"]

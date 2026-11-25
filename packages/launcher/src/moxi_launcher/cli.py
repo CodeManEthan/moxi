@@ -12,7 +12,7 @@ launched.
     moxi launcher handoffs [--key KEY] [--json]
     moxi launcher deliver REQUEST_ID --pid PID
     moxi launcher relaunch --self --handoff FILE [--dry-run] [--json]
-    moxi launcher relaunch SESSION_ID|IDENTITY [--dry-run] [--json]
+    moxi launcher relaunch SESSION_ID|IDENTITY [--handoff FILE] [--dry-run] [--json]
     moxi launcher relaunch --status RUN [--json]
     moxi launcher relaunch --stop RUN [--json]
     moxi launcher relaunch --from-record RUN [--json]
@@ -40,7 +40,8 @@ newest launch. `deliver` is internal: the detached process that sends a terminal
 first turn.
 
 The acts on a launched session: `relaunch` arms a relaunch of this session (`--self`), or
-relaunches another as one of its directors, shows a run (`--status`), stops one
+relaunches another as one of its directors with a handoff for its new session, shows a
+run (`--status`), stops one
 (`--stop`), or launches again the session of a run that exited it and did not bring it
 back (`--from-record`).
 `exit-session` exits a launched session, and `exits` lists every exit tried. `sessions`
@@ -584,7 +585,8 @@ def _relaunch(args: argparse.Namespace, prog: str) -> int:
         return _said(relaunch.from_record(args.from_record), args)
     if args.self:
         return _said(relaunch.arm_self(args.handoff, dry_run=args.dry_run), args)
-    return _said(relaunch.call_director(args.target, dry_run=args.dry_run), args)
+    return _said(relaunch.call_director(args.target, handoff=args.handoff,
+                                        dry_run=args.dry_run), args)
 
 
 def _exit_session(args: argparse.Namespace, prog: str) -> int:
@@ -827,7 +829,8 @@ def _act_parsers(verbs) -> None:
     relaunch = verbs.add_parser(
         "relaunch", help="relaunch a session in its slot", allow_abbrev=False,
         description="Relaunch a session in its slot: this session with --self and a handoff "
-                    "for the new one, or another as one of its directors. --status shows a "
+                    "for the new one, or another as one of its directors, with a handoff "
+                    "for its new session. --status shows a "
                     "run; --stop stops one; --from-record launches again the session of a "
                     "run that exited it and did not bring it back.")
     relaunch.add_argument("target", nargs="?", metavar="SESSION_ID|IDENTITY",
@@ -845,7 +848,10 @@ def _act_parsers(verbs) -> None:
     form.add_argument("--from-record", metavar="RUN",
                       help="launch again the session the run RUN exited")
     relaunch.add_argument("--handoff", metavar="FILE",
-                          help="with --self: the handoff the new session gets first")
+                          help="the handoff the new session gets as its first turn: needed "
+                               "with --self; optional on a director's call, which without it "
+                               "carries the seat's newest handoff written since its session "
+                               "began")
     relaunch.add_argument("--dry-run", action="store_true",
                           help="take the checks and write nothing")
     relaunch.add_argument("--json", action="store_true", help="print one JSON object")
@@ -993,8 +999,8 @@ def _check_relaunch(parser: argparse.ArgumentParser, args: argparse.Namespace) -
                      "IDENTITY, --status RUN, --stop RUN or --from-record RUN")
     if args.self and not args.handoff:
         parser.error("relaunch --self needs --handoff FILE")
-    if args.handoff and not args.self:
-        parser.error("--handoff goes with --self")
+    if args.handoff and not (args.self or args.target is not None):
+        parser.error("--handoff goes with --self or a SESSION_ID or IDENTITY")
     if args.dry_run and (args.status is not None or args.stop is not None
                          or args.from_record is not None):
         parser.error("--dry-run goes with --self or a SESSION_ID or IDENTITY")

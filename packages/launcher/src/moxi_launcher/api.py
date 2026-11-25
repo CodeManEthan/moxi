@@ -71,8 +71,9 @@ warning (`catalog.drop_retired`). A
 relaunch's model pin (`pin.choose`) is its model only when the stored values name none;
 the new row records the stored model and a `model-pin` event, never the pin as a value.
 It never sends the row's
-brief: a self relaunch's first turn is its handoff alone, under the header `Handoff from
-launcher, relaunched by <actor>: <path>`, a director's relaunch sends none, and a resume
+brief: a relaunch's first turn is its handoff alone, under the header `Handoff from
+launcher, relaunched by <actor>: <path>` (a director's run recorded with no handoff sends
+none), and a resume
 sends the brief it was given, if any, as a launch sends its own. **A replay's environment is built from the row and the settings only**: the row's recorded
 base (`base_env_json`: the short list slots' server keeps, the core's locators, the
 keep-lists' and provider names classed recorded, on Windows the names a process needs
@@ -219,11 +220,12 @@ class ReplayRequest:
     with `--resume`, never minted. `request_id` and `actor` are as `LaunchRequest`'s.
 
     `posture` is the start posture the identity block shows in place of the row's
-    (`common.RELAUNCHED` for a self relaunch, `with:<director>` for a director's); it goes
+    (`common.RELAUNCHED` for a relaunch with a handoff, `with:<director>` for a director's
+    run recorded with none); it goes
     in the new row's `posture` and never in its `values_json`. A resume, which gives none,
     shows the posture the launch was configured with, from the row's values, so a resume of
     a relaunch's row shows that one, not the relaunch's. `handoff` is the handoff a
-    self relaunch carries as its first turn, `run` the relaunch's run id, stamped as
+    relaunch carries as its first turn, `run` the relaunch's run id, stamped as
     `MOXI_LAUNCHER_RELAUNCH` when there is a handoff. `director` marks a director's
     relaunch, whose credentials come from `relaunch.director_pass_env`. `brief` and
     `brief_file` are the brief a resume was given (at most one of them), sent as its first
