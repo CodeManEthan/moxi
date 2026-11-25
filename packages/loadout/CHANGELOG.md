@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- On Windows the preview reads the files of a folder it compares. It took every file
+  for one swapped since it was listed, so it read none: a folder listing's stat holds no
+  device or file id there, and the preview compared those with the opened file's. Each
+  entry is now read again whole on Windows.
 - The page's `Reading…` line, while its first read is out, shows once that read has
   been out 400 ms in every browser. In Firefox it could stay blank until something
   else redrew the page, since the page checked the wait against `Date.now()`, which

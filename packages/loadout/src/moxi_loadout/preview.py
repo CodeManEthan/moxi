@@ -38,6 +38,7 @@ import difflib
 import json
 import os
 import stat
+import sys
 from pathlib import Path
 
 from moxi_loadout import displaced, entries, install, planner
@@ -313,7 +314,7 @@ class _Reader:
                 if count[0] > TREE_MAX_FILES:
                     self.skip(top, "many")
                     return False
-                out[rel] = self._read(entry.path, entry.stat(follow_symlinks=False))
+                out[rel] = self._read(entry.path, _entry_stat(entry))
         return True
 
     def _read(self, path, st) -> str | None:
@@ -335,6 +336,15 @@ class _Reader:
             self.skip(path, "binary")
             return None
         return self.data(path, raw)
+
+
+def _entry_stat(entry: os.DirEntry) -> os.stat_result:
+    """A folder entry's own stat, not following a link. On Windows a listing's stat holds
+    no device or file id (0), which `_read` compares with the opened file's, so the entry
+    is read again whole there."""
+    if sys.platform == "win32":
+        return os.lstat(entry.path)
+    return entry.stat(follow_symlinks=False)
 
 
 def _junction(path) -> bool:
