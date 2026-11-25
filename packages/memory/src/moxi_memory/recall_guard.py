@@ -26,8 +26,10 @@ counts as no fork, and memory's doctor lists it. A record that names no holder (
 holder's identity could not be read) can't be told apart from a child still starting
 up: it awaits its fork only until `records.STARTING_GRACE_S` from its start. Ages are
 measured by `recall_holder.age`, on a clock no wall-clock step moves where the system
-has one. Only records of the subagent route await a fork here: a fork on another route
-is not a subagent of the session. Every other subagent's call is left alone.
+has one. `waiting` reads the holder of a record on any route, as memory's doctor lists
+it; only records of the subagent route await a fork here (`awaits_fork`): a fork on
+another route is not a subagent of the session. Every other subagent's call is left
+alone.
 
 **A slot fork** is a session of its own, stamped `SUBCONSCIOUS_FORK_ENV` with the id of
 the recall it serves (`slot_fork`). Every call there is the fork's, judged against that
@@ -77,9 +79,10 @@ leading words match an entry of the list word for word.
 never sees a dialog for it; every other subagent's ask is left to the person.
 
 **Where they run (`guarded`).** Only in a session whose launch turned the subconscious
-on and picked the subagent route (`recall_start.route_stamp`), decided once at the
-session's start, so a session on another route never has a subagent's call judged as a
-recall fork's.
+on and picked the subagent route (`recall_start.route_stamp`, the reading
+`recall_start.route` makes), decided once at the session's start, so a session on
+another route never has a subagent's call judged as a recall fork's. A route stamp that
+names no route runs no recall (`recall_start.UNKNOWN_ROUTE`) and no guard.
 
 Standard library at import; the core is imported at use.
 """
@@ -161,11 +164,9 @@ def holder_of(session_id: str, record: Mapping[str, object]):
 
 def waiting(session_id: str, record: Mapping[str, object], *, now: float | None = None,
             boot: dict | None = None) -> tuple[bool, str | None]:
-    """(whether `record` awaits its fork, why not when it might have: `HOLDER_GONE`,
-    `PAST_WAIT` or `NO_HOLDER`). See the module's docstring."""
+    """(whether `record`, on any route, still awaits its fork's id, why not when it might
+    have: `HOLDER_GONE`, `PAST_WAIT` or `NO_HOLDER`). See the module's docstring."""
     if record.get("state") not in (records.STARTING, records.HURRIED) or record.get("fork"):
-        return False, None
-    if record.get("route") not in (None, SUBAGENT):
         return False, None
     age = recall_holder.age(record, now=now, boot=boot)
     held = holder_of(session_id, record)
@@ -182,8 +183,10 @@ def waiting(session_id: str, record: Mapping[str, object], *, now: float | None 
 
 def awaits_fork(session_id: str, record: Mapping[str, object], *,
                 now: float | None = None) -> bool:
-    """Whether `record` is a recall whose fork's id is not yet written while its holder
-    may still write it. See the module's docstring."""
+    """Whether `record` is a subagent-route recall whose fork's id is not yet written
+    while its holder may still write it. See the module's docstring."""
+    if record.get("route") not in (None, SUBAGENT):
+        return False
     return waiting(session_id, record, now=now)[0]
 
 

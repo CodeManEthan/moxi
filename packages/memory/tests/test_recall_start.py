@@ -174,6 +174,17 @@ def test_a_claude_session_runs_the_route_its_launch_picked(places):
     assert recall_start.route("claude", SESSION, SLOT_STAMP) == (recall_start.SLOT, None)
 
 
+@pytest.mark.parametrize("stamp", ["host-fork", "SLOT", "fork"])
+def test_a_route_stamp_naming_no_route_runs_no_recall_and_no_guard(places, stamp):
+    env = {recall_start.SUBCONSCIOUS_ENV: "automatic",
+           recall_start.SUBCONSCIOUS_ROUTE_ENV: stamp}
+    why = f"the launch's route {stamp!r} is not one of subagent, slot"
+    assert recall_start.route("claude", SESSION, env) == (None, why)
+    assert recall_start.route("codex", SESSION, env) == (None, why)
+    assert not recall_guard.guarded(env)
+    assert recall_guard.guarded({**env, recall_start.SUBCONSCIOUS_ROUTE_ENV: "subagent"})
+
+
 def test_a_claude_session_with_no_turns_fork_falls_back_to_the_slot_route(places):
     places.fork = False
     assert recall_start.route("claude", SESSION) == (recall_start.SLOT, None)

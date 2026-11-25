@@ -493,13 +493,13 @@ def live_subconscious() -> list[tuple[str, str, str | None]]:
 def _never_ran(lines: list[dict], *, now: float) -> str | None:
     """The recalls whose child never ran or whose fork's id never came: lines lost with
     reason `spawn` in the last day (the child could not be started); records `starting`
-    or `hurried` with no fork that the recall guards no longer wait on, each with its
-    state and age: those that name no holder past `records.STARTING_GRACE_S` (an old
-    record whose child ended before it wrote its line or found no identity of its own,
-    or one whose holder's identity could not be read), those whose holder is gone with
-    no log line naming a child (it ended before the child wrote one), and those whose
-    holder still runs past its wait (`recall_guard.holder_wait_s`). None when there are
-    none."""
+    or `hurried` with no fork, on any route, each with its state and age: those that
+    name no holder past `records.STARTING_GRACE_S` (an old record whose child ended
+    before it wrote its line or found no identity of its own, or one whose holder's
+    identity could not be read), and those whose holder is gone with no log line naming
+    a child (it ended before the child wrote one); and, on the subagent route, whose
+    fork the recall guards no longer wait on, those whose holder still runs past its
+    wait (`recall_guard.holder_wait_s`). None when there are none."""
     from . import recall_guard, recall_holder, recall_start, recalls, records
 
     said = []
@@ -518,7 +518,8 @@ def _never_ran(lines: list[dict], *, now: float) -> str | None:
             _waits, why = recall_guard.waiting(session_id, record, now=now, boot=boot)
             age = recall_holder.age(record, now=now, boot=boot)
             if why == recall_guard.PAST_WAIT:
-                past.append((age, record))
+                if record.get("route") in (None, recall_start.SUBAGENT):
+                    past.append((age, record))
             elif why == recall_guard.NO_HOLDER or (
                     why == recall_guard.HOLDER_GONE and record.get("recall") not in named):
                 silent.append((age, record))

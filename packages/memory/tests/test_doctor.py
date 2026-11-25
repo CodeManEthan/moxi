@@ -452,6 +452,34 @@ def test_recalls_whose_child_never_ran_are_listed():
         assert other not in row.detail
 
 
+def test_a_comms_route_record_whose_child_died_before_its_line_is_listed():
+    import time
+
+    from moxi_memory import recall_guard, recall_start, recall_take, recalls, records
+
+    now = time.time()
+    live = recall_take.me()
+    with recalls.session_lock(SID):
+        for recall_id, route, holder, age in (
+                ("r-slot-gone", recall_start.SLOT, DEAD, 30),
+                ("r-host-nameless", recall_start.HOST_FORK, None, 600),
+                ("r-slot-live", recall_start.SLOT, live, 600)):
+            record = {"recall": recall_id, "session": SID, "state": "starting",
+                      "route": route, "settings": recall_start.default_settings()}
+            if holder is not None:
+                record["holder"] = holder
+            records.write(record, now=now - age)
+    for recall_id in ("r-slot-gone", "r-host-nameless", "r-slot-live"):
+        record = records.read(SID, recall_id)
+        assert recall_guard.awaits_fork(SID, record) is False
+    row = by_name()["subconscious"]
+    assert row.state == "warn"
+    assert ("2 recalls with no log line naming its child (gone before it wrote one, or "
+            "with no identity to write): r-slot-gone (starting, 30s old), r-host-nameless "
+            "(starting, 10m old)") in row.detail
+    assert "r-slot-live" not in row.detail
+
+
 class FakeSession:
     def __init__(self, sid, harness, stamps, capabilities=("fork",)):
         self.session_id, self.harness = sid, harness

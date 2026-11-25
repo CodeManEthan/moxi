@@ -13,8 +13,10 @@ finished fork) never counts. In automatic mode a counted prompt starts a recall;
 on-demand mode it resets the agent's count of recalls (`reset_asked`).
 
 **The route (`route`).** A session runs the route its launch picked
-(`SUBCONSCIOUS_ROUTE_ENV`, `subagent` when unset) where that route can run here, checked
-at every try, not once. Claude Code's subagent route (`SUBAGENT`) needs a turns endpoint
+(`SUBCONSCIOUS_ROUTE_ENV`, `subagent` when unset, read by `route_stamp`, as the recall
+guards read it) where that route can run here, checked at every try, not once. A stamp
+that names no route of `ROUTES` runs none (`UNKNOWN_ROUTE`), so no recall runs where
+the guards would not judge its fork. Claude Code's subagent route (`SUBAGENT`) needs a turns endpoint
 that offers `fork`; a Claude Code session whose endpoint offers none falls back to the
 slot route. The slot route (`SLOT`) forks the session into a slot through the
 launcher's interface 3 and needs that launcher, tmux slots here and a way back by comms
@@ -99,6 +101,7 @@ HOST_FORK = "host-fork"
 BY_COMMS: tuple[str, ...] = (SLOT, HOST_FORK)
 #: Why a session's subconscious can't run.
 NO_FORK = "no turns fork in this session"
+UNKNOWN_ROUTE = "the launch's route {route!r} is not one of " + ", ".join(ROUTES)
 CODEX = "Codex: off unless the launch picks the slot route"
 NO_SLOTS = "no slots here"
 NO_LAUNCHER = "launcher without interface 3"
@@ -123,7 +126,8 @@ def mode(env: Mapping[str, str] | None) -> str | None:
 
 def route_stamp(env: Mapping[str, str] | None) -> str:
     """The route the session's launch picked: its `SUBCONSCIOUS_ROUTE_ENV` stamp, else
-    the default, `subagent`."""
+    the default, `subagent`. A value not in `ROUTES` is returned as it is; `route` runs
+    no recall for it and `recall_guard.guarded` is false for it."""
     return (env or {}).get(SUBCONSCIOUS_ROUTE_ENV) or SUBAGENT
 
 
@@ -147,6 +151,8 @@ def route(harness: str | None, session_id: str,
     if is_fork(env):
         return None, IN_FORK
     picked = route_stamp(env)
+    if picked not in ROUTES:
+        return None, UNKNOWN_ROUTE.format(route=picked)
     if harness == "codex":
         if picked != SLOT:
             return None, CODEX
@@ -456,8 +462,8 @@ def reset_asked(session_id: str) -> None:
 
 __all__ = ["SUBCONSCIOUS_ENV", "SUBCONSCIOUS_ROUTE_ENV", "SUBCONSCIOUS_FORK_ENV",
            "STAMPS", "route_stamp", "AUTOMATIC", "ON_DEMAND", "MODES", "SUBAGENT", "SLOT",
-           "HOST_FORK", "ROUTES", "BY_COMMS", "NO_FORK", "CODEX", "NO_SLOTS", "NO_LAUNCHER",
-           "IN_FORK",
+           "HOST_FORK", "ROUTES", "BY_COMMS", "NO_FORK", "UNKNOWN_ROUTE", "CODEX", "NO_SLOTS",
+           "NO_LAUNCHER", "IN_FORK",
            "is_fork", "offers_fork", "slot_why", "slots_here", "USER", "USER_AND_COMMS",
            "SCRIPT", "ASKED", "SPAWN", "mode",
            "counts", "route", "comms_why", "comms_name", "subconscious_settings", "settings_keys",

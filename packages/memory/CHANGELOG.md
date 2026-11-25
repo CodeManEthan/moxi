@@ -31,7 +31,8 @@
   interface 3 `slots_here` says so; an older launcher reads as `no slots here`) and
   comms with scoped senders. On Codex only the slot route runs a recall, and
   only where the launch picks it; on `subagent` a Codex session has the subconscious off
-  (`Codex: off unless the launch picks the slot route`). No recall starts inside a slot
+  (`Codex: off unless the launch picks the slot route`). A route stamp naming neither
+  route runs no recall, with an off reason that names it. No recall starts inside a slot
   fork, and the on-demand command refuses there. Two turns guards hold a slot fork to
   the same reads: `memory.subconscious-slot` (every call, Claude Code's and Codex's,
   whose shell reaches the guard as `Bash`) and `memory.subconscious-slot-ask` (every

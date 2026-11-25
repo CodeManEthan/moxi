@@ -6180,8 +6180,8 @@ memory	packages/memory/src/moxi_memory/recall_guard.py	"""Whether the child of r
 memory	packages/memory/src/moxi_memory/recall_guard.py	"""Whether `record` is a recall whose fork's id is not yet written while its child	keep	record	record
 memory	packages/memory/src/moxi_memory/recall_guard.py	"""Whether a round of `record`'s recall was asked, so its fork may have started."""	keep	record	record
 memory	packages/memory/src/moxi_memory/recall_guard.py	"""The holder `record` names, as a mapping, else the child its log line names (a	keep	record	record
-memory	packages/memory/src/moxi_memory/recall_guard.py	"""(whether `record` awaits its fork, why not when it might have: `HOLDER_GONE`,	keep	record	record
-memory	packages/memory/src/moxi_memory/recall_guard.py	"""Whether `record` is a recall whose fork's id is not yet written while its holder	keep	record	record
+memory	packages/memory/src/moxi_memory/recall_guard.py	"""(whether `record`, on any route, still awaits its fork's id, why not when it might	keep	record	record
+memory	packages/memory/src/moxi_memory/recall_guard.py	"""Whether `record` is a subagent-route recall whose fork's id is not yet written	keep	record	record
 memory	packages/memory/src/moxi_memory/recall_guard.py	"""Judge a fork's `call` against `record`, of session `session_id`, under the	keep	record	record
 memory	packages/memory/src/moxi_memory/recall_stream.py	recall.record = records.read(recall.session_id, recall.recall_id) or recall.record	keep	record	record
 memory	packages/memory/src/moxi_memory/recall_stream.py	rounds.append({"round": round_number, "text": answer, "at": now})	keep	round	round
