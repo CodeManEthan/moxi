@@ -39,8 +39,9 @@ is refused only by a file that can't be read or a held lock.
 The write is one `moxi.files.edit_toml` block on `presets.path(env)`, under
 `presets.toml.lock`, which reads the file again inside the lock and keeps every other byte:
 a changed value keeps its place and trailing comment, a new key goes straight after the
-table's last key (or straight under its header when it holds none, so it lands above a
-comment block that follows the table), a cleared key goes with its line, the header stays
+table's last own key, above any `[defaults.<x>]` sub-table (or straight under its header
+when it holds none, so it lands above a comment block that follows the table), a cleared
+key goes with its line, the header stays
 when its last key goes, a file with no `[defaults]` gets one at its end, an inline
 `defaults = {...}` is edited in place, and a missing file is made (0600 on POSIX).
 """
@@ -422,11 +423,21 @@ def _write(doc, name: str, op: str, value: object) -> None:
         table[name] = value
     else:
         body = table.value
-        keys = [key for key, _ in body.body if key is not None]
+        keys = [key for key, item in body.body if _own_key(key, item)]
         if keys:
             body._insert_after(keys[-1], name, value)
         else:
             body._insert_at(0, name, value)
+
+
+def _own_key(key, item) -> bool:
+    """Whether a body entry of `[defaults]` is one of the table's own keys: a key line,
+    dotted or not, and not a `[defaults.<x>]` or `[[defaults.<x>]]` under its own header,
+    which tomlkit keeps in the same body. A new key goes after the last own key, so it
+    never lands inside such a sub-table."""
+    if key is None:
+        return False
+    return key.is_dotted() or type(item).__name__ not in ("Table", "AoT")
 
 
 __all__ = ["APPLIES", "BOTH", "GROUPS", "LINE", "NEEDS_FIX", "START", "TABLE", "TITLE",

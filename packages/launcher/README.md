@@ -250,8 +250,8 @@ or leave out (an owned row, `takes_policy_directors`, a typo, a retired row) sit
 under `needs a fix`, and can only be cleared. A key set for a row this machine doesn't
 offer is kept as it is and not shown; a hand edit clears it. The write changes one key
 and keeps every other byte of the file, comments included: a new key goes straight after
-the table's last key. A change reaches launches made after it; a relaunch or resume keeps
-what its session launched with. `moxi launcher presets check` warns, at `defaults`, of
+the table's last own key, above any `[defaults.<x>]` sub-table. A change reaches launches
+made after it; a relaunch or resume keeps what its session launched with. `moxi launcher presets check` warns, at `defaults`, of
 what a launch with no preset and nothing typed meets from `[defaults]`.
 
 ## The launch log

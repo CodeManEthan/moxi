@@ -233,6 +233,30 @@ def test_the_writer_keeps_every_other_byte_of_a_users_file():
     assert text() == now.replace("[defaults]\n", '[defaults]\nmodel = "opus"\n', 1)
 
 
+@pytest.mark.parametrize(("before", "after"), [
+    ('[defaults]\npermission_mode = "plan"\n\n[defaults.foo]\nbar = 1\n\n[seat.a]\nx = 1\n',
+     '[defaults]\npermission_mode = "plan"\nmodel = "opus"\n\n[defaults.foo]\nbar = 1\n\n'
+     '[seat.a]\nx = 1\n'),
+    ('[defaults]\npermission_mode = "plan"\n\n[[defaults.foo]]\nbar = 1\n',
+     '[defaults]\npermission_mode = "plan"\nmodel = "opus"\n\n[[defaults.foo]]\nbar = 1\n'),
+    ('[defaults]\n# a note\n\n[defaults.foo]\nbar = 1\n',
+     '[defaults]\nmodel = "opus"\n# a note\n\n[defaults.foo]\nbar = 1\n'),
+    ('[seat.a]\nx = 1\n\n[defaults.foo]\nbar = 1\n',
+     '[seat.a]\nx = 1\n\n[defaults]\nmodel = "opus"\n[defaults.foo]\nbar = 1\n'),
+    ('[defaults]\npermission_mode = "plan"\n\n[seat.a]\nx = 1\n',
+     '[defaults]\npermission_mode = "plan"\nmodel = "opus"\n\n[seat.a]\nx = 1\n'),
+], ids=["sub-table", "array-of-tables", "emptied-above-a-sub-table", "only-a-sub-table",
+        "no-sub-table"])
+def test_a_new_key_goes_among_the_tables_own_keys_above_any_sub_table(before, after):
+    write(before)
+    assert change("model", "set", "opus") == (True, [])
+    assert text() == after
+    assert rows()["model"]["value"] == "opus"
+    # A second save of the same value finds the key and changes nothing.
+    assert change("model", "set", "opus") == (False, [])
+    assert text() == after
+
+
 def test_a_file_without_defaults_gets_the_table_at_its_end():
     write('[seat.a]\nharness = "claude"\n')
     change("effort", "set", "low")

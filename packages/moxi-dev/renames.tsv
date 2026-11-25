@@ -18167,6 +18167,8 @@ launcher	packages/launcher/tests/test_defaults.py	assert config.change_table("la
 launcher	packages/launcher/tests/test_defaults.py	code = cli.main(["config", "set", "launcher", "defaults.permission_mode", "plan",	keep	set	set
 launcher	packages/launcher/tests/test_defaults.py	assert (code, answer["changed"], answer["problem"]) == (0, True, None)	keep	changed	changed
 launcher	packages/launcher/tests/test_defaults.py	assert [(r["op"], r["by"]) for r in records] == [("set", "ui")]	keep	set	set
+launcher	packages/launcher/tests/test_defaults.py	assert change("model", "set", "opus") == (True, [])	keep	set	set
+launcher	packages/launcher/tests/test_defaults.py	assert change("model", "set", "opus") == (False, [])	keep	set	set
 launcher	packages/launcher/tests/test_recycle.py	store.end_run(conn, first.run_id, "compacted")	keep	compacted	compacted
 launcher	packages/launcher/tests/test_relaunch.py	"""sessions' `find` and `records`: the id's main transcript, whose first records have	keep	find	find
 launcher	packages/launcher/tests/test_relaunch.py	assert "stale" in caught.value.problem and later.asked == [CLEARED]	keep	stale	stale
