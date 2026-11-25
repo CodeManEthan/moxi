@@ -59,6 +59,7 @@ test("an opened row shows the prompt, the reply, the subagents, the session line
       notice: null,
     },
     session: { label: "Session", lead: "claude · model-1", rest: "today 07:40 to 08:55" },
+    cache: null,
     resume: { label: "Resume", command: `claude --resume ${ID}`, where: "run it in /work/proj-a", copy: COPY },
     transcript: { text: READ_TRANSCRIPT, route: `claude/${ID}` },
     copyId: { text: COPY_ID, id: ID },

@@ -299,7 +299,7 @@ test("line two is the typed message: its time, You: and its text, with Open as t
     name: "kestrel-web · started today 18:45", where: null, fact: null, factHeavy: false,
     lead: null, leadHeavy: false, time: "19:09", saidBy: "you",
     rest: "Run the visual regression suite and report every diff over 0.5%.",
-    lines: 2, act: "Open", open: false, on: TODAY,
+    lines: 2, act: "Open", open: false, on: TODAY, cache: null,
   });
   assert.equal(rowView(row("s1", NOW), "2026-11-06", TODAY, false, UTC).on, "2026-11-06");
 });

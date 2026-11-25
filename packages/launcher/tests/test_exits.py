@@ -715,6 +715,34 @@ def test_the_exit_run_is_a_relaunch_job_whose_outcomes_are_verdicts():
     assert set(exits.EXIT_CODES) == set(store.VERDICTS)
 
 
+def test_an_exit_to_a_gone_endpoint_keeps_the_target_its_caller_found(conn, monkeypatch):
+    # `claude` runs and a new endpoint has claimed the session, but the verb's caller owns
+    # and closes the target it found, so the exit goes on to the pane with it. The run's
+    # own turns, were it to look the session up again, are the same fake.
+    ident = proc.identity(os.getpid())
+    store.set_facts(conn, "r1", pid=ident.pid, pid_started=ident.started)
+    old, new = FakeSession(exits=(Result("refused", "gone"),)), FakeSession()
+    new.endpoint_pid = os.getppid()
+    finds = []
+
+    def find(**kw):
+        finds.append(kw)
+        if len(finds) == 1:
+            return old
+        parent = proc.identity(os.getppid())
+        conn.execute("UPDATE launches SET endpoint = ? WHERE request_id = 'r1'",
+                     (f"{parent.pid}@{parent.started:.6f}",))
+        return new
+
+    turns = SimpleNamespace(find=find)
+    monkeypatch.setattr(first, "turns_api", lambda quiet=False: turns)
+    result = go(conn, turns=turns)
+    assert result.data["outcome"] == "exited" and len(finds) == 1
+    assert old.commands == [("exit", 4)] and new.commands == [] and old.closed == 1
+    kinds = [e.kind for e in store.run_events(conn, result.run.run_id)]
+    assert "moved" not in kinds and "pane-ended" in kinds
+
+
 # -- park's exit ------------------------------------------------------------------------------
 
 
