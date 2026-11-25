@@ -612,11 +612,14 @@ def test_a_working_session_reads_working_and_an_idle_one_reads_as_without_turns(
 
 def test_a_session_turns_does_not_list_reads_as_without_turns(turns_shell, live_launches, ui_contexts):
     page = ui_contexts(turns_shell).pages[0]
-    stub = TurnsStub(page, [live("0f0e0d0c-0b0a-4908-8706-050403020100", turn_open=True)])
+    # turns lists planner, in a turn, and a session of no line here; not builder-1.
+    TurnsStub(page, [live("0f0e0d0c-0b0a-4908-8706-050403020100", turn_open=True),
+                     live(session_of(live_launches["planner"]), turn_open=True)])
     item = opened(page, "atlas-api")
     expect_labels(page, item, ["Folder", "Agents", "Launch", "Sessions"])
-    stub.read_once(page)
-    expect(lines(item, "Sessions")).to_have_text(["planner · headless", "builder-1 · slot 4"])
+    # planner's word says turns' report is drawn; builder-1's line is still as given.
+    expect(lines(item, "Sessions").filter(has_text="planner")).to_have_text("planner · headless · working")
+    expect(lines(item, "Sessions")).to_have_text(["planner · headless · working", "builder-1 · slot 4"])
 
 
 def test_turns_read_failing_leaves_every_line_as_without_turns(turns_shell, live_launches, ui_contexts):
@@ -642,13 +645,18 @@ def test_a_session_id_two_running_lines_carry_reads_working_on_neither(turns_she
     turns_launches.ids.append(first)
     turns_launches.start("atlas-api", "planner", target="headless", session_id=shared, resume_of=first)
     kit.revive(turns_shell, first)
-    kit.published(turns_shell, "running", lambda data: data["count"] == 2)
+    # And reviewer on its own session, in a turn as well.
+    reviewer = turns_launches.start("atlas-api", "reviewer", target="slot", slot="5")
+    kit.published(turns_shell, "running", lambda data: data["count"] == 3)
     page = ui_contexts(turns_shell).pages[0]
-    stub = TurnsStub(page, [live(shared, turn_open=True)])
+    TurnsStub(page, [live(shared, turn_open=True), live(session_of(reviewer), turn_open=True)])
     item = opened(page, "atlas-api")
     expect_labels(page, item, ["Folder", "Agents", "Launch", "Sessions"])
-    stub.read_once(page)
-    expect(lines(item, "Sessions")).to_have_text(["planner · headless", "builder-1 · slot 4"])
+    # reviewer's word says turns' report is drawn; the two lines on the shared id are still
+    # as given.
+    expect(lines(item, "Sessions").filter(has_text="reviewer")).to_have_text("reviewer · slot 5 · working")
+    expect(lines(item, "Sessions")).to_have_text(
+        ["reviewer · slot 5 · working", "planner · headless", "builder-1 · slot 4"])
 
 
 def test_without_turns_nothing_asks_turns_and_no_line_reads_working(full_shell, busy, ui_contexts):
