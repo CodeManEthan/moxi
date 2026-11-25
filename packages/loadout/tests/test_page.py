@@ -392,7 +392,7 @@ def test_view_answers_from_the_one_plan_status_builds(lo, tmp_path, monkeypatch,
         k: status[k] for k in ("lines", "notes", "counts")}
     by = {(r["kind"], r["name"], r["harness"], r["scope"]): r for r in body["rows"]}
     assert {k: by[("skill", "review", "claude", "user")][k] for k in facts} == {
-        "form": "link", "edited": False, "covers": None, "prior": False,
+        "form": kit.DIR_FORM, "edited": False, "covers": None, "prior": False,
         "applies": "section", "ignores": False}
     assert body["resolved_all"] is True
     assert any(r["scope"] == str(proj) for r in body["rows"])
@@ -976,7 +976,11 @@ def test_a_job_read_through_to_its_end_does_what_the_verb_does(
     assert (body["state"], body["exit"], body["argv"]) == ("done", 0, ["add", "skill", "lint"])
     assert "listed skill lint in user" in body["outcome"]["lines"]
     assert body["outcome"]["counts"] == {"ok": 2}     # lint for claude and codex
-    assert os.readlink(kit.claude() / "lint") == str(lo / "skills" / "lint")
+    if kit.DIR_FORM == "link":
+        assert os.readlink(kit.claude() / "lint") == str(lo / "skills" / "lint")
+    else:
+        assert (kit.claude() / "lint" / "SKILL.md").read_bytes() == \
+            (lo / "skills" / "lint" / "SKILL.md").read_bytes()
     assert 'skills = ["review", "lint"]' in (lo / "loadout.toml").read_text()
 
 

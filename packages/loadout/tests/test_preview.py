@@ -196,7 +196,7 @@ def test_a_file_saved_over_the_link_moves_against_its_source(lo):
     write(lo, '[user]\nskills = ["review"]\n')
     assert install.install().code == 0
     target = kit.claude() / "review"
-    target.unlink()
+    kit.unplace(target)
     kit.skill(kit.claude(), "review", "saved over\n")
     shown = preview.replace_preview("skill:review@claude", "user")
     assert shown["case"] == "moves"
@@ -247,7 +247,7 @@ def test_others_counts_the_changes_waiting_in_the_acts_scope(lo, tmp_path):
         fh.write("# mine\n")
     write(lo, f'[user]\nagents = ["helper"]\nskills = ["lint"]\n[project.{toml_string(proj)}]\n'
               'skills = ["lint"]\n[skill.lint]\nharnesses = ["claude"]\n')
-    (proj / ".claude" / "skills" / "lint").unlink()
+    kit.unplace(proj / ".claude" / "skills" / "lint")
     shown = preview.replace_preview("agent:helper@codex", "user")
     assert shown["case"] == "keeps"
     assert shown["others"] == 1   # the user's lint for claude; the project's is not counted
@@ -341,7 +341,7 @@ def test_a_preview_writes_nothing(lo, tmp_path):
     with open(generated(), "a") as fh:
         fh.write("# mine\n")
     EDITS["hook"][1]()
-    (kit.claude() / "review").unlink()
+    kit.unplace(kit.claude() / "review")
     kit.skill(kit.claude(), "review", "saved over\n")
     before = snapshot(tmp_path)
     for text in ("agent:helper@codex", "hook:guard-rm@claude", "skill:review@claude"):
