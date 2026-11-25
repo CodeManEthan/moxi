@@ -451,3 +451,57 @@ def test_moxi_services_runs_through_the_cores_dispatch(fake, site, capsys):
     code = moxi.cli.dispatch("services", ["list", "--json"])
     out, _ = capsys.readouterr()
     assert code == 0 and json.loads(out)[0]["id"] == "services/site"
+
+
+# --- the timer fence --------------------------------------------------------------------
+
+TIMER_REFUSAL = ("Turning a timer on is for the person at the keyboard, and this command "
+                 "runs inside an agent session (claude). Ask them to run it, or to turn it "
+                 "on from the services page.")
+
+
+def test_an_agent_enabling_a_timer_is_refused_and_writes_nothing(fake, no_modules, agent,
+                                                                  capsys):
+    add(**written("nightly", kind="timer", every="1h"))
+    add(**written("web"))
+    fake.written["nightly"] = Unit("timer", enabled=False)
+    fake.written["web"] = Unit("daemon", enabled=False)
+    agent["harness"] = "claude"
+    code, out, err = run(capsys, "enable", "web", "nightly")
+    assert code == 3 and err.strip() == f"moxi services enable: {TIMER_REFUSAL}"
+    assert not fake.written["nightly"].enabled and not fake.written["web"].enabled
+    assert not store.get("nightly").enabled
+    assert [c for c in fake.calls if c[0] != "status"] == []
+    # A daemon's enable and a timer's disable pass.
+    assert run(capsys, "enable", "web")[0] == 0
+    add(**written("hourly", kind="timer", every="1h", enabled=True))
+    fake.written["hourly"] = Unit("timer", enabled=True)
+    assert run(capsys, "disable", "hourly")[0] == 0
+    # With no agent the timer is turned on as before.
+    agent["harness"] = None
+    assert run(capsys, "enable", "nightly")[0] == 0
+
+
+def test_an_agent_enabling_a_module_timer_is_refused(fake, site, agent, capsys,
+                                                    monkeypatch):
+    site.module("jotter", '''
+        TIMERS = {"sweep": {"command": "moxi-jotter-sweep", "doc": "sweep",
+                            "every": "5m", "switch": "sweep.enabled"}}
+        ''')
+    monkeypatch.setattr(moxi.config, "set_value",
+                        lambda *a, **k: pytest.fail("the switch was set"))
+    agent["harness"] = "claude"
+    code, out, err = run(capsys, "enable", "jotter/sweep")
+    assert code == 3 and TIMER_REFUSAL in err
+
+
+def test_an_agent_adding_an_enabled_timer_is_refused(fake, no_modules, agent, capsys):
+    agent["harness"] = "opencode"
+    code, out, err = run(capsys, "add", "nightly", "--timer", "--every", "1h", "--enable",
+                         "--", PY, "-c", "pass")
+    assert code == 3 and "inside an agent session (opencode)" in err
+    assert store.get("nightly") is None
+    # Added off, or as a daemon, it passes.
+    assert run(capsys, "add", "nightly", "--timer", "--every", "1h", "--", PY, "-c",
+               "pass")[0] == 0
+    assert run(capsys, "add", "web", "--enable", "--", PY, "-c", "pass")[0] == 0

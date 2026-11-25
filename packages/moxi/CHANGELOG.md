@@ -2,6 +2,11 @@
 
 ## 0.1.11 (unreleased)
 
+- `moxi config set MODULE KEY` and `unset` refuse with exit 3, writing nothing, when the
+  key is the switch of one of the module's timers, the change would turn it on, and an
+  agent's session started the run (`moxi.terminal.agent()`). Turning one off is never
+  refused. `moxi.units` gains `switched_timers(module, key)`, `timer_turned_on(module,
+  key, op, value)` and the refusal's words, `TIMER_ON_REFUSED`.
 - The skill placer (`moxi.place.apply`) compares an occupant with what it would place
   before a replace moves it aside: a file by its bytes, a folder by its files' names and
   bytes, a link by where it points. Equal, it replaces with no question. Different, it

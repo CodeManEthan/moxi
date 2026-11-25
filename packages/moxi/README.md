@@ -74,6 +74,8 @@ commands:
   shows first, its group, unit, words for an enum's values, and whether a change can hurt
   or is made at the terminal or on another page). `moxi config set --json` and `unset
   --json` print one object, `{changed, problem, fix, units}`, in place of their lines.
+  Run inside an agent's session, a `set` or `unset` that would turn a module's timer on
+  is refused (exit 3): turning a timer on is for the person at the keyboard.
 - `moxi paths <module>` prints where a module keeps its files: its data, state, cache,
   config and runtime directories, its config file and each store it declares.
 - `moxi doctor [<module>...]` checks the modules, their settings, daemons, timers and
