@@ -38,10 +38,10 @@ its size, a marker as a labelled rule, a request as its model and token counts.
 
 from __future__ import annotations
 
-import time
 from collections import deque
 from collections.abc import Callable, Iterator, Mapping
 from dataclasses import dataclass
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from .shape import CODEX, UNKNOWN, Record, squeezed_first, tool_summary
@@ -430,9 +430,15 @@ SYNTHETIC_CUT = 200
 NO_TIME = "(no time)".ljust(20)
 
 
+#: Epoch second 0.
+_EPOCH = datetime(1970, 1, 1, tzinfo=UTC)
+
+
 def stamp(epoch: float) -> str:
-    """Epoch seconds as UTC `YYYY-MM-DDTHH:MM:SSZ`, the form `--around` takes back."""
-    return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(epoch))
+    """Epoch seconds as UTC `YYYY-MM-DDTHH:MM:SSZ`, the form `--around` takes back, for
+    any time from year 1 to the end of year 9999 on every system (the system's `gmtime`
+    stops at year 3000 on Windows). Raises OverflowError outside those years."""
+    return (_EPOCH + timedelta(seconds=epoch)).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
 def _count(n: int | float) -> str:

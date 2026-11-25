@@ -65,7 +65,7 @@ def test_the_entry_is_named_for_the_module_and_loads_the_provider():
 
 def test_the_package_imports_nothing_of_the_host():
     for path in PACKAGE.glob("*.py"):
-        tree = ast.parse(path.read_text())
+        tree = ast.parse(path.read_text(encoding="utf-8"))
         for node in ast.walk(tree):
             names = ([a.name for a in node.names] if isinstance(node, ast.Import)
                      else [node.module or ""] if isinstance(node, ast.ImportFrom) else [])
@@ -78,7 +78,7 @@ def test_nothing_else_in_sessions_imports_the_provider():
     for path in src.glob("*.py"):
         assert "connector" not in {
             (node.module or "").split(".")[0]
-            for node in ast.walk(ast.parse(path.read_text()))
+            for node in ast.walk(ast.parse(path.read_text(encoding="utf-8")))
             if isinstance(node, ast.ImportFrom) and node.level}, path.name
 
 

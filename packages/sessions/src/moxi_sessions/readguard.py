@@ -14,7 +14,14 @@ the call run) or turns' `Deny(reason)`, whose reason names `moxi sessions read <
   name `Bash`): each simple command is judged on its own, and one is refused when one of
   its words is such a path. A word is read as a path when it starts with `/`, `~`, `$HOME`
   or `${HOME}`, or holds a `/` (then it is joined to the working directory); a word
-  `--name=value` or `NAME=value` is read by its value too.
+  `--name=value` or `NAME=value` is read by its value too. Words are read by sh's rules,
+  as Git Bash reads them on Windows, so a bare backslash escapes the next character there
+  too.
+
+**On Windows** a path is absolute when it names a drive (`C:\\` or `C:/`) or a share, either
+separator divides it, `~` and `$HOME` take `HOME` (else `USERPROFILE`, as Git Bash does),
+paths are compared without regard to case, a word holding a `\\` is read as a path too, and
+a program is named with or without its `.exe`.
 
 The roots are each harness's `source.root()`: the configured root when a config key names
 one, and the harness's own rule over the launch's environment. Each archive folder
@@ -45,6 +52,7 @@ modules load at the first call that needs them.
 from __future__ import annotations
 
 import _thread
+import ntpath
 import os
 import posixpath
 import sysconfig
@@ -76,6 +84,11 @@ DENY = (
 )
 
 _GLOB = "*?["
+#: Whether paths are read by Windows' rules, the separator a normalized path holds, and
+#: the characters that divide a path.
+_WINDOWS = os.name == "nt"
+_SEP = "\\" if _WINDOWS else "/"
+_SEPS = "/\\" if _WINDOWS else "/"
 _HOME_PREFIXES = ("${HOME}", "$HOME", "~")
 _said: set[str] = set()
 _lock = _thread.allocate_lock()
@@ -123,14 +136,14 @@ def decide(call, *, roots: Iterable[tuple[str, str]] | None = None,
         return None
     env = _env(getattr(call, "env", None))
     cwd = _absolute(getattr(call, "cwd", None))
-    home = _absolute(env.get("HOME"))
+    home = _absolute(env.get("HOME") or (env.get("USERPROFILE") if _WINDOWS else None))
     if roots is None:
         roots = transcript_roots(env)
     if archives is None:
         archives = archive_roots()
     known = _known(roots)
     kept = tuple((harness, _normpath(archive_dir)) for harness, archive_dir in archives
-                 if isinstance(archive_dir, str) and archive_dir.startswith("/"))
+                 if isinstance(archive_dir, str) and _isabs(archive_dir))
     if not known and not kept:
         return None
     for what, path in _named(tool, tool_input, cwd, home):
@@ -251,7 +264,7 @@ def _known(roots: Iterable[tuple[str, str]]) -> tuple[tuple[str, str, str], ...]
     its real path."""
     out = []
     for harness, r in roots:
-        if not isinstance(r, str) or not r.startswith("/"):
+        if not isinstance(r, str) or not _isabs(r):
             continue
         lexical = _normpath(r)
         out.append((harness, lexical, lexical))
@@ -265,7 +278,7 @@ def _under_written(path: str, kept) -> tuple[str, str] | None:
     """`(harness, folder)` of the first archive folder `path` is or lies under, both as
     written; nothing is resolved."""
     for harness, archive_dir in kept:
-        if path == archive_dir or path.startswith(archive_dir.rstrip("/") + "/"):
+        if _within(path, archive_dir):
             return harness, archive_dir
     return None
 
@@ -275,20 +288,41 @@ def _under_root(path: str, known) -> tuple[str, str] | None:
     its real path; None when none."""
     forms = {path, os.path.realpath(path)}
     for harness, named, form in known:
-        prefix = form.rstrip("/") + "/"
-        if any(p == form or p.startswith(prefix) for p in forms):
+        if any(_within(p, form) for p in forms):
             return harness, named
     return None
 
 
 # --- paths ------------------------------------------------------------------------------
 
+def _isabs(p: str) -> bool:
+    """Whether `p` is absolute by this system's rules: on Windows, a drive and its root
+    or a share."""
+    if not _WINDOWS:
+        return p.startswith("/")
+    drive, rest = ntpath.splitdrive(p)
+    return bool(drive) and (rest.startswith(("/", "\\")) or drive[:2] in ("//", "\\\\"))
+
+
 def _normpath(p: str) -> str:
+    if _WINDOWS:
+        return ntpath.normpath(p)
     return "/" + posixpath.normpath(p).lstrip("/")
 
 
+def _key(p: str) -> str:
+    """A normalized path as it is compared: on Windows in lower case, with `\\`."""
+    return ntpath.normcase(p) if _WINDOWS else p
+
+
+def _within(path: str, top_dir: str) -> bool:
+    """Whether `path` is `top_dir` or lies under it, both normalized."""
+    path, top_dir = _key(path), _key(top_dir)
+    return path == top_dir or path.startswith(top_dir.rstrip(_SEPS) + _SEP)
+
+
 def _absolute(p: object) -> str | None:
-    if isinstance(p, str) and p.startswith("/"):
+    if isinstance(p, str) and _isabs(p):
         return _normpath(p)
     return None
 
@@ -300,7 +334,7 @@ def _path(value: object, base: str | None, home: str | None) -> str | None:
     if not isinstance(value, str) or not value:
         return None
     for prefix in _HOME_PREFIXES:
-        if value == prefix or value.startswith(prefix + "/"):
+        if value == prefix or (value.startswith(prefix) and value[len(prefix)] in _SEPS):
             if home is None:
                 return None
             value = home + value[len(prefix):]
@@ -308,24 +342,38 @@ def _path(value: object, base: str | None, home: str | None) -> str | None:
     cut = min((i for i in (value.find(c) for c in _GLOB) if i >= 0), default=-1)
     if cut >= 0:
         value = value[:cut]
-        value = value[:value.rfind("/") + 1] if "/" in value else ""
-    if not value.startswith("/"):
+        value = value[:max(value.rfind(sep) for sep in _SEPS) + 1]
+    if not _isabs(value):
         if base is None:
             return None
-        value = base + "/" + value
+        value = base + _SEP + value
     return _normpath(value)
 
 
 def _pathlike(word: str) -> bool:
-    return (word.startswith(("/", "~", "$HOME", "${HOME}")) or "/" in word
+    return (word.startswith(("/", "~", "$HOME", "${HOME}")) or _divided(word)
             or word in (".", ".."))
+
+
+def _divided(text: str) -> bool:
+    return any(sep in text for sep in _SEPS)
+
+
+def _program(word: str) -> str:
+    """A command word's program name: its last part, on Windows in lower case and without
+    `.exe`."""
+    name = word[max(word.rfind(sep) for sep in _SEPS) + 1:]
+    if _WINDOWS:
+        name = name.lower()
+        name = name[:-4] if name.endswith(".exe") else name
+    return name
 
 
 def _values(word: str) -> Iterator[str]:
     """The word, and the value of a `--name=value` or `NAME=value` word."""
     yield word
     name, eq, value = word.partition("=")
-    if eq and value and "/" not in name:
+    if eq and value and not _divided(name):
         yield value
 
 
@@ -356,7 +404,7 @@ def _script(words: list[str]) -> int | None:
     """Where the `-c` script of a command that runs a shell is among its words, or
     None."""
     skip = len(words) - len(_past_assignments(words))
-    if skip >= len(words) or posixpath.basename(words[skip]) not in SHELLS:
+    if skip >= len(words) or _program(words[skip]) not in SHELLS:
         return None
     for i in range(skip + 1, len(words)):
         word = words[i]
@@ -471,15 +519,16 @@ def escaped(words: list[str], home: str | None = None,
     first = words[0]
     if first == "moxi":
         return True
-    if first.startswith("~/") and home is not None:
+    if first[:1] == "~" and first[1:2] and first[1:2] in _SEPS and home is not None:
         first = home + first[1:]
-    if not first.startswith("/"):
+    if not _isabs(first):
         return False
     own = own_moxi()
     if own is None:
         return False
-    return (_normpath(first) == own
-            or os.path.realpath(first) == os.path.realpath(own))
+    return (_key(_normpath(first)) == _key(own)
+            or os.path.realpath(first) == os.path.realpath(own)
+            or (_WINDOWS and _key(_normpath(first)) == _key(own) + ".exe"))
 
 
 def own_moxi() -> str | None:

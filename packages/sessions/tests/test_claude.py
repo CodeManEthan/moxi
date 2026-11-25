@@ -269,6 +269,7 @@ def test_with_none_the_config_key_names_the_root(own_config, monkeypatch, tmp_pa
 def test_the_config_key_expands_a_tilde_and_refuses_a_relative_path(own_config,
                                                                     monkeypatch, tmp_path):
     monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setenv("USERPROFILE", str(tmp_path))     # the home on Windows
     write_config(own_config, '[claude]\nprojects = "~/stated"\n')
     assert projects_root(None) == tmp_path / "stated"
     write_config(own_config, '[claude]\nprojects = "relative/path"\n')

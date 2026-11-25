@@ -385,7 +385,9 @@ class _Walk:
                 return None
             self.held.add(session_id)
         try:
-            st = entry.stat()
+            # On Windows a listing's stat leaves `st_dev` and `st_ino` at 0, so the file's
+            # identity would never match the one a read takes from its handle.
+            st = os.stat(entry.path) if os.name == "nt" else entry.stat()
         except FileNotFoundError:
             self._gone(entry.path)
             return None

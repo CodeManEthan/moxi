@@ -172,6 +172,23 @@ def test_a_work_dir_is_the_same_work_dir_with_or_without_a_slash_at_its_end(root
     assert listed(roots, work_dir="/work/proj-A")["total"] == 0     # nothing else is folded
 
 
+def test_a_work_dir_in_windows_form_drops_its_end_slashes(roots):
+    claude(roots, 1, NOW - 10, cwd="C:\\work\\proj-a")
+    claude(roots, 2, NOW - 20, cwd="C:\\work\\proj-a\\")
+    claude(roots, 3, NOW - 30, cwd="C:\\")
+    claude(roots, 4, NOW - 40, cwd="\\\\srv\\share\\proj-b")
+
+    assert listed(roots, work_dir="C:\\work\\proj-a")["total"] == 2
+    assert listed(roots, work_dir="C:\\work\\proj-a\\/")["total"] == 2
+    assert listed(roots, work_dir="C:\\")["total"] == 1
+    assert listed(roots, work_dir="\\\\srv\\share\\proj-b\\")["total"] == 1
+    assert listed(roots, work_dir="C:/work/proj-a")["total"] == 0   # nothing else is folded
+    assert ids(group(listed(roots, find="proj-b"), "found")["rows"]) == [sid(4)]
+    for relative in ("work\\proj-a", "C:work", "\\work\\proj-a"):
+        with pytest.raises(ValueError, match="absolute path"):
+            listed(roots, work_dir=relative)
+
+
 def test_a_harness_filter_leaves_the_harness_counts_as_they_were(roots):
     shared_dir(roots)
 

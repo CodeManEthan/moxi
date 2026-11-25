@@ -438,6 +438,10 @@ The guard is a nudge, not a boundary. Its known gaps:
 - A word that starts with `/` is read as a path even when it is text, quotes or not: a
   heredoc line naming a transcript, or `echo '<transcript path>'`, is refused. A quoted
   sentence that holds such a path is one word that doesn't start with `/`, and passes.
+- On Windows the guard reads paths by Windows' rules (a drive or a share, either
+  separator, any case), but a command's words by sh's, as Git Bash reads them: an
+  unquoted `C:\Users\...` there is `C:Users...` to bash and to the guard, and passes.
+  Quoted, or with forward slashes, it is read.
 
 ## The page
 

@@ -8,9 +8,11 @@ becomes `local`.
 
 Local paths go second, cut by root wherever a root occurs, whatever precedes it, matched
 without regard to case. The roots are the home folder `env` names (`HOME`; the process
-environment when `env` is None), `~/`, `$HOME/` and `SYSTEM_ROOTS`. A path runs to the
+environment when `env` is None), `~/`, `$HOME/`, `SYSTEM_ROOTS` and any drive's root
+(`C:\\` or `C:/`, not preceded by a letter or digit), on every system. A path runs to the
 first whitespace, quote, backtick or one of `<>|,;(){}[]`, or the text's end, and is
-replaced by its last non-empty segment cut to `SEGMENT_MAX_BYTES`. Every root holds a
+replaced by its last non-empty segment (segments divided by `/` or `\\`) cut to
+`SEGMENT_MAX_BYTES`. Every root holds a
 segment of its own, so a bare root shows its own name (`/home/` shows `home`, `~/` shows
 `~`). A redaction placeholder (`[REDACTED:<rule>]`) counts as part of the path, so a
 path holding a secret in a middle segment is still cut to its last segment, and shows
@@ -22,7 +24,7 @@ away the boundary the secret's rule needs, and only the redaction after it judge
 text as sent.
 
 `last_segment(path)` is a folder's own cut, which takes any path, not only one under a
-root. It splits a path on `/` and drops the empty parts, so a trailing slash or a
+root. It splits a path on `/` and `\\` and drops the empty parts, so a trailing slash or a
 relative path cuts the same way, and gives the last part, cut to `SEGMENT_MAX_BYTES`
 UTF-8 bytes on a character boundary. A path with no segment (`/`) gives `/`; an empty or
 missing path gives None.
@@ -45,6 +47,11 @@ SEGMENT_MAX_BYTES = 255
 SYSTEM_ROOTS = ("/home/", "/tmp/", "/root/", "/etc/", "/var/", "/usr/", "/opt/", "/mnt/",
                 "/media/", "/run/", "/srv/")
 
+#: A drive's root, `C:\\` or `C:/`, as a root the cut finds on every system.
+DRIVE_ROOT = r"(?<![A-Za-z0-9])[A-Za-z]:[\\/]"
+#: What divides a path's segments.
+_SEGMENTS = re.compile(r"[\\/]")
+
 #: A redaction placeholder, which a path's run takes in whole.
 _PLACEHOLDER = r"\[REDACTED:[^\[\]\s]*\]"
 #: The characters a path runs over after its root.
@@ -65,7 +72,7 @@ def last_segment(path: str | None) -> str | None:
     part; None for an empty or missing path."""
     if not isinstance(path, str) or not path:
         return None
-    parts = [part for part in path.split("/") if part]
+    parts = [part for part in _SEGMENTS.split(path) if part]
     if not parts:
         return ROOT_SEGMENT
     return _bounded(parts[-1]) or ROOT_SEGMENT
@@ -88,12 +95,12 @@ def _roots(home: str | None) -> tuple[str, ...]:
 
 @functools.lru_cache(maxsize=8)
 def _paths(home: str | None) -> re.Pattern:
-    return re.compile("(?:" + "|".join(re.escape(root) for root in _roots(home)) + ")"
+    return re.compile("(?:" + "|".join([*map(re.escape, _roots(home)), DRIVE_ROOT]) + ")"
                       + RUN, re.IGNORECASE)
 
 
 def _display(match: re.Match) -> str:
-    parts = [part for part in match.group(0).split("/") if part]
+    parts = [part for part in _SEGMENTS.split(match.group(0)) if part]
     return _bounded(parts[-1])
 
 
@@ -105,5 +112,6 @@ def cut_local(text: str, env: Mapping[str, str] | None = None) -> str:
     return _paths(home).sub(_display, _LOOPBACK.sub(LOOPBACK, text))
 
 
-__all__ = ["LOOPBACK", "ROOT_SEGMENT", "RUN", "SEGMENT_MAX_BYTES", "SYSTEM_ROOTS",
+__all__ = ["DRIVE_ROOT", "LOOPBACK", "ROOT_SEGMENT", "RUN", "SEGMENT_MAX_BYTES",
+           "SYSTEM_ROOTS",
            "cut_local", "last_segment"]

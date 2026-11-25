@@ -46,6 +46,19 @@ def test_a_root_is_cut_wherever_it_occurs_and_case_doesnt_matter():
     assert cut("/Etc/Passwd") == "Passwd"
 
 
+@pytest.mark.parametrize("text, expected", [
+    ("open C:\\Users\\someone\\work\\plan.md now", "open plan.md now"),
+    ("open c:/Users/someone/plan.md", "open plan.md"),
+    ('{"cwd": "D:\\\\proj\\\\app"}', '{"cwd": "app"}'),
+    ("Read(C:\\Users\\x\\a.md)", "Read(a.md)"),
+    ("C:\\", "C:"),
+    ("https://example.com/C:/x", "https://example.com/x"),
+    ("ABC:/x and 9:/y", "ABC:/x and 9:/y"),
+])
+def test_a_path_from_a_drive_s_root_is_cut_on_every_system(text, expected):
+    assert cut(text) == expected
+
+
 def test_a_path_outside_the_roots_is_left():
     assert cut("/data/other/x and a/b/c") == "/data/other/x and a/b/c"
 
@@ -76,6 +89,7 @@ def test_a_cwd_with_no_part_is_slash_and_an_empty_one_is_none():
     assert last_segment("/") == "/"
     assert last_segment("") is None and last_segment(None) is None
     assert last_segment("/data/x/") == "x"
+    assert last_segment("C:\\work\\app\\") == "app" and last_segment("\\") == "/"
 
 
 def test_a_placeholder_in_a_middle_segment_is_part_of_the_path():

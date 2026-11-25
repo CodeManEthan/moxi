@@ -5,6 +5,7 @@ folders by their written path, setup, the doctor's `archives` row and `retention
 
 from __future__ import annotations
 
+import json
 import os
 import stat
 import sys
@@ -150,7 +151,7 @@ def test_find_with_archives_asks_the_live_root_then_each_archive_in_order(home, 
     assert [p.root for p in found.probes] == [str(live(home, harness)),
                                              str(arch(home, harness, 1))]
     assert [p.outcome for p in found.probes] == ["miss", "hit"]
-    assert found.hits[0].source.path.startswith(str(arch(home, harness, 1)) + "/")
+    assert found.hits[0].source.path.startswith(str(arch(home, harness, 1)) + os.sep)
 
 
 def test_find_without_archives_and_sources_ask_the_live_root_only_and_test_nothing(
@@ -408,7 +409,7 @@ def test_root_verb_names_each_archive_and_tests_none(home, capsys, spawned):
         for n in (1, 2):
             assert f"  archive: {arch(home, harness, n)}" in out
     code, out, _ = run(capsys, "root", "--json")
-    assert str(arch(home, "codex", 2)) in out
+    assert json.dumps(str(arch(home, "codex", 2))) in out
 
 
 # --- nothing changes in an archive folder -------------------------------------------------
@@ -463,7 +464,7 @@ def test_the_guard_refuses_a_path_under_an_archive_without_resolving_it(home, mo
     assert not any(path.startswith(archive_dir) for path in resolved)
     shell = readguard.judge(turns.ToolCall(
         harness="codex", session_id=ONE, agent_id=None, tool="Bash", tool_use_id="toolu_2",
-        input={"command": f"cat {arch(home, 'codex', 1)}/2026/x.jsonl"}, cwd="/",
+        input={"command": f"cat {arch(home, 'codex', 1).as_posix()}/2026/x.jsonl"}, cwd="/",
         env={"HOME": str(home)}))
     assert isinstance(shell, turns.Deny)
 

@@ -63,6 +63,12 @@ def transcript(home: Path) -> str:
     return str(home / ".claude/projects/-work-project" / f"{SESSION}.jsonl")
 
 
+def word(path) -> str:
+    """A path as a shell command names it: with `/`, which Git Bash on Windows reads as
+    it stands (a bare `\\` there escapes the next character)."""
+    return Path(path).as_posix()
+
+
 def loader():
     """turns' guard loader, which turns' own endpoint runs."""
     return importlib.import_module("moxi_turns.guards")
@@ -137,7 +143,7 @@ def test_claude_glob_by_its_pattern_joined_to_its_path(home):
 
 
 def test_claude_bash_words_naming_a_root_path_are_refused(home):
-    t = transcript(home)
+    t = word(transcript(home))
     for command in (f"cat {t}", f"tail -n 5 '{t}'", f"wc -l < {t}",
                     "grep -r error ~/.claude/projects", "ls $HOME/.claude/projects",
                     "jq . ${HOME}/.claude/projects/-work-project/a.jsonl",
@@ -151,17 +157,17 @@ def test_claude_bash_words_naming_a_root_path_are_refused(home):
 
 
 def test_codex_shell_calls_under_its_root_are_refused(home):
-    rollout = str(home / ".codex/sessions/2026/11/07/rollout.jsonl")
+    rollout = word(home / ".codex/sessions/2026/11/07/rollout.jsonl")
     assert refused("Bash", {"command": f"cat {rollout}"}, home, harness="codex")
     assert refused("Bash", {"command": ["bash", "-lc", f"cat {rollout}"]}, home,
                    harness="codex")
-    assert refused("Bash", {"command": f"sqlite3 {home}/.local/share/opencode/opencode.db"},
+    assert refused("Bash", {"command": f"sqlite3 {word(home)}/.local/share/opencode/opencode.db"},
                    home, harness="codex")
     assert not refused("Bash", {"command": "cat README.md"}, home, harness="codex")
 
 
 def test_a_shell_c_script_is_judged_as_commands_of_its_own(home):
-    t = transcript(home)
+    t = word(transcript(home))
     assert refused("Bash", {"command": f"bash -lc 'cat {t}'"}, home)
     assert not refused("Bash", {"command": f"bash -lc 'moxi sessions find {t}'"}, home)
 
@@ -185,23 +191,95 @@ def test_the_refusal_names_the_path_its_root_and_the_reader(home):
     assert "moxi sessions read <session>" in answer.reason
 
 
+# --- Windows' paths, read by Windows' rules on every system -----------------------------
+
+WIN_HOME = "C:\\Users\\Some One"
+WIN_ROOT = WIN_HOME + "\\.claude\\projects"
+
+
+@pytest.fixture
+def windows_rules(monkeypatch):
+    """The guard reading paths as it does on Windows."""
+    monkeypatch.setattr(readguard, "_WINDOWS", True)
+    monkeypatch.setattr(readguard, "_SEP", "\\")
+    monkeypatch.setattr(readguard, "_SEPS", "/\\")
+    monkeypatch.setattr(readguard, "own_moxi", lambda: "C:\\venv\\Scripts\\moxi")
+
+
+def win_refused(tool, tool_input, *, env=None, cwd="C:\\work\\project", archives=()):
+    env = {"USERPROFILE": WIN_HOME} if env is None else env
+    got = readguard.decide(turns.ToolCall(harness="claude", session_id=SESSION,
+                                          agent_id=None, tool=tool, tool_use_id="toolu_1",
+                                          input=tool_input, cwd=cwd, env=env),
+                           roots=[("claude", WIN_ROOT)], archives=archives)
+    return got is not None
+
+
+def test_windows_paths_under_a_root_are_refused_in_either_spelling_and_any_case(
+        windows_rules):
+    for path in (WIN_ROOT + "\\-p\\a.jsonl", "C:/Users/Some One/.claude/projects/-p/a.jsonl",
+                 "c:\\users\\SOME ONE\\.Claude\\Projects", "~/.claude/projects/-p",
+                 "~\\.claude\\projects", "C:\\Users\\Some One\\x\\..\\.claude\\projects"):
+        assert win_refused("Read", {"file_path": path}), path
+    for path in ("C:\\Users\\Some One\\.claude\\projects-old\\a",
+                 "D:\\Users\\Some One\\.claude\\projects\\a",
+                 "\\Users\\Some One\\.claude\\projects\\a", "relative\\a"):
+        assert not win_refused("Read", {"file_path": path}), path
+    assert win_refused("Grep", {"pattern": "x"}, cwd=WIN_ROOT + "\\-p")
+    assert win_refused("Glob", {"pattern": "**\\*.jsonl", "path": WIN_ROOT})
+    assert not win_refused("Glob", {"pattern": "C:\\Users\\Some One\\*\\x.jsonl"})
+
+
+def test_windows_shell_words_are_read_as_git_bash_reads_them(windows_rules):
+    for command in ("cat 'C:\\Users\\Some One\\.claude\\projects\\-p\\a.jsonl'",
+                    'cat "C:\\Users\\Some One\\.claude\\projects\\-p\\a.jsonl"',
+                    "cat C:/Users/Some\\ One/.claude/projects/-p/a.jsonl",
+                    "ls ~/.claude/projects", "ls $HOME/.claude/projects",
+                    "cat .claude\\\\projects\\\\-p",
+                    "jq . --file=C:/Users/Some\\ One/.claude/projects",
+                    "'C:\\Program Files\\Git\\bin\\BASH.EXE' -c 'cat ~/.claude/projects/x'",
+                    "C:/venv/Scripts/moxi.exe usage C:/Users/Some\\ One/.claude/projects"):
+        assert win_refused("Bash", {"command": command}, cwd=WIN_HOME), command
+    for command in ("C:/venv/Scripts/moxi.exe sessions read ~/.claude/projects",
+                    "c:\\\\VENV\\\\scripts\\\\moxi sessions find ~/.claude/projects",
+                    # A bare backslash escapes, so bash reads `C:UsersSome`.
+                    "cat C:\\Users\\Some One\\.claude\\projects\\a"):
+        assert not win_refused("Bash", {"command": command}, cwd=WIN_HOME), command
+
+
+def test_windows_home_is_home_else_the_profile(windows_rules):
+    tilde = {"file_path": "~/.claude/projects/a"}
+    assert win_refused("Read", tilde, env={"HOME": WIN_HOME})
+    assert not win_refused("Read", tilde, env={"HOME": "C:\\elsewhere", "USERPROFILE": WIN_HOME})
+    assert not win_refused("Read", tilde, env={"PATH": "x"})
+
+
+def test_a_windows_archive_dir_is_compared_as_written_without_regard_to_case(
+        windows_rules):
+    kept = [("claude", "D:\\Arch\\claude-1")]
+    assert win_refused("Read", {"file_path": "d:/arch/CLAUDE-1/-p/a.jsonl"}, archives=kept)
+    assert not win_refused("Read", {"file_path": "D:\\Arch\\claude-10\\a"}, archives=kept)
+    assert not win_refused("Read", {"file_path": "D:\\Arch\\x"},
+                           archives=[("claude", "relative\\claude-1")])
+
+
 # --- the escape -------------------------------------------------------------------------
 
 def test_moxi_sessions_passes_whatever_paths_it_names(home):
-    t = transcript(home)
+    t = word(transcript(home))
     for command in (f"moxi sessions find {t}",
                     f"MOXI_HOME=/x moxi sessions read {SESSION} --root {t}",
-                    f"{readguard.own_moxi()} sessions read {SESSION} {t}"):
+                    f"{word(readguard.own_moxi())} sessions read {SESSION} {t}"):
         assert not refused("Bash", {"command": command}, home), command
 
 
 def test_the_escapes_are_sessions_alone_by_default(home, own_config):
     assert readguard.escapes() == readguard.ESCAPES == frozenset({"sessions"})
-    assert refused("Bash", {"command": f"moxi notes add --from {transcript(home)}"}, home)
+    assert refused("Bash", {"command": f"moxi notes add --from {word(transcript(home))}"}, home)
 
 
 def test_a_verb_added_to_the_escapes_setting_passes(home, own_config):
-    t = transcript(home)
+    t = word(transcript(home))
     write_config(own_config,
                  '[guard]\ntranscript_read_escapes = ["sessions", "notes"]\n')
     assert readguard.escapes() == frozenset({"sessions", "notes"})
@@ -212,11 +290,11 @@ def test_a_verb_added_to_the_escapes_setting_passes(home, own_config):
 
 def test_the_escapes_setting_can_take_sessions_off(home, own_config):
     write_config(own_config, "[guard]\ntranscript_read_escapes = []\n")
-    assert refused("Bash", {"command": f"moxi sessions find {transcript(home)}"}, home)
+    assert refused("Bash", {"command": f"moxi sessions find {word(transcript(home))}"}, home)
 
 
 def test_the_command_after_the_escape_is_judged_on_its_own(home):
-    t = transcript(home)
+    t = word(transcript(home))
     for command in (f"moxi sessions root; cat {t}", f"moxi sessions root && cat {t}",
                     f"moxi sessions read {SESSION} | tee {t}",
                     f"moxi sessions root\ncat {t}",
@@ -225,7 +303,7 @@ def test_the_command_after_the_escape_is_judged_on_its_own(home):
 
 
 def test_another_moxi_or_another_verb_is_no_escape(home):
-    t = transcript(home)
+    t = word(transcript(home))
     for command in (f"/opt/other/bin/moxi sessions read {t}", f"moxi usage {t}",
                     f"echo moxi sessions {t}"):
         assert refused("Bash", {"command": command}, home), command
@@ -238,7 +316,7 @@ def test_a_root_moved_by_config_is_guarded(home, own_config, tmp_path):
     (moved / "-p").mkdir(parents=True)
     write_config(own_config, f'[claude]\nprojects = {toml_string(moved)}\n')
     assert refused("Read", {"file_path": str(moved / "-p/a.jsonl")}, home)
-    assert refused("Bash", {"command": f"cat {moved}/-p/a.jsonl"}, home)
+    assert refused("Bash", {"command": f"cat {word(moved)}/-p/a.jsonl"}, home)
     assert ("claude", str(moved)) in readguard.transcript_roots({"HOME": str(home)})
 
 

@@ -41,6 +41,7 @@ import threading
 import time
 from collections.abc import Iterable
 from dataclasses import dataclass
+from pathlib import PurePath
 
 from .shape import CLAUDE, CODEX
 
@@ -163,9 +164,9 @@ def archive_answers(paths: Iterable[str], *, fresh: bool = False,
     """Each folder's answer, keyed by the folder as given, testing at once every folder
     this process holds no answer for (every folder with `fresh`), waiting at most
     `wait_s` seconds for all of them together (config `archives.answer_wait_s` when None). A
-    relative folder is offline without a test. Never raises for what a folder does;
-    raises `moxi.config.ConfigError` when `wait_s` is None and the config file cannot be
-    read."""
+    relative folder (on Windows, one without a drive or share too) is offline without a
+    test. Never raises for what a folder does; raises `moxi.config.ConfigError` when
+    `wait_s` is None and the config file cannot be read."""
     wanted = list(dict.fromkeys(str(p) for p in paths))
     out: dict[str, ArchiveAnswer] = {}
     now = time.monotonic()
@@ -175,7 +176,7 @@ def archive_answers(paths: Iterable[str], *, fresh: bool = False,
             kept = None if fresh else _kept.get(archive_dir)
             if kept is not None and now - kept[0] < KEEP_S:
                 out[archive_dir] = kept[1]
-            elif not archive_dir.startswith("/"):
+            elif not PurePath(archive_dir).is_absolute():
                 out[archive_dir] = ArchiveAnswer(archive_dir, ok=False, reason="is not an absolute path")
             else:
                 to_test.append(archive_dir)

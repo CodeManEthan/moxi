@@ -18,8 +18,11 @@ either reads each head not read yet, once for the catalog's life. Nothing else r
 every head. Every count an answer gives is exact for the sessions it stands for; where a
 part of a root could not be listed, the answer's `roots` says so.
 
-A folder is compared as written but for the slashes at its end, so `/work/proj-a/` asks
-for `/work/proj-a`; nothing else is folded, and no link is followed.
+A folder is an absolute path in POSIX's form (`/work/proj-a`) or Windows' (`C:\\work\\proj-a`,
+a drive and its root, or a share), as harnesses record it on each system. It is compared
+as written but for the slashes at its end (in Windows' form `\\` too, a drive's root kept
+whole), so `/work/proj-a/` asks for `/work/proj-a`; nothing else is folded, and no link is
+followed.
 
 **The groups.** A list with no `find` is cut into:
 
@@ -79,6 +82,7 @@ turn, the last (`Catalog.facts`).
 
 from __future__ import annotations
 
+import ntpath
 import os
 import time
 from collections import Counter
@@ -166,7 +170,7 @@ def _filters(harness: Any = None, since: Any = None, until: Any = None,
              work_dir: Any = None, find: Any = None) -> _Filters:
     if harness is not None and harness not in HARNESSES:
         raise ValueError(f"harness is one of {', '.join(HARNESSES)}, not {harness!r}")
-    if work_dir is not None and not (isinstance(work_dir, str) and work_dir.startswith("/")):
+    if work_dir is not None and not (isinstance(work_dir, str) and _rooted(work_dir)):
         raise ValueError(f"folder is an absolute path, not {work_dir!r}")
     if find is not None:
         if not isinstance(find, str) or len(find.strip()) < FIND_MIN:
@@ -182,7 +186,25 @@ def _work_dir(path: str | None) -> str | None:
     no folder."""
     if not path:
         return None
-    return path.rstrip("/") or "/"
+    drive = _windows_drive(path)
+    if not drive:
+        return path.rstrip("/") or "/"
+    kept = path.rstrip("/\\")
+    return kept if len(kept) > len(drive) else path[:len(drive) + 1]
+
+
+def _windows_drive(path: str) -> str:
+    """The drive (`C:`) or share of a path in Windows' form, else an empty text; a path
+    that starts with `/` is in POSIX's form."""
+    return "" if path.startswith("/") else ntpath.splitdrive(path)[0]
+
+
+def _rooted(path: str) -> bool:
+    """Whether `path` is absolute in POSIX's form or Windows'."""
+    if path.startswith("/"):
+        return True
+    drive = _windows_drive(path)
+    return bool(drive) and (path[len(drive):].startswith(("/", "\\")) or drive[:2] == "\\\\")
 
 
 def _in_time(entry: Entry, f: _Filters) -> bool:
@@ -200,6 +222,8 @@ def _found(entry: Entry, work_dir: str | None, needle: str) -> bool:
         return True
     if not work_dir:
         return False
+    if _windows_drive(work_dir):
+        work_dir = work_dir.replace("\\", "/")
     return needle in work_dir.rstrip("/").rsplit("/", 1)[-1].lower()
 
 

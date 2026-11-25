@@ -60,7 +60,6 @@ from __future__ import annotations
 import argparse
 import json
 import sys
-import time
 from collections.abc import Sequence
 from datetime import datetime
 
@@ -307,8 +306,7 @@ def parse_time(text: str) -> float:
     value = text.strip()
     try:
         seconds = float(value) if value.replace(".", "", 1).isdigit() else _iso(value)
-        if time.gmtime(seconds).tm_year > 9999:
-            raise ValueError(value)
+        view.stamp(seconds)             # raises past the end of year 9999
         return seconds
     except (ValueError, OverflowError, OSError):
         raise ValueError(f"{text!r} is not a time: give ISO 8601 "

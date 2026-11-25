@@ -822,7 +822,7 @@ class Catalog:
         with self._lock:
             self._gathered = result
             if None not in unsure:
-                under = tuple(f"{root}/" for root in unsure)
+                under = tuple(os.path.join(root, "") for root in unsure)
                 for path in [p for p in self._heads
                              if p not in live and not p.startswith(under)]:
                     del self._heads[path]

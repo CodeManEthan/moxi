@@ -14,7 +14,11 @@
 Rows are held until `write`, which writes every row added or changed since the last
 write, and every delete, in one transaction with `synchronous=OFF`, so a test's database
 costs no fsync per statement. A database built in several writes is how a test shows a
-reader rows arriving: each `write` is one commit, as OpenCode's own writes are.
+reader rows arriving: each `write` is one commit, as OpenCode's own writes are. Each
+write that holds a row or a delete leaves the database and its `-wal` file a modification
+time later than the write before it gave them, so a reader that compares sizes and times sees every write: a
+filesystem's clock moves in steps (about 15 ms on Windows), and two writes inside one
+step that leave the sizes alike would read as no change.
 
 Every row gets the next time on the builder's clock (`start`, then `step` seconds apart),
 in milliseconds as OpenCode writes them; `at=` (epoch seconds) sets a row's time instead.
@@ -29,6 +33,7 @@ test can show that a reader never reads them. Nothing is read from the environme
 from __future__ import annotations
 
 import json
+import os
 import sqlite3
 from pathlib import Path
 from typing import Any
@@ -116,6 +121,7 @@ class OpenCodeDb:
         self._newest = self.clock
         self._unsummed: set[str] = set()
         self.sessions: dict[str, OpenCodeSession] = {}
+        self._mtimes: dict[Path, int] = {}
 
     # -- the clock and ids -----------------------------------------------------------
 
@@ -200,6 +206,7 @@ class OpenCodeDb:
         self._unsummed.clear()
         self.path.parent.mkdir(parents=True, exist_ok=True)
         new = not self.path.exists()
+        wrote = bool(self._dirty or self._deleted)
         conn = sqlite3.connect(self.path, isolation_level=None)
         try:
             conn.execute("PRAGMA synchronous=OFF")
@@ -225,7 +232,24 @@ class OpenCodeDb:
             conn.close()
         self._dirty.clear()
         self._deleted.clear()
+        if wrote:
+            self._later()
         return self.path
+
+    def _later(self) -> None:
+        """Give the database and its log a modification time past the last write's
+        where the filesystem's clock didn't move one."""
+        for path in (self.path, self.path.with_name(self.path.name + "-wal")):
+            try:
+                st = os.stat(path)
+            except FileNotFoundError:
+                continue
+            last = self._mtimes.get(path)
+            mtime_ns = st.st_mtime_ns
+            if last is not None and mtime_ns <= last:
+                mtime_ns = last + 1_000_000
+                os.utime(path, ns=(st.st_atime_ns, mtime_ns))
+            self._mtimes[path] = mtime_ns
 
 
 class OpenCodeSession:

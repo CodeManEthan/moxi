@@ -2,6 +2,27 @@
 
 ## Unreleased
 
+- On Windows the transcript-read guard refuses what it refuses elsewhere. It read only
+  POSIX paths, so a Windows path (`C:\...`) never matched a root and nothing was refused.
+  There a path is absolute when it names a drive or a share, either separator divides it,
+  paths are compared without regard to case, `~` and `$HOME` take `HOME` else
+  `USERPROFILE`, and the escape names this environment's `moxi` with or without `.exe`.
+  Shell words are still read by sh's rules, as Git Bash reads them, so a path in a command
+  needs its quotes or forward slashes there as it does in Git Bash.
+- The path cut for text that leaves the machine cuts a path from any drive's root (`C:\`
+  or `C:/`), on every system, and a path's last part is found at `/` or `\`. On Windows
+  every local path left whole before, the user's name in it included.
+- On Windows a listing's files carry their real identity (device and inode). They were 0
+  there, so no read matched its listing: every head and prompt was read again at each
+  gather, and the counts of reads doubled.
+- On Windows an archive folder with a drive (`D:\arch`) is tested and read; every
+  archive folder there was offline as "not an absolute path". A head kept under a root
+  that could not be listed for one gather is kept on Windows too.
+- `list --folder` and the API's `work_dir` take a folder in Windows' form (`C:\work\app`,
+  a drive and its root, or a share), as Claude Code and Codex record it there; its end
+  slashes are dropped as they are for a POSIX folder, and `find` matches its last part.
+- `read --around` takes any time to the end of year 9999 on Windows too, whose `gmtime`
+  stops at year 3000. The time a read prints is computed the same way.
 - The list's find reads the list again through moxi-ui's `readLater`, so the page root's
   `data-reading` mark counts that read from the keystroke until the list it brings is
   drawn, and a test's press waits for it. A user sees no change. The `ui` extra asks for
