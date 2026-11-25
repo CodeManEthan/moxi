@@ -8,14 +8,17 @@ repo's choice to keep its history publishable without being public (`clean.py`).
 piece reads the public flag first, and the message and content pieces the clean or public
 flag; a piece registered in a repo without its flag refuses.
 
-`enable` writes the flag, then registers the three pieces through repo's API, each
-piece's settings seeded from publishing's `defaults.*` keys and overridden by `--set`.
+`enable` registers the three pieces through repo's API, each piece's settings seeded
+from publishing's `defaults.*` keys and overridden by `--set`, then writes the flag. It
+turns clean history on as well (`clean.Prepared`): a public repo always keeps it.
 A seed is written only where the piece is first registered: enabling a repo again leaves
 the settings it has, as repo does with its own seeds. Every `--set` for one key together
 give that key's whole list, replacing the seed or what the repo had. A call that sets the
 push piece's `standing-branch`, `main` or `protected` is refused, writing nothing, when a
 `standing-branch` pattern would then be bad (`push.Standing`). `disable` removes the
-pieces, then the flag.
+push piece, then the flag, then turns clean history off where `enable` turned it on or
+the repo has no clean flag (one enabled before clean history existed); a repo that kept a
+clean history before it was public keeps it.
 """
 
 from __future__ import annotations
@@ -271,13 +274,15 @@ def _names_empty() -> str | None:
 
 def enable(path: str | os.PathLike, *, github: str | None = None,
            sets: list[str] | tuple = ()) -> list[str]:
-    """Mark the repo at `path` public and register the three pieces. Returns the lines to
-    print. Raises `Failure`; a refused `--set` writes nothing.
+    """Mark the repo at `path` public, register the three pieces and turn clean history
+    on. Returns the lines to print. Raises `Failure`; a refused `--set` writes nothing.
 
     repo registers the pieces first, judging every `--set` before it writes, and the flag
     is written after: a run that stops between them leaves pieces that refuse every commit
     until the flag is there, never a flag with nothing guarding it."""
     from moxi_repo import api
+
+    from moxi_publishing import clean
 
     root = resolve(path)
     planned = _planned(sets)
@@ -296,18 +301,27 @@ def enable(path: str | os.PathLike, *, github: str | None = None,
                 given += [f"{key}={value}" for value in values]
     known = config_get(root, GITHUB)
     github = github or (None if known else _github_from_origin(root))
+    prepared = clean.Prepared(root)
+    clean_before = _is_true(root, CLEAN)
     try:
-        report = api.add(root, *PIECES, sets=given)
+        report = api.add(root, *PIECES, *prepared.named, sets=given + prepared.sets)
     except api.Failure as exc:
         raise Failure(exc.text, exc.code) from None
-    for key, value in ((FLAG, "true"), (INTERPRETER, api.interpreter()),
+    prepared.record(root)
+    if not clean_before:
+        done = _git(root, "config", clean.CLEAN_WITH_PUBLIC, "true")
+        if done.returncode != 0:
+            raise Failure(f"git config {clean.CLEAN_WITH_PUBLIC} failed in {root}: "
+                          f"{done.stderr.strip()}")
+    for key, value in ((CLEAN, "true"), (FLAG, "true"), (INTERPRETER, api.interpreter()),
                        *(((GITHUB, github),) if github else ())):
         done = _git(root, "config", key, value)
         if done.returncode != 0:
             raise Failure(f"git config {key} failed in {root}: {done.stderr.strip()}; the "
                           "pieces are registered and refuse every commit until moxi "
                           f"publishing enable {root} runs again")
-    lines = [f"marked {root} public ({FLAG})", *report.lines, *report.problems]
+    lines = [f"marked {root} public ({FLAG}); it keeps a clean history ({CLEAN})",
+             *report.lines, *report.problems, *prepared.lines()]
     if not (github or known):
         lines.append(f"note: no GitHub repo is known; name it with: moxi publishing enable "
                      f"{root} --github OWNER/REPO")
@@ -318,13 +332,19 @@ def enable(path: str | os.PathLike, *, github: str | None = None,
 
 
 def disable(path: str | os.PathLike) -> list[str]:
-    """Remove the pieces from the repo at `path`, then the flag. Returns the lines to
-    print. Raises `Failure`."""
+    """Remove the push piece from the repo at `path`, then the flag, then clean history
+    where `enable` turned it on or no clean flag is set. Returns the lines to print.
+    Raises `Failure`."""
     from moxi_repo import api
+    from moxi_repo.api import quote_arg
+
+    from moxi_publishing import clean
 
     root = resolve(path)
     lines = []
-    present = [piece for piece in PIECES if piece in registered(root)]
+    clean_off = (config_get(root, clean.CLEAN_WITH_PUBLIC) == "true"
+                 or not _is_true(root, CLEAN))
+    present = [piece for piece in (PUSH,) if piece in registered(root)]
     if present:
         try:
             report = api.remove(root, *present)
@@ -336,6 +356,12 @@ def disable(path: str | os.PathLike) -> list[str]:
         raise Failure(f"git config --unset-all {FLAG} failed in {root}: "
                       f"{done.stderr.strip()}")
     lines.append(f"{root} is no longer marked public")
+    if clean_off:
+        lines += clean.disable(root)
+    else:
+        lines.append(f"{root} still keeps the clean history it kept before it was public; "
+                     "turn that off with: moxi publishing clean-history disable "
+                     f"{quote_arg(root)}")
     return lines
 
 

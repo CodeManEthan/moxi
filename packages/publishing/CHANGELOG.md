@@ -81,3 +81,8 @@ The first version.
   repo. The message and content pieces now run where the repo is marked clean or public,
   so a private clean repo drops `Claude-Session` too; registered with neither flag they
   refuse, naming both commands. `moxi doctor publishing` reads a clean repo's pieces.
+- `moxi publishing enable` turns clean history on too, since a public repo always keeps
+  it. `moxi publishing disable` removes the push piece and the public flag, and turns
+  clean history off where enable turned it on (or the repo has no clean flag, as one
+  enabled before clean history); a repo that kept a clean history before it was public
+  keeps it.

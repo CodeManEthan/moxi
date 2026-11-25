@@ -59,8 +59,18 @@ def test_the_flag_with_a_piece_missing_or_disabled_fails(repo, names):
 def test_a_piece_without_the_flag_fails(repo, names):
     enabled(repo)
     git(repo, "config", "--unset", "moxi-publishing.public")
+    git(repo, "config", "--unset", "moxi-publishing.clean")
     [(state, detail)] = states(repo)
     assert state == "fail" and "marked neither clean nor public" in detail
+
+
+def test_the_push_piece_in_a_clean_repo_that_isnt_public_fails(repo, names):
+    enabled(repo)
+    git(repo, "config", "--unset", "moxi-publishing.public")
+    [(state, detail)] = states(repo)
+    assert state == "fail"
+    assert detail == ("publishing/push is registered, but the repo isn't marked public, "
+                      "so it refuses every push")
 
 
 def test_with_nothing_public_one_ok_row():

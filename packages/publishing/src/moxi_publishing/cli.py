@@ -44,7 +44,8 @@ def _parser(prog: str) -> argparse.ArgumentParser:
     p = verbs.add_parser(
         "enable", help="mark a repo public and register the three guards",
         description="Mark the repo at PATH public (moxi-publishing.public in its git "
-                    "config) and register the message, content and push pieces. Where a "
+                    "config) and register the message, content and push pieces, turning "
+                    "clean history on as clean-history enable does. Where a "
                     "piece is first registered its settings start from publishing's "
                     "defaults.* config keys; a repo enabled again keeps the settings it "
                     "has.")
@@ -53,9 +54,12 @@ def _parser(prog: str) -> argparse.ArgumentParser:
                    help="the GitHub repo (default: read from origin when it is GitHub)")
     p.add_argument("--set", dest="sets", action="append", default=[], metavar="KEY=VALUE",
                    help=_SETS_HELP)
-    p = verbs.add_parser("disable", help="remove the three guards, then the public flag",
-                         description="Remove the three pieces from the repo at PATH, then "
-                                     "its public flag.")
+    p = verbs.add_parser(
+        "disable", help="remove the push guard, then the public flag",
+        description="Remove the push piece from the repo at PATH, then its public flag, "
+                    "then clean history where enable turned it on or the repo has no "
+                    "clean flag. A repo that kept a clean history before it was public "
+                    "keeps it.")
     p.add_argument("path", metavar="PATH")
     p = verbs.add_parser(
         "clean-history", help="keep a repo's history publishable, public or not",

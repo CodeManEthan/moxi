@@ -22,6 +22,10 @@ registration with. Where `enable` found nothing of repo's and no piece is left
 registered, it then removes everything repo wrote there, as `moxi repo git-hooks remove
 PATH` does, so the repo's git config is as it was. Last it unsets the flag, the records
 and the interpreter.
+
+`moxi publishing enable` turns clean history on too, through `Prepared`, recording in
+`moxi-publishing.clean-with-public` that it did when the clean flag wasn't set; `moxi
+publishing disable` then turns clean history off with the public flag.
 """
 
 from __future__ import annotations
@@ -36,6 +40,8 @@ CLEAN_TRAILERS = "moxi-publishing.clean-trailers"
 CLEAN_RULES = "moxi-publishing.clean-rules"
 #: Whether repo had written nothing in the repo's git config, nor indexed it, before.
 CLEAN_HOOKS = "moxi-publishing.clean-hooks"
+#: Whether `moxi publishing enable` turned clean history on, so `disable` turns it off.
+CLEAN_WITH_PUBLIC = "moxi-publishing.clean-with-public"
 #: The two pieces clean history registers, in the order it registers them.
 PIECES = (flag.MESSAGE, flag.CONTENT)
 COMMIT_RULES = "repo/commit-rules"
@@ -77,6 +83,41 @@ def _repo_untouched(root: str) -> bool:
         raise flag.Failure(exc.text, exc.code) from None
 
 
+class Prepared:
+    """What turning clean history on adds in one repo, read before anything is written:
+    `added`, the keys of `defaults.refused_trailers` the repo doesn't refuse yet; `named`
+    and `sets`, the commit-rules piece and the `refused-trailer` values to register it
+    with (none when nothing is added); `rules_absent`, whether commit-rules isn't
+    registered; `untouched`, whether repo has written nothing there yet."""
+
+    def __init__(self, root: str) -> None:
+        keys = _refused_keys()
+        rules = flag.piece_settings(root, COMMIT_RULES)
+        current = [v for v in (rules or {}).get(REFUSED_TRAILER, []) if v.strip()]
+        held = {v.strip().casefold() for v in current}
+        self.added = [key for key in keys if key.casefold() not in held]
+        self.rules_absent = rules is None
+        self.untouched = _repo_untouched(root)
+        self.named = [COMMIT_RULES] if self.added else []
+        self.sets = ([f"{REFUSED_TRAILER}={value}" for value in current + self.added]
+                     if self.added else [])
+
+    def record(self, root: str) -> None:
+        """Write the records `disable` reads, after the pieces are registered."""
+        recorded = {v.casefold() for v in flag.config_get_all(root, CLEAN_TRAILERS)}
+        for key in self.added:
+            if key.casefold() not in recorded:
+                _set(root, "--add", CLEAN_TRAILERS, key)
+        if self.added and self.rules_absent:
+            _set(root, CLEAN_RULES, "true")
+        if self.untouched:
+            _set(root, CLEAN_HOOKS, "true")
+
+    def lines(self) -> list[str]:
+        return ([f"{COMMIT_RULES} refuses {', '.join(self.added)} ({REFUSED_TRAILER})"]
+                if self.added else [])
+
+
 def enable(path: str | os.PathLike) -> list[str]:
     """Turn clean history on in the repo at `path`. Returns the lines to print. Raises
     `flag.Failure`.
@@ -87,32 +128,16 @@ def enable(path: str | os.PathLike) -> list[str]:
     from moxi_repo import api
 
     root = flag.resolve(path)
-    keys = _refused_keys()
     seeds = flag._seeds()
     have = flag.registered(root)
-    rules = flag.piece_settings(root, COMMIT_RULES)
-    current = [v for v in (rules or {}).get(REFUSED_TRAILER, []) if v.strip()]
-    held = {v.strip().casefold() for v in current}
-    added = [key for key in keys if key.casefold() not in held]
+    prepared = Prepared(root)
     given = [f"{key}={value}" for piece in PIECES if piece not in have
              for key, values in seeds.get(piece, {}).items() for value in values]
-    untouched = _repo_untouched(root)
-    named = list(PIECES)
-    if added:
-        named.append(COMMIT_RULES)
-        given += [f"{REFUSED_TRAILER}={value}" for value in current + added]
     try:
-        report = api.add(root, *named, sets=given)
+        report = api.add(root, *PIECES, *prepared.named, sets=given + prepared.sets)
     except api.Failure as exc:
         raise flag.Failure(exc.text, exc.code) from None
-    recorded = {v.casefold() for v in flag.config_get_all(root, CLEAN_TRAILERS)}
-    for key in added:
-        if key.casefold() not in recorded:
-            _set(root, "--add", CLEAN_TRAILERS, key)
-    if added and rules is None:
-        _set(root, CLEAN_RULES, "true")
-    if untouched:
-        _set(root, CLEAN_HOOKS, "true")
+    prepared.record(root)
     for key, value in ((flag.CLEAN, "true"), (flag.INTERPRETER, api.interpreter())):
         done = flag._git(root, "config", key, value)
         if done.returncode != 0:
@@ -120,9 +145,7 @@ def enable(path: str | os.PathLike) -> list[str]:
                                "the pieces are registered and refuse every commit until "
                                f"moxi publishing clean-history enable {root} runs again")
     lines = [f"{root} keeps a clean history ({flag.CLEAN})", *report.lines,
-             *report.problems]
-    if added:
-        lines.append(f"{COMMIT_RULES} refuses {', '.join(added)} ({REFUSED_TRAILER})")
+             *report.problems, *prepared.lines()]
     warning = flag._names_empty()
     if warning:
         lines.append(warning)
@@ -196,11 +219,12 @@ def disable(path: str | os.PathLike) -> list[str]:
     if ours and rules is not None and COMMIT_RULES not in removing:
         lines.append(f"kept {COMMIT_RULES}: {', '.join(kept)} is set there beyond what "
                      "clean history wrote")
-    for key in (flag.CLEAN, CLEAN_TRAILERS, CLEAN_RULES, CLEAN_HOOKS, flag.INTERPRETER):
+    for key in (flag.CLEAN, CLEAN_TRAILERS, CLEAN_RULES, CLEAN_HOOKS, CLEAN_WITH_PUBLIC,
+                flag.INTERPRETER):
         _set(root, "--unset-all", key)
     lines.append(f"{root} no longer keeps a clean history")
     return lines
 
 
-__all__ = ["CLEAN_TRAILERS", "CLEAN_RULES", "CLEAN_HOOKS", "PIECES", "COMMIT_RULES", "REFUSED_TRAILER",
+__all__ = ["CLEAN_TRAILERS", "CLEAN_RULES", "CLEAN_HOOKS", "CLEAN_WITH_PUBLIC", "Prepared", "PIECES", "COMMIT_RULES", "REFUSED_TRAILER",
            "enable", "disable"]

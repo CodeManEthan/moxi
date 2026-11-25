@@ -15,12 +15,18 @@ moxi publishing disable ~/src/app
 
 ## The public flag
 
-`enable` writes `moxi-publishing.public = true` into the repo's own git config, then
-registers the pieces `publishing/message` (commit-msg), `publishing/content` (pre-commit)
-and `publishing/push` (pre-push). Each piece reads the flag first: a piece registered in a
-repo without it refuses, since whoever registered it meant the repo to be guarded.
-`disable` removes the pieces, then the flag. `list` shows every repo marked public with
-each piece's state and settings.
+`enable` registers the pieces `publishing/message` (commit-msg), `publishing/content`
+(pre-commit) and `publishing/push` (pre-push), then writes `moxi-publishing.public = true`
+into the repo's own git config. A public repo always keeps a [clean
+history](#clean-history), so `enable` turns that on too: the clean flag, and the trailer
+keys commit-rules refuses. Each piece reads its flag first: a piece registered in a repo
+without it refuses, since whoever registered it meant the repo to be guarded.
+
+`disable` removes the push piece, then the public flag. Where `enable` turned clean
+history on, or the repo was enabled before clean history existed, `disable` turns it off
+too; a repo that kept a clean history before it was made public keeps it, and `disable`
+names `clean-history disable` for it. `list` shows every repo marked public with each
+piece's state and settings.
 
 `enable` warns when secrets' private names list is empty: add yours with
 `moxi config secrets`.
@@ -53,6 +59,8 @@ changes.
 `moxi-publishing.clean-trailers`). It removes commit-rules only when `enable` registered it
 and nothing else is set there. It refuses in a public repo, which always keeps clean
 history: run `moxi publishing disable` first.
+
+`moxi publishing enable` turns clean history on as part of marking a repo public.
 
 The message and content pieces run where the repo is marked clean or public; a public
 repo counts as clean, so a repo enabled before clean history existed needs nothing.

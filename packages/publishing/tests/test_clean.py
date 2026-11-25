@@ -132,3 +132,43 @@ def test_the_doctor_names_a_missing_piece_of_a_clean_repo(repo, names):
                               if row.name == f"repo {repo}"]
     assert state == "fail" and f"missing: {flag.CONTENT}" in detail
     assert fix == f"moxi publishing clean-history enable {repo}"
+
+
+def test_enable_public_turns_clean_history_on(repo, names):
+    lines = flag.enable(repo)
+    assert "it keeps a clean history (moxi-publishing.clean)" in lines[0]
+    assert flag.config_get(str(repo), flag.CLEAN) == "true"
+    assert rules_of(repo)["refused-trailer"] == ["Round", "Reconciles"]
+    assert commit(repo, "Subject\n\nRound: one\n").returncode != 0
+
+
+def test_disable_public_turns_off_the_clean_history_enable_turned_on(repo, names):
+    before = local_config(repo)
+    flag.enable(repo)
+    lines = flag.disable(repo)
+    assert lines[-1].endswith("no longer keeps a clean history")
+    assert flag.registered(str(repo)) == {} and rules_of(repo) is None
+    assert local_config(repo) == before
+
+
+def test_disable_public_keeps_a_clean_history_kept_before(repo, names):
+    clean.enable(repo)
+    flag.enable(repo)
+    lines = flag.disable(repo)
+    assert "still keeps the clean history it kept before it was public" in lines[-1]
+    assert flag.is_clean(str(repo)) and not flag.is_public(str(repo))
+    assert set(flag.registered(str(repo))) == {flag.MESSAGE, flag.CONTENT}
+    assert commit(repo, "Subject\n\nClaude-Session: x\n").returncode == 0
+    assert "Claude-Session" not in last_message(repo)
+    clean.disable(repo)
+    assert rules_of(repo) is None
+
+
+def test_disable_public_in_a_repo_enabled_before_clean_history_turns_it_all_off(repo,
+                                                                                  names):
+    from conftest import public_repo
+
+    public_repo(repo, *flag.PIECES)
+    flag.disable(repo)
+    assert flag.registered(str(repo)) == {}
+    assert not flag.is_clean(str(repo))
