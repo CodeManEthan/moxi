@@ -3,8 +3,9 @@ import test from "node:test";
 
 import {
   actCommand, emptyGlobal, emptyLines, failedLine, fixLine, folderView, footLines, GLOBAL_PLACE, INSTALL_ALL_PLACE,
-  itemPlace, jobPlace, noteGroup, pageState, PLACED_PLACE, problemPlace, READING_AFTER_MS,
+  itemPlace, jobPlace, noteGroup, pageState, parseShownOnly, PLACED_PLACE, problemPlace, READING_AFTER_MS, shownOnly,
 } from "../src/frame-model.ts";
+import { itemsView } from "../src/items-model.ts";
 import { INSTALL_ALL, placedView } from "../src/placed-model.ts";
 import { fullView, withRow } from "./fixtures.mjs";
 
@@ -117,4 +118,28 @@ test("the line under an act goes at the act, else under Placed, else at the foot
   assert.equal(jobPlace(null, drawn, { placed: true }), PLACED_PLACE);
   // With no Placed drawn (the empty state), at the foot.
   assert.equal(jobPlace(problemPlace("p2"), drawn, { placed: false }), null);
+});
+
+test("a harness the page doesn't draw loses its column, rows, notes, global file and counts", () => {
+  const view = fullView({ shown: ["claude", "opencode"],
+                          counts: { ok: 30, off: 1, missing: 1 } });
+  const missing = withRow(view, { name: "tidy-notes", harness: "codex" }, { state: "missing" });
+  const cut = shownOnly(missing);
+  assert.deepEqual(cut.harnesses, ["claude", "opencode"]);
+  assert.ok(cut.rows.every((r) => r.harness !== "codex"));
+  assert.ok(cut.item_notes.every((n) => n.harness !== "codex"));
+  assert.deepEqual(cut.global.files.map((f) => f.harness), ["claude", "opencode"]);
+  const codexRows = missing.rows.filter((r) => r.harness === "codex");
+  assert.equal(cut.counts.missing, undefined);
+  assert.equal(cut.counts.off, undefined);
+  assert.equal(cut.counts.ok, 30 - codexRows.filter((r) => r.state === "ok").length);
+  // Every cell, Placed and the verdict read the cut view.
+  assert.ok(itemsView(cut).groups.every((g) => g.rows.every((r) => r.cells.length === 2)));
+  assert.equal(placedView(missing).problems.length, 1);
+  assert.equal(placedView(cut).problems.length, 0);
+  // Nothing hidden: the view as it is.
+  const all = fullView();
+  assert.equal(shownOnly(all), all);
+  assert.deepEqual(parseShownOnly(missing), cut);
+  assert.equal(parseShownOnly({}), null);
 });

@@ -5,7 +5,7 @@
 
 import type { Projects, SourceDir, View } from "./feed.ts";
 import { sectionFor } from "./address-model.ts";
-import { homeForm, kindWord, sectionWord, YOUR_ITEMS } from "./words.ts";
+import { harnessWord, homeForm, kindWord, sectionWord, YOUR_ITEMS } from "./words.ts";
 
 /** Under Add's buttons, dim. */
 export const ADD_NOTE = "Lists it in loadout.toml and places it at once.";
@@ -72,4 +72,22 @@ export function pickerOf(view: View, projects: Projects | null): Picker {
   }
   const cause = projects !== null && projects.projects.length === 0 ? projects.cause : null;
   return { options, line: cause === null ? null : PICKER_LINES[cause] ?? null };
+}
+
+/** Add's `For` picker's first choice, which names no harness. */
+export const EVERY_HARNESS = "every harness";
+
+/** One choice of Add's `For` picker: `harness` is what the act names, null for every
+ * harness. */
+export interface HarnessOption {
+  value: string;
+  label: string;
+  harness: string | null;
+}
+
+/** Add's `For` picker: every harness, then each harness on this machine by its word. A
+ * harness that isn't on this machine is never offered. */
+export function harnessPicker(view: Pick<View, "present">): HarnessOption[] {
+  return [{ value: "", label: EVERY_HARNESS, harness: null },
+          ...view.present.map((harness) => ({ value: harness, label: harnessWord(harness), harness }))];
 }
