@@ -54,3 +54,5 @@ packages/ui/src/moxi_ui/testing/phone.py	SSLSocket.shutdown	the shutdown method 
 packages/ui/tests/squatter.py	Server.close_clients	the asyncio Server method added in Python 3.13
 packages/ui/web/src/passkey.ts	toJSON	the WebAuthn method that gives a credential as JSON
 packages/secrets/src/moxi_secrets/paths.py	--env-file	an example of a flag joined to a path by "=", as container tools take it
+packages/comms/src/moxi_comms/claimhold.py	CREATE_SUSPENDED	the Windows process creation flag that starts a child suspended
+packages/moxi/tests/test_settle.py	nohup	the POSIX command that starts a program immune to hangups
