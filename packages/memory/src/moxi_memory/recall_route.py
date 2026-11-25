@@ -71,7 +71,7 @@ EXIT_HELD_S = 60
 #: The round bound memory gives turns on Codex's host fork, in seconds: the largest turns
 #: takes (`2**31 - 1` ms, whole seconds), so turns never ends a round memory still
 #: waits on or a late answer could still settle. A copy, since turns exports no
-#: maximum: memory's tests check that turns still takes it.
+#: maximum: turns' own tests pin the value this copies.
 HOST_FORK_TURNS_BOUND_S = (2**31 - 1) // 1000
 
 
