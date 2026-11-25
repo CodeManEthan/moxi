@@ -365,17 +365,15 @@ def test_a_defaults_row_the_mode_does_not_take_stays_not_applied(work, harness):
     assert "approval" in said["not_applied"]
 
 
-def test_limit_at_at_its_shipped_default_is_not_refused_for_its_companion(work, monkeypatch):
+def test_a_retired_row_is_not_on_the_form_and_is_refused_typed(work, monkeypatch):
     monkeypatch.setattr(slots, "links", lambda name: name in ("turns", "usage"))
     write_presets(f'[seat.lead]\ncwd = "{work}"\n')
     body = filled({"seat": "lead"})
-    assert (body["values"].get("limit_at", ""), body["values"]["recycle_at_limit"]) == (
-        "", "off")
+    assert "limit_at" not in body["values"] and "limit_at" not in body["leave_out"]
     request, _ = pagehandlers.launch_request(body, "r1")
     assert "limit_at" not in request.typed
-    assert job.placed(request).values["limit_at"] == ""
-    # Typed, the same word would be refused: limit_at needs recycle_at_limit.
-    with pytest.raises(catalog.Refused, match="limit_at"):
+    assert "limit_at" not in job.placed(request).values
+    with pytest.raises(catalog.Retired, match="limit_at"):
         job.placed(dataclasses.replace(request, typed={"limit_at": "1x"}))
 
 
@@ -386,39 +384,33 @@ def test_the_pages_preview_refuses_a_scratch_set_to_recycle_itself(work, monkeyp
     assert codes(said) == ["scratch-recycle"] and said["ticket"] is None
 
 
-def test_a_word_enum_left_out_with_its_companion_off_launches_with_no_recycling(
-        work, monkeypatch):
-    monkeypatch.setattr(slots, "links", lambda name: name in ("turns", "usage"))
-    write_presets(f'[seat.lead]\ncwd = "{work}"\nrecycle_at_limit = "compact"\n'
-                  'limit_at = "2x"\n')
-    body = edited(filled({"seat": "lead"}), {"recycle_at_limit": "off"}, ["limit_at"])
+def test_a_word_enum_left_out_launches_with_no_recycling(work, monkeypatch):
+    monkeypatch.setattr(slots, "links", lambda name: name in ("turns", "cache"))
+    write_presets(f'[seat.lead]\ncwd = "{work}"\nrecycle_on_expiry = "compact"\n')
+    body = edited(filled({"seat": "lead"}), {}, ["recycle_on_expiry"])
     request, _ = pagehandlers.launch_request(body, "r1")
-    assert dict(request.typed) == {"recycle_at_limit": "off"}
-    assert tuple(request.left_out) == ("limit_at",)
+    assert dict(request.typed) == {}
+    assert tuple(request.left_out) == ("recycle_on_expiry",)
     resolved = job.placed(request)
-    assert resolved.values["recycle_at_limit"] == "off"
-    assert (resolved.values["limit_at"], resolved.sources["limit_at"]) == ("", "left-out")
+    assert (resolved.values["recycle_on_expiry"], resolved.sources["recycle_on_expiry"]) == (
+        "off", "left-out")
 
 
-def test_limit_at_the_preset_sets_to_its_shipped_word_can_still_be_left_out(
+def test_a_word_the_preset_sets_to_its_shipped_value_can_still_be_left_out(
         work, monkeypatch, tmp_path, fixed_ids):
-    # The seat chose limit_at even though "1x" is the shipped word, so leaving it out
-    # removes that choice, as --leave-out does on the command line.
+    # The seat chose recycle_at_limit even though "off" is the shipped word, so leaving it
+    # out removes that choice, as --leave-out does on the command line.
     monkeypatch.setenv("PATH", str(tmp_path))
     monkeypatch.setattr(slots, "links", lambda name: name in ("turns", "usage"))
-    write_presets(f'[seat.lead]\ncwd = "{work}"\nrecycle_at_limit = "compact"\n'
-                  'limit_at = "1x"\n')
-    body = edited(filled({"seat": "lead"}), {"recycle_at_limit": "off"}, ["limit_at"])
+    write_presets(f'[seat.lead]\ncwd = "{work}"\nrecycle_at_limit = "off"\n')
+    body = edited(filled({"seat": "lead"}), {}, ["recycle_at_limit"])
     said = previewed(body)
-    assert said["refused"] == [] and said["left_out"] == ["limit_at"]
-    line = ["--seat", "lead", "--recycle-at-limit=off", "--leave-out", "limit_at"]
+    assert said["refused"] == [] and said["left_out"] == ["recycle_at_limit"]
+    line = ["--seat", "lead", "--leave-out", "recycle_at_limit"]
     request, composition = command_line_preview(line)
     assert page_shown(said) == shown(composition)
     assert said["left_out"] == list(request.left_out)
     assert said["command"] == cli.command_line(["moxi", "launcher", "run", *line])
-    # Kept, the seat's limit_at needs the recycling the form turned off.
-    kept = previewed(edited(filled({"seat": "lead"}), {"recycle_at_limit": "off"}, []))
-    assert codes(kept) == ["needs-module"] and kept["refused"][0]["row"] == "limit_at"
 
 
 @POSIX
@@ -541,8 +533,7 @@ def test_an_unchanged_form_types_nothing_and_leaves_nothing_out_over_every_prese
     write_presets(RULE_FILE.format(work=work, there=there) + f"""
 [seat.lead]
 cwd = "{work}"
-recycle_at_limit = "compact"
-limit_at = "1x"
+recycle_at_limit = "off"
 
 [seat.headless]
 harness = "codex"
@@ -567,8 +558,6 @@ remote_control = false
 
 def _sample(row: catalog.Row, work: Path) -> tuple[object, dict]:
     """A value of `row` other than its shipped default, and the rows it needs beside it."""
-    if row.name == "limit_at":
-        return "2x", {"recycle_at_limit": "compact"}
     if row.name == "slot":
         return "3", {"target": "slot"}
     if row.optional_value:

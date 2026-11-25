@@ -825,11 +825,14 @@ def _config(argv: list[str]) -> int:
         return 0
     if args.action == "check":
         try:
-            config._check_config(module, schema, None if found is None
-                                 else found.config_check)
+            checked = config._check_config(module, schema, None if found is None
+                                           else found.config_check)
         except config.ConfigError as exc:
             _error(str(exc))
             return 1
+        for name, words in checked.left_out.items():
+            print(f"warning: {path}: {name} is retired and left out: {words}",
+                  file=sys.stderr)
         state = "" if path.exists() else " (no file: every key at its default)"
         print(f"ok: {path}{state}")
         return 0

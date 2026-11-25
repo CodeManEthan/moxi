@@ -21,7 +21,7 @@ classifiers = [
 # before exit-session ends it. Every other module it works with (turns, comms, slots,
 # projects, notes, cache, usage, ui, sessions, memory) is an optional link it reaches
 # through moxi.modules.load where a feature needs it, and never imports.
-dependencies = ["moxi>=0.1.9,<0.2", "psutil>=5.9"]
+dependencies = ["moxi>=0.1.11,<0.2", "psutil>=5.9"]
 
 [project.optional-dependencies]
 # The first turn, readiness, Codex ids, and the start listeners.
@@ -37,8 +37,8 @@ ui = ["moxi-ui>=0.2.8,<0.3"]
 # notes' handoff folder, which a launch's handoff pointer and a relaunch's handoff use.
 notes = ["moxi-notes>=0.1,<0.2"]
 # cache's timer, for keep-warm and recycle on expiry.
-cache = ["moxi-cache>=0.1.6,<0.2"]
-# usage's context warning: the warn_at, limit_at and recycle_at_limit rows.
+cache = ["moxi-cache>=0.1.7,<0.2"]
+# usage's context warning: the warn_at and recycle_at_limit rows.
 usage = ["moxi-usage>=0.2,<0.3"]
 # The latest thing said in each running session, on Home's Sessions row.
 sessions = ["moxi-sessions>=0.2.8,<0.3"]
@@ -59,20 +59,21 @@ launcher = "moxi_launcher.module"
 [project.entry-points."moxi.turns.listeners"]
 launcher = "moxi_launcher.listeners"
 
-# The launcher's subscriptions to cache's timer (recycle on expiry, keep-warm), read by
-# cache's watcher.
+# The launcher's subscriptions to cache's timer (clear on expiry, compact before it,
+# keep-warm), read by cache's watcher.
 [project.entry-points."moxi.cache.timers"]
 launcher = "moxi_launcher.cachetimers"
 
 # The crossing handler, called by usage in a session's endpoint process when the session
-# passes its launch's `limit_at` mark: the relaunch line once, or the limit compact.
+# passes its launch's `warn_at` mark: the relaunch line, once a rise.
 [project.entry-points."moxi.usage.crossings"]
 launcher = "moxi_launcher.recycle:on_crossing"
 
 # The launcher's commands run as `moxi launcher <verb>` (only the core declares `moxi`),
 # the detached first-turn sender (`moxi launcher deliver`) among them. One console script
-# of its own: the detached runs (a relaunch, a repair, an expiry or keep-warm ask, a limit
-# compact), spawned and never typed, found through `moxi.paths.script`.
+# of its own: the detached runs (a relaunch, a repair, an expiry or keep-warm ask, and the
+# retired limit compact's stub), spawned and never typed, found through
+# `moxi.paths.script`.
 [project.scripts]
 moxi-launcher-job = "moxi_launcher.job:main"
 

@@ -483,6 +483,10 @@ read = "use"
 
 [old]
 retired = "use backend instead"
+
+[gone]
+retired = "nothing reads it now; remove gone"
+left_out = true
 """
 
 
@@ -526,6 +530,15 @@ def test_config_check(configured, capsys):
     assert code == 1 and "retired" in err and "use backend instead" in err
     configured.write_text("backend = \n")
     assert run(capsys, "config", "alpha", "check")[0] == 1
+
+
+def test_config_check_warns_of_a_left_out_key_and_passes(configured, capsys):
+    configured.parent.mkdir(parents=True)
+    configured.write_text('gone = 5\nbackend = "remote"\n')
+    code, out, err = run(capsys, "config", "alpha", "check")
+    assert code == 0 and out.startswith("ok: ")
+    assert "warning:" in err and "gone is retired and left out" in err
+    assert "nothing reads it now; remove gone" in err
 
 
 def test_config_init_writes_every_key_commented_at_its_default(configured, capsys):

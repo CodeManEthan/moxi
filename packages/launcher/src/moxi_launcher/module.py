@@ -45,12 +45,12 @@ OPTIONAL = {
              "handoff folder. Without it the launcher keeps its own folder.",
     "cache": "Prompt cache timing: keep_warm nudges a waiting session before its cache "
              "expires, as Keep warm on a running session's row does from the press on, "
-             "and recycle_on_expiry clears or compacts an idle session once it has. "
+             "and recycle_on_expiry clears an idle session once it has, or compacts it "
+             "shortly before, once per idle stretch, while its cache is still warm. "
              "Without it those rows and Keep warm aren't offered.",
     "usage": "Context warnings: warn_at sets the mark where usage warns the session and "
-             "a session that can relaunch itself is told it may; recycle_at_limit "
-             "compact with limit_at compacts a session past its mark. Without it those "
-             "rows aren't offered.",
+             "a session that can relaunch itself is told it may, with recycle_at_limit "
+             "relaunch. Without it those rows aren't offered.",
     "sessions": "The latest thing said in each running session, on Home's Sessions row. "
                 "Without it a row shows when it was launched.",
     "memory": "memory's subconscious: the subconscious row turns it on for a launch, "
@@ -71,9 +71,9 @@ INTERNAL_ENV = {
     "MOXI_LAUNCHER_KEEP_WARM": "launcher stamp: the launch keeps its session warm, read by "
                                "a cache watcher started before the timer asked by "
                                "MOXI_LAUNCHER_REQUEST",
-    "MOXI_LAUNCHER_RECYCLE_ON_EXPIRY": "launcher stamp: the launch clears or compacts its "
-                                       "session once its cache expires, read by cache's "
-                                       "timer",
+    "MOXI_LAUNCHER_RECYCLE_ON_EXPIRY": "launcher stamp: the launch clears its session "
+                                       "once its cache expires, or compacts it shortly "
+                                       "before, read by cache's timer",
     "MOXI_LAUNCHER_TURNS": "test seam: the import name of a module that stands in for "
                            "turns' API in the first-turn sender",
     "MOXI_LAUNCHER_SLOTS": "test seam: the import name of a module that stands in for "
@@ -153,7 +153,7 @@ SESSION_ENV = {
                               "pointer",
     "MOXI_LAUNCHER_KEEP_WARM": "set when the launch keeps its session warm",
     "MOXI_LAUNCHER_RECYCLE_ON_EXPIRY": "set to clear or compact when the launch recycles its "
-                                       "session on cache expiry",
+                                       "session around its cache's expiry",
     "MOXI_USAGE_CROSSING_AT": "usage's crossing mark, set when the launch recycles at its "
                               "limit; scrubbed even without usage installed",
     "MOXI_USAGE_WARN_AT": "usage's warning mark, set from warn_at; scrubbed even without "

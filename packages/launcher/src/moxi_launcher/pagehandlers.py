@@ -1291,7 +1291,7 @@ def launch_request(body: Mapping[str, Any], request_id: str):
     leave-out is kept when `[defaults]` or the preset names the row itself, the place and
     one-spelling rules kept that layer's value, and the value is set; else it is dropped,
     since no layer's choice is there to remove. Who set the row counts, not its value: a
-    preset's `limit_at = "1x"` is the shipped word and still chosen, so leaving it out
+    preset's `recycle_at_limit = "off"` is the shipped word and still chosen, so leaving it out
     removes it. A row the harness doesn't offer that `body` leaves out is
     taken out of the layers before the preset is laid, and stays left out when a layer
     names it. A typed row of a group (`_GROUPS`) makes every other value of that group in

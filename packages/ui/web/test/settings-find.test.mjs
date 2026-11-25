@@ -28,7 +28,7 @@ const LAUNCHER = [
   key("startup.wait_s", "int", 20, 20, { label: "For startup screens, in a slot" }),
   key("page.launch_wait_s", "int", 600, 600, { label: "A launch from the page may take" }),
   key("relaunch.wait_s", "int", 900, 900, { label: "For the session to be quiet" }),
-  key("recycle.limit_wait_s", "int", 1800, 1800, { label: "For idle, to compact at the limit" }),
+  key("park.wait_s", "int", 300, 300, { label: "Park waits for each session to be quiet" }),
   key("name.template", "string", "", "", { elsewhere: "The session name is edited in Home's Options, with the launch it names." }),
   key("runs.keep_days", "int", 14, 30, { label: "Keep run files for", doc: "A launch's prompt file and wait log." }),
 ];
