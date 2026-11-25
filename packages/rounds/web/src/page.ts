@@ -50,7 +50,7 @@ import {
   LOCAL, linesShown, markAttributes, markKey, moreLabel, noLongerOpen, NOTHING_WAITS, OPEN_ROUNDS,
   parseAddress, parseMarkKey, PASSAGE_LINES, phoneWaiting, PHONE_PX, phraseShown, placePopover, POP_WIDE, POP_WIDTH,
   popoverWidth, revealBy,
-  READ_PASSAGE, READING, READING_AFTER_MS, recordQuery, revealing, sessionAt, sheetMarks, sheetQuestions, SHOW_LINE,
+  READ_PASSAGE, READING, READING_AFTER_MS, recordQuery, revealing, rulingQuery, sessionAt, sheetMarks, sheetQuestions, SHOW_LINE,
   slugOf, stageOf, stateWords, stepHead, stepName, stepSections, STRIP_CAPTION, STRIP_EMPTY, STRIP_HEAD, stripCard, stripKey,
   stripStep, stripTabs, UNREADABLE_LEAD, unreadableWords, WAITING_LEAD, waitingCounts, walkFoot, WALK_BUTTON,
   walkStep, dropLines, dropReceipt, hasOpenBuild, leadFromProject, leadOf, PARKED_HEAD, parkedGroups, parkedWords, parkingWords,
@@ -59,10 +59,10 @@ import {
 import type { Address, Context, DropFacts, Filter, GroupView, Held, Item, ItemKind, ItemView, Piece, Section } from "./model.ts";
 import {
   bodyOf, chipOf, correctionFound, draftOf, EACH, eachLeadWords, isAnswerable, isPageKind, kindWords, messageWords,
-  leadsKnown, mintId, overCap, postsOf, readBackOf, receiptLines, recipientWords, RULE_LINE, RULE_LINE_ALONE, sendable, sendWords,
-  Tray, trayKey,
+  leadsKnown, mintId, overCap, postsOf, readBackOf, receiptLines, recipientWords, RULE_LINE, RULE_LINE_ALONE,
+  sameRuling, sendable, sendWords, Tray, trayKey,
 } from "./tray.ts";
-import type { Draft, Kind, Reach, Receipt, ReceiptLine, Store } from "./tray.ts";
+import type { Draft, Kind, Reach, Receipt, ReceiptLine, RulingOf, Store } from "./tray.ts";
 
 const TAG = "moxi-rounds-page";
 const MODULE = "rounds";
@@ -337,8 +337,9 @@ export class RoundsPage extends LitElement {
   #editing: string | null = null;
   #parkedOpen = false;
   #drop: DropState | null = null;
-  /** Each sent own-words draft's round `rev` when its record was last read. */
-  #readAt = new Map<string, string>();
+  /** Each sent own-words answer's and correction's feed value (`Feed.taken`) when its
+   * record was last read. */
+  #readAt = new Map<string, number>();
 
   connectedCallback(): void {
     super.connectedCallback();
@@ -432,37 +433,41 @@ export class RoundsPage extends LitElement {
       if (round && this.#record && this.#record.rev !== null && round.rev !== this.#record.rev) {
         void this.#readRecord(this.#address!);
       }
-      void this.#readFound(value);
-      this.#takeCorrections(value);
+      void this.#readFound(feed.taken);
     }
     this.requestUpdate();
   }
 
-  /** Reads again the question of each sent own-words draft whose round changed, so its
-   * row reads recorded once the agent's ruling appears. */
-  async #readFound(value: Board): Promise<void> {
-    for (const draft of this.#tray.sent.filter((one) => one.kind === "words" && one.receipt?.message?.id)) {
-      const rev = value.rounds.find((one) => one.name === draft.holder)?.rev ?? "";
-      if (this.#readAt.get(draft.act) === rev) continue;
-      this.#readAt.set(draft.act, rev);
-      const read = await readRecord(() => api(MODULE, recordQuery({ kind: "question", holder: draft.holder,
-                                                                     id: draft.item })!));
-      if (read.kind === "record") this.#takeFound(draft.holder, draft.item, read.record);
+  /** Reads again, for each sent own-words answer and correction, at each new board value
+   * the feed takes (`taken`), the record its row reads from: the question's, so the row
+   * reads recorded once the agent's ruling appears; for a correction the corrected
+   * ruling's, which gives the newest ruling that replaces it, read back or not. Not a
+   * round's `rev`: a read-back in the project's log can show a round's ruling and change
+   * nothing of the round's value, and a closed round has no rev. Not the board's
+   * `read_at`: two gathers in one second share it. The page server publishes a value only
+   * when it changed, so each one taken is a change somewhere. */
+  async #readFound(taken: number): Promise<void> {
+    const sent = this.#tray.sent.filter((one) => (one.kind === "words" || one.kind === "correct")
+      && one.receipt?.message?.id);
+    for (const draft of sent) {
+      if (this.#readAt.get(draft.act) === taken) continue;
+      this.#readAt.set(draft.act, taken);
+      const route = draft.kind === "words" ? recordQuery({ kind: "question", holder: draft.holder, id: draft.item })!
+        : rulingQuery(draft.holder, draft.item);
+      const read = await readRecord(() => api(MODULE, route));
+      if (read.kind !== "record") continue;
+      if (draft.kind === "words") this.#takeFound(draft.holder, draft.item, read.record);
+      else this.#takeCorrection(draft.act, correctionFound(draft, read.record));
     }
   }
 
-  /** Puts on each sent correction the ruling that supersedes the one it corrects, once
-   * the rulings waiting to be read back list it. One found stays after it is read back. */
-  #takeCorrections(value: Board): void {
-    let changed = false;
-    for (const draft of this.#tray.sent.filter((one) => one.kind === "correct" && one.receipt?.message?.id)) {
-      const found = correctionFound(draft, value.waiting);
-      if (found && draft.found?.id !== found.id) {
-        this.#tray.setFound(draft.act, found);
-        changed = true;
-      }
-    }
-    if (changed) this.requestUpdate();
+  /** Puts on a sent correction the ruling that replaces the one it corrects. One found
+   * stays when a later read finds none. */
+  #takeCorrection(act: string, found: RulingOf | null): void {
+    const draft = this.#tray.sent.find((one) => one.act === act);
+    if (!draft || found === null || sameRuling(draft.found, found)) return;
+    this.#tray.setFound(act, found);
+    this.requestUpdate();
   }
 
   /** Puts the ruling a question's record holds on its sent own-words drafts. */

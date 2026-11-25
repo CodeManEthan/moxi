@@ -275,6 +275,8 @@ class ExitRun(job.RelaunchJob):
     process) the host's stop, in this process. Its outcome is its verdict."""
 
     kind = "exit"
+    #: The verb's caller owns the target it found: the run keeps it, moved or not.
+    follows_moves = False
 
     def __init__(self, conn: sqlite3.Connection, run: store.Run, found: target.Target, *,
                  in_slot: bool, shells: Shells, host: proc.ProcId | None = None,

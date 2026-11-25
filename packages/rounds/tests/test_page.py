@@ -192,8 +192,9 @@ def _calls(value: dict) -> list[dict]:
               for one in waiting["decisions"]]
     calls += [{"what": "wait", "round": one["round"], "id": one["id"]}
               for one in waiting["waits"]]
-    calls += [{"what": "shown", "round": row["holder"], "id": row["id"]}
-              for back in waiting["not_shown"] for row in back["rows"]]
+    calls += [{"what": what, "round": row["holder"], "id": row["id"]}
+              for back in waiting["not_shown"] for row in back["rows"]
+              for what in ("shown", "ruling")]
     return calls
 
 
@@ -263,6 +264,7 @@ def test_a_record_of_a_round_no_longer_open_is_gone(kit):
     ({"what": "step"}, "round"),
     ({"what": "step", "round": BUSY}, "column"),
     ({"what": "question", "round": BUSY}, "id"),
+    ({"what": "ruling", "round": BUSY}, "id"),
 ])
 def test_a_record_query_that_names_too_little_is_refused(kit, query, key):
     [(status, sent)] = run(("/api/record", query))
@@ -359,6 +361,94 @@ def test_a_question_no_log_holds_is_gone(kit):
     [_, (_, sent)] = run(("/api/rounds", None),
                          ("/api/record", {"what": "question", "round": BUSY, "id": "Q9"}))
     assert sent == {"gone": True, "record": None}
+
+
+def _ruling_records(holder: str, *ids: str) -> list[dict]:
+    """The ruling records of `ids` on `holder`, read after a gather."""
+    answers = run(("/api/rounds", None),
+                  *(("/api/record", {"what": "ruling", "round": holder, "id": one})
+                    for one in ids))[1:]
+    lb = loopback()
+    shape = lb.Out("table", items={"gone": lb.Out("bool"), "record": page.RECORD})
+    assert all(status == 200 and conforms(sent, shape) for status, sent in answers)
+    return [sent["record"] for _status, sent in answers]
+
+
+def _fields(ruled, *, by: str, shown: bool) -> dict:
+    return {"id": ruled.id, "text": ruled.text, "record": ruled.event["record"],
+            "actor": by, "at": ruled.event["at"], "shown": shown}
+
+
+def test_a_rulings_record_holds_the_newest_ruling_that_replaces_it_in_any_shown_state(kit):
+    from moxi_rounds import ruling, shown
+
+    [first] = _ruling_records(BUSY, "C1")
+    assert (first["what"], first["holder"], first["ruling"]["id"]) == ("ruling", BUSY, "C1")
+    assert (first["ruling"]["actor"], first["ruling"]["shown"]) == ("lead", False)
+    assert first["replaced_by"] is None
+    second = ruling.rule(BUSY, text="Exports keep no header row.", supersedes="C1",
+                         record="comms:7000001", by="builder-1")
+    [record] = _ruling_records(BUSY, "C1")
+    assert record["replaced_by"] == _fields(second, by="builder-1", shown=False)
+    # Read back elsewhere: the replacing ruling no longer waits to be shown, and the
+    # record still finds it, shown.
+    shown.mark(BUSY, second.id, by="lead", record="comms:7000002")
+    value = board_value(kit)
+    assert second.id not in [row["id"] for back in value["waiting"]["not_shown"]
+                             for row in back["rows"] if row["holder"] == BUSY]
+    [record] = _ruling_records(BUSY, "C1")
+    assert record["replaced_by"] == _fields(second, by="builder-1", shown=True)
+    assert record["ruling"]["shown"] is False
+    # A correction of a ruling replaced already replaces the one in its place, and the
+    # first ruling's record follows to the newest.
+    third = ruling.rule(BUSY, text="Exports keep a header row, named.", supersedes=second.id,
+                        record="comms:7000003", by="atlas")
+    first, middle, newest = _ruling_records(BUSY, "C1", second.id, third.id)
+    assert first["replaced_by"] == _fields(third, by="atlas", shown=False)
+    assert middle["replaced_by"] == first["replaced_by"]
+    assert newest["replaced_by"] is None
+
+
+def test_a_project_rulings_record_answers_from_the_projects_log(kit):
+    from moxi_rounds import ruling, shown
+
+    first = ruling.rule("kestrel", text="Ledgers stay in kestrel.", record=page_kit.PTR,
+                        by="lead")
+    [record] = _ruling_records("kestrel", first.id)
+    assert (record["holder"], record["ruling"]["id"], record["replaced_by"]) == (
+        "kestrel", first.id, None)
+    second = ruling.rule("kestrel", text="Ledgers move to osprey.", supersedes=first.id,
+                         record="comms:7000004", by="builder-1")
+    shown.mark("kestrel", second.id, by="lead", record="comms:7000005")
+    [record] = _ruling_records("kestrel", first.id)
+    assert record["replaced_by"] == _fields(second, by="builder-1", shown=True)
+
+
+def test_a_closed_rounds_ruling_reads_shown_once_a_project_read_back_covers_it(kit):
+    from moxi_rounds import opening, ruling
+
+    spare = "kestrel/spare"
+    opening.open_round(spare, description="a round that closes", by="planner")
+    ruling.rule(spare, text="Exports keep a header row.", record=page_kit.PTR, by="lead",
+                at="2026-01-02T00:00:00Z")
+    second = ruling.rule(spare, text="Exports keep no header row.", supersedes="C1",
+                         record="comms:7000001", by="builder-1", at="2026-01-03T00:00:00Z")
+    page_kit.append(kit / "spare", "round.closed")
+    [record] = _ruling_records(spare, "C1")
+    assert record["replaced_by"] == _fields(second, by="builder-1", shown=False)
+    # In the project's log alone: the closed round's own log is not written.
+    ruling.rule("kestrel", item="readback=2026-01-03T00:00:00Z", record="comms:7000002",
+                by="lead")
+    [record] = _ruling_records(spare, "C1")
+    assert record["replaced_by"] == _fields(second, by="builder-1", shown=True)
+
+
+def test_a_ruling_no_log_holds_is_gone(kit):
+    [_, (_, missing), (_, nowhere)] = run(
+        ("/api/rounds", None),
+        ("/api/record", {"what": "ruling", "round": BUSY, "id": "C9"}),
+        ("/api/record", {"what": "ruling", "round": "kestrel/nowhere", "id": "C1"}))
+    assert missing == nowhere == {"gone": True, "record": None}
 
 
 def test_a_prepared_answer_rides_on_the_question_and_its_record(kit, tmp_path):

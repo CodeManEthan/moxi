@@ -74,6 +74,23 @@ compact detached (`moxi.proc.spawn`); each records its own process as its run's 
    identity, read every 2 s for up to 60 s until the new session has bound it (`held`)
    or a read fails (`unreadable: <why>`, comms offline included).
 
+**A moved endpoint.** Claude Code replaces a session's turns endpoint when its plugins
+reload, while its `claude` process and session id stay; it applies a pending reload when a
+turn ends, the moment a self run's wait releases. A Claude launch's run that meets its
+endpoint gone (turns' `gone` or its error at the exit, the watch's end in the wait, or the
+endpoint process ended before the closing note) while the launch's `claude` still runs
+(`store.is_launch_parent`'s test of the row's `pid` and `pid_started`) looks the session
+up again (`follow_move`): up to `listen_ready.OVERLAP_WAIT_S`, every `MOVE_STEP_S`, until a
+live endpoint other than the old one passes the claim check, rechecking each time that
+`claude` runs. A move writes a `moved` event with both endpoints, and a run moves at most
+`MOVES` times. At the exit the run goes back to step 1 on the new endpoint, a self run
+waiting again for a fresh turn number and a director's run reading it from the new
+endpoint (its count restarts), with the hold, warm and launch checks taken again; the wait
+waits on with a watch of the new endpoint; the note goes to it. With `claude` ended, no
+new endpoint by the bound, the moves spent or another harness, the run goes on as it
+always did: to the pane from the exit, `gone` from the wait, the old endpoint for the note.
+The look-up writes no claim.
+
 **A stop signal before step 3 ends the run `stopped`; from step 3 on it is recorded and
 deferred until step 6 has been tried.** **A job acts only while its run is open**: right
 before each act on the session (the exit, the dialog's answer, the respawn) it moves its
@@ -191,6 +208,13 @@ FIRST_READS, FIRST_READ_S = 5, 0.2
 REPAIRABLE = ("relaunch-failed", "gone", "exit-pending", "error")
 #: The events that mark a run as having acted on its session (the exit, or later).
 ACTED = ("exit", "respawn")
+#: The most times a run follows its session to a new endpoint (`follow_move`).
+MOVES = 3
+#: How often a run looks a moved session up again, in seconds; a new endpoint takes the
+#: launch about 0.25 s after the old one ends.
+MOVE_STEP_S = 0.25
+#: How far apart two reads of one process's start time may be, in seconds.
+SAME_START_S = 1.0
 
 #: Stands for a seam the job looks up itself.
 LOOK: Any = object()
@@ -401,6 +425,8 @@ class RelaunchJob:
     kind = "relaunch"
     #: Whether a client's activity holds at the exit dialog (copy mode always does).
     count_activity = True
+    #: Whether the run follows its session to a new endpoint (`follow_move`).
+    follows_moves = True
 
     def __init__(self, conn: sqlite3.Connection, run_id: str, *, turns: Any = LOOK,
                  slots_api: Any = LOOK, comms: Any = LOOK, sessions: Any = LOOK,
@@ -424,6 +450,10 @@ class RelaunchJob:
         self.run: store.Run | None = None
         self.row: store.LaunchRow | None = None
         self.target: Any | None = None
+        #: The endpoint process serving `target`, read when it was found.
+        self.endpoint: Any | None = None
+        #: How many times the run followed its session to a new endpoint.
+        self.moves = 0
         self.watch: quiet.Watch | None = None
         self.holder = run_id
         self.held: str | None = None
@@ -536,7 +566,7 @@ class RelaunchJob:
             if not store.advance_run(self.conn, run.run_id, "waiting", leaving=("armed",)):
                 self._ended_under()
         while True:
-            number = self.wait() if run.mode == "self" else run.turn_number
+            number = self.wait() if run.mode == "self" else self.turn_number()
             self.end_if_changed()
             self.refresh_pin()
             try:
@@ -622,7 +652,85 @@ class RelaunchJob:
         if not found.live:
             found.close()
             self.end("gone", GONE, f"session {run.session_id} is not live")
+        self.endpoint = _endpoint_of(found.session)
         return found
+
+    def turn_number(self) -> int | None:
+        """A director's run's turn number: the run's own, or after a move the new
+        endpoint's, whose count restarts. A read that fails keeps the run's own, which
+        turns then refuses `stale-turn`."""
+        if self.moves:
+            try:
+                return self.target.session.facts().turn_number
+            except Exception:  # noqa: BLE001  (an unread number keeps the run's own)
+                pass
+        return self.run.turn_number
+
+    def claude_runs(self) -> bool:
+        """Whether the run's launch is Claude's and its own `claude` process still runs:
+        `store.is_launch_parent`'s test of the row's `pid` and `pid_started`."""
+        from moxi import proc
+
+        row = self.row
+        if row is None or row.harness != "claude" or row.pid is None or row.pid_started is None:
+            return False
+        return store.is_launch_parent(row, proc.ProcId(row.pid, row.pid_started))
+
+    def endpoint_gone(self) -> bool:
+        """Whether the endpoint process that served the run's target when it was found
+        has ended. False when that process could not be read."""
+        from moxi import proc
+
+        return self.endpoint is not None and not proc.alive(self.endpoint)
+
+    def follow_move(self, why: str) -> bool:
+        """Follow the session to a new endpoint, after `why` said the old one is gone:
+        while the moves last (`MOVES`) and the launch's `claude` runs (`claude_runs`), look
+        the session up again every `MOVE_STEP_S` for up to `listen_ready.OVERLAP_WAIT_S`.
+        A find that is not live, refused `changed` with the reclaim pending, or `unclaimed`
+        is tried again, and so is one of the old endpoint, which is no move. A live new
+        endpoint becomes the run's target: the old target and the watch are closed, and a
+        `moved` event names both endpoints. True when the run moved; False to go on as
+        before the move was looked for. Writes no claim."""
+        from . import listen_ready, target
+
+        if not self.follows_moves or self.moves >= MOVES or not self.claude_runs():
+            return False
+        old, old_endpoint = self.target, self.endpoint
+        deadline = self.clock() + listen_ready.OVERLAP_WAIT_S
+        while True:
+            try:
+                found = target.find(self.run.session_id, conn=self.conn, turns=self.turns,
+                                    slot=False)
+            except target.Unclaimed:
+                found = None
+            except target.Changed as refused_exc:
+                # The old endpoint, found once the claim has moved, is no move either.
+                if not (refused_exc.reclaim_pending
+                        or _serving_pid(refused_exc) == _pid_of(old)):
+                    return False
+                found = None
+            except Exception:  # noqa: BLE001  (any other refusal or fault: as before)
+                return False
+            if found is not None:
+                new_endpoint = _endpoint_of(found.session)
+                if found.live and not _same(found, old, new_endpoint, old_endpoint):
+                    break
+                found.close()
+            if self.clock() >= deadline or not self.claude_runs():
+                return False
+            self.sleep(MOVE_STEP_S)
+        self.moves += 1
+        if self.watch is not None:
+            self.watch.close()
+            self.watch = None
+        if old is not None:
+            old.close()
+        self.target, self.endpoint = found, new_endpoint
+        self.event("moved", {"from": _endpoint_text(old_endpoint, old),
+                             "to": _endpoint_text(new_endpoint, found),
+                             "why": why, "move": self.moves})
+        return True
 
     @property
     def slot(self) -> str | None:
@@ -636,26 +744,25 @@ class RelaunchJob:
         """Step 1: wait for the session to be quiet; return the turn number the last
         read saw. Past `wait_s` after the run's insert (`relaunch.wait_s` when None) the
         run ends with the outcome `expired`, worded by what still held."""
-        session = self.target.session
         person_s = float(self.setting("relaunch.person_s"))
         if wait_s is None:
             wait_s = float(self.setting("relaunch.wait_s"))
         bound = store.parse_time(self.run.created_at).timestamp() + wait_s
-        if self.watch is None:
-            try:
-                self.watch = quiet.Watch(session, clock=self.wall)
-            except Exception as exc:  # noqa: BLE001  (a watch that can't start ends it)
-                self.end("error", "turns-failed",
-                         f"the session's watch could not start: {_words(exc)}")
-        watch = self.watch
+        watch = self._watch()
         read = dict(slot=self.slot, slots_api=self.slots_api, person_s=person_s)
         seen = watch.events
         reading = watch.read(**read)
         said: str | None = None
         while True:
             if watch.gone is not None:
-                self.end("gone", GONE, f"the session ended while the run waited: "
-                                       f"{watch.gone}")
+                if not self.follow_move(f"the watch ended: {watch.gone}"):
+                    self.end("gone", GONE, f"the session ended while the run waited: "
+                                           f"{watch.gone}")
+                # A new endpoint: its own watch, read whole.
+                watch = self._watch()
+                seen = watch.events
+                reading = watch.read(**read)
+                continue
             self.check_stop()
             first = reading.first
             holds = first or self.paced()
@@ -682,6 +789,16 @@ class RelaunchJob:
                 # A draft cleared, a subagent done or a read that failed again may come
                 # with no event: the whole read again.
                 reading = watch.read(**read)
+
+    def _watch(self) -> quiet.Watch:
+        """The watch of the run's session, opened when there is none."""
+        if self.watch is None:
+            try:
+                self.watch = quiet.Watch(self.target.session, clock=self.wall)
+            except Exception as exc:  # noqa: BLE001  (a watch that can't start ends it)
+                self.end("error", "turns-failed",
+                         f"the session's watch could not start: {_words(exc)}")
+        return self.watch
 
     def paced(self) -> quiet.Hold | None:
         """The hold `rate` while a refusal of turns' pace keeps the run out of the exit,
@@ -810,22 +927,31 @@ class RelaunchJob:
 
     def exit(self, number: int | None) -> tuple[str, str | None]:
         """Step 3: exit the session through turns. Returns the result's kind and reason
-        when the steps go on to the pane (`ran`, a `failed`, turns' `gone` or its error)."""
+        when the steps go on to the pane (`ran`, a `failed`, turns' `gone` or its error).
+        turns' `gone` or its error from an endpoint that moved (`follow_move`) sends the
+        run back to its wait instead, `_Again` with the word `moved`."""
         self.event("exit", {"turn_number": number})
         try:
             result = self.target.session.command("exit", if_turn_number=number)
         except Exception as exc:  # noqa: BLE001  (turns' error reads as gone)
             self.event("exit-result", {"kind": "error", "reason": GONE,
                                        "why": _words(exc)})
+            self._again_if_moved(f"turns' error at the exit: {_words(exc)}")
             return "error", GONE
         kind = getattr(result, "KIND", type(result).__name__.lower())
         reason = getattr(result, "reason", None)
         self.event("exit-result", {"kind": kind, "reason": reason})
+        if kind == "refused" and reason == GONE:
+            self._again_if_moved("turns refused the exit: gone")
         if kind != "refused" or reason == GONE:
             return kind, reason
         if reason in TRANSIENT:
             self._transient(reason, f"turns refused the exit: {reason}")
         self.end("not-exited", reason, f"turns refused the exit: {reason}")
+
+    def _again_if_moved(self, why: str) -> None:
+        if self.follow_move(why):
+            raise _Again("moved", f"{why}; the session moved to a new endpoint")
 
     def dialog(self, number: int | None) -> None:
         """Step 4: the exit dialog, answered after its last checks, or a pane that
@@ -1048,6 +1174,8 @@ class RelaunchJob:
         told = notices.settings_of(self.settings)
         events = store.run_events(self.conn, self.run_id)
         if notices.owes_note(run, outcome, events):
+            if self.target is not None and self.endpoint_gone():
+                self.follow_move("the endpoint ended before the note")
             session = self.target.session if self.target is not None else None
             if session is not None and notices.note(
                     self.conn, run, session, wait_s=float(self.setting("relaunch.wait_s"))):
@@ -1073,6 +1201,49 @@ class RelaunchJob:
             store.prune(self.conn, float(self.setting("records.keep_days")))
         except Exception as exc:  # noqa: BLE001  (retention never stops a run)
             log.warning("the launcher's records were not pruned: %s", exc)
+
+
+def _endpoint_of(session: Any) -> Any | None:
+    """The endpoint process serving turns' `session` (a `moxi.proc.ProcId`), or None
+    when it names none or the process can't be read."""
+    from moxi import proc
+
+    pid = getattr(session, "endpoint_pid", None)
+    if not isinstance(pid, int) or isinstance(pid, bool):
+        return None
+    return proc.identity(pid)
+
+
+def _same(found: Any, old: Any | None, endpoint: Any | None,
+          old_endpoint: Any | None) -> bool:
+    """Whether the target `found` is served by the old target's endpoint: the same
+    endpoint pid, and, where both processes were read, start times within
+    `SAME_START_S`."""
+    pid = getattr(found.session, "endpoint_pid", None)
+    if pid is None or pid != _pid_of(old):
+        return False
+    if endpoint is None or old_endpoint is None:
+        return True
+    return abs(endpoint.started - old_endpoint.started) < SAME_START_S
+
+
+def _pid_of(found: Any | None) -> int | None:
+    """The endpoint pid of the target `found`'s session, or None."""
+    return getattr(getattr(found, "session", None), "endpoint_pid", None)
+
+
+def _serving_pid(refused_exc: Any) -> int | None:
+    """The pid of the endpoint a `changed` refusal names as serving the session, or None."""
+    parsed = store.parse_endpoint(refused_exc.serving) if refused_exc.serving else None
+    return parsed[0] if parsed is not None else None
+
+
+def _endpoint_text(endpoint: Any | None, found: Any | None) -> str | None:
+    """An endpoint as a claim names it, `<pid>@<start time>`, or its pid alone."""
+    if endpoint is not None:
+        return f"{endpoint.pid}@{endpoint.started:.6f}"
+    pid = _pid_of(found)
+    return None if pid is None else str(pid)
 
 
 class RepairJob(RelaunchJob):
