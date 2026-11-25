@@ -3,7 +3,8 @@
 Moxi's publishing module keeps private text out of a public git repo. You mark a repo
 public, and three git hook pieces, run by Moxi's repo module, guard what it commits and
 pushes. The pattern sets they read (credentials, and your private names) are Moxi's secrets
-module's.
+module's. A repo that isn't public can keep the same clean history without being called
+public ([Clean history](#clean-history)).
 
 ```sh
 moxi publishing enable ~/src/app --github alice/app
@@ -23,6 +24,39 @@ each piece's state and settings.
 
 `enable` warns when secrets' private names list is empty: add yours with
 `moxi config secrets`.
+
+## Clean history
+
+A repo can keep its history publishable without being public: clean commit messages and
+no private text, so it could go public later, or be read by someone it is shared with.
+
+```sh
+moxi publishing clean-history enable ~/src/app
+moxi publishing clean-history disable ~/src/app
+```
+
+`clean-history enable` registers the message and content pieces (their settings seeded
+as `enable` seeds them), makes sure repo's commit-rules piece, `repo/commit-rules`,
+refuses each trailer key in publishing's `defaults.refused_trailers` (`Round` and
+`Reconciles`, the trailers Moxi's rounds writes for its own records), and writes
+`moxi-publishing.clean = true` into the repo's git config. A repo that already has
+commit-rules keeps its settings: the keys it doesn't refuse yet are added to its
+`refused-trailer` list, never replacing it.
+
+The message and content pieces then run as in a public repo: `Claude-Session` is dropped
+from every message, and a message or an added line holding a credential, a private name or
+a provenance pointer is refused. The push piece is not registered; nothing about pushing
+changes.
+
+`clean-history disable` removes the two pieces and the flag, and takes back out of
+`refused-trailer` only the keys `enable` added (recorded in
+`moxi-publishing.clean-trailers`). It removes commit-rules only when `enable` registered it
+and nothing else is set there. It refuses in a public repo, which always keeps clean
+history: run `moxi publishing disable` first.
+
+The message and content pieces run where the repo is marked clean or public; a public
+repo counts as clean, so a repo enabled before clean history existed needs nothing.
+Registered in a repo marked neither, they refuse every commit, naming both commands.
 
 ## Settings
 
@@ -521,8 +555,10 @@ until you know why.
 ## Doctor
 
 `moxi doctor publishing` reads each repo repo has indexed, and uses no network. It fails
-a repo marked public where a piece is missing or disabled; a piece registered where the
-repo isn't marked public; a hook command repo wrote for the pieces that runs another
+a repo marked public where a piece is missing or disabled; a repo that keeps a clean
+history where the message or content piece is missing or disabled; a piece registered
+where the repo isn't marked as it needs (clean or public for the message and content
+pieces, public for the push piece); a hook command repo wrote for the pieces that runs another
 interpreter than the one `enable` recorded in `moxi-publishing.interpreter`; and a repo
 where a commit-msg hook of its own runs after the pieces while the message piece's
 `drop-trailer` names `Commit-Check`, or holds no value, which reads as the seed that

@@ -1,5 +1,5 @@
-"""The content piece, `publishing/content`, and `moxi publishing scan`: the text a public
-repo holds.
+"""The content piece, `publishing/content`, and `moxi publishing scan`: the text a clean or
+public repo holds.
 
 The piece runs on pre-commit, fail closed, order 50. It scans what the commit adds: one
 `git diff --cached` pass with every attribute, diff driver, text conversion and colour
@@ -38,8 +38,8 @@ CONTENT = {
     "target": "moxi_publishing.content:pre_commit",
     "fail": "closed",
     "order": 50,
-    "doc": "In a public repo, refuse a commit that adds a credential, a private name or "
-           "a provenance pointer.",
+    "doc": "In a clean or public repo, refuse a commit that adds a credential, a private "
+           "name or a provenance pointer.",
 }
 
 PIECE_ID = "publishing/content"
@@ -394,10 +394,10 @@ def pre_commit(ctx):
 
     from moxi_repo.api import Outcome
 
-    from moxi_publishing.message import is_public, no_flag
+    from moxi_publishing.message import keeps_clean, no_flag
 
-    if not is_public(ctx):
-        return no_flag(ctx, PIECE_ID)
+    if not keeps_clean(ctx):
+        return no_flag(ctx, PIECE_ID, clean=True)
 
     def git(*args, stdin_data=None):
         return ctx.git(NO_REPLACE, *args, stdin_data=stdin_data, binary=True)
@@ -413,8 +413,8 @@ def pre_commit(ctx):
         return Outcome.refuse(f"what this commit adds can't be scanned, so it is refused: "
                               f"{exc}")
     if refused:
-        return Outcome.refuse("this repo is public, and what this commit adds can't be "
-                              "published:", *refused, _next_step())
+        return Outcome.refuse("this repo keeps a clean history, and what this commit adds "
+                              "can't be published:", *refused, _next_step())
     return Outcome.ok()
 
 

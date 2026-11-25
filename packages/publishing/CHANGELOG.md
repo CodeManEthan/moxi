@@ -73,3 +73,11 @@ The first version.
 - `moxi publishing ci siblings` runs the suite with `MOXI_TEST_TIMED=hold`, over any value
   the job had, so a release's test run holds every timed test as the land check does;
   they run only in `moxi-dev timed`.
+- Clean history, a repo's own choice apart from being public: `moxi publishing
+  clean-history enable PATH` registers the message and content pieces, adds each key of
+  the new `defaults.refused_trailers` setting (default `Round` and `Reconciles`) to repo's
+  commit-rules piece, registering it where it isn't, and writes `moxi-publishing.clean`.
+  `clean-history disable PATH` takes back only what enable added, and refuses in a public
+  repo. The message and content pieces now run where the repo is marked clean or public,
+  so a private clean repo drops `Claude-Session` too; registered with neither flag they
+  refuse, naming both commands. `moxi doctor publishing` reads a clean repo's pieces.

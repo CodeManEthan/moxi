@@ -2,7 +2,8 @@
 # `moxi config publishing` shows every key and `moxi config publishing init` writes the file.
 # Every key is read at its use. A value that can differ between repos is not here: it is a
 # piece setting in that repo's own git config, and the `defaults.*` keys only seed those
-# settings when `moxi publishing enable` first registers a piece in a repo.
+# settings when `moxi publishing enable` or `clean-history enable` first registers a piece
+# in a repo, or adds to its commit-rules piece.
 
 [provenance.rules]
 type = "list"
@@ -30,6 +31,15 @@ doc = "Seeds a repo's drop-trailer setting when enable first registers the messa
 read = "use"
 label = "Trailers to drop, for a new repo"
 line = "Copied in when enable first registers the message piece in a repo; a later change reaches no repo that has it."
+
+[defaults.refused_trailers]
+type = "list"
+items = "str"
+default = ["Round", "Reconciles"]
+doc = "Trailer keys clean history adds to a repo's commit-rules piece as its refused-trailer setting, registering the piece where it isn't: the trailers Moxi's rounds writes for its own records. Keys the repo already refuses are kept; nothing is replaced."
+read = "use"
+label = "Trailers a clean repo refuses"
+line = "Added to the repo's refused-trailer setting when clean history is turned on there; a later change reaches no repo that has it."
 
 [defaults.main]
 type = "string"

@@ -48,6 +48,7 @@ def test_show_json_gives_every_key_a_label_and_a_line(capsys):
         "provenance.rules": "Provenance rules that run",
         "push.word_pattern": "What a push word must look like",
         "defaults.drop_trailers": "Trailers to drop, for a new repo",
+        "defaults.refused_trailers": "Trailers a clean repo refuses",
         "defaults.main": "The main branch, for a new repo",
         "defaults.word_required": "Push word needed, for a new repo"}
     assert all(key["line"] for key in keys.values())

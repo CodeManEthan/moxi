@@ -3,8 +3,10 @@
 The flag is `moxi-publishing.public = true` in the repo's own git config, beside the two
 keys `enable` also writes: `moxi-publishing.github` (OWNER/REPO, for the GitHub verbs and
 the tag gate) and `moxi-publishing.interpreter` (the Python the hook entries were written
-with, which the doctor compares). Each piece reads the flag first; a piece registered in a
-repo without it refuses.
+with, which the doctor compares). The clean flag, `moxi-publishing.clean = true`, is a
+repo's choice to keep its history publishable without being public (`clean.py`). The push
+piece reads the public flag first, and the message and content pieces the clean or public
+flag; a piece registered in a repo without its flag refuses.
 
 `enable` writes the flag, then registers the three pieces through repo's API, each
 piece's settings seeded from publishing's `defaults.*` keys and overridden by `--set`.
@@ -22,6 +24,7 @@ import os
 import re
 
 FLAG = "moxi-publishing.public"
+CLEAN = "moxi-publishing.clean"
 GITHUB = "moxi-publishing.github"
 INTERPRETER = "moxi-publishing.interpreter"
 MESSAGE = "publishing/message"
@@ -94,27 +97,57 @@ def config_get(root: str, key: str) -> str | None:
     return done.stdout.strip() if done.returncode == 0 else None
 
 
-def is_public(root: str) -> bool:
-    done = _git(root, "config", "--type=bool", "--get", FLAG)
+def config_get_all(root: str, key: str) -> list[str]:
+    """Every value of `key` in the repo's git config, in order; none when it is unset."""
+    done = _git(root, "config", "--get-all", key)
+    return done.stdout.splitlines() if done.returncode == 0 else []
+
+
+def _is_true(root: str, key: str) -> bool:
+    done = _git(root, "config", "--type=bool", "--get", key)
     return done.returncode == 0 and done.stdout.strip() == "true"
 
 
-def registered(root: str) -> dict[str, dict]:
-    """publishing's pieces registered in the repo: id -> {"enabled": bool,
-    "settings": {name: [values]}}."""
-    done = _git(root, "config", "--get-regexp", r"^moxi-repo\.piece\.publishing/")
+def is_public(root: str) -> bool:
+    return _is_true(root, FLAG)
+
+
+def is_clean(root: str) -> bool:
+    """Whether the repo keeps clean history: the clean flag, or the public flag, since a
+    public repo always does."""
+    return _is_true(root, CLEAN) or is_public(root)
+
+
+def _pieces(root: str, owner: str) -> dict[str, dict]:
+    """The pieces registered in the repo whose id starts with `owner` and `/`."""
+    done = _git(root, "config", "--get-regexp", r"^moxi-repo\.piece\.")
     if done.returncode not in (0, 1):
         raise Failure(f"git config can't be read in {root}: {done.stderr.strip()}")
     out: dict[str, dict] = {}
     for line in done.stdout.splitlines():
         name, _, value = line.partition(" ")
         section, _, key = name[len("moxi-repo.piece."):].rpartition(".")
+        if not section.startswith(owner + "/"):
+            continue
         piece = out.setdefault(section, {"enabled": True, "settings": {}})
         if key == "enabled":
             piece["enabled"] = value.strip().lower() not in ("false", "no", "off", "0")
         elif key not in _REGISTRATION:
             piece["settings"].setdefault(key, []).append(value)
     return out
+
+
+def registered(root: str) -> dict[str, dict]:
+    """publishing's pieces registered in the repo: id -> {"enabled": bool,
+    "settings": {name: [values]}}."""
+    return _pieces(root, "publishing")
+
+
+def piece_settings(root: str, piece_id: str) -> dict[str, list[str]] | None:
+    """The settings of any owner's piece `piece_id` in the repo, {name: [values]}, or
+    None when it isn't registered there."""
+    found = _pieces(root, piece_id.partition("/")[0]).get(piece_id)
+    return None if found is None else found["settings"]
 
 
 # -- free-ref patterns -------------------------------------------------------------------
@@ -332,6 +365,7 @@ def listing() -> list[dict]:
     return sorted(out, key=lambda item: item["root"])
 
 
-__all__ = ["FLAG", "GITHUB", "INTERPRETER", "PIECES", "Failure", "config_get", "disable",
-           "enable", "free_ref_problem", "is_public", "listing", "looks_like_release_tag",
+__all__ = ["FLAG", "CLEAN", "GITHUB", "INTERPRETER", "PIECES", "Failure", "config_get",
+           "config_get_all", "disable", "enable", "free_ref_problem", "is_clean",
+           "is_public", "listing", "looks_like_release_tag", "piece_settings",
            "registered", "resolve", "work_tree"]

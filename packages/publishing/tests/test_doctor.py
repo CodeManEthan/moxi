@@ -60,7 +60,7 @@ def test_a_piece_without_the_flag_fails(repo, names):
     enabled(repo)
     git(repo, "config", "--unset", "moxi-publishing.public")
     [(state, detail)] = states(repo)
-    assert state == "fail" and "isn't marked public" in detail
+    assert state == "fail" and "marked neither clean nor public" in detail
 
 
 def test_with_nothing_public_one_ok_row():

@@ -2,6 +2,7 @@
 
     moxi publishing enable PATH [--github OWNER/REPO] [--set KEY=VALUE]...
     moxi publishing disable PATH
+    moxi publishing clean-history enable|disable PATH
     moxi publishing list [--json]
     moxi publishing scan [PATH] [--rev REV] [--from REV] [--ci]
     moxi publishing bump PACKAGE... [--part patch|minor|major] [--path PATH]
@@ -56,6 +57,28 @@ def _parser(prog: str) -> argparse.ArgumentParser:
                          description="Remove the three pieces from the repo at PATH, then "
                                      "its public flag.")
     p.add_argument("path", metavar="PATH")
+    p = verbs.add_parser(
+        "clean-history", help="keep a repo's history publishable, public or not",
+        description="Keep the history of the repo at PATH publishable without marking it "
+                    "public: the message piece (which drops the trailers you name, "
+                    "Claude-Session among them) and the content piece, and repo's "
+                    "commit-rules piece refusing publishing's defaults.refused_trailers.")
+    steps = p.add_subparsers(dest="step", metavar="STEP")
+    steps.required = True
+    s = steps.add_parser(
+        "enable", help="turn clean history on",
+        description="Register the message and content pieces, add each key of "
+                    "defaults.refused_trailers to commit-rules' refused-trailer "
+                    "(registering commit-rules where it isn't), then write "
+                    "moxi-publishing.clean. Keys the repo already refuses are kept.")
+    s.add_argument("path", metavar="PATH")
+    s = steps.add_parser(
+        "disable", help="turn clean history off",
+        description="Remove the two pieces and the flag, and take back out only the "
+                    "refused-trailer keys enable added; commit-rules goes only when "
+                    "enable registered it and nothing else is set there. Refused in a "
+                    "public repo, which always keeps clean history.")
+    s.add_argument("path", metavar="PATH")
     p = verbs.add_parser("list", help="every repo marked public, with its pieces",
                          description="Every repo repo has indexed that is marked public, "
                                      "with each piece's state and settings.")
@@ -257,6 +280,10 @@ def main(argv: Sequence[str] | None = None, prog: str = "moxi publishing") -> in
             lines = flag.enable(args.path, github=args.github, sets=args.sets)
         elif args.verb == "disable":
             lines = flag.disable(args.path)
+        elif args.verb == "clean-history":
+            from moxi_publishing import clean
+
+            lines = (clean.enable if args.step == "enable" else clean.disable)(args.path)
         else:
             repos = flag.listing()
             if args.json:

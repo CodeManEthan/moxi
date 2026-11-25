@@ -1,4 +1,4 @@
-"""The message piece, `publishing/message`: a public repo's commit messages.
+"""The message piece, `publishing/message`: a clean or public repo's commit messages.
 
 It runs on commit-msg, fail closed, order 90, so repo's own commit-msg pieces (order 10
 and 20) read the message before it, and the repo's existing git hook reads it after. On
@@ -22,8 +22,9 @@ A trailer line is one git's trailer parser reads as one: a key of ASCII letters,
 and `-` at the start of the line, then spaces or tabs, then `:`; a `:` followed by `//`
 (a URL) is no separator. Keys match ignoring case.
 
-The piece first reads the public flag; registered in a repo without it, it refuses, since
-whoever registered it meant the repo to be guarded.
+The piece first reads the clean and public flags; registered in a repo with neither, it
+refuses, since whoever registered it meant the repo to be guarded. A public repo always
+keeps clean history, so the public flag alone is enough.
 
 Standard library only at import; secrets and the rules load when the piece runs.
 """
@@ -40,8 +41,8 @@ MESSAGE = {
     "target": "moxi_publishing.message:commit_msg",
     "fail": "closed",
     "order": 90,
-    "doc": "In a public repo, drop the trailers you name and refuse a message holding a "
-           "credential, a private name or a provenance pointer.",
+    "doc": "In a clean or public repo, drop the trailers you name and refuse a message "
+           "holding a credential, a private name or a provenance pointer.",
     "settings": {"drop-trailer": "multi", "pass-trailer": "multi"},
 }
 
@@ -156,10 +157,27 @@ def is_public(ctx) -> bool:
     return done.returncode == 0 and done.stdout.strip() == "true"
 
 
-def no_flag(ctx, piece_id: str):
-    """The refusal of a piece registered in a repo without the public flag."""
+def keeps_clean(ctx) -> bool:
+    """Whether the repo's git config reads `moxi-publishing.clean` or
+    `moxi-publishing.public` as true: a public repo always keeps clean history."""
+    from moxi_publishing.flag import CLEAN
+
+    done = ctx.git("config", "--type=bool", "--get", CLEAN)
+    return (done.returncode == 0 and done.stdout.strip() == "true") or is_public(ctx)
+
+
+def no_flag(ctx, piece_id: str, *, clean: bool = False):
+    """The refusal of a piece registered in a repo without its flag: the public flag, or
+    with `clean` the clean or public flag."""
     from moxi_repo.api import Outcome
 
+    if clean:
+        return Outcome.refuse(
+            f"{piece_id} is registered here but the repo is marked neither clean nor "
+            "public (moxi-publishing.clean, moxi-publishing.public); keep its history "
+            f"clean with: moxi publishing clean-history enable {ctx.root}, or mark it "
+            f"public with: moxi publishing enable {ctx.root}; or take the pieces out "
+            f"with: moxi publishing clean-history disable {ctx.root}")
     return Outcome.refuse(
         f"{piece_id} is registered here but the repo isn't marked public "
         "(moxi-publishing.public); guard it with: moxi publishing enable "
@@ -183,8 +201,8 @@ def commit_msg(ctx):
     from moxi_repo.api import Outcome
     from moxi_repo.api import comment_prefix
 
-    if not is_public(ctx):
-        return no_flag(ctx, PIECE_ID)
+    if not keeps_clean(ctx):
+        return no_flag(ctx, PIECE_ID, clean=True)
     with open(ctx.message_path, "rb") as fh:
         text = fh.read().decode("utf-8", "surrogateescape")
     try:
@@ -195,7 +213,8 @@ def commit_msg(ctx):
         return Outcome.refuse(f"the message can't be checked, so it is refused: {exc}")
     if judged.refusals:
         return Outcome.refuse(
-            "this repo is public, and these lines of the message can't be published:",
+            "this repo keeps a clean history, and these lines of the message can't be "
+            "published:",
             *(line for _, line in judged.refusals), _next_step(ctx))
     if judged.dropped:
         from moxi.files import atomic_write
@@ -203,10 +222,10 @@ def commit_msg(ctx):
         atomic_write(ctx.message_path, judged.text.encode("utf-8", "surrogateescape"),
                      mode=os.stat(ctx.message_path).st_mode & 0o777)
         for key in judged.dropped:
-            print(f"publishing: dropped the {key} line: this repo is public and drops it "
-                  "at commit", file=sys.stderr)
+            print(f"publishing: dropped the {key} line: this repo keeps a clean history "
+                  "and drops it at commit", file=sys.stderr)
     return Outcome.ok()
 
 
 __all__ = ["MESSAGE", "PIECE_ID", "DROP_TRAILER", "PASS_TRAILER", "Judged", "judge",
-           "trailer_key", "above_scissors", "is_public", "no_flag", "commit_msg"]
+           "trailer_key", "above_scissors", "is_public", "keeps_clean", "no_flag", "commit_msg"]

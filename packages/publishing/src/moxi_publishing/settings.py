@@ -1,9 +1,11 @@
 """publishing's config, read through `moxi.config` at each use.
 
 Keys: `provenance.rules`, the provenance rules that run; `push.word_pattern`, the shape a
-push word must match in full; and `defaults.drop_trailers`, `defaults.main` and
+push word must match in full; `defaults.drop_trailers`, `defaults.main` and
 `defaults.word_required`, which seed a repo's piece settings when `enable` first
-registers a piece there. Every value scoped to one repo lives in that repo's git config.
+registers a piece there; and `defaults.refused_trailers`, the keys clean history adds to
+the repo's commit-rules piece. Every value scoped to one repo lives in that repo's git
+config.
 """
 
 from __future__ import annotations
@@ -15,6 +17,7 @@ SCHEMA_RESOURCE = "settings.toml"
 RULES = "provenance.rules"
 WORD_PATTERN = "push.word_pattern"
 DROP_TRAILERS = "defaults.drop_trailers"
+REFUSED_TRAILERS = "defaults.refused_trailers"
 MAIN = "defaults.main"
 WORD_REQUIRED = "defaults.word_required"
 
