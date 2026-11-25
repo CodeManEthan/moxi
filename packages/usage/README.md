@@ -342,8 +342,13 @@ writing, editing and reading (with a `limit`) `.md` files under the handoff fold
 `moxi launcher relaunch --self --handoff FILE` with FILE a `.md` file under the handoff
 folder; and Claude's `Skill` and `ToolSearch`, which load a skill (the handoff skill) or a
 held-back tool (comms' own) and act on nothing themselves. A tool `ToolSearch` loads is
-judged when it is called. A refusal gives `stop.deny_text`, its `{mark}` and `{folder}` filled in, and the
-reason in brackets. The guard runs only in a session whose launch set a stop mark, and
+judged when it is called. A skill that runs forked in a subagent (`context: fork` in its
+frontmatter) would act where the stop doesn't reach, so `Skill` loads only a skill whose
+file the guard finds (under Claude's folder, the project's `.claude` folders up to the
+repository's root, an installed plugin, or the skills synced from the account) and none
+of whose files forks; any other, Claude Code's own bundled skills among them, is refused.
+A refusal gives `stop.deny_text`, its `{mark}` and `{folder}` filled in, and the reason
+in brackets. The guard runs only in a session whose launch set a stop mark, and
 only on Claude; a subagent's calls are not stopped, since only the main session's calls
 grow the context the stop measures.
 

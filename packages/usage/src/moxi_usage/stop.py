@@ -24,7 +24,12 @@ in memory. With no latch it allows. Latched, it allows only:
   message verbs `COMMS_VERBS`, written bare and passing the allowlist's lexer;
 * the tools `WRAP_UP_TOOLS`: `Skill`, so a handoff skill can be loaded, and `ToolSearch`,
   so comms' MCP tools can be loaded where Claude Code holds them back. Neither acts on its
-  own: a tool `ToolSearch` loads is judged by this guard when it is called.
+  own: a tool `ToolSearch` loads is judged by this guard when it is called. A skill acts
+  on its own when it runs forked in a subagent (`context: fork` in its frontmatter), and
+  a subagent's calls are not this guard's, so `Skill` is allowed only for a skill that
+  runs inline (`skill_refusal`): one whose file is found where Claude Code finds skills
+  and none of whose files forks. A skill with no file found (Claude Code's own bundled
+  skills, a managed or `--add-dir` one) can't be told, and is refused.
 
 Everything else is refused with `stop.deny_text`, its `{mark}` and `{folder}` filled in,
 and the allowlist's reason in brackets. A subagent's calls are not the guard's: the stop
@@ -54,9 +59,12 @@ STATE_DIR = "stop"
 SCHEMA = 1
 #: The prefix of comms' MCP tools in a Claude session (`mcp__<server>__<tool>`).
 COMMS_TOOL_PREFIX = "mcp__comms__"
-#: The tools a stopped session may call whatever their input: they load a skill or a
-#: tool's schema and act on nothing themselves.
-WRAP_UP_TOOLS = ("Skill", "ToolSearch")
+#: The tools a stopped session may call: they load a skill or a tool's schema and act on
+#: nothing themselves. `Skill` only for a skill that runs inline (`skill_refusal`).
+SKILL_TOOL = "Skill"
+WRAP_UP_TOOLS = (SKILL_TOOL, "ToolSearch")
+#: A skill's frontmatter key, and its value that runs the skill forked in a subagent.
+CONTEXT_KEY, FORK = "context", "fork"
 #: The comms verbs a stopped session may run on the shell: its message verbs.
 COMMS_VERBS = ("send", "reply", "agents", "whoami", "history", "remove")
 #: The commands a stopped session may run, as the allowlist's word lists.
@@ -276,13 +284,17 @@ def decide(call, *, env=None) -> str | None:
     if latched(harness, session_id, env) is None:
         return None
     tool = getattr(call, "tool", None)
-    if isinstance(tool, str) and (tool.startswith(COMMS_TOOL_PREFIX)
-                                  or tool in WRAP_UP_TOOLS):
-        return None
     from collections.abc import Mapping
 
     session_env = getattr(call, "env", None)
     session_env = session_env if isinstance(session_env, Mapping) else {}
+    if tool == SKILL_TOOL:
+        why = skill_refusal(getattr(call, "input", None), getattr(call, "cwd", None),
+                            session_env)
+        return None if why is None else f"{stop_text(session_env, env)} ({why})"
+    if isinstance(tool, str) and (tool.startswith(COMMS_TOOL_PREFIX)
+                                  or tool in WRAP_UP_TOOLS):
+        return None
     handoff_dir = session_env.get(STOP_HANDOFFS_ENV) or ""
     home = session_env.get("HOME")
     tool_input = getattr(call, "input", None)
@@ -318,6 +330,130 @@ def comms_verb(command: object, home: str | None = None) -> bool:
     return words[:2] == ["moxi", "comms"] and len(words) >= 3 and words[2] in COMMS_VERBS
 
 
+# --- skills -----------------------------------------------------------------------------
+
+#: One part of a skill's name (`handoff`, either part of `plugin:skill`).
+_NAME_PART = r"[A-Za-z0-9][A-Za-z0-9._-]*"
+#: How many folders, the working directory first, project skills are looked for in.
+PROJECT_DEPTH = 64
+
+
+def skill_refusal(tool_input, cwd, session_env) -> str | None:
+    """Why a `Skill` call past the stop is refused, or None when its skill runs inline:
+    a file of it is found (`skill_files`) and none sets `context: fork`."""
+    import re
+    from collections.abc import Mapping
+
+    name = tool_input.get("skill") if isinstance(tool_input, Mapping) else None
+    name = name.strip().removeprefix("/") if isinstance(name, str) else ""
+    if not re.fullmatch(rf"{_NAME_PART}(:{_NAME_PART})*", name):
+        return "Skill names no skill a file can be found for"
+    files = skill_files(name, cwd, session_env)
+    if not files:
+        return (f"no file of skill {name} is found, so whether it runs in a subagent "
+                "can't be told")
+    for path in files:
+        forks = skill_forks(path)
+        if forks is None:
+            return f"skill {name}'s file {path} can't be read"
+        if forks:
+            return f"skill {name} runs forked in a subagent"
+    return None
+
+
+def skill_files(name: str, cwd, session_env) -> list[str]:
+    """The files Claude Code may load for the skill `name`, each one that is there.
+
+    A bare name is looked for under Claude's folder (`CLAUDE_CONFIG_DIR`, else
+    `~/.claude`, as `session_env` places it) and under `.claude` in `cwd` and each folder
+    above it up to its repository's root: `skills/<name>/SKILL.md`, and the older
+    `commands/<name>.md`. `<space>:<name>` is looked for in each installed copy of the
+    plugin `<space>` (Claude's `plugins/installed_plugins.json`), and as
+    `commands/<space>/<name>.md` in the same folders. Either form is looked for among the
+    skills Claude syncs from the account (`skills/synced/<bucket>/<name>/SKILL.md`)."""
+    from moxi.paths import claude_home
+
+    *spaces, bare = name.split(":")
+    try:
+        claude_dir = str(claude_home(session_env))
+    except LookupError:
+        claude_dir = None
+    roots = [claude_dir] if claude_dir else []
+    roots += [os.path.join(d, ".claude") for d in _project_dirs(cwd)]
+    if len(spaces) == 1 and claude_dir:
+        roots += _plugin_dirs(claude_dir, spaces[0])
+    found = []
+    for root in roots:
+        found.append(os.path.join(root, "skills", bare, "SKILL.md"))
+        found.append(os.path.join(root, "commands", *spaces, f"{bare}.md"))
+        if spaces:
+            found.append(os.path.join(root, "commands", f"{bare}.md"))
+    if claude_dir:
+        synced = os.path.join(claude_dir, "skills", "synced")
+        try:
+            buckets = sorted(os.listdir(synced))
+        except OSError:
+            buckets = []
+        found += [os.path.join(synced, b, bare, "SKILL.md") for b in buckets]
+    return [path for path in dict.fromkeys(found) if os.path.isfile(path)]
+
+
+def _project_dirs(cwd) -> list[str]:
+    """`cwd` and each folder above it, up to the first that holds `.git` (its
+    repository's root) or the top of the file system."""
+    if not isinstance(cwd, str) or not os.path.isabs(cwd):
+        return []
+    out, at = [], os.path.normpath(cwd)
+    while len(out) < PROJECT_DEPTH:
+        out.append(at)
+        up = os.path.dirname(at)
+        if os.path.exists(os.path.join(at, ".git")) or up == at:
+            break
+        at = up
+    return out
+
+
+def _plugin_dirs(claude_dir: str, plugin: str) -> list[str]:
+    """The install folders of `plugin`, from any marketplace, that Claude's plugin list
+    names; none when the list can't be read."""
+    import json
+
+    try:
+        with open(os.path.join(claude_dir, "plugins", "installed_plugins.json"),
+                  encoding="utf-8") as fh:
+            doc = json.load(fh)
+    except (OSError, ValueError):
+        return []
+    plugins = doc.get("plugins") if isinstance(doc, dict) else None
+    out = []
+    for key, copies in plugins.items() if isinstance(plugins, dict) else ():
+        if str(key).split("@", 1)[0] != plugin or not isinstance(copies, list):
+            continue
+        out += [c["installPath"] for c in copies
+                if isinstance(c, dict) and isinstance(c.get("installPath"), str)]
+    return out
+
+
+def skill_forks(path) -> bool | None:
+    """Whether the skill file `path` runs forked in a subagent: its frontmatter (between
+    a first line `---` and the next) sets `context: fork`. None when it can't be read."""
+    try:
+        with open(path, encoding="utf-8") as fh:
+            head = fh.read(65536)
+    except (OSError, UnicodeDecodeError):
+        return None
+    lines = head.splitlines()
+    if not lines or lines[0].strip() != "---":
+        return False
+    for line in lines[1:]:
+        if line.strip() == "---":
+            break
+        key, colon, value = line.partition(":")
+        if colon and key.strip() == CONTEXT_KEY:
+            return value.split("#", 1)[0].strip().strip("'\"").lower() == FORK
+    return False
+
+
 # --- logging ----------------------------------------------------------------------------
 
 _said: set[str] = set()
@@ -334,6 +470,8 @@ def _warn(kind: str, message: str, *, exc_info: bool = False) -> None:
 
 
 __all__ = ["GUARD_ID", "NAME", "DENY_TEXT_KEY", "STATE_DIR", "SCHEMA", "COMMS_TOOL_PREFIX",
-           "WRAP_UP_TOOLS", "COMMS_VERBS", "COMMANDS", "NO_HANDOFF_DIR", "state_dir", "latch_file", "read_latch",
-           "latched", "latch", "sweep", "reset", "deny_text", "stop_text", "fill", "on_for",
-           "judge", "decide", "comms_verb"]
+           "WRAP_UP_TOOLS", "SKILL_TOOL", "CONTEXT_KEY", "FORK", "PROJECT_DEPTH",
+           "COMMS_VERBS", "COMMANDS", "NO_HANDOFF_DIR", "state_dir", "latch_file",
+           "read_latch", "latched", "latch", "sweep", "reset", "deny_text", "stop_text",
+           "fill", "on_for", "judge", "decide", "comms_verb", "skill_refusal",
+           "skill_files", "skill_forks"]

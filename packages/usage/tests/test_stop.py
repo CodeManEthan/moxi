@@ -32,13 +32,31 @@ def fresh():
 
 @pytest.fixture()
 def where(tmp_path):
-    """The session's working directory and its handoff folder, real paths."""
+    """The session's working directory and its handoff folder, real paths, and a home
+    whose Claude folder holds an inline handoff skill."""
     root = os.path.realpath(tmp_path)
     work = os.path.join(root, "work", "project")
     handoffs = os.path.join(root, "handoffs")
     os.makedirs(work)
     os.makedirs(handoffs)
-    return SimpleNamespace(work=work, handoffs=handoffs, home=os.path.join(root, "home"))
+    home = os.path.join(root, "home")
+    skill(os.path.join(home, ".claude"), "handoff")
+    return SimpleNamespace(work=work, handoffs=handoffs, home=home, root=root)
+
+
+def skill(base, name, *, context=None, command=False):
+    """Write the skill `name` under `base` (a `.claude` folder or a plugin's), as
+    `skills/<name>/SKILL.md` or, with `command`, the older `commands/<name>.md`; with
+    `context`, its frontmatter sets it. Returns the file's path."""
+    path = os.path.join(base, "commands", f"{name}.md") if command else \
+        os.path.join(base, "skills", name, "SKILL.md")
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    front = f"name: {name}\ndescription: a test skill\n"
+    if context is not None:
+        front += f"context: {context}\n"
+    with open(path, "w", encoding="utf-8") as fh:
+        fh.write(f"---\n{front}---\n\n# {name}\n\ncontext: fork is body text here.\n")
+    return path
 
 
 def stamps(where, mark="2.5x"):
@@ -63,6 +81,17 @@ def bash(where, command, **kwargs):
 def latch():
     assert stop.latch("claude", SESSION, mark="2.5x", tokens=400_000, threshold=399_000,
                       model="claude-opus-5-5", at=NOW)
+
+
+def skill_call(where, name, **kwargs):
+    return call(where, "Skill", {"skill": name}, **kwargs)
+
+
+#: The stop text the test's launch reads, before the reason in brackets.
+def stopped(where):
+    return (f"This session is past its stop mark (2.5x). Only wrap-up works now: commit "
+            f"your work with git, write your handoff in {where.handoffs}, send what you "
+            "owe on comms, then run moxi launcher relaunch --self --handoff FILE.")
 
 
 # --- the declaration --------------------------------------------------------------------
@@ -176,6 +205,117 @@ def test_a_tool_toolsearch_loads_is_still_judged_when_called(where):
         reason = stop.decide(call(where, tool, {}))
         assert reason.endswith(f"({tool} is not a wrap-up operation)")
         assert isinstance(stop.judge(call(where, tool, {}, turns_call=True)), turns.Deny)
+
+
+# --- skills past the stop --------------------------------------------------------------
+
+def test_a_skill_that_runs_inline_loads(where):
+    latch()
+    assert stop.decide(skill_call(where, "handoff")) is None
+    assert stop.decide(skill_call(where, "/handoff")) is None
+    assert stop.judge(skill_call(where, "handoff", turns_call=True)) is None
+
+
+@pytest.mark.parametrize("context", ["fork", "'fork'", '"Fork"', "fork  # in a subagent"])
+def test_a_skill_that_runs_forked_is_refused_with_the_stop_text(where, context):
+    skill(os.path.join(where.home, ".claude"), "survey", context=context)
+    latch()
+    reason = stop.decide(skill_call(where, "survey"))
+    assert reason == f"{stopped(where)} (skill survey runs forked in a subagent)"
+    denied = stop.judge(skill_call(where, "survey", turns_call=True))
+    assert isinstance(denied, turns.Deny) and denied.reason == reason
+
+
+def test_a_context_other_than_fork_and_body_text_load_inline(where):
+    skill(os.path.join(where.home, ".claude"), "plain", context="inline")
+    latch()
+    # The fixture's body holds "context: fork" below the frontmatter: not read.
+    assert stop.decide(skill_call(where, "plain")) is None
+
+
+def test_a_skill_with_no_file_found_is_refused(where):
+    latch()
+    reason = stop.decide(skill_call(where, "simplify"))
+    assert reason == (f"{stopped(where)} (no file of skill simplify is found, so whether "
+                      "it runs in a subagent can't be told)")
+
+
+@pytest.mark.parametrize("tool_input", [{}, {"skill": ""}, {"skill": "../handoff"},
+                                        {"skill": "a/b"}, {"skill": 3}, {"skill": "a::b"}])
+def test_a_skill_call_naming_no_skill_is_refused(where, tool_input):
+    latch()
+    reason = stop.decide(call(where, "Skill", tool_input))
+    assert reason.endswith("(Skill names no skill a file can be found for)")
+
+
+def test_project_skills_are_found_up_to_the_repositorys_root(where):
+    repo = os.path.dirname(where.work)
+    os.makedirs(os.path.join(repo, ".git"))
+    skill(os.path.join(where.work, ".claude"), "here")
+    skill(os.path.join(repo, ".claude"), "above", context="fork")
+    skill(os.path.join(where.root, ".claude"), "outside")
+    latch()
+    assert stop.decide(skill_call(where, "here")) is None
+    assert stop.decide(skill_call(where, "above")).endswith("runs forked in a subagent)")
+    assert "no file of skill outside is found" in stop.decide(skill_call(where, "outside"))
+
+
+def test_a_fork_anywhere_its_name_is_found_refuses(where):
+    skill(os.path.join(where.work, ".claude"), "handoff", context="fork")
+    latch()
+    assert stop.decide(skill_call(where, "handoff")).endswith(
+        "(skill handoff runs forked in a subagent)")
+
+
+def test_an_older_command_file_is_read_too(where):
+    skill(os.path.join(where.home, ".claude"), "deploy", context="fork", command=True)
+    skill(os.path.join(where.work, ".claude"), "notes", command=True)
+    latch()
+    assert stop.decide(skill_call(where, "deploy")).endswith("runs forked in a subagent)")
+    assert stop.decide(skill_call(where, "notes")) is None
+
+
+def test_plugin_skills_are_found_through_claudes_plugin_list(where):
+    claude_dir = os.path.join(where.home, ".claude")
+    plugin = os.path.join(where.root, "plugins", "kit", "1.0.0")
+    skill(plugin, "tidy")
+    skill(plugin, "audit", context="fork")
+    os.makedirs(os.path.join(claude_dir, "plugins"), exist_ok=True)
+    with open(os.path.join(claude_dir, "plugins", "installed_plugins.json"), "w") as fh:
+        json.dump({"version": 2, "plugins": {"kit@market": [
+            {"scope": "user", "installPath": plugin}]}}, fh)
+    latch()
+    assert stop.decide(skill_call(where, "kit:tidy")) is None
+    assert stop.decide(skill_call(where, "kit:audit")).endswith(
+        "(skill kit:audit runs forked in a subagent)")
+    assert "no file of skill other:tidy" in stop.decide(skill_call(where, "other:tidy"))
+
+
+def test_synced_account_skills_are_found(where):
+    bucket = os.path.join(where.home, ".claude", "skills", "synced", "bucket-1")
+    os.makedirs(os.path.join(bucket, "docs"))
+    with open(os.path.join(bucket, "docs", "SKILL.md"), "w", encoding="utf-8") as fh:
+        fh.write("---\nname: docs\n---\n")
+    latch()
+    assert stop.decide(skill_call(where, "account-skills:docs")) is None
+    assert stop.decide(skill_call(where, "docs")) is None
+
+
+def test_claudes_config_dir_is_the_sessions(where):
+    config_dir = os.path.join(where.root, "claude-config")
+    skill(config_dir, "wrap")
+    latch()
+    env = {**stamps(where), "CLAUDE_CONFIG_DIR": config_dir}
+    assert stop.decide(skill_call(where, "wrap", env=env)) is None
+    assert stop.decide(skill_call(where, "wrap")).endswith("can't be told)")
+
+
+def test_an_unreadable_skill_file_is_refused(where):
+    path = skill(os.path.join(where.home, ".claude"), "broken")
+    with open(path, "wb") as fh:
+        fh.write(b"---\ncontext: \xff\xfe\n---\n")
+    latch()
+    assert stop.decide(skill_call(where, "broken")).endswith(f"{path} can't be read)")
 
 
 def test_a_subagents_calls_are_not_the_stops(where):

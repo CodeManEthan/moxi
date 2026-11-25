@@ -12,7 +12,9 @@
   wrap-up (git's wrap-up forms, `.md` notes in the handoff folder, `moxi repo rules`,
   comms, `moxi launcher handoff dir`, `moxi launcher relaunch --self --handoff FILE`,
   and Claude's `Skill` and `ToolSearch`, whose loaded tools are judged when called) with
-  `stop.deny_text`, a new setting.
+  `stop.deny_text`, a new setting. `Skill` loads only a skill that runs inline: one whose
+  file is found and sets no `context: fork`; a forked skill, or one with no file found,
+  is refused.
 - A mark may be a multiple `<k>x`, k a decimal of at most two places and at least 1:
   `threshold` works it out on the same equation as `1x`, `1.5x` and `2x`, and
   `cost_multiple` reads its k. Interface 3 is interface 2 plus these and the stop's two
