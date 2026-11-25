@@ -39,7 +39,11 @@
   permission ask, Claude Code).
 - A recall on the slot route sends each answer by comms, to the session alone, under
   the session's recall sender (`<comms name>-subconscious`, comms' scoped sender for the
-  word `subconscious`, which memory declares). After the session has ended, an answer
+  word `subconscious`, which memory declares). The word is declared once memory is
+  installed beside comms, subconscious on or not, so from then no session or program on
+  the machine can take a name of the form `<comms name>-subconscious`; one held before
+  stays its holder's and puts that parent's recall sender in conflict (the slot route
+  off for its session, `moxi doctor` naming the holder). After the session has ended, an answer
   still goes to the comms name the session held when the recall started. The line reads
   `sending` until comms
   takes it, tried again every 10 seconds for a minute and then every 5 minutes, each

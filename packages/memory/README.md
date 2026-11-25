@@ -557,7 +557,13 @@ so a recall never holds the prompt. The child:
 **Answers by comms.** On the slot route the child sends each answer to the session alone,
 as an interrupt that doesn't expire, under the session's recall sender: comms' scoped
 sender `<comms name>-subconscious` (`builder-subconscious@acme` for `builder@acme`),
-which memory declares to comms with the word `subconscious`. The message is the fork's
+which memory declares to comms with the word `subconscious`. The word is declared once
+memory is installed beside comms, whether or not anyone turns the subconscious on, and
+from then no session or program on the machine can take a name of the form `<comms
+name>-subconscious` (comms refuses the binding or the send-only name). Where one already
+held such a name, it stays its holder's, and that one parent's recall sender is in
+conflict: the slot route is off for its session with that reason, memory's doctor names
+the sender, and `moxi doctor` names the holder. The message is the fork's
 answer as it wrote it, cut on a line at 4,000 characters; `NOTHING` sends nothing. It
 goes to the comms name the session holds when it is sent, or, once the session has ended
 and holds none, to the name it held when the recall started, which comms keeps the
