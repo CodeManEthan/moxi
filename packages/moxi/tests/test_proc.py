@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import os
+import signal
 import stat
 import subprocess
 import sys
@@ -228,6 +229,33 @@ def test_a_grandchild_that_ignores_sigterm_and_holds_no_pipe_is_killed(
             os.kill(grandchild, 9)
         except ProcessLookupError:
             pass
+
+
+LEAVES_A_GRANDCHILD = """
+    import subprocess, sys, time
+    grandchild = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(60)"],
+                                  stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                                  stderr=subprocess.DEVNULL)
+    print(grandchild.pid, flush=True)
+"""
+
+
+@pytest.mark.parametrize("end_tree", [True, False])
+def test_a_run_ends_what_its_child_left_running_only_when_asked(tmp_path, end_tree):
+    """The child exits at once and leaves a grandchild that holds none of its pipes."""
+    done = proc.run([PY, script(tmp_path, "leaves.py", LEAVES_A_GRANDCHILD)], timeout_s=30,
+                    end_tree=end_tree)
+    assert done.returncode == 0
+    grandchild = int(done.stdout)
+    ident = proc.identity(grandchild)
+    try:
+        if end_tree:
+            assert ident is None or gone(ident), "the grandchild outlived the run"
+        else:
+            assert ident is not None and proc.alive(ident)
+    finally:
+        if ident is not None and proc.alive(ident):
+            os.kill(grandchild, signal.SIGTERM)
 
 
 def test_a_tree_that_ends_on_sigterm_does_not_wait_out_the_grace(tmp_path, monkeypatch):

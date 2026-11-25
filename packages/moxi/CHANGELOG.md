@@ -2,6 +2,9 @@
 
 ## 0.1.11 (unreleased)
 
+- `moxi.proc.run` takes `end_tree`: with it, whatever the child left running is ended once
+  it exits, not only on timeout (POSIX: SIGKILL to its process group; Windows: the job
+  the run already puts it in is terminated), so nothing a command started outlives it.
 - On Windows a child `spawn(..., detached=True)` starts appends to `output` instead of
   writing over it from the start. The C runtime's append mode is its own and doesn't reach
   the handle a child gets, so the file is now opened at its end.

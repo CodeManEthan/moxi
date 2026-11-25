@@ -3,7 +3,7 @@
 - `run` runs a command to its end with a deadline. Its stdin is closed or fed (secrets
   travel on stdin, never in argv or the environment), its output is captured, left alone
   or written to a file, and on timeout the whole tree it started is killed, not only the
-  first process.
+  first process (with `end_tree=True`, what it left running is ended once it exits too).
 - `spawn` starts a long-lived child that cannot outlive its parent: it holds a lifeline,
   a pipe the parent keeps open, and the child ends when the parent goes. With
   `detached=True` it starts a child that is meant to outlive it, logging to a file.
@@ -63,8 +63,8 @@ Argv = Sequence[str | os.PathLike]
 def run(argv: Argv, *, timeout_s: float, stdin_data: bytes | str | None = None,
         env: Mapping[str, str] | None = None, cwd: str | os.PathLike | None = None,
         capture: bool = True, output: str | os.PathLike | None = None,
-        first_signal: str = "SIGTERM",
-        grace_s: float | None = None) -> subprocess.CompletedProcess:
+        first_signal: str = "SIGTERM", grace_s: float | None = None,
+        end_tree: bool = False) -> subprocess.CompletedProcess:
     """Run `argv` to its end, or kill everything it started once `timeout_s` seconds pass.
 
     stdin is closed (`/dev/null`), or a pipe fed `stdin_data` and then closed. With `capture`
@@ -87,6 +87,10 @@ def run(argv: Argv, *, timeout_s: float, stdin_data: bytes | str | None = None,
     stop cleanly on), and `grace_s` another wait than `KILL_GRACE` before the SIGKILL.
     Windows: the child starts in a new process group and is put in a Job Object as soon
     as it starts; on timeout the job is terminated, which ends the whole tree.
+
+    With `end_tree`, whatever the child left running is ended once it exits too, so
+    nothing it started outlives the run: POSIX: its process group gets SIGKILL; Windows:
+    its job is terminated. A process that left the group (POSIX) still escapes.
 
     On timeout `subprocess.TimeoutExpired` is raised, carrying what was captured.
     """
@@ -120,6 +124,8 @@ def run(argv: Argv, *, timeout_s: float, stdin_data: bytes | str | None = None,
             out, err = _end_tree(proc, job, first_signal=first_signal, grace_s=grace_s)
             raise subprocess.TimeoutExpired(proc.args, timeout_s, output=out,
                                             stderr=err) from None
+        if end_tree:
+            _end_left(proc, job)
     except BaseException:
         if proc.returncode is None:
             _kill_now(proc, job)
@@ -177,6 +183,14 @@ def _end_tree(proc: subprocess.Popen, job, *, first_signal: str = "SIGTERM",
     if _group_alive(proc.pid):
         _signal_group(proc.pid, _sig("SIGKILL"))
     return out, err
+
+
+def _end_left(proc: subprocess.Popen, job) -> None:
+    """End what an exited child left running in its tree."""
+    if job is not None:
+        job.terminate()
+    else:
+        _signal_group(proc.pid, _sig("SIGKILL"))
 
 
 def _kill_now(proc: subprocess.Popen, job) -> None:
