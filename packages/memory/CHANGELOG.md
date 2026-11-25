@@ -52,7 +52,8 @@
   session's recall senders starts no recall; with other senders too, the lines memory
   already sent leave the recall's query and reach its fork as already recalled. The off reasons name comms' trouble, the recall
   sender in conflict among them. Every recall child and taker starts through a detached
-  starter, outside every session.
+  starter, outside every session where the system takes an orphan as its own (Linux,
+  macOS); on native Windows, where no such route runs today, comms could not place it.
 - A slot fork is exited through the launcher once its recall's last round is settled,
   by the child, a taker, or a discard of a line whose owner is gone, and the line notes
   how (`fork_exit`). An exit still held after a minute is left: memory's doctor lists

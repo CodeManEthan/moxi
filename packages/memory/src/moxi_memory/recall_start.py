@@ -317,7 +317,8 @@ def spawn_starter(args: list[str]) -> int:
     and return its process id without waiting for it. The starter starts
     `moxi-memory-subconscious ARGS` detached in its turn and exits, so that process's
     parent is the system's and it runs outside every session: comms takes a send under
-    a scoped sender only from such a process."""
+    a scoped sender only from such a process. That needs a system that hands an orphan
+    to itself (Linux, macOS); see `moxi_memory.recall_child` for native Windows."""
     import moxi.paths
     import moxi.proc
 

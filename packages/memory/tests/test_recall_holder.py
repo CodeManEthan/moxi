@@ -68,6 +68,15 @@ def test_a_starter_never_overwrites_a_child_that_named_itself():
     assert records.read(SESSION, record["recall"])["holder"]["pid"] == os.getppid()
 
 
+def test_a_starter_run_through_a_launcher_of_its_own_names_the_child():
+    # Windows runs a console script through an .exe launcher: begin records that
+    # launcher's pid, the parent of the python the starter runs in, not os.getpid().
+    record = a_record(pid=os.getppid())
+    assert record["holder"]["pid"] == os.getppid() != os.getpid()
+    recall_child.name_holder(SESSION, record["recall"], os.getpid())
+    assert records.read(SESSION, record["recall"])["holder"]["pid"] == os.getpid()
+
+
 def test_a_child_whose_identity_cannot_be_read_leaves_the_record_naming_none():
     record = a_record(pid=os.getpid())
     recall_child.name_holder(SESSION, record["recall"], -1)

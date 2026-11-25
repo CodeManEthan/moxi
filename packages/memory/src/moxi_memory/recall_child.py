@@ -41,11 +41,15 @@ With `--take`, it does the same for the one session and exits: the taker memory'
 With `--detach` first, it is the detached starter: it starts `moxi-memory-subconscious`
 with the rest of its arguments, detached, and exits, so the process it started has the
 system's for its parent and runs outside every session (comms takes a send under a
-scoped sender only from such a process). The listener, the on-demand command and the
-`gone` listener start every child and taker through it. A starter of a recall's child
-names that child on the record as the recall's holder, under the session's lock, before
-it exits (`name_holder`); none, when the child's identity can't be read. A recall's child it can't start
-ends the recall `lost` with the reason `spawn`.
+scoped sender only from such a process). That holds where an orphan is handed to the
+system (Linux, macOS). Native Windows keeps a dead parent's pid on its child, so there
+comms' ancestry walk can't place the ended starter and refuses the child's send; no
+route that sends by comms runs on native Windows today (slots refuse it, and no session
+takes Codex's host fork). The listener, the on-demand command and the `gone` listener
+start every child and taker through it. A starter of a recall's child names that child
+on the record as the recall's holder, under the session's lock, before it exits
+(`name_holder`); none, when the child's identity can't be read. A recall's child it
+can't start ends the recall `lost` with the reason `spawn`.
 
 It exits 0 when the recall ran to an end or the taking is done, 2 for arguments or a
 record it can't use.
@@ -252,10 +256,23 @@ def _given(argv: list[str], flag: str) -> str | None:
     return None
 
 
+def _names_starter(value) -> bool:
+    """Whether holder `value` names this starter: this process, or this process's
+    parent while that parent is the live process `value` names. Where a console script
+    runs through a launcher of its own (Windows' `.exe`), the pid `begin` recorded is
+    that launcher's, the parent of the python that runs the starter; the child the
+    starter starts is never its parent."""
+    from . import recall_holder
+
+    pid = int(value["pid"])
+    return pid == os.getpid() or (pid == os.getppid() and recall_holder.alive(value))
+
+
 def name_holder(session_id: str, recall_id: str, pid: object) -> None:
     """The starter hands the recall on: under the session's lock, name process `pid` on
     the record as the recall's holder (none, when its identity can't be read) while the
-    record still names this starter or none; a child that named itself first is kept.
+    record still names this starter (`_names_starter`) or none; a child that named
+    itself first is kept.
     Never raises."""
     from . import recall_holder
 
@@ -266,7 +283,7 @@ def name_holder(session_id: str, recall_id: str, pid: object) -> None:
             if record is None:
                 return
             current = record.get("holder")
-            if recall_holder.named(current) and int(current["pid"]) != os.getpid():
+            if recall_holder.named(current) and not _names_starter(current):
                 return  # the child named itself first
             records.update(session_id, recall_id, holder=found)
     except Exception:  # noqa: BLE001 - a record it can't write keeps the starter named
