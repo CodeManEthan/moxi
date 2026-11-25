@@ -22,6 +22,9 @@
   runner 0.3.2, so `moxi install turns` updates an install at user scope.
 - `agents` entries gain `is_fork` (a fork of the main loop, which Claude Code lists as a
   subagent) and `last_write_at` (the newest write the judgment read).
+- `STALE_AFTER_S` is exported from `moxi_turns`: the seconds a `waiting` subagent must be
+  silent to read stale, so a caller can say when an entry's `last_write_at` would make
+  it stale.
 - The guard API gains `touched_files(call)`, exported from `moxi_turns`: the files a
   write call touches, in the call's order, each a `TouchedFile(path, kind, text)`.
   Claude Code's `Write` and `Edit` and OpenCode's `write` and `edit` give one `write`

@@ -3402,7 +3402,7 @@ launcher	packages/launcher/src/moxi_launcher/cli.py	help="take the checks and wr
 launcher	packages/launcher/src/moxi_launcher/cli.py	help="the session to relaunch as its director: its session id or "	keep	help	help
 launcher	packages/launcher/src/moxi_launcher/cli.py	help="the session; this one when left out")	keep	help	help
 launcher	packages/launcher/src/moxi_launcher/cli.py	help="the table to list: launches (the default), runs, exits or holds")	keep	help	help
-launcher	packages/launcher/src/moxi_launcher/cli.py	help="with --self: the handoff the new session gets first")	keep	help	help
+launcher	packages/launcher/src/moxi_launcher/cli.py	help="the handoff the new session gets as its first turn: needed "	keep	help	help
 launcher	packages/launcher/src/moxi_launcher/cli.py	hint = hint.format(run=run.run_id)	keep	run=	run=
 launcher	packages/launcher/src/moxi_launcher/cli.py	if args.action == "show":	keep	show	show
 launcher	packages/launcher/src/moxi_launcher/cli.py	if args.dry_run and (args.status is not None or args.from_record is not None):	keep	dry_run	dry_run
@@ -3442,7 +3442,7 @@ launcher	packages/launcher/src/moxi_launcher/cli.py	resumed. `keep-warm` opens, 
 launcher	packages/launcher/src/moxi_launcher/cli.py	return _listed(args, resume.sessions(limit=args.limit, before=args.before), "sessions")	keep	sessions	sessions
 launcher	packages/launcher/src/moxi_launcher/cli.py	return _said(exits.exit_session(args.session_id, dry_run=args.dry_run), args)	keep	dry_run	dry_run
 launcher	packages/launcher/src/moxi_launcher/cli.py	return _said(relaunch.arm_self(args.handoff, dry_run=args.dry_run), args)	keep	dry_run	dry_run
-launcher	packages/launcher/src/moxi_launcher/cli.py	return _said(relaunch.call_director(args.target, dry_run=args.dry_run), args)	keep	dry_run	dry_run
+launcher	packages/launcher/src/moxi_launcher/cli.py	dry_run=args.dry_run), args)	keep	dry_run	dry_run
 launcher	packages/launcher/src/moxi_launcher/cli.py	run = verbs.add_parser("run", help="launch a session", allow_abbrev=False,	keep	help	help
 launcher	packages/launcher/src/moxi_launcher/cli.py	shown = {"key": key, "folder": str(folder)}	keep	folder	folder
 launcher	packages/launcher/src/moxi_launcher/cli.py	shown = {"key": key, "folder": str(handoff_dir)}	keep	folder	folder
@@ -3556,7 +3556,7 @@ launcher	packages/launcher/src/moxi_launcher/first.py	actor	name	environ	caller_
 launcher	packages/launcher/src/moxi_launcher/first.py	actor	name	environ	env
 launcher	packages/launcher/src/moxi_launcher/first.py	deliver	name	error	exc
 launcher	packages/launcher/src/moxi_launcher/first.py	if kind == "refused":	keep	refused	refused
-launcher	packages/launcher/src/moxi_launcher/first.py	parts = [header.format(actor=by, path=path), handoff_text.strip("\n")]	keep	actor=	actor=
+launcher	packages/launcher/src/moxi_launcher/first.py	header = (RELAUNCH_HEADER if relaunched else HANDOFF_HEADER).format(actor=by, path=path)	keep	actor=	actor=
 launcher	packages/launcher/src/moxi_launcher/first.py	read_handoff	name	error	exc
 launcher	packages/launcher/src/moxi_launcher/first.py	reason = str(getattr(value, "reason", "") or "refused")	keep	refused	refused
 launcher	packages/launcher/src/moxi_launcher/first.py	return BRIEF_HEADER.format(actor=by) + "\n\n" + brief	keep	actor=	actor=
@@ -3565,6 +3565,7 @@ launcher	packages/launcher/src/moxi_launcher/first.py	return any(isinstance(word
 launcher	packages/launcher/src/moxi_launcher/first.py	return turns.wait_ready(**where, timeout=timeout)	use	timeout=	timeout_s=
 launcher	packages/launcher/src/moxi_launcher/first.py	send	name	error	exc
 launcher	packages/launcher/src/moxi_launcher/first.py	text	name	actor	by
+launcher	packages/launcher/src/moxi_launcher/first.py	seen: set[str] = set()	keep	set	set
 launcher	packages/launcher/src/moxi_launcher/handoffs.py	"current", "file_name", "folder", "folder_of_key", "folder_of_row", "handoffs",	keep	folder	folder
 launcher	packages/launcher/src/moxi_launcher/handoffs.py	-	name	COMMS_NAME	comms_name_env
 launcher	packages/launcher/src/moxi_launcher/handoffs.py	-	name	FOLDER	HANDOFFS_DIR
@@ -3897,6 +3898,7 @@ launcher	packages/launcher/src/moxi_launcher/quiet.py	self._changed.notify_all()
 launcher	packages/launcher/src/moxi_launcher/quiet.py	self._changed.wait_for(lambda: self.events > seen or self.gone is not None,	keep	_changed	_changed
 launcher	packages/launcher/src/moxi_launcher/quiet.py	self._thread.join(timeout=2)	keep	timeout	timeout
 launcher	packages/launcher/src/moxi_launcher/quiet.py	with self._changed:	keep	_changed	_changed
+launcher	packages/launcher/src/moxi_launcher/quiet.py	if any(_last_write(a) is not None for a in live) else None)	keep	any	any
 launcher	packages/launcher/src/moxi_launcher/recycle.py	-	name	scratch_relaunch	is_scratch_relaunch
 launcher	packages/launcher/src/moxi_launcher/recycle.py	- `cleared` or `compacted`.	keep	compacted	compacted
 launcher	packages/launcher/src/moxi_launcher/recycle.py	RAN = {"clear": "cleared", "compact": "compacted"}	keep	compacted	compacted
@@ -3938,6 +3940,7 @@ launcher	packages/launcher/src/moxi_launcher/relaunch.py	offered	name	error	exc
 launcher	packages/launcher/src/moxi_launcher/relaunch.py	start_job	name	error	exc
 launcher	packages/launcher/src/moxi_launcher/relaunch.py	started = api.run_job(name, argv, env=common.scrub(env, modules.session_env()),	keep	env	env
 launcher	packages/launcher/src/moxi_launcher/relaunch.py	text = ARMED.format(run=run.run_id, slot=row.slot,	keep	run=	run=
+launcher	packages/launcher/src/moxi_launcher/relaunch.py	if not live or any(a.kind != "subagent" or a.state != "waiting" for a in live):	keep	any	any
 launcher	packages/launcher/src/moxi_launcher/restore.py	#: `liveness-unread`, `refused` and `kept` (the entry left open), `dropped` (closed with no	keep	refused	refused
 launcher	packages/launcher/src/moxi_launcher/restore.py	OUTCOMES = ("restored", "still-running", "liveness-unread", "refused", "kept", "dropped",	keep	refused	refused
 launcher	packages/launcher/src/moxi_launcher/restore.py	LEFT_OPEN = ("still-running", "liveness-unread", "refused", "kept", "failed")	keep	refused	refused
@@ -4333,7 +4336,7 @@ launcher	packages/launcher/tests/test_cli_acts.py	assert acts <= set(cli.VERBS)	
 launcher	packages/launcher/tests/test_cli_acts.py	assert run(["sessions", "--json"], capsys) == (codes.OK, "", "")	keep	sessions	sessions
 launcher	packages/launcher/tests/test_cli_acts.py	assert run(["sessions"], capsys) == (codes.OK, "", "no sessions\n")	keep	sessions	sessions
 launcher	packages/launcher/tests/test_cli_acts.py	assert run(["show"], capsys)[:2] == (codes.OK, "session x: ok\n")	keep	show	show
-launcher	packages/launcher/tests/test_cli_acts.py	assert seen == [(("boss@work",), {"dry_run": False})]	keep	dry_run	dry_run
+launcher	packages/launcher/tests/test_cli_acts.py	assert seen == [(("boss@work",), {"handoff": None, "dry_run": False})]	keep	dry_run	dry_run
 launcher	packages/launcher/tests/test_cli_acts.py	assert seen == [(("h.md",), {"dry_run": False})]	keep	dry_run	dry_run
 launcher	packages/launcher/tests/test_cli_acts.py	assert seen == [(("h.md",), {"dry_run": True})]	keep	dry_run	dry_run
 launcher	packages/launcher/tests/test_cli_acts.py	assert seen[-1] == ((SID,), {"dry_run": True})	keep	dry_run	dry_run
@@ -4362,6 +4365,8 @@ launcher	packages/launcher/tests/test_cli_acts.py	assert seen == [((SID,), {"dry
 launcher	packages/launcher/tests/test_cli_acts.py	assert seen[-1] == ((SID,), {"dry_run": False})	keep	dry_run	dry_run
 launcher	packages/launcher/tests/test_cli_acts.py	assert any("Build it." in word for word in execs[-1])	keep	any	any
 launcher	packages/launcher/tests/test_cli_acts.py	assert not any("Build it." in word or word.startswith("Brief from launcher")	keep	any	any
+launcher	packages/launcher/tests/test_cli_acts.py	assert seen[-1] == ((SID,), {"handoff": None, "dry_run": True})	keep	dry_run	dry_run
+launcher	packages/launcher/tests/test_cli_acts.py	assert seen[-1] == ((SID,), {"handoff": "h.md", "dry_run": False})	keep	dry_run	dry_run
 launcher	packages/launcher/tests/test_codex_trust.py	"HOME": str(cwd), "PATH": "/usr/bin:/bin",	keep	HOME	HOME
 launcher	packages/launcher/tests/test_codex_trust.py	assert codex_trust.config_file({"HOME": str(tree)}) == tree / ".codex" / "config.toml"	keep	HOME	HOME
 launcher	packages/launcher/tests/test_codex_trust.py	return {"CODEX_HOME": str(tree / "codex-home"), "HOME": str(tree)}	keep	HOME	HOME
@@ -4964,6 +4969,10 @@ launcher	packages/launcher/tests/test_relaunch.py	assert refused("feedfacecafebe
 launcher	packages/launcher/tests/test_relaunch.py	assert refused(compact.run_id) == "not-relaunch"	keep	refused	refused
 launcher	packages/launcher/tests/test_relaunch.py	store.end_run(conn, compact.run_id, "compacted")	keep	compacted	compacted
 launcher	packages/launcher/tests/test_relaunch.py	assert refused(run.run_id) == "not-open"	keep	refused	refused
+launcher	packages/launcher/tests/test_relaunch.py	call(conn, handoff=str(make(tmp_path)), slots_api=slots_api)	keep	auto	auto
+launcher	packages/launcher/tests/test_relaunch.py	call(conn, handoff=str(make(tmp_path)), slots_api=slots_api)	keep	start	start
+launcher	packages/launcher/tests/test_relaunch.py	@pytest.mark.parametrize("written", ["none", "stale"])	keep	stale	stale
+launcher	packages/launcher/tests/test_relaunch.py	if written == "stale":	keep	stale	stale
 launcher	packages/launcher/tests/test_relaunch_flags.py	path.parent.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
 launcher	packages/launcher/tests/test_relaunch_job.py	FakeSession.__init__	kwonly	agents_complete	agents_complete
 launcher	packages/launcher/tests/test_relaunch_job.py	Result("failed", "timeout"), Result("refused", "gone"),	keep	refused	refused
@@ -5008,6 +5017,7 @@ launcher	packages/launcher/tests/test_relaunch_job.py	assert released == {"slot"
 launcher	packages/launcher/tests/test_relaunch_job.py	self.policy, self.never_bound = policy, set(never_bound)	keep	set	set
 launcher	packages/launcher/tests/test_relaunch_job.py	if self.never_bound & set(to):	keep	set	set
 launcher	packages/launcher/tests/test_relaunch_job.py	return SimpleNamespace(outcome="refused", message_id=None,	keep	refused	refused
+launcher	packages/launcher/tests/test_relaunch_job.py	launch=launched_result(outcome="refused"))	keep	refused	refused
 launcher	packages/launcher/tests/test_replay.py	"HOME": "/h", "PATH": "/bin", "TMPDIR": "/t", "LC_ALL": "C"}	keep	HOME	HOME
 launcher	packages/launcher/tests/test_replay.py	"SESSIONNAME"} & set(short)	keep	set	set
 launcher	packages/launcher/tests/test_replay.py	-	name	test_a_replay_writes_its_row_where_the_callers_environment_puts_the_store	test_a_replay_writes_its_row_where_the_callers_env_puts_the_store
@@ -5032,6 +5042,7 @@ launcher	packages/launcher/tests/test_replay.py	looks = (any(word in name for wo
 launcher	packages/launcher/tests/test_replay.py	path.parent.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
 launcher	packages/launcher/tests/test_replay.py	rig	name	directory	slots_dir
 launcher	packages/launcher/tests/test_replay.py	rig.plan(respawn="refused", refused={"reason": "live-pane", "words": "the pane is live"})	keep	refused	refused
+launcher	packages/launcher/tests/test_replay.py	file.parent.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
 launcher	packages/launcher/tests/test_restore.py	for entry, request in zip((three, five), launch.requests, strict=True):	keep	strict	strict
 launcher	packages/launcher/tests/test_restore.py	rig.plan(slots={"3": reserved("missing", "r3")}, placed=7, create="refused",	keep	refused	refused
 launcher	packages/launcher/tests/test_replay.py	assert not any("recycle_at_limit" in said for said in replayed.warnings)	keep	any	any

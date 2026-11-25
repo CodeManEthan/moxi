@@ -16,6 +16,9 @@ out of the harness. This package is turns' whole public API, the announcement's
     f = s.facts()    # Facts(session_id, turn_number, turn_open, turn, agents, draft, at,
                      #       stale, ready); turn: OpenTurn | None
     a = s.agents()   # Agents(entries, complete, at)
+    turns.STALE_AFTER_S   # seconds a `waiting` Claude subagent must be silent to read
+                          # stale (capability stale-agents): it reads `idle`, and an
+                          # entry's `last_write_at` plus this is when it would
     e = s.env(names)   # {name: value | None}: the session's own environment, read
                            # from its endpoint (capability environ; at most 64 names)
 
@@ -121,6 +124,7 @@ _WHERE = {
     **dict.fromkeys(("Guard", "ToolCall", "Prompt", "Allow", "Deny", "TouchedFile",
                      "touched_files"), "guards"),
     "COMMANDS_ENV": "config",
+    "STALE_AFTER_S": "claude_stale",
 }
 
 __all__ = [
@@ -132,8 +136,8 @@ __all__ = [
     "Shells", "LeftShell", "Failed", "Ready", "TurnStarted", "TurnSteered", "TurnEnded",
     "DeliveryRef", "Gone", "StopFacts", "SessionEvent",
     "CAPABILITIES", "OUTCOMES", "DELIVERY_REFUSALS", "COMMAND_REFUSALS", "READY_SOURCES",
-    "COMMANDS", "COMMANDS_ENV", "Guard", "ToolCall", "Prompt", "Allow", "Deny",
-    "TouchedFile", "touched_files",
+    "COMMANDS", "COMMANDS_ENV", "STALE_AFTER_S", "Guard", "ToolCall", "Prompt", "Allow",
+    "Deny", "TouchedFile", "touched_files",
 ]
 
 
