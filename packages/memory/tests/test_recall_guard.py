@@ -317,20 +317,12 @@ def test_a_slot_forks_calls_are_judged_against_the_record_its_stamp_names():
 
 
 def codex_call(recall_id, tool_name, tool_input):
-    """A Codex slot fork's call as turns' Codex host builds it from Codex's `PreToolUse`
-    hook input: the fields `codex_hooks.hook_fields` forwards, the tool's canonical name
-    as Codex's hook carries it (its shell is `Bash`, the command text under `command`;
-    `apply_patch` the patch under the same key)."""
-    from moxi_turns import codex_hooks
-
-    frame = codex_hooks.hook_fields(
-        {"session_id": "t-fork", "turn_id": "turn-1", "cwd": "/w",
-         "transcript_path": "/r.jsonl", "tool_name": tool_name, "tool_use_id": "exec-1",
-         "tool_input": tool_input, "model": "m", "permission_mode": "default",
-         "hook_event_name": "PreToolUse"}, event="PreToolUse")
+    """A Codex slot fork's call as turns' Codex host hands it to the guard: the tool's
+    name and input as Codex's `PreToolUse` hook carries them (its shell is `Bash`, the
+    command text under `command`; `apply_patch` the patch under the same key). turns'
+    own tests pin those names."""
     return ToolCall(harness="codex", session_id="0190b000-0000-7000-8000-0000000000f0",
-                    agent_id=frame.get("agent_id"), tool=frame["tool_name"],
-                    input=dict(frame.get("tool_input") or {}),
+                    agent_id=None, tool=tool_name, input=dict(tool_input),
                     env={recall_start.SUBCONSCIOUS_FORK_ENV: recall_id})
 
 
