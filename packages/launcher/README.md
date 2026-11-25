@@ -733,6 +733,39 @@ recycle and keep-warm state (this session's when none is named). It reads red, w
 `failed` or `blocked` and why, when the latest run on the launch failed or was blocked
 and nothing has gone well since; a session merely waiting is never red.
 
+## The wake guard
+
+A session whose cache has gone cold wakes when something outside it ends its background
+shells or its subagents' work: the session gets a turn on a cold cache, which means
+reading its whole context again uncached. The wake guard, `launcher.wake`, is a turns
+guard that refuses that. Before a shell call runs (Claude Code's `Bash` and `PowerShell`
+tools, Codex's `Bash`, in a main session or a subagent), it works out which processes a
+kill in it would end (`kill`, `pkill`, `killall`, `pgrep ... | xargs kill`,
+`taskkill`, PowerShell's `Stop-Process`), finds the session each runs under, and asks
+cache whether that session is cold. If one is, the call is refused before it runs,
+naming the session and how long its cache has been cold, and saying to relaunch it
+(`moxi launcher relaunch NAME`, as its director) or leave it.
+
+What passes: a kill of your own session's processes, of a session's own harness process
+(that ends the session rather than waking it), of processes under no session, or under a
+session whose cache is warm, fresh or can't be read. A target the guard can't work out
+(a variable, a file it reads, an option it doesn't know) passes too, and so does a kill
+written in another language, which the guard doesn't see. If the guard breaks or runs
+late, the call goes ahead.
+
+The guard is on by default where turns and cache are installed. Turn it off with
+`moxi config set launcher wake_guard.enabled false`; naming `launcher.wake` on turns'
+`guards.run` turns it on again regardless.
+
+**On Windows** Claude Code's `Bash` tool runs Git Bash, whose `kill` takes Git Bash's
+own process ids, not Windows ones, and whose `pkill` and `killall` see only Git Bash's
+own processes. The guard can't map those to Windows processes, so on Windows `kill`,
+`pkill`, `killall` and `xargs kill` go through unjudged: they can wake a cold session.
+On the shell there it judges only `taskkill`. PowerShell's `Stop-Process` is judged as
+on any system, and Codex's shell tool, which runs PowerShell on Windows, is read as
+PowerShell. Each call let through this way is logged at info level, and nothing else
+says so.
+
 ## The page
 
 With the UI shell installed (`moxi install launcher --with ui`), the launcher has a page
@@ -1102,6 +1135,8 @@ Set with `moxi config set launcher <key> <value>`:
 - `relaunch.director_pass_env` (empty): the same for a director's relaunch, read from
   the director's environment. Empty, nothing of the director's reaches the session.
 - `relaunch.notice_retry_s` (30): how long a refused notice is tried again.
+- `wake_guard.enabled` (on): whether the wake guard runs where cache is installed (see
+  "The wake guard").
 - `recycle.limit_wait_s` (1800): how long a compact at the limit waits for the session to
   be idle.
 - `keep_warm.subagent_cap` (3) and `keep_warm.director_cap` (10): how many nudges in a row
