@@ -44,8 +44,8 @@ def _boot_id() -> str | None:
     if not _LINUX:
         return None
     try:
-        with open(_BOOT_ID, encoding="ascii") as handle:
-            return handle.read().strip() or None
+        with open(_BOOT_ID, encoding="ascii") as fh:
+            return fh.read().strip() or None
     except OSError:
         return None
 
@@ -56,8 +56,8 @@ def _ticks(pid: int) -> tuple[int, str] | None:
     if not _LINUX or pid <= 0:
         return None
     try:
-        with open(f"/proc/{pid}/stat", encoding="utf-8", errors="replace") as handle:
-            text = handle.read()
+        with open(f"/proc/{pid}/stat", encoding="utf-8", errors="replace") as fh:
+            text = fh.read()
         fields = text[text.rindex(")") + 2:].split()
         return int(fields[19]), fields[0]
     except (OSError, ValueError, IndexError):

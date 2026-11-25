@@ -387,7 +387,7 @@ def test_files_that_match_alike_are_ordered_by_path(tmp_path):
     assert shown == [str(tmp_path / n) for n in ("a.md", "b.md", "c.md")]
 
 
-def test_a_notes_directory_that_does_not_exist_is_none(tmp_path, monkeypatch):
+def test_a_notes_dir_that_does_not_exist_is_none(tmp_path, monkeypatch):
     monkeypatch.setattr("moxi_memory.labels.project_label", lambda cwd: "shop")
     root, _own = notes_tree(tmp_path)
     missing = tmp_path / "notes" / ".local" / "state" / "shop"
@@ -400,7 +400,7 @@ def test_a_notes_directory_that_does_not_exist_is_none(tmp_path, monkeypatch):
     assert len(found.part("beyond").notes) == 2
 
 
-def test_a_project_notes_directory_outside_the_root_is_named_too(tmp_path, monkeypatch):
+def test_a_project_notes_dir_outside_the_root_is_named_too(tmp_path, monkeypatch):
     monkeypatch.setattr("moxi_memory.labels.project_label", lambda cwd: "shop")
     root, _own = notes_tree(tmp_path)
     outside = tmp_path / "elsewhere"
