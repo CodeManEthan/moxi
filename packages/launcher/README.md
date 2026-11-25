@@ -983,7 +983,11 @@ shows:
   template on Home.
 - `Sessions`: each launched session running there, newest first, with where it runs
   (`slot 3`, `headless`, `terminal`) and, with sessions installed, when it was last
-  active. Remove's step says they keep running.
+  active. Remove's step says they keep running. Each of these lines says, as a typed
+  field, that its session runs now (`runs`), and its `last active` part that it holds
+  only while the session is not in a turn (`idle_only`). The launcher reads no turn
+  state: with turns installed, the page joins turns' word in place of that part (see
+  projects' README, "Facts on the Projects page").
 
 The component reads only the launcher's own routes: `/api/running` when it is placed, on
 the launcher's `running` topic and every 30 seconds; `/api/presets` and `/api/catalog`

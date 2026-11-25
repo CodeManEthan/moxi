@@ -258,6 +258,21 @@ test("past six running launches the last line says how many more and claims them
   assert.equal(sessionsSection([]), null);
 });
 
+test("a running line says it runs, and its last-active part holds only while idle; the more line says neither", () => {
+  const rows = section(kestrel(), "Sessions");
+  assert.deepEqual(rows.lines.map((line) => line.runs), [true, true]);
+  assert.deepEqual(rows.lines[0].parts.map((part) => part.idle_only), [undefined, undefined, true]);
+  assert.deepEqual(rows.lines[1].parts.map((part) => part.idle_only), [undefined, undefined]);
+  const list = Array.from({ length: 9 }, (_, n) => parseRunning({ state: "up", detail: null, count: 1,
+                                                                    sessions: [entry(`s${n}`, "x")] }).sessions[0]);
+  const more = sessionsSection(list).lines[5];
+  assert.equal(more.runs, undefined);
+  assert.deepEqual(more.parts.map((part) => part.idle_only), [undefined]);
+  const bare = sessionLine(entry("a", "x", { activity: null }));
+  assert.equal(bare.runs, true);
+  assert.ok(bare.parts.every((part) => part.idle_only === undefined));
+});
+
 test("agents: a running launch under the lead's or an associated name runs now, where it runs; none else", () => {
   assert.deepEqual(kestrel().agents, { "builder-2": { runs: true, state: "running now", where: "in slot 4" } });
   const list = running([
