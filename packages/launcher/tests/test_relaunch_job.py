@@ -5,6 +5,8 @@ released on every terminal path, a run ended under its job, the notices, and rep
 from __future__ import annotations
 
 import os
+import subprocess
+import sys
 import threading
 import time
 from types import SimpleNamespace
@@ -13,6 +15,7 @@ import pytest
 from moxi import proc
 from moxi.config import Settings
 from moxi.paths import Layout
+from moxi_dev.testing import PROC_WAIT_S
 
 from moxi_launcher import job, notices, settings, store
 from moxi_launcher import job as job_module
@@ -255,7 +258,7 @@ def arm(conn, mode="self", handoff="/work/h.md", turn_number=4):
 
 
 def go(conn, run, *, session=None, slots_api=None, comms=None, launch=None, settings=None,
-       cls=job.RelaunchJob, stop=None, sessions=None, cache=None):
+       cls=job.RelaunchJob, stop=None, sessions=None, cache=None, turns=None):
     session = session or FakeSession()
     slots_api = slots_api or FakeSlots(ended=True)
     seen = []
@@ -267,7 +270,7 @@ def go(conn, run, *, session=None, slots_api=None, comms=None, launch=None, sett
     clock = Clock()
     if not isinstance(settings, Settings):
         settings = {**SETTINGS, **(settings or {})}
-    runner = cls(conn, run.run_id, turns=FakeTurns(session), slots_api=slots_api,
+    runner = cls(conn, run.run_id, turns=turns or FakeTurns(session), slots_api=slots_api,
                  comms=comms, sessions=sessions, cache=cache, launch=fake_launch,
                  settings=settings, clock=clock, sleep=clock.sleep)
     if stop:
@@ -1523,3 +1526,268 @@ def test_a_relaunch_without_comms_records_no_identity_state(conn):
     detail = ended_detail(conn, run)
     assert detail["identity_state"] is None
     assert detail["posture"] == "relaunched (handoff: /work/h.md)"
+
+
+# -- a moved endpoint --------------------------------------------------------------------
+
+
+def ident_text(pid):
+    ident = proc.identity(pid)
+    return f"{ident.pid}@{ident.started:.6f}"
+
+
+def claude_runs(conn, *, alive=True):
+    """The launch's `claude` recorded as this test's process: running, or one that ended
+    (the same pid, another start time)."""
+    ident = proc.identity(os.getpid())
+    store.set_facts(conn, "r1", pid=ident.pid,
+                    pid_started=ident.started if alive else ident.started - 1000)
+
+
+def take(conn, endpoint):
+    """The claim naming `endpoint`, as a new endpoint's `load` writes it."""
+    conn.execute("UPDATE launches SET endpoint = ? WHERE request_id = 'r1'", (endpoint,))
+    conn.commit()
+
+
+def moving(conn, session):
+    """A find that answers not live while `session`'s endpoint takes the launch, so the
+    next find reads the moved claim."""
+    def find():
+        take(conn, ident_text(session.endpoint_pid))
+    return find
+
+
+def reloads(conn, old, new):
+    """`old`'s endpoint replaced by `new`'s as the exit reaches it: the claim moves, then
+    `old` answers as it was set to."""
+    command = old.command
+
+    def reloaded(name, *, if_turn_number=None):
+        take(conn, ident_text(new.endpoint_pid))
+        return command(name, if_turn_number=if_turn_number)
+    old.command = reloaded
+
+
+def moved_session(**kw):
+    """A session served by another endpoint process than `FakeSession`'s, its count
+    restarted."""
+    kw.setdefault("facts_seq", [facts(number=0)])
+    session = FakeSession(**kw)
+    session.endpoint_pid = os.getppid()
+    return session
+
+
+class MovingTurns:
+    """turns whose finds answer in order (the last again): a session, None (not live), or
+    a callable that is called (the claim moving first)."""
+
+    def __init__(self, *finds):
+        self.finds, self.asked = list(finds), 0
+
+    def find(self, *, session_id=None, pid=None):
+        self.asked += 1
+        value = self.finds[0] if len(self.finds) == 1 else self.finds.pop(0)
+        return value() if callable(value) else value
+
+
+class Gone:
+    """turns' watch event for an endpoint that ended."""
+
+    reason = "the endpoint ended"
+
+
+class EndingWatch(FakeWatch):
+    def __iter__(self):
+        return iter([Gone()])
+
+
+class EndingSession(FakeSession):
+    """A session whose watch ends at once, its endpoint gone, while a turn is open."""
+
+    def __init__(self, **kw):
+        super().__init__(facts_seq=[facts(turn_open=True)], **kw)
+
+    def watch(self):
+        return EndingWatch(self.facts())
+
+
+def moves(conn, run):
+    return [e.detail for e in store.run_events(conn, run.run_id) if e.kind == "moved"]
+
+
+@pytest.mark.parametrize("gone", [Result("refused", "gone"), RuntimeError("endpoint ending")])
+def test_an_exit_to_a_moved_endpoint_waits_again_and_exits_the_new_one(conn, gone):
+    claude_runs(conn)
+    old, new = FakeSession([gone]), moved_session()
+    # Not live while the claim moves, then the old endpoint again (no move), then the new.
+    turns = MovingTurns(old, moving(conn, new), old, new)
+    run = arm(conn)
+    got = go(conn, run, session=old, turns=turns)
+    assert got.outcome == "relaunched"
+    assert old.commands == [("exit", 4)] and new.commands == [("exit", 0)]
+    [moved] = moves(conn, run)
+    assert moved["from"] == me() and moved["to"] == ident_text(os.getppid())
+    assert moved["move"] == 1 and turns.asked == 4
+    again = [e.detail for e in store.run_events(conn, run.run_id) if e.kind == "again"]
+    assert [a["word"] for a in again] == ["moved"]
+    assert got.events.count("hold") == 2 and old.closed and new.closed
+
+
+def test_a_moved_endpoint_not_yet_claimed_is_looked_up_until_it_is(conn):
+    claude_runs(conn)
+    old, new = FakeSession([Result("refused", "gone")]), moved_session()
+    command = old.command
+
+    def ended(name, *, if_turn_number=None):
+        # The old endpoint ended and the new one has not claimed the launch yet: its
+        # finds are refused `changed`, the reclaim pending.
+        take(conn, "1@1.0")
+        return command(name, if_turn_number=if_turn_number)
+
+    old.command = ended
+    turns = MovingTurns(old, new, moving(conn, new), new)
+    run = arm(conn)
+    got = go(conn, run, session=old, turns=turns)
+    assert got.outcome == "relaunched" and new.commands == [("exit", 0)]
+    assert turns.asked == 4 and len(moves(conn, run)) == 1
+
+
+def test_a_directors_run_after_a_move_reads_the_new_endpoints_turn_number(conn):
+    claude_runs(conn)
+    old, new = FakeSession([Result("refused", "gone")]), moved_session()
+    reloads(conn, old, new)
+    run = arm(conn, mode="director", turn_number=19)
+    got = go(conn, run, session=old, turns=MovingTurns(old, new))
+    assert got.outcome == "relaunched"
+    assert old.commands == [("exit", 19)] and new.commands == [("exit", 0)]
+    assert len(moves(conn, run)) == 1 and got.events.count("hold") == 2
+
+
+@pytest.mark.parametrize("why", ["claude-ended", "codex", "nothing-found"])
+def test_an_exit_to_a_gone_endpoint_goes_on_to_the_pane_without_a_move(conn, why):
+    claude_runs(conn, alive=why != "claude-ended")
+    if why == "codex":
+        conn.execute("UPDATE launches SET harness = 'codex' WHERE request_id = 'r1'")
+        conn.commit()
+    old = FakeSession([Result("refused", "gone")])
+    turns = MovingTurns(old, None)
+    run = arm(conn)
+    got = go(conn, run, session=old, turns=turns)
+    assert got.outcome == "relaunched" and "pane-ended" in got.events
+    assert moves(conn, run) == [] and old.commands == [("exit", 4)]
+    if why == "nothing-found":
+        assert turns.asked > 2
+    else:
+        assert turns.asked == 1
+
+
+def test_a_fourth_move_goes_on_to_the_pane(conn):
+    claude_runs(conn)
+    sessions = [FakeSession([Result("refused", "gone")], facts_seq=[facts(number=0)])
+                for _ in range(5)]
+    for index, session in enumerate(sessions):
+        session.endpoint_pid = os.getpid() if index % 2 == 0 else os.getppid()
+    for old, new in zip(sessions, sessions[1:]):
+        reloads(conn, old, new)
+    turns = MovingTurns(*sessions)
+    run = arm(conn)
+    got = go(conn, run, session=sessions[0], turns=turns)
+    assert got.outcome == "relaunched" and "pane-ended" in got.events
+    assert [m["move"] for m in moves(conn, run)] == [1, 2, 3]
+    assert [len(s.commands) for s in sessions] == [1, 1, 1, 1, 0]
+
+
+def test_a_watch_that_ends_while_claude_runs_waits_on_the_new_endpoint(conn):
+    claude_runs(conn)
+    old, new = EndingSession(), moved_session()
+    run = arm(conn)
+    got = go(conn, run, session=old, turns=MovingTurns(old, moving(conn, new), new))
+    assert got.outcome == "relaunched"
+    assert old.commands == [] and new.commands == [("exit", 0)]
+    [moved] = moves(conn, run)
+    assert "the watch ended" in moved["why"] and "again" not in got.events
+
+
+@pytest.mark.parametrize("alive", [True, False])
+def test_a_watch_that_ends_with_nothing_to_move_to_ends_gone(conn, alive):
+    claude_runs(conn, alive=alive)
+    old = EndingSession()
+    run = arm(conn)
+    got = go(conn, run, session=old, turns=MovingTurns(old, None))
+    assert got.outcome == "gone" and moves(conn, run) == []
+
+
+def test_the_note_after_a_move_reaches_the_new_endpoint(conn):
+    claude_runs(conn)
+    old = FakeSession([Result("refused", "gone")])
+    new = moved_session(exits=(Result("refused", "not-allowed"),))
+    reloads(conn, old, new)
+    got = go(conn, arm(conn), session=old, turns=MovingTurns(old, new))
+    assert got.outcome == "not-exited"
+    assert old.deliveries == [] and len(new.deliveries) == 1
+
+
+def test_a_note_to_an_endpoint_that_ended_goes_to_the_new_one(conn):
+    claude_runs(conn)
+    child = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(60)"])
+    try:
+        old = FakeSession([Result("refused", "not-allowed")])
+        old.endpoint_pid = child.pid
+        take(conn, ident_text(child.pid))
+        new = moved_session()
+        command = old.command
+
+        def refused(name, *, if_turn_number=None):
+            # The endpoint ends with the run: a reload after the refusal.
+            child.kill()
+            child.wait(PROC_WAIT_S)
+            return command(name, if_turn_number=if_turn_number)
+
+        old.command = refused
+        run = arm(conn)
+        got = go(conn, run, session=old, turns=MovingTurns(old, moving(conn, new), new))
+    finally:
+        child.kill()
+        child.wait(PROC_WAIT_S)
+    assert got.outcome == "not-exited"
+    assert old.deliveries == [] and len(new.deliveries) == 1
+    [moved] = moves(conn, run)
+    assert moved["why"] == "the endpoint ended before the note"
+
+
+def test_a_find_of_the_old_endpoint_still_claimed_is_no_move(conn):
+    claude_runs(conn)
+    old, new = FakeSession([Result("refused", "gone")]), moved_session()
+    # The old endpoint found live under its own claim, then the claim moves to the new.
+    turns = MovingTurns(old, old, moving(conn, new), new)
+    run = arm(conn)
+    got = go(conn, run, session=old, turns=turns)
+    assert got.outcome == "relaunched" and turns.asked == 4
+    [moved] = moves(conn, run)
+    assert moved["from"] == me() and moved["to"] == ident_text(os.getppid())
+    assert old.commands == [("exit", 4)] and new.commands == [("exit", 0)]
+
+
+def test_claude_ending_during_the_lookup_stops_it(conn):
+    child = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(60)"])
+    try:
+        ident = proc.identity(child.pid)
+        store.set_facts(conn, "r1", pid=ident.pid, pid_started=ident.started)
+        old, new = FakeSession([Result("refused", "gone")]), moved_session()
+
+        def claude_ends():
+            # The new endpoint claims the launch and `claude` ends before the next find.
+            take(conn, ident_text(new.endpoint_pid))
+            child.kill()
+            child.wait(PROC_WAIT_S)
+
+        turns = MovingTurns(old, claude_ends, new)
+        run = arm(conn)
+        got = go(conn, run, session=old, turns=turns)
+    finally:
+        child.kill()
+        child.wait(PROC_WAIT_S)
+    assert got.outcome == "relaunched" and "pane-ended" in got.events
+    assert moves(conn, run) == [] and turns.asked == 2
+    assert old.commands == [("exit", 4)] and new.commands == []

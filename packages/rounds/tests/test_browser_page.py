@@ -309,9 +309,6 @@ LINE_BOXES = """(lines) => lines.map((line) => {
 
 #: The least clear space between a line's ▼ and the step words of the line above.
 CLEAR = 3
-#: Whether the tray's first sent row holds `found.shown` equal to the argument.
-SENT_SHOWN = ("shown => JSON.parse(localStorage.getItem(`moxi-rounds-tray:${location.origin}`))"
-              ".sent[0].found?.shown === shown")
 
 
 def test_a_current_steps_mark_stays_clear_of_the_line_above(ui_shells, ui_shell_options,
@@ -435,6 +432,11 @@ def test_a_sent_correction_reads_recorded_once_its_ruling_is_read_back(ui_shells
     expect(row).to_contain_text("Recorded as C2: Exports keep no header row.")
     expect(row).to_contain_text("by builder-1")
     expect(row).not_to_contain_text("not recorded yet")
+
+
+#: Whether the tray's first sent answer has its found ruling's shown flag as `shown`.
+SENT_SHOWN = ("shown => JSON.parse(localStorage.getItem(`moxi-rounds-tray:${location.origin}`))"
+              ".sent[0].found?.shown === shown")
 
 
 def test_a_project_read_back_shows_a_closed_rounds_found_ruling(ui_shells, ui_shell_options,
