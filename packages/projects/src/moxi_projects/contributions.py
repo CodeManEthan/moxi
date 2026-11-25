@@ -1,4 +1,5 @@
-"""What other modules contribute to projects: kinds, field defaults and remove refusals.
+"""What other modules contribute to projects: kinds, field defaults, remove refusals and
+the questions an add puts.
 
 A module that depends on projects declares one entry in the entry-point group
 `moxi.projects`, named by the module and pointing at a small module of its own:
@@ -7,7 +8,7 @@ A module that depends on projects declares one entry in the entry-point group
     notes = "moxi_notes.projects_link"
 
 That module declares `INTERFACE`, the version of this contract it implements; this code
-reads versions 1 and 2. Interface 1 offers either or both of:
+reads versions 1 to 3. Interface 1 offers either or both of:
 
 - `KINDS`: a mapping of kind name to `(doc, check)`. `check(fields)` gets the proposed row
   as a dict (`key`, `root`, `kind`, `lead`, `notes_root`) and returns a sentence refusing
@@ -26,7 +27,24 @@ Interface 2 is interface 1 plus, each optional:
   only) or `"refuse"`. A value of two means `"git"`. Under interface 1 a value of three is
   the wrong length.
 
-Every contribution function does local reads only: no subprocess, no network, no writes.
+Interface 3 is interface 2 plus, offered both or neither:
+
+- `questions(fields)`: gets the project just added as a dict (`key`, `root`, `kind`,
+  `lead`, `notes_root`, and `mint`, the mint `add --create` makes, or None) and returns a
+  list of the questions the add should put, or None. Each is a dict: `key` (a name unique
+  within the module), `text` (one plain sentence), `later` (the command that sets it
+  later), and, each optional, `choices` (a list of answers; none means any text),
+  `suggested` (the answer offered as the default), `preset` (an answer already settled,
+  say by a setting: the add asks nothing and acts on it) and `after` (`[key, value]`: put
+  only once the module's earlier question `key` is answered `value`). A `suggested` or
+  `preset` must be one of the choices, where there are choices. Read as a
+  `moxi_projects.api.Question`.
+- `answer(project, key, value)`: acts on the answer `value` to the question `key` after
+  the row is written. It may return one sentence saying what it did, or None. It may
+  write: it runs after the add, outside the store's lock. If it raises, the project
+  stays added, and the add's answer names the failure and the question's `later`.
+
+Every other contribution function does local reads only: no subprocess, no network, no writes.
 
 The group is read afresh by every `load()`, so a long-lived process sees a module
 installed after it started. The read API's `list_projects`, `get` and `for_path` never
@@ -35,8 +53,9 @@ read it.
 A broken contribution blocks only the acts it bears on, and every block names the module
 and the fix (repair it or uninstall it):
 
-- An entry that won't load (its import fails, its `INTERFACE` is not 1 or 2, its `KINDS`
-  is not a mapping, or a function it offers is not callable) blocks `remove`, since it
+- An entry that won't load (its import fails, its `INTERFACE` is not 1 to 3, its `KINDS`
+  is not a mapping, a function it offers is not callable, or it offers one of
+  `questions` and `answer` without the other) blocks `remove`, since it
   can't say whether it holds the project, and `add` or `set` of a kind no loaded entry
   declares, since it may be that kind's home (for a `set`, whether the set names the kind
   or the row keeps it).
@@ -47,25 +66,27 @@ and the fix (repair it or uninstall it):
   declared with a value of the wrong shape, blocks `add` and `set` of that kind alone,
   and `set` of any field on a row of that kind. A blocked kind is not among the kinds
   found; it is named among the broken ones.
+- A `questions` that raises or answers out of shape puts none of its module's questions:
+  the add goes ahead and its answer carries a warning naming the module and the fix.
 """
 
 from __future__ import annotations
 
 import importlib
 import os
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Mapping, Sequence
 
 import moxi.modules
 
 from . import api
-from .api import DEFAULT_KIND, Kind, Kinds, Project
+from .api import DEFAULT_KIND, Kind, Kinds, Project, Question
 from .errors import Broken, Refused, Usage
 from .rules import check_agent, check_key, check_kind_name, check_root
 
 #: The entry-point group other modules contribute through.
 GROUP = "moxi.projects"
 #: The versions of the contract this code reads.
-INTERFACES = frozenset({1, 2})
+INTERFACES = frozenset({1, 2, 3})
 #: How `add --create` may make a root.
 MINTS = ("git", "dir", "refuse")
 #: The fields a `prepare` may default.
@@ -134,11 +155,12 @@ class Contribution:
     """One entry of the group that loaded: its module, interface and offerings."""
 
     __slots__ = ("module", "name", "interface", "kinds", "bad_kinds", "refuse_remove",
-                 "prepare")
+                 "prepare", "questions", "answer")
 
     def __init__(self, module: str, name: str, interface: int,
                  kinds: dict[str, Declared], bad_kinds: dict[str, str],
-                 refuse_remove: Callable | None, prepare: Callable | None):
+                 refuse_remove: Callable | None, prepare: Callable | None,
+                 questions: Callable | None = None, answer: Callable | None = None):
         self.module = module
         self.name = name
         self.interface = interface
@@ -146,6 +168,8 @@ class Contribution:
         self.bad_kinds = bad_kinds
         self.refuse_remove = refuse_remove
         self.prepare = prepare
+        self.questions = questions
+        self.answer = answer
 
 
 def _kind_value(module: str, name: str, value: object, interface: int
@@ -193,6 +217,15 @@ def _read(ext: moxi.modules.Extension) -> Contribution:
     prepare = getattr(target, "prepare", None) if interface >= 2 else None
     if prepare is not None and not callable(prepare):
         raise ValueError("its prepare is not callable")
+    questions = getattr(target, "questions", None) if interface >= 3 else None
+    answer = getattr(target, "answer", None) if interface >= 3 else None
+    for name, offered in (("questions", questions), ("answer", answer)):
+        if offered is not None and not callable(offered):
+            raise ValueError(f"its {name} is not callable")
+    if (questions is None) != (answer is None):
+        have, lacks = ("questions", "answer") if answer is None else ("answer", "questions")
+        raise ValueError(f"it offers {have} without {lacks}; interface 3 takes both or "
+                         "neither")
     kinds: dict[str, Declared] = {}
     bad: dict[str, str] = {}
     for name, value in declared.items():
@@ -203,7 +236,8 @@ def _read(ext: moxi.modules.Extension) -> Contribution:
             kinds[name] = good
         else:
             bad[name] = reason
-    return Contribution(ext.module, ext.name, interface, kinds, bad, refuse_remove, prepare)
+    return Contribution(ext.module, ext.name, interface, kinds, bad, refuse_remove, prepare,
+                        questions, answer)
 
 
 class Contributions:
@@ -414,6 +448,180 @@ class Contributions:
                 out.append((c.module, said, None))
         return out
 
+    def questions(self, fields: Mapping[str, object]
+                  ) -> tuple[tuple[Question, ...], list[str]]:
+        """The questions the loaded contributions put to an add, given `fields` (the row
+        as written, and `mint`), in the order the entries loaded; and a warning for each
+        module whose `questions` raised or answered out of shape, which puts none."""
+        found: list[Question] = []
+        warnings: list[str] = []
+        for c in self.loaded:
+            if c.questions is None:
+                continue
+            try:
+                said = c.questions(dict(fields))
+            except Exception as exc:  # noqa: BLE001 - a raising questions is the module's
+                warnings.append(_skipped_questions(c.module, f"raised {_describe(exc)}"))
+                continue
+            try:
+                found.extend(_read_questions(c.module, said))
+            except ValueError as exc:
+                warnings.append(_skipped_questions(c.module, str(exc)))
+        return tuple(found), warnings
+
+    def settle(self, questions: Sequence[Question], project: Project, *,
+               given: Mapping[tuple[str, str], str] | None = None,
+               ask: Callable[[Question], str | None] | None = None) -> Settled:
+        """Answer `questions` for `project`, just added, and act on each answer.
+
+        In order, each question whose `after` is met (its earlier question answered that
+        value; else it is passed over) takes its `preset`, else the answer in `given`
+        (keyed by `(module, key)`), else what `ask` returns (None for no answer). One
+        with no answer is not asked: `Settled.asked` gets a line naming the command that
+        sets it later. An answer that isn't one of the choices (matched ignoring case and
+        surrounding spaces), or an `answer` that raises, leaves the project added and
+        puts a warning naming the failure and that command."""
+        by_module = {c.module: c for c in self.loaded if c.answer is not None}
+        settled = Settled()
+        values: dict[tuple[str, str], str] = {}
+        for q in questions:
+            if q.after is not None and values.get((q.module, q.after[0])) != q.after[1]:
+                continue
+            value = q.preset
+            if value is None and given is not None:
+                value = given.get((q.module, q.key))
+            if value is None and ask is not None:
+                value = ask(q)
+            if value is None:
+                settled.asked.append(asked_line(q))
+                continue
+            try:
+                value = _choice(q, value)
+            except ValueError as exc:
+                settled.warnings.append(f"{q.module} can't take {value!r} for {q.key!r}: "
+                                        f"{exc}; to set it: {q.later}")
+                continue
+            values[(q.module, q.key)] = value
+            try:
+                said = by_module[q.module].answer(project, q.key, value)
+            except Exception as exc:  # noqa: BLE001 - a failing answer leaves the add as it is
+                settled.warnings.append(f"{q.module}'s answer to {q.key!r} failed "
+                                        f"({_describe(exc)}), so the project is added "
+                                        f"without it; to set it: {q.later}")
+                continue
+            settled.answered.append({"module": q.module, "key": q.key, "value": value})
+            if isinstance(said, str) and said.strip():
+                settled.notes.append(f"{q.module}: {_one_line(said)}")
+        return settled
+
+
+class Settled:
+    """What `Contributions.settle` came to: `answered` (`{module, key, value}` for each
+    answer acted on), `asked` (a line per question not asked, naming the command that
+    sets it later), `notes` (what each answer said it did) and `warnings` (an answer
+    that failed or didn't fit, with that command)."""
+
+    __slots__ = ("answered", "asked", "notes", "warnings")
+
+    def __init__(self):
+        self.answered: list[dict[str, str]] = []
+        self.asked: list[str] = []
+        self.notes: list[str] = []
+        self.warnings: list[str] = []
+
+
+def asked_line(q: Question) -> str:
+    """The line an add prints for question `q` when it doesn't ask it."""
+    suggested = f" (suggested: {q.suggested})" if q.suggested is not None else ""
+    return f"{q.module} asks: {q.text}{suggested}; to set it later: {q.later}"
+
+
+def _choice(q: Question, value: object) -> str:
+    """`value` as an answer to `q`: one of its choices as spelled there, or for a question
+    with none, the text stripped. Raises `ValueError` with the reason otherwise."""
+    if not isinstance(value, str):
+        raise ValueError(f"an answer is text, not {type(value).__name__}")
+    value = value.strip()
+    if not q.choices:
+        return value
+    for choice in q.choices:
+        if choice.casefold() == value.casefold():
+            return choice
+    raise ValueError(f"the answers are {', '.join(q.choices)}")
+
+
+def _skipped_questions(module: str, why: str) -> str:
+    return (f"skipped {module}'s questions, since its questions {why}, so none of them "
+            f"was put; fix: {_fix(module)}")
+
+
+#: The fields a question may give, and those it must.
+_QUESTION_FIELDS = frozenset({"key", "text", "later", "choices", "suggested", "preset",
+                              "after"})
+_QUESTION_NEEDS = ("key", "text", "later")
+
+
+def _read_questions(module: str, said: object) -> list[Question]:
+    """`said`, a `questions` answer, read as `Question`s, or `ValueError` naming what is
+    out of shape."""
+    if said is None:
+        return []
+    if not isinstance(said, list | tuple):
+        raise ValueError(f"answered {type(said).__name__}, not a list or None")
+    out: list[Question] = []
+    seen: dict[str, Question] = {}
+    for item in said:
+        if not isinstance(item, Mapping):
+            raise ValueError(f"answered a question as {type(item).__name__}, not a dict")
+        extra = set(item) - _QUESTION_FIELDS
+        if extra:
+            raise ValueError(f"gave a question the field {sorted(map(str, extra))[0]!r}")
+        for name in _QUESTION_NEEDS:
+            value = item.get(name)
+            if not isinstance(value, str) or not value.strip():
+                raise ValueError(f"gave a question no {name}")
+        key = item["key"].strip()
+        if key in seen:
+            raise ValueError(f"put the question {key!r} twice")
+        choices = item.get("choices") or ()
+        if not isinstance(choices, list | tuple) or not all(
+                isinstance(c, str) and c.strip() for c in choices):
+            raise ValueError(f"gave the question {key!r} choices that aren't a list of text")
+        choices = tuple(c.strip() for c in choices)
+        if len({c.casefold() for c in choices}) != len(choices):
+            raise ValueError(f"gave the question {key!r} one choice twice")
+        picked = {}
+        for name in ("suggested", "preset"):
+            value = item.get(name)
+            if value is not None:
+                if not isinstance(value, str):
+                    raise ValueError(f"gave the question {key!r} a {name} that isn't text")
+                value = value.strip()
+                if choices and value not in choices:
+                    raise ValueError(f"gave the question {key!r} the {name} {value!r}, "
+                                     "not one of its choices")
+            picked[name] = value
+        after = item.get("after")
+        if after is not None:
+            if (not isinstance(after, list | tuple) or len(after) != 2
+                    or not all(isinstance(a, str) for a in after)):
+                raise ValueError(f"gave the question {key!r} an after that isn't "
+                                 "[key, value]")
+            earlier = seen.get(after[0])
+            if earlier is None:
+                raise ValueError(f"put the question {key!r} after {after[0]!r}, which it "
+                                 "hasn't put before it")
+            if earlier.choices and after[1] not in earlier.choices:
+                raise ValueError(f"put the question {key!r} after the answer {after[1]!r}, "
+                                 f"not one of {after[0]!r}'s choices")
+            after = (after[0], after[1])
+        q = Question(module=module, key=key, text=_one_line(item["text"]), choices=choices,
+                     suggested=picked["suggested"], preset=picked["preset"], after=after,
+                     later=_one_line(item["later"]))
+        seen[key] = q
+        out.append(q)
+    return out
+
 
 def _ask_remove(c: Contribution, project: Project) -> str | None:
     """`c`'s sentence refusing to remove `project`, stripped, or None when it has none.
@@ -607,5 +815,5 @@ def plan_set(key: str, *, contributions: Contributions | None = None,
 
 
 __all__ = ["GROUP", "INTERFACES", "MINTS", "DEFAULTABLE", "BUILT_IN", "OWN", "Declared",
-           "Contribution", "Contributions", "Planned", "load", "notes_present", "plan_add",
-           "plan_set"]
+           "Contribution", "Contributions", "Settled", "Planned", "asked_line", "load",
+           "notes_present", "plan_add", "plan_set"]

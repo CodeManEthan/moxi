@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+- `moxi projects add` asks the questions other modules offer about the new project.
+  With a terminal on stdin and stdout and without `--json`, it asks each one, its
+  suggestion the default. Without a terminal, or with `--json`, it asks nothing, turns
+  nothing on, and prints a `not asked:` line per question naming the command that sets
+  it later (`asked` in `--json`; the answers acted on are `answered`). A failing answer
+  leaves the project added, with a warning naming the command to run. Modules ask through
+  contribution interface 3, `questions(fields)` and `answer(project, key, value)`;
+  projects reads interfaces 1 to 3, and `api.Question` is the question as read.
+
 - `Add a project` reads what is at the typed folder through moxi-ui's `readLater`, so the
   page root's `data-reading` mark counts that read from the keystroke until what it fills
   in is drawn, and a test's press waits for it. A user sees no change. The `ui` extra asks

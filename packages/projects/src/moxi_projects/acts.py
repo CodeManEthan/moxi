@@ -6,6 +6,11 @@ sequence (`moxi_projects.store.write`), and returns the project as it now stands
 remove, as it was). Each refusal is a `moxi_projects.api.ProjectsError` carrying the
 reason, the fix and the exit code.
 
+Once the row is written, `add` puts the questions contributions offer (contribution
+interface 3): each takes its preset, the caller's answer, or what the caller's `ask`
+callback returns, and the contribution acts on it. One left unanswered is named with the
+command that sets it later, and an answer that fails leaves the project added.
+
 `add` with `create=True` mints the root first, then writes the row, in three steps:
 
 1. Every check `add` makes, plus: the kind's mint is not `refuse`; the root is absent or
@@ -42,11 +47,11 @@ import shlex
 import shutil
 import sqlite3
 import subprocess
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 
 from . import api, store
 from . import contributions as _contributions
-from .api import DEFAULT_KIND, NotFound, Project
+from .api import DEFAULT_KIND, NotFound, Project, Question
 from .contributions import Contributions, Planned
 from .errors import Broken, MintFailed, MoveFailed, NoGit, ProjectsError, Refused, Usage
 from .rules import check_root, same_root
@@ -57,18 +62,23 @@ GIT_TIMEOUT = 30
 
 
 class Added:
-    """What `add` did: `project`, the row as written; `notes_installed`, sentences worth showing
-    that refuse nothing (a root that doesn't exist yet, what a mint made); and
-    `warnings`, sentences about what the add went ahead without (a contribution skipped
-    since it won't load, naming the fix)."""
+    """What `add` did: `project`, the row as written; `notes`, sentences worth showing
+    that refuse nothing (a root that doesn't exist yet, what a mint made, what an answer
+    did); `warnings`, sentences about what the add went ahead without (a contribution
+    skipped since it won't load, an answer that failed, each naming the fix);
+    `asked`, a line per question not asked, naming the command that sets it later; and
+    `answered`, `{module, key, value}` for each answer acted on."""
 
-    __slots__ = ("project", "notes", "warnings")
+    __slots__ = ("project", "notes", "warnings", "asked", "answered")
 
     def __init__(self, project: Project, notes: list[str],
-                 warnings: list[str] | None = None):
+                 warnings: list[str] | None = None, asked: list[str] | None = None,
+                 answered: list[dict[str, str]] | None = None):
         self.project = project
         self.notes = notes
         self.warnings = list(warnings or [])
+        self.asked = list(asked or [])
+        self.answered = list(answered or [])
 
 
 def root_note(root: str) -> str | None:
@@ -85,22 +95,32 @@ def root_note(root: str) -> str | None:
 def add(key: str, *, root: str | None = None, kind: str = DEFAULT_KIND,
         lead: str | None = None, notes_root: str | None = None, create: bool = False,
         contributions: Contributions | None = None, notes_installed: bool | None = None,
-        git_timeout: float = GIT_TIMEOUT) -> Added:
-    """Add project `key`; with `create`, mint its root first.
+        git_timeout: float = GIT_TIMEOUT,
+        answers: Mapping[tuple[str, str], str] | None = None,
+        ask: Callable[[Question], str | None] | None = None) -> Added:
+    """Add project `key`; with `create`, mint its root first; then put the contributions'
+    questions.
 
     Paths must already be absolute (`rules.absolutize` makes a command line's so). A root
     left out comes from a contribution's default, or the add stops with `Usage`. A
     contribution that won't load is skipped unless the kind may be its own, and
-    `Added.warnings` names it. `contributions` and `notes_installed` stand in for the installed contributions and for whether
-    notes is installed. `git_timeout` bounds a `git` mint's `git init`, in seconds.
+    `Added.warnings` names it. `contributions` and `notes_installed` stand in for the
+    installed contributions and for whether notes is installed. `git_timeout` bounds a
+    `git` mint's `git init`, in seconds.
+
+    `answers` holds answers to the questions, keyed by `(module, key)`; `ask` is called
+    with each question that has no preset and no answer there, and returns the answer or
+    None. With neither, nothing is asked and `Added.asked` names each question's command.
     """
+    contributions = contributions if contributions is not None else _contributions.load()
     planned = _contributions.plan_add(key, kind=kind, root=root, lead=lead,
                                       notes_root=notes_root,
                                       contributions=contributions, notes_installed=notes_installed)
     if not create:
         project = store.write(planned.insert)
         note = root_note(project.root)
-        return Added(project, [note] if note else [], planned.warnings)
+        return _put_questions(Added(project, [note] if note else [], planned.warnings),
+                              contributions, mint=None, answers=answers, ask=ask)
     command = _add_command(planned, notes_root)
     git = _check_mint(planned)
     _check_free(planned)
@@ -112,7 +132,28 @@ def add(key: str, *, root: str | None = None, kind: str = DEFAULT_KIND,
         _amend(exc, f"{exc.reason}; {what}, and is left as it is",
                f"{exc.fix + '; then ' if exc.fix else ''}`{command}` adds its row")
         raise
-    return Added(project, [_made_words(planned, made)], planned.warnings)
+    return _put_questions(Added(project, [_made_words(planned, made)], planned.warnings),
+                          contributions, mint=planned.kind.kind.mint, answers=answers, ask=ask)
+
+
+def _put_questions(added: Added, found: Contributions, *, mint: str | None,
+                   answers: Mapping[tuple[str, str], str] | None,
+                   ask: Callable[[Question], str | None] | None) -> Added:
+    """`added` with the contributions' questions put and answered for its project, which
+    is written: `mint` is what `--create` made, or None."""
+    project = added.project
+    fields = {"key": project.key, "root": project.root, "kind": project.kind,
+              "lead": project.lead, "notes_root": project.notes_root, "mint": mint}
+    questions, warnings = found.questions(fields)
+    added.warnings.extend(warnings)
+    if not questions:
+        return added
+    settled = found.settle(questions, project, given=answers, ask=ask)
+    added.notes.extend(settled.notes)
+    added.warnings.extend(settled.warnings)
+    added.asked.extend(settled.asked)
+    added.answered.extend(settled.answered)
+    return added
 
 
 def _check_mint(planned: Planned) -> str | None:
