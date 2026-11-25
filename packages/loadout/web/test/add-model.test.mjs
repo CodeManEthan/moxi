@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { addAct } from "../src/acts-model.ts";
-import { ADD_NOTE, BY_NAME, notListed, pickerOf } from "../src/add-model.ts";
+import { ADD_NOTE, BY_NAME, EVERY_HARNESS, harnessPicker, notListed, pickerOf } from "../src/add-model.ts";
 import { ATLAS, FOLDER, fullView, USER } from "./fixtures.mjs";
 
 const dir = (unlisted) => ({ state: "ok", detail: null, uncommitted: [], more: 0, unlisted, reinstalls: false });
@@ -46,4 +46,22 @@ test("Add and place: the user section, a project section, or a project's key", (
   assert.deepEqual(addAct("agent", "lead", "otter"), {
     path: "api/add", body: { kind: "agent", name: "lead", project: "otter" },
     argv: ["add", "agent", "lead", "--project=otter"] });
+});
+
+test("Add for one harness: `harnesses` in the body, `--harness` in the words", () => {
+  assert.deepEqual(addAct("skill", "bump-version", null, "codex"), {
+    path: "api/add", body: { kind: "skill", name: "bump-version", harnesses: ["codex"] },
+    argv: ["add", "skill", "bump-version", "--harness=codex"] });
+  assert.deepEqual(addAct("agent", "lead", "otter", "claude"), {
+    path: "api/add", body: { kind: "agent", name: "lead", project: "otter", harnesses: ["claude"] },
+    argv: ["add", "agent", "lead", "--project=otter", "--harness=claude"] });
+  assert.deepEqual(addAct("skill", "x", null, null), addAct("skill", "x", null));
+});
+
+test("For: every harness, then each harness on this machine and no other", () => {
+  assert.equal(EVERY_HARNESS, "every harness");
+  const picker = harnessPicker(fullView({ present: ["claude", "opencode"] }));
+  assert.deepEqual(picker.map((o) => [o.value, o.label, o.harness]),
+                   [["", "every harness", null], ["claude", "Claude Code", "claude"], ["opencode", "OpenCode", "opencode"]]);
+  assert.deepEqual(harnessPicker(fullView({ present: [] })).map((o) => o.label), ["every harness"]);
 });

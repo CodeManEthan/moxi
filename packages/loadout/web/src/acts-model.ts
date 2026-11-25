@@ -56,10 +56,14 @@ export function removeAct(kind: string, name: string, section: Section): PageAct
 }
 
 /** `add <kind> <name>` to one section: Your items with `section` null, else that project
- * section (or a project's key, which gives it a section). */
-export function addAct(kind: string, name: string, section: string | null): PageAct {
-  return { path: "api/add", body: { kind, name, ...(section === null ? {} : { project: section }) },
-           argv: ["add", kind, name, ...(section === null ? [] : [`--project=${section}`])] };
+ * section (or a project's key, which gives it a section); for every harness with `harness`
+ * null, else for that harness only. */
+export function addAct(kind: string, name: string, section: string | null, harness: string | null = null): PageAct {
+  return { path: "api/add",
+           body: { kind, name, ...(section === null ? {} : { project: section }),
+                   ...(harness === null ? {} : { harnesses: [harness] }) },
+           argv: ["add", kind, name, ...(section === null ? [] : [`--project=${section}`]),
+                  ...(harness === null ? [] : [`--harness=${harness}`])] };
 }
 
 /** `global mode <mode>` for `managed` or `if-absent`. */

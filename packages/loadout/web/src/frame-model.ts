@@ -4,7 +4,7 @@
 // No DOM, so the Node tests read it.
 
 import type { SourceDir, View } from "./feed.ts";
-import { FINE } from "./feed.ts";
+import { FINE, parseView } from "./feed.ts";
 import { commandOf } from "./acts-model.ts";
 import { actArgv } from "./placed-model.ts";
 import type { Problem, ProblemAct } from "./placed-model.ts";
@@ -48,6 +48,37 @@ export function pageState(read: ViewRead, waitedMs: number): PageState {
   }
   if (view.problem !== null) return "problem";
   return view.items.length === 0 && view.rows.every((row) => FINE.has(row.state)) ? "empty" : "up";
+}
+
+/** `view` cut to the harnesses the page draws (`shown`): a harness of the table that isn't
+ * on this machine and has nothing of loadout's there loses its column, its rows, its item
+ * notes and its global file, and its rows leave the counts, so every part of the page
+ * (cells, Placed, the verdict, the opened item) reads only what is drawn. The page cuts
+ * each view as it reads it. */
+export function shownOnly(view: View): View {
+  const shown = new Set(view.shown);
+  const hidden = new Set(view.harnesses.filter((harness) => !shown.has(harness)));
+  if (hidden.size === 0) return view;
+  const kept = (harness: string | null): boolean => harness === null || !hidden.has(harness);
+  const counts = { ...view.counts };
+  for (const row of view.rows) {
+    if (kept(row.harness) || counts[row.state] === undefined) continue;
+    counts[row.state] -= 1;
+    if (counts[row.state] <= 0) delete counts[row.state];
+  }
+  return {
+    ...view, counts,
+    harnesses: view.harnesses.filter((harness) => !hidden.has(harness)),
+    rows: view.rows.filter((row) => kept(row.harness)),
+    item_notes: view.item_notes.filter((note) => kept(note.harness)),
+    global: { ...view.global, files: view.global.files.filter((file) => kept(file.harness)) },
+  };
+}
+
+/** `/api/view`'s value cut to the harnesses the page draws, or null when it isn't one. */
+export function parseShownOnly(data: unknown): View | null {
+  const view = parseView(data);
+  return view === null ? null : shownOnly(view);
 }
 
 /** The line a view that never read shows. */

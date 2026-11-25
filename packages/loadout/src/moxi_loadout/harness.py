@@ -41,7 +41,7 @@ it points at. A missing parent folder is made with the ordinary mode.
 from __future__ import annotations
 
 import os
-from collections.abc import Mapping
+from collections.abc import Iterable, Mapping
 from pathlib import Path
 
 from moxi import harnessfile
@@ -81,6 +81,44 @@ def opencode_xdg_home(env: Mapping[str, str] | None = None) -> Path:
 def home(harness: str, env: Mapping[str, str] | None = None) -> Path:
     return {"claude": claude_home, "codex": codex_home,
             "opencode": opencode_home}[harness](env)
+
+
+def present(names: Iterable[str], env: Mapping[str, str] | None = None) -> list[str]:
+    """Which of `names` (the core harness table's) are on this machine, in their order.
+
+    A harness loadout knows is on it when its home above is a folder, as the sessions
+    catalog skips a harness whose home is absent. A row loadout knows no home for is
+    counted as present, since nothing here can tell. `harness_row.present` is another
+    fact: whether the table has an opencode row at all."""
+    out = []
+    for name in names:
+        if name not in HARNESSES:
+            out.append(name)
+            continue
+        try:
+            if home(name, env).is_dir():
+                out.append(name)
+        except (OSError, ValueError, LookupError):
+            continue
+    return out
+
+
+#: The states of a row that say something stands where it places: loadout's placement, or
+#: what is in its way.
+STANDING = frozenset({"ok", "stale", "modified", "blocked"})
+
+
+def shown(names: Iterable[str], rows: Iterable[tuple[str | None, str, str | None]],
+          env: Mapping[str, str] | None = None) -> list[str]:
+    """Which of `names` the page draws, in their order: each `present` one, and one that
+    isn't present while one of its `rows` (`(harness, state, target)`) is `STANDING` at a
+    target, so nothing on disk is hidden. A harness not present with only `missing` or
+    `off` rows, or rows that place nowhere (a section that can't be placed), isn't drawn,
+    and its rows aren't counted."""
+    names = list(names)
+    standing = {h for h, state, target in rows if state in STANDING and target}
+    here = set(present(names, env))
+    return [name for name in names if name in here or name in standing]
 
 
 def settings_file(harness: str) -> Path | None:
@@ -160,6 +198,6 @@ def _backups(harness: str) -> Path:
     return stores.backups_dir() / harness
 
 
-__all__ = ["HARNESSES", "GLOBAL_NAMES", "claude_home", "claude_json", "codex_home",
-           "opencode_home", "opencode_xdg_home", "home", "settings_file", "global_file", "rules_file", "Refused",
-           "Doc", "write", "backup"]
+__all__ = ["HARNESSES", "GLOBAL_NAMES", "STANDING", "present", "shown", "claude_home",
+           "claude_json", "codex_home", "opencode_home", "opencode_xdg_home", "home",
+           "settings_file", "global_file", "rules_file", "Refused", "Doc", "write", "backup"]
