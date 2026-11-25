@@ -894,9 +894,12 @@ def _act_parsers(verbs) -> None:
     clear = verbs.add_parser(
         "clear-expired", help="ask now whether each session that recycles on expiry is due",
         allow_abbrev=False,
-        description="Make the expiry ask of every live launch that recycles on expiry, now: "
-                    "each is cleared or compacted when its cache is cold and it is quiet. "
-                    "Exit 1 when an ask ended blocked, failed or unconfirmed.")
+        description="Make each live launch's own expiry ask, now, for every launch that "
+                    "recycles on expiry: a clear launch is cleared when its cache is cold "
+                    "and it is quiet; a compact launch is compacted inside its window before "
+                    "the expiry, while its cache is warm and nothing is at work, once per "
+                    "idle stretch, and outside the window ends with nothing done. Exit 1 "
+                    "when an ask ended blocked, failed or unconfirmed.")
     clear.add_argument("--session", metavar="ID",
                        help="ask only of the launch whose current session is ID")
     clear.add_argument("--dry-run", action="store_true",

@@ -26,6 +26,12 @@ deny-list.
   and `session_id` are both the thread id: the thread's own cache key. Its time, the end
   of the response, is the clock's stamp. A guardian review or an internal child uses
   another key and never moves the clock.
+* **How long the last response took** (`response_s`): the record's stamp minus the stamp
+  of the input it answered, the newest user or developer message or tool output older
+  than the record and newer than the thread's own record before it, passing over one
+  that a line of the record's own response is older than. The read covers the record's
+  turn back to its `turn_context`, which is older than the turn's first input; with no
+  such input in what it covered, None.
 * **The two pairs.** The last model is the `model` of the record's own turn's
   `turn_context`; the last provider is the latest `thread_settings_applied` of this thread
   at or before the record, else line 1's `model_provider`. Both are read from the settings
@@ -144,6 +150,19 @@ def _is_start(rec) -> bool:
 
 def _is_token_count(rec) -> bool:
     return rec.raw_kind == "event_msg/token_count"
+
+
+def _input_ts(lines: list, index: int, thread_id: str) -> float | None:
+    """The stamp of the input the record at `lines[index]` answered, or None."""
+    found = None
+    for rec in reversed(lines[:index]):
+        if _own(rec, thread_id):
+            break
+        if _clock.is_output(rec):
+            found = None
+        elif _clock.is_input(rec) and found is None:
+            found = rec
+    return None if found is None else _ts(found)
 
 
 def _breaks_continuation(rec) -> bool:
@@ -465,6 +484,7 @@ def _clock_from(scan: Scan, record, thread_id, *, table, now, drift, bound_at,
         return Clock(COLD, age_s=age, reason=CHANGED, code=_clock.CHANGED)
     row = table.lookup(HARNESS, last_provider, last_model)
     key = f"{HARNESS} {pair_text(last_provider, last_model)}"
+    response_s = _clock.response_span(ts, _input_ts(lines, index, thread_id))
     if row is None:
         # A model with no lifetime row has no clock to count by.
         return Clock(NO_CACHE, age_s=age, reason=no_row(last_provider, last_model),
@@ -474,7 +494,7 @@ def _clock_from(scan: Scan, record, thread_id, *, table, now, drift, bound_at,
                      key=f"{key} (free)", code=_clock.FREE)
     if not row.measured:
         return _verdict(age, row.seconds, key=key, basis="documented",
-                        provider=last_provider, model=last_model)
+                        provider=last_provider, model=last_model, response_s=response_s)
     # A measured row: the lifetime in force after drift.
     if drift is MISSING:
         return unknown(_clock.NO_DRIFT_RECORD, NO_DRIFT)
@@ -492,7 +512,8 @@ def _clock_from(scan: Scan, record, thread_id, *, table, now, drift, bound_at,
         lowered_at = observed.lowered["at_iso"]
     clock = _verdict(age, lifetime, key=_measured_key(key, row, lifetime, lowered_at),
                      basis="measured", provider=last_provider, model=last_model,
-                     lowered_from=row.seconds if lifetime < row.seconds else None)
+                     lowered_from=row.seconds if lifetime < row.seconds else None,
+                     response_s=response_s)
     clock.lowering = observed.lowered
     clock.notes = observed.notes
     clock.judged = (thread_id, observed.newest) if observed.newest else None
@@ -506,10 +527,12 @@ def _measured_key(key, row, lifetime, lowered_at) -> str:
     return f"{key} (measured on this box)"
 
 
-def _verdict(age, lifetime, *, key, basis, provider, model, lowered_from=None) -> Clock:
+def _verdict(age, lifetime, *, key, basis, provider, model, lowered_from=None,
+             response_s=None) -> Clock:
     kind = COLD if age >= lifetime else WARM
     return Clock(kind, age_s=age, ttl_s=lifetime, key=key, basis=basis,
-                 provider=provider, model=model, lowered_from=lowered_from)
+                 provider=provider, model=model, lowered_from=lowered_from,
+                 response_s=response_s)
 
 
 # --------------------------------------------------------------------------- drift
