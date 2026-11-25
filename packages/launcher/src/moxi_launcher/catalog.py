@@ -45,7 +45,8 @@ the catalog's own:
     when     on an `enum` row: per value, what that value needs besides the row's own:
              `requires` (modules), `condition`, `target` (the launch's target), and
              `refused` and `hint`, the words a launch or preset that breaks it is refused
-             with
+             with; `applies_with`, another launcher row, when the value's needs hold only
+             while that row is set off its default
     offered_with
              another launcher row: this row is offered only when that one is set off its
              default
@@ -196,7 +197,7 @@ GROUPS = ("model", "access", "tools", "seat", "runs-in", "lifecycle", "config")
 #: What a fork does with a row (the `fork` field): copy it, drop it, or compose it again.
 FORK_CLASSES = ("copy", "drop", "own")
 #: The fields of one value's table under `when`.
-WHEN_FIELDS = ("requires", "condition", "target", "refused", "hint")
+WHEN_FIELDS = ("requires", "condition", "target", "refused", "hint", "applies_with")
 #: The harnesses whose sessions cache's timer asks about: it keeps clock records for
 #: Claude sessions only, so a row that rides its asks is offered for Claude alone.
 CACHE_TIMED = ("claude",)
@@ -423,13 +424,15 @@ class Spelling:
 class When:
     """What one value of an `enum` row needs besides the row's own needs: modules, a
     condition, the launch's target, and the words a launch that breaks it is refused
-    with."""
+    with. With `applies_with`, another launcher row, the needs hold only while that row
+    is set off its default: a value that does nothing without it is not refused."""
 
     requires: tuple[str, ...] = ()
     condition: str | None = None
     target: str | None = None
     refused: str = ""
     hint: str = ""
+    applies_with: str | None = None
 
 
 @dataclass(frozen=True)
@@ -735,6 +738,11 @@ def parse_text(text: str, *, harness: str, source: str = "catalog") -> Catalog:
             if row_.offered_with is not None and row_.offered_with not in rows:
                 raise CatalogError(source, row_.name, f"is offered_with "
                                    f"{row_.offered_with!r}, which is not a launcher row")
+            for value, need in row_.when.items():
+                if need.applies_with is not None and need.applies_with not in rows:
+                    raise CatalogError(source, row_.name, f"has when.{value} applies_with "
+                                       f"{need.applies_with!r}, which is not a launcher "
+                                       "row")
         return Catalog(LAUNCHER, MappingProxyType(rows), source)
     checked, helps = _meta(meta, harness, source)
     catalog = Catalog(harness, MappingProxyType(rows), source, checked, helps)
@@ -972,11 +980,17 @@ def _when(raw, kind, values, bad) -> dict[str, When]:
         target = spec.get("target")
         if target is not None and not isinstance(target, str):
             raise bad(f"has when.{value} target {target!r}, which is not a target's name")
+        applies_with = spec.get("applies_with")
+        if applies_with is not None and not (isinstance(applies_with, str)
+                                             and _NAME.fullmatch(applies_with)):
+            raise bad(f"has when.{value} applies_with {applies_with!r}, which is not a "
+                      "row's name")
         needs = _requires(spec.get("requires"), bad)
         out[value] = When(requires=() if needs is None else
                           ((needs,) if isinstance(needs, str) else needs),
                           condition=_condition(spec.get("condition"), bad),
-                          target=target, refused=refused, hint=hint)
+                          target=target, refused=refused, hint=hint,
+                          applies_with=applies_with)
     return out
 
 
@@ -1062,7 +1076,8 @@ def refuse_values(harness: str, values: Mapping[str, object], *,
     the rule's own words (`NeedsModule`):
 
     - a value whose `when` needs are not met: a module absent, its condition not
-      holding here, or the launch's `target` another;
+      holding here, or the launch's `target` another; a need with `applies_with` only
+      while that row is set off its default;
     - a row chosen for this launch (`chosen`: typed or from the preset) whose
       `offered_with` row is at its default, which leaves it nothing to do.
 
@@ -1078,7 +1093,8 @@ def refuse_values(harness: str, values: Mapping[str, object], *,
         if row_ is None:
             continue
         need = row_.when.get(value) if isinstance(value, str) else None
-        if need is not None and not _met(need, values, avail, harness):
+        if (need is not None and _applies(need, values, harness)
+                and not _met(need, values, avail, harness)):
             raise NeedsModule(row_, need.refused, need.hint)
         if row_.offered_with is not None and name in chosen:
             other = row(harness, row_.offered_with)
@@ -1131,6 +1147,16 @@ def refuse_relaunch_mark(values: Mapping[str, object]) -> None:
     if is_set(values.get("limit_at")):
         raise RelaunchMark("limit_at", "limit_at does nothing on a launch that relaunches "
                                        "itself", RELAUNCH_LIMIT_HINT)
+
+
+def _applies(need: When, values: Mapping[str, object], harness: str | None) -> bool:
+    """Whether `need` holds for a launch's `values`: always, but with `applies_with`
+    only while that row is set off its default (unset counts as its default)."""
+    if need.applies_with is None:
+        return True
+    other = row(harness, need.applies_with)
+    return other is not None and values.get(other.name, other.default) not in (
+        None, "", other.default)
 
 
 def _met(need: When, values: Mapping[str, object], avail: Callable[[str], bool],

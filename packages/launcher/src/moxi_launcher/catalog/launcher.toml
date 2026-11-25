@@ -281,5 +281,6 @@ label = "Subconscious route"
 [subconscious_route.when.slot]
 requires = ["slots", "comms"]
 condition = "slots-here"
+applies_with = "subconscious"
 refused = "the subconscious in a slot needs slots and comms"
 hint = "use --subconscious-route subagent, or launch where tmux slots run"
