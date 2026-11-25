@@ -478,6 +478,14 @@ def test_a_posix_address_is_the_socket_path(monkeypatch):
         ipc.address("turns", "a/b")
 
 
+@POSIX
+def test_a_posix_address_under_a_given_env_reads_that_env_alone(monkeypatch):
+    monkeypatch.setenv("MOXI_TURNS_RUNTIME_DIR", "/r")
+    env = {"MOXI_TURNS_RUNTIME_DIR": "/g"}
+    assert ipc.address("turns", "daemon", env) == "/g/turns/daemon.sock"
+    assert ipc.address("turns", "daemon", env) == paths.socket_path("turns", "daemon", env)
+
+
 def _home_hash_of(path) -> str:
     import os
 
@@ -519,6 +527,15 @@ def test_two_homes_of_one_user_never_share_a_pipe(windows_names, tmp_path, monke
     second = ipc.address("comms", "daemon")
     assert first != second
     assert ipc._pipe_parts(first) == ipc._pipe_parts(second) == ("comms", "daemon")
+
+
+def test_a_windows_address_under_a_given_env_is_the_one_that_env_serves(windows_names,
+                                                                         tmp_path, monkeypatch):
+    env = {"MOXI_COMMS_RUNTIME_DIR": str(tmp_path / "other")}
+    given = ipc.address("comms", "daemon", env)
+    assert given != ipc.address("comms", "daemon"), "the process's own env is not read"
+    monkeypatch.setenv("MOXI_COMMS_RUNTIME_DIR", str(tmp_path / "other"))
+    assert given == ipc.address("comms", "daemon")
 
 
 @pytest.mark.skipif(sys.platform == "win32", reason="on Windows a symbolic link needs a "

@@ -30,6 +30,7 @@ on first use.
 from __future__ import annotations
 
 import sys
+from collections.abc import Mapping
 
 from .. import names
 from ._wire import (Agreed, AlreadyServing, Hello, IpcError, NotRpc, NotServing, RpcError,
@@ -51,8 +52,9 @@ _LAZY = {
 }
 
 
-def address(module: str, name: str) -> str:
-    """The address of module `module`'s endpoint `name`.
+def address(module: str, name: str, env: Mapping[str, str] | None = None) -> str:
+    """The address of module `module`'s endpoint `name`: where a server started with
+    environment `env` (this process's own without one) serves it.
 
     Linux and macOS: `moxi.paths.socket_path(module, name)`, a socket in the module's
     runtime directory (or a short hashed path when that is too long). Windows:
@@ -60,16 +62,17 @@ def address(module: str, name: str) -> str:
     SHA-256 of the user's SID, since every user on the machine shares the pipe namespace,
     and `h` the same of the module's runtime directory spelled one way (`_home_hash`), so
     two Moxi homes of one user never share a pipe and two spellings of one home always do.
+    The user is always this process's own; `env` places only the runtime directory.
     """
     if not _WINDOWS:
         from .. import paths
 
-        return paths.socket_path(module, name)
+        return paths.socket_path(module, name, env)
     if not names.is_module_name(module):
         raise ValueError(f"{module!r} is not a Moxi module name")
     if not name or name in (".", "..") or any(c in name for c in "/\\\0"):
         raise ValueError(f"{name!r} is not an endpoint name")
-    return f"{_PIPE_PREFIX}{module}-{name}-{_user_hash()}-{_home_hash(module)}"
+    return f"{_PIPE_PREFIX}{module}-{name}-{_user_hash()}-{_home_hash(module, env)}"
 
 
 def _user_hash() -> str:
@@ -80,7 +83,7 @@ def _user_hash() -> str:
     return hashlib.sha256(_win.user_sid().encode()).hexdigest()[:8]
 
 
-def _home_hash(module: str) -> str:
+def _home_hash(module: str, env: Mapping[str, str] | None = None) -> str:
     """The first 8 hex digits of the SHA-256 of `module`'s runtime directory in its one
     spelling: its real path (links resolved, each name in its long form), case-folded,
     with no trailing separator."""
@@ -89,7 +92,7 @@ def _home_hash(module: str) -> str:
 
     from .. import paths
 
-    real = os.path.normcase(os.path.realpath(paths._layout(module).runtime_dir()))
+    real = os.path.normcase(os.path.realpath(paths._layout(module).runtime_dir(env)))
     return hashlib.sha256(real.encode("utf-8")).hexdigest()[:8]
 
 

@@ -52,7 +52,12 @@ def test_comms_locations(monkeypatch, tmp_path):
 def test_every_location_reads_a_given_env(tmp_path):
     env = {"MOXI_COMMS_HOME": str(tmp_path), "MOXI_COMMS_DEVICE": "box2"}
     assert paths.comms_db(env) == tmp_path / "state" / "comms" / "comms.db"
-    assert paths.daemon_socket(env) == tmp_path / "runtime" / "comms" / "daemon.sock"
+    # The core's address under that env: a pipe on Windows, else its socket path (the
+    # short hashed one when the runtime folder's path is too long).
+    from moxi import ipc
+
+    assert paths.daemon_socket(env) == Path(ipc.address("comms", "daemon", env))
+    assert paths.daemon_socket(env) != paths.daemon_socket()
 
 
 def test_a_socket_under_the_runtime_dir_passes():

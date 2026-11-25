@@ -328,22 +328,23 @@ def _host_name() -> str:
 
 # -- sockets and this environment's programs --------------------------------------------
 
-def socket_path(module: str, name: str) -> str:
+def socket_path(module: str, name: str, env: Mapping[str, str] | None = None) -> str:
     """The path of module `module`'s Unix socket `name`, under `SOCKET_MAX` bytes.
 
     `<runtime_dir>/<name>.sock` when that is short enough, else `/tmp/moxi-<uid>/<h>.sock`
     with `h` the first 16 hex digits of the long path's SHA-256; `/tmp/moxi-<uid>` is made
     private and refused when another user owns it. Not `$TMPDIR`, which on macOS is long
     itself. The runtime directory is not created here. `socket_path(module, "page")` is a
-    page server's socket. Windows has no such sockets (its endpoints are named pipes), so
-    there it raises `NotImplementedError`.
+    page server's socket. With `env`, the runtime directory is the one that environment
+    places, as every `Layout` method reads it. Windows has no such sockets (its endpoints
+    are named pipes), so there it raises `NotImplementedError`.
     """
     if _WINDOWS:
         raise NotImplementedError("Windows has no Unix socket paths; its endpoints are "
                                   "named pipes")
     if not name or name in (".", "..") or "/" in name or "\0" in name:
         raise ValueError(f"{name!r} is not a socket name")
-    path = os.path.join(_layout(module).runtime_dir(), f"{name}.sock")
+    path = os.path.join(_layout(module).runtime_dir(env), f"{name}.sock")
     encoded = os.fsencode(path)
     if len(encoded) < SOCKET_MAX:
         return path

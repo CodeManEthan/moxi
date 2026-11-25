@@ -2,6 +2,11 @@
 
 ## 0.1.11 (unreleased)
 
+- `moxi.ipc.address(module, name, env)` and `moxi.paths.socket_path(module, name, env)`
+  take an optional environment: the address a server started with that environment
+  serves at, read from it alone. A caller holding another process's environment (a
+  session hook given the session's) could only build the POSIX path by hand, which on
+  Windows names no pipe and on POSIX misses the short path a long runtime folder gets.
 - On Windows `moxi.render.install()` reads the user's known folders before it adds the
   hook, and `moxi._win.known_folder` gives those answers from then on. A render could not
   name a module's folders on Windows, because the shell is asked through `ctypes`, which

@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- On Windows the session hook finds comms' daemon. Given the session's environment, it
+  looked for the daemon at a socket path in the runtime folder, where Windows has none,
+  so every Claude session there read comms as offline at its start and got no roster
+  updates. It now asks the core for the daemon's address under that environment (the
+  pipe on Windows; on POSIX also the short path a long runtime folder gets).
 - On Windows `ClaimServer.spawn` starts its child. It started a gate process that took
   the pipe by `pass_fds` and exec'd the program, which Windows lacks; there the program
   now starts suspended, is written to the claim file as a `tree` root and is then

@@ -172,7 +172,7 @@ def a_pipe(monkeypatch):
     from moxi import ipc
 
     pipe = PIPE_PREFIX + "moxi-comms-daemon-0123abcd"
-    monkeypatch.setattr(ipc, "address", lambda module, name: pipe)
+    monkeypatch.setattr(ipc, "address", lambda module, name, env=None: pipe)
     resolve = Path.resolve
 
     def resolve_no_pipe(self, *args, **kwargs):
