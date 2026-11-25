@@ -31,21 +31,26 @@
   doesn't import.
 - sessions: rows in the session table, with an identity, settled, and with each launch
   kind. `warn` when memory's state store can't be opened or read.
-- links: whether comms, the launcher and notes load, and what memory does without each.
+- links: whether comms, the launcher, notes and slots load, and what memory does without each.
 - retention: each harness's transcript retention, from sessions. `warn` where sessions
   warns.
 - subconscious: for each live session whose launch turned the subconscious on, whether a
   recall route can run in it now, checked as a recall's own try checks it (a Codex
-  session, or a Claude Code session whose turns offers no `fork`, has it off; a route
-  that answers by comms is off while the session has no comms name or its recall sender
+  session runs only the slot route, and only where its launch picks it; a Claude Code
+  session whose turns offers no `fork` falls back to the slot route; a route that
+  answers by comms is off while the session has no comms name or its recall sender
   can't send, and the reason names that sender, in conflict among them), naming the
   reason only while it holds; while memory's config file is in error, each recall it
   stopped (its line `lost` with the reason `config`) and the error; each recall line
-  still open, sending or kept whose child and taker are gone, with its age, until a
-  taker settles it; and each recall line still `sending`, an answer comms has not taken
-  yet, with how long it has waited and comms' last refusal. `warn` for each of those. With the subconscious on in a live session it also says
-  that a recall fork's permission asks are refused. Recall runs on Claude Code's subagent
-  route only.
+  left at the late wait's last limit with its fork's round still open, with its fork
+  and age; each recall line still open, sending or kept whose child and taker are gone,
+  with its age, until a taker settles it; each recall line still `sending`, an answer
+  comms has not taken yet, with how long it has waited and comms' last refusal; each
+  slot fork whose exit the launcher still held after the exit's wait, with its session,
+  its slot where the launcher can say, and its age, which memory leaves running; and
+  the recalls whose child never ran or whose fork's id never came. `warn` for each of
+  those. With the subconscious on in a live session it also says that a recall fork's
+  permission asks are refused.
 
 No row writes anything: the index is opened to read, and the state store only when it
 is there.
@@ -401,6 +406,7 @@ _WITHOUT = {
     "comms": "no identities: no agent list, and the project list names harnesses",
     "launcher": "no launch kinds: every session is searched by default and may be listed",
     "notes": "a recall reads past sessions only, no notes",
+    "slots": "no slot route for the subconscious",
 }
 
 
@@ -410,7 +416,7 @@ def _links() -> Row:
     parts = []
     state = "ok"
     for name, link in (("comms", links.comms()), ("launcher", links.launcher()),
-                       ("notes", links.notes())):
+                       ("notes", links.notes()), ("slots", links.slots())):
         if link.ready:
             parts.append(f"{name} loads")
         elif link.state == links.FAILING:
@@ -442,6 +448,7 @@ SUBCONSCIOUS_SHOWN = 5
 UNTAKEN_GRACE_S = 30.0
 SUBCONSCIOUS_LIST = "moxi memory subconscious list"
 SUBCONSCIOUS_DISCARD = "moxi memory subconscious discard RECALL_ID"
+EXIT_SESSION = "moxi launcher exit-session SESSION_ID"
 
 
 def _age(seconds: float) -> str:
@@ -528,6 +535,52 @@ def _never_ran(lines: list[dict], *, now: float) -> str | None:
     return "; ".join(said) or None
 
 
+def running_slots() -> tuple[dict[str, str | None] | None, str | None]:
+    """The launcher's running launches as `{session id: slot}`, read through its
+    interface 3, and None with the reason when the launcher can't say."""
+    from . import links
+
+    link = links.launcher_forks()
+    if not link.ready:
+        return None, link.reason or "the launcher can't be asked"
+    try:
+        launches = link.api.running(live_only=True)
+    except Exception as exc:  # noqa: BLE001 - a launch log that can't be read says nothing
+        return None, f"the launcher's launch log can't be read ({exc})"
+    return {str(x.session_id): x.slot for x in launches if x.session_id}, None
+
+
+def _held_forks(lines: list[dict], *, now: float) -> str | None:
+    """The slot forks whose exit the launcher still held past the exit's wait (the
+    line's `fork_exit` `held: <word>`), each with its recall, session, slot and age since
+    its line was last written. A fork the launcher no longer runs is left out; where the
+    launcher can't say, every such fork is listed with no slot. memory ends none of
+    them. None when there are none."""
+    from . import recall_route, recall_start
+
+    held = [line for line in lines
+            if line.get("route") == recall_start.SLOT and line.get("fork")
+            and str(line.get("fork_exit") or "").startswith(f"{recall_route.HELD}:")]
+    if not held:
+        return None
+    slots, why = running_slots()
+    if slots is not None:
+        held = [line for line in held if str(line.get("fork")) in slots]
+        if not held:
+            return None
+    named = []
+    for line in held[::-1]:
+        fork = str(line.get("fork"))
+        where = f", slot {slots[fork]}" if slots is not None and slots[fork] else ""
+        age = _age(now - float(line.get("updated") or line.get("at") or now))
+        named.append(f"{line.get('recall')} (session {fork}{where}, "
+                     f"{line.get('fork_exit')}, {age} old)")
+    unsure = f" (the launcher can't say which are still running: {why})" if why else ""
+    return (f"{_plural(len(held), 'slot fork')} whose exit was still held after the "
+            f"exit's wait, holding its slot{unsure}: {_shown(named)}; memory leaves it "
+            f"running, and {EXIT_SESSION} ends it once it is quiet")
+
+
 def _config_losses(lines: list[dict]) -> list[dict]:
     """The lines lost with reason `config` since memory's config last read cleanly for a
     recall: those opened after the newest line whose child got past its config read (its
@@ -604,6 +657,10 @@ def _subconscious(*, config_in_error: bool, now: float | None = None) -> Row:
         parts.append(f"{_plural(len(sending), 'recall')} still sending, waiting for comms "
                      f"to take its answer: {_shown(named)}; one comms will never take "
                      f"ends with {SUBCONSCIOUS_DISCARD}")
+    held = _held_forks(lines, now=now)
+    if held:
+        warn = True
+        parts.append(held)
     never_ran = _never_ran(lines, now=now)
     if never_ran:
         warn = True
@@ -614,4 +671,4 @@ def _subconscious(*, config_in_error: bool, now: float | None = None) -> Row:
     return Row(MODULE, "subconscious", "warn" if warn else "ok", "; ".join(parts), fix)
 
 
-__all__ = ["rows", "live_subconscious"]
+__all__ = ["rows", "live_subconscious", "running_slots"]

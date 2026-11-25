@@ -295,3 +295,58 @@ def test_the_doctor_lists_a_line_left_at_the_late_waits_last_limit_with_its_age(
     assert ("1 recall line left at the late wait's last limit, its fork's round still "
             f"open: {recall.recall_id} (lost, fork {FORK}, 10m old)") in row.detail
     assert "not yet taken" not in row.detail
+
+
+def test_the_doctor_lists_a_slot_fork_whose_exit_is_still_held_and_never_ends_it(
+        monkeypatch):
+    monkeypatch.setattr(doctor, "live_subconscious", lambda: [])
+    launcher = Launcher(exits=("held",))
+    recall = a_dead_line(state=recalls.BACK, kept=False)
+    route = recall_route.Slot(SESSION, recall.recall_id, fork=FORK, launcher=launcher)
+    assert recall_route.end_fork(recall, route, held_s=0) == "held: turn"
+    asked = []
+
+    def slots_running(slots, why=None):
+        def read():
+            asked.append(1)
+            return slots, why
+        return read
+
+    later = time.time() + 600
+    monkeypatch.setattr(doctor, "running_slots", slots_running({FORK: "3"}))
+    row = doctor._subconscious(config_in_error=False, now=later)
+    assert row.state == "warn"
+    assert ("1 slot fork whose exit was still held after the exit's wait, holding its "
+            f"slot: {recall.recall_id} (session {FORK}, slot 3, held: turn, 10m old); "
+            "memory leaves it running, and moxi launcher exit-session SESSION_ID ends it "
+            "once it is quiet") in row.detail
+    monkeypatch.setattr(doctor, "running_slots", slots_running({}))
+    assert "slot fork" not in doctor._subconscious(config_in_error=False, now=later).detail
+    monkeypatch.setattr(doctor, "running_slots",
+                        slots_running(None, "launcher is not installed"))
+    row = doctor._subconscious(config_in_error=False, now=later)
+    assert ("1 slot fork whose exit was still held after the exit's wait, holding its "
+            "slot (the launcher can't say which are still running: launcher is not "
+            f"installed): {recall.recall_id} (session {FORK}, held: turn, 10m old)"
+            ) in row.detail
+    assert len(asked) == 3 and launcher.exited == [FORK]
+
+
+def test_running_slots_reads_the_launchers_running_launches_by_session(monkeypatch):
+    from moxi_memory import links
+
+    launches = (types.SimpleNamespace(session_id=FORK, slot="2"),
+                types.SimpleNamespace(session_id=None, slot="4"))
+    api = types.SimpleNamespace(running=lambda *, live_only: launches if live_only else ())
+    monkeypatch.setattr(links, "launcher_forks", lambda: links.Link(links.READY, api=api))
+    assert doctor.running_slots() == ({FORK: "2"}, None)
+
+    def busy(*, live_only):
+        raise RuntimeError("held")
+
+    monkeypatch.setattr(links, "launcher_forks", lambda: links.Link(
+        links.READY, api=types.SimpleNamespace(running=busy)))
+    assert doctor.running_slots() == (None, "the launcher's launch log can't be read (held)")
+    monkeypatch.setattr(links, "launcher_forks", lambda: links.Link(
+        links.NONE, reason="launcher is not installed"))
+    assert doctor.running_slots() == (None, "launcher is not installed")

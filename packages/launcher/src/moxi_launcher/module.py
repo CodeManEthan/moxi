@@ -54,8 +54,11 @@ OPTIONAL = {
     "sessions": "The latest thing said in each running session, on Home's Sessions row. "
                 "Without it a row shows when it was launched.",
     "memory": "memory's subconscious: the subconscious row turns it on for a launch, "
-              "automatic or on demand, by stamping the mode memory reads. Without it "
-              "that row isn't offered.",
+              "automatic or on demand, and the subconscious_route row picks where its "
+              "recalls run, a subagent or a slot (on Codex only the slot route runs "
+              "one), each stamped where memory reads it. A recall's slot fork is left "
+              "to memory to end: park, crash discovery and restore leave it out. "
+              "Without it those rows aren't offered.",
 }
 GATED = {}
 #: Each Moxi variable the launcher reads outside moxi.paths and moxi.config, and why: the

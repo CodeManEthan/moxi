@@ -8,10 +8,10 @@
   main agent what it finds, at each prompt `subconscious.trigger` counts (`automatic`)
   or when the agent runs `moxi memory subconscious recall TOPIC` (`on-demand`, with a
   start line naming it and at most `subconscious.on_demand_per_prompt` between two
-  counted prompts). For now a recall runs only on Claude Code, as a subagent forked
-  through turns' `fork`; a Codex session, or a Claude Code session whose turns offers no
-  `fork`, has the subconscious off, told by an `off` line in the log at the first try
-  and whenever the reason changes, by the on-demand command's refusal and by the doctor.
+  counted prompts). A recall runs on Claude Code as a subagent forked through turns'
+  `fork`, or in a slot on the slot route (next entry); a session where no route can run
+  has the subconscious off, told by an `off` line in the log at the first try and
+  whenever the reason changes, by the on-demand command's refusal and by the doctor.
   A recall's detached child runs a first search (none for a prompt with no keyword,
   never this session's own rows) and reads the notes with notes installed, writes the
   fork's brief, and streams rounds through `fork` and `fork.continue`, each kept by
@@ -20,9 +20,43 @@
   child died is taken over by the next recall child or by a taker started at session
   end. New settings under `subconscious.*` (`limit_s` held to 1 to 3600 by the config
   check), a log shown by `moxi memory subconscious list`, and `moxi memory subconscious
-  discard`, which refuses every line on the subagent route since the harness brings
-  every answer back itself. Recall records are swept after a day unless their line is
-  still kept.
+  discard`, which ends a line still sending and refuses every line on the subagent
+  route, since the harness brings every answer back itself. Recall records are swept
+  after a day unless their line is still kept.
+- The slot route: with the launcher's `subconscious_route = "slot"` (stamped as
+  `MOXI_MEMORY_SUBCONSCIOUS_ROUTE`), or on Claude Code when turns offers no `fork`, a
+  recall forks the session into a tmux slot through the launcher's interface 3, the
+  fork stamped `MOXI_MEMORY_SUBCONSCIOUS_FORK` with the recall's id
+  (`api.SUBCONSCIOUS_FORK_ENV`). It needs the launcher, slots (a new `slots` extra and
+  link) and comms with scoped senders. On Codex only the slot route runs a recall, and
+  only where the launch picks it; on `subagent` a Codex session has the subconscious off
+  (`Codex: off unless the launch picks the slot route`). No recall starts inside a slot
+  fork, and the on-demand command refuses there. Two turns guards hold a slot fork to
+  the same reads: `memory.subconscious-slot` (every call, Claude Code's and Codex's,
+  whose shell reaches the guard as `Bash`) and `memory.subconscious-slot-ask` (every
+  permission ask, Claude Code).
+- A recall on the slot route sends each answer by comms, to the session alone, under
+  the session's recall sender (`<comms name>-subconscious`, comms' scoped sender for the
+  word `subconscious`, which memory declares). The line reads `sending` until comms
+  takes it, tried again every 10 seconds for a minute and then every 5 minutes, each
+  refusal on the line; `list` and the doctor show the wait and the last refusal, and a
+  discard ends a line comms will never take. A round past its bound is noted
+  (`past_bound`) and its answer is still sent if it comes within 300 seconds; past that
+  the line is left for a taker, which settles it once the fork's round ends. On Codex
+  the message lands as one more request in the same turn, so that turn's final answer is
+  the reply to the recall. Under `user-and-comms` a delivery whose senders are all this
+  session's recall senders starts no recall; with other senders too, the lines memory
+  already sent leave the recall's query and reach its fork as already recalled. The off reasons name comms' trouble, the recall
+  sender in conflict among them. Every recall child and taker starts through a detached
+  starter, outside every session.
+- A slot fork is exited through the launcher once its recall's last round is settled,
+  by the child, a taker, or a discard of a line whose owner is gone, and the line notes
+  how (`fork_exit`). An exit still held after a minute is left: memory's doctor lists
+  the fork with its session, slot and age, and memory never ends it on its own. The
+  doctor's `links` row names slots too.
+- memory's side of Codex's host fork (`host-fork` in the log): its rounds through turns'
+  Codex `fork` and `fork.continue`, its answers sent by comms, nothing to exit. No
+  session is routed to it.
 - A recall's record names the process that holds it from its first write: the
   listener or the on-demand command starts the detached starter under the session's
   lock and names it, the starter names the child, and the child names itself. The
