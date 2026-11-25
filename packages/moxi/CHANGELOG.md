@@ -2,6 +2,12 @@
 
 ## 0.1.11 (unreleased)
 
+- New `moxi.terminal.agent(view=None, run=None)`: the agent test. It names the harness
+  (`claude`, `codex` or `opencode`) whose session started the run, or None, by the
+  terminal walk's agent signs: a harness's program above the run, Claude Code's or Codex's
+  Linux sandbox, or Claude Code's tool mark. Unlike the walk it climbs past a Moxi
+  program, a unit and the start mark, so a session a Moxi launcher started is still an
+  agent's. Where the walk can't go on, it names none. A module needs `moxi>=0.1.11`.
 - New `moxi install <module> --setup-only`: runs an installed module's `SETUP` again in a
   fresh process under the core lock and records the version it ran at in `setup.json`,
   as an install's settle step does, and nothing else: no install, no index, no catalogue

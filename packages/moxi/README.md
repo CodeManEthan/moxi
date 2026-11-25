@@ -86,6 +86,12 @@ commands:
   help.
 - `moxi version` prints the versions of `moxi` and the modules it sees.
 
+A module that keeps an act for the person at the keyboard asks `moxi.terminal.agent()`,
+which names the agent (`claude`, `codex` or `opencode`) whose session started the run, or
+None. It reads the process tree and the marks a harness sets, on Windows, macOS and Linux.
+It is a fence, not a lock: a process that clears its environment and runs outside the
+agent's process tree is not caught.
+
 ## What it does outside its own folders
 
 The core keeps its own files in the usual places for this system (`moxi paths moxi`
