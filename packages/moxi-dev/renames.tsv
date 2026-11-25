@@ -18091,6 +18091,31 @@ moxi-dev	packages/moxi-dev/tests/test_check.py	assert checker.wait(timeout=testi
 moxi-dev	packages/moxi-dev/tests/test_check.py	checker.wait(timeout=1)	keep	timeout	timeout
 moxi-dev	packages/moxi-dev/tests/test_check.py	assert checker.wait(timeout=testing.PROC_WAIT_S) == 128 + signal.SIGTERM	keep	timeout	timeout
 moxi-dev	packages/moxi-dev/tests/test_kit.py	wait_for(lambda: not any(_running(pid) for pid in pids), testing.PROC_WAIT_S,	keep	any	any
+launcher	packages/launcher/src/moxi_launcher/compose/common.py	BASE_NAMES = ("HOME", "USER", "LOGNAME", "SHELL", "PATH", "LANG", "TZ", "TMPDIR",	keep	HOME	HOME
+launcher	packages/launcher/src/moxi_launcher/compose/common.py	adds nothing), with each of `CALLER_FIRST_NAMES` that `environ`, the replaying	keep	environ	environ
+launcher	packages/launcher/src/moxi_launcher/compose/common.py	that `environ` holds; for a resume into the caller's own terminal (`terminal`), the	keep	environ	environ
+launcher	packages/launcher/src/moxi_launcher/compose/common.py	caller's terminal names it holds (`TERMINAL_NAMES`). Nothing else of `environ` comes	keep	environ	environ
+launcher	packages/launcher/src/moxi_launcher/job.py	A find that is not live, refused `changed` with the reclaim pending, or `unclaimed`	keep	changed	changed
+launcher	packages/launcher/src/moxi_launcher/job.py	if kind == "refused" and reason == GONE:	keep	refused	refused
+launcher	packages/launcher/src/moxi_launcher/job.py	"""The pid of the endpoint a `changed` refusal names as serving the session, or None."""	keep	changed	changed
+launcher	packages/launcher/tests/test_relaunch_job.py	@pytest.mark.parametrize("gone", [Result("refused", "gone"), RuntimeError("endpoint ending")])	keep	refused	refused
+launcher	packages/launcher/tests/test_relaunch_job.py	assert got.events.count("hold") == 2 and old.closed and new.closed	keep	closed	closed
+launcher	packages/launcher/tests/test_relaunch_job.py	old, new = FakeSession([Result("refused", "gone")]), moved_session()	keep	refused	refused
+launcher	packages/launcher/tests/test_relaunch_job.py	# finds are refused `changed`, the reclaim pending.	keep	changed	changed
+launcher	packages/launcher/tests/test_relaunch_job.py	old = FakeSession([Result("refused", "gone")])	keep	refused	refused
+launcher	packages/launcher/tests/test_relaunch_job.py	sessions = [FakeSession([Result("refused", "gone")], facts_seq=[facts(number=0)])	keep	refused	refused
+launcher	packages/launcher/tests/test_relaunch_job.py	new = moved_session(exits=(Result("refused", "not-allowed"),))	keep	refused	refused
+launcher	packages/launcher/tests/test_relaunch_job.py	old = FakeSession([Result("refused", "not-allowed")])	keep	refused	refused
+launcher	packages/launcher/tests/test_replay.py	assert common.base_env({"HOME": "/h", BUS: "unix:path=/run/user/7/bus"},	keep	HOME	HOME
+launcher	packages/launcher/tests/test_replay.py	is_windows=False) == {"HOME": "/h", BUS: "unix:path=/run/user/7/bus"}	keep	HOME	HOME
+launcher	packages/launcher/tests/test_replay.py	assert common.base_env({"HOME": "/h"}, is_windows=False) == {"HOME": "/h"}	keep	HOME	HOME
+launcher	packages/launcher/tests/test_replay.py	base = {"HOME": "/h", BUS: "unix:path=/run/user/7/then"}	keep	HOME	HOME
+launcher	packages/launcher/tests/test_replay.py	now = {"HOME": "/elsewhere", BUS: "unix:path=/run/user/7/now"}	keep	HOME	HOME
+launcher	packages/launcher/tests/test_replay.py	assert common.replay_env(base, now) == {"HOME": "/h", BUS: "unix:path=/run/user/7/now"}	keep	HOME	HOME
+launcher	packages/launcher/tests/test_replay.py	assert common.replay_env(base, {"HOME": "/elsewhere"}) == base	keep	HOME	HOME
+launcher	packages/launcher/tests/test_replay.py	assert common.replay_env({"HOME": "/h"}, {"HOME": "/elsewhere"}) == {"HOME": "/h"}	keep	HOME	HOME
+launcher	packages/launcher/tests/test_exits.py	old, new = FakeSession(exits=(Result("refused", "gone"),)), FakeSession()	keep	refused	refused
+launcher	packages/launcher/tests/test_exits.py	assert old.commands == [("exit", 4)] and new.commands == [] and old.closed == 1	keep	closed	closed
 rounds	packages/rounds/src/moxi_rounds/board.py	"""A ruling as a record gives it: its `id`, its sentence, its pointer (`record`),	keep	record	record
 rounds	packages/rounds/src/moxi_rounds/board.py	return {"id": ruling.id, "text": ruling.text or ruling.rules, "record": ruling.record,	keep	record	record
 rounds	packages/rounds/src/moxi_rounds/corrections.py	"KINDS", "kind_of", "item_of", "stands", "live", "find", "newest_replacing",	keep	find	find

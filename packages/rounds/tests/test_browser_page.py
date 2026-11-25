@@ -434,6 +434,11 @@ def test_a_sent_correction_reads_recorded_once_its_ruling_is_read_back(ui_shells
     expect(row).not_to_contain_text("not recorded yet")
 
 
+#: Whether the tray's first sent answer has its found ruling's shown flag as `shown`.
+SENT_SHOWN = ("shown => JSON.parse(localStorage.getItem(`moxi-rounds-tray:${location.origin}`))"
+              ".sent[0].found?.shown === shown")
+
+
 def test_a_project_read_back_shows_a_closed_rounds_found_ruling(ui_shells, ui_shell_options,
                                                                 ui_contexts):
     # A shell of its own, so the round and the read-back it adds change no other test.
@@ -461,14 +466,12 @@ def test_a_project_read_back_shows_a_closed_rounds_found_ruling(ui_shells, ui_sh
     panel = open_panel(page)
     row = panel.get_by_role("region", name="Your answers").locator(f'.trow[data-act="{act}"]')
     expect(row).to_contain_text("Recorded as C2: Exports keep no header row.")
-    stored = ("shown => JSON.parse(localStorage.getItem(`moxi-rounds-tray:${location.origin}`))"
-              ".sent[0].found?.shown === shown")
-    page.wait_for_function(stored, arg=False)
+    page.wait_for_function(SENT_SHOWN, arg=False)
     # The read-back is in the project's log alone: the closed round's log is not written.
     with page_kit.under(own):
         ruling.rule("kestrel", item="readback=2026-01-03T00:00:00Z", record="comms:7000002",
                     by="lead")
-    page.wait_for_function(stored, arg=True)
+    page.wait_for_function(SENT_SHOWN, arg=True)
 
 
 def test_show_its_line_sets_the_filter_that_hides_it_and_scrolls_to_it(shell, ui_page):
