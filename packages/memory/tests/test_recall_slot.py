@@ -360,7 +360,7 @@ def test_the_doctor_lists_a_slot_fork_whose_exit_is_still_held_and_never_ends_it
     monkeypatch.setattr(doctor, "running_slots", slots_running({FORK: "3"}))
     row = doctor._subconscious(config_in_error=False, now=later)
     assert row.state == "warn"
-    assert ("1 slot fork whose exit was still held after the exit's wait, holding its "
+    assert ("1 slot fork memory did not exit, holding its "
             f"slot: {recall.recall_id} (session {FORK}, slot 3, held: turn, 10m old); "
             "memory leaves it running, and moxi launcher exit-session SESSION_ID ends it "
             "once it is quiet") in row.detail
@@ -369,11 +369,37 @@ def test_the_doctor_lists_a_slot_fork_whose_exit_is_still_held_and_never_ends_it
     monkeypatch.setattr(doctor, "running_slots",
                         slots_running(None, "launcher is not installed"))
     row = doctor._subconscious(config_in_error=False, now=later)
-    assert ("1 slot fork whose exit was still held after the exit's wait, holding its "
+    assert ("1 slot fork memory did not exit, holding its "
             "slot (the launcher can't say which are still running: launcher is not "
             f"installed): {recall.recall_id} (session {FORK}, held: turn, 10m old)"
             ) in row.detail
     assert len(asked) == 3 and launcher.exited == [FORK]
+
+
+def test_the_doctor_lists_every_slot_fork_memory_did_not_exit(monkeypatch):
+    from moxi_memory import recall_take
+
+    monkeypatch.setattr(doctor, "live_subconscious", lambda: [])
+    listed = {
+        "not-exited": a_dead_line(state=recalls.BACK, kept=False, fork_exit="not-exited"),
+        "unknown": a_dead_line(state=recalls.BACK, kept=False, fork_exit="unknown"),
+        "refused (busy)": a_dead_line(state=recalls.BACK, kept=False,
+                               fork_exit="refused (busy): the launch log is locked"),
+        "gone": a_dead_line(state=recalls.BACK, kept=False)}
+    unlisted = {
+        "exited": a_dead_line(state=recalls.BACK, kept=False, fork_exit="exited"),
+        "for a taker": a_dead_line(state=recalls.SENDING, kept=False),
+        "owner alive": a_dead_line(state=recalls.BACK, kept=False)}
+    unlisted["owner alive"].put(child=recall_take.me())
+    monkeypatch.setattr(doctor, "running_slots", lambda: ({FORK: "3"}, None))
+    row = doctor._subconscious(config_in_error=False, now=time.time() + 600)
+    assert row.state == "warn"
+    assert "4 slot forks memory did not exit, holding its slot: " in row.detail
+    for how, recall in listed.items():
+        word = "owner gone before its exit" if how == "gone" else how
+        assert f"{recall.recall_id} (session {FORK}, slot 3, {word}" in row.detail
+    for recall in unlisted.values():
+        assert f"{recall.recall_id} (session" not in row.detail
 
 
 def test_running_slots_reads_the_launchers_running_launches_by_session(monkeypatch):

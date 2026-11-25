@@ -46,8 +46,10 @@
   and age; each recall line still open, sending or kept whose child and taker are gone,
   with its age, until a taker settles it; each recall line still `sending`, an answer
   comms has not taken yet, with how long it has waited and comms' last refusal; each
-  slot fork whose exit the launcher still held after the exit's wait, with its session,
-  its slot where the launcher can say, and its age, which memory leaves running; and
+  slot fork memory did not exit that the launcher still runs (its exit given up, held
+  past the exit's wait or answered with anything but `exited`, or its owner gone with
+  no exit asked and nothing left for a taker), with its session, its slot where the
+  launcher can say, how its exit came out and its age, which memory leaves running; and
   the recalls whose child never ran or whose fork's id never came. `warn` for each of
   those. With the subconscious on in a live session it also says that a recall fork's
   permission asks are refused.
@@ -550,35 +552,44 @@ def running_slots() -> tuple[dict[str, str | None] | None, str | None]:
     return {str(x.session_id): x.slot for x in launches if x.session_id}, None
 
 
-def _held_forks(lines: list[dict], *, now: float) -> str | None:
-    """The slot forks whose exit the launcher still held past the exit's wait (the
-    line's `fork_exit` `held: <word>`), each with its recall, session, slot and age since
-    its line was last written. A fork the launcher no longer runs is left out; where the
-    launcher can't say, every such fork is listed with no slot. memory ends none of
-    them. None when there are none."""
-    from . import recall_route, recall_start
+def _left_forks(lines: list[dict], *, now: float) -> str | None:
+    """The slot forks memory did not exit: each slot line with a fork whose `fork_exit`
+    is anything but `exited` (held past the exit's wait, `not-exited`, `unknown`, a
+    refusal), or that has none while its owner is gone and nothing is left for a taker
+    (`recall_take.needs_taking`), as when the child died between its last settle and its
+    exit. Each is named with its recall, session, slot, how its exit came out and its
+    age since its line was last written. A fork the launcher no longer runs is left
+    out; where the launcher can't say, every such fork is listed with no slot. memory
+    ends none of them. None when there are none."""
+    from . import recall_route, recall_start, recall_take
 
-    held = [line for line in lines
-            if line.get("route") == recall_start.SLOT and line.get("fork")
-            and str(line.get("fork_exit") or "").startswith(f"{recall_route.HELD}:")]
-    if not held:
+    def left(line: dict) -> bool:
+        if line.get("route") != recall_start.SLOT or not line.get("fork"):
+            return False
+        outcome = line.get("fork_exit")
+        if outcome:
+            return outcome != recall_route.EXITED
+        return recall_take.owner_gone(line) and not recall_take.needs_taking(line)
+
+    found = [line for line in lines if left(line)]
+    if not found:
         return None
     slots, why = running_slots()
     if slots is not None:
-        held = [line for line in held if str(line.get("fork")) in slots]
-        if not held:
+        found = [line for line in found if str(line.get("fork")) in slots]
+        if not found:
             return None
     named = []
-    for line in held[::-1]:
+    for line in found[::-1]:
         fork = str(line.get("fork"))
         where = f", slot {slots[fork]}" if slots is not None and slots[fork] else ""
+        how = line.get("fork_exit") or "owner gone before its exit"
         age = _age(now - float(line.get("updated") or line.get("at") or now))
-        named.append(f"{line.get('recall')} (session {fork}{where}, "
-                     f"{line.get('fork_exit')}, {age} old)")
+        named.append(f"{line.get('recall')} (session {fork}{where}, {how}, {age} old)")
     unsure = f" (the launcher can't say which are still running: {why})" if why else ""
-    return (f"{_plural(len(held), 'slot fork')} whose exit was still held after the "
-            f"exit's wait, holding its slot{unsure}: {_shown(named)}; memory leaves it "
-            f"running, and {EXIT_SESSION} ends it once it is quiet")
+    return (f"{_plural(len(found), 'slot fork')} memory did not exit, holding its "
+            f"slot{unsure}: {_shown(named)}; memory leaves it running, and "
+            f"{EXIT_SESSION} ends it once it is quiet")
 
 
 def _config_losses(lines: list[dict]) -> list[dict]:
@@ -657,10 +668,10 @@ def _subconscious(*, config_in_error: bool, now: float | None = None) -> Row:
         parts.append(f"{_plural(len(sending), 'recall')} still sending, waiting for comms "
                      f"to take its answer: {_shown(named)}; one comms will never take "
                      f"ends with {SUBCONSCIOUS_DISCARD}")
-    held = _held_forks(lines, now=now)
-    if held:
+    left = _left_forks(lines, now=now)
+    if left:
         warn = True
-        parts.append(held)
+        parts.append(left)
     never_ran = _never_ran(lines, now=now)
     if never_ran:
         warn = True
