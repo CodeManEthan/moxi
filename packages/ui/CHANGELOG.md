@@ -18,6 +18,8 @@
   so choosing it again is no change. A text key holding a bool shows `true` or `false`.
   An empty `path` value reads as unset, as an empty default does.
 
+## 0.2.8 (2026-11-23)
+
 - On the modules view, each block's card says `Reading…` until its block first takes up
   height, rather than showing an empty card while the block's script and first read
   are out.
