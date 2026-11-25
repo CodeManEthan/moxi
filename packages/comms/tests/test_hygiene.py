@@ -197,7 +197,7 @@ def unreadable_references(roots=("src", "scripts")) -> list[str]:
                 continue
             for n, text in _shipped_text(path):
                 for m in UNREADABLE_REFERENCES.finditer(text):
-                    hits.append(f"{path.relative_to(REPO)}:{n}: {m.group(0)!r}")
+                    hits.append(f"{path.relative_to(REPO).as_posix()}:{n}: {m.group(0)!r}")
     return hits
 
 
@@ -265,7 +265,7 @@ def retired_slot_vocabulary(repo=REPO):
             continue
         if path.relative_to(repo).parts[:3] == _BUILT_WEB:
             continue
-        relative = str(path.relative_to(repo))
+        relative = path.relative_to(repo).as_posix()
         for line_number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
             if "slot" not in line.lower():
                 continue

@@ -19,6 +19,7 @@ operator token was lost is refused because provisioning cannot recover it.
 
 from __future__ import annotations
 
+import contextlib
 import io
 import os
 import shutil
@@ -29,6 +30,7 @@ import tempfile
 import time
 from pathlib import Path
 
+import psutil
 import pytest
 
 from conftest import write_config
@@ -302,23 +304,59 @@ def _clean_env(tmp_path, **extra) -> dict:
     return keep
 
 
-def _run_daemon(env, sock: Path, *, expect_socket=True):
-    from conftest import RESERVED_NONE_PATCH
+#: On Windows no signal reaches the daemon (`send_signal(SIGTERM)` is TerminateProcess),
+#: so `_run_daemon` ends it and its exit code says nothing; on POSIX its handler stops it.
+WINDOWS = sys.platform == "win32"
 
+
+def _stopped_cleanly(code: int) -> bool:
+    """Whether a daemon `_run_daemon` stopped exited as its stop says: 0 on POSIX. On
+    Windows it was ended, so only the method it answered first shows it booted."""
+    return WINDOWS or code == 0
+
+
+def _run_daemon(env, *, expect_socket=True, while_serving=None):
+    """Run the daemon with `env` until it answers a method, call `while_serving()` (a
+    reader beside the live daemon, as WAL readers are), then stop it: (exit code,
+    output)."""
+    from conftest import RESERVED_NONE_PATCH
+    from moxi_comms.client import DaemonClient
+
+    address = daemon_socket(env)
     proc = subprocess.Popen(
         [sys.executable, "-c", RESERVED_NONE_PATCH + "import sys; "
                                "from moxi_comms.daemon import main; sys.exit(main([]))"],
         env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
     try:
         deadline = time.monotonic() + 20
-        while expect_socket and not sock.exists() and time.monotonic() < deadline:
-            if proc.poll() is not None:
+        serving = False
+        while expect_socket and time.monotonic() < deadline:
+            # A method is answered only once the daemon's boot (its provisioning
+            # included) is done; a bare connect may land before it.
+            try:
+                client = DaemonClient(address, timeout=1).connect()
+                try:
+                    client.call("agents")
+                    serving = True
+                finally:
+                    client.close()
+            except Exception:                                     # noqa: BLE001
+                pass
+            if serving or proc.poll() is not None:
                 break
             time.sleep(0.05)
-        assert not expect_socket or sock.exists(), proc.stdout.read() if proc.poll() \
-            is not None else "no socket"
+        assert not expect_socket or serving, proc.stdout.read() if proc.poll() \
+            is not None else "no daemon answers at its address"
+        if while_serving is not None:
+            while_serving()
     finally:
         if proc.poll() is None:
+            if WINDOWS:
+                # A venv's python.exe is a launcher that runs the interpreter as its
+                # child: ending the launcher alone would leave the daemon running.
+                for child in psutil.Process(proc.pid).children(recursive=True):
+                    with contextlib.suppress(psutil.NoSuchProcess):
+                        child.kill()
             proc.send_signal(signal.SIGTERM)
         out, _ = proc.communicate(timeout=20)
     return proc.returncode, out
@@ -328,17 +366,19 @@ def test_the_daemon_process_provisions_without_slots(tmp_path, runtime_dir):
     home = tmp_path / "solo"
     env = _clean_env(tmp_path, MOXI_COMMS_HOME=str(home),
                      MOXI_COMMS_RUNTIME_DIR=str(runtime_dir), MOXI_COMMS_DEVICE="t")
-    code, out = _run_daemon(env, runtime_dir / "comms" / "daemon.sock")
-    assert code == 0, out
-    db = home / "state" / "comms" / "comms.db"
-    conn = directory.connect(db, read_only=True)
-    try:
-        tables = {row[0] for row in conn.execute(
-            "SELECT name FROM sqlite_master WHERE type='table'")}
-        assert {"slots", "webhooks"}.isdisjoint(tables)
-        assert directory.meta_get(conn, directory.META_WRITER) == "provisioner"
-    finally:
-        conn.close()
+
+    def provisioned():
+        conn = directory.connect(home / "state" / "comms" / "comms.db", read_only=True)
+        try:
+            tables = {row[0] for row in conn.execute(
+                "SELECT name FROM sqlite_master WHERE type='table'")}
+            assert {"slots", "webhooks"}.isdisjoint(tables)
+            assert directory.meta_get(conn, directory.META_WRITER) == "provisioner"
+        finally:
+            conn.close()
+
+    code, out = _run_daemon(env, while_serving=provisioned)
+    assert _stopped_cleanly(code), out
     assert not (home / "data" / "comms" / "directory.db").exists()
 
 
@@ -350,15 +390,18 @@ def test_a_daemon_process_on_mock_never_provisions(tmp_path, runtime_dir):
                      MOXI_COMMS_RUNTIME_DIR=str(runtime_dir), MOXI_COMMS_DEVICE="t",
                      MOXI_COMMS_BACKEND="mock",
                      MOXI_COMMS_MOCK_BACKEND=str(tmp_path / "mock.json"))
-    code, out = _run_daemon(env, runtime_dir / "comms" / "daemon.sock")
-    assert code == 0, out
-    conn = directory.connect(home / "state" / "comms" / "comms.db", read_only=True)
-    try:
-        assert directory.meta_get(conn, directory.META_WRITER) is None
-        assert conn.execute("SELECT COUNT(*) FROM operators").fetchone()[0] == 0
-        assert conn.execute("SELECT COUNT(*) FROM rooms").fetchone()[0] == 0
-    finally:
-        conn.close()
+
+    def nothing_minted():
+        conn = directory.connect(home / "state" / "comms" / "comms.db", read_only=True)
+        try:
+            assert directory.meta_get(conn, directory.META_WRITER) is None
+            assert conn.execute("SELECT COUNT(*) FROM operators").fetchone()[0] == 0
+            assert conn.execute("SELECT COUNT(*) FROM rooms").fetchone()[0] == 0
+        finally:
+            conn.close()
+
+    code, out = _run_daemon(env, while_serving=nothing_minted)
+    assert _stopped_cleanly(code), out
     assert not (home / "data" / "comms" / "directory.db").exists()
     assert not (home / "state" / "t" / "comms" / "tokens").exists()
 

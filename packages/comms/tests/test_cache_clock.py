@@ -22,6 +22,7 @@ import json
 import logging
 import os
 import sqlite3
+import sys
 import time
 from datetime import datetime, timezone
 from pathlib import Path
@@ -670,6 +671,8 @@ def test_the_hold_names_the_lowering(rig, adapters, tmp_path):
     assert "went cold 10m ago" in out
 
 
+@pytest.mark.skipif(sys.platform == "win32", reason="the unwritable folder is made by mode "
+                    "bits, which Windows doesn't apply")
 def test_a_write_that_fails_holds_the_model_until_one_succeeds(rig, adapters, tmp_path):
     root = sessions_root(tmp_path)
     prev, _gap = lowering_rollout(root)

@@ -5,6 +5,8 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
+from moxi_dev.testing import console_script
+
 SCRIPTS = Path(__file__).resolve().parent.parent / "scripts"
 
 
@@ -51,14 +53,13 @@ def test_the_live_codex_smoke_refuses_a_second_codex_without_a_home_of_its_own(
         tmp_path, monkeypatch):
     """A codex binary other than the one on PATH runs only with its own CODEX_HOME."""
     smoke = load_codex_smoke()
-    on_path = tmp_path / "global" / "codex"
-    other = tmp_path / "other" / "codex"
-    for binary in (on_path, other):
-        binary.parent.mkdir()
-        binary.write_text("#!/bin/sh\n")
-        binary.chmod(0o755)
+    (tmp_path / "global").mkdir()
+    (tmp_path / "other").mkdir()
+    on_path = console_script(tmp_path / "global", "codex")
+    other = console_script(tmp_path / "other", "codex")
     monkeypatch.setenv("PATH", str(on_path.parent))
     monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setenv("USERPROFILE", str(tmp_path))
     monkeypatch.delenv("CODEX_HOME", raising=False)
     assert smoke.own_home_refusal(str(on_path)) is None
     assert "CODEX_HOME" in smoke.own_home_refusal(str(other))

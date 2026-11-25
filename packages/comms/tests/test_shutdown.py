@@ -20,6 +20,8 @@ from moxi_comms.paths import daemon_socket
 SIGHUP = getattr(signal, "SIGHUP", None)
 
 
+@pytest.mark.skipif(sys.platform == "win32", reason="on Windows send_signal(SIGTERM) is "
+                    "TerminateProcess, so no signal reaches the daemon to stop it")
 @pytest.mark.parametrize("sig", [signal.SIGTERM, pytest.param(SIGHUP, marks=pytest.mark.skipif(
     SIGHUP is None, reason="this system has no SIGHUP"))])
 def test_a_signal_runs_the_clean_shutdown(tmp_path, sig):

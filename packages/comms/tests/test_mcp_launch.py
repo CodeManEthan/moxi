@@ -19,8 +19,8 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
-from moxi_dev.testing import PROC_WAIT_S, timed_slack
-from conftest import wait_until, write_config
+from moxi_dev.testing import PROC_WAIT_S, console_script, timed_slack
+from conftest import LAUNCHES, wait_until, write_config
 
 import moxi_turns
 from moxi_comms import context, listener
@@ -202,9 +202,7 @@ def test_no_daemon_is_no_tools_at_once():
 def launched(monkeypatch, tmp_path):
     """The wrapper run to its exec with turns' real additions: (main, the captures). Each
     `launch_additions` call's environment is kept too."""
-    binary = tmp_path / "claude"
-    binary.write_text("#!/bin/sh\n")
-    binary.chmod(0o755)
+    binary = console_script(tmp_path, "claude")
     seen = {"asked": []}
     real = moxi_turns.launch_additions
 
@@ -474,6 +472,7 @@ def fake_host(tmp_path):
                            instructions=tmp_path / "instructions.seen")
 
 
+@LAUNCHES
 def test_a_codex_launch_stamps_the_pair_for_the_host_and_names_the_tools(
         serving, fake_host):
     code = ("import moxi.paths, moxi_turns\n"

@@ -16,7 +16,7 @@ import sys
 import textwrap
 
 import pytest
-from conftest import wait_until
+from conftest import LAUNCHES, wait_until
 
 import moxi_turns
 from moxi_comms import context, listener
@@ -151,6 +151,7 @@ def fake_claude(tmp_path):
     return script, out
 
 
+@LAUNCHES
 def test_the_claude_wrapper_stamps_its_own_comms_command(rig, fake_claude):
     script, out = fake_claude
     code = ("from moxi_comms.adapters import session; raise SystemExit(session.main("

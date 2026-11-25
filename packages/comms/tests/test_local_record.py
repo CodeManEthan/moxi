@@ -17,6 +17,7 @@ import time
 
 import pytest
 from conftest import wait_until, write_config
+from moxi_dev.testing import toml_string
 
 from moxi import exit as moxi_exit
 from moxi_comms import config, daemon as daemon_mod, record as record_mod, paths
@@ -619,13 +620,14 @@ def test_local_is_one_of_two_backends_and_open_record_returns_it(monkeypatch, tm
 
 
 def test_the_local_table_is_read_and_a_token_shaped_key_in_it_is_still_refused():
-    write_config(None, 'backend = "local"\n\n[local]\nrecord = "/srv/record.db"\n'
+    record, other = os.path.abspath("/srv/record.db"), os.path.abspath("/srv/other.db")
+    write_config(None, f'backend = "local"\n\n[local]\nrecord = {toml_string(record)}\n'
                        'retain_days = 30\n')
     loaded = config.load()
     assert (loaded.backend, loaded.local.record, loaded.local.retain_days) == \
-        ("local", "/srv/record.db", 30)
-    env = dict(os.environ, MOXI_COMMS_LOCAL_RECORD="/srv/other.db")
-    assert config.load(env=env).local.record == "/srv/other.db"
+        ("local", record, 30)
+    env = dict(os.environ, MOXI_COMMS_LOCAL_RECORD=other)
+    assert config.load(env=env).local.record == other
 
     write_config(None, '[local]\nrecord_token = "abc"\n')
     with pytest.raises(config.ConfigError, match="looks like a secret"):

@@ -546,6 +546,7 @@ def test_the_start_text_follows_the_stamp(tmp_path):
     assert context.layer_one_form(env) == context.TOOLS
 
 
+@LAUNCHES
 @pytest.mark.parametrize("reach", [None, SHELL_REACH_OFF])
 def test_the_thread_record_hashes_the_form_of_layer_one_it_was_given(
         rig, launch, monkeypatch, reach):

@@ -104,7 +104,7 @@ def test_the_file_sets_every_table(monkeypatch):
     cfg = config.load()
     assert cfg.source == str(path) == str(config.config_path())
     assert cfg.backend == "mock" and cfg.block is True
-    assert cfg.local.record == os.path.expanduser("~/rec.db")
+    assert cfg.local.record == os.path.normpath(os.path.expanduser("~/rec.db"))
     assert cfg.local.retain_days == 7 and cfg.threads.reply_cap == 3
     assert cfg.credentials.chain == ("store",)
     assert cfg.credentials.roles == ("calendar", "pager")
@@ -455,11 +455,13 @@ class _NoEnvironment(dict):
 
 def test_the_text_entry_reads_nothing_but_the_text(monkeypatch):
     # A path's `~` is the user's home, the one thing the core's reader reads to type it.
-    text = EVERY_TABLE.replace('"~/rec.db"', '"/var/rec.db"')
+    text = EVERY_TABLE.replace('"~/rec.db"', toml_string(os.path.abspath("/var/rec.db")))
     config.schema()
-    monkeypatch.setattr(os, "environ", _NoEnvironment())
-    assert config.check_text(text) is None
-    assert config.check_text(WARNED_ROWS) is None
+    # Undone before the fixtures' teardowns, which may read the environment.
+    with monkeypatch.context() as patch:
+        patch.setattr(os, "environ", _NoEnvironment())
+        assert config.check_text(text) is None
+        assert config.check_text(WARNED_ROWS) is None
 
 
 def test_the_text_entry_logs_no_roster_warning(caplog, capsys):

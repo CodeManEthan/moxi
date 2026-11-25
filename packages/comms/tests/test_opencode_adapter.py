@@ -461,7 +461,8 @@ def test_a_silent_stream_counts_as_cut_and_is_reconnected_and_reconciled(
 
     adapter._on_stream_close = on_close
     fake.stalled = True
-    assert wait_until(lambda: first.closed.is_set(), LIVE_S)
+    # The stream's close callback runs after its `closed` and `reason` are set.
+    assert wait_until(lambda: first.closed.is_set() and closed_ready, LIVE_S)
     assert first.reason == "no event for 0.6s"
     assert closed_ready[0][1:] == (False, False), "not ready from the detection on"
     fake.stalled = False
@@ -636,7 +637,8 @@ def test_the_launch_notice_is_printed_and_held_before_the_window(wrapper, fake, 
     adapter = wrapper()
     started = time.monotonic()
     oc.show_notice(adapter, 0.3)
-    assert time.monotonic() - started >= 0.3
+    # Less one step of the clock, which on Windows moves in about 15 ms steps.
+    assert time.monotonic() - started >= 0.3 - time.get_clock_info("monotonic").resolution
     err = capsys.readouterr().err
     assert "opencode/minimax-m3.1-flash-free is not offered" in err
     assert "the window opens in 0.3s" in err

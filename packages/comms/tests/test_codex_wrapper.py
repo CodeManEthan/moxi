@@ -15,6 +15,7 @@ import os
 import subprocess
 import sys
 import textwrap
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -194,10 +195,10 @@ def test_the_dry_run_prints_the_host_line_and_starts_nothing(tmp_path, capsys,
     assert code == 0, out
     (line,) = [ln for ln in out.splitlines() if ln.startswith("  launch     ")]
     words = line.split()[1:]
-    assert words[0].endswith("moxi-turns-codex-host")
+    assert Path(words[0]).stem == "moxi-turns-codex-host"
     assert words[1:3] == ["--cwd", str(tmp_path)]
     assert words[-2] == "--instructions-file"
-    assert words[-1].endswith("/instructions.md")
+    assert Path(words[-1]).name == "instructions.md"
     assert "identity   coder" in out and "approvals never by turns" in out
     assert not codex_wrapper.sessions_dir().exists() or not any(
         codex_wrapper.sessions_dir().iterdir())
@@ -345,6 +346,7 @@ def test_a_launch_told_to_resume_binds_the_name_to_that_thread(rig, fake_host):
     assert wait_until(lambda: "coder@proj-a" not in rig.daemon.bindings, PROC_WAIT_S)
 
 
+@LAUNCHES
 def test_a_held_name_is_refused_before_the_host_starts(rig, fake_host):
     rig.shim(name="taken")
     proc = run_wrapper(fake_host, "--name", "taken", "--no-window")
@@ -354,6 +356,7 @@ def test_a_held_name_is_refused_before_the_host_starts(rig, fake_host):
     assert not fake_host.out.exists(), "the host never started"
 
 
+@LAUNCHES
 def test_a_reserved_name_reads_reserved_and_is_refused_before_the_host_starts(
         rig, fake_host):
     reserved.reconcile(declared={"launcher": ["console"]}, chain=secrets.from_config())
@@ -367,6 +370,7 @@ def test_a_reserved_name_reads_reserved_and_is_refused_before_the_host_starts(
     assert "console" not in rig.daemon.bindings
 
 
+@LAUNCHES
 def test_a_daemon_that_is_not_running_is_tempfail_before_the_host_starts(fake_host):
     proc = run_wrapper(fake_host, "--name", NAME, "--no-window")
     _, err = proc.communicate(timeout=30)

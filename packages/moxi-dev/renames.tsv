@@ -18149,3 +18149,9 @@ statusline	packages/statusline/tests/test_detect.py	return home, dict(os.environ
 loadout	packages/loadout/tests/test_entries.py	given = {"HOME": "/given/home", "USERPROFILE": "/given/home", "CLAUDE_CONFIG_DIR": "~/cc"}	keep	HOME	HOME
 loadout	packages/loadout/tests/test_homes.py	HOME_VARIABLE = "USERPROFILE" if sys.platform == "win32" else "HOME"	keep	HOME	HOME
 loadout	packages/loadout/tests/test_view.py	assert (gone["state"], gone["form"]) == ("stale", kit.DIR_FORM)	keep	stale	stale
+comms	packages/comms/tests/test_local_record.py	assert config.load(env=env).local.record == other	keep	record	record
+comms	packages/comms/tests/test_opencode_adapter.py	# The stream's close callback runs after its `closed` and `reason` are set.	keep	closed	closed
+comms	packages/comms/tests/test_opencode_adapter.py	assert wait_until(lambda: first.closed.is_set() and closed_ready, LIVE_S)	keep	closed	closed
+comms	packages/comms/tests/test_settings.py	assert cfg.local.record == os.path.normpath(os.path.expanduser("~/rec.db"))	keep	record	record
+comms	packages/comms/tests/test_settings.py	patch.setattr(os, "environ", _NoEnvironment())	keep	environ	environ
+moxi-dev	packages/moxi-dev/src/moxi_dev/contract.py	named = set()	keep	set	set

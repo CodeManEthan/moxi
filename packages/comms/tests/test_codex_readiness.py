@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import shlex
+
 from conftest import clock_reads_warm
 
 from moxi_comms import codex_threads
@@ -74,7 +76,7 @@ def test_comms_is_this_environments_moxi_script_with_comms(tmp_path):
         seen.append(name)
         return tmp_path / "venv" / "bin" / name
 
-    assert own_comms(find) == f"{tmp_path / 'venv/bin/moxi'} comms"
+    assert own_comms(find) == f"{shlex.quote(str(tmp_path / 'venv/bin/moxi'))} comms"
     assert seen == ["moxi"]
 
 
@@ -94,7 +96,7 @@ def test_the_default_reads_moxi_paths_script():
     from moxi import paths as moxi_paths
 
     try:
-        expected = f"{moxi_paths.script('moxi')} comms"
+        expected = f"{shlex.quote(str(moxi_paths.script('moxi')))} comms"
     except FileNotFoundError:
         expected = None
     assert own_comms() == expected

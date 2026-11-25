@@ -26,7 +26,7 @@ import bind_kit
 from moxi import exit as moxi_exit
 from moxi_comms import claimfile, paths, reserved, secrets
 from moxi_comms.adapters import session, word
-from moxi_dev.testing import PROC_WAIT_S
+from moxi_dev.testing import PROC_WAIT_S, console_script, toml_string
 
 NAME = "launched"
 #: The id the launch names to `claude`, and its session dir's name.
@@ -174,6 +174,7 @@ def run_wrapper(script, name, sid, *extra):
                           capture_output=True, text=True, timeout=60)
 
 
+@LAUNCHES
 def test_a_reserved_name_is_refused_before_claude_starts(rig, fake_claude):
     script, out, release = fake_claude
     release.touch()                     # a claude that did start would end at once
@@ -188,6 +189,7 @@ def test_a_reserved_name_is_refused_before_claude_starts(rig, fake_claude):
                       timeout=PROC_WAIT_S)
 
 
+@LAUNCHES
 def test_a_held_name_is_refused_before_claude_starts(rig, fake_claude):
     script, out, release = fake_claude
     release.touch()
@@ -202,6 +204,7 @@ def test_a_held_name_is_refused_before_claude_starts(rig, fake_claude):
     assert binding(rig, "heldname") is holder, "the holder keeps its name"
 
 
+@LAUNCHES
 def test_a_launch_with_no_daemon_is_tempfail_before_claude_starts(rig, fake_claude):
     """A launch that finds no daemon is "try again" and starts nothing: no `claude`
     without comms."""
@@ -440,9 +443,7 @@ def fake_additions(monkeypatch, *, argv=(), env=None, notes=(), raises=None) -> 
 @pytest.fixture
 def launched(monkeypatch, tmp_path):
     """Run the wrapper to its exec and keep what it would exec: (main, the captures)."""
-    binary = tmp_path / "claude"
-    binary.write_text("#!/bin/sh\n")
-    binary.chmod(0o755)
+    binary = console_script(tmp_path, "claude")
     seen = {}
 
     def launch(s, found, cmd, env, *, prog="moxi-comms-claude", **_):
@@ -539,11 +540,11 @@ def test_turns_endpoint_command_reaches_the_env_claude_starts_with(launched):
     from pathlib import Path
     config = Path(os.environ["MOXI_TURNS_CONFIG_HOME"]) / "turns"
     config.mkdir(parents=True, exist_ok=True)
-    (config / "config.toml").write_text(
-        '[claude]\nendpoint = "/opt/elsewhere/moxi-turns-endpoint"\n')
+    endpoint = os.path.abspath("/opt/elsewhere/moxi-turns-endpoint")
+    (config / "config.toml").write_text(f'[claude]\nendpoint = {toml_string(endpoint)}\n')
     code, seen = launched()
     assert code == 0
-    assert seen["env"]["MOXI_TURNS_ENDPOINT"] == "/opt/elsewhere/moxi-turns-endpoint"
+    assert seen["env"]["MOXI_TURNS_ENDPOINT"] == endpoint
 
 
 @pytest.mark.parametrize("error", ["turns", "value"])

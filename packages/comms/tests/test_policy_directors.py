@@ -14,6 +14,7 @@ import time
 
 import pytest
 from conftest import write_config
+from moxi_dev.testing import console_script
 
 from moxi_comms import directors, owed
 from moxi_comms.adapters.claude_shim import frame_line
@@ -220,9 +221,7 @@ def test_an_empty_setting_says_nothing(capsys):
 def test_the_claude_launch_stamps_the_merge(monkeypatch, tmp_path):
     from moxi_comms.adapters import session
 
-    binary = tmp_path / "claude"
-    binary.write_text("#!/bin/sh\n")
-    binary.chmod(0o755)
+    binary = console_script(tmp_path, "claude")
     seen = {}
     monkeypatch.setattr(session, "launch",
                         lambda s, found, cmd, env, **_: seen.update(s=s, env=env) or 0)

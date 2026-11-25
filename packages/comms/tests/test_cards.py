@@ -37,7 +37,7 @@ def run(argv, *, env=None, socket_path="/nonexistent/comms-whois-must-not-connec
 def write_card(qualified: str, text: str) -> Path:
     path = cards.card_path(qualified)
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(text, encoding="utf-8")
+    path.write_text(text, encoding="utf-8", newline="")
     return path
 
 
