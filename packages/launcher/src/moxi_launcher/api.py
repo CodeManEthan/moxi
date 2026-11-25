@@ -65,7 +65,10 @@ preset read, and its own request id (and, but for a resume, its own Claude sessi
 keeps the row's directory, a scratch one too. An option row (keep-warm, recycling) the
 install no longer offers, or whose value's needs it no longer meets, goes back to its
 default with a warning, as a comms name does without comms; so does a scratch row's
-`recycle_at_limit = relaunch`, recorded before a scratch launch was refused it. A
+`recycle_at_limit = relaunch`, recorded before a scratch launch was refused it. A replay
+or a fork drops a stored value of a retired catalog row (`limit_at`), and replays a value
+a live row has retired (`recycle_at_limit = compact`) as the row's unset value, with one
+warning (`catalog.drop_retired`). A
 relaunch's model pin (`pin.choose`) is its model only when the stored values name none;
 the new row records the stored model and a `model-pin` event, never the pin as a value.
 It never sends the row's
@@ -409,7 +412,7 @@ def check(request, *, env: Mapping[str, str] | None = None) -> list[Refusal]:
     """The refusals `launch` would meet in the live state, without composing or writing
     anything: the resolver's own (an unknown preset or project, projects unreadable or
     busy, a posture off its default, a scratch launch set to recycle itself:
-    `recycle_at_limit = relaunch`, `compact` being open to one), a directory that does
+    `recycle_at_limit = relaunch`), a directory that does
     not exist, a scratch folder's parent this user can't trust (a link, another user's,
     or open to others), a slot
     named for a launch whose target is not `slot` (exit 2, like a flag misused), a comms
@@ -643,7 +646,8 @@ def _replayed(request: ReplayRequest) -> Replayed:
                                          ", and only a slot launch is respawned",
                                "replay it without respawn")
     stored = row.values
-    values = {k: v for k, v in stored.items() if k not in _NOT_REPLAYED}
+    values, warnings = catalog.drop_retired(
+        row.harness, {k: v for k, v in stored.items() if k not in _NOT_REPLAYED})
     values.update(brief=request.brief or "", brief_file=request.brief_file or "",
                   handoff=request.handoff or "")
     model_pin = request.model_pin if request.model_pin and not values.get("model") else None
@@ -654,7 +658,6 @@ def _replayed(request: ReplayRequest) -> Replayed:
     if slot is not None:
         values["slot"] = str(slot)
     harness, target = row.harness, row.target
-    warnings: list[str] = []
     identity, scope = row.identity or None, row.scope or None
     if identity and not slots.links("comms"):
         warnings.append(f"identity {identity} is ignored: comms is not installed")

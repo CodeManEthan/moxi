@@ -10,8 +10,8 @@ the catalog's own:
              as a config key. A default of "" (or [] or false) means the row is not set.
              On a `string` row `values` lists suggestions, and any string is taken; on an
              `enum` it is the set of values the row takes. `env` names a variable spelled
-             with the launcher's prefix. A retired row says what to do instead, and
-             setting it is refused.
+             with the launcher's prefix. A retired row takes no other field: it says
+             what to do instead, and setting it is refused, code `retired`.
     flag     the harness spelling (`--model`, `-m`); a launcher row has none
     aliases  other spellings of the same flag that the harness's `--help` lists
              (`--allowed-tools` beside `--allowedTools`)
@@ -42,6 +42,10 @@ the catalog's own:
              row to be offered, by name (`CONDITIONS`): `cache-timer`, cache's timer
              asks about the harness's sessions and can read a session's environment here;
              `slots-here`, tmux slots run here
+    retired_values
+             on an `enum` row: a table from each value the row no longer takes to what
+             to do instead. Setting one is refused, code `retired`, before the row's
+             `values` are tested; a replay reads it as the row's unset value.
     when     on an `enum` row: per value, what that value needs besides the row's own:
              `requires` (modules), `condition`, `target` (the launch's target), and
              `refused` and `hint`, the words a launch or preset that breaks it is refused
@@ -71,10 +75,8 @@ What this module gives the rest of the launcher:
 - `forked(harness, values)`: a fork's values from its parent's, by each row's `fork`
   class.
 - `refuse_values(harness, values, chosen=...)`: the rules between a launch's values that
-  `when` and `offered_with` state, each refused with its own words, and the rules no row
-  states: a scratch launch can't recycle itself (`refuse_scratch_recycle`), and a launch
-  that relaunches itself is told at its `warn_at` mark, not at a `limit_at`
-  (`refuse_relaunch_mark`).
+  `when` and `offered_with` state, each refused with its own words, and the rule no row
+  states: a scratch launch can't recycle itself (`refuse_scratch_recycle`).
 - `Row.check(value)` and `Row.tokens(mode, value, cwd=...)`: a value checked against its
   row, and the tokens one mode spells it as.
 - `fit(harness, mode, values, chosen)`: the modes rule. A composed command carries only
@@ -186,7 +188,7 @@ TYPES = ("bool", "int", "float", "string", "enum", "path", "list")
 KEY_FIELDS = ("type", "default", "doc", "values", "env", "retired")
 OWN_FIELDS = ("flag", "aliases", "repeatable", "optional_value", "variadic", "modes",
               "items", "owned", "posture", "since", "hidden", "requires", "condition",
-              "when", "offered_with", "fork")
+              "when", "offered_with", "fork", "retired_values")
 #: What the browser's launch options read of a row: where it is drawn, what it is called,
 #: which of its values can hurt, and what it needs to be drawn or typed.
 PANEL_FIELDS = ("group", "sub", "label", "danger", "carry", "shown_with", "typed_with")
@@ -241,6 +243,13 @@ class BadValue(Refused):
 
     code = "bad-value"
     exit_code = codes.USAGE
+
+
+class Retired(BadValue):
+    """A retired row, or a value an `enum` row has retired (`retired_values`): the hint
+    says what to do instead."""
+
+    code = "retired"
 
 
 class NotTaken(Refused):
@@ -463,6 +472,7 @@ class Row:
     requires: str | tuple[str, ...] | None = None
     condition: str | None = None
     when: Mapping[str, When] = field(default_factory=lambda: MappingProxyType({}))
+    retired_values: Mapping[str, str] = field(default_factory=lambda: MappingProxyType({}))
     offered_with: str | None = None
     group: str | None = None
     sub: str | None = None
@@ -535,10 +545,14 @@ class Row:
         return frozenset(flags)
 
     def check(self, value: object) -> object:
-        """`value` as this row's type, or `BadValue`. A path expands `~`, must then be
-        absolute, and reads as a string; "" reads None."""
+        """`value` as this row's type, or `BadValue`: `Retired` for a retired row or a
+        value it has retired. A path expands `~`, must then be absolute, and reads as a
+        string; "" reads None."""
         if self.retired is not None:
-            raise BadValue(self.name, f"{self.name} is retired", self.retired)
+            raise Retired(self.name, f"{self.name} is retired", self.retired)
+        if isinstance(value, str) and value in self.retired_values:
+            raise Retired(self.name, f"{self.name} {value} is retired",
+                          self.retired_values[value])
         if self.optional_value and isinstance(value, bool):
             return value
         kind = self.type
@@ -696,15 +710,36 @@ def forked(harness: str, values: Mapping[str, object]) -> dict[str, object]:
     """A fork's values from its parent's recorded `values`, by each row's `fork` class:
     a `copy` row as the parent ran it, a `drop` row unset (`unset`), an `own` row left
     out for the fork's launch to compose again. A value that names no row of the
-    launcher or of `harness` is kept as it is."""
+    launcher or of `harness` is kept as it is. Retired rows and values go first
+    (`drop_retired`)."""
     out: dict[str, object] = {}
-    for name, value in values.items():
+    for name, value in drop_retired(harness, values)[0].items():
         found = row(harness, name)
         if found is None or found.fork == "copy":
             out[name] = value
         elif found.fork == "drop":
             out[name] = unset(found)
     return out
+
+
+def drop_retired(harness: str, values: Mapping[str, object]
+                 ) -> tuple[dict[str, object], list[str]]:
+    """Recorded `values` as a replay or a fork takes them, and the warnings: a value of a
+    retired row is dropped, quietly; a value a live row has retired (`retired_values`)
+    becomes the row's unset value, with one warning naming it."""
+    out: dict[str, object] = {}
+    warnings: list[str] = []
+    for name, value in values.items():
+        found = row(harness, name)
+        if found is not None and found.retired is not None:
+            continue
+        if found is not None and isinstance(value, str) and value in found.retired_values:
+            out[name] = unset(found)
+            warnings.append(f"{name} {value} is not applied: "
+                            f"{found.retired_values[value]}")
+            continue
+        out[name] = value
+    return out, warnings
 
 
 def _read(name: str) -> Catalog:
@@ -799,6 +834,8 @@ def _row(name, spec, harness, source) -> Row:
     unknown = sorted(set(spec) - set(FIELDS))
     if unknown:
         raise bad(f"has unknown field(s) {', '.join(unknown)}")
+    if "retired" in spec:
+        return _retired_row(name, spec, harness, bad)
     for required in ("type", "default", "doc"):
         if required not in spec:
             raise bad(f"lacks {required}")
@@ -812,9 +849,7 @@ def _row(name, spec, harness, source) -> Row:
     for f, value in flags.items():
         if not isinstance(value, bool):
             raise bad(f"has {f} {value!r}, not a bool")
-    retired = spec.get("retired")
-    if retired is not None and (not isinstance(retired, str) or not retired.strip()):
-        raise bad("has an empty retired; say what to do instead")
+    retired = None
 
     values = spec.get("values")
     if values is not None:
@@ -867,6 +902,7 @@ def _row(name, spec, harness, source) -> Row:
     requires = _requires(spec.get("requires"), bad)
     condition = _condition(spec.get("condition"), bad)
     when = _when(spec.get("when"), kind, values, bad)
+    retired_values = _retired_values(spec.get("retired_values"), kind, values, bad)
     offered_with = spec.get("offered_with")
     if offered_with is not None:
         if harness != LAUNCHER or not (isinstance(offered_with, str)
@@ -884,8 +920,8 @@ def _row(name, spec, harness, source) -> Row:
                 default=default, doc=doc, values=values, env=env, retired=retired,
                 flag=flag, aliases=tuple(aliases), modes=modes, items=items,
                 since=since, requires=requires, condition=condition,
-                when=MappingProxyType(when), offered_with=offered_with, fork=fork,
-                **panel, **flags)
+                when=MappingProxyType(when), retired_values=retired_values,
+                offered_with=offered_with, fork=fork, **panel, **flags)
     if retired is None:
         try:
             checked = (built.check(default) if not (kind == "path" and default == "")
@@ -898,6 +934,36 @@ def _row(name, spec, harness, source) -> Row:
         raise bad(f"has no fork class; class it {', '.join(FORK_CLASSES)}" if fork is None
                   else f"has fork {fork!r}; class it {', '.join(FORK_CLASSES)}")
     return built
+
+
+def _retired_row(name, spec, harness, bad) -> Row:
+    """A retired row: `retired` alone, the words of what to do instead. Its type is
+    `string` and its fork class `drop`, which nothing reads: every reader refuses or
+    drops it first."""
+    retired = spec["retired"]
+    if not isinstance(retired, str) or not retired.strip():
+        raise bad("has an empty retired; say what to do instead")
+    others = sorted(set(spec) - {"retired"})
+    if others:
+        raise bad(f"is retired, so it takes no {', '.join(others)}")
+    return Row(name=name, harness=None if harness == LAUNCHER else harness, type="string",
+               default="", doc=retired, retired=retired, fork="drop")
+
+
+def _retired_values(raw, kind, values, bad) -> Mapping[str, str]:
+    """An `enum` row's `retired_values`: each a value the row no longer takes, and the
+    words of what to do instead."""
+    if raw is None:
+        return MappingProxyType({})
+    if kind != "enum":
+        raise bad("has retired_values, which only an enum row takes")
+    if not isinstance(raw, dict) or not raw or not all(
+            isinstance(v, str) and v.strip() for v in raw.values()):
+        raise bad("has retired_values that are not a table of value to what to do instead")
+    taken = sorted(set(raw) & set(values or ()))
+    if taken:
+        raise bad(f"retires {', '.join(taken)}, which its values still take")
+    return MappingProxyType(dict(raw))
 
 
 def _requires(raw, bad, what: str = "requires") -> str | tuple[str, ...] | None:
@@ -1081,11 +1147,10 @@ def refuse_values(harness: str, values: Mapping[str, object], *,
     - a row chosen for this launch (`chosen`: typed or from the preset) whose
       `offered_with` row is at its default, which leaves it nothing to do.
 
-    A row not in `values` is not offered here and is not looked at. First come
-    `refuse_scratch_recycle` and `refuse_relaunch_mark`, so a launch, its preview and
-    `presets check` all refuse those pairs in their own words."""
+    A row not in `values` is not offered here and is not looked at. First comes
+    `refuse_scratch_recycle`, so a launch, its preview and `presets check` all refuse that
+    pair in its own words."""
     refuse_scratch_recycle(values)
-    refuse_relaunch_mark(values)
     avail = _available(available)
     chosen = frozenset(chosen)
     for name, value in values.items():
@@ -1105,9 +1170,9 @@ def refuse_values(harness: str, values: Mapping[str, object], *,
 
 
 #: Why a scratch launch may not recycle itself, and what to do instead: a scratch folder
-#: has no notes directory to keep a handoff in. `compact` stays open to a scratch.
+#: has no notes directory to keep a handoff in.
 SCRATCH_RECYCLE = ("a scratch launch can't recycle itself",
-                   "recycle with compact, or launch in a directory")
+                   "set recycle_at_limit off, or launch in a directory")
 
 
 class ScratchRecycle(Refused):
@@ -1123,30 +1188,6 @@ def refuse_scratch_recycle(values: Mapping[str, object]) -> None:
     `off` on a scratch launch, so what reaches here was typed or set by the preset."""
     if bool(values.get("scratch")) and values.get("recycle_at_limit") == "relaunch":
         raise ScratchRecycle("recycle_at_limit", *SCRATCH_RECYCLE)
-
-
-class RelaunchMark(Refused):
-    """A launch set to relaunch itself with a `limit_at`, which no longer moves the
-    relaunch line."""
-
-    code = "relaunch-mark"
-
-
-#: The hint of a `limit_at` on a launch that relaunches itself.
-RELAUNCH_LIMIT_HINT = "the relaunch line comes at warn_at; set warn_at"
-
-
-def refuse_relaunch_mark(values: Mapping[str, object]) -> None:
-    """Refuse `RelaunchMark` when `values` set `recycle_at_limit = relaunch` with a
-    `limit_at`: the relaunch line comes at `warn_at`, so a `limit_at` would do nothing.
-    `presets.resolve` has already left a `[defaults]` `limit_at` out of a relaunch
-    launch, with a warning, so what reaches here was chosen for the launch. A relaunch
-    with no warn-at mark is not refused: its session is armed and never told."""
-    if values.get("recycle_at_limit") != "relaunch":
-        return
-    if is_set(values.get("limit_at")):
-        raise RelaunchMark("limit_at", "limit_at does nothing on a launch that relaunches "
-                                       "itself", RELAUNCH_LIMIT_HINT)
 
 
 def _applies(need: When, values: Mapping[str, object], harness: str | None) -> bool:
@@ -1254,7 +1295,7 @@ class _Retired(argparse.Action):
         super().__init__(*args, nargs=0, **kwargs)
 
     def __call__(self, parser, namespace, values, option_string=None):
-        raise BadValue(self.dest, f"{option_string} is retired", self.retired)
+        raise Retired(self.dest, f"{option_string} is retired", self.retired)
 
 
 def build_parser(harness: str, *, available: Callable[[str], bool] | None = None,
@@ -1297,7 +1338,8 @@ def _add_option(parser: argparse.ArgumentParser, row_: Row) -> None:
                                 metavar="VALUE", **common)
     else:
         convert = {"int": int, "float": float, "path": cli_path}.get(row_.type, str)
-        choices = row_.values if row_.type == "enum" else None
+        # A retired value passes the parser, so `Row.check` refuses it with its hint.
+        choices = (*row_.values, *row_.retired_values) if row_.type == "enum" else None
         parser.add_argument(row_.option, type=convert, choices=choices,
                             metavar=row_.name.upper(), **common)
 

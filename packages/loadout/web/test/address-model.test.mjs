@@ -3,7 +3,7 @@ import test from "node:test";
 
 import {
   addressPath, closed, filteredView, goneLine, goneLineOf, itemAddress, NOTHING_OPEN, openKind, opensItem, parseRoute,
-  pathToWrite, projectChoices, projectNamed, routeOf, sameAddress, sectionFor, unfilteredLine,
+  pathToWrite, projectChoices, projectNamed, routeOf, sameAddress, sectionFor, sectionsFor, unfilteredLine,
 } from "../src/address-model.ts";
 import { problemsOf } from "../src/placed-model.ts";
 import { fullView, HOME, withRow } from "./fixtures.mjs";
@@ -83,7 +83,8 @@ const PROJECTS = [{ key: "Atlas-API", root: `${HOME}/code/atlas-api` }, { key: "
 
 test("the filtered join: the key section ignoring case, or the path section by its root exactly", () => {
   const view = fullView();
-  view.sections.push({ name: `${HOME}/code/kestrel`, where: "path", root: `${HOME}/code/kestrel`, refused: null });
+  view.sections.push({ name: `${HOME}/code/kestrel`, where: "path", root: `${HOME}/code/kestrel`, project: null,
+                      refused: null });
   assert.equal(projectNamed(PROJECTS, "atlas-api").key, "Atlas-API");
   assert.equal(sectionFor(PROJECTS[0], view), "atlas-api");
   assert.equal(sectionFor(PROJECTS[1], view), `${HOME}/code/kestrel`);
@@ -107,16 +108,55 @@ test("the filtered view: its line, Placed over its section and Your items, its o
                    [["atlas-api", "api-lead"], ["user", "tidy-notes"]]);
   assert.equal(filtered.placed.verdict, "2 items need you");
   assert.equal(filtered.placed.counts, "Claude Code 10 of 11 placed · Codex 8 of 9 · OpenCode 8 of 8");
-  assert.deepEqual([filtered.own.label, filtered.own.count], ["Atlas-API", "2 of its own"]);
-  assert.deepEqual(filtered.own.group.rows.map((r) => r.name), ["release-checklist", "api-lead"]);
+  assert.deepEqual(filtered.own.map((o) => [o.label, o.count]), [["Atlas-API", "2 of its own"]]);
+  assert.deepEqual(filtered.own[0].group.rows.map((r) => r.name), ["release-checklist", "api-lead"]);
   assert.deepEqual([filtered.yours.label, filtered.yours.count], ["Yours too", "8 items"]);
   assert.equal(filtered.yours.group.global.label, "Global file");
   assert.deepEqual(filtered.modules.map((g) => g.label), ["launcher"]);
   // A project with no section shows Placed over Your items and Yours too.
   const none = filteredView("kestrel", PROJECTS, view);
-  assert.equal(none.own, null);
+  assert.deepEqual(none.own, []);
   assert.deepEqual(none.placed.problems.map((p) => p.name), ["tidy-notes"]);
   assert.equal(filteredView("nope", PROJECTS, view), null);
+});
+
+const path = (root, project) => ({ name: root, where: "path", root, project, refused: null });
+
+test("every section of the project: its key section, then path sections at its root or under it", () => {
+  const view = fullView();
+  const web = `${HOME}/code/atlas-api/web`;
+  view.sections.push(path(web, "Atlas-API"), path(`${HOME}/code/atlas-api`, "Atlas-API"),
+                     path(`${HOME}/code/atlas-api/docs`, null), path(`${HOME}/code/kestrel/app`, "kestrel"));
+  assert.deepEqual(sectionsFor(PROJECTS[0], view), ["atlas-api", web, `${HOME}/code/atlas-api`]);
+  // Without projects' map, only a path section at the root exactly.
+  assert.deepEqual(sectionsFor(PROJECTS[1], view), [`${HOME}/code/kestrel/app`]);
+  assert.deepEqual(sectionsFor({ key: "kestrel", root: `${HOME}/code/kestrel` },
+                               { sections: [path(`${HOME}/code/kestrel`, null)] }), [`${HOME}/code/kestrel`]);
+  assert.deepEqual(sectionsFor({ key: "otter", root: "/w/otter" }, view), []);
+  // Add's narrower test: a project with only a section under its root has none at its root.
+  assert.equal(sectionFor(PROJECTS[1], view), null);
+});
+
+test("the filtered view of a project with a key section and a path section under its root shows both", () => {
+  const web = `${HOME}/code/atlas-api/web`;
+  const view = fullView();
+  view.sections.push(path(web, "Atlas-API"), path(`${HOME}/code/elsewhere`, null));
+  view.items.push({ ...view.items[0], name: "lint-web", scope: web });
+  view.rows.push({ ...view.rows[0], name: "lint-web", scope: web, state: "missing" });
+  view.items.push({ ...view.items[0], name: "far", scope: `${HOME}/code/elsewhere` });
+  view.rows.push({ ...view.rows[0], name: "far", scope: `${HOME}/code/elsewhere`, state: "missing" });
+  const filtered = filteredView("atlas-api", PROJECTS, view);
+  assert.deepEqual(filtered.own.map((o) => [o.label, o.count]),
+                   [["Atlas-API", "2 of its own"], ["~/code/atlas-api/web", "1 of its own"]]);
+  assert.deepEqual(filtered.own[1].group.rows.map((r) => r.name), ["lint-web"]);
+  assert.deepEqual(filtered.placed.problems.map((p) => [p.section, p.name]), [[web, "lint-web"]]);
+  // Only the path section: it is the project's own, under its `~` path.
+  const only = fullView({ sections: [view.sections[0], path(web, "Atlas-API")], items: view.items, rows: view.rows });
+  assert.deepEqual(filteredView("atlas-api", PROJECTS, only).own.map((o) => o.label), ["~/code/atlas-api/web"]);
+  // Without projects' map (no projects, or an older one) the section under the root isn't
+  // the project's, and the view reads as before.
+  const unmapped = fullView({ sections: [...fullView().sections, path(web, null)], items: view.items, rows: view.rows });
+  assert.deepEqual(filteredView("atlas-api", PROJECTS, unmapped).own.map((o) => o.label), ["Atlas-API"]);
 });
 
 test("the filter line's picker, and the line when projects can't be read", () => {

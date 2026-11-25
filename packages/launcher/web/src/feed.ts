@@ -41,11 +41,9 @@ export interface RelaunchState {
 export interface RecycleState {
   on_expiry: string;
   at_limit: string;
-  limit_at: string | null;
   last: RunLine | null;
-  pending_compact: string | null;
   told_at: string | null;
-  pending_dropped_at: string | null;
+  mark: string | null;
 }
 
 export interface KeepWarmState {

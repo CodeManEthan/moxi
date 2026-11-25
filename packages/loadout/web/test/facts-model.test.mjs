@@ -13,7 +13,7 @@ const ATLAS = { key: "atlas-api", root: `${HOME}/code/atlas-api` };
 const KESTREL = { key: "kestrel-web", root: `${HOME}/code/kestrel-web` };
 const GIVEN = [ATLAS, KESTREL];
 
-const section = (name, where = "key", root = null) => ({ name, where, root });
+const section = (name, where = "key", root = null, project = null) => ({ name, where, root, project });
 const item = (kind, name, scope) => ({ kind, name, scope, harnesses: null, source: `${HOME}/my-loadout/x`,
                                        disabled: [] });
 /** `/api/list`'s answer: Your items, and atlas-api's section by key with its two items. */
@@ -94,6 +94,17 @@ test("a path section at the root alone: its items are the row's", () => {
                  items: [item("skill", "tidy-notes", "user"), item("hook", "fmt", at.name), item("mcp", "docs", at.name)] };
   assert.deepEqual(projectSections(ATLAS, listing(over)), [at.name]);
   assert.deepEqual(texts(report(over)), ["hook fmt", "MCP server docs"]);
+});
+
+test("a path section under the root that projects maps to the project: its items are the row's too", () => {
+  const web = section(`${HOME}/code/atlas-api/web`, "path", `${HOME}/code/atlas-api/web`, "atlas-api");
+  const over = { sections: [section("user", "user"), web, section("atlas-api")],
+                 items: [item("skill", "by-key", "atlas-api"), item("skill", "lint-web", web.name)] };
+  assert.deepEqual(projectSections(ATLAS, listing(over)), ["atlas-api", web.name]);
+  assert.deepEqual(texts(report(over)), ["skill by-key", "skill lint-web"]);
+  // Not mapped (no projects): only the key section's.
+  const unmapped = { ...over, sections: [section("user", "user"), { ...web, project: null }, section("atlas-api")] };
+  assert.deepEqual(texts(report(unmapped)), ["skill by-key"]);
 });
 
 test("a key section and a path section at the root: both count, the key section's items first", () => {

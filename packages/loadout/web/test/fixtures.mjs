@@ -5,8 +5,8 @@ export const HOME = "/home/me";
 export const FOLDER = `${HOME}/my-loadout`;
 export const HARNESSES = ["claude", "codex", "opencode"];
 
-export const USER = { name: "user", where: "user", root: null, refused: null };
-export const ATLAS = { name: "atlas-api", where: "key", root: null, refused: null };
+export const USER = { name: "user", where: "user", root: null, project: null, refused: null };
+export const ATLAS = { name: "atlas-api", where: "key", root: null, project: null, refused: null };
 
 export const item = (over) => ({
   kind: "skill", name: "tidy-notes", scope: "user", harnesses: null,
@@ -76,7 +76,8 @@ export function fullView(over = {}) {
   ];
   return {
     problem: null, lines: [], notes: [], counts: {}, note: null, home: HOME, folder: FOLDER,
-    manifest: `${FOLDER}/loadout.toml`, harnesses: [...HARNESSES], resolved_all: true,
+    manifest: `${FOLDER}/loadout.toml`, harnesses: [...HARNESSES], present: [...HARNESSES],
+    shown: [...HARNESSES], resolved_all: true,
     sections: [USER, ATLAS], items, rows,
     item_notes: [{ kind: "hook", name: "guard-rm", harness: "codex", code: "trust" },
                  { kind: "hook", name: "guard-rm", harness: "opencode", code: "no-hooks" }],

@@ -9,8 +9,8 @@ drift apart.
 A launch is armed (its session can finish a self relaunch) when it is:
 
 1. **set to relaunch**: `recycle_at_limit = relaunch`, set by a flag, the page, its
-   preset or `[defaults]`. The row ships `off`, and `off` or `compact` from any layer
-   opts out, a launch's recorded `off` included.
+   preset or `[defaults]`. The row ships `off`, and `off` from any layer opts out, a
+   launch's recorded `off` included, as does a row recorded with the retired `compact`.
 2. **a Claude launch**: the relaunch exits the session through turns' `exit`, which only
    Claude's turns session offers.
 3. **a slot launch**, with slots running here.
@@ -93,7 +93,7 @@ def missing(*, harness: str, target: str | None, in_slot: bool, cwd: str | None,
             return found
         said = "holds recycle_at_limit off"
     elif value == "compact":
-        said = "recycles at its limit by compacting"
+        said = "was launched with recycle_at_limit compact, which no longer acts"
     elif value == "off":
         said = "has recycle_at_limit off"
     else:

@@ -64,13 +64,8 @@ common = true
 hurts = { when = "on", says = "accepts the bypass-permissions warning for every slot launch", confirm = "A bypass slot launch held on Claude Code's bypass-permissions warning presses 'Yes, I accept', and Claude Code writes skipDangerousModePermissionPrompt: true into ~/.claude/settings.json, which turns the warning off for every later bypass session on this machine.", stays = true }
 
 [recycle.limit_wait_s]
-type = "int"
-default = 1800
-doc = "How long a compact at the context limit waits for the session to be idle, in seconds."
-read = "use"
-label = "For idle, to compact at the limit"
-group = "Waits"
-unit = "seconds"
+retired = "the launcher no longer compacts at a context limit, so nothing waits; remove recycle.limit_wait_s"
+left_out = true
 
 [page.launch_wait_s]
 type = "int"

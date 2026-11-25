@@ -855,13 +855,30 @@ def test_a_replay_of_an_older_scratch_row_set_to_relaunch_recycles_off(
                 "itself") in replayed.warnings
         # So the launch check does not refuse the replay.
         assert "scratch-recycle" not in {r.code for r in api._check(replayed, {})}
-    # compact is replayed as it was.
-    stored = {**old.values, "recycle_at_limit": "compact"}
-    replayed = api._replayed(ReplayRequest(
-        dataclasses.replace(old, values_json=json.dumps(stored)), relaunch_of="r1",
-        request_id="r2", actor="ann"))
-    assert replayed.values["recycle_at_limit"] == "compact"
-    assert not any("recycle_at_limit" in said for said in replayed.warnings)
+
+
+#: The warning a replay of a row recorded with `recycle_at_limit = compact` carries.
+COMPACT_NOT_APPLIED = ("recycle_at_limit compact is not applied: "
+                       + catalog.launcher()["recycle_at_limit"].retired_values["compact"])
+
+
+def test_a_replay_drops_a_stored_limit_at_and_replays_compact_as_off(
+        harness, tmp_path, no_exec):
+    api.launch(LaunchRequest(cwd=str(tmp_path), request_id="r1", session_id=SID,
+                             actor="ann"))
+    old = row("r1")
+    stored = {**old.values, "recycle_at_limit": "compact", "limit_at": "1.5x",
+              "sources": {"recycle_at_limit": "preset"}}
+    old = dataclasses.replace(old, values_json=json.dumps(stored))
+    for replay in (dict(relaunch_of="r1"), dict(resume_of="r1")):
+        replay = ReplayRequest(old, request_id="r2", actor="ann", **replay)
+        replayed = api._replayed(replay)
+        assert replayed.values["recycle_at_limit"] == "off"
+        assert "limit_at" not in replayed.values
+        assert [w for w in replayed.warnings if "recycle_at_limit" in w or "limit_at" in w
+                ] == [COMPACT_NOT_APPLIED]
+        # The launch check does not refuse it.
+        assert not [r for r in api._check(replayed, {}) if r.code == "retired"]
 
 
 # -- whether a replay can recycle itself ---------------------------------------------------
@@ -924,7 +941,9 @@ def test_a_replay_never_changes_whether_the_launch_can_recycle_itself(
     assert can(old) is holds
     replayed, new = replayed_row(old)
     assert can(new) is holds
-    assert replayed.values["recycle_at_limit"] == recycle
+    # A row recorded with the retired compact replays off, opted out as it was.
+    assert replayed.values["recycle_at_limit"] == (
+        "off" if recycle == "compact" else recycle)
     # And again, from the replay's own row.
     _, newer = replayed_row(new)
     assert can(newer) is holds
