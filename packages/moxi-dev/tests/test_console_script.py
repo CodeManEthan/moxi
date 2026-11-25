@@ -94,3 +94,11 @@ def test_its_pid_is_the_pid_of_the_process_that_was_started(tmp_path):
     child = subprocess.Popen([str(path)])
     assert child.wait(timeout=30) == 0
     assert int(out.read_text()) == child.pid
+
+
+def test_its_file_is_the_stand_in_itself(tmp_path):
+    out = tmp_path / "file"
+    path = console_script(tmp_path, "moxi",
+                          f"open({str(out)!r}, 'w').write(__file__)\n")
+    subprocess.run([str(path)], check=True, timeout=30)
+    assert os.path.samefile(out.read_text(), path)

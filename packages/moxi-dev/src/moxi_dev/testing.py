@@ -2588,7 +2588,9 @@ def console_script(script_dir: str | os.PathLike[str], name: str,
     exactly as the program that started it passed them, and exits with its status.
     `os.getpid()` in that code is the pid of the process that was started: on Windows
     the launcher runs Python as a child, so the stand-in reads its launcher's pid and
-    answers that.
+    answers that. `__file__` in that code is the stand-in's own path on every system
+    (on Windows Python reads the code from a zip inside the `.exe`), so a stand-in can
+    keep its files beside itself.
     """
     if WINDOWS:
         path = Path(script_dir, f"{name}.exe")
@@ -2608,11 +2610,13 @@ def console_script(script_dir: str | os.PathLike[str], name: str,
     return path
 
 
-# The head of a Windows stand-in's script. The launcher starts Python as its child (and a
-# venv's python.exe starts the base interpreter as one more), so the script's own pid is
-# not the one the product started: it walks up its parents to the nearest process with
-# the stand-in's file name and makes `os.getpid` answer that pid.
+# The head of a Windows stand-in's script. Python runs it as `__main__.py` in the zip
+# inside the `.exe`, so `__file__` is set to the `.exe` itself. The launcher starts Python
+# as its child (and a venv's python.exe starts the base interpreter as one more), so the
+# script's own pid is not the one the product started: it walks up its parents to the
+# nearest process with the stand-in's file name and makes `os.getpid` answer that pid.
 _STAND_IN_PID = """\
+__file__ = __import__("os").path.dirname(__file__)
 def _stand_in_pid(exe):
     import ctypes, os
     from ctypes import wintypes

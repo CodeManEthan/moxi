@@ -13,6 +13,8 @@
   the program that started it passed them (cmd.exe cut one at a newline and read `&`,
   `|`, `^`, `%`, `<` and `>`), a start by bare name finds it, and `os.getpid()` in it
   is the pid of the process that was started, not the Python child the launcher runs.
+  `__file__` in it is the stand-in's own path, as on POSIX, so it finds files kept
+  beside it.
 - On Windows the test fence keeps `PROGRAMDATA`, the machine's shared settings folder,
   as it keeps `SYSTEMROOT`: Windows' own OpenSSH (`ssh-keygen`, and git's SSH signing
   through it) exited 255 without it.
