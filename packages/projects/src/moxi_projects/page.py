@@ -138,9 +138,22 @@ WHERE = {"store": _PATH, "git": _MAYBE_PATH, "note": _MAYBE_SAYS}
 #: An add or a set: the project as it now stands, and notes that refuse nothing (a root
 #: that doesn't exist yet, what a create made).
 WRITTEN = {"project": PROJECT, "notes": lb.Out("list", items=_SAYS)}
-#: An add: a write, and `warnings`, what the add went ahead without (a contribution
-#: skipped since it won't load, with the fix); empty when it went without nothing.
-ADDED = {**WRITTEN, "warnings": lb.Out("list", items=_SAYS)}
+#: An add: a write, `warnings`, what the add went ahead without (a contribution skipped
+#: since it won't load, an answer that failed, each with the fix), and `asked`, a line per
+#: question the add didn't put (no answer was sent for it), naming the command that sets
+#: it later; each empty when there is none.
+ADDED = {**WRITTEN, "warnings": lb.Out("list", items=_SAYS),
+         "asked": lb.Out("list", items=_SAYS)}
+#: One question an add puts, as `moxi_projects.api.Question` gives it: `choices` empty for
+#: any text; `preset` an answer a module's setting settled, which the add acts on unasked;
+#: `after` `[key, value]` when it is put only once that question of the module is answered
+#: that value; `later` the command that sets it later.
+QUESTION = lb.Out("table", items={
+    "module": _TEXT, "key": _TEXT, "text": _SAYS, "choices": _NAMES, "suggested": _MAYBE,
+    "preset": _MAYBE, "after": lb.Out("list", items=_TEXT, nullable=True), "later": _SAYS})
+#: The questions an add of a project at `path` would put, in order; empty for a path this
+#: server can't take (relative, `~user`, `~` with no home).
+QUESTIONS = {"questions": lb.Out("list", items=QUESTION)}
 #: A remove's outcome, as `/api/remove` and `/api/remove-status` answer it: `job` the
 #: press it was kept under; `state` is `removed` or `refused`; `key` the project's key as
 #: stored (as asked when there was none); `project` the key the request was kept under.
@@ -165,8 +178,15 @@ _MAYBE_NAME = lb.Field("string", required=False, max=NAME_MAX)
 _MAYBE_DIR = lb.Field("string", required=False, max=PATH_MAX)
 _FLAG = lb.Field("bool", required=False)
 
+#: The most answers an add takes.
+ANSWERS_MAX = 64
+
+#: An add: the verb's fields, `create` its `--create`, and `answers`, one
+#: `module.key=value` string per question answered (`/api/questions` lists them).
 ADD_BODY = {"key": _KEY, "root": _MAYBE_DIR, "kind": _MAYBE_NAME, "lead": _MAYBE_NAME,
-            "notes_root": _MAYBE_DIR, "create": _FLAG}
+            "notes_root": _MAYBE_DIR, "create": _FLAG,
+            "answers": lb.Field("list", required=False, max=ANSWERS_MAX,
+                                items=lb.Field("string", max=PATH_MAX))}
 SET_BODY = {"key": _KEY, "root": _MAYBE_DIR, "kind": _MAYBE_NAME, "lead": _MAYBE_NAME,
             "no_lead": _FLAG, "notes_root": _MAYBE_DIR, "no_notes_root": _FLAG}
 AGENT_BODY = {"key": _KEY, "name": _NAME}
@@ -197,6 +217,10 @@ PAGE = lb.Page(
         lb.Route("/api/folder", "read", _target("at_path"),
                  query={"path": lb.Field("string", max=PATH_MAX)}, returns=AT_PATH),
         lb.Route("/api/kinds", "read", _target("kinds"), returns=KINDS),
+        lb.Route("/api/questions", "read", _target("questions"),
+                 query={"path": lb.Field("string", max=PATH_MAX), "kind": _MAYBE_NAME,
+                        "create": _FLAG},
+                 returns=QUESTIONS),
         lb.Route("/api/where", "read", _target("where"), returns=WHERE),
         lb.Route("/api/remove-check", "read", _target("remove_check"), query={"key": _KEY},
                  returns=REMOVE_CHECK),
@@ -213,6 +237,7 @@ PAGE = lb.Page(
     ),
 )
 
-__all__ = ["ADD_BODY", "ADDED", "AGENT_BODY", "AT_PATH", "BROKEN", "BUDGET", "KIND", "KINDS",
-           "LISTED", "ONE", "PAGE", "PROJECT", "PROJECTS", "REMOVE_BODY", "REMOVE_CHECK",
+__all__ = ["ADD_BODY", "ADDED", "AGENT_BODY", "ANSWERS_MAX", "AT_PATH", "BROKEN", "BUDGET",
+           "KIND", "KINDS", "LISTED", "ONE", "PAGE", "PROJECT", "PROJECTS", "QUESTION",
+           "QUESTIONS", "REMOVE_BODY", "REMOVE_CHECK",
            "SET_BODY", "STATUS", "STATUS_ROUTE", "WHERE", "WRITTEN"]

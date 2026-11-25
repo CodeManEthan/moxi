@@ -32,7 +32,7 @@ Interface 3 is interface 2 plus, offered both or neither:
 - `questions(fields)`: gets the project just added as a dict (`key`, `root`, `kind`,
   `lead`, `notes_root`, and `mint`, the mint `add --create` makes, or None) and returns a
   list of the questions the add should put, or None. Each is a dict: `key` (a name unique
-  within the module), `text` (one plain sentence), `later` (the command that sets it
+  within the module: a lower-case letter, then lower-case letters, digits and `_`), `text` (one plain sentence), `later` (the command that sets it
   later), and, each optional, `choices` (a list of answers; none means any text),
   `suggested` (the answer offered as the default), `preset` (an answer already settled,
   say by a setting: the add asks nothing and acts on it) and `after` (`[key, value]`: put
@@ -74,6 +74,7 @@ from __future__ import annotations
 
 import importlib
 import os
+import re
 from collections.abc import Callable, Mapping, Sequence
 
 import moxi.modules
@@ -559,6 +560,8 @@ def _skipped_questions(module: str, why: str) -> str:
 _QUESTION_FIELDS = frozenset({"key", "text", "later", "choices", "suggested", "preset",
                               "after"})
 _QUESTION_NEEDS = ("key", "text", "later")
+#: What a question's key may be.
+QUESTION_KEY = re.compile(r"[a-z][a-z0-9_]*")
 
 
 def _read_questions(module: str, said: object) -> list[Question]:
@@ -581,6 +584,9 @@ def _read_questions(module: str, said: object) -> list[Question]:
             if not isinstance(value, str) or not value.strip():
                 raise ValueError(f"gave a question no {name}")
         key = item["key"].strip()
+        if not QUESTION_KEY.fullmatch(key):
+            raise ValueError(f"gave a question the key {key!r}; a key is a lower-case "
+                             "letter, then lower-case letters, digits and _")
         if key in seen:
             raise ValueError(f"put the question {key!r} twice")
         choices = item.get("choices") or ()

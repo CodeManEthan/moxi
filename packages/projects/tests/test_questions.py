@@ -273,6 +273,9 @@ def test_questions_under_interface_2_are_not_read(site, tmp_path):
      "put the question 'k' after 'j', which it hasn't put before it"),
     ("[{'key': 'k', 'text': 't', 'later': 'l'}, {'key': 'k', 'text': 't', 'later': 'l'}]",
      "put the question 'k' twice"),
+    ("[{'key': 'Push.x', 'text': 't', 'later': 'l'}]",
+     "gave a question the key 'Push.x'; a key is a lower-case letter, then lower-case "
+     "letters, digits and _"),
 ])
 def test_questions_out_of_shape_put_none_and_the_add_goes_ahead_with_a_warning(
         site, tmp_path, said, why):

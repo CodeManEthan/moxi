@@ -89,6 +89,23 @@ export interface Written {
  * contribution skipped since it won't load, with the fix). */
 export interface Added extends Written {
   warnings: string[];
+  /** A line per question the add didn't put, naming the command that sets it later. */
+  asked: string[];
+}
+
+/** One question an add puts, as `/api/questions` gives it. `choices` is empty for any
+ * text; `preset` an answer a module's setting settled, which the add acts on unasked;
+ * `after` `[key, value]` when the question is put only once that question of the same
+ * module is answered that value; `later` the command that sets it later. */
+export interface Question {
+  module: string;
+  key: string;
+  text: string;
+  choices: string[];
+  suggested: string | null;
+  preset: string | null;
+  after: [string, string] | null;
+  later: string;
 }
 
 /** `/api/remove-status`: what a remove request came to. */
@@ -236,8 +253,21 @@ export function parseWritten(data: unknown): Written | null {
 /** `/api/add`'s value, or null when it isn't one. */
 export function parseAdded(data: unknown): Added | null {
   const written = parseWritten(data);
-  if (written === null || !isObj(data) || !isStrings(data.warnings)) return null;
-  return { ...written, warnings: [...data.warnings] };
+  if (written === null || !isObj(data) || !isStrings(data.warnings) || !isStrings(data.asked)) return null;
+  return { ...written, warnings: [...data.warnings], asked: [...data.asked] };
+}
+
+function isQuestion(value: unknown): value is Question {
+  return isObj(value) && isStr(value.module) && isStr(value.key) && isStr(value.text) && isStrings(value.choices)
+    && isStrOrNull(value.suggested) && isStrOrNull(value.preset) && isStr(value.later)
+    && (value.after === null || (isStrings(value.after) && value.after.length === 2));
+}
+
+/** `/api/questions`' list, or null when it isn't one. */
+export function parseQuestions(data: unknown): Question[] | null {
+  if (!isObj(data) || !isListOf(data.questions, isQuestion)) return null;
+  return data.questions.map((q) => ({ ...q, choices: [...q.choices],
+                                      after: q.after === null ? null : [q.after[0], q.after[1]] }));
 }
 
 /** `/api/remove-status`'s value, or null when it isn't one. */

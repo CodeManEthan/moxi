@@ -71,6 +71,9 @@ as `asked`). A question a module's own setting already answers is not asked, and
 answer is acted on either way (`answered` in `--json`). An answer that fails leaves the
 project added, and a warning names the failure and the command to run.
 
+The Projects page's Add panel shows the same questions as fields under `Name`, each set
+to its suggestion, once the folder has been read, and sends the answers with the add.
+
 A module asks through projects' contribution interface 3: `questions(fields)` gives the
 questions for the new row, and `answer(project, key, value)` acts on each answer
 (`moxi_projects/contributions.py` holds the contract).

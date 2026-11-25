@@ -7,7 +7,8 @@
 //
 // It sends `/api/add` once per press and shows what came back: the project and its
 // notes, with any warning beside them (a contribution skipped since it won't load, and
-// the fix), or the refusal with its fix. When no answer comes back it can't know whether the
+// the fix), or the refusal with its fix. It puts no questions: the add names each question
+// other modules would put, with the command that sets it later, among its lines. When no answer comes back it can't know whether the
 // add was made, so it says so, and that the directory may exist after a create. After
 // every add that was made or may have been, it sends `CHANGED` on the document, so every
 // projects component on the page reads its route again.

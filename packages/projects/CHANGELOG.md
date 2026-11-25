@@ -10,6 +10,12 @@
   leaves the project added, with a warning naming the command to run. Modules ask through
   contribution interface 3, `questions(fields)` and `answer(project, key, value)`;
   projects reads interfaces 1 to 3, and `api.Question` is the question as read.
+- The Projects page's Add panel shows those questions as fields under `Name`, each set to
+  its suggestion, and sends the answers with the add. The page serves
+  `/api/questions?path=`, the questions an add at a path would put; `/api/add` takes
+  `answers` (`module.key=value`) and answers `asked`, the questions it didn't put. The
+  `Add a project` block puts no questions and lists them as not asked. A question's key
+  is a lower-case letter, then lower-case letters, digits and `_`.
 
 - `Add a project` reads what is at the typed folder through moxi-ui's `readLater`, so the
   page root's `data-reading` mark counts that read from the keystroke until what it fills
