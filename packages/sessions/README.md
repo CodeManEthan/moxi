@@ -126,15 +126,21 @@ way), and it adds four commands:
   `--folder` an absolute path. Nothing a person or a model said is printed unless
   `--text` is given; then the newest thing said in each session follows its line, cut at
   300 bytes. A root that can't be listed is named on stderr and the others are listed.
-- `moxi sessions read SESSION [--harness H] [--around TIME] [--turns N] [--all] [--json]`
-  prints part of one session, the way the page below shows a transcript: the last five turns, or
+- `moxi sessions read SESSION [--harness H] [--around TIME] [--turns N] [--all] [--results]
+  [--json]` prints part of one session, the way the page below shows a transcript: the last five turns, or
   `--turns` of them (at most 50); with `--around TIME` (ISO 8601 such as
   `2026-11-06T14:03:22Z`, a time with no zone read as local time, or epoch seconds) the
   turns around that time; with `--all` the whole session. Each line starts with its time
   in UTC, in the form `--around` takes. A message shows as its text, cut at 64 KiB with
   the cut said; a tool call as one line naming the tool and what it was called on, cut at
   160 characters; a tool result as its size and whether it failed. No flag prints more of
-  a tool's input than that line, or any of a tool's output. Without `--harness` it reads
+  a tool's input than that line. `--results` also prints each tool result's output below
+  its `Result:` line, redacted as the messages are and then cut to its first and last
+  4,000 characters, with a line saying how many were cut between them. A result whose
+  call names a secret path (secrets' `secret_path`), or whose call is not among the turns
+  read, says its output is withheld instead. `--results` needs the secrets module and
+  refuses without it (exit 3), naming why and `moxi install secrets`; without the flag
+  no tool output is printed. Without `--harness` it reads
   the session from whichever harness's live root holds it, and asks the archive folders
   only when none does; when more than one harness holds it, it names them and exits 2 for
   `--harness` to choose. With `--harness` it asks that harness's live root, then its
@@ -144,7 +150,10 @@ way), and it adds four commands:
 
 With `--json`, each command prints one JSON object that starts with the shape version.
 `read --json` holds the same rows the page is sent, under `records`, with the header and
-whether earlier or later turns were left out. `list --json` holds the counts (`all`,
+whether earlier or later turns were left out. With `--results`, each tool result row also
+carries `output` (its first and last 4,000 characters put end to end, or null when
+withheld), `output_cut_chars` (how many were cut from between them) and `withheld_why`
+(null, or why the output is withheld). `list --json` holds the counts (`all`,
 `total`, one per harness that was read), the roots that could not be listed and the
 sessions under `rows`; a row's `activity` and `prompt` carry their `text` only with
 `--text`.

@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- `moxi sessions read --results` prints each tool result's output under its `Result:`
+  line, and `--json` gives each tool result row `output`, `output_cut_chars` and
+  `withheld_why`. The output is redacted with the read's redaction before it is cut to its
+  first and last 4,000 characters, and a line names how many characters were cut between
+  them. A result whose call names a secret path, or whose call is not in the turns read,
+  says its output is withheld. Without the secrets module `--results` refuses (exit 3).
+  Without the flag the read prints what it did before; the page and the connector's
+  `read_session` are unchanged.
 - With cache installed, a row of `Active recently` ends its first line in `warm until
   <time>` or `cold`, from cache's clock record for the session, and turns cold at its
   time; opened, it has a `Cache` line linking cache's page. A day's rows say nothing of
