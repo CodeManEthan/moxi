@@ -5,11 +5,9 @@ the lines each row carries, and the writer's key placement over files shaped lik
 
 from __future__ import annotations
 
-import dataclasses
 import json
 import os
 import sys
-from types import MappingProxyType
 
 import pytest
 from moxi import cli, config
@@ -110,10 +108,10 @@ def test_a_held_value_for_a_row_not_offered_is_kept_and_not_listed(conditions):
 
 def test_relaunch_is_offered_only_where_slots_run(conditions):
     here = only("turns", "usage", "slots")
-    assert rows(here)["recycle_at_limit"]["values"] == ["off", "relaunch", "compact"]
+    assert rows(here)["recycle_at_limit"]["values"] == ["off", "relaunch"]
     conditions(slots_here=False)
-    assert rows(here)["recycle_at_limit"]["values"] == ["off", "compact"]
-    assert rows(only("turns", "usage"))["recycle_at_limit"]["values"] == ["off", "compact"]
+    assert rows(here)["recycle_at_limit"]["values"] == ["off"]
+    assert rows(only("turns", "usage"))["recycle_at_limit"]["values"] == ["off"]
 
 
 def test_a_held_relaunch_where_slots_cant_run_is_refused_not_warned(conditions):
@@ -122,8 +120,8 @@ def test_a_held_relaunch_where_slots_cant_run_is_refused_not_warned(conditions):
     row = rows(only("turns", "usage", "slots"))["recycle_at_limit"]
     assert row["value"] == "relaunch" and not row.get("clear_only")
     assert row["refused"] == ("relaunch at limit needs slots and a slot launch; launch it "
-                              "in a slot (--target slot) where tmux slots run, or recycle "
-                              "with compact.")
+                              "in a slot (--target slot) where tmux slots run, or set "
+                              "recycle_at_limit off.")
     assert row["warning"] is None
     with pytest.raises(ConfigError) as caught:
         change("recycle_at_limit", "set", "relaunch", only("turns", "usage", "slots"))
@@ -320,47 +318,38 @@ def test_a_key_that_can_only_be_cleared_is_refused_a_value():
     assert caught.value.problem == "session_id is set by the launcher itself"
 
 
-def _launcher_with(monkeypatch, name, **changes):
-    real = catalog.launcher()
-    rows = dict(real.rows)
-    rows[name] = dataclasses.replace(rows[name], **changes)
-    fake = dataclasses.replace(real, rows=MappingProxyType(rows))
-    monkeypatch.setattr(catalog, "launcher", lambda: fake)
-    return rows[name]
+LIMIT_AT_LEFT_OUT = ("limit_at is left out: the launcher no longer compacts at a context "
+                     "mark; remove limit_at (the relaunch line comes at warn_at).")
+COMPACT_LEFT_OUT = ("recycle_at_limit compact is left out: compact at the context limit is "
+                    "gone; set recycle_at_limit off or relaunch, and recycle_on_expiry = "
+                    "compact to compact before the cache expires.")
 
 
-def test_a_retired_row_is_listed_to_clear_and_never_set(monkeypatch):
-    _launcher_with(monkeypatch, "limit_at", retired="remove limit_at")
+def test_a_retired_row_is_listed_to_clear_and_never_set(conditions):
     write('[defaults]\nlimit_at = "1x"\n')
     row = rows(ALL)["limit_at"]
     assert row["clear_only"] is True and row["group"] == defaults.NEEDS_FIX
-    assert "limit_at is retired; remove limit_at" in (row["refused"] or row["warning"])
+    # The launcher's own warning for it, once, and no line of the table's own.
+    assert (row["refused"], row["warning"]) == (None, LIMIT_AT_LEFT_OUT)
+    assert row["line"] == row["doc"]
     with pytest.raises(ConfigError) as caught:
         change("limit_at", "set", "1x", ALL)
     assert caught.value.problem == "limit_at is retired"
     assert change("limit_at", "unset", available=ALL) == (True, [])
 
 
-@dataclasses.dataclass(frozen=True)
-class _RetiresCompact(catalog.Row):
-    """A `recycle_at_limit` whose `compact` is retired, as a catalog that retires a value
-    has it."""
-
-    def check(self, value):
-        if value == "compact":
-            raise catalog.BadValue(self.name, f"{self.name} compact is retired",
-                                   "set recycle_at_limit off")
-        return super().check(value)
+def test_a_retired_value_shows_as_chosen_with_the_launchers_warning(conditions):
+    here = only("turns", "usage", "slots")
+    write('[defaults]\nrecycle_at_limit = "compact"\n')
+    row = rows(here)["recycle_at_limit"]
+    assert row["value"] == "compact" and not row.get("clear_only")
+    assert row["values"] == ["off", "relaunch"]
+    assert (row["refused"], row["warning"]) == (None, COMPACT_LEFT_OUT)
+    assert row["line"] == row["doc"]
+    assert change("recycle_at_limit", "unset", None, here) == (True, [])
 
 
 def test_a_retired_value_is_refused_by_the_rows_own_check_alone(monkeypatch, conditions):
-    real = catalog.launcher()
-    rows_ = dict(real.rows)
-    old = rows_["recycle_at_limit"]
-    rows_["recycle_at_limit"] = _RetiresCompact(**{f.name: getattr(old, f.name)
-                                                   for f in dataclasses.fields(old)})
-    monkeypatch.setattr(catalog, "launcher", lambda: dataclasses.replace(
-        real, rows=MappingProxyType(rows_)))
     # Even where [defaults]' own check lets a retired value through, the write's call of
     # the row's check refuses it.
     monkeypatch.setattr(presets, "defaults_problems", lambda table, available=None: [])
@@ -375,7 +364,7 @@ def test_a_retired_value_is_refused_by_the_rows_own_check_alone(monkeypatch, con
 RECYCLES = only("turns", "usage", "slots")
 REFUSED_BARE = ("a launch with no preset is refused: relaunch at limit needs slots and a "
                 "slot launch; launch it in a slot (--target slot) where tmux slots run, or "
-                "recycle with compact")
+                "set recycle_at_limit off")
 
 
 def test_a_relaunch_with_no_slot_target_is_written_with_its_warning(conditions):

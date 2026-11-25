@@ -333,8 +333,8 @@ const ROWS = [
                                     refused: "typo_row is not a launcher row; moxi launcher catalog lists the rows." }),
   row("permission_mode", "enum", "plan", "default", { group: "access", source: "file",
                                                       values: ["default", "plan", "acceptEdits"] }),
-  row("recycle_at_limit", "enum", "relaunch", "compact", { group: "lifecycle", source: "file", values: ["off", "compact"],
-                                                           warning: "A launch with no preset is refused." }),
+  row("recycle_at_limit", "enum", "relaunch", "off", { group: "lifecycle", source: "file", values: ["off"],
+                                                       warning: "A launch with no preset is refused." }),
 ];
 const OWN = [key("ready.wait_s", "int", 60, 60, { label: "Ready", common: true }),
              key("runs.keep_days", "int", 14, 30, { label: "Keep run files for", source: "file" })];
@@ -375,7 +375,7 @@ test("refused and warning lines ride on the row; a clear-only key is its value a
 test("an enum value its list doesn't offer stays in the list as the chosen one", () => {
   const control = controlOf(ROWS[2]);
   assert.equal(control.selected, "relaunch");
-  assert.deepEqual(control.options.map((option) => option.value), ["off", "compact", "relaunch"]);
+  assert.deepEqual(control.options.map((option) => option.value), ["off", "relaunch"]);
   // A value the list offers adds nothing.
   assert.deepEqual(controlOf(ROWS[1]).options.map((option) => option.value), ["default", "plan", "acceptEdits"]);
 });

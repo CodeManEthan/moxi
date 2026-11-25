@@ -18153,9 +18153,9 @@ launcher	packages/launcher/tests/test_defaults.py	assert change("remote_control"
 launcher	packages/launcher/tests/test_defaults.py	change("instructions_file", "set", "~/agents/planner.md", ALL)	keep	set	set
 launcher	packages/launcher/tests/test_defaults.py	change(name, "set", value, ALL)	keep	set	set
 launcher	packages/launcher/tests/test_defaults.py	change("session_id", "set", "y")	keep	set	set
-launcher	packages/launcher/tests/test_defaults.py	assert "limit_at is retired; remove limit_at" in (row["refused"] or row["warning"])	keep	refused	refused
+launcher	packages/launcher/tests/test_defaults.py	assert (row["refused"], row["warning"]) == (None, LIMIT_AT_LEFT_OUT)	keep	refused	refused
+launcher	packages/launcher/tests/test_defaults.py	assert (row["refused"], row["warning"]) == (None, COMPACT_LEFT_OUT)	keep	refused	refused
 launcher	packages/launcher/tests/test_defaults.py	change("limit_at", "set", "1x", ALL)	keep	set	set
-launcher	packages/launcher/tests/test_defaults.py	return super().check(value)	keep	ok	ok
 launcher	packages/launcher/tests/test_defaults.py	change("recycle_at_limit", "set", "compact", ALL)	keep	set	set
 launcher	packages/launcher/tests/test_defaults.py	changed, warnings = change("recycle_at_limit", "set", "relaunch", RECYCLES)	keep	set	set
 launcher	packages/launcher/tests/test_defaults.py	assert row["warning"] == REFUSED_BARE + "." and row["refused"] is None	keep	refused	refused

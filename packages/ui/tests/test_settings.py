@@ -767,7 +767,7 @@ def test_a_table_key_carries_its_table_fields_its_file_as_a_tilde_and_applies_as
     from moxi_ui.loopback.routes import project
 
     env = _table_env(tmp_path)
-    item = _row("mode", "enum", "relaunch", "compact", env=env, values=["off", "compact"],
+    item = _row("mode", "enum", "relaunch", "off", env=env, values=["off"],
                 warning="A launch with no preset is refused.")
     key = settings.descriptor("demo", item, env=env)
     file = str(Layout("demo").config_dir(env) / "rows.toml")
@@ -777,7 +777,7 @@ def test_a_table_key_carries_its_table_fields_its_file_as_a_tilde_and_applies_as
     assert key["mark"] == APPLIES
     assert (key["warning"], key["refused"], key["clear_only"]) == (
         "A launch with no preset is refused.", None, False)
-    assert key["value"] == "relaunch" and key["values"] == ["off", "compact"]
+    assert key["value"] == "relaunch" and key["values"] == ["off"]
     assert key["table_error"] is None and key["changed"]
     project(key, settings.KEY_SHAPE, strict=True)
     typo = settings.descriptor("demo", _row("typo", "int", 3, env=env, clear_only=True,

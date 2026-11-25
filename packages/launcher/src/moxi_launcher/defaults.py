@@ -236,15 +236,9 @@ def _doc(rows: tuple[catalog.Row, ...]) -> str:
 
 def _held_elsewhere(name: str, held: Mapping[str, object]) -> list[str]:
     """The launcher's words for a `[defaults]` value some launches hold something else in
-    place of: a relaunch a scratch launch holds off, and a `limit_at` a relaunch launch
-    leaves out (while the catalog has one)."""
-    relaunch = held.get(presets.RECYCLE_AT_LIMIT) == "relaunch"
-    if name == presets.RECYCLE_AT_LIMIT and relaunch:
+    place of: a relaunch a scratch launch holds off."""
+    if name == presets.RECYCLE_AT_LIMIT and held.get(name) == "relaunch":
         return [_sentence(presets.SCRATCH_RECYCLE_OFF)]
-    left_out = getattr(presets, "LIMIT_AT_LEFT_OUT", None)
-    if (name == getattr(presets, "LIMIT_AT", None) and left_out and relaunch
-            and catalog.is_set(held.get(name))):
-        return [_sentence(left_out)]
     return []
 
 
@@ -272,7 +266,8 @@ def _lines(held: Mapping[str, object], avail,
             if problem.level == presets.ERROR:
                 out.setdefault(key, ([], []))[0].append(f"{problem.problem}; {problem.hint}")
             elif problem.code == "retired":
-                out.setdefault(key, ([], []))[1].append(_left_out_words(problem))
+                out.setdefault(key, ([], []))[1].append(
+                    presets.left_out_words(problem.problem, problem.hint))
             elif key not in unmet:
                 out.setdefault(key, ([], []))[1].append(f"{problem.problem}; {problem.hint}")
     for name, (problem, hint) in unmet.items():
@@ -301,11 +296,6 @@ def _unlisted(held: Mapping[str, object], avail) -> set[str]:
     """The keys `held` holds for a row this machine doesn't offer."""
     return {problem.key for problem in presets.defaults_problems(held, available=avail)
             if _is_unoffered(problem)}
-
-
-def _left_out_words(problem: presets.Problem) -> str:
-    """A retired row or value's warning: `<what> is left out: <what to do instead>`."""
-    return f"{problem.problem.removesuffix(' is retired')} is left out: {problem.hint}"
 
 
 def _said(lines: list[str]) -> str | None:

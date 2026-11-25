@@ -1822,7 +1822,7 @@ def test_check_warns_of_a_defaults_value_a_bare_launch_refuses(monkeypatch):
                       "a launch with no preset is refused: relaunch at limit needs slots "
                       "and a slot launch",
                       "launch it in a slot (--target slot) where tmux slots run, or "
-                      "recycle with compact")]
+                      "set recycle_at_limit off")]
     # A seat that launches in a slot meets no refusal, so only the warning is said.
     assert not errors('[defaults]\nrecycle_at_limit = "relaunch"\n'
                       '[seat.s]\ntarget = "slot"\n', only("turns", "usage", "slots"))
