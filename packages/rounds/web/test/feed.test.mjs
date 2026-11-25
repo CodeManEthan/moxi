@@ -117,6 +117,20 @@ test("a topic event replaces the value while the last read succeeded; otherwise 
   assert.equal(failed.feed.failure, null);
 });
 
+test("each value taken counts, a read's or a topic's, also at the same read_at; a failure does not", async () => {
+  const { feed } = feedOf([{ status: 200, data: UP }, { status: 500, data: null }, { status: 200, data: UP }]);
+  assert.equal(feed.taken, 0);
+  await feed.refresh();
+  assert.equal(feed.taken, 1);
+  // The same second's gather: read_at is as it was, and the value is still a new one.
+  feed.topic({ ...BOARD, waiting: { ...BOARD.waiting, not_shown: [] } });
+  assert.equal(feed.taken, 2);
+  await feed.refresh();
+  assert.equal(feed.taken, 2);
+  await feed.refresh();
+  assert.equal(feed.taken, 3);
+});
+
 test("a refresh during a read makes one more read; a closed feed drops what comes after", async () => {
   const { feed, reads } = feedOf([{ status: 200, data: UP }, { status: 200, data: UP }, { status: 200, data: UP }]);
   const first = feed.refresh();
