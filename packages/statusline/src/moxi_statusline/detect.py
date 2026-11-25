@@ -47,8 +47,8 @@ exited, so nothing it left running outlives the run. `HOME` is an empty folder i
 the throwaway folder, and every `XDG_*_HOME`, every `MOXI_*` variable but the core's start
 mark, and `CLAUDE_CONFIG_DIR` are unset, so a script's writes under its home and default
 folders land in the throwaway folder and go with it. A `~` or `$HOME` in the
-command's own text is replaced by the real home folder first, so the command is still
-found. Writes to absolute paths, and processes that leave the group, still escape. The
+command's own text is replaced by the real home folder first (with forward slashes under
+Git Bash), so the command is still found. Writes to absolute paths, and processes that leave the group, still escape. The
 throwaway folder is made fresh under the system temp folder and removed every time.
 
 **Reading the output.** Escape sequences (colours, links) are stripped, then each marker
@@ -377,7 +377,8 @@ def _also(text: str, cut: list[tuple[int, int]], root: str) -> str | None:
             keep[i] = False
     left = "".join(ch for ch, kept in zip(text, keep) if kept)
     name = re.escape(os.path.basename(root))
-    left = re.sub(rf"(?:[^\s/]*/)*{name}(?:/|(?![\w]))", "", left)
+    seps = re.escape(os.sep + (os.altsep or ""))
+    left = re.sub(rf"(?:[^\s{seps}]*[{seps}])*{name}(?:[{seps}]|(?![\w]))", "", left)
     rows = [" ".join(line.split()) for line in left.split("\n")]
     rows = [row for row in rows if row]
     return " | ".join(rows) if rows else None
@@ -484,6 +485,8 @@ def detect(command: str, *, tmp: str | None = None, now: Callable[[], float] = t
             real_home = str(paths.home(base))
         except LookupError:
             real_home = None
+        if real_home is not None and shell.find(run_env).kind == "bash":
+            real_home = real_home.replace("\\", "/")  # Git Bash drops a bare backslash
         line = command if real_home is None else homed(command, real_home)
         data = json.dumps(drawn.payload()).encode("utf-8")
         try:

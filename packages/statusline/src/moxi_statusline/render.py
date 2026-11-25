@@ -46,6 +46,7 @@ import sys
 RENDER_IMPORTS = (
     "moxi",
     "moxi._mark",
+    "moxi._win",
     "moxi.config",
     "moxi.modules",
     "moxi.names",

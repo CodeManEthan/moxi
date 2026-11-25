@@ -32,6 +32,11 @@ The first version.
   name. Under PowerShell `pieces` measures nothing and says its commands need Git Bash.
   The test run ends what the line left running once it exits on every system, through
   the core's `run(..., end_tree=True)`.
+- Moxi's line is written for the shell Claude Code runs it with: on Windows, under Git
+  Bash with forward slashes and bash's quoting, since bash drops the backslashes of a bare
+  Windows path and the line didn't run; under PowerShell as `& '<path>'`. The form written
+  before still counts as Moxi's line, so the next switch rewrites it. `pieces`' commands
+  use the Git Bash form.
 - `moxi statusline status [--json]`.
 - `moxi statusline pieces` prints those commands, cache's timer first, with each one's
   measured time.

@@ -5,6 +5,7 @@ Bytecode goes under a prefix in the test's tmp (`sys.pycache_prefix`), so compil
 core writes nothing beside its sources."""
 
 import sys
+from pathlib import Path
 
 import pytest
 from statusline_kit import FROM_INPUT
@@ -39,7 +40,7 @@ def alpha(seen):
 
 
 def rel(paths, root):
-    return sorted(str(p).removeprefix(str(root) + "/") for p in paths)
+    return sorted(Path(p).relative_to(root).as_posix() for p in paths)
 
 
 def test_the_closure_inside_the_segments_package(alpha):
@@ -107,7 +108,7 @@ def test_the_doctor_row_names_a_stale_segment_file(alpha, prefix):
     (alpha.root / "moxi_alpha/helper.py").write_text("X = 100\n")
     row = bytecode_row(["alpha"])
     assert row.state == "warn"
-    assert "moxi_alpha/helper.py" in row.detail
+    assert str(Path("moxi_alpha", "helper.py")) in row.detail
     assert bytecode_row([]).state == "ok"
 
 

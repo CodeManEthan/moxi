@@ -22,7 +22,7 @@ from statusline_kit import config_file, write_config
 from moxi import config, modules, paths
 from moxi_dev.testing import PROC_WAIT_S
 from moxi_statusline import compile as segments
-from moxi_statusline import page, pagehandlers
+from moxi_statusline import page, pagehandlers, switch
 
 TOKEN = "T" * 43
 SERVER_ID = "0123456789abcdef0123456789abcdef"
@@ -312,7 +312,7 @@ def test_a_held_lock_is_a_409_and_writes_nothing(monkeypatch):
         [sys.executable, "-c", HOLD, str(path.with_name(path.name + ".lock"))],
         stdin=subprocess.PIPE, stdout=subprocess.PIPE)
     try:
-        assert holder.stdout.readline() == b"held\n"
+        assert holder.stdout.readline().rstrip() == b"held"
         status, body = post("/api/save", draft({"color": False}))
     finally:
         holder.stdin.close()
@@ -412,8 +412,8 @@ def test_use_with_no_line_switches_to_moxis():
     assert status == 200, body
     assert body["claude"]["moxis"] and body["claude"]["here"]
     assert body["said"]
-    assert json.loads(settings_file().read_text())["statusLine"]["command"].endswith(
-        "moxi-statusline-render")
+    assert json.loads(settings_file().read_text())["statusLine"]["command"] == \
+        switch.render_command()
     # use writes no config.
     assert not config_file().exists()
 

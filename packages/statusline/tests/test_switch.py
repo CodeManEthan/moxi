@@ -81,12 +81,62 @@ def test_a_wrapper_script_that_calls_the_render_is_not_moxis(tmp_path):
 
 
 def test_the_command_written_is_this_environments_render_and_counts_as_moxis():
-    command = here()
-    assert command.endswith("moxi-statusline-render")
-    assert os.path.isabs(command)
-    assert switch.is_moxis({"command": command})
-    assert switch.render_command("/a b/bin/moxi-statusline-render") == \
+    path = switch.moxis_path({"command": here()})
+    assert path is not None and os.path.samefile(path, switch.render_path())
+    assert switch.render_command("/a b/bin/moxi-statusline-render", kind="sh") == \
         "'/a b/bin/moxi-statusline-render'"
+
+
+# The Windows forms are read with Windows' path rules on every system.
+WINDOWS_RENDER = r"C:\Users\you\it's here\Scripts\moxi-statusline-render.exe"
+
+
+@pytest.mark.parametrize(("kind", "command"), [
+    ("bash", "'C:/Users/you/it'\"'\"'s here/Scripts/moxi-statusline-render.exe'"),
+    ("powershell", "& 'C:\\Users\\you\\it''s here\\Scripts\\moxi-statusline-render.exe'"),
+])
+def test_a_windows_command_is_written_for_its_shell_and_is_moxis(monkeypatch, kind, command):
+    monkeypatch.setattr(switch, "_WINDOWS", True)
+    assert switch.render_command(WINDOWS_RENDER, kind=kind) == command
+    assert switch.moxis_path({"command": command}).replace("/", "\\") == WINDOWS_RENDER
+
+
+@pytest.mark.parametrize("command", [
+    r"C:\env\Scripts\moxi-statusline-render.exe",
+    r'"C:\with space\Scripts\moxi-statusline-render.exe"',
+    "C:/env/Scripts/moxi-statusline-render.exe",
+    "'C:/with space/Scripts/MOXI-STATUSLINE-RENDER.EXE'",
+    r"& 'C:\env\Scripts\moxi-statusline-render.exe'",
+    r"  &'C:\env\Scripts\moxi-statusline-render'  ",
+])
+def test_every_windows_form_and_the_old_one_are_moxis(monkeypatch, command):
+    monkeypatch.setattr(switch, "_WINDOWS", True)
+    assert switch.is_moxis({"type": "command", "command": command})
+
+
+@pytest.mark.parametrize("command", [
+    r"& C:\env\Scripts\moxi-statusline-render.exe",
+    r"& 'C:\env\Scripts\moxi-statusline-render.exe' --only cache",
+    r"& 'C:\it's\moxi-statusline-render.exe'",
+    "C:/env/Scripts/moxi-statusline-render.exe --only cache",
+    "'C:/unclosed/moxi-statusline-render.exe",
+    r"Scripts\moxi-statusline-render.exe",
+    "moxi-statusline-render.exe",
+    r"C:\env\Scripts\moxi-statusline-render-wrapper.exe",
+])
+def test_other_windows_lines_are_not_moxis(monkeypatch, command):
+    monkeypatch.setattr(switch, "_WINDOWS", True)
+    assert not switch.is_moxis({"type": "command", "command": command})
+
+
+def test_a_line_in_the_old_windows_form_is_rewritten_by_the_switch(monkeypatch):
+    monkeypatch.setattr(switch, "_WINDOWS", True)
+    write_settings({"statusLine": {"type": "command",
+                                   "command": r"C:\env\Scripts\moxi-statusline-render.exe"}})
+    act = switch.switch(None, by="test")
+    assert act.ok and act.kind == "refreshed"
+    assert settings()["statusLine"]["command"] == here()
+    assert not switch.previous_path().exists()
 
 
 # -- the switch ------------------------------------------------------------------------
@@ -343,6 +393,7 @@ def test_project_lines_finds_a_projects_own_line(tmp_path):
     assert switch.project_lines(tmp_path) == []
 
 
+@pytest.mark.skipif(os.name != "posix", reason="Windows takes no write away by a folder's mode")
 def test_a_dir_that_cant_be_written_is_said_and_changes_nothing():
     raw = write_settings({"statusLine": {"type": "command", "command": "/x/l.sh"}})
     settings_dir = settings_file().parent

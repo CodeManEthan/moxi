@@ -3,6 +3,9 @@
 from statusline_kit import write_config
 
 import json
+import os
+import shlex
+import sys
 
 from moxi import paths
 from moxi.doctor import Row
@@ -80,9 +83,11 @@ def test_no_status_line_is_ok():
 
 
 def test_moxis_line_here_is_ok():
-    _line(switch.render_command())
+    command = switch.render_command()
+    _line(command)
     row = doctor.command_row()
-    assert row.state == "ok" and row.detail.startswith("Moxi's line, /")
+    assert (row.state, row.detail) == (
+        "ok", f"Moxi's line, {switch.moxis_path({'command': command})}")
 
 
 def test_moxis_line_at_a_path_that_is_gone_fails():
@@ -105,14 +110,21 @@ def test_moxis_line_in_another_env_warns(tmp_path):
     assert row.state == "warn" and "another environment's render" in row.detail
 
 
-def test_an_own_line_is_checked_by_its_first_word(tmp_path):
+def test_an_own_line_is_checked_by_its_first_word(tmp_path, monkeypatch):
     script = tmp_path / "line.sh"
     script.write_text("#!/bin/sh\n")
     script.chmod(0o755)
-    _line(f"{script} --flag")
+    # Written as the shell reads it: Git Bash on Windows drops a bare backslash.
+    _line(f"{shlex.quote(script.as_posix())} --flag")
     row = doctor.command_row()
-    assert row.state == "ok" and str(script) in row.detail
-    _line("sh -c 'echo hi'")
+    assert row.state == "ok" and script.as_posix() in row.detail
+    tools_dir = tmp_path / "tools"
+    tool = tools_dir / ("own-tool.exe" if sys.platform == "win32" else "own-tool")
+    tools_dir.mkdir()
+    tool.write_text("")
+    tool.chmod(0o755)
+    monkeypatch.setenv("PATH", str(tools_dir) + os.pathsep + os.environ.get("PATH", ""))
+    _line("own-tool -c 'echo hi'")
     assert doctor.command_row().state == "ok"
     _line(str(tmp_path / "missing.sh"))
     row = doctor.command_row()

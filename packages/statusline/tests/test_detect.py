@@ -24,9 +24,11 @@ from moxi_statusline import detect, offers
 SEGMENTS = ["cache", "usage"]
 DEFAULT = ["dir", "branch", "model", "effort", "context", "usage", "cache"]
 
-#: Prints every piece on two rows, with colours, labels and separators.
+#: Prints every piece on two rows, with colours, labels and separators, in UTF-8 (a pipe's
+#: own encoding on Windows can't write the separator).
 ALL = r"""
 import json, os, subprocess, sys
+sys.stdout.reconfigure(encoding="utf-8")
 d = json.load(sys.stdin)
 b = subprocess.run(["git", "branch", "--show-current"], capture_output=True,
                    text=True).stdout.strip()
@@ -124,6 +126,7 @@ def test_colours_and_an_osc8_link_are_stripped(line, throwaway):
 def test_extra_text_is_shown_as_it_is(line, throwaway):
     found = run(line("""
         import json, sys
+        sys.stdout.reconfigure(encoding="utf-8")
         d = json.load(sys.stdin)
         print(f"up 3d │ {d['model']['display_name']}")
     """), throwaway)
@@ -339,7 +342,7 @@ def test_writes_under_home_land_in_the_throwaway_dir(line, throwaway, tmp_path):
 
 def test_a_command_naming_home_is_found(throwaway):
     script = Path(os.environ["HOME"]) / "my line.py"
-    script.write_text(ALL)
+    script.write_text(ALL, encoding="utf-8")
     found = run(f"{shlex.quote(sys.executable)} ~/'my line.py'", throwaway)
     assert found.problem is None and "model" in found.pieces()
     found = run(f'{shlex.quote(sys.executable)} "$HOME/my line.py"', throwaway)

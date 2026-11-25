@@ -7,10 +7,13 @@ teardown) and `remove` (the teardown, when nothing was saved). The render never 
 this module: a render writes nothing.
 
 **Moxi's line** is a `statusLine` whose `command` is one absolute path, any
-environment's, to a file named `moxi-statusline-render`. A path with a space is written
-shell-quoted, as one word, and still counts. A user's own script that calls the render,
-or a bare `moxi-statusline-render` found on PATH, is not Moxi's line: it is theirs, and
-statusline leaves it alone.
+environment's, to a file named `moxi-statusline-render`. The path is written for the shell
+Claude Code runs the line with (`shell.find`): quoted by sh's rules on POSIX; on Windows,
+under Git Bash with forward slashes and quoted by bash's rules, and under PowerShell as
+`& '<path>'`. Each of those counts, on Windows also the form written before (the path
+with backslashes, double-quoted when it has a space), so the next switch rewrites it. A
+user's own script that calls the render, or a bare `moxi-statusline-render` found on
+PATH, is not Moxi's line: it is theirs, and statusline leaves it alone.
 
 **The write.** Each act reads the file once with `moxi.harnessfile.Doc` and writes it
 once with `moxi.harnessfile.write`: a file that is not a plain JSON object is refused and
@@ -36,6 +39,7 @@ say. It prints nothing itself, so the verbs, setup and the page each show it the
 from __future__ import annotations
 
 import json
+import ntpath
 import os
 import shlex
 from collections.abc import Mapping, Sequence
@@ -43,6 +47,8 @@ from pathlib import Path
 
 from moxi import exit as codes
 from moxi import files, harnessfile, paths
+
+from . import shell
 
 MODULE = "statusline"
 #: The console script Moxi's line runs.
@@ -158,22 +164,43 @@ def moxis_path(value) -> str | None:
     if command is None:
         return None
     if _WINDOWS:
-        word = command.strip()
+        return _windows_path(command)
+    word = _one_word(command)
+    if word is not None and os.path.isabs(word) and os.path.basename(word) == SCRIPT:
+        return word
+    return None
+
+
+def _one_word(command: str) -> str | None:
+    """`command` as one word by sh's rules, or None when it is more or can't be read."""
+    try:
+        words = shlex.split(command)
+    except ValueError:
+        return None
+    return words[0] if len(words) == 1 else None
+
+
+def _windows_path(command: str) -> str | None:
+    """The render's path in a Windows `command`, in any form `render_command` writes there
+    or the form written before; None when it is none of them."""
+    word = command.strip()
+    if word.startswith("&"):
+        # PowerShell: the call operator and a single-quoted path, its ' doubled.
+        word = word[1:].strip()
+        inner = word[1:-1]
+        if len(word) < 2 or word[0] != "'" or word[-1] != "'" or "'" in inner.replace("''", ""):
+            return None
+        word = inner.replace("''", "'")
+    elif "\\" in word:
+        # The form written before: the path as it is, double-quoted when it has a space.
         if len(word) > 1 and word[0] == word[-1] == '"':
             word = word[1:-1]
-        names = (SCRIPT, SCRIPT + ".exe")
-        name = os.path.basename(word).lower()
     else:
-        try:
-            words = shlex.split(command)
-        except ValueError:
+        # Git Bash: forward slashes, quoted by bash's rules.
+        word = _one_word(word)
+        if word is None:
             return None
-        if len(words) != 1:
-            return None
-        word = words[0]
-        names = (SCRIPT,)
-        name = os.path.basename(word)
-    if os.path.isabs(word) and name in names:
+    if ntpath.isabs(word) and ntpath.basename(word).lower() in (SCRIPT, SCRIPT + ".exe"):
         return word
     return None
 
@@ -188,12 +215,19 @@ def render_path() -> str:
     return str(paths.script(SCRIPT))
 
 
-def render_command(path: str | None = None) -> str:
+def render_command(path: str | None = None, *, kind: str | None = None,
+                   env: Mapping[str, str] | None = None) -> str:
     """The `command` of Moxi's line for `path` (default: this environment's render), one
-    word for the shell Claude Code runs it with."""
+    word for the shell `kind` (one of `shell.KINDS`; None: the one Claude Code runs a line
+    with under `env`, `shell.find`). `sh` quotes the path by sh's rules; `bash`, Git Bash
+    on Windows, turns its backslashes to forward slashes first, since bash drops a bare
+    backslash; `powershell` writes `& '<path>'`, a ' in the path doubled."""
     path = render_path() if path is None else path
-    if _WINDOWS:
-        return f'"{path}"' if " " in path else path
+    kind = shell.find(env).kind if kind is None else kind
+    if kind == "powershell":
+        return "& '" + path.replace("'", "''") + "'"
+    if kind == "bash":
+        path = path.replace("\\", "/")
     return shlex.quote(path)
 
 

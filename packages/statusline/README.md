@@ -79,7 +79,11 @@ neither, it runs `powershell.exe -NoProfile -NonInteractive -Command`; Claude Co
 name no flags for PowerShell, so these are Moxi's.
 
 Moxi's line is a `statusLine` whose command is the absolute path of a
-`moxi-statusline-render`. A script of your own that calls it stays yours.
+`moxi-statusline-render`, written for that shell: on Linux and macOS quoted by sh's rules;
+on Windows under Git Bash with forward slashes (`C:/.../moxi-statusline-render.exe`,
+quoted by bash's rules when it needs it), and under PowerShell as `& '<path>'`. A line
+written before in the Windows form with backslashes still counts as Moxi's, and the next
+`moxi statusline use` rewrites it. A script of your own that calls the render stays yours.
 
 Each write keeps the old bytes of `settings.json` (the newest 5) in statusline's state
 folder, and is dropped, with one line, if the file changed since it was read. The file

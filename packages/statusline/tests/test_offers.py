@@ -53,7 +53,8 @@ def own(tmp_path):
     script = tmp_path / "lines" / "line.py"
     script.parent.mkdir()
     ran = tmp_path / "ran"
-    script.write_text(f"open({str(ran)!r}, 'a').write('ran\\n')\n" + textwrap.dedent(ALL))
+    script.write_text(f"open({str(ran)!r}, 'a').write('ran\\n')\n" + textwrap.dedent(ALL),
+                      encoding="utf-8")
     value = {"type": "command",
              "command": f"{shlex.quote(sys.executable)} {shlex.quote(str(script))}",
              "padding": 1}

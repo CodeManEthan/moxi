@@ -77,7 +77,8 @@ def ordered(modules: Sequence[str]) -> list[str]:
 
 def pieces(segments: Sequence[str] | None = None, *, render: str | None = None) -> list[Piece]:
     """The pieces of the installed modules with a segment (`segments`, found when None).
-    `render` is the render's command (this environment's when None; raises
+    `render` is the render's command (this environment's when None, written for bash
+    where Claude Code runs a line through PowerShell, since the commands are bash; raises
     `FileNotFoundError` when it isn't installed)."""
     if segments is None:
         from .compile import present_segments
@@ -86,7 +87,8 @@ def pieces(segments: Sequence[str] | None = None, *, render: str | None = None) 
     if render is None:
         from .switch import render_command
 
-        render = render_command()
+        kind = shell.find().kind
+        render = render_command(kind="bash" if kind == "powershell" else kind)
     return [Piece(module, label(module),
                   f"printf '%s' \"$input\" | {render} --only {module}")
             for module in ordered(segments)]
