@@ -18145,3 +18145,4 @@ statusline	packages/statusline/src/moxi_statusline/shell.py	#: The kinds of shel
 statusline	packages/statusline/src/moxi_statusline/shell.py	__all__ = ["Shell", "find", "GIT_BASH_PATH_ENV", "BASH_NAMES", "POWERSHELL", "KINDS"]	keep	find	find
 statusline	packages/statusline/tests/test_shell.py	path.parent.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
 statusline	packages/statusline/tests/test_shell.py	assert not any("not measured" in line for line in out)	keep	any	any
+statusline	packages/statusline/tests/test_detect.py	return home, dict(os.environ, HOME=str(home), USERPROFILE=str(home))	keep	HOME	HOME
