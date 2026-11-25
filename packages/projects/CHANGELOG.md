@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- The facts contract has a second joined phrase. A report may give a line `runs` (its
+  session runs now), a part `idle_only` (it holds only while that session is not in a
+  turn) and `live`, by claim, `{in_turn, state}`, at most 100. On the opened project, a
+  running line whose one session every report's `live` agrees is in a turn is drawn
+  without its idle-only parts and ends with that word: `planner · headless · working`. A
+  claim the reports disagree on, or one claimed by two lines, is drawn as given. The new
+  fields are optional, so the contract stays at version 1.
 - `Add a project` reads what is at the typed folder through moxi-ui's `readLater`, so the
   page root's `data-reading` mark counts that read from the keystroke until what it fills
   in is drawn, and a test's press waits for it. A user sees no change. The `ui` extra asks

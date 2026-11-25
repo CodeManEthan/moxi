@@ -67,11 +67,18 @@ export interface Part {
   text: string;
   claims?: string[];
   count?: { one: string; many: string };
+  /** A part that holds only while the line's session is not in a turn: a running line's
+   * `last active`. The page may leave it out when another module says the session is in
+   * one. */
+  idle_only?: true;
 }
 
 export interface Line {
   parts: Part[];
   claims?: string[];
+  /** The launcher's word that the line's session runs now: on each running launch's line,
+   * never on the `<n> more` line. */
+  runs?: true;
 }
 
 export interface Section {
@@ -278,14 +285,16 @@ export function launchSection(reads: Reads, key: string, when: When): Section | 
 }
 
 /** One running launch's line in the `Sessions` row: its name, how it runs, and when its
- * session was last active, each left out when it is none. It claims its session. */
+ * session was last active, each left out when it is none. It claims its session and says
+ * it runs (`runs`); its `last active` part holds only while the session is not in a turn
+ * (`idle_only`), so the page can join another module's word for a turn in its place. */
 export function sessionLine(entry: RunningEntry): Line {
   const parts: Part[] = [{ text: clip(entry.name || entry.request_id) }];
-  const runs = runsWhere(entry.where);
-  if (runs !== "") parts.push({ text: clip(runs) });
+  const where = runsWhere(entry.where);
+  if (where !== "") parts.push({ text: clip(where) });
   const at = entry.activity === null || epochOf(entry.activity.at) === null ? "" : clock(entry.activity.at);
-  if (at !== "") parts.push({ text: `last active ${at}` });
-  return { parts, claims: [claimOf(entry)] };
+  if (at !== "") parts.push({ text: `last active ${at}`, idle_only: true });
+  return { parts, claims: [claimOf(entry)], runs: true };
 }
 
 /** The `Sessions` row: a line per running launch, newest first; past the contract's cap,

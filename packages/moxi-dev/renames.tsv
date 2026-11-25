@@ -4232,6 +4232,7 @@ launcher	packages/launcher/tests/test_browser_phone_running.py	return any(entry[
 launcher	packages/launcher/tests/test_browser_phone_running.py	return any(entry["request_id"] == request_id and entry["coverable"]	keep	any	any
 launcher	packages/launcher/tests/test_browser_phone_running.py	shell = gateway_shell(tmp_path_factory.mktemp("gw"), options["site"], env=options["env"])	keep	env	env
 launcher	packages/launcher/tests/test_browser_phone_running.py	turns.script(sessions=sessions)	keep	sessions	sessions
+launcher	packages/launcher/tests/test_browser_project_facts.py	"stale": False, "ready": None, "at": now},	keep	stale	stale
 launcher	packages/launcher/tests/test_browser_project_facts.py	Path(root(shell, project.key)).mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
 launcher	packages/launcher/tests/test_browser_project_facts.py	assert set(kestrel) == {"sections"}, kestrel	keep	set	set
 launcher	packages/launcher/tests/test_browser_project_facts.py	assert set(report["projects"]) == {"atlas-api", "harbor-infra", "kestrel-web"}	keep	set	set
@@ -8604,6 +8605,7 @@ projects	packages/projects/tests/conftest.py	path.parent.mkdir(parents=True, exi
 projects	packages/projects/tests/conftest.py	self.packages: set[str] = set()	keep	set	set
 projects	packages/projects/tests/conftest.py	store_path.parent.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
 projects	packages/projects/tests/fixture/moxi_fixture/page.py	STATE.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
+projects	packages/projects/tests/projects_page_kit.py	if any(topic.startswith("turns.") and topic not in TURNS_TOPICS for topic in topics):	keep	any	any
 projects	packages/projects/tests/projects_page_kit.py	site.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
 projects	packages/projects/tests/projects_page_kit.py	info.mkdir(exist_ok=True)	keep	exist_ok	exist_ok
 projects	packages/projects/tests/projects_page_kit.py	(site / "sitecustomize.py").write_text(_HIDE.format(names=set(hidden)), encoding="utf-8")	keep	set	set
@@ -15590,6 +15592,7 @@ turns	packages/turns/tests/test_page.py	assert reader.value()["sessions"] == []	
 turns	packages/turns/tests/test_page.py	assert routes["/api/events"]["topics"]["sessions"]["items"] == {	keep	sessions	sessions
 turns	packages/turns/tests/test_page.py	assert set(keys(data)) == {a.dir.name, b.dir.name}	keep	set	set
 turns	packages/turns/tests/test_page.py	assert set(keys(data)) == {key, "claude-hung"}	keep	set	set
+turns	packages/turns/tests/test_page.py	assert set(module.COMPONENTS) == {"page", "project-facts"}	keep	set	set
 turns	packages/turns/tests/test_page.py	assert set(module.OPTIONAL) == {"codex", "ui"}	keep	set	set
 turns	packages/turns/tests/test_page.py	assert {"deliver", "agents", "steer"} <= set(row["capabilities"])	keep	set	set
 turns	packages/turns/tests/test_page.py	await stream.until(lambda d: len(d["sessions"]) == 2, 5)	keep	sessions	sessions
