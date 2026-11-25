@@ -38,6 +38,11 @@ publishing = "moxi_publishing.module"
 "publishing.push" = "moxi_publishing.push:PUSH"
 "publishing.approval" = "moxi_publishing.approval:APPROVAL"
 
+# projects reads the questions `moxi projects add` puts, and acts on their answers, from
+# here; publishing never imports projects.
+[project.entry-points."moxi.projects"]
+publishing = "moxi_publishing.projects_link"
+
 [dependency-groups]
 dev = ["pytest", "moxi-dev"]
 

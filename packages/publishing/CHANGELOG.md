@@ -103,3 +103,13 @@ The first version.
   public flag, each with those three choices (`public`, `clean`, `approval` in
   `--json`); `moxi doctor publishing` fails a leftover `word-required = true` and warns on
   any other leftover value.
+- `moxi projects add` asks publishing's two questions for a new project whose root is in
+  a git repo (or one `--create` makes): keep the history publishable (suggested yes,
+  which runs clean-history enable), and ask for approval before agents push to some
+  branches (suggested no; a yes asks which, and an empty answer turns nothing on).
+  Without a terminal it asks nothing and names both commands. The settings
+  `project_add.clean_history` and `project_add.push_approval` (`ask`, `yes` or `no`,
+  default `ask`) and `project_add.approval_branches` answer for the machine: with `yes`
+  or `no` the add asks nothing for that choice and applies it. publishing contributes
+  through projects' `moxi.projects` group, interface 3, and needs a projects that reads
+  it.

@@ -99,6 +99,34 @@ The message and content pieces run where the repo is marked clean or public; a p
 repo counts as clean, so a repo enabled before clean history existed needs nothing.
 Registered in a repo marked neither, they refuse every commit, naming both commands.
 
+## At project add
+
+Where projects is installed, `moxi projects add` asks two questions for a new project
+whose root is in a git repo, or whose `--create` makes one:
+
+- "Keep this repo's history publishable (clean commit messages, no private text)?",
+  suggested yes. Yes runs `moxi publishing clean-history enable` on the repo.
+- "Ask for approval before agents push to some branches?", suggested no. Yes asks which
+  branches (patterns, separated by spaces), with no suggestion; the patterns named go to
+  `moxi publishing approval enable`, and an empty answer turns nothing on.
+
+The add asks only with a terminal on both stdin and stdout. Run from a script or an
+agent's shell, it turns nothing on and prints each question with the command that sets it
+later. The Projects page's Add panel shows the same questions as fields.
+
+Three settings answer for the machine, so the add asks nothing for that choice and
+applies it, in a terminal or not:
+
+| key | values | default |
+|---|---|---|
+| `project_add.clean_history` | `ask`, `yes`, `no` | `ask` |
+| `project_add.push_approval` | `ask`, `yes`, `no` | `ask` |
+| `project_add.approval_branches` | branch patterns | `[]` |
+
+With `push_approval = "yes"` and no branches listed, a terminal add asks for them, and any
+other add turns nothing on and says so. The questions read no repo's git config, so a repo
+that already keeps a clean history is asked again; a yes then changes nothing.
+
 ## Settings
 
 Each piece's settings live in the repo's git config, so the git hooks read nothing outside

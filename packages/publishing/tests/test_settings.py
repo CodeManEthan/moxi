@@ -49,7 +49,10 @@ def test_show_json_gives_every_key_a_label_and_a_line(capsys):
         "push.word_pattern": "What a push word must look like",
         "defaults.drop_trailers": "Trailers to drop, for a new repo",
         "defaults.refused_trailers": "Trailers a clean repo refuses",
-        "defaults.main": "The main branch, for a new repo"}
+        "defaults.main": "The main branch, for a new repo",
+        "project_add.clean_history": "Clean history at project add",
+        "project_add.push_approval": "Push approval at project add",
+        "project_add.approval_branches": "Branches guarded at project add"}
     assert all(key["line"] for key in keys.values())
     for key in keys.values():
         assert key["common"] is False and key["group"] is None and key["unit"] is None

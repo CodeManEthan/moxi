@@ -52,3 +52,30 @@ line = "Copied in when enable first registers the push piece in a repo: the bran
 [defaults.word_required]
 retired = "remove it: the push word is push approval's now (moxi publishing approval enable PATH --branch PATTERN)"
 left_out = true
+
+[project_add.clean_history]
+type = "enum"
+values = ["ask", "yes", "no"]
+default = "ask"
+doc = "What `moxi projects add` does about clean history for a new project whose root is in a git repo: ask (the add asks in a terminal, suggesting yes, and names the command otherwise), yes (turn it on, asking nothing) or no (leave it off, asking nothing)."
+read = "use"
+label = "Clean history at project add"
+line = "Whether adding a project asks to keep its repo's history publishable, or answers for you."
+
+[project_add.push_approval]
+type = "enum"
+values = ["ask", "yes", "no"]
+default = "ask"
+doc = "What `moxi projects add` does about push approval for a new project whose root is in a git repo: ask (the add asks in a terminal, suggesting no, and names the command otherwise), yes (turn it on for project_add.approval_branches, asking for branches in a terminal when none are listed) or no (leave it off, asking nothing)."
+read = "use"
+label = "Push approval at project add"
+line = "Whether adding a project asks to guard agents' pushes to some branches, or answers for you."
+
+[project_add.approval_branches]
+type = "list"
+items = "str"
+default = []
+doc = "The branch patterns push approval guards when project_add.push_approval is yes (`*`, `?` and `[...]` over the branch name). Empty: the add asks for them in a terminal, and without one turns nothing on and says so."
+read = "use"
+label = "Branches guarded at project add"
+line = "The branches a new project's push approval guards when it is turned on for you."
