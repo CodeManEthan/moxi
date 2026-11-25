@@ -74,9 +74,12 @@ def source_of(values: Mapping[str, Any], name: str = RECYCLE_AT_LIMIT) -> str | 
 def missing(*, harness: str, target: str | None, in_slot: bool, cwd: str | None,
             values: Mapping[str, Any], source: str | None,
             slots_here: Callable[[], bool] | None = None,
-            env: Mapping[str, str] | None = None, told: bool = False) -> Missing | None:
+            env: Mapping[str, str] | None = None, told: bool = False,
+            check_handoffs: bool = True) -> Missing | None:
     """The first item a launch fails, or None when its session can recycle itself (with
-    `told`, and is told it may at its warn-at mark: items 1 to 6, else 1 to 5).
+    `told`, and is told it may at its warn-at mark: items 1 to 6, else 1 to 5). Without
+    `check_handoffs` item 5 is not tested: `presets check` has no launch folder to test it
+    on, and leaves it to the launch.
     `in_slot` says the launch runs in a slot (a launch not yet placed: that its target is
     one). `values` are the launch's values; `source` is where `recycle_at_limit` came from
     (None when that was not recorded). `slots_here` stands in for `catalog.slots_here`.
@@ -85,10 +88,12 @@ def missing(*, harness: str, target: str | None, in_slot: bool, cwd: str | None,
     value = values.get(RECYCLE_AT_LIMIT)
     if value == RELAUNCH:
         return _cannot(harness=harness, target=target, in_slot=in_slot, cwd=cwd,
-                       values=values, slots_here=slots_here, env=env, told=told)
+                       values=values, slots_here=slots_here, env=env, told=told,
+                       check_handoffs=check_handoffs)
     if value == "off" and source == LEFT_OUT:
         found = _cannot(harness=harness, target=target, in_slot=in_slot, cwd=cwd,
-                        values=values, slots_here=slots_here, env=env, told=told)
+                        values=values, slots_here=slots_here, env=env, told=told,
+                        check_handoffs=check_handoffs)
         if found is not None:
             return found
         said = "holds recycle_at_limit off"
@@ -104,8 +109,10 @@ def missing(*, harness: str, target: str | None, in_slot: bool, cwd: str | None,
 
 def _cannot(*, harness: str, target: str | None, in_slot: bool, cwd: str | None,
             values: Mapping[str, Any], slots_here: Callable[[], bool] | None,
-            env: Mapping[str, str] | None, told: bool) -> Missing | None:
-    """The first of items 2 to 5 the launch fails, and with `told` item 6, or None."""
+            env: Mapping[str, str] | None, told: bool,
+            check_handoffs: bool = True) -> Missing | None:
+    """The first of items 2 to 5 the launch fails (2 to 4 without `check_handoffs`), and
+    with `told` item 6, or None."""
     if harness != "claude":
         return Missing(HARNESS, f"is a {harness} launch, and only a Claude session can be "
                                 "exited and relaunched", "launch the seat on Claude")
@@ -121,8 +128,9 @@ def _cannot(*, harness: str, target: str | None, in_slot: bool, cwd: str | None,
     from . import handoffs
 
     try:
-        handoffs.handoff_dir(str(cwd or "."), notes_dir=values.get("notes_dir") or None,
-                             env=env, create=False, create_own=False)
+        if check_handoffs:
+            handoffs.handoff_dir(str(cwd or "."), notes_dir=values.get("notes_dir") or None,
+                                 env=env, create=False, create_own=False)
     except handoffs.NoNotesDir as exc:
         return Missing(HANDOFFS, exc.problem.removeprefix("this launch "), exc.hint)
     mark = values.get(WARN_AT)

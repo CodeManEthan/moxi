@@ -654,8 +654,12 @@ is refused (`stop-mark`, exit 3) when it is not of the form `<k>x`, when the lau
 no `warn_at` mark (hint: set `warn_at` first), when it is not past `warn_at` (naming
 that mark), and when the launch can't relaunch itself (naming what it fails). One from
 `[defaults]` is left out, with a warning, of a launch that can't relaunch itself, and
-refused otherwise by the same rules. The launch stamps the mark as `MOXI_USAGE_STOP_AT`
-and its handoff folder as `MOXI_USAGE_STOP_HANDOFFS`. A fork drops it.
+refused otherwise by the same rules. `presets check` flags a preset's `stop_at` by the
+same rules, as an error for the form and `warn_at` and as a warning where a launch of
+the preset can't relaunch itself (`recycle_at_limit` not `relaunch`, a Codex preset, a
+scratch folder); only the handoff folder, which needs the launch's folder, waits for the
+launch. The launch stamps the mark as `MOXI_USAGE_STOP_AT` and its handoff folder as
+`MOXI_USAGE_STOP_HANDOFFS`. A fork drops it.
 
 **Keep-warm.** `--keep-warm on` (needs turns and cache) nudges a session shortly before
 its prompt cache would expire while it waits on work it handed out. It is off unless a

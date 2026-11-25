@@ -394,7 +394,9 @@ def _value_rules(preset: Preset, values: Mapping[str, object],
     whose place, when it names one, replaces the one `[defaults]` names. As `resolve`
     holds them: on a scratch launch a `[defaults]` relaunch holds `off`, a `[defaults]`
     `limit_at` is left out of a relaunch launch, and a seat or Codex launch that sets no
-    `warn_at` holds none, so a `stop_at` it sets is refused here as at its launch."""
+    `warn_at` holds none, so a `stop_at` it sets is refused here as at its launch. A
+    `stop_at` the preset sets on a launch that can't relaunch itself is warned of
+    (`_stop_way_out`)."""
     harness = preset.harness if preset.harness in catalog.HARNESSES else base_harness
     rows = catalog.offered(harness, avail)
     effective = {name: row.default for name, row in rows.items()}
@@ -402,9 +404,10 @@ def _value_rules(preset: Preset, values: Mapping[str, object],
     if [k for k in PLACE if catalog.is_set(values.get(k))]:
         effective.update({k: rows[k].default for k in PLACE if k in rows})
     effective.update({k: v for k, v in values.items() if k in rows})
+    recycle_source = None
     if (effective.get("scratch") and RECYCLE_AT_LIMIT not in values
             and effective.get(RECYCLE_AT_LIMIT) == "relaunch"):
-        effective[RECYCLE_AT_LIMIT] = "off"
+        effective[RECYCLE_AT_LIMIT], recycle_source = "off", LEFT_OUT
     if (effective.get(RECYCLE_AT_LIMIT) == "relaunch" and LIMIT_AT not in values
             and LIMIT_AT in effective):
         effective[LIMIT_AT] = rows[LIMIT_AT].default
@@ -416,7 +419,37 @@ def _value_rules(preset: Preset, values: Mapping[str, object],
         catalog.refuse_values(harness, effective, chosen=values, available=avail)
     except Refused as exc:
         return [Problem.of(preset.where, exc.row, exc)]
+    if STOP_AT in values and catalog.is_set(effective.get(STOP_AT)):
+        return _stop_way_out(preset, harness, effective, recycle_source, avail)
     return []
+
+
+#: A preset's `stop_at` on a launch `presets check` can show can't relaunch itself.
+STOP_NO_WAY_OUT_PRESET = ("stop_at needs a launch that can relaunch itself, its one way "
+                          "out, and a launch of this preset {problem}, so each such launch "
+                          "refuses it")
+
+
+def _stop_way_out(preset: Preset, harness: str, effective: Mapping[str, object],
+                  recycle_source: str | None, avail) -> list[Problem]:
+    """A warning for a `stop_at` the preset sets where a launch of it, with nothing
+    typed, fails the self-relaunch test (`selfrecycle.missing`, armed) on an item the
+    preset shows: `recycle_at_limit` not relaunch, a Codex launch, a target other than a
+    slot, slots not running here, a scratch folder. The handoff folder needs the launch's
+    folder, and is left to the launch. A warning, not an error: a launch may type what
+    the preset lacks (`--target slot`)."""
+    from . import selfrecycle
+
+    target = effective.get("target")
+    found = selfrecycle.missing(
+        harness=harness, target=str(target or ""), in_slot=target == "slot", cwd=None,
+        values=effective, source=recycle_source,
+        slots_here=lambda: avail(slots.MODULE) and catalog.slots_here(),
+        check_handoffs=False)
+    if found is None:
+        return []
+    return [Problem(preset.where, STOP_AT, STOP_NO_WAY_OUT_PRESET.format(
+        problem=found.problem), found.hint, catalog.StopMark.code, WARNING)]
 
 
 def _check_defaults(table: Mapping[str, object], avail) -> tuple[dict, list[Problem]]:

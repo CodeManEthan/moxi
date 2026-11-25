@@ -78,6 +78,22 @@ def test_a_launch_with_no_notes_dir_has_no_handoff_dir(monkeypatch):
                              "it has no handoffs/ to read from")
 
 
+def test_without_check_handoffs_the_handoff_dir_is_left_untested(monkeypatch):
+    def homeless(cwd, **kw):
+        raise AssertionError("the handoff folder was looked up")
+
+    monkeypatch.setattr(handoffs, "handoff_dir", homeless)
+    r = row()
+    assert selfrecycle.missing(harness="claude", target="slot", in_slot=True, cwd=None,
+                               values=r.values, source=None, slots_here=lambda: True,
+                               check_handoffs=False) is None
+    # The other items are still tested.
+    found = selfrecycle.missing(harness="claude", target="slot", in_slot=True, cwd=None,
+                                values={**r.values, "scratch": True}, source=None,
+                                slots_here=lambda: True, check_handoffs=False)
+    assert found.item == selfrecycle.SCRATCH
+
+
 def test_the_handoff_dir_is_looked_up_without_being_made(monkeypatch):
     asked = []
     monkeypatch.setattr(handoffs, "handoff_dir", lambda cwd, **kw: asked.append(kw))

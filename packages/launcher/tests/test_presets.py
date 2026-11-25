@@ -1888,3 +1888,62 @@ def test_the_presets_check_flags_a_stop_with_no_warn_at_or_not_past_it(recyclabl
     # A project preset keeps the shipped 2x.
     assert not errors('[project.p]\ntarget = "slot"\nrecycle_at_limit = "relaunch"\n'
                       'stop_at = "2.5x"\n', SLOTTED)
+
+
+def stop_warnings(text, available=SLOTTED):
+    return [(p.where, p.key, p.code, p.problem, p.hint)
+            for p in problems(text, available) if p.level == presets.WARNING]
+
+
+@pytest.mark.parametrize("text, problem", [
+    ('[seat.s]\ntarget = "slot"\nwarn_at = "2x"\nstop_at = "2.5x"\n',
+     "has recycle_at_limit off, so it can't relaunch itself"),
+    ('[seat.s]\ntarget = "slot"\nwarn_at = "2x"\nrecycle_at_limit = "compact"\n'
+     'stop_at = "2.5x"\n',
+     "recycles at its limit by compacting, so it can't relaunch itself"),
+    ('[seat.s]\nharness = "codex"\n' + RELAUNCH_SEAT.removeprefix("[seat.s]\n")
+     + 'stop_at = "2.5x"\n',
+     "is a codex launch, and only a Claude session can be exited and relaunched"),
+    ('[defaults]\nrecycle_at_limit = "relaunch"\n[seat.s]\ntarget = "slot"\n'
+     'warn_at = "2x"\nscratch = true\nstop_at = "2.5x"\n',
+     "works in a scratch folder, and a scratch launch can't recycle itself"),
+])
+def test_the_presets_check_warns_of_a_stop_on_a_launch_that_cannot_relaunch_itself(
+        recyclable, text, problem):
+    # Every launch of such a preset refuses its stop_at; the check says so at the preset.
+    found = [w for w in stop_warnings(text) if w[1] == "stop_at"]
+    assert [w[:3] for w in found] == [("seat.s", "stop_at", "stop-mark")]
+    assert found[0][3] == ("stop_at needs a launch that can relaunch itself, its one way "
+                           f"out, and a launch of this preset {problem}, so each such "
+                           "launch refuses it")
+    assert not [p for p in errors(text, SLOTTED) if p.key == "stop_at"]
+
+
+@pytest.mark.parametrize("target", ['', 'target = "terminal"\n', 'target = "headless"\n'])
+def test_the_presets_check_refuses_a_stop_seats_relaunch_off_a_slot(recyclable, target):
+    # A relaunch off a slot is the check's error already; the stop adds no second word.
+    text = f'[seat.s]\n{target}warn_at = "2x"\nrecycle_at_limit = "relaunch"\n' \
+        'stop_at = "2.5x"\n'
+    assert [(p.key, p.code) for p in errors(text, SLOTTED)] == [
+        ("recycle_at_limit", "needs-module")]
+    assert not [w for w in stop_warnings(text) if w[1] == "stop_at"]
+
+
+def test_the_presets_check_refuses_a_stop_seats_relaunch_where_slots_does_not_run(
+        recyclable, monkeypatch):
+    monkeypatch.setattr(catalog, "slots_here", lambda: False)
+    assert [(p.key, p.code) for p in errors(STOP_SEAT, SLOTTED)] == [
+        ("recycle_at_limit", "needs-module")]
+    assert not [w for w in stop_warnings(STOP_SEAT) if w[1] == "stop_at"]
+
+
+def test_the_presets_check_leaves_the_handoff_dir_to_the_launch(recyclable, monkeypatch):
+    no_notes_dir(monkeypatch)
+    assert not [w for w in stop_warnings(STOP_SEAT) if w[1] == "stop_at"]
+    assert not [w for w in stop_warnings(STOP_SEAT) if w[2] == "stop-mark"]
+
+
+def test_the_presets_check_does_not_warn_of_a_defaults_stop(recyclable):
+    # A [defaults] stop_at is left out, with a warning, at a launch that can't take it.
+    text = '[defaults]\nstop_at = "2.5x"\nwarn_at = "2x"\n[seat.s]\ntarget = "slot"\n'
+    assert not [w for w in stop_warnings(text) if w[1] == "stop_at"]

@@ -18,7 +18,9 @@
   `warn_at` mark (set `warn_at` first), at or below `warn_at`, or on a launch that can't
   relaunch itself; one from `[defaults]` is left out of a launch that can't relaunch
   itself, with a warning. `presets check` flags a preset whose `stop_at` has no
-  `warn_at` mark under it or is not past it. A launch with a stop stamps
+  `warn_at` mark under it or is not past it, and warns of one on a launch it can show
+  can't relaunch itself (`recycle_at_limit` not `relaunch`, a Codex preset, a scratch
+  folder); the handoff folder is left to the launch. A launch with a stop stamps
   `MOXI_USAGE_STOP_AT` and `MOXI_USAGE_STOP_HANDOFFS` (its handoff folder) through usage's
   interface 3, and both join the stamps a launch from inside a session scrubs.
 - The `subconscious` row (`off`, `automatic`, `on-demand`; needs turns and memory) turns
