@@ -73,7 +73,8 @@ query keeps at most 64 tokens of at most 100 characters each.
 Each hit is two lines: its number, harness, session id, time (local, to the minute),
 project label and what the row is (`user`, `assistant`, `tool`, or `result` for the end
 of a tool result, with `failed` when the tool failed and `subagent <id>` on a subagent's
-row), then the matching part of the text with each match marked `«...»`. Under the hits
+row; a delivered message shows who delivered it in place of `user`: `hook` for a plugin's,
+comms mail among them, or `channel`, `peer`, `coordinator` or `task`), then the matching part of the text with each match marked `«...»`. Under the hits
 is one command that opens the first hit's session around its time:
 
 ```text
@@ -109,8 +110,9 @@ which holds the session table) doesn't, search exits 1 the same way and names th
 a rebuild doesn't repair it.
 
 `--json` prints one object: `tokens`, `rows`, `hits` (each with `harness`, `session_id`,
-`agent_id`, `time` in epoch seconds, `at` in UTC ISO 8601, `project`, `kind`, `tier` (`1`,
-`2` or `"subagent"`), `failed`, `snippet`, `score` and `read_command`, the command that
+`agent_id`, `time` in epoch seconds, `at` in UTC ISO 8601, `project`, `kind`, `writer`
+(the row's writer, `person`, `model`, `hook` and so on, or null for a result's end),
+`tier` (`1`, `2` or `"subagent"`), `failed`, `snippet`, `score` and `read_command`, the command that
 opens its session), `filling` (`{"sources_read", "listed"}` or null), `rebuild_started_at`
 (the rebuild's start in epoch seconds, or null), `top_read_command` (the first hit's
 `read_command`) and `notes` (the incomplete-answer lines). With no
@@ -197,7 +199,9 @@ archive folder not listed whole yet, one the last rebuild didn't read, and one s
 config no longer names); and the session table's
 count by launch kind and by whether a session has an identity, or that memory's state
 store, which holds the session table, can't be read (the index line is apart from it).
-With no index, or one that can't be read, it says so, still prints the rebuild and session lines, names `moxi memory
+For an index made before memory kept delivered messages (below), a `delivered messages:`
+line says it holds none for the sessions it had read and names `moxi memory reindex`;
+`--json` gives `keeps_delivered` false. With no index, or one that can't be read, it says so, still prints the rebuild and session lines, names `moxi memory
 reindex` unless a rebuild is running, and exits 1. `--json` prints the same as one object.
 
 ## What each session gets
@@ -319,17 +323,23 @@ A failed child (a setting memory can't use, a redaction set that won't run) leav
 
 | Tier | What | Kept per row | Searched |
 |---|---|---|---|
-| 1 | each `user` or `assistant` message of a main session, and each tool call, as its summary line and its input | a message's first 16,384 characters, a tool call's first 2,048 | always |
+| 1 | each `user` or `assistant` message of a main session, delivered messages included, and each tool call, as its summary line and its input | a message's first 16,384 characters, a tool call's first 2,048 | always |
 | 2 | the end of each main-session tool result, with whether the tool failed | the last `index.tail_chars` characters, 1,000 by default | with `--results` |
 | subagents | tier 1 rows of subagent sessions, under their main session's id | as tier 1 | with `--subagents`, and only while `index.include_subagents` is on |
 
 A cut text says how much went: `[... N more characters cut]` after a message, `[... N
 earlier characters cut]` before a tail.
 
-Not indexed: system and developer messages; messages the harness says it added itself,
-or that a plugin, a channel, another session or a background task submitted, whatever
-their role (sessions' `injected`); messages Claude Code flags as meta, and compaction
-summaries; reasoning; this module's own start line and reminder; markers, requests and
+Delivered messages are indexed: what a plugin (comms mail among them), a channel,
+another session (a peer or a coordinator) or a background task put into the session,
+each row naming who delivered it (sessions' `writer`: `hook`, `channel`, `peer`,
+`coordinator`, `task`), also when Claude Code flags the line as meta. An index made
+before memory kept them holds none for the sessions it had read; `moxi memory status`
+and `moxi doctor memory` say so, and one `moxi memory reindex` reads them in. Nothing
+reindexes by itself.
+
+Not indexed: system and developer messages; other messages the harness says it added
+itself, or flags as meta (sessions' writer `harness`), and compaction summaries; reasoning; this module's own start line and reminder; markers, requests and
 rate-limit readings; whole tool results; subagent tool results; and Codex threads that
 Codex imported from another harness, whose original is that harness's transcript.
 
@@ -678,7 +688,8 @@ failed ingest child.
   seconds or a
   `datetime` (no zone is local time). A `Result` holds `hits` (each a `Hit`: `harness`,
   `session_id`, always the main session's, `agent_id` on a subagent's hit, `time`,
-  `project`, `kind`, `tier`, `snippet`, `key`, `score` and `failed`), `rows` (how many rows
+  `project`, `kind`, `tier`, `snippet`, `key`, `score`, `failed` and `writer`), `rows` (how
+  many rows
   were searched), `tokens`, `filling` (a `Filling(read, listed)` while the first full read
   hasn't finished, else None), `rebuilding` (a running rebuild's start time, else None),
   `unread` (the archive folders no walk they answered has listed whole) and

@@ -104,7 +104,11 @@ def read_line(hit) -> str:
 
 
 def _kind(hit) -> str:
-    kind = hit.kind
+    """What a hit's line says it is: its kind, or a delivered row's writer, so a comms
+    message reads as delivered, not typed."""
+    from .rows import DELIVERED_WRITERS
+
+    kind = hit.writer if hit.writer in DELIVERED_WRITERS else hit.kind
     if hit.failed:
         kind += ", failed"
     if hit.agent_id:
@@ -177,7 +181,8 @@ def _search(args, out, prog: str) -> int:
             "hits": [{"harness": h.harness, "session_id": h.session_id,
                       "agent_id": h.agent_id, "time": h.time,
                       "at": None if h.time is None else searching.stamp(h.time),
-                      "project": h.project, "kind": h.kind, "tier": h.tier,
+                      "project": h.project, "kind": h.kind, "writer": h.writer,
+                      "tier": h.tier,
                       "failed": h.failed, "snippet": h.snippet, "score": h.score,
                       "read_command": read_line(h)} for h in result.hits],
             "filling": (None if result.filling is None else
@@ -313,6 +318,8 @@ def _status(args, out, prog: str) -> int:
               file=out)
         print(f"sources: {s.sources_read} read, {s.sources_not_read} not read "
               "(compressed Codex rollouts, which sessions can't read)", file=out)
+        if s.keeps_delivered is False:
+            print(f"delivered messages: {stat.DELIVERED_BEHIND}", file=out)
         walks = ", ".join(f"{h} {show(t)}" for h, t in sorted(s.last_walk.items()))
         print(f"last ingest: {show(s.last_ingest)}; last walk: "
               f"{walks or 'none yet'}", file=out)

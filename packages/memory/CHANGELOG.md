@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+- Delivered messages are indexed again: what a plugin (every comms message), a channel,
+  a peer, a coordinator or a background task put into a session enters tier 1 with its
+  writer (`hook`, `channel`, `peer`, `coordinator`, `task`), also when Claude Code
+  flags the line as meta. A message the harness composed, a compaction summary and a
+  thought stay out. `moxi memory search` finds them with no new flag, and a hit on one
+  prints who delivered it where a typed row prints `user`; `--json` hits gain `writer`.
+  A new generation records the rule in its `meta` (`keeps_delivered`); for one without
+  it, `moxi memory status` (`keeps_delivered` in `--json`) and `moxi doctor memory` say
+  it holds no delivered messages for the sessions it had read and name `moxi memory
+  reindex`. Nothing reindexes by itself.
 - The subconscious, memory's second way to recall: in a session launched with it on (the
   launcher's `subconscious` row, which stamps `MOXI_MEMORY_SUBCONSCIOUS`, exported as
   `api.SUBCONSCIOUS_ENV`), a second agent searches past sessions and notes and sends the

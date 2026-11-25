@@ -6,12 +6,18 @@ module only decides which of them count and what text each row holds.
 **Tier 1** (`Row`, the `rows` table) holds what a person or an agent wrote in the session:
 
 - each message whose role is `user` or `assistant`, that is not a thought (`reasoning`),
-  that sessions doesn't mark `injected`, that the harness doesn't flag as meta, and that
-  is not a compaction summary. A message sessions marks `injected` as unknown is kept;
+  and that sessions' `writer(record)` names as delivered (`DELIVERED_WRITERS`: a
+  plugin's, a channel's, a peer's, a coordinator's or a background task's message),
+  whatever its meta flag says;
+- each other such message that sessions doesn't mark `injected`, that the harness
+  doesn't flag as meta, and that is not a compaction summary. A message sessions marks
+  `injected` as unknown is kept;
 - each tool call, as its summary line and its input.
 
-Each tier 1 row records its writer, from sessions' `writer(record)`: `person`, `model`
-(a tool call's too), `unknown`, or the kind of a message sessions doesn't mark injected.
+A message the harness composed (writer `harness`), a compaction summary and a thought
+stay out. Each tier 1 row records its writer, from sessions' `writer(record)`:
+`person`, `model` (a tool call's too), `unknown`, one of `DELIVERED_WRITERS`, or the
+kind of a message sessions doesn't mark injected.
 
 **Tier 2** (`Tail`, the `tails` table) holds the end of each main-session tool result,
 `tail_chars` characters long, with whether the tool failed. A subagent's results give no
@@ -329,6 +335,12 @@ def keys(records: Iterable[Any], source_key: str) -> list[str]:
 
 # -- records to rows -------------------------------------------------------------------
 
+#: The writers of a message something delivered into the session, which tier 1 keeps:
+#: a plugin's (`hook`, every comms message among them), a channel's, a peer's, a
+#: coordinator's and a background task's.
+DELIVERED_WRITERS = ("hook", "channel", "peer", "coordinator", "task")
+
+
 def _known(value: Any) -> Any:
     """`value`, or None for the sessions' unknown sentinel and anything that is not a
     plain string or number."""
@@ -339,10 +351,14 @@ def _known(value: Any) -> Any:
     return None
 
 
-def tier_one_message(record: Any) -> bool:
-    """Whether a message record belongs in tier 1."""
+def tier_one_message(record: Any, writer: str | None = None) -> bool:
+    """Whether a message record belongs in tier 1. `writer` is the record's writer as
+    sessions' `writer(record)` names it: a delivered one (`DELIVERED_WRITERS`) is let
+    through before the injected and meta tests, which would drop it."""
     if record.role not in ("user", "assistant") or record.reasoning:
         return False
+    if writer in DELIVERED_WRITERS:
+        return bool(record.text and record.text.strip())
     if record.injected is True:
         return False
     flags = record.flags if isinstance(record.flags, Mapping) else {}
@@ -399,11 +415,12 @@ def convert(records: Iterable[Any], *, source_key: str, main_id: str,
                   else None, "turn_id": None if _known(record.turn_id) is None
                   else str(record.turn_id)}
         if record.kind == "message":
-            if not tier_one_message(record):
+            wrote = writer(record)
+            if not tier_one_message(record, wrote):
                 continue
             text = keep_head(record.text, MESSAGE_CHARS, policy.sets)
             out.rows.append(Row(**common, agent_id=agent_id, kind=record.role, text=text,
-                                writer=writer(record)))
+                                writer=wrote))
         elif record.kind == "tool_call":
             name = _tool_name(record)
             path = secret_path(record.input)
@@ -437,4 +454,5 @@ def convert(records: Iterable[Any], *, source_key: str, main_id: str,
 __all__ = ["KINDS", "MESSAGE_CHARS", "TOOL_CHARS", "MARGIN", "EDGE_CHARS", "TOOL",
            "UNSCANNED", "Policy", "Row", "Tail", "Converted", "redact_version", "redact",
            "keep_head", "keep_tail", "recut_head", "recut_tail", "hide_cut_edges",
-           "line_id", "keys", "tier_one_message", "model_answer", "convert"]
+           "line_id", "keys", "DELIVERED_WRITERS", "tier_one_message", "model_answer",
+           "convert"]
