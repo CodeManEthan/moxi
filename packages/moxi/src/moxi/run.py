@@ -416,6 +416,8 @@ def _once(args: Args, stopper: _Stopper) -> tuple[int, float]:
         options.update(stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
     if _WINDOWS:
         options["creationflags"] = subprocess.CREATE_NO_WINDOW
+        if log is None:
+            options.update(_given_stdio())
     try:
         child = subprocess.Popen(list(args.argv), **options)
     except (OSError, ValueError) as exc:
@@ -446,6 +448,22 @@ def _once(args: Args, stopper: _Stopper) -> tuple[int, float]:
     lasted = time.monotonic() - mono
     _line(args, at=start, seconds=lasted, result=RAN, code=code)
     return code, lasted
+
+
+def _given_stdio() -> dict[str, int]:
+    """Windows: the gate's own stdin, stdout and stderr that are a file or a pipe, to give
+    the command by name. A command started with `CREATE_NO_WINDOW` gets a console of its
+    own, so without them it reads and writes that hidden console, not the gate's. A
+    console or a closed descriptor is left out, and the command keeps its own there."""
+    given = {}
+    for name, fd in (("stdin", 0), ("stdout", 1), ("stderr", 2)):
+        try:
+            os.fstat(fd)
+        except OSError:
+            continue
+        if not os.isatty(fd):
+            given[name] = fd
+    return given
 
 
 def _exit_code(returncode: int) -> int:

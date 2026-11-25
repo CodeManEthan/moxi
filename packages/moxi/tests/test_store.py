@@ -226,8 +226,8 @@ def test_on_windows_the_wal_and_shm_in_a_dir_connect_makes_grant_only_this_user(
     conn = _with_wal(path)
     try:
         user = _win._token_sid(_win._TOKEN_USER)
-        for side in ("-wal", "-shm"):
-            assert _win._only_user(Path(str(path) + side), user)
+        for side in ("-wal", "-shm"):  # SQLite's files take the directory's list
+            assert _win._only_user(Path(str(path) + side), user, inherited=True)
     finally:
         conn.close()
 

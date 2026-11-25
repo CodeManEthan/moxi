@@ -346,8 +346,9 @@ def test_log_rolls_past_its_cap(demo, monkeypatch):
     code = run.main(["--record", "demo/daemon", "--log", str(log), "--",
                      *py("""
                          import sys
-                         for i in range(30):
-                             sys.stdout.write("x" * 99 + "\\n"); sys.stdout.flush()
+                         for i in range(30):  # bytes: a text stdout ends \\r\\n on Windows
+                             sys.stdout.buffer.write(b"x" * 99 + b"\\n")
+                             sys.stdout.flush()
                          """)])
     assert code == 0
     older = log.with_name("daemon.log.1")

@@ -49,7 +49,7 @@ def test_a_missing_file_reads_empty_and_is_unchanged_until_given_data(harness_di
 
 
 def test_a_blank_json_file_reads_as_an_empty_object(harness_dir):
-    (harness_dir / "settings.json").write_text("  \n")
+    (harness_dir / "settings.json").write_bytes(b"  \n")
     doc = Doc(harness_dir / "settings.json", "json")
     assert doc.data == {} and doc.raw == b"  \n"
 

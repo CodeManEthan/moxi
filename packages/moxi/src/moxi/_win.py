@@ -512,8 +512,10 @@ def _read(path: Path, what: int) -> _Read:
     return _Read(api, owner, dacl, descriptor)
 
 
-def _only_user(path: Path, user: _Sid) -> bool:
-    """Whether `path`'s access list is protected and allows no one but `user`."""
+def _only_user(path: Path, user: _Sid, *, inherited: bool = False) -> bool:
+    """Whether `path`'s access list is protected and allows no one but `user`. With
+    `inherited`, a list taken from the parent (not protected) counts too when it allows no
+    one but `user`."""
     api = _bind()
     ctypes = api.ctypes
     read = _read(path, _DACL_SECURITY_INFORMATION)
@@ -524,7 +526,7 @@ def _only_user(path: Path, user: _Sid) -> bool:
         if not api.GetSecurityDescriptorControl(read.descriptor, ctypes.byref(control),
                                                 ctypes.byref(revision)):
             raise _error("GetSecurityDescriptorControl")
-        if not control.value & _SE_DACL_PROTECTED:
+        if not control.value & _SE_DACL_PROTECTED and not inherited:
             return False
         count = ctypes.cast(read.dacl, ctypes.POINTER(api.ACL)).contents.AceCount
         allowed = 0

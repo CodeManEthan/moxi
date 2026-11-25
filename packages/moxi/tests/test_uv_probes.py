@@ -10,10 +10,20 @@ from __future__ import annotations
 
 import json
 import subprocess
+import sys
 import tomllib
 from pathlib import Path
 
 import pytest
+
+
+#: The folder of an environment's scripts on this system.
+SCRIPTS = "Scripts" if sys.platform == "win32" else "bin"
+
+
+def exe(name: str) -> str:
+    """A console script's file name on this system (`.exe` on Windows)."""
+    return name + ".exe" if sys.platform == "win32" else name
 
 
 def first_set(wheels, out: Path) -> Path:
@@ -121,8 +131,8 @@ def test_a_dangling_moxi_link_is_no_clash(uv):
 def test_another_tool_s_internal_scripts_stay_off_path(uv):
     done = uv.tool("install", "moxi", "--with", "moxi-comms")
     assert "Installed 1 executable: moxi" in done.stderr
-    assert not (uv.bin / "moxi-comms-daemon").exists()
-    assert (uv.tools / "moxi" / "bin" / "moxi-comms-daemon").exists()
+    assert not (uv.bin / exe("moxi-comms-daemon")).exists()
+    assert (uv.tools / "moxi" / SCRIPTS / exe("moxi-comms-daemon")).exists()
     assert uv.modules(uv.bin / "moxi") == ["comms", "turns"]
 
 
@@ -130,7 +140,7 @@ def test_reinstall_package_repairs_a_lost_moxi(uv):
     uv.tool("install", "moxi-comms", "--with", "moxi-cache")
     uv.tool("install", "moxi-comms")
     uv.tool("install", "moxi-comms", "--reinstall-package", "moxi-comms")
-    assert (uv.tools / "moxi-comms" / "bin" / "moxi").exists()
+    assert (uv.tools / "moxi-comms" / SCRIPTS / exe("moxi")).exists()
     assert uv.modules(uv.bin / "moxi") == ["comms", "turns"]
 
 
@@ -144,12 +154,12 @@ def test_with_executables_from_clashes_when_modules_declare_moxi(uv):
 def test_a_plain_env_loses_moxi_with_a_module(uv):
     venv = uv.tmp / "venv"
     uv("venv", str(venv))
-    python = str(venv / "bin" / "python")
+    python = str(venv / SCRIPTS / exe("python"))
     uv("pip", "install", "--python", python, "--no-index", "--find-links", str(uv.wheels),
        "moxi-comms", "moxi-cache")
-    assert uv.modules(venv / "bin" / "moxi") == ["cache", "comms", "turns"]
+    assert uv.modules(venv / SCRIPTS / "moxi") == ["cache", "comms", "turns"]
     uv("pip", "uninstall", "--python", python, "moxi-cache")
-    assert not (venv / "bin" / "moxi").exists()
+    assert not (venv / SCRIPTS / exe("moxi")).exists()
 
 
 def test_a_re_run_drops_the_receipt_s_options_and_python(uv):
@@ -174,7 +184,9 @@ def test_a_direct_url_with_satisfies_a_dependency(uv):
     uv.tool("install", "moxi-comms", "--with", f"moxi-turns @ {turns.as_uri()}")
     assert uv.modules(uv.bin / "moxi") == ["comms", "turns"]
     entry = uv.receipt("moxi-comms")["requirements"][1]
-    assert entry == {"name": "moxi-turns", "path": str(turns)}
+    # uv writes the path with forward slashes on Windows.
+    assert (sorted(entry), entry["name"], Path(entry["path"])) == (
+        ["name", "path"], "moxi-turns", turns)
 
 
 def test_the_offline_env_keeps_uv_s_installed_pythons_and_a_cache_of_its_own(

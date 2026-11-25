@@ -900,7 +900,7 @@ def test_the_roll_goes_through_the_retrying_replace(tmp_path, monkeypatch):
 @WINDOWS
 def test_the_roll_retries_a_sharing_violation(tmp_path, monkeypatch):
     log = tmp_path / "r.jsonl"
-    files.append_record(log, {"i": 0}, max_bytes=20)
+    files.append_record(log, {"i": 0}, max_bytes=10)
     calls = []
     real = os.replace
 
@@ -911,7 +911,7 @@ def test_the_roll_retries_a_sharing_violation(tmp_path, monkeypatch):
         real(src, dst)
 
     monkeypatch.setattr(os, "replace", flaky)
-    files.append_record(log, {"i": 1}, max_bytes=20)
+    files.append_record(log, {"i": 1}, max_bytes=10)  # two 8-byte lines pass the cap
     assert len(calls) == 3
     assert [r["i"] for r in files.read_records(log)] == [0, 1]
 

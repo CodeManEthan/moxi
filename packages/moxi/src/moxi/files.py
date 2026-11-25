@@ -38,6 +38,11 @@ POLL = 0.05
 #: On Windows, `msvcrt.locking` locks this one byte, past the pid text at offset 0, so a
 #: waiting process can still read the holder's pid.
 LOCK_OFFSET = 2 ** 30
+#: On Windows an append holds this one byte of the log while it writes, far past any end
+#: a log reaches (`_append_held`).
+APPEND_LOCK_OFFSET = 2 ** 62
+#: How often a waiting append on Windows tries the byte again, in seconds.
+_APPEND_POLL_S = 0.002
 #: How long `atomic_write` retries a replace that meets a sharing violation (Windows).
 REPLACE_RETRY = 1.0
 #: The block size `read_records` reads backwards in.
@@ -516,11 +521,12 @@ def append_record(path: str | os.PathLike, record: dict, *,
     """Append `record` to the log `path` as one JSON line.
 
     The line is written with one `write` on a descriptor opened for appending (the file
-    is created 0600), so lines from several writers never interleave. When the file and
-    the line together would pass `max_bytes`, the file first moves to `<path>.1` (one
-    older generation is kept; on Windows a move that meets a sharing violation is tried
-    again for up to a second, as `atomic_write`'s replace is) and the line starts a new
-    file. A line longer than `max_bytes` raises `ValueError`. With `max_bytes=None` the
+    is created 0600), so lines from several writers never interleave (on Windows the write
+    holds a byte of the file far past its end, since an append there is two steps). When
+    the file and the line together would pass `max_bytes`, the file first moves to
+    `<path>.1` (one older generation is kept; on Windows a move that meets a sharing
+    violation is tried again for up to a second, as `atomic_write`'s replace is) and the
+    line starts a new file. A line longer than `max_bytes` raises `ValueError`. With `max_bytes=None` the
     file never rolls and a line of any length is written.
 
     With `durable=True` the file is flushed to disk after the write, and so is its
@@ -718,13 +724,37 @@ def _append(path: Path, line: bytes, *, durable: bool = False) -> None:
     else:
         fd = os.open(path, flags, 0o600)
     try:
-        os.write(fd, line)
+        if _WINDOWS:
+            _append_held(fd, line)
+        else:
+            os.write(fd, line)
         if durable:
             os.fsync(fd)
     finally:
         os.close(fd)
     if made and not _WINDOWS:
         _fsync_dir(path.parent)
+
+
+def _append_held(fd: int, line: bytes) -> None:
+    """Write `line` at the end of `fd`'s file on Windows, holding the byte at
+    `APPEND_LOCK_OFFSET` meanwhile. The C runtime's append there is a seek to the end and
+    then a write, so without the byte two writers could land at one offset and one line
+    would overwrite the other. The byte goes when the write is done, or with the handle."""
+    import msvcrt
+
+    os.lseek(fd, APPEND_LOCK_OFFSET, os.SEEK_SET)
+    while True:
+        try:
+            msvcrt.locking(fd, msvcrt.LK_NBLCK, 1)
+            break
+        except OSError:
+            time.sleep(_APPEND_POLL_S)
+    try:
+        os.write(fd, line)
+    finally:
+        os.lseek(fd, APPEND_LOCK_OFFSET, os.SEEK_SET)
+        msvcrt.locking(fd, msvcrt.LK_UNLCK, 1)
 
 
 def _older(path: Path) -> Path:

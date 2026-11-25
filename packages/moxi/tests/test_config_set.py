@@ -16,6 +16,9 @@ import pytest
 from moxi import cli, config
 from moxi.config import ConfigError, Schema, SchemaError
 
+#: An absolute path on this system (on Windows a root path names no drive).
+ROOTED = os.path.abspath("/var/r")
+
 SCHEMA = """
 [backend]
 type = "enum"
@@ -154,7 +157,7 @@ def test_a_bool_is_read_from_its_words(demo, given, stored):
     ("watch.tick", "2.5", 2.5), ("watch.tick", 3, 3.0),
     ("name", "a name", "a name"), ("name", 12, "12"),
     ("backend", "remote", "remote"),
-    ("local.root", "~/record", "~/record"), ("local.root", "/var/r", "/var/r"),
+    ("local.root", "~/record", "~/record"), ("local.root", ROOTED, ROOTED),
     ("local.root", "", ""),
 ])
 def test_each_scalar_type_is_coerced(demo, key, given, stored):

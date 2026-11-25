@@ -1112,6 +1112,11 @@ def pl(d, tmp_path, monkeypatch):
     return d
 
 
+#: The form that makes a placement a link: a symlink, or a junction on Windows, where a
+#: folder is copied by default.
+LINK = "link"
+
+
 def place_demo(pl, *, owner="demo", form=None, source=None):
     source = source or pl.source
     steps = place.plan(owner, [place.Item(source, "claude", "demo-send")], form=form)
@@ -1132,7 +1137,7 @@ def test_placements_as_placed_are_one_ok_row_per_owner(pl):
 
 
 def test_a_gone_source_warns_source_missing_and_the_dangling_link_is_left(pl, capsys):
-    target = place_demo(pl)
+    target = place_demo(pl, form=LINK)
     shutil.rmtree(pl.source)
     ledger = (moxi.paths.core().state_dir() / place.LEDGER).read_bytes()
     row = pl.rows()[("demo", "placement claude demo-send")]
@@ -1141,13 +1146,13 @@ def test_a_gone_source_warns_source_missing_and_the_dangling_link_is_left(pl, ca
     assert row.fix == "moxi install demo"
     assert ("demo", "placements") not in pl.rows()
     # The doctor only reads: the link still dangles there and the ledger is as it was.
-    assert target.is_symlink() and not target.exists()
+    assert os.path.lexists(target) and not target.exists()
     assert (moxi.paths.core().state_dir() / place.LEDGER).read_bytes() == ledger
     assert cli.main(["doctor", "demo"]) == 0
 
 
 def test_a_missing_placement_warns(pl):
-    target = place_demo(pl)
+    target = place_demo(pl, form=LINK)
     target.unlink()
     row = pl.rows()[("demo", "placement claude demo-send")]
     assert (row.state, row.detail, row.fix) == ("warn", f"{target} is gone",
@@ -1176,7 +1181,7 @@ def test_a_copy_whose_source_changed_is_stale(pl):
 
 
 def test_a_link_pointed_elsewhere_warns_modified(pl, tmp_path):
-    target = place_demo(pl)
+    target = place_demo(pl, form=LINK)
     target.unlink()
     elsewhere = tmp_path / "elsewhere"
     elsewhere.mkdir()
@@ -1201,13 +1206,13 @@ def test_a_placement_whose_source_is_outside_its_owner_s_package_has_no_fix(pl, 
     other = tmp_path / "elsewhere" / "demo-send"
     other.mkdir(parents=True)
     (other / "SKILL.md").write_text("# x\n")
-    target = place_demo(pl, source=other)
+    target = place_demo(pl, source=other, form=LINK)
     target.unlink()
     assert pl.rows()[("demo", "placement claude demo-send")].fix is None
 
 
 def test_module_names_restrict_the_placement_rows(pl):
-    target = place_demo(pl)
+    target = place_demo(pl, form=LINK)
     target.unlink()
     assert ("demo", "placement claude demo-send") in pl.rows("demo")
     assert not placement_rows(pl.rows("moxi"))
@@ -1515,7 +1520,7 @@ def test_the_install_fix_follows_the_placer_s_own_package_test(pl, tmp_path):
     project = tmp_path / "proj" / "moxi_demo" / "skills" / "demo-send"
     project.mkdir(parents=True)
     (project / "SKILL.md").write_text("# project\n")
-    target = place_demo(pl, source=project)
+    target = place_demo(pl, source=project, form=LINK)
     target.unlink()
     assert pl.rows()[("demo", "placement claude demo-send")].fix is None
     place.remove("demo", say=lambda line: None)

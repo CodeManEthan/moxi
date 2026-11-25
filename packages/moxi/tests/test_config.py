@@ -1,3 +1,4 @@
+import os
 import textwrap
 import tomllib
 from pathlib import Path
@@ -7,6 +8,9 @@ import pytest
 import moxi.modules as modules
 from moxi import config
 from moxi.config import Config, ConfigError, Schema, SchemaError
+
+#: An absolute path on this system (on Windows a root path names no drive, so it is relative).
+RECORD = os.path.abspath("/var/demo.db")
 
 SCHEMA = """
 [backend]
@@ -75,7 +79,8 @@ def schema():
 @pytest.fixture
 def home(tmp_path):
     """An environment whose config root is a test directory; returns (env, config file)."""
-    env = {"HOME": str(tmp_path), "MOXI_DEMO_CONFIG_HOME": str(tmp_path / "config")}
+    env = {"HOME": str(tmp_path), "USERPROFILE": str(tmp_path),  # `~` on Windows
+           "MOXI_DEMO_CONFIG_HOME": str(tmp_path / "config")}
     return env, tmp_path / "config" / "demo" / "config.toml"
 
 
@@ -259,11 +264,11 @@ def test_a_declared_env_override_wins_for_one_process(schema, home):
     s = config.load("demo", schema, env={**env, "MOXI_DEMO_BACKEND": "remote",
                                           "MOXI_DEMO_BLOCK": "on",
                                           "MOXI_DEMO_RETAIN_DAYS": "3",
-                                          "MOXI_DEMO_RECORD": "/var/demo.db"})
+                                          "MOXI_DEMO_RECORD": RECORD})
     assert (s["backend"], s.source("backend")) == ("remote", "env")
     assert (s["block"], s.source("block")) == (True, "env")
     assert s["local.retain_days"] == 3
-    assert s["local.record"] == Path("/var/demo.db")
+    assert s["local.record"] == Path(RECORD)
 
 
 def test_an_empty_env_override_is_unset(schema, home):

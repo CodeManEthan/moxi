@@ -9,8 +9,10 @@ from __future__ import annotations
 
 import importlib
 import io
+import os
 import shutil
 import sys
+from pathlib import Path
 
 import pytest
 
@@ -19,6 +21,11 @@ import moxi.install as install
 import moxi.modules as modules
 from moxi.install import InstallError, Req, receipt_entry, receipt_options, union
 from moxi_dev.testing import PROC_WAIT_S
+
+
+def file_uri(path: str) -> str:
+    """The `file://` URI of `path` made absolute on this system (a drive on Windows)."""
+    return Path(os.path.abspath(path)).as_uri()
 
 # -- requirements --------------------------------------------------------------------------
 
@@ -66,8 +73,9 @@ def test_parse_from():
     ({"name": "moxi-comms", "extras": ["cache"], "specifier": ">=0.1, <0.2"},
      "moxi-comms[cache]>=0.1,<0.2"),
     ({"name": "moxi-turns", "path": "/w/moxi_turns-0.1.0-py3-none-any.whl"},
-     "moxi-turns @ file:///w/moxi_turns-0.1.0-py3-none-any.whl"),
-    ({"name": "moxi-turns", "directory": "/src/turns"}, "moxi-turns @ file:///src/turns"),
+     f"moxi-turns @ {file_uri('/w/moxi_turns-0.1.0-py3-none-any.whl')}"),
+    ({"name": "moxi-turns", "directory": "/src/turns"},
+     f"moxi-turns @ {file_uri('/src/turns')}"),
     ({"name": "x", "url": "https://h/x.tar.gz", "subdirectory": "pkg"},
      "x @ https://h/x.tar.gz#subdirectory=pkg"),
     ({"name": "moxi-cache", "extras": ["a"], "git": "https://github.com/o/cache?rev=private"},
@@ -140,7 +148,8 @@ def test_tool_command_re_runs_with_everything_the_receipt_holds(tmp_path):
         "--excludes", str(tmp_path / "excludes.txt"),
         "--python", "3.12", "--find-links", "file:///w"]
     assert (tmp_path / "constraints.txt").read_text() == "websockets<16\n"
-    assert env == {"UV_TOOL_DIR": str(tmp_path / "tools"), "UV_TOOL_BIN_DIR": "/b"}
+    assert env == {"UV_TOOL_DIR": str(tmp_path / "tools"),
+                   "UV_TOOL_BIN_DIR": str(Path("/b"))}  # the entry point's folder
     assert [r.key for r in reqs] == ["moxi-comms", "moxi-turns", "moxi-x"]
 
 
@@ -376,7 +385,7 @@ def test_install_a_module_with_its_required_modules_only(fake, capsys):
     assert fake.runs == [["/fake/uv", "tool", "install", "moxi", "--with", "moxi-comms",
                           "--find-links", "file:///w"]]
     assert fake.envs[0] == {"UV_TOOL_DIR": str(fake.prefix.parent),
-                            "UV_TOOL_BIN_DIR": "/b"}
+                            "UV_TOOL_BIN_DIR": str(Path("/b"))}
     assert fake.installed == {"moxi-comms", "moxi-turns"}
     # Each new module is settled, required before requiring.
     assert fake.setups == ["turns", "comms"]

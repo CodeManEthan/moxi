@@ -41,6 +41,13 @@ def wait_for(check, timeout: float = PROC_WAIT_S, step: float = 0.05):
     return check()
 
 
+def read_line(child: subprocess.Popen) -> bytes:
+    """The child's next stdout line, its end as `\n` (a child's print ends `\r\n` on
+    Windows)."""
+    line = child.stdout.readline()
+    return line[:-2] + b"\n" if line.endswith(b"\r\n") else line
+
+
 def gone(ident: proc.ProcId, timeout: float = PROC_WAIT_S) -> bool:
     return wait_for(lambda: not proc.alive(ident), timeout)
 
@@ -57,8 +64,11 @@ def test_run_captures_bytes_by_default_and_text_for_text_input():
     done = proc.run([PY, "-c", "import sys; print('out'); print('err', file=sys.stderr)"],
                     timeout_s=30)
     assert (done.returncode, done.stdout.strip(), done.stderr.strip()) == (0, b"out", b"err")
-    fed = proc.run([PY, "-c", "import sys; sys.stdout.write(sys.stdin.read().upper())"],
-                   timeout_s=30, stdin_data="sécret")
+    # The child reads and writes UTF-8 bytes, as the run sends and reads text (a child's
+    # own stdio on Windows takes the locale's code page).
+    upper = ("import sys; sys.stdout.buffer.write("
+             "sys.stdin.buffer.read().decode('utf-8').upper().encode('utf-8'))")
+    fed = proc.run([PY, "-c", upper], timeout_s=30, stdin_data="sécret")
     assert fed.stdout == "SÉCRET"
 
 
@@ -330,11 +340,11 @@ def test_an_fd_child_keeps_stdin_free_and_hears_the_close(tmp_path):
     child = proc.spawn([PY, script(tmp_path, "fd.py", FD_CHILD)], lifeline="fd",
                        stdout=subprocess.PIPE)
     assert child.stdin is None
-    assert child.stdout.readline() == b"env False\n"
+    assert read_line(child) == b"env False\n"
     time.sleep(0.2)
     assert child.poll() is None
     child.lifeline.close()
-    assert child.stdout.readline() == b"closed True\n"
+    assert read_line(child) == b"closed True\n"
     assert child.wait(timeout=30) == 0
     child.stdout.close()
 
@@ -376,11 +386,11 @@ def test_an_execd_child_holds_the_lifeline_and_ends_when_its_holder_is_killed(tm
                              stdout=subprocess.PIPE)
     holder = int(child.stdout.readline())
     try:
-        assert child.stdout.readline() == b"fd yes False\n"
+        assert read_line(child) == b"fd yes False\n"
         time.sleep(0.2)
         assert child.poll() is None
         os.kill(holder, signal.SIGKILL)
-        assert child.stdout.readline() == b"closed True\n"
+        assert read_line(child) == b"closed True\n"
         assert child.wait(timeout=30) == 0
     finally:
         try:
@@ -430,7 +440,7 @@ def test_the_default_close_interrupts_the_main_thread(tmp_path):
     """
     child = proc.spawn([PY, script(tmp_path, "int.py", interrupted)], lifeline="fd",
                        stdout=subprocess.PIPE)
-    assert child.stdout.readline() == b"ready\n"
+    assert read_line(child) == b"ready\n"
     child.lifeline.close()
     assert child.wait(timeout=30) == 7
     child.stdout.close()
@@ -455,7 +465,7 @@ def test_the_default_close_ends_a_process_that_ignores_the_interrupt(tmp_path):
     """
     child = proc.spawn([PY, script(tmp_path, "deaf.py", deaf)], lifeline="fd",
                        stdout=subprocess.PIPE)
-    assert child.stdout.readline() == b"ready\n"
+    assert read_line(child) == b"ready\n"
     child.lifeline.close()
     assert child.wait(timeout=30) == 1
     child.stdout.close()
@@ -471,7 +481,7 @@ def test_a_child_on_stdin_calls_lifeline_without_the_variable(tmp_path):
         raise SystemExit(0 if closed.wait(30) else 1)
     """
     child = proc.spawn([PY, script(tmp_path, "stdin.py", on_stdin)], stdout=subprocess.PIPE)
-    assert child.stdout.readline() == b"ready\n"
+    assert read_line(child) == b"ready\n"
     child.lifeline.close()
     assert child.wait(timeout=30) == 0
     child.stdout.close()
@@ -544,7 +554,7 @@ def test_the_watchdog_kills_a_child_that_ignores_sigterm(tmp_path):
     """
     child = proc.spawn([PY, script(tmp_path, "stubborn.py", stubborn)], lifeline="watch",
                        stdout=subprocess.PIPE)
-    assert child.stdout.readline() == b"ready\n"
+    assert read_line(child) == b"ready\n"
     start = time.monotonic()
     child.lifeline.close()
     assert child.wait(timeout=30) == -9
@@ -728,9 +738,14 @@ def test_lifeline_kind_after_lifeline_answers_what_it_read(unread, monkeypatch, 
 
 def test_a_second_lifeline_holds_what_the_first_read(unread, monkeypatch):
     monkeypatch.setenv(proc.LIFELINE_ENV, "5")
+    msvcrt = _FakeMsvcrt()
+    monkeypatch.setitem(sys.modules, "msvcrt", msvcrt)  # on Windows 5 names a handle
     proc.lifeline(on_close=lambda: None)
     proc.lifeline(on_close=lambda: None)
-    assert unread == [5, 5]
+    if sys.platform == "win32":
+        assert (msvcrt.opened, unread) == ([5, 5], [99, 99])
+    else:
+        assert unread == [5, 5]
 
 
 @pytest.mark.parametrize("value", [None, "", "0"], ids=["unset", "empty", "zero"])
@@ -809,7 +824,7 @@ def test_in_a_child_lifeline_keeps_the_kind_and_passes_no_variable_on(tmp_path, 
     time.sleep(0.2)
     assert child.poll() is None
     child.lifeline.close()
-    assert child.stdout.readline() == b"closed True\n"
+    assert read_line(child) == b"closed True\n"
     assert child.wait(timeout=30) == 0
     child.stdout.close()
 

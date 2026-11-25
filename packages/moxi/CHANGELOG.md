@@ -2,6 +2,13 @@
 
 ## 0.1.11 (unreleased)
 
+- On Windows a closed `proc.lifeline` wakes a main thread asleep in `time.sleep`, so the
+  default close raises `KeyboardInterrupt` there as on POSIX. It interrupted through
+  `_thread.interrupt_main`, which never wakes a sleep on Windows, and the process was
+  ended at the five-second grace instead.
+- On Windows `files.append_record` holds a byte of the log far past its end while it
+  writes. The C runtime's append mode there is a seek to the end and then a write, so two
+  processes appending at once could write at one offset and one line overwrote the other.
 - `moxi.ipc.address(module, name, env)` and `moxi.paths.socket_path(module, name, env)`
   take an optional environment: the address a server started with that environment
   serves at, read from it alone. A caller holding another process's environment (a

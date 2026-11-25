@@ -67,7 +67,7 @@ def fake_windows(monkeypatch):
     and the user hash fixed."""
     monkeypatch.setattr(ipc, "_WINDOWS", True)
     monkeypatch.setattr(ipc, "_user_hash", lambda: "0123abcd")
-    monkeypatch.setattr(ipc, "_home_hash", lambda module: "4567cdef")
+    monkeypatch.setattr(ipc, "_home_hash", lambda module, env=None: "4567cdef")
     monkeypatch.setattr(_sweep, "_WINDOWS", True)
 
 

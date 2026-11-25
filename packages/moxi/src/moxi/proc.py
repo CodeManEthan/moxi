@@ -733,12 +733,17 @@ def _interrupt_main() -> None:
 
     POSIX: a real SIGINT sent to the main thread, which breaks a blocking call such as a
     sleep or a read (`_thread.interrupt_main` only sets a flag the thread sees once the
-    call returns). Windows: `_thread.interrupt_main`, which also wakes a sleep there.
+    call returns). Windows: SIGINT raised in this thread, which runs Python's handler: it
+    sets the flag and the event a sleep there waits on (`_thread.interrupt_main` sets only
+    the flag, so a sleeping main thread slept on). Where Python doesn't handle SIGINT
+    (it is ignored or left to the system), nothing is raised, as `interrupt_main` would
+    raise nothing there.
     """
     if _WINDOWS:
-        import _thread
+        import signal
 
-        _thread.interrupt_main()
+        if callable(signal.getsignal(signal.SIGINT)):
+            signal.raise_signal(signal.SIGINT)
         return
     import signal
 

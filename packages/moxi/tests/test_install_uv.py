@@ -8,10 +8,20 @@ from __future__ import annotations
 
 import json
 import subprocess
+import sys
 import tomllib
 from pathlib import Path
 
 import pytest
+
+
+#: The folder of an environment's scripts on this system.
+SCRIPTS = "Scripts" if sys.platform == "win32" else "bin"
+
+
+def exe(name: str) -> str:
+    """A console script's file name on this system (`.exe` on Windows)."""
+    return name + ".exe" if sys.platform == "win32" else name
 
 
 @pytest.fixture
@@ -174,12 +184,12 @@ def test_install_in_a_plain_env(tool, tmp_path, offline_uv_env):
     venv = tmp_path / "venv"
     index = tmp_path / "index"
     for args in (["venv", str(venv)],
-                 ["pip", "install", "--python", str(venv / "bin" / "python"),
+                 ["pip", "install", "--python", str(venv / SCRIPTS / exe("python")),
                   "--no-index", "--find-links", str(index), "moxi"]):
         done = subprocess.run(["uv", *args], env=offline_uv_env, capture_output=True, text=True,
                               timeout=120)
         assert done.returncode == 0, done.stderr
-    done = subprocess.run([str(venv / "bin" / "moxi"), "install", "comms", "--none",
+    done = subprocess.run([str(venv / SCRIPTS / "moxi"), "install", "comms", "--none",
                            "--from", tool.frm("comms"), "--from", tool.frm("turns")],
                           env=offline_uv_env, capture_output=True, text=True, timeout=300,
                           stdin=subprocess.DEVNULL)
