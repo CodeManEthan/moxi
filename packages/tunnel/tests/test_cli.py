@@ -3,6 +3,7 @@ listeners."""
 
 from __future__ import annotations
 
+import io
 import json
 import random
 import subprocess
@@ -41,7 +42,9 @@ def test_add_status_and_remove(alpha, tailscale, capsys):
 
 
 def test_no_terminal_and_no_yes_refuses(alpha, tailscale, capsys, monkeypatch):
-    monkeypatch.setattr(sys, "stdin", open("/dev/null"))
+    # Not the null device: on Windows `NUL` is a character device, which reads as a
+    # terminal.
+    monkeypatch.setattr(sys, "stdin", io.StringIO(""))
     code, _, err = run(capsys, "add", "alpha/gateway")
     assert code == 3 and "no terminal" in err and "--yes" in err
     assert tailscale.changes() == []

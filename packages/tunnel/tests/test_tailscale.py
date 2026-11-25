@@ -3,9 +3,11 @@ prerequisite checks and the commands it runs."""
 
 from __future__ import annotations
 
+import types
+
 import pytest
 
-from fake_tailscale import FUNNEL_CAP, HOST, status
+from fake_tailscale import FUNNEL_CAP, HOST, status, this_user
 from moxi_tunnel import tailscale as ts
 from moxi_tunnel.errors import ApplyError, Refused
 from moxi_tunnel.record import Entry, State
@@ -85,6 +87,15 @@ def test_the_binary_setting_wins_over_path(tailscale, config_file, tmp_path):
     assert "tailscale.binary setting" in ts.Tailscale().ready("own-devices")[0].reason
 
 
+def as_linux(tailscale, monkeypatch) -> None:
+    """Read as Linux reads, where the operator check runs, on any system: the fake found
+    as this system finds it, and this user named as the fake names its operator."""
+    # Only tunnel's reading of the platform changes; Python's own (and its PATH lookup)
+    # stays this system's.
+    monkeypatch.setattr(ts, "sys", types.SimpleNamespace(platform="linux"))
+    monkeypatch.setattr(ts, "_this_user", this_user)
+
+
 @pytest.mark.parametrize("change, reach, fix", [
     (lambda s: s["status"].update(BackendState="NeedsLogin"), "own-devices", "tailscale up"),
     (lambda s: s["status"]["CurrentTailnet"].update(MagicDNSEnabled=False), "own-devices",
@@ -99,7 +110,7 @@ def test_the_binary_setting_wins_over_path(tailscale, config_file, tmp_path):
     (lambda s: s["prefs"].update(ShieldsUp=True), "public", "--shields-up=false"),
 ])
 def test_each_missing_prerequisite_names_its_fix(tailscale, change, reach, fix, monkeypatch):
-    monkeypatch.setattr(ts.sys, "platform", "linux")
+    as_linux(tailscale, monkeypatch)
     monkeypatch.setattr(ts, "_is_root", lambda: False)
     tailscale.edit(change)
     problems = ts.Tailscale().ready(reach)
@@ -107,7 +118,7 @@ def test_each_missing_prerequisite_names_its_fix(tailscale, change, reach, fix, 
 
 
 def test_the_operator_check_is_skipped_when_prefs_lack_the_key(tailscale, monkeypatch):
-    monkeypatch.setattr(ts.sys, "platform", "linux")
+    as_linux(tailscale, monkeypatch)
     tailscale.edit(lambda s: s["prefs"].pop("OperatorUser"))
     assert ts.Tailscale().ready("own-devices") == []
 

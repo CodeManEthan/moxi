@@ -193,7 +193,7 @@ def test_the_old_funnels_port_is_held_not_foreign(half, tailscale, yes):
 
 def test_the_doctor_checks_funnel_and_shields_for_the_old_funnel(half, tailscale):
     tailscale.edit(lambda s: s["prefs"].update(ShieldsUp=True))
-    got = {r.name: r for r in doctor.rows(budget=3.0, read_wait=0.5, connect_wait=0.05)}
+    got = {r.name: r for r in doctor.rows(connect_wait=0.05)}
     assert got["Funnel allowed"].state == "ok"
     assert got["shields up"].state == "fail"
     assert got[KEY].state == "fail" and got[KEY].fix == "moxi tunnel repair"

@@ -32,7 +32,7 @@ def test_the_exact_file(tmp_path):
     creds.write_text("{}")
     text = _render(tmp_path, [("a.example.com", 8461), ("b.example.com", 9000)], creds)
     rest = (f'tunnel: "{ID}"\n'
-            f'credentials-file: "{creds}"\n'
+            f"credentials-file: {json.dumps(str(creds))}\n"
             'metrics: "127.0.0.1:20241"\n'
             "ingress:\n"
             '  - hostname: "a.example.com"\n'
@@ -99,7 +99,8 @@ def test_credentials_that_are_missing_or_not_a_file_are_a_problem_the_writer_ski
     assert "can't be found" in cloudflare.credentials_problem(str(tmp_path / "nope.json"))
     assert "not a regular file" in cloudflare.credentials_problem(str(tmp_path))
     # The writer checks only the path's form: taking a rule out needs no credentials file.
-    assert str(tmp_path / "nope.json") in _render(tmp_path, [], tmp_path / "nope.json")
+    assert json.dumps(str(tmp_path / "nope.json")) in _render(tmp_path, [],
+                                                               tmp_path / "nope.json")
 
 
 def test_the_credential_is_never_opened(tmp_path, monkeypatch, cf, units):

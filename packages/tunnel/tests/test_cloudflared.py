@@ -10,7 +10,9 @@ import signal
 import subprocess
 import sys
 import threading
+import types
 from http.server import BaseHTTPRequestHandler, HTTPServer
+from pathlib import Path
 
 import pytest
 
@@ -67,16 +69,18 @@ def test_with_nothing_to_serve_it_logs_one_line_and_exits_0(cf, monkeypatch, log
 
 def test_on_posix_it_replaces_its_process_with_cloudflared(served, monkeypatch):
     got = []
-    monkeypatch.setattr(sys, "platform", "linux")
+    # Only cloudflared's reading of the platform changes; the PATH lookup stays this
+    # system's.
+    monkeypatch.setattr(cloudflared, "sys", types.SimpleNamespace(platform="linux"))
     monkeypatch.setattr(os, "execv", lambda path, argv: got.append((path, argv)))
     cloudflared.main([])
     (path, argv), = got
-    assert path == cloudflare.find_binary() and path.endswith("cloudflared")
+    assert path == cloudflare.find_binary() and Path(path).stem == "cloudflared"
     assert argv == [path, "--no-autoupdate", "tunnel", "--config", str(served), "run"]
 
 
 def test_the_binary_setting_wins_over_path(cf, tmp_path, config_file):
-    assert cloudflare.find_binary().endswith("cloudflared")
+    assert Path(cloudflare.find_binary()).stem == "cloudflared"
     other = tmp_path / "other-cloudflared"
     other.write_text("")
     config_file("tunnel", f"[cloudflare]\nbinary = '{other}'\n")

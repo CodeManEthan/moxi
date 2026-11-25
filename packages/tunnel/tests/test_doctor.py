@@ -28,14 +28,27 @@ def states(rows) -> dict[str, str]:
     return {r.name: r.state for r in rows}
 
 
-#: The wait a test that hangs a read gives that read: 0.2 s, not the doctor's 2 s.
-HUNG_READ_S = 0.2
+#: Whether the operator row applies: only Linux keeps an operator for the serve config,
+#: and elsewhere the row is off whatever the reads say.
+OPERATOR = sys.platform.startswith("linux")
+OPERATOR_ROW = "may change serve config"
+
+
+def checked(names: tuple[str, ...]) -> tuple[str, ...]:
+    """`names` without the operator row where it is off on this system."""
+    return names if OPERATOR else tuple(n for n in names if n != OPERATOR_ROW)
+
+
+#: The wait a test that hangs a read gives every read: 1 s, not the doctor's 2 s. The
+#: reads that answer must answer inside it, and on Windows a stand-in's start alone takes
+#: about 0.2 s.
+HUNG_READ_S = 1.0
 
 
 def quick(**kw):
     """One run with the doctor's own waits, which a read that answers never comes near.
     Only a test that hangs a read cuts the wait, with `read_wait=HUNG_READ_S`, so the
-    hung read costs 0.2 s, not 2 s."""
+    hung read costs 1 s, not 2 s."""
     return doctor.rows(**kw)
 
 
@@ -70,14 +83,17 @@ def test_a_recorded_tailscale_target_turns_its_rows_on(alpha, tailscale, yes, co
     assert states(rows) == {
         "record": "ok", "tailscale CLI": "ok", "certificate renewal": "ok",
         "logged in": "ok", "HTTPS certificates": "ok",
-        "Funnel allowed": "off", "may change serve config": "ok", "shields up": "off",
+        "Funnel allowed": "off", OPERATOR_ROW: "ok" if OPERATOR else "off",
+        "shields up": "off",
         "alpha/gateway": "ok", "alpha/gateway answers": "ok", "cloudflare": "off",
         "cloudflare in step": "ok"}
     assert got["tailscale CLI"].detail.startswith("tailscale 1.104.1 at ")
     assert got["alpha/gateway"].detail == f"https://{HOST}:{listening}/ (tailscale) is " \
                                           "live as recorded"
-    # Each read ran once, shared by every row and by the entry's comparison.
-    assert sorted(c[0] for c in tailscale.calls) == ["debug", "serve", "status", "version"]
+    # Each read ran once, shared by every row and by the entry's comparison; the prefs
+    # (`debug`) only where the operator row reads them.
+    assert sorted(c[0] for c in tailscale.calls) == \
+        ["debug"] * OPERATOR + ["serve", "status", "version"]
 
 
 def test_a_target_that_does_not_answer_is_a_warning_naming_its_module(alpha, tailscale, yes):
@@ -202,8 +218,8 @@ def test_no_tailscale_cli_fails_its_row_and_checks_nothing_else(alpha, tailscale
     got = by_name(rows)
     assert got["tailscale CLI"].state == "fail"
     assert "tailscale.binary" in got["tailscale CLI"].detail
-    for name in ("certificate renewal", "logged in", "HTTPS certificates",
-                 "may change serve config", "alpha/gateway"):
+    for name in checked(("certificate renewal", "logged in", "HTTPS certificates",
+                         OPERATOR_ROW, "alpha/gateway")):
         assert (got[name].state, got[name].detail) == ("warn", "not checked: no tailscale CLI")
 
 
@@ -242,10 +258,10 @@ def _quick_with_tailscale_hung(alpha, tailscale, yes) -> float:
     took = time.monotonic() - start
     got = by_name(rows)
     assert got["tailscale CLI"].state == "fail"
-    assert got["tailscale CLI"].detail == "tailscale did not answer in 0.2 s"
+    assert got["tailscale CLI"].detail == f"tailscale did not answer in {HUNG_READ_S:g} s"
     assert got["tailscale CLI"].fix == "tailscale status"
-    for name in ("certificate renewal", "logged in", "HTTPS certificates", "Funnel allowed",
-                 "may change serve config", "shields up", "alpha/connector"):
+    for name in checked(("certificate renewal", "logged in", "HTTPS certificates",
+                         "Funnel allowed", OPERATOR_ROW, "shields up", "alpha/connector")):
         assert (got[name].state, got[name].detail) == \
             ("warn", "not checked: tailscale did not answer"), name
     assert tailscale.calls == [["version"]]
@@ -276,9 +292,11 @@ def test_a_hung_serve_status_fails_the_first_entry_and_skips_the_prefs(alpha, ta
     got = by_name(quick(read_wait=HUNG_READ_S))
     assert (got["logged in"].state, got["tailscale CLI"].state) == ("ok", "ok")
     assert got["alpha/connector"].state == "fail"
-    assert got["alpha/connector"].detail == "tailscale did not answer in 0.2 s"
+    assert got["alpha/connector"].detail == f"tailscale did not answer in {HUNG_READ_S:g} s"
     assert got["alpha/gateway"].state == "warn"
-    assert got["may change serve config"].detail == "not checked: tailscale did not answer"
+    assert got[OPERATOR_ROW].detail == ("not checked: tailscale did not answer" if OPERATOR
+                                        else "only Linux keeps an operator for the serve "
+                                        "config")
     assert not any(c[0] == "debug" for c in tailscale.calls)
 
 
@@ -292,8 +310,7 @@ def test_reads_the_deadline_has_passed_are_not_checked_and_never_run(alpha, tail
 
     got = by_name(doctor.rows(clock=clock))
     assert got["tailscale CLI"].state == "ok"
-    for name in ("logged in", "HTTPS certificates", "may change serve config",
-                 "alpha/gateway"):
+    for name in checked(("logged in", "HTTPS certificates", OPERATOR_ROW, "alpha/gateway")):
         assert (got[name].state, got[name].detail) == \
             ("warn", "not checked: the doctor's 8 s ran out"), name
     assert tailscale.calls == [["version"]]
