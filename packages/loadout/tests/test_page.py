@@ -197,7 +197,8 @@ def test_every_value_that_can_hold_a_path_carries_a_mark():
         "/api/folder unlisted[].source", "/api/status kept[].target",
         "/api/status kept[].copy", "/api/job outcome.kept[].target",
         "/api/job outcome.kept[].copy", "/api/replace-preview target",
-        "/api/replace-preview kept_in", "/api/replace-preview skipped[].path"}
+        "/api/replace-preview kept_in", "/api/replace-preview skipped[].path",
+        "/api/status strays[].path", "/api/job outcome.strays[].path"}
     for said in ("/api/status problem", "/api/status rows[].reason", "/api/status rows[].name",
                  "/api/status rows[].scope", "/api/status lines[]", "/api/status notes[]",
                  "/api/list items[].source", "/api/list items[].scope",

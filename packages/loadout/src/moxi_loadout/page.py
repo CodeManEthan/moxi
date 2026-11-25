@@ -144,7 +144,9 @@ KEPT = lb.Out("table", items={
 
 #: What a run came to, as `--json` prints it: its rows, the lines said on the way, notes,
 #: the counts, the exit code, what it kept (none for `status`), and, for `status`, the
-#: git hook's record of a failed reinstall, `{at, text}`, while it stands (else null).
+#: git hook's record of a failed reinstall, `{at, text}`, while it stands (else null),
+#: and the strays, each entry of a harness folder loadout places into that no placement
+#: holds, with its `path`, `harness` and `kind` (none for an install).
 OUTCOME = {
     "rows": lb.Out("list", items=ROW),
     "lines": _LINES,
@@ -153,6 +155,8 @@ OUTCOME = {
     "exit": lb.Out("int"),
     "kept": lb.Out("list", items=KEPT),
     "reinstall_failed": lb.Out("table", items={"at": _TEXT, "text": _SAYS}, nullable=True),
+    "strays": lb.Out("list", items=lb.Out("table", items={"path": _PATH, "harness": _TEXT,
+                                                          "kind": _TEXT})),
 }
 
 #: One item a section lists: `harnesses` null for every harness; `source` a path, `module

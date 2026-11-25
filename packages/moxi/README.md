@@ -113,7 +113,8 @@ behalf, and `moxi uninstall` removes what it wrote:
   `--replace` moves it aside. A skill or agent file in the way is first compared with the
   module's: equal, it is replaced; different, `moxi install` asks at a terminal, refuses
   without one, and replaces it without asking with `--accept-diff`. A place that fails
-  after the move puts the file back.
+  after the move puts the file back. `moxi.place.move_aside` moves a path no placement
+  holds into the same `displaced/` folder the same way, for a module that clears one.
 - Whatever the module's own setup does, which its README describes.
 
 A shortcut (`moxi shortcut`) is a small script written beside the `moxi` on PATH.

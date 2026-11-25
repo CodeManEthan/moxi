@@ -179,6 +179,11 @@ class Plan:
     copies: set[str] | None = None
     #: The harness table's names, in its order: the harnesses every item is planned for.
     harnesses: list[str] = field(default_factory=list)
+    #: Each project section's root, by the section's name, for those that resolved.
+    roots: dict[str, str] = field(default_factory=dict)
+    #: The `project_folders` setting as `settings` reads it: per harness, `{skills,
+    #: agents}`, each relative to a project's root.
+    project_dirs: dict[str, dict[str, str]] = field(default_factory=dict)
 
     @property
     def resolved_all(self) -> bool:
@@ -228,7 +233,7 @@ def build(manifest: Manifest, machine, data: dict, *,
 
     rows, skipped = place.harnesses()
     plan = Plan(manifest, Path(machine.source), data, lines=list(skipped),
-                harnesses=list(rows))
+                harnesses=list(rows), project_dirs=dict(machine.project_dirs))
     plan.lines += [r.line for r in manifest.refused]
     every = list(rows)
     user_skills = set(manifest.user.names("skill"))
@@ -246,6 +251,8 @@ def build(manifest: Manifest, machine, data: dict, *,
             root = res.root
         elif section.where == "path":
             root = section.root
+        if root is not None:
+            plan.roots[section.name] = os.fspath(root)
         for kind in PLACED_KINDS:
             for name in section.names(kind):
                 harnesses = manifest.harnesses(kind, name)

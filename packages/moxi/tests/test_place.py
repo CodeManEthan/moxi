@@ -1432,6 +1432,45 @@ def test_a_cross_device_move_copies_checks_and_removes(home, skill, monkeypatch,
     assert (kept / "deep" / "b.bin").read_bytes() == b"\0\1\2"
 
 
+def test_placed_targets_holds_every_owners_placements(home, skill):
+    src = skill()
+    place.apply(place.plan("comms", [Item(src, "claude", "comms-send")]), say=lambda line: None)
+    place.apply(place.plan("turns", [Item(src, "codex", "comms-send")]), say=lambda line: None)
+    held = place.placed_targets()
+    assert place.target_key(home / ".claude" / "skills" / "comms-send") in held
+    assert len(held) == 2
+
+
+@pytest.mark.parametrize("cross", [False, True], ids=["rename", "copy"])
+def test_move_aside_moves_a_path_no_placement_holds_and_names_where(home, monkeypatch,
+                                                                     cross):
+    import errno
+
+    target = home / ".claude" / "skills" / "mine"
+    (target / "deep").mkdir(parents=True)
+    (target / "SKILL.md").write_text("mine\n")
+    (target / "deep" / "b.bin").write_bytes(b"\0\1")
+    if cross:
+        real_rename = os.rename
+
+        def rename(a, b):
+            if Path(a) == target:
+                raise OSError(errno.EXDEV, "cross-device")
+            real_rename(a, b)
+        monkeypatch.setattr(place.os, "rename", rename)
+    kept = place.move_aside(target, harness="claude")
+    assert not os.path.lexists(target)
+    assert kept.parent.name == "claude" and kept.name == "mine"
+    assert kept.parent.parent.parent == moxi.paths.core().data_dir() / "displaced"
+    assert (kept / "SKILL.md").read_text() == "mine\n"
+    assert (kept / "deep" / "b.bin").read_bytes() == b"\0\1"
+    again = home / ".claude" / "skills" / "mine"
+    again.mkdir()
+    assert place.move_aside(again, harness="claude").name in ("mine", "mine-2")
+    with pytest.raises(FileNotFoundError):
+        place.move_aside(again, harness="claude")
+
+
 def test_a_move_that_fails_otherwise_places_nothing(home, skill, monkeypatch):
     # As a file Windows holds locked fails the rename: no copy is tried.
     src = skill()

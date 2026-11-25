@@ -1288,6 +1288,28 @@ def _displace(path: str, stamp: str, harness: str, name: str) -> Path:
     return dest
 
 
+def placed_targets() -> frozenset[str]:
+    """Every target a placement of any owner's holds, as the ledger keys it
+    (`target_key`), the owner installed now or not. Reads only."""
+    return frozenset(key for record in _read_ledger().values()
+                     for key in record.get("placed", {}))
+
+
+def move_aside(path: str | os.PathLike, *, harness: str) -> Path:
+    """Move `path` (a file, a folder or a link) to the core's
+    `DATA/moxi/displaced/<UTC stamp>/<harness>/<its name>` (a free name), as a replace
+    moves an occupant aside: one rename, or across volumes a whole copy checked by hash
+    and then the original removed. Returns where it went. It reads and writes no ledger,
+    so it is for a path no placement holds. Raises `OSError` with `path` where it was."""
+    import time
+
+    key = os.path.normpath(os.path.abspath(os.fspath(path)))
+    if not os.path.lexists(key):
+        raise FileNotFoundError(f"{key} is not there")
+    stamp = time.strftime("%Y%m%dT%H%M%SZ", time.gmtime())
+    return _displace(key, stamp, harness, os.path.basename(key))
+
+
 #: Windows' error for a rename from one volume to another (`ERROR_NOT_SAME_DEVICE`).
 _NOT_SAME_DEVICE = 17
 
@@ -1529,4 +1551,4 @@ def adopt(from_owner: str, to_owner: str, placements: Iterable[Placed], *,
 __all__ = ["FORMS", "SETTINGS", "KINDS", "ACTIONS", "CAUSES", "STATES", "MARK", "LEDGER",
            "IN_PLACE", "HELD_IN_PLACE", "FILE_NOTE", "DIR_NOTE", "Item", "Step", "Placed", "Harness",
            "harnesses", "chosen", "target_key", "from_package", "plan", "apply", "status",
-           "remove", "adopt"]
+           "remove", "adopt", "placed_targets", "move_aside"]

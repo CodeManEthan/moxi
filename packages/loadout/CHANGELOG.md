@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- `moxi loadout status` lists, after its rows and under `not loadout's:`, each entry of
+  a harness's skills or agents folder that no placement holds (not loadout's, not any
+  module's, not tracked by git, not a dotted name), as information that changes no exit
+  code. `--json` and `/api/status` give them as `strays`, each with `path`, `harness`
+  and `kind`. Two new verbs act on one: `moxi loadout take PATH [--user | --project P]`
+  copies it into the loadout folder as a source, lists it and installs it, the original
+  kept under `displaced/`; `moxi loadout move-aside PATH` moves it under `displaced/`
+  and prints the command that puts it back.
 - `moxi loadout status` says when the git hook's last automatic reinstall failed or ran
   out of time: its first line is `The last automatic reinstall failed (<when>): run moxi
   doctor loadout` until a clean install clears the record. `--json` and `/api/status`

@@ -103,7 +103,7 @@ def status(call: Any) -> dict[str, Any]:
     except Exception as exc:  # noqa: BLE001 - a read says what failed, it never raises
         return {"problem": _problem(exc, "the status"), "rows": [], "lines": [],
                 "notes": [], "counts": {}, "exit": 1, "kept": [],
-                "reinstall_failed": None}
+                "reinstall_failed": None, "strays": []}
     return {"problem": None, **outcome.as_json()}
 
 

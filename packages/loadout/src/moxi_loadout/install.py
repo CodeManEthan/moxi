@@ -65,6 +65,7 @@ from pathlib import Path
 from moxi.exit import ERROR, REFUSED, TEMPFAIL
 
 from moxi_loadout import adoption, displaced, entries, homes, ignores, ledger, planner, repo_link
+from moxi_loadout import strays as strays_mod
 from moxi_loadout.manifest import USER, ManifestError, parse_id
 from moxi_loadout.planner import FINE, Row, Scope
 
@@ -73,6 +74,8 @@ INSTALL_WAIT = 60.0
 #: How long install waits for a `moxi install` or `moxi uninstall` that holds the core
 #: lock (it may be installing packages), in seconds.
 CORE_WAIT = 600.0
+#: The line status lists the strays under.
+STRAYS_HEADING = "not loadout's:"
 #: What status's line about a failed automatic reinstall says to run.
 REINSTALL_FIX = "moxi doctor loadout"
 #: How the note naming targets the would-commit check had no time for starts.
@@ -87,7 +90,9 @@ class Outcome:
     `status` also gives the generated agent and global files nothing uses (`orphans`, see
     `orphans`), and the git hook's record of a failed reinstall while it stands
     (`reinstall_failed`, `{at, text}`; None for `install`), whose line its text puts
-    first."""
+    first, and the entries of the harness folders it places into that no placement holds
+    (`strays`, `moxi_loadout.strays`; none for `install`), which its text lists after the
+    rows under `not loadout's`, as information: they change no exit code."""
 
     rows: list[Row] = field(default_factory=list)
     lines: list[str] = field(default_factory=list)
@@ -99,6 +104,7 @@ class Outcome:
     #: Each copy the run kept, `{target, copy, how, id, back}` (`displaced.Keeper`).
     kept: list[dict] = field(default_factory=list)
     reinstall_failed: dict | None = None
+    strays: list = field(default_factory=list)
 
     def as_json(self) -> dict:
         counts: dict[str, int] = {}
@@ -106,7 +112,8 @@ class Outcome:
             counts[r.state] = counts.get(r.state, 0) + 1
         return {"rows": [r.as_json() for r in self.rows], "lines": self.lines,
                 "notes": self.notes, "counts": counts, "exit": self.code, "kept": self.kept,
-                "reinstall_failed": self.reinstall_failed}
+                "reinstall_failed": self.reinstall_failed,
+                "strays": [s.as_json() for s in self.strays]}
 
     def text(self) -> list[str]:
         out = [] if self.reinstall_failed is None else [
@@ -114,6 +121,9 @@ class Outcome:
             f"run {REINSTALL_FIX}"]
         out += self.lines
         out += [r.line() for r in self.rows if r.state != "ok"]
+        if self.strays:
+            out.append(STRAYS_HEADING)
+            out += [f"  {s.path}" for s in self.strays]
         out += [f"note: {n}" for n in self.notes]
         counts: dict[str, int] = {}
         for r in self.rows:
@@ -158,7 +168,8 @@ def status_plan(scope: Scope = Scope(), *, loadout_dir=None, resolver=planner.re
     """`status` with the plan and the entries run its outcome came from; the arguments
     are `status`'s."""
     plan, run = _plan(loadout_dir, resolver, git_seconds)
-    notes = _check_placed(plan, ignores.Git() if git is None else git)
+    git = ignores.Git() if git is None else git
+    notes = _check_placed(plan, git)
     for level, line in opencode_reads_claude(plan, run, after=False):
         run.global_lines.append((level, line))
         run.lines.append(line)
@@ -175,8 +186,19 @@ def status_plan(scope: Scope = Scope(), *, loadout_dir=None, resolver=planner.re
     outcome = Outcome(rows, list(plan.lines) + run.lines,
                       list(dict.fromkeys(plan.notes + run.notes + notes)),
                       code, orphans(plan, plan.ledger), run.global_lines,
-                      reinstall_failed=reinstall_failed())
+                      reinstall_failed=reinstall_failed(),
+                      strays=[s for s in strays_mod.find(plan, git)
+                              if _stray_shown(scope, s)])
     return Status(plan, run, outcome, [src for _, src in sourced])
+
+
+def _stray_shown(scope: Scope, stray) -> bool:
+    """Whether status in `scope` lists `stray`: every one for a whole status, those of
+    the named sections for a scoped one, none for one item's."""
+    if scope.item is not None:
+        return False
+    named = scope.sections()
+    return named is None or stray.section in named
 
 
 def reinstall_failed() -> dict | None:

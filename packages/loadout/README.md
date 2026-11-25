@@ -69,8 +69,8 @@ and `moxi loadout status` says what has drifted.
    fails prints the command to run and leaves a doctor record, which the next clean
    install clears. While the record stands, `moxi loadout status` prints first `The last
    automatic reinstall failed (<when>): run moxi doctor loadout`, and its `--json` gives
-   the record as `reinstall_failed` (`{at, text}`, else null). `moxi config set loadout reinstall_on_commit false` turns it off, and
-   the next install removes the pieces. Without repo, run `moxi loadout install` after a
+   the record as `reinstall_failed` (`{at, text}`, else null). `moxi config set loadout
+   reinstall_on_commit false` turns it off, and the next install removes the pieces. Without repo, run `moxi loadout install` after a
    commit.
 10. `moxi uninstall loadout` takes out everything it placed or wrote: harness entries, the
     global part, placements, its ignore files and the OpenCode row. Module skills from
@@ -87,6 +87,15 @@ and `moxi loadout status` says what has drifted.
     out with the item. A plain `add` is for every harness. The line `add` prints names the
     harnesses the item is on for. A harness the core's table has no row for is refused,
     and so is one an item's own `harnesses` leaves out.
+12. `status` lists, after its rows and under `not loadout's:`, each entry of a harness's
+    skills or agents folder (the user's, and each project section's) that no placement
+    holds: not loadout's, not a module's, not tracked by git, and not a dotted name of
+    the harness's or the tools' own. It is information; the exit code doesn't change, and
+    `--json` gives them as `strays` (`path`, `harness`, `kind`). `moxi loadout take PATH
+    [--user | --project P]` copies one into the folder as a source (`skills/<name>/`, or
+    `agents/<name>.md`), lists it in its own section unless you name one, and installs
+    it, keeping the original under `displaced/` first. `moxi loadout move-aside PATH`
+    moves one under `displaced/` and prints the command that puts it back.
 
 ## Install
 

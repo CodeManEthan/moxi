@@ -2,6 +2,10 @@
 
 ## 0.1.11 (unreleased)
 
+- `moxi.place.move_aside(path, harness=...)` moves a path no placement holds under the
+  core's `displaced/<stamp>/<harness>/`, the way a replace moves an occupant aside (one
+  rename, or a checked copy across volumes), and returns where it went.
+  `moxi.place.placed_targets()` gives every target any owner's placement holds.
 - `moxi config set MODULE KEY` and `unset` refuse with exit 3, writing nothing, when the
   key is the switch of one of the module's timers, the change would turn it on, and an
   agent's session started the run (`moxi.terminal.agent()`). Turning one off is never
