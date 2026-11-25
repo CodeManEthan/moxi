@@ -15,6 +15,14 @@ A read gives one of five kinds:
 Every `no-cache` and `unknown` carries a `code` from `CODES`, and so does a `cold` that
 has a reason. A caller branches on the code, never on the reason's words.
 
+**How long the last response took.** A Claude or Codex clock also carries `response_s`:
+the clock request's stamp minus the stamp of the input that request answered, the newest
+prompt or tool result written before it. The harness writes that input before it sends
+the request, so `response_s` is never shorter than the response, and a reader that adds
+it to `age_s` reads the cache's age from the request's start rather than its end. An
+input written among the request's own lines (a tool that ran while the response streamed)
+is not the one it answered and is passed over. None where the read finds no such input.
+
 **One skew rule for every clock.** A last request stamped more than `SKEW_LIMIT` seconds
 after now is `unknown`: the system clock may have stepped back, and a negative age read as
 zero would read warm. Within the limit the age is zero.
@@ -141,7 +149,10 @@ class Clock:
     returned; through a read-only store it was observed and counted in this read only,
     and nothing was written;
     `notes`, journal lines about cold landings under the documented minimum; and
-    `judged`, (thread id, the newest turn the drift scan judged)."""
+    `judged`, (thread id, the newest turn the drift scan judged).
+
+    A Claude or Codex clock carries `response_s`, the length of the last response
+    measured from the input it answered (above), or None where the read found none."""
 
     kind: str
     age_s: float | None = None
@@ -157,6 +168,7 @@ class Clock:
     judged: tuple | None = None
     code: str | None = None
     ttl_source: str | None = None
+    response_s: float | None = None
 
     def as_dict(self) -> dict:
         out = asdict(self)
@@ -167,6 +179,29 @@ class Clock:
 
 def unknown(code: str, reason: str) -> Clock:
     return Clock(UNKNOWN, reason=reason, code=code)
+
+
+def is_input(record) -> bool:
+    """Whether a record is input the harness writes before it sends a request: a tool's
+    result, or a message that is not the model's own (a prompt, a developer note)."""
+    if record.kind == "tool_result":
+        return True
+    role = getattr(record, "role", None)
+    return record.kind == "message" and isinstance(role, str) and role != "assistant"
+
+
+def is_output(record) -> bool:
+    """Whether a record is part of a response: a tool call or the model's own message."""
+    return record.kind == "tool_call" or (record.kind == "message"
+                                          and getattr(record, "role", None) == "assistant")
+
+
+def response_span(request_ts: float, input_ts: float | None) -> float | None:
+    """`response_s` from the clock request's stamp and its input's; None with no input, or
+    an input stamped after the request."""
+    if input_ts is None or input_ts > request_ts:
+        return None
+    return request_ts - input_ts
 
 
 def pair_text(provider, model) -> str:
@@ -213,4 +248,4 @@ def bad_id(what: str, value) -> Clock:
 __all__ = ["WARM", "COLD", "FRESH", "NO_CACHE", "UNKNOWN", "KINDS", "MISSING", "SKEW_LIMIT",
            "CLOCK_BLOCK", "CLOCK_SCAN_LIMIT", "TTL_TIER", "TTL_CONFIG", "CODES", "Clock",
            "unknown", "pair_text", "future_stamp", "span", "no_row", "free_reason",
-           "NO_ROW_WORDS", "bad_id"]
+           "NO_ROW_WORDS", "bad_id", "is_input", "is_output", "response_span"]

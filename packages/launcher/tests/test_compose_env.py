@@ -261,21 +261,10 @@ def test_on_windows_the_whole_line_is_limited():
 # -- the limit mark -------------------------------------------------------------------------
 
 
-@pytest.mark.parametrize("values, mark", [
-    # limit_at set to a mark wins over everything.
-    ({"limit_at": "1.5x", "warn_at": "2x"}, "1.5x"),
-    # Unset, it follows the launch's warn_at.
-    ({"limit_at": "", "warn_at": "2x"}, "2x"),
-    ({"warn_at": "1.5x"}, "1.5x"),
-    # warn_at off or unset: usage warns at no mark, and no config stands in; 1x.
-    ({"warn_at": "off"}, "1x"),
-    ({"limit_at": "", "warn_at": ""}, "1x"),
-    ({}, "1x"),
-])
-def test_the_compact_mark_follows_limit_at_then_warn_at(values, mark):
-    compact = {"recycle_at_limit": "compact", **values}
-    assert common.limit_mark(compact) == mark
-    assert common.option_stamps(compact) == {"MOXI_USAGE_CROSSING_AT": mark}
+@pytest.mark.parametrize("values", [
+    {"warn_at": "2x"}, {"warn_at": "1.5x", "limit_at": "1x"}, {"warn_at": "off"}, {}])
+def test_a_row_recorded_with_the_retired_compact_stamps_no_crossing(values):
+    assert common.option_stamps({"recycle_at_limit": "compact", **values}) == {}
     assert common.option_stamps({"recycle_at_limit": "off", **values}) == {}
 
 
@@ -295,10 +284,9 @@ def slot_here(monkeypatch):
 
 
 @pytest.mark.parametrize("warn_at", ["1x", "1.5x", "2x"])
-@pytest.mark.parametrize("limit_at", ["", "1x"])
-def test_a_relaunch_launch_crosses_at_its_warn_at(slot_here, warn_at, limit_at):
-    # The relaunch line rides on usage's warning; a limit_at never moves it.
-    values = {**SLOT_LAUNCH, "warn_at": warn_at, "limit_at": limit_at}
+def test_a_relaunch_launch_crosses_at_its_warn_at(slot_here, warn_at):
+    # The relaunch line rides on usage's warning.
+    values = {**SLOT_LAUNCH, "warn_at": warn_at}
     assert common.limit_mark(values) == warn_at
     assert common.relaunch_holds(values)
     assert common.option_stamps(values) == {"MOXI_USAGE_CROSSING_AT": warn_at}
@@ -337,7 +325,8 @@ def test_a_config_naming_a_default_mark_moves_no_launch_mark():
     path = Layout("usage").config_file()
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text('[marks]\ndefault = "1.5x"\n', encoding="utf-8")
-    assert common.limit_mark({"recycle_at_limit": "compact", "warn_at": ""}) == "1x"
+    assert common.limit_mark({"recycle_at_limit": "relaunch", "warn_at": ""}) == ""
+    assert common.option_stamps({"recycle_at_limit": "relaunch", "warn_at": ""}) == {}
 
 
 # -- the stop -------------------------------------------------------------------------------

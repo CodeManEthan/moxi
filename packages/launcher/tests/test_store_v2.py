@@ -472,7 +472,7 @@ def test_prune_deletes_old_ended_runs_with_their_events_and_exits(conn):
                  (at(-20 * 86400), at(-10 * 86400)))
     counts = store.prune(conn, 90, at=at())
     assert counts == {"run_events": 2, "exits": 1, "runs": 1, "warm_holds": 1,
-                      "park_entries": 0}
+                      "park_entries": 0, "pending_compacts": 0, "limit_runs_ended": 0}
     assert store.get_run(conn, gone.run_id) is None
     assert store.get_run(conn, kept_recent.run_id) is not None
     assert store.get_run(conn, kept_open.run_id).state == "armed"
@@ -488,6 +488,87 @@ def test_prune_takes_at_most_its_limit_of_each_table_and_finishes_later(conn):
     store.prune(conn, 90, at=at(), limit=2)
     assert all(store.get_run(conn, m.run_id) is None for m in made)
     assert conn.execute("SELECT count(*) FROM run_events").fetchone()[0] == 0
+
+
+# -- what a compact at the context limit left ---------------------------------------------
+
+RETIRED_DETAIL = "the launcher no longer compacts a session at a context limit"
+
+
+def test_prune_turns_each_pending_compact_into_a_dropped_event(conn):
+    launch(conn, "r1")
+    launch(conn, "r2")
+    conn.execute("INSERT INTO pending_compacts VALUES ('r1', 'sid-1|1x|t1', ?)", (at(-5),))
+    conn.execute("INSERT INTO pending_compacts VALUES ('r2', '|1x|t2', ?)", (at(-4),))
+    counts = store.prune(conn, 90, at=at())
+    assert counts["pending_compacts"] == 2
+    assert conn.execute("SELECT count(*) FROM pending_compacts").fetchone()[0] == 0
+    [first] = [e for e in store.events(conn, "r1") if e.kind == "pending-compact-dropped"]
+    assert first.session_id == "sid-1" and first.at == at()
+    assert first.detail == {"crossing_key": "sid-1|1x|t1", "pended_at": at(-5),
+                            "word": "retired", "detail": RETIRED_DETAIL}
+    [second] = [e for e in store.events(conn, "r2") if e.kind == "pending-compact-dropped"]
+    assert second.session_id is None
+    assert store.prune(conn, 90, at=at(1))["pending_compacts"] == 0
+
+
+def test_prune_ends_an_open_limit_compact_with_no_compact_event_failed(conn):
+    launch(conn, "r1")
+    made = run(conn, "r1", kind="compact", mode="limit", state="armed", at=at(-30))
+    store.add_run_event(conn, made.run_id, "wait", {"word": "turn"}, at=at(-20))
+    assert store.prune(conn, 90, at=at())["limit_runs_ended"] == 1
+    ended = store.get_run(conn, made.run_id)
+    assert (ended.state, ended.outcome, ended.word, ended.detail, ended.updated_at) == (
+        "ended", "failed", "retired", RETIRED_DETAIL, at())
+    assert [e.kind for e in store.run_events(conn, made.run_id)] == ["wait", "ended"]
+
+
+def test_prune_ends_an_open_limit_compact_past_its_compact_event_error(conn):
+    # It may have compacted the session, so it ends error, where its compact event bounds
+    # it as a compaction of unknown outcome, never failed, which marks nothing.
+    launch(conn, "r1")
+    made = run(conn, "r1", kind="compact", mode="limit", state="acting", at=at(-30))
+    store.add_run_event(conn, made.run_id, "compact", {"turn_number": 4}, at=at(-10))
+    store.prune(conn, 90, at=at())
+    ended = store.get_run(conn, made.run_id)
+    assert (ended.outcome, ended.word, ended.detail) == ("error", "retired", RETIRED_DETAIL)
+    [*_, last] = store.run_events(conn, made.run_id)
+    assert last.kind == "ended" and last.detail["outcome"] == "error"
+
+
+@pytest.mark.parametrize("kind, mode", [("compact", "expiry"), ("relaunch", "self"),
+                                        ("clear", "expiry"), ("keep-warm", "expiry")])
+def test_prune_leaves_open_runs_of_other_kinds_and_modes(conn, kind, mode):
+    launch(conn, "r1")
+    made = run(conn, "r1", kind=kind, mode=mode, state="armed", at=at(-30))
+    assert store.prune(conn, 90, at=at())["limit_runs_ended"] == 0
+    assert store.get_run(conn, made.run_id).state == "armed"
+
+
+def test_prune_leaves_an_ended_limit_compact_as_it_ended(conn):
+    launch(conn, "r1")
+    made = run(conn, "r1", kind="compact", mode="limit", at=at(-30))
+    store.end_run(conn, made.run_id, "compacted", at=at(-20))
+    store.prune(conn, 90, at=at())
+    assert store.get_run(conn, made.run_id).outcome == "compacted"
+
+
+def test_no_launcher_code_reads_or_writes_pending_compacts_but_prune():
+    import moxi_launcher
+
+    package = Path(moxi_launcher.__file__).parent
+    found = sorted(str(f.relative_to(package)) for f in package.rglob("*.py")
+                   if "pending_compacts" in f.read_text())
+    assert found == ["store.py"]
+    text = (package / "store.py").read_text()
+    body = text[text.index("def _retire_limit_compacts("):]
+    body = body[:body.index("\ndef ", 1)]
+    assert text.count("FROM pending_compacts") == body.count("FROM pending_compacts") == 2
+
+
+def test_the_schema_stays_at_version_4(conn):
+    assert len(store.STEPS) == 4
+    assert conn.execute("PRAGMA user_version").fetchone()[0] == 4
 
 
 def test_a_newer_store_than_this_launchers_is_refused(tmp_path):

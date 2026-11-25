@@ -3587,7 +3587,6 @@ launcher	packages/launcher/src/moxi_launcher/job.py	"""`error`, a refusal from b
 launcher	packages/launcher/src/moxi_launcher/job.py	Choice.__init__	kwonly	chain	chain
 launcher	packages/launcher/src/moxi_launcher/job.py	Choice.__init__	kwonly	held	held
 launcher	packages/launcher/src/moxi_launcher/job.py	Choice.__init__	kwonly	respawn	respawn
-launcher	packages/launcher/src/moxi_launcher/job.py	CompactJob.steps	name	error	exc
 launcher	packages/launcher/src/moxi_launcher/job.py	DONE = ("relaunched", "cleared", "compacted", "nudged")	keep	compacted	compacted
 launcher	packages/launcher/src/moxi_launcher/job.py	RelaunchJob._find	name	error	exc
 launcher	packages/launcher/src/moxi_launcher/job.py	RelaunchJob._find	name	refused	refused_exc
@@ -3920,8 +3919,6 @@ launcher	packages/launcher/src/moxi_launcher/recycle.py	return Verdict(None, get
 launcher	packages/launcher/src/moxi_launcher/recycle.py	return str(root / "sessions")	keep	sessions	sessions
 launcher	packages/launcher/src/moxi_launcher/recycle.py	root = Path(home) if home else Path(env.get("HOME") or Path.home()) / ".codex"	keep	HOME	HOME
 launcher	packages/launcher/src/moxi_launcher/recycle.py	said = f"the session {'cleared' if command == 'clear' else 'compacted'}"	keep	compacted	compacted
-launcher	packages/launcher/src/moxi_launcher/recycle.py	start_compact	name	environ	caller_env
-launcher	packages/launcher/src/moxi_launcher/recycle.py	start_compact	name	error	exc
 launcher	packages/launcher/src/moxi_launcher/recycle.py	reads; a fault after its run was written ends the run `exc`. With `dry_run` the ask	keep	dry_run	dry_run
 launcher	packages/launcher/src/moxi_launcher/recycle.py	bad = any(a.verdict.outcome not in (None, *job.DONE) for a in asked)	keep	any	any
 launcher	packages/launcher/src/moxi_launcher/recycle.py	"outcome": "dry-run" if dry_run else "asked", "dry_run": dry_run,	keep	dry_run	dry_run
@@ -3988,7 +3985,6 @@ launcher	packages/launcher/src/moxi_launcher/state.py	shown = "stale"	keep	stale
 launcher	packages/launcher/src/moxi_launcher/state.py	state	name	environ	caller_env
 launcher	packages/launcher/src/moxi_launcher/state.py	the open run's state, `stale`, or `ended`), its outcome, word and detail, and when it	keep	stale	stale
 launcher	packages/launcher/src/moxi_launcher/store.py	"""The row as a JSON object: every column, the JSON columns expanded, and `stale`	keep	stale	stale
-launcher	packages/launcher/src/moxi_launcher/store.py	FRESH_CONTEXT = ("relaunched", "first-turn-not-sent", "cleared", "compacted", "exited")	keep	compacted	compacted
 launcher	packages/launcher/src/moxi_launcher/store.py	VERDICTS = ("exited", "held", "at-dialog", "not-exited", "refused")	keep	refused	refused
 launcher	packages/launcher/src/moxi_launcher/store.py	_insert_run	name	actor	by
 launcher	packages/launcher/src/moxi_launcher/store.py	_writing	name	error	exc
@@ -18136,6 +18132,46 @@ moxi-dev	packages/moxi-dev/tests/test_check.py	assert checker.wait(timeout=testi
 moxi-dev	packages/moxi-dev/tests/test_check.py	checker.wait(timeout=1)	keep	timeout	timeout
 moxi-dev	packages/moxi-dev/tests/test_check.py	assert checker.wait(timeout=testing.PROC_WAIT_S) == 128 + signal.SIGTERM	keep	timeout	timeout
 moxi-dev	packages/moxi-dev/tests/test_kit.py	wait_for(lambda: not any(_running(pid) for pid in pids), testing.PROC_WAIT_S,	keep	any	any
+cache	packages/cache/tests/test_codex_clock.py	r.record("t1", t + 3)	keep	record	record
+cache	packages/cache/tests/test_codex_clock.py	r.record("t1", t + 30)	keep	record	record
+launcher	packages/launcher/src/moxi_launcher/cachetimers.py	__all__ = ["COMPACT_BEFORE_EXPIRY", "JOB", "KEEP_WARM", "TIMERS"]	keep	KEEP_WARM	KEEP_WARM
+launcher	packages/launcher/src/moxi_launcher/catalog.py	others = sorted(set(spec) - {"retired"})	keep	set	set
+launcher	packages/launcher/src/moxi_launcher/catalog.py	raise bad(f"is retired, so it takes no {', '.join(others)}")	keep	bad	bad
+launcher	packages/launcher/src/moxi_launcher/catalog.py	raise bad("has retired_values, which only an enum row takes")	keep	bad	bad
+launcher	packages/launcher/src/moxi_launcher/catalog.py	raise bad("has retired_values that are not a table of value to what to do instead")	keep	bad	bad
+launcher	packages/launcher/src/moxi_launcher/catalog.py	taken = sorted(set(raw) & set(values or ()))	keep	set	set
+launcher	packages/launcher/src/moxi_launcher/catalog.py	raise bad(f"retires {', '.join(taken)}, which its values still take")	keep	bad	bad
+launcher	packages/launcher/src/moxi_launcher/presets.py	row.check(value)  # raises `catalog.Retired`, with what to do instead	keep	ok	ok
+launcher	packages/launcher/src/moxi_launcher/presets.py	and any(p.key == name for p in retired)):	keep	any	any
+launcher	packages/launcher/src/moxi_launcher/recycle.py	newest compact run of any mode on the launch's chain that ended `compacted` (bound at	keep	compacted	compacted
+launcher	packages/launcher/src/moxi_launcher/recycle.py	its end), or `unconfirmed` or `error` after its `compact` event (bound at that event	keep	error	error
+launcher	packages/launcher/src/moxi_launcher/recycle.py	directed join. With `dry_run` the ask writes nothing and ends, where it would act, as	keep	dry_run	dry_run
+launcher	packages/launcher/src/moxi_launcher/recycle.py	`compacted`, bound at its end; or that ended in `COMPACT_UNKNOWN` after its `compact`	keep	compacted	compacted
+launcher	packages/launcher/src/moxi_launcher/recycle.py	"""End `run` `error` on the fault `exc`; raise it again unless it is an `Exception`."""	keep	error	error
+launcher	packages/launcher/src/moxi_launcher/store.py	`compact` event may have compacted, so it ends `error`, and that event bounds it as a	keep	error	error
+launcher	packages/launcher/tests/test_catalog.py	row.check("compact")	keep	ok	ok
+launcher	packages/launcher/tests/test_catalog.py	assert row.check("relaunch") == "relaunch"	keep	ok	ok
+launcher	packages/launcher/tests/test_page_launch.py	assert said["refused"] == [] and said["left_out"] == ["recycle_at_limit"]	keep	refused	refused
+launcher	packages/launcher/tests/test_presets.py	path.parent.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
+launcher	packages/launcher/tests/test_recycle.py	"compact", "expiry", "compacted", 4)	keep	compacted	compacted
+launcher	packages/launcher/tests/test_recycle.py	assert ask_compact(conn, session=moved, cache=cache).verdict.outcome == "compacted"	keep	compacted	compacted
+launcher	packages/launcher/tests/test_recycle.py	got = ask_compact(conn, session=FakeSession([Result("refused", "stale-turn")]))	keep	refused	refused
+launcher	packages/launcher/tests/test_recycle.py	done = compact_ended(conn, "compacted", sent=last + 2, ended=last + 10)	keep	compacted	compacted
+launcher	packages/launcher/tests/test_recycle.py	compact_ended(conn, "compacted", sent=last - 20, ended=last - 10)	keep	compacted	compacted
+launcher	packages/launcher/tests/test_recycle.py	assert stretch_ask(conn, last).verdict.outcome == "compacted"	keep	compacted	compacted
+launcher	packages/launcher/tests/test_recycle.py	compact_ended(conn, "compacted", sent=last - 5, ended=last + 0.001)	keep	compacted	compacted
+launcher	packages/launcher/tests/test_recycle.py	compact_ended(conn, "compacted", sent=last - 5, ended=last + 5, mode="limit")	keep	compacted	compacted
+launcher	packages/launcher/tests/test_recycle.py	compact_ended(conn, "compacted", sent=last - 5, ended=last + 5, request_id="r0")	keep	compacted	compacted
+launcher	packages/launcher/tests/test_recycle.py	compact_ended(conn, "compacted", sent=last - 5, ended=last + 5, request_id="r2")	keep	compacted	compacted
+launcher	packages/launcher/tests/test_recycle.py	compact_ended(conn, "compacted", sent=last - 5, ended=last + 5,	keep	compacted	compacted
+launcher	packages/launcher/tests/test_recycle.py	compact_ended(conn, "compacted", sent=last - 100, ended=last - 90)	keep	compacted	compacted
+launcher	packages/launcher/tests/test_recycle.py	self.end("compacted")	keep	compacted	compacted
+launcher	packages/launcher/tests/test_settings.py	assert set(settings.schema().keys) == set(DEFAULTS) | set(TEXTS) | LEFT_OUT	keep	set	set
+launcher	packages/launcher/tests/test_store_v2.py	store.end_run(conn, made.run_id, "compacted", at=at(-20))	keep	compacted	compacted
+launcher	packages/launcher/tests/test_store_v2.py	assert store.get_run(conn, made.run_id).outcome == "compacted"	keep	compacted	compacted
+moxi	packages/moxi/src/moxi/config.py	raise bad(f"has left_out {left_out!r}", "give left_out true or false")	keep	bad	bad
+moxi	packages/moxi/src/moxi/config.py	raise bad("has left_out but is not retired",	keep	bad	bad
+moxi	packages/moxi/tests/test_config_set.py	demo.parent.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
 loadout	packages/loadout/src/moxi_loadout/cli.py	p.add_argument("--harness", action="append", default=[], metavar="H",	keep	default	default
 loadout	packages/loadout/src/moxi_loadout/cli.py	help="list it for harness H only, a row of the core's harness "	keep	help	help
 loadout	packages/loadout/src/moxi_loadout/page.py	_ADD_BODY = {**_ITEM_BODY, "harnesses": lb.Field("list", required=False, max=LIST_MAX,	keep	required	required

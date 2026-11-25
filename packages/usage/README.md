@@ -309,7 +309,7 @@ model, at)`. Handlers run one after another, each waited on for at most
 `marks.handler_wait_ms` (200). A line a handler returns on the call that also fired the
 notice is appended to it after `. `, so the model sees one line; on a call with no notice
 it is a line of its own. Each rise fires the crossing again: a reading below its mark arms
-it once more, so a launch that compacts at its limit compacts at every rise. usage itself
+it once more, so a launch told at its mark is told again at every rise. usage itself
 does nothing on a crossing. The wait is per handler, and turns bounds the whole listener
 call by its own `after_tool.wait_ms` (300): two handlers that each take most of their
 200 ms outlast it, and turns then drops the call's answer, the notice with it. A handler

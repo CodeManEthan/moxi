@@ -2,6 +2,36 @@
 
 ## Unreleased
 
+- `recycle_on_expiry = compact` compacts the session shortly before its cache expires,
+  no longer after: inside a window from 360 s before the expiry (where keep-warm's
+  shuts) to 60 s before it, counted on cache's age plus the last response's length
+  (cache's `response_s`), while cache reads it warm, it is quiet and nothing is at work
+  by keep-warm's reading (live subagents, the chain's open holds, directed agents),
+  whether or not keep-warm is on. An open hold now stops a compact as it stops a clear.
+  It compacts at most once in an idle stretch, read from the compact runs of the
+  launch's chain, and reads cache again after its run is written, right before it acts.
+  A lifetime of 360 s or less has no window. cache's timer asks through a new
+  subscription, `launcher.compact-before-expiry`, every 60 s in the window; the
+  `launcher.recycle-on-expiry` subscription now asks only sessions stamped `clear`. A
+  cache older than 0.1.7 gives no `response_s`, and a compact ask then ends quietly
+  `unreadable`.
+- keep-warm reads cache again after its run is written and drops the nudge, quietly
+  `outside`, once the window has shut, so on one cache clock no nudge comes after the
+  compact's window opens.
+- The launcher no longer compacts a session at its context limit. `recycle_at_limit`
+  takes `off` and `relaunch`; `compact` and the `limit_at` row are retired, refused when
+  typed or set by a preset and left out with a warning from `[defaults]`.
+  `recycle.limit_wait_s` is retired and left out with a warning. A replay of a launch
+  recorded with `compact` runs `off`, with a warning. Pending compacts and open limit
+  compacts are ended by the store's prune, and `moxi-launcher-job compact` is a stub
+  that ends its run `failed` (`retired`). A relaunch launch grants turns `exit` alone.
+- `moxi launcher show` and Home show a relaunch launch's mark again, read from its
+  `warn_at` (`at limit relaunch (2x)`), and show a launch recorded with `compact` as
+  `compact (no longer acts)`.
+- The `cache` extra now needs `moxi-cache>=0.1.7`, the first cache whose clock carries
+  `response_s`.
+- The launcher needs moxi 0.1.11 or later: its settings mark the retired
+  `recycle.limit_wait_s` `left_out`, a field an older core refuses.
 - A director's relaunch always carries a handoff, the new session's first turn as a self
   relaunch's is: `moxi launcher relaunch SESSION_ID|IDENTITY --handoff FILE`, else the
   seat's newest waiting handoff written since the old session began, checked against the

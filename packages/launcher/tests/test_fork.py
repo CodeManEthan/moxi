@@ -90,6 +90,13 @@ def test_a_fork_copies_the_request_rows_unsets_the_dropped_and_leaves_its_own_ou
     assert "target" not in got and "slot" not in got
 
 
+def test_a_fork_drops_retired_rows_and_values():
+    got = catalog.forked("claude", {"harness": "claude", "recycle_at_limit": "compact",
+                                    "limit_at": "1x", "model": "opus"})
+    assert "limit_at" not in got and got["recycle_at_limit"] == "off"
+    assert got["model"] == "opus"
+
+
 # -- the composers --------------------------------------------------------------------
 
 
@@ -150,6 +157,23 @@ def test_a_fork_of_a_live_session_records_fork_of_and_reads_as_a_fork(work, harn
     assert (new.values["name"], new.values["model"], new.values["add_dir"]) == (
         "", "opus", [str(work)])
     assert api.launch_kind(new_id) == "fork" and api.launch_kind(SID) == "one-off"
+
+
+def test_a_fork_of_a_row_recorded_with_compact_and_limit_at_composes(work, harness,
+                                                                      no_exec):
+    parent(work)
+    conn = store.connect()
+    try:
+        stored = {**row("r1").values, "recycle_at_limit": "compact", "limit_at": "1x"}
+        conn.execute("UPDATE launches SET values_json = ? WHERE request_id = 'r1'",
+                     (json.dumps(stored),))
+        conn.commit()
+    finally:
+        conn.close()
+    got = fork.fork(SID, request_id="r2")
+    assert got.exit_code == 0 and got.data["outcome"] == "forked"
+    new = row("r2")
+    assert new.values["recycle_at_limit"] == "off" and "limit_at" not in new.values
 
 
 def test_a_forks_env_holds_nothing_of_the_asking_session(work, harness, no_exec,

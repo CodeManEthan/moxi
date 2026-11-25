@@ -77,6 +77,13 @@
   held back since the last line, in place of asyncio's traceback for each failure (up to
   101 per readiness event). `serve` puts a filter in front of the loop's exception handler
   to do it; every other context reaches that handler as before.
+- A retired key may carry `left_out = true`, for a key in a file every process of the
+  module reads, where one stale line would stop them all. A file that still sets such a
+  key reads as though it didn't: the `Settings` list it in `left_out`, by name with its
+  `retired` words, in place of a `ConfigError`. `moxi config check` passes and warns,
+  naming the key and its `retired` words; `moxi config set` still refuses the key, and
+  `moxi config unset` removes its line from the file. A module that marks a key `left_out` needs `moxi>=0.1.11`: an older core refuses its
+  schema for the unknown field.
 
 ## 0.1.10 (unreleased)
 

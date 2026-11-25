@@ -494,13 +494,16 @@ def test_preview_gives_the_resolvers_warnings_as_launch_does(tmp_path, monkeypat
 
 def test_a_preview_shows_the_limit_mark_it_stamps(tmp_path, monkeypatch):
     Harness.on_path(tmp_path, monkeypatch)
+    monkeypatch.setattr("moxi_launcher.slots.links", lambda module: True)
+    monkeypatch.setattr("moxi_launcher.catalog.slots_here", lambda: True)
     work = tmp_path / "work"
     work.mkdir()
-    req = api.LaunchRequest(typed={"recycle_at_limit": "compact", "warn_at": "1.5x"},
+    req = api.LaunchRequest(typed={"recycle_at_limit": "relaunch", "warn_at": "1.5x",
+                                   "target": "slot"},
                             cwd=str(work), request_id="r1", session_id=SID, actor="ann")
     got = api.preview(req)
     assert got.env["MOXI_USAGE_CROSSING_AT"] == "1.5x"
-    assert got.values["limit_at"] == ""
+    assert "limit_at" not in got.values
 
 
 def test_a_preview_refuses_a_scratch_launch_set_to_recycle_itself(tmp_path, monkeypatch):
@@ -511,9 +514,9 @@ def test_a_preview_refuses_a_scratch_launch_set_to_recycle_itself(tmp_path, monk
         api.preview(req)
     assert caught.value.code == "scratch-recycle" and caught.value.exit_code == 3
     assert caught.value.problem == "a scratch launch can't recycle itself"
-    compact = api.LaunchRequest(typed={"scratch": True, "recycle_at_limit": "compact"},
-                                request_id="r2", session_id=SID, actor="ann")
-    assert api.preview(compact).values["recycle_at_limit"] == "compact"
+    off = api.LaunchRequest(typed={"scratch": True, "recycle_at_limit": "off"},
+                            request_id="r2", session_id=SID, actor="ann")
+    assert api.preview(off).values["recycle_at_limit"] == "off"
 
 
 def test_a_preview_of_a_scratch_holds_a_defaults_relaunch_off(tmp_path, monkeypatch):
