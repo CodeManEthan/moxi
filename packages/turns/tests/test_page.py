@@ -1339,6 +1339,19 @@ def test_the_page_states_its_group_and_order_among_the_pages():
     assert (page_decl["group"], page_decl["order"]) == ("daily", 25)
 
 
+def test_the_project_facts_component_is_declared_inline_with_the_contracts_attributes():
+    from moxi_turns import module
+
+    assert set(module.COMPONENTS) == {"page", "project-facts"}
+    facts = module.COMPONENTS["project-facts"]
+    assert (facts["script"], facts["place"], facts["contract"]) == ("project-facts.js", "inline", 1)
+    assert "home" not in facts and "band_unless" not in facts
+    assert {name: attr["type"] for name, attr in facts["attributes"].items()} == {
+        "projects": "string", "open": "string"}
+    assert loopback().export(page.PAGE)["assets"] == ["build-stamp.txt", "page.js",
+                                                      "project-facts.js"]
+
+
 def test_the_page_leaves_the_band_where_sessions_is_installed():
     from moxi_turns import module
 

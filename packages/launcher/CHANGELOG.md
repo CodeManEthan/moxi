@@ -18,6 +18,10 @@
   with no preset and nothing typed meets from `[defaults]`: a rule between rows that
   refuses it, or a self-relaunch item that a `recycle_at_limit = "relaunch"` fails before
   the launch has a folder (the harness, a slot target, slots running here, scratch).
+- On the Projects page, each running session's line in the opened project's `Sessions`
+  row says it runs (`runs`) and its `last active` part that it holds only while the
+  session is not in a turn (`idle_only`), so the page can join turns' `working` there.
+  The component reads nothing new.
 - `recycle_on_expiry = compact` compacts the session shortly before its cache expires,
   no longer after: inside a window from 360 s before the expiry (where keep-warm's
   shuts) to 60 s before it, counted on cache's age plus the last response's length
