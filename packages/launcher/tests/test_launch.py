@@ -1109,7 +1109,7 @@ def test_a_scratch_launch_set_to_recycle_itself_is_refused_before_the_row(
     assert isinstance(refused, api.ScratchRecycle) and refused.exit_code == exits.REFUSED
     assert refused.row == "recycle_at_limit"
     assert refused.problem == "a scratch launch can't recycle itself"
-    assert refused.hint == "recycle with compact, or launch in a directory"
+    assert refused.hint == "set recycle_at_limit off, or launch in a directory"
     # Ahead of the target's own checks, so the launch raises it.
     with pytest.raises(api.ScratchRecycle):
         api.launch(req)
@@ -1142,10 +1142,9 @@ def test_a_scratch_launch_holds_a_defaults_relaunch_off(harness, tmp_path, monke
 
 
 @POSIX
-def test_a_scratch_launch_may_compact_at_its_limit(harness, tmp_path, monkeypatch):
-    for recycle in ("compact", "off"):
-        req = recycling_scratch(monkeypatch, tmp_path, recycle)
-        assert "scratch-recycle" not in {r.code for r in api.check(req)}
+def test_a_scratch_launch_set_off_is_not_refused(harness, tmp_path, monkeypatch):
+    req = recycling_scratch(monkeypatch, tmp_path, "off")
+    assert "scratch-recycle" not in {r.code for r in api.check(req)}
 
 
 @POSIX

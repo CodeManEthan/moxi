@@ -11,6 +11,14 @@ clock reads young by the length of the last response, because the stamp is writt
 response ends and the lifetime runs from when the request started; a read inside that
 margin past the lifetime reads warm. Declared.
 
+**How long the last response took** (`response_s`). The same backward read goes on past
+the clock request to the input it answered: the newest prompt or tool result of the main
+conversation older than the request's own lines and newer than the request before it. A
+tool result written among the request's lines (a tool that ran while the response
+streamed) is passed over, since a line of the request older than it shows the request
+had already started. A read that reaches its byte limit before the request before it
+finds none. `response_s` is the clock request's stamp minus that input's.
+
 **What each ending of the read means.** The newest request that meets the rule is the
 clock; one with no readable stamp is `unknown`. A read that ended at the start of the file
 with no such request is `fresh`, unless a line on the way would not parse (a `malformed`
@@ -63,8 +71,9 @@ NO_SESSION_YET = "no session id reported yet"
 
 #: The record kinds the clock reads. A line that will not parse is asked for too: with
 #: requests alone the read would pass it by unseen, and a read to the start past one is
-#: not evidence of no request.
-KINDS = frozenset({"request", "malformed"})
+#: not evidence of no request. Messages, tool calls and tool results find the input the
+#: clock request answered.
+KINDS = frozenset({"request", "malformed", "message", "tool_call", "tool_result"})
 
 
 def _count(value) -> bool:
@@ -89,6 +98,40 @@ def _stamp(record) -> float | None:
     return record.time if isinstance(record.time, (int, float)) else None
 
 
+def _main(record) -> bool:
+    """A record of the main conversation: a subagent's line carries its id."""
+    return record.agent_id is None and getattr(record, "sidechain", None) is not True
+
+
+class _Input:
+    """The search, newest first past the clock request, for the input it answered.
+
+    Holds the newest input seen since the last line of the clock request; a line of it
+    older than that input clears it, and the request before it ends the search."""
+
+    def __init__(self, request_id: str):
+        self.request_id = request_id
+        self.found = None
+        self.done = False
+
+    def feed(self, record) -> None:
+        if self.done or not _main(record):
+            return
+        if record.kind == "request":
+            if record.request_id != self.request_id:
+                self.done = True
+        elif _clock.is_output(record):
+            self.found = None
+        elif _clock.is_input(record) and self.found is None:
+            self.found = record
+
+    def stamp(self, ended: str | None) -> float | None:
+        """The input's stamp; at the read's end, only when it reached the file's start."""
+        if not self.done and ended != "start":
+            return None
+        return None if self.found is None else _stamp(self.found)
+
+
 @dataclass(frozen=True)
 class Read:
     """What one backward read of a transcript found.
@@ -98,17 +141,19 @@ class Read:
     (the limit stopped the read with no such request), `nostamp` (the newest such request
     has no readable stamp) or `malformed` (read to the start, no such request, and a line
     that would not parse). `tier_ended` says how the tier read ended when the clock
-    request named none: `start` or `limit`."""
+    request named none: `start` or `limit`. `input_ts` is the stamp of the input the clock
+    request answered, None when the read found none."""
 
     outcome: str
     ts: float | None = None
     tier: int | None = None
     tier_ended: str | None = None
+    input_ts: float | None = None
 
 
 def last_request(path, *, limit: int | None = None) -> Read:
-    """Read a transcript backwards to its clock request, and past it to the tier. Raises
-    OSError on a read that fails."""
+    """Read a transcript backwards to its clock request, and past it to the tier and the
+    input the request answered. Raises OSError on a read that fails."""
     limit = _clock.CLOCK_SCAN_LIMIT if limit is None else limit
     malformed = False
     with records_back(Source(HARNESS, str(path), None, None), kinds=KINDS,
@@ -124,14 +169,16 @@ def last_request(path, *, limit: int | None = None) -> Read:
             if ts is None:
                 return Read("nostamp")
             tier = tier_of(record)
-            if tier is not None:
-                return Read("clock", ts, tier)
+            search = _Input(record.request_id)
             for older in records:
-                if _meets(older):
+                search.feed(older)
+                if tier is None and _meets(older):
                     tier = tier_of(older)
-                    if tier is not None:
-                        return Read("clock", ts, tier)
-            return Read("clock", ts, None, tier_ended=back.ended)
+                if tier is not None and search.done:
+                    return Read("clock", ts, tier, input_ts=search.stamp(None))
+            return Read("clock", ts, tier,
+                        tier_ended=back.ended if tier is None else None,
+                        input_ts=search.stamp(back.ended))
         if back.ended == "limit":
             return Read("limit")
     return Read("malformed") if malformed else Read("none")
@@ -197,7 +244,7 @@ def read(session_id, *, now: float, projects_root=None, turned: bool = True,
             return unknown(_clock.CONFIG_ERROR, f"cache's config could not be read ({exc})")
     age = max(0.0, now - found.ts)
     return Clock(COLD if age >= ttl else WARM, age_s=age, ttl_s=ttl,
-                 ttl_source=source)
+                 ttl_source=source, response_s=_clock.response_span(found.ts, found.input_ts))
 
 
 __all__ = ["HARNESS", "TIER_1H", "TIER_5M", "Read", "tier_of", "last_request", "read"]

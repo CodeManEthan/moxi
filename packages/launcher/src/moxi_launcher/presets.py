@@ -45,7 +45,7 @@ from __future__ import annotations
 import os
 import re
 from collections.abc import Callable, Mapping, Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from types import MappingProxyType
 
@@ -392,8 +392,9 @@ def _value_rules(preset: Preset, values: Mapping[str, object],
     """The rules between rows (`catalog.refuse_values`) over what a launch of the preset
     resolves to with nothing typed: the shipped defaults, `[defaults]`, then the preset,
     whose place, when it names one, replaces the one `[defaults]` names. As `resolve`
-    holds them: on a scratch launch a `[defaults]` relaunch holds `off`, and a
-    `[defaults]` `limit_at` is left out of a relaunch launch."""
+    holds them: on a scratch launch a `[defaults]` relaunch holds `off`, and a retired
+    value or row from `[defaults]` is left out (`defaults` as checked holds none), so a
+    `[defaults]` `recycle_at_limit = compact` the preset doesn't override holds `off`."""
     harness = preset.harness if preset.harness in catalog.HARNESSES else base_harness
     rows = catalog.offered(harness, avail)
     effective = {name: row.default for name, row in rows.items()}
@@ -404,9 +405,6 @@ def _value_rules(preset: Preset, values: Mapping[str, object],
     if (effective.get("scratch") and RECYCLE_AT_LIMIT not in values
             and effective.get(RECYCLE_AT_LIMIT) == "relaunch"):
         effective[RECYCLE_AT_LIMIT] = "off"
-    if (effective.get(RECYCLE_AT_LIMIT) == "relaunch" and LIMIT_AT not in values
-            and LIMIT_AT in effective):
-        effective[LIMIT_AT] = rows[LIMIT_AT].default
     try:
         catalog.refuse_values(harness, effective, chosen=values, available=avail)
     except Refused as exc:
@@ -416,7 +414,10 @@ def _value_rules(preset: Preset, values: Mapping[str, object],
 
 def _check_defaults(table: Mapping[str, object], avail) -> tuple[dict, list[Problem]]:
     """`[defaults]`: each key a launcher row or a row of some harness, its value checked
-    against each such row; a row in `PER_SEAT` is refused by name (`per-seat`)."""
+    against each such row; a row in `PER_SEAT` is refused by name (`per-seat`). A retired
+    row or value (code `retired`) is a warning, not an error: `[defaults]` serves every
+    launch, so it is left out of each launch with a warning naming the fix
+    (`layered`)."""
     values: dict = {}
     problems: list[Problem] = []
     where = "defaults"
@@ -447,6 +448,8 @@ def _check_defaults(table: Mapping[str, object], avail) -> tuple[dict, list[Prob
                                                if key in catalog.load(h)])
         if problem is not None:
             values.pop(key, None)
+            if problem.code == RETIRED:
+                problem = replace(problem, level=WARNING)
             problems.append(problem)
     problems += _check_place(where, values, allow_home=False)
     return values, problems
@@ -997,6 +1000,7 @@ def layered(request, *, harness: str | None = None, presets: Presets | None = No
     errors = [p for p in problems if p.level == ERROR and p.code != "needs-module"]
     if errors:
         raise BadPreset(errors[0])
+    retired = [p for p in problems if p.code == RETIRED and p.key not in left_out]
     from_defaults = {k: v for k, v in defaults.items() if k not in left_out}
     if preset is not None and left_out:
         preset = Preset(preset.kind, preset.name, MappingProxyType(
@@ -1012,7 +1016,7 @@ def layered(request, *, harness: str | None = None, presets: Presets | None = No
                        "set it to one of " + ", ".join(map(repr, catalog.HARNESSES)))
 
     chosen_preset: dict = {}
-    warnings: list[str] = []
+    warnings: list[str] = [left_out_words(p.problem, p.hint) for p in retired]
     if preset is not None:
         chosen_preset, problems = _check_preset(preset, defaults.get("harness")
                                                 or shipped_harness, avail, harness=harness)
@@ -1023,9 +1027,12 @@ def layered(request, *, harness: str | None = None, presets: Presets | None = No
                      and p.key != "identity"]
 
     rows = catalog.offered(harness, avail)
-    for key in typed:
+    for key, value in typed.items():
+        row = catalog.row(harness, key)
+        if row is not None and (row.retired is not None or (
+                isinstance(value, str) and value in row.retired_values)):
+            row.check(value)  # raises `catalog.Retired`, with what to do instead
         if key not in rows:
-            row = catalog.row(harness, key)
             if row is not None and row.settable and not row.offered(avail, harness):
                 raise NeedsModule(row, *(row.unoffered(avail, harness) or ()))
             raise BadValue(key, f"{key} is not a {harness} row or a launcher row",
@@ -1039,7 +1046,8 @@ def layered(request, *, harness: str | None = None, presets: Presets | None = No
         for source, layer in layers:
             if name in layer:
                 values[name], sources[name] = _unset_as_default(row, layer[name]), source
-        if name in left_out:
+        if name in left_out or (sources[name] == SHIPPED
+                                and any(p.key == name for p in retired)):
             sources[name] = LEFT_OUT
     _one_spelling(layers, rows, values, sources)
 
@@ -1063,6 +1071,17 @@ def layered(request, *, harness: str | None = None, presets: Presets | None = No
         chosen=frozenset(k for k in (*chosen_preset, *typed) if k in rows),
         place=MappingProxyType(place), place_source=place_source,
         defaults=MappingProxyType(defaults), warnings=tuple(warnings))
+
+
+#: The code of a retired row or value.
+RETIRED = catalog.Retired.code
+
+
+def left_out_words(problem: str, hint: str) -> str:
+    """The warning of a retired row, value or setting left out of a launch: `problem`
+    (`<what> is retired`) as `<what> is left out: <hint>`."""
+    what = problem.removesuffix(" is retired")
+    return f"{what} is left out: {hint}"
 
 
 def _left_out(names: Sequence[str], typed: Mapping[str, object]) -> frozenset[str]:
@@ -1103,7 +1122,7 @@ def resolve(request, *, presets: Presets | None = None,
     preset, harness, place = laid.preset, laid.harness, laid.place
     values, sources, chosen = dict(laid.values), dict(laid.sources), laid.chosen
     off_posture = bool(getattr(request, "off_posture", False))
-    warnings = list(laid.warnings)
+    warnings = list(laid.warnings) + _settings_left_out()
 
     caller = getattr(request, "cwd", None) or os.getcwd()
     cwd, scratch, project = _place(place, caller, avail,
@@ -1170,6 +1189,19 @@ def resolve(request, *, presets: Presets | None = None,
         off_posture=off_posture, links=frozenset(links), warnings=tuple(warnings))
 
 
+def _settings_left_out() -> list[str]:
+    """The warning of each retired key the launcher's config file still sets, which its
+    reader leaves out (`moxi.config`'s `left_out`); none when the file can't be read,
+    which every launcher read of its settings reports itself."""
+    from . import settings
+
+    try:
+        left = settings.current().left_out
+    except ConfigError:
+        return []
+    return [f"{name} is left out: {words}" for name, words in left.items()]
+
+
 #: The row that recycles a launch at its context limit.
 RECYCLE_AT_LIMIT = "recycle_at_limit"
 #: The warning of a scratch launch whose `recycle_at_limit = relaunch` came from
@@ -1177,17 +1209,10 @@ RECYCLE_AT_LIMIT = "recycle_at_limit"
 SCRATCH_RECYCLE_OFF = ("recycle_at_limit relaunch is left out: a scratch launch can't "
                        "recycle itself, so the default relaunch holds off here")
 
-
-#: The warning of a relaunch launch that has a `limit_at` from `[defaults]`.
-LIMIT_AT_LEFT_OUT = ("limit_at is left out: this launch relaunches itself, and the "
-                     "relaunch line comes at warn_at; limit_at still acts on a launch that "
-                     "compacts")
 #: The warning of a launch set to relaunch itself by a flag, its preset or `[defaults]`
 #: whose session can't (`selfrecycle.missing`): what it fails, and what would let it.
 RELAUNCH_NOT_APPLIED = ("recycle_at_limit relaunch does nothing on this launch: it "
                         "{problem}; {hint}")
-#: The row holding the mark a compacting launch compacts at.
-LIMIT_AT = "limit_at"
 
 
 def _settle_recycle(harness: str, values: dict, sources: dict, *, cwd: str | None,
@@ -1198,9 +1223,7 @@ def _settle_recycle(harness: str, values: dict, sources: dict, *, cwd: str | Non
     (`selfrecycle.missing`) is kept, and warned of with the item it fails
     (`RELAUNCH_NOT_APPLIED`), so a value set for the launch is never silently without
     effect; `catalog.refuse_values` then refuses the pairs it refuses. A relaunch with no
-    warn-at mark is armed and never told, and says nothing: that is what was set. A
-    `[defaults]` `limit_at` is left out of a relaunch launch, with a warning, since the
-    same `[defaults]` serves compacting launches, where it acts."""
+    warn-at mark is armed and never told, and says nothing: that is what was set."""
     from . import selfrecycle
 
     if values.get(RECYCLE_AT_LIMIT) != "relaunch":
@@ -1214,9 +1237,6 @@ def _settle_recycle(harness: str, values: dict, sources: dict, *, cwd: str | Non
     warnings = []
     if found is not None:
         warnings.append(RELAUNCH_NOT_APPLIED.format(problem=found.problem, hint=found.hint))
-    if catalog.is_set(values.get(LIMIT_AT)) and sources.get(LIMIT_AT) == DEFAULTS:
-        values[LIMIT_AT], sources[LIMIT_AT] = "", LEFT_OUT
-        warnings.append(LIMIT_AT_LEFT_OUT)
     return warnings
 
 

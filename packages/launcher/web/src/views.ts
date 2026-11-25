@@ -61,9 +61,8 @@ export function stateLines(entry: SessionState): string[] {
   const recycle = entry.recycle;
   if (recycle !== null) {
     let line = `recycle: on expiry ${recycle.on_expiry}, at limit ${recycle.at_limit}`;
-    if (recycle.at_limit !== "off" && recycle.limit_at) line += ` (${recycle.limit_at})`;
+    if (recycle.mark) line += ` (${recycle.mark})`;
     if (recycle.last !== null) line += `; last: ${recycle.last.kind} ${said(recycle.last)} at ${when(recycle.last.updated_at)}`;
-    if (recycle.pending_compact) line += `; a compact pending since ${when(recycle.pending_compact)}`;
     if (recycle.told_at) line += `; told to recycle itself at ${when(recycle.told_at)}`;
     lines.push(line);
   }
@@ -81,14 +80,13 @@ export function stateLines(entry: SessionState): string[] {
 }
 
 /** What a session's state shows in a few words: the red word, or what is under way (an
- * open relaunch, a pending compact, keep-warm on), or `ok`. */
+ * open relaunch, keep-warm on), or `ok`. */
 export function summary(entry: SessionState): string {
   if (entry.unreadable !== null) return UNREADABLE;
   if (entry.red) return entry.word ?? "failed";
   const parts: string[] = [];
   const run = entry.relaunch?.run;
   if (run && run.state !== "ended" && entry.relaunch?.state) parts.push(`relaunch ${entry.relaunch.state}`);
-  if (entry.recycle?.pending_compact) parts.push("compact pending");
   if (entry.keep_warm?.on) parts.push("warm");
   return parts.join(" · ") || "ok";
 }

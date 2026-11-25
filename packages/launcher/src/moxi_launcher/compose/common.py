@@ -677,21 +677,20 @@ def director_words(values: Mapping[str, object], ctx: Context) -> list[str]:
 
 def commands(values: Mapping[str, object]) -> tuple[str, ...]:
     """The session commands a launch grants through turns: `exit`, then `clear` or
-    `compact` for `recycle_on_expiry`, and `compact` for `recycle_at_limit`."""
+    `compact` exactly when `recycle_on_expiry` is that value. `recycle_at_limit` grants
+    nothing: a relaunch exits through `exit`."""
     granted = list(COMMANDS)
     expiry = values.get("recycle_on_expiry")
     if expiry in ("clear", "compact"):
         granted.append(str(expiry))
-    if values.get("recycle_at_limit") in ("relaunch", "compact") and "compact" not in granted:
-        granted.append("compact")
     return tuple(granted)
 
 
 def option_stamps(values: Mapping[str, object]) -> dict[str, str]:
     """The stamps a launch's option rows set: keep-warm on, recycle on expiry's value,
-    and the crossing mark (`limit_mark`) when it recycles at its limit: a `compact`
-    launch always, a `relaunch` launch only where it is told it may recycle itself
-    (`selfrecycle.missing` with `told`): its arm would be accepted and it warns at a mark.
+    and the crossing mark (`limit_mark`) for a `relaunch` launch only where it is told it
+    may recycle itself (`selfrecycle.missing` with `told`): its arm would be accepted and
+    it warns at a mark.
     The subconscious row stamps its mode under memory's variable. A row at `off` stamps
     nothing."""
     env: dict[str, str] = {}
@@ -699,8 +698,7 @@ def option_stamps(values: Mapping[str, object]) -> dict[str, str]:
         env[KEEP_WARM_ENV] = "on"
     if values.get("recycle_on_expiry") in ("clear", "compact"):
         env[RECYCLE_ON_EXPIRY_ENV] = str(values["recycle_on_expiry"])
-    at_limit = values.get("recycle_at_limit")
-    if at_limit == "compact" or relaunch_holds(values):
+    if relaunch_holds(values):
         _stamp(env, "usage", 1, "CROSSING_AT_ENV", limit_mark(values))
     if values.get("subconscious") in ("automatic", "on-demand"):
         _stamp(env, "memory", 1, "SUBCONSCIOUS_ENV", str(values["subconscious"]))
@@ -723,24 +721,11 @@ def relaunch_holds(values: Mapping[str, object]) -> bool:
         values=values, source=None, told=True) is None
 
 
-#: The mark a limit crossing falls back to when no other mark applies.
-LIMIT_FALLBACK = "1x"
-
-
 def limit_mark(values: Mapping[str, object]) -> str:
-    """The mark a launch that recycles at its limit is stamped to cross at, read when the
-    launch is composed. A `relaunch` launch crosses at its `warn_at`, the mark usage warns
-    it at, so the relaunch line rides on that warning; `relaunch_holds` has made sure it
-    is a mark. A `compact` launch crosses at `limit_at` when it is a mark; else `warn_at`
-    when it is one; else `LIMIT_FALLBACK` (`warn_at` is `off` or unset, and usage warns
-    the launch at no mark)."""
-    marks = catalog.launcher()["limit_at"].values
-    if values.get("recycle_at_limit") == "relaunch" and values.get("warn_at") in marks:
-        return str(values["warn_at"])
-    for name in ("limit_at", "warn_at"):
-        if values.get(name) in marks:
-            return str(values[name])
-    return LIMIT_FALLBACK
+    """The mark a launch that relaunches itself is stamped to cross at, read when the
+    launch is composed: its `warn_at`, the mark usage warns it at, so the relaunch line
+    rides on that warning. `relaunch_holds` has made sure it is a mark."""
+    return str(values.get("warn_at") or "")
 
 
 def stamps(request_id: str, *, turns: bool = False, additions: Additions | None = None,
@@ -937,7 +922,7 @@ __all__ = ["BASE_NAMES", "BASE_PREFIXES", "CALLER_FIRST_NAMES", "CODEX_KEEP", "C
            "Unreadable", "agent_role", "base_env", "check_sizes", "commands",
            "director_words", "encode",
            "env_class", "child_env", "first_turn", "headless_words", "identity_block",
-           "LIMIT_FALLBACK", "limit_mark", "locator", "no_credentials", "option_stamps",
+           "limit_mark", "locator", "no_credentials", "option_stamps",
            "prompt_path", "read_settings", "relaunch_holds",
            "replay_env", "scratch_dir", "scratch_name", "scratch_root",
            "scratch_root_problem", "scrub", "seat_text", "settings_file", "settings_path",

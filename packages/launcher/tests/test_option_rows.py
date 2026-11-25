@@ -29,11 +29,11 @@ def test_the_rows_their_values_and_needs():
     rows = catalog.launcher()
     assert rows["keep_warm"].values == ("off", "on") and rows["keep_warm"].default == "off"
     assert rows["recycle_on_expiry"].values == ("off", "clear", "compact")
-    assert rows["recycle_at_limit"].values == ("off", "relaunch", "compact")
-    assert rows["limit_at"].values == ("1x", "1.5x", "2x") and rows["limit_at"].default == ""
+    assert rows["recycle_at_limit"].values == ("off", "relaunch")
+    assert list(rows["recycle_at_limit"].retired_values) == ["compact"]
+    assert rows["limit_at"].retired and not rows["limit_at"].settable
     assert rows["keep_warm"].required == ("turns", "cache")
     assert rows["recycle_at_limit"].required == ("turns", "usage")
-    assert rows["limit_at"].offered_with == "recycle_at_limit"
     assert rows["keep_warm"].key.needs == "turns"
 
 
@@ -77,19 +77,8 @@ def test_relaunch_at_limit_is_refused_where_slots_cant_run(monkeypatch):
     values = {"recycle_at_limit": "relaunch", "target": "slot"}
     with pytest.raises(NeedsModule, match="relaunch at limit"):
         catalog.refuse_values("claude", values, available=everything)
-    catalog.refuse_values("claude", {**values, "recycle_at_limit": "compact"},
+    catalog.refuse_values("claude", {**values, "recycle_at_limit": "off"},
                           available=everything)
-
-
-def test_limit_at_needs_recycle_at_limit_when_chosen(readable):
-    with pytest.raises(NeedsModule, match="limit_at needs recycle_at_limit"):
-        catalog.refuse_values("claude", {"limit_at": "2x", "recycle_at_limit": "off"},
-                              chosen={"limit_at"}, available=everything)
-    # Left at its default it is never refused.
-    catalog.refuse_values("claude", {"limit_at": "1x", "recycle_at_limit": "off"},
-                          available=everything)
-    catalog.refuse_values("claude", {"limit_at": "2x", "recycle_at_limit": "compact"},
-                          chosen={"limit_at"}, available=everything)
 
 
 def test_resolve_refuses_a_typed_value_that_breaks_a_rule(tmp_path, readable):
@@ -100,10 +89,10 @@ def test_resolve_refuses_a_typed_value_that_breaks_a_rule(tmp_path, readable):
 
 def test_presets_check_refuses_a_preset_with_the_rules_words(tmp_path, readable):
     path = tmp_path / "presets.toml"
-    path.write_text('[seat.a]\nlimit_at = "2x"\n\n[seat.b]\nharness = "codex"\n'
-                    'keep_warm = "on"\n', encoding="utf-8")
+    path.write_text('[seat.a]\nrecycle_at_limit = "relaunch"\n\n[seat.b]\n'
+                    'harness = "codex"\nkeep_warm = "on"\n', encoding="utf-8")
     found = {(p.where, p.key): p for p in presets.check(path, available=everything)}
-    assert found["seat.a", "limit_at"].problem == "limit_at needs recycle_at_limit"
+    assert found["seat.a", "recycle_at_limit"].problem.startswith("relaunch at limit")
     assert "cache times only claude" in found["seat.b", "keep_warm"].problem
     assert found["seat.b", "keep_warm"].code == "needs-module"
 
@@ -130,22 +119,23 @@ from moxi_launcher.compose import common  # noqa: E402
     ({}, ("exit",)),
     ({"recycle_on_expiry": "clear"}, ("exit", "clear")),
     ({"recycle_on_expiry": "compact"}, ("exit", "compact")),
-    ({"recycle_at_limit": "compact"}, ("exit", "compact")),
-    ({"recycle_at_limit": "relaunch", "recycle_on_expiry": "clear"},
-     ("exit", "clear", "compact")),
+    ({"recycle_at_limit": "relaunch"}, ("exit",)),
+    ({"recycle_at_limit": "relaunch", "recycle_on_expiry": "clear"}, ("exit", "clear")),
+    ({"recycle_at_limit": "relaunch", "recycle_on_expiry": "compact"},
+     ("exit", "compact")),
     ({"recycle_at_limit": "off", "recycle_on_expiry": "off"}, ("exit",)),
 ])
-def test_the_grant_widens_with_the_recycle_rows(values, granted):
+def test_the_grant_follows_recycle_on_expiry_alone(values, granted):
     assert common.commands(values) == granted
 
 
 def test_the_option_stamps():
     assert common.option_stamps({"keep_warm": "off", "recycle_on_expiry": "off",
-                                 "recycle_at_limit": "off", "limit_at": "1x"}) == {}
+                                 "recycle_at_limit": "off"}) == {}
+    # A row recorded with the retired compact stamps no crossing.
     assert common.option_stamps({"keep_warm": "on", "recycle_on_expiry": "compact",
-                                 "recycle_at_limit": "compact", "limit_at": "1.5x"}) == {
-        "MOXI_LAUNCHER_KEEP_WARM": "on", "MOXI_LAUNCHER_RECYCLE_ON_EXPIRY": "compact",
-        "MOXI_USAGE_CROSSING_AT": "1.5x"}
+                                 "recycle_at_limit": "compact", "warn_at": "1.5x"}) == {
+        "MOXI_LAUNCHER_KEEP_WARM": "on", "MOXI_LAUNCHER_RECYCLE_ON_EXPIRY": "compact"}
     # A relaunch launch crosses at warn_at, and only where it can recycle itself
     # (test_compose_env): a terminal launch is not stamped.
     assert common.option_stamps({"harness": "claude", "target": "terminal", "cwd": "/w",

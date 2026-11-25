@@ -403,7 +403,7 @@ def test_no_cache_installed_ends_quietly(conn):
 def test_the_cache_read_names_the_harness_and_newest_id(conn):
     cache = FakeCache()
     ask(conn, cache=cache)
-    assert cache.reads == [("claude", SID, {})]
+    assert cache.reads == [("claude", SID, {})] * 2   # the window read, then the final read
 
 
 def test_a_launch_that_does_not_keep_warm_ends_quietly(conn):
@@ -472,6 +472,58 @@ def test_a_turn_started_after_the_insert_drops_the_run(conn):
     got = ask(conn, session=session)
     assert (got.verdict.outcome, got.verdict.word) == (None, "busy")
     assert got.runs == [] and session.delivered == []
+
+
+class AgingCache(FakeCache):
+    """A cache whose reads give the next of `ages`, the last repeating; `on_read` is
+    called at each read."""
+
+    def __init__(self, *ages, on_read=None, **kw):
+        super().__init__(**kw)
+        self.ages, self.on_read = list(ages), on_read
+
+    def read(self, harness, session_id, **options):
+        if self.on_read is not None:
+            self.on_read()
+        self.age = self.ages[0] if len(self.ages) == 1 else self.ages.pop(0)
+        return super().read(harness, session_id, **options)
+
+
+def test_a_final_read_past_the_window_after_a_slow_join_drops_the_run(conn):
+    """The window read at TTL - 370; the final read, after the join, at TTL - 355, where
+    the compact's window has opened: nothing is delivered and no run is left."""
+    session = FakeSession(agents=[agent("a1")])
+    got = ask(conn, session=session, cache=AgingCache(3230.0, 3245.0))
+    assert (got.verdict.outcome, got.verdict.word) == (None, "outside")
+    assert got.runs == [] and session.delivered == []
+    assert conn.execute("SELECT count(*) FROM run_events").fetchone()[0] == 0
+
+
+def test_the_nudge_s_final_read_is_made_after_its_run_is_written(conn):
+    seen = []
+    cache = AgingCache(IN, on_read=lambda: seen.append(store.open_run(conn, "r1")))
+    got = ask(conn, cache=cache)
+    assert got.verdict.outcome == "nudged"
+    assert len(seen) == 2 and seen[0] is None
+    assert (seen[1].kind, seen[1].state) == (keepwarm.KIND, "acting")
+
+
+def test_a_final_read_still_in_the_window_nudges(conn):
+    got = ask(conn, cache=AgingCache(3230.0, 3239.0))
+    assert got.verdict.outcome == "nudged"
+
+
+def test_on_one_clock_a_nudge_s_last_age_is_below_the_compact_s_first():
+    from moxi_launcher import recycle
+
+    shut = SimpleNamespace(kind="warm", age_s=3600.0 - keepwarm.SHUT_S, ttl_s=3600.0,
+                           response_s=0.0)
+    assert keepwarm.window(shut).word == "outside"
+    assert recycle.compact_due(shut, now=0.0, fact=None) is None
+    before = SimpleNamespace(kind="warm", age_s=3600.0 - keepwarm.SHUT_S - 0.001, ttl_s=3600.0,
+                             response_s=0.0)
+    assert keepwarm.window(before) is None
+    assert recycle.compact_due(before, now=0.0, fact=None).word == "outside"
 
 
 def test_another_open_run_makes_the_ask_lose(conn):
