@@ -30,8 +30,10 @@ def me() -> str:
     return f"{ident.pid}@{ident.started:.6f}"
 
 
-def agent(kind="subagent", state="running", *, final=False):
-    return SimpleNamespace(kind=kind, state=state, final=final)
+def agent(kind="subagent", state="running", *, final=False, description=None,
+          last_write_at=None):
+    return SimpleNamespace(id="a1", kind=kind, state=state, final=final,
+                           description=description, last_write_at=last_write_at)
 
 
 class FakeSession:
@@ -229,6 +231,19 @@ def handoff(tmp_path, text="state of the work; next step", name="handoff.md"):
     return path
 
 
+#: The handoff a director's call carries unless a test gives its own (`given_handoff`).
+GIVEN: dict[str, str] = {}
+
+
+@pytest.fixture(autouse=True)
+def given_handoff(tmp_path):
+    """A handoff written now, after the session began, that `call` passes as --handoff
+    unless the test passes its own (None: no --handoff)."""
+    GIVEN["path"] = str(handoff(tmp_path, name="director-handoff.md"))
+    yield
+    GIVEN.clear()
+
+
 def test_env(**extra):
     return {**os.environ, **extra}
 
@@ -244,6 +259,7 @@ def arm(conn, path, *, session=None, slots_api=None, settings=None, **kw):
 
 def call(conn, which=SID, *, session=None, slots_api=None, comms=None, cache=None,
          settings=None, turns=None, **kw):
+    kw.setdefault("handoff", GIVEN.get("path"))
     return relaunch.call_director(
         which, conn=conn, turns=turns or FakeTurns(session or FakeSession()),
         slots_api=slots_api if slots_api is not None else FakeSlots(),
@@ -533,7 +549,7 @@ def test_a_directors_call_whose_launch_would_be_refused_touches_nothing(conn, ch
     with pytest.raises(relaunch.Refused) as refused:
         call(conn, slots_api=slots_api, dry_run=dry_run)
     assert refused.value.code == "launch-check"
-    assert checks.asked[0].director and checks.asked[0].posture == "with:boss"
+    assert checks.asked[0].director and checks.asked[0].handoff == GIVEN["path"]
     nothing_written(conn, slots_api)
 
 
@@ -927,7 +943,7 @@ def test_a_directors_call_writes_its_run_and_starts_its_job(conn):
     result = call(conn, slots_api=slots_api, session=FakeSession(number=7), follow=False)
     assert result.exit_code == 0 and result.data["outcome"] == "started"
     run = result.run
-    assert (run.mode, run.actor, run.handoff_path) == ("director", "boss", None)
+    assert (run.mode, run.actor, run.handoff_path) == ("director", "boss", GIVEN["path"])
     assert run.turn_number == 7 and run.job == f"slots:relaunch-{run.run_id}"
     [job] = slots_api.started
     assert job.argv == [str(SCRIPT), "relaunch", run.run_id]
@@ -966,7 +982,8 @@ def test_an_unknown_session_id_is_not_launched_and_comms_is_never_asked(conn, wh
     nothing_written(conn, slots_api)
 
 
-def test_a_session_id_the_launch_never_learned_is_found_by_its_claude_process(conn):
+def test_a_session_id_the_launch_never_learned_is_found_by_its_claude_process(conn,
+                                                                            tmp_path):
     class Unasked(FakeComms):
         def session_of(self, identity):
             raise AssertionError("comms was asked about a session id")
@@ -974,8 +991,12 @@ def test_a_session_id_the_launch_never_learned_is_found_by_its_claude_process(co
     ident = proc.identity(os.getppid())
     conn.execute("UPDATE launches SET pid = ?, pid_started = ?", (ident.pid, ident.started))
     before = store.session_ids(conn, "r1")
+    # The unlearned id began with the launch, just made: its handoff is written after.
+    later = handoff(tmp_path, name="after.md")
+    began = store.parse_time(store.get(conn, "r1").created_at).timestamp()
+    os.utime(later, (began + 1, began + 1))
     result = call(conn, CLEARED, session=FakeSession(session_id=CLEARED), comms=Unasked(),
-                  follow=False)
+                  follow=False, handoff=str(later))
     assert result.run.request_id == "r1" and result.run.session_id == CLEARED
     assert store.session_ids(conn, "r1") == before
 
@@ -1207,7 +1228,251 @@ def test_a_dry_run_call_writes_nothing(conn):
     slots_api = FakeSlots()
     result = call(conn, slots_api=slots_api, dry_run=True)
     assert result.exit_code == 0 and result.data["outcome"] == "dry-run"
+    assert result.data["handoff"] == GIVEN["path"]
+    assert result.lines[0].endswith(f"handoff {GIVEN['path']}")
     nothing_written(conn, slots_api)
+
+
+# -- the held words and an endpoint that doesn't judge --------------------------------------
+
+
+def judging(**kw):
+    """A session whose endpoint judges stale subagents."""
+    return FakeSession(capabilities=("exit", relaunch.STALE_AGENTS), **kw)
+
+
+def test_the_held_words_name_a_live_subagent_with_its_last_write_and_stale_time(
+        conn, monkeypatch):
+    monkeypatch.setattr(relaunch.quiet, "turns_stale_after_s", lambda: 3600.0)
+    wrote = datetime.now(timezone.utc).timestamp() - 1500
+    session = judging(agents=[agent(state="waiting", description="build check",
+                                    last_write_at=wrote)])
+    result = call(conn, session=session)
+    assert result.exit_code == 75 and result.data["word"] == "subagents"
+    stale_at = relaunch.quiet._utc(wrote + 3600.0)
+    line = result.lines[0]
+    assert line.startswith('held: subagents: 1 still working: "build check" (subagent, '
+                           'waiting, last wrote 25 min ago, reads stale at '
+                           f'{stale_at}). Messaging the session or ending its shells '
+                           'would wake it')
+    assert result.data["detail"] in line
+
+
+def test_the_held_words_say_keep_warm_is_off_for_the_session(conn):
+    result = call(conn, session=judging(agents=[agent()]))
+    assert "keep-warm is off for this session, so nothing kept it warm" in result.lines[0]
+
+
+def test_the_held_words_say_keep_warm_should_have_kept_it_warm(tmp_path):
+    conn = store.connect(tmp_path / "warm.db")
+    try:
+        launched(conn, keep_warm="on")
+        result = call(conn, session=judging(agents=[agent()]))
+        assert result.lines[0].endswith("would wake it, and keep-warm should have kept it "
+                                        "warm; nothing was done, try again later")
+    finally:
+        conn.close()
+
+
+@pytest.mark.parametrize("entries", [
+    [agent(state="waiting")],
+    [agent(state="waiting"), agent(state="waiting"), agent(kind="shell")],
+])
+def test_an_endpoint_that_does_not_judge_held_by_waiting_subagents_is_refused(
+        conn, entries):
+    slots_api = FakeSlots()
+    with pytest.raises(relaunch.Refused) as caught:
+        call(conn, session=FakeSession(agents=entries, complete=True), slots_api=slots_api)
+    refused = caught.value
+    count = sum(1 for a in entries if a.kind == "subagent")
+    assert refused.code == "old-endpoint" and refused.exit_code == 3
+    assert refused.problem == (
+        f"session {SID}'s turns endpoint started before the stale-subagent judgment was "
+        f"installed, so it can't tell its {count} waiting subagent"
+        f"{'s' if count != 1 else ''} from working ones, and trying again won't change "
+        "that")
+    assert refused.hint == (
+        "wait until its subagents' waits end and it relaunches itself, or wake it with a "
+        "message so it can stop them and relaunch itself; a relaunch then starts its new "
+        "session on an endpoint that judges")
+    nothing_written(conn, slots_api)
+
+
+def test_a_list_read_in_part_of_waiting_subagents_is_held_not_refused(conn):
+    slots_api = FakeSlots()
+    session = FakeSession(agents=[agent(state="waiting"), agent(state="waiting")],
+                          complete=False)
+    result = call(conn, session=session, slots_api=slots_api)
+    assert result.exit_code == 75 and result.data["outcome"] == "held"
+    assert result.data["word"] == "subagents"
+    assert result.data["detail"] == "the agent list could not be read whole"
+    nothing_written(conn, slots_api)
+
+
+@pytest.mark.parametrize("session", [
+    FakeSession(agents=[agent(state="waiting"), agent(state="running")]),
+    FakeSession(agents=[agent(state="pending")]),
+    FakeSession(agents=[agent(kind="teammate", state="waiting")]),
+    FakeSession(agents=[agent(state="waiting")], turn_open=True),
+    judging(agents=[agent(state="waiting")]),
+])
+def test_a_working_entry_or_a_judging_endpoint_gets_the_held_words(conn, session):
+    slots_api = FakeSlots()
+    result = call(conn, session=session, slots_api=slots_api)
+    assert result.exit_code == 75 and result.data["outcome"] == "held"
+    nothing_written(conn, slots_api)
+
+
+def test_a_cold_session_with_background_shells_listed_goes_ahead(conn):
+    session = FakeSession(agents=[agent(kind="shell", state="running"),
+                                  agent(kind="shell", state="waiting")])
+    result = call(conn, session=session, follow=False)
+    assert result.exit_code == 0 and result.data["outcome"] == "started"
+    [run] = runs(conn)
+    assert run.mode == "director" and run.open
+
+
+# -- the handoff a director's call carries --------------------------------------------------
+
+
+def cache_kinds(conn, run):
+    return [e.detail for e in store.run_events(conn, run.run_id) if e.kind == "cache"]
+
+
+@pytest.mark.parametrize("cache, kind", [(FakeCache("cold"), "cold"),
+                                         (FakeCache("unknown"), "unknown"),
+                                         (FakeCache(error=OSError("no store")), None)])
+def test_a_directors_run_carries_its_handoff_and_the_cache_kind_it_read(conn, cache, kind):
+    result = call(conn, cache=cache, follow=False)
+    assert result.exit_code == 0
+    [run] = runs(conn)
+    assert run.handoff_path == GIVEN["path"]
+    assert cache_kinds(conn, run) == [{"kind": kind}]
+
+
+def test_the_directors_handoff_is_checked_against_the_targets_launch(conn, checks):
+    call(conn, follow=False)
+    [request] = checks.asked
+    assert request.handoff == GIVEN["path"]
+    assert request.posture == f"relaunched (handoff: {GIVEN['path']})"
+
+
+@pytest.mark.parametrize("make, words", [
+    (_blank, "is blank"),
+    (_too_big, f"past the {relaunch.HANDOFF_CAP} a relaunch carries"),
+    (_missing, "can't be read"),
+])
+def test_a_directors_handoff_that_is_not_a_small_text_file_is_refused(conn, tmp_path,
+                                                                      make, words):
+    slots_api = FakeSlots()
+    with pytest.raises(relaunch.Refused) as caught:
+        call(conn, handoff=str(make(tmp_path)), slots_api=slots_api)
+    assert caught.value.code == "handoff" and words in caught.value.problem
+    nothing_written(conn, slots_api)
+
+
+def test_a_directors_handoff_older_than_the_session_is_stale(conn, tmp_path):
+    path = handoff(tmp_path)
+    old = datetime(2025, 12, 31, tzinfo=timezone.utc).timestamp()
+    os.utime(path, (old, old))
+    slots_api = FakeSlots()
+    with pytest.raises(relaunch.Refused) as caught:
+        call(conn, handoff=str(path), slots_api=slots_api)
+    assert caught.value.code == "handoff"
+    assert caught.value.problem == (f"the handoff {path} was last written before session "
+                                    f"{SID} began ({LONG_AGO}): it is stale")
+    assert caught.value.hint == "write a handoff for it since it began, then relaunch it again"
+    nothing_written(conn, slots_api)
+
+
+def test_a_directors_relative_handoff_is_read_from_its_own_dir_and_stored_absolute(
+        conn, tmp_path, monkeypatch):
+    handoff(tmp_path, name="rel.md")
+    monkeypatch.chdir(tmp_path)
+    call(conn, handoff="rel.md", follow=False)
+    [run] = runs(conn)
+    assert run.handoff_path == str(tmp_path / "rel.md")
+
+
+def test_with_notes_a_directors_handoff_must_be_in_the_targets_handoff_dir(conn, tmp_path,
+                                                                    monkeypatch):
+    handoff_dir = tmp_path / "handoffs"
+    handoff_dir.mkdir()
+    available = relaunch.modules.available
+    monkeypatch.setattr(relaunch.modules, "available",
+                        lambda name: name == "notes" or available(name))
+    monkeypatch.setattr(relaunch.handoffs, "handoff_dir_of_row",
+                        lambda row, create=True: handoff_dir)
+    slots_api = FakeSlots()
+    with pytest.raises(relaunch.Refused) as caught:
+        call(conn, slots_api=slots_api)
+    assert caught.value.code == "handoff"
+    assert caught.value.problem == (f"the handoff {GIVEN['path']} is not in launch r1's "
+                                    f"handoff folder, {handoff_dir.resolve()}")
+    assert caught.value.hint == ("write it there (moxi launcher handoffs --key planner "
+                                 "lists that folder's handoffs)")
+    nothing_written(conn, slots_api)
+    inside = handoff(handoff_dir, name="2026-11-24-planner.md")
+    assert call(conn, handoff=str(inside), follow=False).exit_code == 0
+
+
+def waiting_in(monkeypatch, tmp_path):
+    """The seat's handoff folder, notes not installed: the launcher's own, stood in."""
+    handoff_dir = tmp_path / "seat-handoffs"
+    handoff_dir.mkdir()
+    monkeypatch.setattr(relaunch.handoffs, "handoff_dir_of_row",
+                        lambda row, create=True: handoff_dir)
+    return handoff_dir
+
+
+def test_with_no_handoff_given_the_seats_fresh_waiting_one_is_used(conn, tmp_path,
+                                                                   monkeypatch):
+    handoff_dir = waiting_in(monkeypatch, tmp_path)
+    older = handoff(handoff_dir, name="2026-11-20-planner.md")
+    newest = handoff(handoff_dir, name="2026-11-24-planner.md")
+    handoff(handoff_dir, name="2026-11-25-someone.md")
+    assert older.exists()
+    result = call(conn, handoff=None, follow=False)
+    assert result.exit_code == 0 and result.data["handoff"] == str(newest)
+    [run] = runs(conn)
+    assert run.handoff_path == str(newest)
+
+
+@pytest.mark.parametrize("sessions_installed, hint", [
+    (True, f"write one and pass --handoff FILE; moxi sessions read {SID} shows how it ended"),
+    (False, "write one and pass --handoff FILE"),
+])
+@pytest.mark.parametrize("written", ["none", "stale"])
+def test_with_no_handoff_given_and_none_fresh_waiting_the_call_is_refused(
+        conn, tmp_path, monkeypatch, sessions_installed, hint, written):
+    handoff_dir = waiting_in(monkeypatch, tmp_path)
+    if written == "stale":
+        old = datetime(2025, 12, 31, tzinfo=timezone.utc).timestamp()
+        path = handoff(handoff_dir, name="2025-12-31-planner.md")
+        os.utime(path, (old, old))
+    available = relaunch.modules.available
+    monkeypatch.setattr(relaunch.modules, "available",
+                        lambda name: sessions_installed if name == "sessions"
+                        else available(name))
+    slots_api = FakeSlots()
+    with pytest.raises(relaunch.Refused) as caught:
+        call(conn, handoff=None, slots_api=slots_api)
+    assert caught.value.code == "handoff"
+    assert caught.value.problem == f"session {SID} has no handoff written since it began"
+    assert caught.value.hint == hint
+    nothing_written(conn, slots_api)
+
+
+def test_a_waiting_handoff_already_given_is_not_used_again(conn, tmp_path, monkeypatch):
+    handoff_dir = waiting_in(monkeypatch, tmp_path)
+    given = handoff(handoff_dir, name="2026-11-24-planner.md")
+    store.insert(conn, request_id="r0", by="ann", harness="claude", target="slot",
+                 cwd="/work", values={}, argv=["claude"], env={}, posture="operator",
+                 session_id=CLEARED, slot="3", identity="planner", handoff_path=str(given),
+                 handoff_key="planner")
+    with pytest.raises(relaunch.Refused) as caught:
+        call(conn, handoff=None, slots_api=FakeSlots())
+    assert caught.value.code == "handoff"
 
 
 # -- following the run ------------------------------------------------------------------------
