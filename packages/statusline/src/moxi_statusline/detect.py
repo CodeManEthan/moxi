@@ -39,12 +39,14 @@ same rule the output is read with, in the whole input and the folder paths outsi
 own piece's fields. Found anywhere else, the markers are drawn again, at most 10 times;
 then nothing is detected.
 
-**The run.** As Claude Code runs it: `sh -c` with the command, in the made folder, the
-input on stdin, at most 5 s, in a process group of its own that is killed when the time
-is up (and once the script has exited, so nothing it left running outlives the run).
-`HOME` is an empty folder inside the throwaway folder, and every `XDG_*_HOME`, every
-`MOXI_*` variable and `CLAUDE_CONFIG_DIR` are unset, so a script's writes under its home
-and default folders land in the throwaway folder and go with it. A `~` or `$HOME` in the
+**The run.** As Claude Code runs it, in the shell `shell.find` names (`sh -c` on POSIX;
+on Windows Git Bash, else PowerShell): the command, in the made folder, the input on
+stdin, at most 5 s, through the core's `run`, which keeps it in a process group (POSIX)
+or a job (Windows) of its own and ends that when the time is up and once the script has
+exited, so nothing it left running outlives the run. `HOME` is an empty folder inside
+the throwaway folder, and every `XDG_*_HOME`, every `MOXI_*` variable but the core's start
+mark, and `CLAUDE_CONFIG_DIR` are unset, so a script's writes under its home and default
+folders land in the throwaway folder and go with it. A `~` or `$HOME` in the
 command's own text is replaced by the real home folder first, so the command is still
 found. Writes to absolute paths, and processes that leave the group, still escape. The
 throwaway folder is made fresh under the system temp folder and removed every time.
@@ -63,14 +65,15 @@ import os
 import random
 import re
 import shutil
-import signal
 import stat
 import subprocess
 import tempfile
 import time
 from collections.abc import Callable, Mapping
 
-from moxi import paths
+from moxi import paths, proc
+
+from . import shell
 
 #: The pieces, in the order the summary would name them.
 PIECES = ("dir", "branch", "model", "effort", "context", "limits", "session", "transcript",
@@ -398,44 +401,19 @@ def homed(command: str, home: str) -> str:
     return re.sub(r"(?<![^\s=:'\"])~(?=/|\s|$|['\"])", lambda _: home, command)
 
 
-def _end(proc: subprocess.Popen) -> None:
-    """Kill what is left of `proc`'s process group."""
-    try:
-        os.killpg(proc.pid, signal.SIGKILL)
-    except (ProcessLookupError, PermissionError):
-        pass
-
-
 def run(command: str, data: bytes, *, cwd: str, env: Mapping[str, str],
         limit: float = LIMIT) -> tuple[int | None, bytes]:
-    """Run `command` through `sh -c` as Claude Code does, with `data` on stdin, in a
-    process group of its own. `(exit code, stdout)`; the code is None when it ran out of
-    time, and the group was killed."""
-    proc = subprocess.Popen(["sh", "-c", command], cwd=cwd, env=dict(env),
-                            stdin=subprocess.PIPE, stdout=subprocess.PIPE,
-                            stderr=subprocess.DEVNULL, start_new_session=True)
+    """Run `command` as Claude Code does (`shell.find`), with `data` on stdin, through the
+    core's `run`: in a process group of its own on POSIX, a job on Windows, both ended when
+    the time is up and once the command exits. `(exit code, stdout)`; the code is None
+    when it ran out of time."""
+    argv = shell.find(env).argv(command)
     try:
-        out, _ = proc.communicate(data, timeout=limit)
+        done = proc.run(argv, timeout_s=limit, stdin_data=data, env=env, cwd=cwd,
+                        first_signal="SIGKILL", grace_s=1.0, end_tree=True)
     except subprocess.TimeoutExpired:
-        _end(proc)
-        try:
-            proc.communicate(timeout=1.0)
-        except subprocess.TimeoutExpired:
-            # A process that left the group still holds the pipe; stop reading it.
-            for stream in (proc.stdin, proc.stdout):
-                if stream is not None:
-                    try:
-                        stream.close()
-                    except OSError:
-                        pass
-            proc.wait()
         return None, b""
-    except BaseException:
-        _end(proc)
-        proc.wait()
-        raise
-    _end(proc)
-    return proc.returncode, out or b""
+    return done.returncode, done.stdout or b""
 
 
 def _git(repo_dir: str, branch: str, env: Mapping[str, str]) -> bool:

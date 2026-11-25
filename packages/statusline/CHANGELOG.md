@@ -24,6 +24,14 @@ The first version.
   with marked test input, in a throwaway folder and home, to see which pieces it shows;
   then offer to switch to Moxi's line set up to show the same, or to keep yours and print
   the commands that add Moxi's pieces to it, each with its measured cost.
+- The test run and `pieces`' measurements run a command as Claude Code runs a status
+  line: `sh -c` on Linux and macOS; on Windows Git Bash (the file
+  `CLAUDE_CODE_GIT_BASH_PATH` names when it exists and is named `bash.exe`, `sh.exe`,
+  `bash` or `sh`, else Git for Windows' `bin\bash.exe` found from `git` on `PATH`), else
+  `powershell.exe -NoProfile -NonInteractive -Command`, flags Claude Code's docs don't
+  name. Under PowerShell `pieces` measures nothing and says its commands need Git Bash.
+  The test run ends what the line left running once it exits on every system, through
+  the core's `run(..., end_tree=True)`.
 - `moxi statusline status [--json]`.
 - `moxi statusline pieces` prints those commands, cache's timer first, with each one's
   measured time.

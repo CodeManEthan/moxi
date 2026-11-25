@@ -18140,3 +18140,8 @@ rounds	packages/rounds/tests/test_removal.py	shown = set(os.stat_result.__match_
 rounds	packages/rounds/tests/test_sweep.py	assert any(line.startswith(f"pid {own_pid} ") for line in scratch.kept.work)	keep	any	any
 moxi-dev	packages/moxi-dev/tests/test_fence.py	"PROGRAMDATA": "C:\\ProgramData", "HOME": "D:\\t\\home", "XDG_CONFIG_HOME": "D:\\t\\home\\.config",	keep	HOME	HOME
 rounds	packages/rounds/tests/test_build_drop.py	assert any(line.startswith(f"pid {proc.own_pid} (") for line in kept.work)	keep	any	any
+statusline	packages/statusline/src/moxi_statusline/detect.py	exited, so nothing it left running outlives the run. `HOME` is an empty folder inside	keep	HOME	HOME
+statusline	packages/statusline/src/moxi_statusline/shell.py	#: The kinds of shell `find` gives.	keep	find	find
+statusline	packages/statusline/src/moxi_statusline/shell.py	__all__ = ["Shell", "find", "GIT_BASH_PATH_ENV", "BASH_NAMES", "POWERSHELL", "KINDS"]	keep	find	find
+statusline	packages/statusline/tests/test_shell.py	path.parent.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
+statusline	packages/statusline/tests/test_shell.py	assert not any("not measured" in line for line in out)	keep	any	any

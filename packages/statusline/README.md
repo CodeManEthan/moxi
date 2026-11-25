@@ -57,15 +57,26 @@ nothing: with no line it says how to switch, and over your own line it prints bo
 offers' commands. An install never edits your own command: it replaces the setting whole
 or leaves it alone.
 
-The test run is your command as Claude Code runs it, `sh -c`, with made-up input on
-stdin: each piece of it (the folder, branch, model, effort, context, limits, session,
+The test run is your command as Claude Code runs it (see "The shell" below), with
+made-up input on stdin: each piece of it (the folder, branch, model, effort, context, limits, session,
 transcript, lines, cost) carries a marker no other piece or the clock can print, so the
 output shows which pieces your line prints, and where. It runs in a fresh folder under the
 system temp folder, with that folder's empty `home` as `HOME` and no `XDG_*_HOME`,
-`MOXI_*` or `CLAUDE_CONFIG_DIR` set, so what the script writes under its home lands there
-and is removed after; a `~` or `$HOME` in the command itself is still your own home. It
-gets 5 seconds, then it and every process it started in its group are killed. Writes to
-absolute paths, and processes that leave the group, are not caught.
+`MOXI_*` (but the start mark every process Moxi starts carries) or `CLAUDE_CONFIG_DIR`
+set, so what the script writes under its home lands there and is removed after; a `~` or
+`$HOME` in the command itself is still your own home. It gets 5 seconds, then it and every
+process it started are ended, and what it left running is ended once it exits too: on
+POSIX its process group, on Windows its job. Writes to absolute paths, and processes that
+leave the group, are not caught.
+
+**The shell.** Moxi runs a command the way Claude Code runs a status line: `sh -c` on
+Linux and macOS. On Windows, Claude Code's docs say it uses Git Bash when it is installed,
+else PowerShell, so Moxi takes the file `CLAUDE_CODE_GIT_BASH_PATH` names when that exists
+and is named `bash.exe`, `sh.exe`, `bash` or `sh` (any other value is ignored, as Claude
+Code ignores it), else Git for Windows' `bin\bash.exe`, found from the `git` on `PATH`,
+with `-c`. A `bash` only on `PATH` is never taken (the one Windows ships is WSL's). With
+neither, it runs `powershell.exe -NoProfile -NonInteractive -Command`; Claude Code's docs
+name no flags for PowerShell, so these are Moxi's.
 
 Moxi's line is a `statusLine` whose command is the absolute path of a
 `moxi-statusline-render`. A script of your own that calls it stays yours.
@@ -140,9 +151,11 @@ Every key is read at each render; `moxi config statusline` shows them.
   ```
 
   where `$input` holds the JSON Claude Code gave your script on stdin. Each piece starts
-  Python once per render of your line; the verb runs each command through `sh -c` with
-  a sample input, once to warm up and 5 times more, and prints each median. cache's
-  figure is for a session with no clock record.
+  Python once per render of your line; the verb runs each command in the shell above
+  with a sample input, once to warm up and 5 times more, and prints each median. cache's
+  figure is for a session with no clock record. The commands are bash: on Windows with
+  no Git Bash, where Claude Code runs a line through PowerShell, nothing is measured and
+  the verb says they need Git Bash.
 - `moxi statusline preview [--show a,b,c] [--no-color]` renders a sample input with the
   real command and prints the line and how long the render took. `--show` renders these
   items in place of `show`.

@@ -177,7 +177,8 @@ VERBS: list[Verb] = [
     Verb("pieces", "print the commands that add Moxi's pieces to your own status line",
          "Print one command per installed module with a segment, cache's timer first, to "
          "call from your own status line script, and what each took, measured just now "
-         "through sh -c with the sample input. Writes nothing.",
+         "in the shell Claude Code runs a status line with, with the sample input. "
+         "Writes nothing.",
          _no_arguments, _pieces),
     Verb("preview", "render the sample input and print the line and its time",
          "Render the sample input with the real command, as Claude runs it, and print "

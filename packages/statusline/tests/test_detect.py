@@ -17,6 +17,8 @@ from pathlib import Path
 
 import pytest
 
+from moxi import proc
+from moxi_dev.testing import PROC_WAIT_S
 from moxi_statusline import detect, offers
 
 SEGMENTS = ["cache", "usage"]
@@ -80,7 +82,7 @@ def line(tmp_path):
 
     def make(body: str, name: str = "line.py") -> str:
         path = lines_dir / name
-        path.write_text(textwrap.dedent(body))
+        path.write_text(textwrap.dedent(body), encoding="utf-8")
         return f"{shlex.quote(sys.executable)} {shlex.quote(str(path))}"
 
     return make
@@ -252,40 +254,48 @@ def test_clock_numbers_cover_the_span_and_the_resets_in_both_zones():
 
 # -- runs that detect nothing ------------------------------------------------------------
 
+def _gone(pid_file: Path) -> bool:
+    """Whether the process whose pid the line wrote to `pid_file` has ended."""
+    ident = proc.identity(int(pid_file.read_text()))
+    deadline = time.monotonic() + PROC_WAIT_S
+    while ident is not None and proc.alive(ident) and time.monotonic() < deadline:
+        time.sleep(0.02)
+    return ident is None or not proc.alive(ident)
+
+
 def test_a_line_that_sleeps_past_the_limit_is_killed(line, throwaway, tmp_path):
+    # The line starts a child that sleeps and waits for it; the child's pid is its own,
+    # the one the system knows, whatever shell ran the line.
     pid_file = tmp_path / "pid"
     start = time.monotonic()
-    found = run(f"sleep 30 & echo $! > {shlex.quote(str(pid_file))}; wait", throwaway,
-                limit=0.5)
-    assert time.monotonic() - start < 5
-    assert found.pieces() == [] and "didn't finish within 0.5 s" in found.problem
-    pid = int(pid_file.read_text())
-    for _ in range(100):
-        try:
-            os.kill(pid, 0)
-        except ProcessLookupError:
-            break
-        time.sleep(0.02)
-    else:
-        pytest.fail("the line's process outlived the run")
+    found = run(line(f"""
+        import subprocess, sys
+        child = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(30)"])
+        with open({str(pid_file)!r}, "w") as fh:
+            fh.write(str(child.pid))
+        child.wait()
+    """), throwaway, limit=3.0)
+    assert time.monotonic() - start < 10
+    assert found.pieces() == [] and "didn't finish within 3 s" in found.problem
+    assert _gone(pid_file), "the line's process outlived the run"
 
 
-def test_what_a_line_leaves_running_is_killed_when_it_exits(throwaway, tmp_path):
+def test_what_a_line_leaves_running_is_killed_when_it_exits(line, throwaway, tmp_path):
     # The line exits at once and leaves a child that would write a second later. The
     # child holds no pipe, so the run ends with the line.
     late, pid_file = tmp_path / "late", tmp_path / "pid"
-    found = run(f"(sleep 1; echo x > {shlex.quote(str(late))}) >/dev/null 2>&1 & "
-                f"echo $! > {shlex.quote(str(pid_file))}; echo hello", throwaway)
+    found = run(line(f"""
+        import subprocess, sys
+        child = subprocess.Popen(
+            [sys.executable, "-c",
+             "import time; time.sleep(1); open({str(late)!r}, 'w').write('x')"],
+            stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        with open({str(pid_file)!r}, "w") as fh:
+            fh.write(str(child.pid))
+        print("hello")
+    """), throwaway)
     assert found.problem is None
-    pid = int(pid_file.read_text())
-    for _ in range(25):
-        try:
-            os.kill(pid, 0)
-        except ProcessLookupError:
-            break
-        time.sleep(0.02)
-    else:
-        pytest.fail("what the line left running outlived the run")
+    assert _gone(pid_file), "what the line left running outlived the run"
     assert not late.exists()
 
 
@@ -322,7 +332,8 @@ def test_writes_under_home_land_in_the_throwaway_dir(line, throwaway, tmp_path):
     assert not (Path(os.environ["HOME"]) / ".cache" / "line").exists()
     names = record["env"]
     assert "CLAUDE_CONFIG_DIR" not in names
-    assert [n for n in names if n.startswith("MOXI_")] == []
+    # The core's start mark is the one Moxi variable the run carries.
+    assert [n for n in names if n.upper().startswith("MOXI_")] == ["MOXI_STARTED_BY"]
     assert [n for n in names if n.startswith("XDG_") and n.endswith("_HOME")] == []
 
 
