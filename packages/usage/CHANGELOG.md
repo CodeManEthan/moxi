@@ -14,7 +14,8 @@
   and Claude's `Skill` and `ToolSearch`, whose loaded tools are judged when called) with
   `stop.deny_text`, a new setting. `Skill` loads only a skill that runs inline: one whose
   file is found and sets no `context: fork`; a forked skill, or one with no file found,
-  is refused.
+  is refused. A plugin's skill, `<plugin>:<name>`, is looked for only in that plugin's
+  installed copies, and is refused when the plugin isn't found.
 - A mark may be a multiple `<k>x`, k a decimal of at most two places and at least 1:
   `threshold` works it out on the same equation as `1x`, `1.5x` and `2x`, and
   `cost_multiple` reads its k. Interface 3 is interface 2 plus these and the stop's two

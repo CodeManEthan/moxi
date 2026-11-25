@@ -291,14 +291,41 @@ def test_plugin_skills_are_found_through_claudes_plugin_list(where):
     assert "no file of skill other:tidy" in stop.decide(skill_call(where, "other:tidy"))
 
 
+def test_a_plugin_skill_is_looked_for_only_in_its_plugin(where):
+    claude_dir = os.path.join(where.home, ".claude")
+    for base in (claude_dir, os.path.join(where.work, ".claude")):
+        skill(base, "b")
+        skill(base, "audit")
+        skill(base, "deploy", command=True)
+    bucket = os.path.join(claude_dir, "skills", "synced", "bucket-1")
+    os.makedirs(os.path.join(bucket, "b"))
+    with open(os.path.join(bucket, "b", "SKILL.md"), "w", encoding="utf-8") as fh:
+        fh.write("---\nname: b\n---\n")
+    plugin = os.path.join(where.root, "plugins", "kit", "1.0.0")
+    skill(plugin, "audit", context="fork")
+    os.makedirs(os.path.join(claude_dir, "plugins"), exist_ok=True)
+    with open(os.path.join(claude_dir, "plugins", "installed_plugins.json"), "w") as fh:
+        json.dump({"version": 2, "plugins": {"kit@market": [
+            {"scope": "user", "installPath": plugin}]}}, fh)
+    latch()
+    assert stop.decide(skill_call(where, "b")) is None
+    for name in ("a:b", "kit:b", "a:deploy", "kit:a:b"):
+        assert stop.decide(skill_call(where, name)).endswith(
+            f"(no file of skill {name} is found, so whether it runs in a subagent "
+            "can't be told)")
+    assert stop.decide(skill_call(where, "kit:audit")).endswith(
+        "(skill kit:audit runs forked in a subagent)")
+
+
 def test_synced_account_skills_are_found(where):
     bucket = os.path.join(where.home, ".claude", "skills", "synced", "bucket-1")
     os.makedirs(os.path.join(bucket, "docs"))
     with open(os.path.join(bucket, "docs", "SKILL.md"), "w", encoding="utf-8") as fh:
         fh.write("---\nname: docs\n---\n")
     latch()
-    assert stop.decide(skill_call(where, "account-skills:docs")) is None
     assert stop.decide(skill_call(where, "docs")) is None
+    assert "no file of skill account-skills:docs is found" in stop.decide(
+        skill_call(where, "account-skills:docs"))
 
 
 def test_claudes_config_dir_is_the_sessions(where):

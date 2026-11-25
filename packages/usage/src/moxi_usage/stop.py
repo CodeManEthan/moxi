@@ -365,12 +365,13 @@ def skill_files(name: str, cwd, session_env) -> list[str]:
     """The files Claude Code may load for the skill `name`, each one that is there.
 
     A bare name is looked for under Claude's folder (`CLAUDE_CONFIG_DIR`, else
-    `~/.claude`, as `session_env` places it) and under `.claude` in `cwd` and each folder
-    above it up to its repository's root: `skills/<name>/SKILL.md`, and the older
-    `commands/<name>.md`. `<space>:<name>` is looked for in each installed copy of the
-    plugin `<space>` (Claude's `plugins/installed_plugins.json`), and as
-    `commands/<space>/<name>.md` in the same folders. Either form is looked for among the
-    skills Claude syncs from the account (`skills/synced/<bucket>/<name>/SKILL.md`)."""
+    `~/.claude`, as `session_env` places it), under `.claude` in `cwd` and each folder
+    above it up to its repository's root, as `skills/<name>/SKILL.md` and the older
+    `commands/<name>.md`, and among the skills Claude syncs from the account
+    (`skills/synced/<bucket>/<name>/SKILL.md`). `<plugin>:<name>` is looked for only in
+    each installed copy of that plugin (Claude's `plugins/installed_plugins.json`), the
+    same two ways, so it never matches another skill that shares its bare name; none is
+    found when the plugin isn't listed, or the name has more than one `:`."""
     from moxi.paths import claude_home
 
     *spaces, bare = name.split(":")
@@ -378,17 +379,17 @@ def skill_files(name: str, cwd, session_env) -> list[str]:
         claude_dir = str(claude_home(session_env))
     except LookupError:
         claude_dir = None
-    roots = [claude_dir] if claude_dir else []
-    roots += [os.path.join(d, ".claude") for d in _project_dirs(cwd)]
-    if len(spaces) == 1 and claude_dir:
-        roots += _plugin_dirs(claude_dir, spaces[0])
+    if spaces:
+        roots = _plugin_dirs(claude_dir, spaces[0]) if len(spaces) == 1 and claude_dir \
+            else []
+    else:
+        roots = [claude_dir] if claude_dir else []
+        roots += [os.path.join(d, ".claude") for d in _project_dirs(cwd)]
     found = []
     for root in roots:
         found.append(os.path.join(root, "skills", bare, "SKILL.md"))
-        found.append(os.path.join(root, "commands", *spaces, f"{bare}.md"))
-        if spaces:
-            found.append(os.path.join(root, "commands", f"{bare}.md"))
-    if claude_dir:
+        found.append(os.path.join(root, "commands", f"{bare}.md"))
+    if claude_dir and not spaces:
         synced = os.path.join(claude_dir, "skills", "synced")
         try:
             buckets = sorted(os.listdir(synced))
