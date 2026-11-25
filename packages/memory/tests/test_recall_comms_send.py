@@ -62,7 +62,7 @@ class Sender:
         self.sent = []
         self.on_send = on_send
 
-    def __call__(self, session_id, text):
+    def __call__(self, session_id, text, *, comms_name=None):
         line = recalls.find_line(SESSION, self.recall_id)
         self.sent.append((text, line["state"], line["kept"]))
         if self.on_send:
@@ -240,6 +240,42 @@ def test_a_taker_sends_a_sending_line_whose_child_died():
     assert [s[0] for s in sender.sent] == ["- a", "- a"]
     assert recalls.find_line(SESSION, recall.recall_id)["state"] == "back"
     assert records.read(SESSION, recall.recall_id)["state"] == "ended"
+
+
+class EndedBinding:
+    """comms as memory reaches it once the session's binding has ended: `owner` names
+    nobody, and a send to a name is taken."""
+
+    def __init__(self):
+        self.sent = []
+
+    def owner(self, session_id, *, timeout_s):
+        return types.SimpleNamespace(session_id=session_id, identity=None)
+
+    def send_scoped(self, module, parent, to, text, *, word, interrupt, expires, timeout_s):
+        self.sent.append((parent, to, text))
+        return types.SimpleNamespace(outcome="sent", message_id="m-1", refusal=None)
+
+
+def test_an_answer_sent_after_the_session_ended_goes_to_the_name_it_started_under(
+        monkeypatch):
+    from moxi_memory import links
+
+    record = recall_start.begin(SESSION, "claude", start="prompt", text="ingest lock",
+                                senders=(), settings=recall_start.default_settings(),
+                                cwd=None, notes_dir=None, route_name=ROUTE,
+                                comms_name="builder@acme", spawn=lambda s, r: None)
+    recall = recall_child.Recall(records.read(SESSION, record["recall"]))
+    recall_child.open_line(recall)
+    assert recalls.find_line(SESSION, recall.recall_id)["comms_name"] == "builder@acme"
+    recall.put(child=DEAD, state=recalls.SENDING, kept=True, ref=f"{recall.recall_id}:1",
+               rounds=[{"round": 1, "text": "- a"}])
+    comms = EndedBinding()
+    monkeypatch.setattr(links, "comms_scoped", lambda: links.Link(links.READY, comms))
+    assert recall_take.take(SESSION, recall.recall_id, identity=DEAD, route=Route([]),
+                            sleep=lambda s: None) == "settled"
+    assert comms.sent == [("builder@acme", "builder@acme", "- a")]
+    assert recalls.find_line(SESSION, recall.recall_id)["state"] == "back"
 
 
 def test_a_taker_never_only_acks_a_round_its_bound_ended():

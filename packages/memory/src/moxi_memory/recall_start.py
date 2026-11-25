@@ -27,6 +27,8 @@ session's `off` line with the reason (`recalls.note_off`), at the first such try
 again only when the reason changes. A route whose answers come back as a comms message
 (`BY_COMMS`) runs only while the session's recall sender can send (`comms_why`,
 `moxi_memory.recall_send`); its reason otherwise names the sender when comms knows it.
+The session's comms name is read first from the claim socket its stamps name, which asks
+comms' daemon nothing, and from comms' `owner` only when that proves none.
 A session stamped `SUBCONSCIOUS_FORK_ENV` is a recall's slot fork: no recall starts in
 it.
 
@@ -35,7 +37,9 @@ the session still running `hurried`, starts the detached starter (`spawn_starter
 the child, `moxi-memory-subconscious`, with the session and the recall's id, and writes
 the new recall's record, state `starting`, naming the starter as the recall's holder
 (`moxi_memory.recall_holder`) and holding everything its child runs on: the prompt's
-text or the topic, its senders and the subconscious settings the caller holds. It
+text or the topic, its senders, the subconscious settings the caller holds and, on a
+route that answers by comms, the session's comms name as it stood when the recall
+started (`comms_name`), which the answer goes to once the session's binding has ended. It
 returns without waiting for the starter, which takes the session's lock before it names
 the child it started as the holder, so it never finds the record unwritten; the child
 runs outside every session. A child that can't be started, by this process or by the
@@ -146,17 +150,17 @@ def route(harness: str | None, session_id: str,
     if harness == "codex":
         if picked != SLOT:
             return None, CODEX
-        why = slot_why(session_id)
+        why = slot_why(session_id, env)
         return (SLOT, None) if why is None else (None, why)
     if harness != "claude":
         return None, NO_FORK
     if picked == SLOT or not offers_fork(session_id):
-        why = slot_why(session_id)
+        why = slot_why(session_id, env)
         if why is None:
             return SLOT, None
         return None, why if picked == SLOT else f"{NO_FORK}; the slot route: {why}"
     if SUBAGENT in BY_COMMS:
-        why = comms_why(session_id)
+        why = comms_why(session_id, env)
         if why is not None:
             return None, why
     return SUBAGENT, None
@@ -176,16 +180,17 @@ def offers_fork(session_id: str) -> bool:
         return False
 
 
-def slot_why(session_id: str) -> str | None:
+def slot_why(session_id: str, env: Mapping[str, str] | None = None) -> str | None:
     """Why the slot route can't run for the session now, or None when it can: a
-    launcher with interface 3, tmux slots here, and a way back by comms."""
+    launcher with interface 3, tmux slots here, and a way back by comms. `env` is the
+    session's, as `comms_why` reads it."""
     from . import links
 
     if not links.launcher_forks().ready:
         return NO_LAUNCHER
     if not slots_here():
         return NO_SLOTS
-    return comms_why(session_id)
+    return comms_why(session_id, env)
 
 
 def slots_here() -> bool:
@@ -201,13 +206,15 @@ def slots_here() -> bool:
         return False
 
 
-def comms_why(session_id: str) -> str | None:
+def comms_why(session_id: str, env: Mapping[str, str] | None = None) -> str | None:
     """Why the session's answers can't go back by comms now (one of
     `recall_send.REASONS`, followed by the recall sender's name when comms knows it),
-    or None when they can."""
+    or None when they can. The session's comms name comes from the claim socket `env`
+    names when it proves one, else from comms' `owner`."""
     from . import recall_send
 
-    found = recall_send.way_back(session_id)
+    claimed = recall_send.claimed_parent(env) if env else None
+    found = recall_send.way_back(session_id, parent=claimed)
     if found.ok:
         return None
     return f"{found.why}: {found.name}" if found.name else found.why
@@ -244,7 +251,7 @@ def new_id() -> str:
 def begin(session_id: str, harness: str | None, *, start: str, text: str,
           senders, settings: Mapping[str, object], cwd: str | None,
           notes_dir: str | None, route_name: str, recall_senders=(),
-          now: float | None = None, spawn=None) -> dict:
+          comms_name: str | None = None, now: float | None = None, spawn=None) -> dict:
     """Write a new recall's record, hurrying the session's running one, start its child
     and return the record. See the module's docstring."""
     from . import recall_holder
@@ -265,7 +272,8 @@ def begin(session_id: str, harness: str | None, *, start: str, text: str,
             "senders": list(senders or ()), "recall_senders": list(recall_senders or ()),
             "settings": dict(settings), "cwd": cwd,
             "notes_dir": notes_dir, "route": route_name, "tools": 0, "answered": False,
-            "rounds": 0, "holder": None if failed else recall_holder.holder(pid)}, now=now)
+            "rounds": 0, "comms_name": comms_name,
+            "holder": None if failed else recall_holder.holder(pid)}, now=now)
     if failed is not None:
         record = lose_spawn(session_id, recall_id, failed) or record
     return record
@@ -389,7 +397,19 @@ def ask(topic: str, *, session=None, spawn=None) -> dict:
 
     return begin(session_id, harness, start=recalls.ASKED, text=topic, senders=(),
                  settings=held, cwd=cwd, notes_dir=notes_override(os.environ),
-                 route_name=route_name, spawn=spawn)
+                 route_name=route_name, comms_name=comms_name(route_name, session_id),
+                 spawn=spawn)
+
+
+def comms_name(route_name: str, session_id: str, env=None) -> str | None:
+    """On a route that answers by comms, the session's comms name now, as a new recall
+    keeps it (`recall_send.session_parent`; `env` names the claim socket, else this
+    process's environment does); None on any other route or when comms names none."""
+    if route_name not in BY_COMMS:
+        return None
+    from . import recall_send
+
+    return recall_send.session_parent(session_id, env)
 
 
 # -- the agent's count, in on-demand mode -----------------------------------------------
@@ -432,7 +452,7 @@ __all__ = ["SUBCONSCIOUS_ENV", "SUBCONSCIOUS_ROUTE_ENV", "SUBCONSCIOUS_FORK_ENV"
            "IN_FORK",
            "is_fork", "offers_fork", "slot_why", "slots_here", "USER", "USER_AND_COMMS",
            "SCRIPT", "ASKED", "SPAWN", "mode",
-           "counts", "route", "comms_why", "subconscious_settings", "settings_keys",
+           "counts", "route", "comms_why", "comms_name", "subconscious_settings", "settings_keys",
            "default_settings", "new_id", "begin", "lose_spawn", "DETACH", "spawn_starter",
            "spawn_child", "STARTED", "START_LINE",
            "Refused", "this_session", "ask", "asked", "write_asked", "reset_asked"]

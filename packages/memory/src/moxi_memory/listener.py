@@ -25,7 +25,9 @@ warning, and passes the settings to the recall's child. A comms delivery whose e
 sender comms reads back, at that prompt, as an active recall sender of this session
 (memory's own earlier answers) starts no recall and resets no count; when such senders
 come with others, the recall's record names them, so its child leaves memory's own lines
-out of what it recalls for. It never raises.
+out of what it recalls for. The senders are read only for a prompt the trigger counts.
+On a route that answers by comms, the record keeps the session's comms name as it stood
+at the prompt. It never raises.
 
 `subconscious_gone(event)` answers a `gone` of a session whose launch turned the
 subconscious on: when a recall's line of the session is still open or kept, it starts a
@@ -196,12 +198,13 @@ def _subconscious(event) -> None:
     session_id = getattr(event, "session_id", None)
     if mode is None or recall_start.is_fork(env) or not recalls.is_safe(session_id):
         return
-    senders = [str(s) for s in getattr(event, "delivery_senders", None) or () if s]
-    ours = recall_senders(event, session_id, env, senders)
-    if senders and len(ours) == len(senders):
-        return
     held = subconscious_settings()
     if not recall_start.counts(event, held["trigger"]):
+        return
+    senders = [str(s) for s in getattr(event, "delivery_senders", None) or () if s]
+    parent = comms_parent(event, session_id, env, senders)
+    ours = recall_senders(senders, parent)
+    if senders and len(ours) == len(senders):
         return
     if mode == recall_start.ON_DEMAND:
         recall_start.reset_asked(session_id)
@@ -211,22 +214,33 @@ def _subconscious(event) -> None:
     if route is None:
         recalls.note_off(session_id, why, harness=harness)
         return
+    if route in recall_start.BY_COMMS and parent is None:
+        parent = recall_start.comms_name(route, session_id, env)
     recall_start.begin(session_id, harness, start=recalls.PROMPT,
                        text=getattr(event, "text", None) or "",
                        senders=senders, settings=held, cwd=session_path(event),
                        notes_dir=notes_override(env), route_name=route,
-                       recall_senders=ours)
+                       recall_senders=ours,
+                       comms_name=parent if route in recall_start.BY_COMMS else None)
 
 
-def recall_senders(event, session_id: str, env, senders: list[str]) -> list[str]:
-    """The senders of a comms delivery that comms reads back, now, as recall senders
-    of this session: memory's own earlier answers. A delivery made of these alone
-    starts no recall and resets no count."""
+def comms_parent(event, session_id: str, env, senders: list[str]) -> str | None:
+    """The session's comms name, read for a comms delivery with senders, or None."""
     if getattr(event, "delivery_by", None) != "comms" or not senders:
+        return None
+    from . import recall_send
+
+    return recall_send.session_parent(session_id, env)
+
+
+def recall_senders(senders: list[str], parent: str | None) -> list[str]:
+    """The senders of a comms delivery that comms reads back, now, as recall senders
+    of the session named `parent`: memory's own earlier answers. A delivery made of
+    these alone starts no recall and resets no count."""
+    if not senders or not parent:
         return []
     from . import recall_send
 
-    parent = recall_send.session_parent(session_id, env)
     return recall_send.recall_senders(senders, parent)
 
 

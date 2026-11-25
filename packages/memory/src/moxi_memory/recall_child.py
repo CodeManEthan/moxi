@@ -78,7 +78,7 @@ class Recall:
             "recall": self.recall_id, "harness": record.get("harness"),
             "state": recalls.OPEN, "start": record.get("start"),
             "head": recalls.head(record.get("text") or ""), "route": record.get("route"),
-            "fork": None, "child": None, "ref": None, "kept": False,
+            "comms_name": record.get("comms_name"), "fork": None, "child": None, "ref": None, "kept": False,
             "prefetch_hits": None, "project_hits": None, "beyond_hits": None,
             "startup_s": None,
             "hurried": False, "past_limit": False, "rounds": [],

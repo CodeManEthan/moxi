@@ -478,7 +478,7 @@ def test_live_sessions_are_checked_as_a_recalls_own_try_checks_them(monkeypatch)
     on = {"MOXI_MEMORY_SUBCONSCIOUS": "automatic"}
     slot = {**on, "MOXI_MEMORY_SUBCONSCIOUS_ROUTE": "slot"}
     monkeypatch.setattr(recall_start, "offers_fork", lambda sid: sid != "c-none")
-    monkeypatch.setattr(recall_start, "slot_why", lambda sid: (
+    monkeypatch.setattr(recall_start, "slot_why", lambda sid, env=None: (
         None if sid == "x-slot" else recall_start.NO_SLOTS))
     monkeypatch.setattr(client, "sessions", lambda: [
         FakeSession("c-fork", "claude", on),
@@ -508,7 +508,7 @@ def test_a_route_that_answers_by_comms_is_off_while_its_recall_sender_cant_send(
     monkeypatch.setattr(recall_start, "BY_COMMS", (recall_start.SUBAGENT,))
     whys = {"c-free": None, "c-held": "recall sender in conflict: held-subconscious",
             "c-nameless": "no comms name for this session"}
-    monkeypatch.setattr(recall_start, "comms_why", lambda sid: whys[sid])
+    monkeypatch.setattr(recall_start, "comms_why", lambda sid, env=None: whys[sid])
     monkeypatch.setattr(recall_start, "offers_fork", lambda sid: True)
     monkeypatch.setattr(client, "sessions", lambda: [
         FakeSession(sid, "claude", on) for sid in whys])

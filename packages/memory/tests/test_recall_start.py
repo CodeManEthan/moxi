@@ -128,7 +128,7 @@ def places(monkeypatch):
     monkeypatch.setattr(links, "launcher_forks", lambda: links.Link(
         links.READY if here.launcher else links.NONE))
     monkeypatch.setattr(recall_start, "slots_here", lambda: here.slots)
-    monkeypatch.setattr(recall_start, "comms_why", lambda session_id: here.comms)
+    monkeypatch.setattr(recall_start, "comms_why", lambda session_id, env=None: here.comms)
     return here
 
 
@@ -604,6 +604,34 @@ def test_a_recall_with_other_mail_leaves_memorys_own_lines_to_recalled(started,
     prompt_part = text.split("Already recalled")[0]
     assert "please also check the reader" in prompt_part
     assert "held by the writer" not in prompt_part
+
+
+def test_under_the_user_trigger_a_comms_delivery_reads_no_senders(started, monkeypatch):
+    from moxi_memory import recall_send
+
+    asked = []
+    monkeypatch.setattr(recall_send, "session_parent",
+                        lambda session_id, env: asked.append(session_id) or "me")
+    monkeypatch.setattr(listener, "subconscious_settings", recall_start.default_settings)
+    listener.subconscious(comms_event(["me-subconscious"]))
+    assert asked == [] and started == []
+
+
+def test_a_comms_routes_record_keeps_the_sessions_comms_name(started, monkeypatch):
+    from moxi_memory import recall_send
+
+    monkeypatch.setattr(recall_start, "route", lambda harness, session_id, env=None: (
+        recall_start.SLOT, None))
+    monkeypatch.setattr(recall_send, "session_parent", lambda session_id, env: "me@acme")
+    listener.subconscious(event())
+    [(_, recall_id)] = started
+    assert records.read(SESSION, recall_id)["comms_name"] == "me@acme"
+
+
+def test_a_subagent_routes_record_keeps_no_comms_name(started):
+    listener.subconscious(event())
+    [(_, recall_id)] = started
+    assert records.read(SESSION, recall_id)["comms_name"] is None
 
 
 def test_split_recalled_matches_stripped_lines_only():

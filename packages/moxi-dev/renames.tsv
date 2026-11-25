@@ -6188,6 +6188,7 @@ memory	packages/memory/src/moxi_memory/recall_stream.py	state = recall.record.ge
 memory	packages/memory/src/moxi_memory/recall_stream.py	recall.write(record=fields, state=recalls.BACK, rounds=rounds)	keep	record	record
 memory	packages/memory/src/moxi_memory/recall_stream.py	if round_number == 1 or not recall.record.get("answered"):	keep	record	record
 memory	packages/memory/src/moxi_memory/recall_stream.py	recall.write(record={"state": records.LOST, "reason": reason,	keep	record	record
+memory	packages/memory/src/moxi_memory/recall_stream.py	return recall.line.get("comms_name") or recall.record.get("comms_name") or None	keep	record	record
 memory	packages/memory/src/moxi_memory/recall_stream.py	rounds.append({"round": round_number, "lost": reason, "error": error,	keep	round	round
 memory	packages/memory/src/moxi_memory/recall_stream.py	recall.write(record={"rounds": round_number}, state=recalls.OPEN, ref=round_ref,	keep	record	record
 memory	packages/memory/src/moxi_memory/recall_stream.py	text = continue_text(recall.record, settings, now=clock())	keep	record	record

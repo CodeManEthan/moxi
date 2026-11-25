@@ -15,9 +15,14 @@ reason (`REASONS`) says which failed, and the route is off for that session: oth
 sessions' recall senders are unaffected.
 
 **One send (`send`).** The answer goes under the session's recall sender to the
-session's comms name, read when it sends, with `interrupt` and no expiry, cut at
-`MAX_CHARS` on a line boundary. comms either takes it or says why not; memory holds an
-answer comms did not take and sends it again (`moxi_memory.recall_stream`).
+session's comms name, with `interrupt` and no expiry, cut at `MAX_CHARS` on a line
+boundary. The name is the one the recall started under (its record's `comms_name`),
+unless comms' `owner`, read when it sends, names the session's live binding now: that
+name wins. Once the session has ended its binding is gone and `owner` names none, so the
+answer still goes to the name the session held, and comms keeps it for that name until a
+session holds it again. comms either takes it or says why not; memory holds an answer
+comms did not take and sends it again (`moxi_memory.recall_stream`). A comms that can't
+be asked is told as `FAILING`, never as a missing name.
 
 **Who sent a delivery (`from_recalls_only`, `recall_senders`).** A sender name is a
 recall of this session when comms reads it back, now, as an active scoped sender of
@@ -97,6 +102,16 @@ def _no_link(found) -> WayBack:
     return WayBack(None, None, NO_COMMS, found.reason)
 
 
+def owner_name(session_id: str, api, *,
+               timeout_s: float = 5.0) -> tuple[str | None, str | None]:
+    """(the session's comms name now from comms' `owner`, or None when the session holds
+    none; why comms couldn't be asked, or None when it answered)."""
+    try:
+        return api.owner(session_id, timeout_s=timeout_s).identity or None, None
+    except Exception as exc:  # noqa: BLE001 - a comms that can't be asked names none
+        return None, f"{type(exc).__name__}: {exc}"
+
+
 def parent_of(session_id: str, *, api=None, timeout_s: float = 5.0) -> str | None:
     """The session's comms name now, from comms' `owner`, or None when it has none or
     comms can't say."""
@@ -105,9 +120,21 @@ def parent_of(session_id: str, *, api=None, timeout_s: float = 5.0) -> str | Non
         if not found.ready:
             return None
         api = found.api
+    return owner_name(session_id, api, timeout_s=timeout_s)[0]
+
+
+def claimed_parent(env=None, *, api=None) -> str | None:
+    """The comms name comms' claim socket that `env` names (else this process's
+    environment) proves for the calling process's session, or None. It asks comms'
+    daemon nothing."""
+    if api is None:
+        found = link()
+        if not found.ready:
+            return None
+        api = found.api
     try:
-        return api.owner(session_id, timeout_s=timeout_s).identity or None
-    except Exception:  # noqa: BLE001 - a name comms can't read is none
+        return api.caller_identity(env) or None
+    except Exception:  # noqa: BLE001 - a claim that can't be read proves no name
         return None
 
 
@@ -137,7 +164,9 @@ def way_back(session_id: str, *, parent: str | None = None) -> WayBack:
     if not found.ready:
         return _no_link(found)
     if parent is None:
-        parent = parent_of(session_id, api=found.api)
+        parent, failed = owner_name(session_id, found.api)
+        if failed is not None:
+            return WayBack(None, None, FAILING, failed)
     if not parent:
         return WayBack(None, None, NO_NAME)
     return sender_state(parent, api=found.api)
@@ -154,16 +183,21 @@ def message_text(answer: str) -> str:
 
 
 def send(session_id: str, answer: str, *, parent: str | None = None,
-         timeout_s: float = 30.0) -> Sent:
-    """Send `answer` under the session's recall sender to the session's comms name (read
-    now, unless `parent` gives it), with `interrupt` and no expiry. Never raises."""
+         comms_name: str | None = None, timeout_s: float = 30.0) -> Sent:
+    """Send `answer` under the session's recall sender to the session's comms name, with
+    `interrupt` and no expiry. The name is `parent` when given; else the one comms'
+    `owner` names now for the session's live binding; else `comms_name`, the name the
+    recall started under, which a session that has ended still answers to. Never
+    raises."""
     found = link()
     if not found.ready:
         return Sent(taken=False, reason=_no_link(found).why)
+    failed = None
     if parent is None:
-        parent = parent_of(session_id, api=found.api)
+        parent, failed = owner_name(session_id, found.api)
+        parent = parent or comms_name or None
     if not parent:
-        return Sent(taken=False, reason=NO_NAME)
+        return Sent(taken=False, reason=f"{FAILING}: {failed}" if failed else NO_NAME)
     try:
         result = found.api.send_scoped(MODULE, parent, parent, message_text(answer),
                                        word=WORD, interrupt=True, expires="never",
@@ -215,11 +249,8 @@ def session_parent(session_id: str, env=None, *, timeout_s: float = 2.0) -> str 
     found = link()
     if not found.ready:
         return None
-    try:
-        name = found.api.caller_identity(env)
-    except Exception:  # noqa: BLE001 - a claim that can't be read proves no name
-        name = None
-    return name or parent_of(session_id, api=found.api, timeout_s=timeout_s)
+    return (claimed_parent(env, api=found.api)
+            or parent_of(session_id, api=found.api, timeout_s=timeout_s))
 
 
 def from_recalls_only(senders: Iterable[str] | None, parent: str | None, *,
@@ -232,5 +263,6 @@ def from_recalls_only(senders: Iterable[str] | None, parent: str | None, *,
 
 __all__ = ["WORD", "MODULE", "SUBCONSCIOUS", "NO_COMMS", "NO_SCOPED", "NO_NAME", "CONFLICT",
            "UNDECLARED", "UNREADABLE", "FAILING", "REASONS", "MAX_CHARS", "WayBack", "Sent",
-           "link", "parent_of", "sender_state", "way_back", "message_text", "send",
+           "link", "owner_name", "parent_of", "claimed_parent", "sender_state", "way_back",
+           "message_text", "send",
            "is_recall_sender", "recall_senders", "session_parent", "from_recalls_only"]

@@ -14,7 +14,8 @@ Everything lives under `subconscious/` in memory's state directory:
 A recall's line holds (`LINE_FIELDS`): its id (`recall`), the session and its harness,
 its state, the reason for a `lost` or `off` state and the error behind it, how it started (`start`: `prompt` or
 `asked`), the first `HEAD_CHARS` characters of its prompt or topic (`head`), its route,
-the fork's id, the child's process identity (`child`: pid and start time) and that of
+the comms name its answers go to once the session's binding has ended (`comms_name`, on
+a route that answers by comms), the fork's id, the child's process identity (`child`: pid and start time) and that of
 the process that took the line over when its owner was gone (`taker`), the current
 round's ref and whether turns still keeps that round's end for memory (`kept`), the
 first search's hit count (`prefetch_hits`, sessions and notes files) and its count in
@@ -69,7 +70,7 @@ ASKED = "asked"
 HEAD_CHARS = 80
 #: The fields of a recall's line.
 LINE_FIELDS = ("recall", "session", "harness", "state", "reason", "error", "start", "head",
-               "route", "fork", "child", "taker", "ref", "kept", "prefetch_hits",
+               "route", "comms_name", "fork", "child", "taker", "ref", "kept", "prefetch_hits",
                "project_hits", "beyond_hits", "widened", "startup_s", "hurried",
                "past_limit", "past_bound", "rounds", "sending_at",
                "send_tries", "send_reason", "sent_at", "message_id", "discarded_by",

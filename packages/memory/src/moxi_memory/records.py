@@ -17,8 +17,9 @@ state, the reason for a `lost` state and the error behind it, how it started (`s
 `prompt` or `asked`), the prompt's text or the topic (`text`), the prompt's
 `delivery_senders` (`senders`), the subconscious settings its child runs on (`settings`,
 every `subconscious.*` key by its last name), the session's launch directory (`cwd`) and
-notes directory override (`notes_dir`), the route, the fork's id and its fork delivery's
-id, the tool calls the fork has made (`tools`), whether any answer came back
+notes directory override (`notes_dir`), the route, the session's comms name when the
+recall started, on a route that answers by comms (`comms_name`), the fork's id and its
+fork delivery's id, the tool calls the fork has made (`tools`), whether any answer came back
 (`answered`), how many rounds were asked (`rounds`), the brief the fork was given, the
 process that holds the recall (`holder`, `moxi_memory.recall_holder`), when it was
 written first and last (`at`, `updated`), the clock that counts from boot at its first
@@ -74,7 +75,8 @@ SWEEP_AFTER_S = 86400.0
 STARTING_GRACE_S = 30.0
 #: The fields of a record.
 RECORD_FIELDS = ("recall", "session", "harness", "state", "reason", "error", "start",
-                 "text", "senders", "settings", "cwd", "notes_dir", "route", "fork",
+                 "text", "senders", "settings", "cwd", "notes_dir", "route", "comms_name",
+                 "fork",
                  "delivery", "tools", "answered", "rounds", "brief", "holder", "seq",
                  "at", "at_boot", "updated")
 

@@ -558,8 +558,11 @@ so a recall never holds the prompt. The child:
 as an interrupt that doesn't expire, under the session's recall sender: comms' scoped
 sender `<comms name>-subconscious` (`builder-subconscious@acme` for `builder@acme`),
 which memory declares to comms with the word `subconscious`. The message is the fork's
-answer as it wrote it, cut on a line at 4,000 characters; `NOTHING` sends nothing. The
-line reads `sending` until comms takes the message, then `back`. A send comms refuses is
+answer as it wrote it, cut on a line at 4,000 characters; `NOTHING` sends nothing. It
+goes to the comms name the session holds when it is sent, or, once the session has ended
+and holds none, to the name it held when the recall started, which comms keeps the
+message for until a session holds that name again. The line reads `sending` until comms
+takes the message, then `back`. A send comms refuses is
 tried again every 10 seconds for a minute, then every 5 minutes, with no last try, each
 refusal's reason on the line. On this route the child waits out each round's bound
 itself. A round past its bound is noted on the line (`past_bound`) with its loss, and

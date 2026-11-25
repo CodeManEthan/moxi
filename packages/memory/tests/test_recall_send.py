@@ -25,12 +25,18 @@ class FakeComms:
         self.senders = dict(senders or {})
         self.refusal = refusal
         self.owner_error = owner_error
+        self.claimed = None
+        self.owners_asked = 0
         self.sent = []
 
     def owner(self, session_id, *, timeout_s):
+        self.owners_asked += 1
         if self.owner_error:
             raise self.owner_error
         return types.SimpleNamespace(session_id=session_id, identity=self.parent)
+
+    def caller_identity(self, env=None):
+        return self.claimed
 
     def scoped_state(self, module, parent, *, word=None):
         assert (module, word) == ("memory", "subconscious")
@@ -85,10 +91,42 @@ def test_a_way_back_needs_comms_with_scoped_senders(monkeypatch):
 def test_a_way_back_needs_a_comms_name(comms):
     comms.parent = None
     assert recall_send.way_back(SESSION).why == "no comms name for this session"
-    comms.owner_error = OSError("daemon down")
-    assert recall_send.way_back(SESSION).why == "no comms name for this session"
     assert recall_send.send(SESSION, "points") == recall_send.Sent(
         taken=False, reason="no comms name for this session")
+
+
+def test_a_comms_that_cant_be_asked_is_not_told_as_a_missing_name(comms):
+    comms.owner_error = OSError("daemon down")
+    found = recall_send.way_back(SESSION)
+    assert (found.why, found.detail) == (recall_send.FAILING, "OSError: daemon down")
+    assert recall_start.comms_why(SESSION) == recall_send.FAILING
+    assert recall_send.send(SESSION, "points") == recall_send.Sent(
+        taken=False, reason="comms can't be asked: OSError: daemon down")
+
+
+def test_a_send_after_the_binding_ended_goes_to_the_name_the_recall_started_under(comms):
+    comms.parent = None
+    assert recall_send.send(SESSION, "- a point", comms_name="builder@acme") == (
+        recall_send.Sent(taken=True, message_id="m-1"))
+    assert [(m["parent"], m["to"]) for m in comms.sent] == [("builder@acme", "builder@acme")]
+    # a daemon that can't say: the start name is tried, and comms' own answer stands
+    comms.owner_error = OSError("daemon down")
+    assert recall_send.send(SESSION, "- a point", comms_name="builder@acme").taken
+
+
+def test_a_live_binding_names_the_recipient_over_the_start_name(comms):
+    comms.parent = "builder-2@acme"
+    recall_send.send(SESSION, "- a point", comms_name="builder@acme")
+    assert [m["to"] for m in comms.sent] == ["builder-2@acme"]
+
+
+def test_the_routes_comms_check_reads_the_claim_and_asks_no_daemon(comms):
+    comms.claimed = "builder@acme"
+    assert recall_start.comms_why(SESSION, {"ANY": "1"}) is None
+    assert comms.owners_asked == 0
+    comms.claimed = None
+    assert recall_start.comms_why(SESSION, {"ANY": "1"}) is None
+    assert comms.owners_asked == 1
 
 
 def test_a_recall_sender_comms_says_cant_send_names_the_sender(comms):

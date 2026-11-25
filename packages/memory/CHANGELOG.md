@@ -37,7 +37,9 @@
   permission ask, Claude Code).
 - A recall on the slot route sends each answer by comms, to the session alone, under
   the session's recall sender (`<comms name>-subconscious`, comms' scoped sender for the
-  word `subconscious`, which memory declares). The line reads `sending` until comms
+  word `subconscious`, which memory declares). After the session has ended, an answer
+  still goes to the comms name the session held when the recall started. The line reads
+  `sending` until comms
   takes it, tried again every 10 seconds for a minute and then every 5 minutes, each
   refusal on the line; `list` and the doctor show the wait and the last refusal, and a
   discard ends a line comms will never take. A round past its bound is noted

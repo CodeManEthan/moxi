@@ -38,7 +38,8 @@ fork's calls before the fork's id is written are judged by its own record
 **A route that answers by comms** (its name in `recall_start.BY_COMMS`). The harness does
 not bring the fork's answer back, so memory sends it. An answer with points goes on the
 line `sending` before anything else is done with it, then the ack, then the mark; then
-the child sends it under the session's recall sender (`moxi_memory.recall_send.send`)
+the child sends it under the session's recall sender (`moxi_memory.recall_send.send`),
+to the session's live comms name, else the one the recall started under (`start_name`),
 until comms takes it (`deliver`): a send comms refuses is tried again every
 `RESEND_FAST_S` for `RESEND_FAST_FOR_S`, then every `RESEND_SLOW_S`, with no last try,
 each refusal's reason kept on the line. The line goes `back` once comms takes it. An
@@ -191,6 +192,12 @@ def _newest_text(line: dict) -> str:
     return ""
 
 
+def start_name(recall) -> str | None:
+    """The session's comms name as it stood when the recall started, from its line or
+    its record: where the answer goes once the session's binding has ended."""
+    return recall.line.get("comms_name") or recall.record.get("comms_name") or None
+
+
 def deliver(recall, *, send=None, sleep=time.sleep, clock=time.time) -> str:
     """Send a `sending` line's newest text under the session's recall sender until comms
     takes it, and return the line's state then: `back`, or the state someone else set
@@ -204,7 +211,7 @@ def deliver(recall, *, send=None, sleep=time.sleep, clock=time.time) -> str:
             if recall.line.get("state") != recalls.SENDING:
                 return str(recall.line.get("state"))
             text = _newest_text(recall.line)
-        sent = send(recall.session_id, text)
+        sent = send(recall.session_id, text, comms_name=start_name(recall))
         now = clock()
         with recalls.session_lock(recall.session_id):
             _refresh(recall)
@@ -460,5 +467,5 @@ def run(recall, route: Route, brief: str, *, clock=time.time, send=None,
 __all__ = ["ROUND_MARGIN_S", "END_WAIT_MARGIN_S", "LATE_WAIT_S", "RESEND_FAST_S",
            "RESEND_FAST_FOR_S", "RESEND_SLOW_S", "GONE", "PAST_BOUND", "UNSETTLED", "NOTHING",
            "END_LINE", "CONTINUE", "Route", "ref", "round_bound_s", "ends_stream",
-           "continue_text", "why_stop", "by_comms", "has_points", "deliver", "note_bound",
+           "continue_text", "why_stop", "by_comms", "has_points", "start_name", "deliver", "note_bound",
            "settle_late", "settle", "KEPT", "open_round", "note_fork", "lose_hurried", "run"]

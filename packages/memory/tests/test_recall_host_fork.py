@@ -87,7 +87,7 @@ def ended(answer):
 
 
 def taken(sent):
-    def send(session_id, text):
+    def send(session_id, text, *, comms_name=None):
         sent.append((session_id, text))
         return recall_send.Sent(taken=True, message_id=f"m-{len(sent)}")
 

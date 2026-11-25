@@ -227,7 +227,8 @@ def test_a_taker_that_sends_a_slot_lines_text_ends_the_fork():
 def recall_send_taken():
     from moxi_memory import recall_send
 
-    return lambda session_id, text: recall_send.Sent(taken=True, message_id="m-1")
+    return lambda session_id, text, comms_name=None: recall_send.Sent(taken=True,
+                                                                      message_id="m-1")
 
 
 def test_a_taker_leaves_the_fork_of_a_round_turns_has_no_end_for():
