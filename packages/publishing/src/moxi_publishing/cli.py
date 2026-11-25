@@ -3,6 +3,8 @@
     moxi publishing enable PATH [--github OWNER/REPO] [--set KEY=VALUE]...
     moxi publishing disable PATH
     moxi publishing clean-history enable|disable PATH
+    moxi publishing approval enable PATH --branch PATTERN [--branch PATTERN]...
+    moxi publishing approval disable PATH
     moxi publishing list [--json]
     moxi publishing scan [PATH] [--rev REV] [--from REV] [--ci]
     moxi publishing bump PACKAGE... [--part patch|minor|major] [--path PATH]
@@ -82,6 +84,27 @@ def _parser(prog: str) -> argparse.ArgumentParser:
                     "refused-trailer keys enable added; commit-rules goes only when "
                     "enable registered it and nothing else is set there. Refused in a "
                     "public repo, which always keeps clean history.")
+    s.add_argument("path", metavar="PATH")
+    p = verbs.add_parser(
+        "approval", help="ask for the word before an agent pushes some branches",
+        description="The approval piece: a push run inside an agent's session that "
+                    "creates, moves or deletes a branch a pattern names, or any tag, "
+                    "needs MOXI_PUBLISHING_PUSH_WORD matching push.word_pattern. A push "
+                    "from your own terminal or a Moxi unit needs none. It reads no "
+                    "public or clean flag.")
+    steps = p.add_subparsers(dest="step", metavar="STEP")
+    steps.required = True
+    s = steps.add_parser(
+        "enable", help="guard the branches named",
+        description="Register the approval piece in the repo at PATH with these branch "
+                    "patterns, replacing those it had.")
+    s.add_argument("path", metavar="PATH")
+    s.add_argument("--branch", dest="branches", action="append", default=[],
+                   metavar="PATTERN", required=True,
+                   help="a branch name in which *, ? and [...] are wildcards; '*' alone "
+                        "is every branch. Give it once per pattern")
+    s = steps.add_parser("disable", help="remove push approval",
+                         description="Remove the approval piece from the repo at PATH.")
     s.add_argument("path", metavar="PATH")
     p = verbs.add_parser("list", help="every repo marked public, with its pieces",
                          description="Every repo repo has indexed that is marked public, "
@@ -288,6 +311,11 @@ def main(argv: Sequence[str] | None = None, prog: str = "moxi publishing") -> in
             from moxi_publishing import clean
 
             lines = (clean.enable if args.step == "enable" else clean.disable)(args.path)
+        elif args.verb == "approval":
+            from moxi_publishing import approval
+
+            lines = (approval.enable(args.path, args.branches) if args.step == "enable"
+                     else approval.disable(args.path))
         else:
             repos = flag.listing()
             if args.json:

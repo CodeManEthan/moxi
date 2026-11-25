@@ -31,11 +31,12 @@ Issues = "https://github.com/CodeManEthan/moxi/issues"
 [project.entry-points."moxi.modules"]
 publishing = "moxi_publishing.module"
 
-# The three git hook pieces, each declared beside the function it runs.
+# The four git hook pieces, each declared beside the function it runs.
 [project.entry-points."moxi.repo.git_hooks"]
 "publishing.message" = "moxi_publishing.message:MESSAGE"
 "publishing.content" = "moxi_publishing.content:CONTENT"
 "publishing.push" = "moxi_publishing.push:PUSH"
+"publishing.approval" = "moxi_publishing.approval:APPROVAL"
 
 [dependency-groups]
 dev = ["pytest", "moxi-dev"]

@@ -90,7 +90,9 @@ def _repo_rows(root: str) -> Iterator[Row]:
     try:
         public = flag.is_public(root)
         clean = flag.is_clean(root)
-        have = flag.registered(root)
+        # The approval piece reads no flag, so it never makes a repo's row here.
+        have = {piece: state for piece, state in flag.registered(root).items()
+                if piece in flag.PIECES}
     except flag.Failure as exc:
         yield Row(MODULE, name, "fail", exc.text)
         return

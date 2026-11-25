@@ -1,8 +1,9 @@
 """The announcement of Moxi's publishing module, which moxi.modules reads.
 
 publishing keeps private text out of a public repo and releases that repo's packages. It
-declares three git hook pieces, which repo runs (`moxi_publishing.message`, `.content` and
-`.push`), and reads secrets' pattern sets and lists. No daemon, timer, store or page.
+declares four git hook pieces, which repo runs (`moxi_publishing.message`, `.content`,
+`.push` and `.approval`), and reads secrets' pattern sets and lists. No daemon, timer,
+store or page.
 """
 
 INTERFACES = frozenset({1})
@@ -14,9 +15,10 @@ OPTIONAL = {}
 GATED = {}
 INTERNAL_ENV = {
     "MOXI_PUBLISHING_PUSH_WORD": "set by whoever pushes, per push: where the push was "
-                                 "approved, which the push piece checks against "
-                                 "push.word_pattern and logs, in a repo whose "
-                                 "word-required setting is true",
+                                 "approved, which the approval piece checks against "
+                                 "push.word_pattern for an agent's push of a guarded "
+                                 "branch or a tag (and the push piece, in a repo whose "
+                                 "word-required setting is true), and both log",
     "MOXI_PUBLISHING_GITHUB_API_URL": "where the tag gate reads GitHub's API, when not "
                                       "api.github.com: a test's fake, or a GitHub "
                                       "Enterprise host",

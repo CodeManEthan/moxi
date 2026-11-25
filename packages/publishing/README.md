@@ -62,6 +62,35 @@ history: run `moxi publishing disable` first.
 
 `moxi publishing enable` turns clean history on as part of marking a repo public.
 
+## Push approval
+
+A repo can ask for your approval before an agent pushes some of its branches. It is a
+choice of its own, apart from clean history and from being public.
+
+```sh
+moxi publishing approval enable ~/src/app --branch main --branch 'release/*'
+moxi publishing approval disable ~/src/app
+```
+
+`approval enable` registers the pre-push piece `publishing/approval` with its `branch`
+setting holding the patterns, replacing those it had. A pattern is a branch name (`main`,
+not `refs/heads/main`) in which `*`, `?` and `[...]` are wildcards; `*` alone is every
+branch. The piece reads no public or clean flag and assumes no branch names or CI: it
+guards exactly the branches its patterns name.
+
+When a push runs inside an agent's session (Moxi's agent test: a harness's program above
+the push, or the harness's mark in its environment), each ref line that creates, moves or
+deletes a named branch needs `MOXI_PUBLISHING_PUSH_WORD`, set to where the push was
+approved and matching `push.word_pattern` in full. Tags need it too: an agent's push that
+creates, moves or deletes any `refs/tags/` ref needs the word wherever approval is on,
+whatever the patterns name, so a release tag pushed by an agent needs your word even
+where the patterns name only `main`. A push from your own terminal, or from a Moxi unit
+such as notes' snapshot, needs no word.
+
+A push that passes is logged in the push log, `pushes.jsonl` in publishing's state
+directory, with the word or null and the harness the agent test named or null. Where the
+push piece runs too, its own record logs the push, word included.
+
 The message and content pieces run where the repo is marked clean or public; a public
 repo counts as clean, so a repo enabled before clean history existed needs nothing.
 Registered in a repo marked neither, they refuse every commit, naming both commands.

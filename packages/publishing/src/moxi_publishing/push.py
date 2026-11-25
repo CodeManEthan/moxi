@@ -327,6 +327,12 @@ def judge_history(git, rev: str, from_rev: str | None, *, sets=None) -> list[str
     return reader.reasons
 
 
+def given_word() -> str | None:
+    """The push word in this process's environment, `WORD_ENV`; a blank one is none."""
+    word = os.environ.get(WORD_ENV) or None
+    return None if word is None or not word.strip() else word
+
+
 class _Push(_Reader):
     """One push being judged: the context, its settings, and what it found."""
 
@@ -343,10 +349,7 @@ class _Push(_Reader):
         # What is printed and logged; a push to a bare URL gives git the URL as the remote.
         self.shown_remote, self.shown_url = _shown_url(self.remote), _shown_url(self.url)
         self.updates = ctx.updates
-        # A blank word is no word.
-        self.word = os.environ.get(WORD_ENV) or None
-        if self.word is not None and not self.word.strip():
-            self.word = None
+        self.word = given_word()
         self.standing = Standing(settings)
         self.commits: list[str] = []
 
@@ -916,5 +919,6 @@ def pre_push(ctx):
 
 __all__ = ["PUSH", "PIECE_ID", "MAIN", "PROTECTED", "WORD_REQUIRED", "FREE_REF",
            "STANDING_BRANCH", "GITHUB_KEY", "WORD_ENV", "MAX_TAGS", "LOG_FILE", "Standing",
+           "given_word",
            "github_repo", "standing_problem", "main_ci", "log_path", "judge_history",
            "pre_push"]

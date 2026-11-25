@@ -86,3 +86,10 @@ The first version.
   clean history off where enable turned it on (or the repo has no clean flag, as one
   enabled before clean history); a repo that kept a clean history before it was public
   keeps it.
+- Push approval, a repo's own choice: `moxi publishing approval enable PATH --branch
+  PATTERN...` registers the new pre-push piece `publishing/approval`, and `approval
+  disable PATH` removes it. A push run inside an agent's session that creates, moves or
+  deletes a branch a pattern names, or any tag, needs `MOXI_PUBLISHING_PUSH_WORD`
+  matching `push.word_pattern`; a push from your own terminal or a Moxi unit needs none.
+  It reads no public or clean flag. A passing push is logged in `pushes.jsonl` with the
+  word and the agent's harness.
