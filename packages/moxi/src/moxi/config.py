@@ -1006,7 +1006,9 @@ def unset(module: str, key: str, *, by: str) -> list:
     """Remove `key` from module `module`'s config file, so it reads its default (a switch
     table's entry then reads false). Returns the units applied, as `set_value` does. A key the
     file does not hold changes nothing: no file is made or written and no history line is
-    added, though the file is still checked as it is (a missing one as the empty text)."""
+    added, though the file is still checked as it is (a missing one as the empty text). A
+    retired key marked `left_out` can be unset, which removes its line; `set_value` still
+    refuses it."""
     _change(module, key, "unset", None, by=by)
     return apply_units(module, key)
 
@@ -1162,11 +1164,13 @@ def _refused(where, problem, fix, code, key=None) -> ConfigError:
     return exc
 
 
-def _resolve(schema, module, key, path):
-    """Step 2: the declared, live key `key` names, with the switch entry it names."""
+def _resolve(schema, module, key, path, *, unset=False):
+    """Step 2: the declared, live key `key` names, with the switch entry it names. With
+    `unset`, a retired key marked `left_out` is named too, so the line its warning asks to
+    remove can be removed; any other retired key is refused."""
     found = schema.keys.get(key)
     if found is not None:
-        if found.retired is not None:
+        if found.retired is not None and not (unset and found.left_out):
             raise ConfigError(path, key, "is retired", found.retired)
         return found, None
     hit = schema.entry(key)
@@ -1424,7 +1428,7 @@ def _change(module, key, op, value, *, by, text=False) -> bool:
     if op == "set":
         target, entry, new = _prepared(schema, module, key, value, path, text=text)
     else:
-        target, entry = _resolve(schema, module, key, path)
+        target, entry = _resolve(schema, module, key, path, unset=(op == "unset"))
     if op in ("add", "remove"):
         if entry is not None:
             raise ConfigError(path, key, "is a switch, not a list",
