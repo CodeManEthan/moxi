@@ -16,6 +16,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 import pytest
+from gateway_kit import windows_profile_env
 from moxi.paths import Layout
 from moxi_ui.loopback.api import Table
 from moxi_ui import listen
@@ -147,7 +148,8 @@ def loop():
 def env(tmp_path_factory):
     """An environment with no Moxi locator, whose runtime directory is short and private."""
     root = tempfile.mkdtemp(prefix="gw", dir=tmp_path_factory.getbasetemp())
-    shell_env = {"HOME": os.path.join(root, "h"), "XDG_RUNTIME_DIR": os.path.join(root, "r")}
+    shell_env = {"HOME": os.path.join(root, "h"), "XDG_RUNTIME_DIR": os.path.join(root, "r"),
+                 **windows_profile_env(os.path.join(root, "h"))}
     os.makedirs(shell_env["XDG_RUNTIME_DIR"], mode=0o700)
     Layout("ui").runtime_dir(shell_env, create=True)
     return shell_env

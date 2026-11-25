@@ -6,14 +6,16 @@ from __future__ import annotations
 
 import json
 import ntpath
+import os
 import posixpath
 import socket
 import subprocess
-from pathlib import PureWindowsPath
+from pathlib import PurePosixPath, PureWindowsPath
 
 import pytest
 from moxi_ui.loopback.api import Conflict, Refused
 from moxi.paths import Layout, python
+from moxi_dev.testing import WINDOWS
 from moxi_ui import settings
 from moxi_ui.page import PAGE
 from moxi_ui.settings import MARK_NEXT_START, MARK_NOW, MARK_SWITCH
@@ -158,7 +160,7 @@ def test_each_key_carries_its_value_as_json_and_whether_it_is_not_the_default():
     assert settings.descriptor("demo", _key("dir", "path", "/a", ""))["json"] == '"/a"'
     assert settings.descriptor("demo", _key("dir", "path", None, ""))["json"] == "null"
     # A path default under the home folder reads as the value the home gives it.
-    env = {"HOME": "/h"}
+    env = {"HOME": "/h", "USERPROFILE": "/h"}
     assert not settings.descriptor("demo", _key("dir", "path", "/h/x", "~/x"), env=env)["changed"]
     assert settings.descriptor("demo", _key("dir", "path", "/h/y", "~/x"), env=env)["changed"]
     # A list of tables travels whole, so the page never parses TOML.
@@ -192,6 +194,8 @@ def test_a_path_default_compares_as_a_path_with_windows_separators_and_case(monk
 
 def test_a_path_default_compares_as_a_path_on_posix(monkeypatch):
     monkeypatch.setattr(settings, "_paths", posixpath)
+    # A POSIX home on any system (a `Path` on Windows spells `/h` as `\h`).
+    monkeypatch.setattr(settings, "home", lambda env=None: PurePosixPath("/h"))
     env = {"HOME": "/h"}
 
     def changed(value, default):
@@ -234,19 +238,37 @@ def test_a_sections_count_leaves_out_what_the_page_does_not_draw_among_its_rows(
     assert settings.is_drawn("demo", {"name": "a", "needs_absent": False, "elsewhere": None})
 
 
+#: Where the config root sits in the home (`XDG_CONFIG_HOME`'s default, or the roaming
+#: folder on Windows), and where a module's config folder sits in that root.
+ROOT_IN_HOME = ("AppData", "Roaming") if WINDOWS else (".config",)
+CONFIG_IN_ROOT = ("moxi", "config") if WINDOWS else ("moxi",)
+
+
+def _placed(home, config_root):
+    """An environment placing the home and the config root, as this system reads them."""
+    if WINDOWS:
+        return {"USERPROFILE": str(home), "WIN_PD_OVERRIDE_APPDATA": str(config_root),
+                "WIN_PD_OVERRIDE_LOCAL_APPDATA": str(home / "AppData" / "Local")}
+    return {"HOME": str(home), "XDG_CONFIG_HOME": str(config_root)}
+
+
 def test_a_sections_file_writes_the_home_as_a_tilde(tmp_path):
-    env = {"HOME": str(tmp_path), "XDG_CONFIG_HOME": str(tmp_path / ".config")}
-    assert settings.file_of("demo", env) == "~/.config/moxi/demo/config.toml"
-    assert settings.file_of("moxi", env) == "~/.config/moxi/moxi/config.toml"
-    elsewhere = {"HOME": str(tmp_path / "h"), "XDG_CONFIG_HOME": str(tmp_path / "conf")}
-    assert settings.file_of("demo", elsewhere) == str(tmp_path / "conf/moxi/demo/config.toml")
+    env = _placed(tmp_path, tmp_path.joinpath(*ROOT_IN_HOME))
+
+    def tilde(module):
+        return os.path.join("~", *ROOT_IN_HOME, *CONFIG_IN_ROOT, module, "config.toml")
+
+    assert settings.file_of("demo", env) == tilde("demo")
+    assert settings.file_of("moxi", env) == tilde("moxi")
+    elsewhere = _placed(tmp_path / "h", tmp_path / "conf")
+    assert settings.file_of("demo", elsewhere) == str(
+        tmp_path.joinpath("conf", *CONFIG_IN_ROOT, "demo", "config.toml"))
     # A home that is only a prefix of the path's folder is not the home folder.
-    near = {"HOME": str(tmp_path / "c"), "XDG_CONFIG_HOME": str(tmp_path / "conf")}
+    near = _placed(tmp_path / "c", tmp_path / "conf")
     assert not settings.file_of("demo", near).startswith("~")
     assert settings.file_of("Not A Module", env) is None
     run = Run(stdout=b"[]", schema=None)
-    assert settings.read_section("demo", cwd="/rt", env=env, run=run)["file"] == \
-        "~/.config/moxi/demo/config.toml"
+    assert settings.read_section("demo", cwd="/rt", env=env, run=run)["file"] == tilde("demo")
 
 
 # --- the commands, recorded --------------------------------------------------------------

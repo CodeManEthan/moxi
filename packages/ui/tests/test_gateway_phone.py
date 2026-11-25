@@ -22,7 +22,7 @@ import pytest
 pytest.importorskip("webauthn")
 pytest.importorskip("cryptography")
 
-from gateway_kit import HOST, ORIGIN, Authenticator  # noqa: E402
+from gateway_kit import HOST, ORIGIN, Authenticator, windows_profile_env  # noqa: E402
 from moxi.paths import Layout  # noqa: E402
 from moxi_ui.loopback.api import Refused, Table  # noqa: E402
 from moxi_ui import page  # noqa: E402
@@ -95,7 +95,8 @@ class Loop:
 def env(tmp_path_factory):
     root = tempfile.mkdtemp(prefix="gw", dir=tmp_path_factory.getbasetemp())
     shell_env = {"HOME": os.path.join(root, "h"), "XDG_RUNTIME_DIR": os.path.join(root, "r"),
-               "XDG_STATE_HOME": os.path.join(root, "s")}
+               "XDG_STATE_HOME": os.path.join(root, "s"),
+               **windows_profile_env(os.path.join(root, "h"))}
     os.makedirs(shell_env["XDG_RUNTIME_DIR"], mode=0o700)
     Layout("ui").runtime_dir(shell_env, create=True)
     return shell_env

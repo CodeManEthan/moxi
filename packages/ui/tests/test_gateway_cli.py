@@ -15,6 +15,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
+from gateway_kit import windows_profile_env
 
 from moxi import modules
 from moxi.paths import Layout
@@ -58,7 +59,7 @@ def _not_ready() -> type:
 def env(tmp_path):
     """An environment with no Moxi locator, whose runtime directory is its own."""
     shell_env = {"HOME": str(tmp_path / "h"), "XDG_RUNTIME_DIR": str(tmp_path / "r"),
-               "XDG_STATE_HOME": str(tmp_path / "s")}
+               "XDG_STATE_HOME": str(tmp_path / "s"), **windows_profile_env(tmp_path / "h")}
     os.makedirs(shell_env["XDG_RUNTIME_DIR"], mode=0o700)
     return shell_env
 

@@ -279,11 +279,18 @@ class OwnerCheck:
 # --- tickets --------------------------------------------------------------------------
 
 
+#: Held while a ticket is spent, by every `Tickets` in this process. On Windows two
+#: threads that both opened a ticket's file can each delete it, so the unlink alone
+#: can't pick one winner there; the shell is the one process that redeems.
+_SPENDING = threading.Lock()
+
+
 class Tickets:
     """One-use sign-in tickets: files in the shell's runtime dir, named by the first 32
     hex of the ticket's SHA-256, each holding its expiry.
 
-    Only the redemption whose unlink succeeds spends a ticket, so two can't both win.
+    Only the redemption whose unlink succeeds spends a ticket, and redemptions in one
+    process take turns, so two can't both win on any system.
     """
 
     def __init__(self, tickets_dir: str | os.PathLike, *, ttl: float = TICKET_TTL,
@@ -309,11 +316,12 @@ class Tickets:
             if not isinstance(ticket, str) or not _TOKEN_SHAPE.match(ticket):
                 return False
             path = self._path(ticket)
-            expires = _expiry(path)
-            try:
-                os.unlink(path)
-            except OSError:
-                return False
+            with _SPENDING:
+                expires = _expiry(path)
+                try:
+                    os.unlink(path)
+                except OSError:
+                    return False
             return expires is not None and self.clock() < expires
         finally:
             self.sweep()

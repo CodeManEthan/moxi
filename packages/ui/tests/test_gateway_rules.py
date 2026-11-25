@@ -12,6 +12,8 @@ from types import SimpleNamespace
 from dataclasses import dataclass
 
 import pytest
+from gateway_kit import windows_profile_env
+from moxi.paths import Layout
 from moxi_ui.gateway import endpoint, provider
 from moxi_ui.gateway.address import OFF, REFUSED, Kept, step
 from moxi_ui.gateway.mount import Mount, decide, read_acts, write_acts
@@ -98,17 +100,24 @@ STATE = {"/": (0, 0o755), "/home": (0, 0o755), "/home/someone": (UID, 0o700),
          "/home/someone/.local/state/moxi/runtime/ui": (UID, 0o700)}
 STATE_SOCK = "/home/someone/.local/state/moxi/runtime/ui/gateway.sock"
 
+#: The walk reads a POSIX path from `/`; the gateway binds a Unix socket, and so checks
+#: its path, only on Linux and WSL.
+POSIX_WALK = pytest.mark.skipif(os.name != "posix", reason="the socket path's walk is POSIX "
+                                "only; on Windows the gateway takes TCP and checks no path")
+
 
 def _check(path, tree, **kwargs):
     kwargs.setdefault("realpath", lambda p: p)
     endpoint.check_socket_path(path, uid=UID, lstat=_fs(tree), platform="linux", **kwargs)
 
 
+@POSIX_WALK
 def test_the_runtime_dir_and_an_owner_only_state_root_pass():
     _check(SOCK, RUN)
     _check(STATE_SOCK, STATE)
 
 
+@POSIX_WALK
 @pytest.mark.parametrize("where, owner, mode, fix", [
     ("/home/someone/.local/state", UID, 0o775, "chmod g-w,o-w /home/someone/.local/state"),
     ("/home/someone/.local", UID, 0o757, "chmod g-w,o-w /home/someone/.local"),
@@ -124,12 +133,14 @@ def test_a_dir_another_user_owns_or_can_write_is_refused_and_named(where, owner,
     assert where in str(err.value) and fix in str(err.value)
 
 
+@POSIX_WALK
 def test_a_group_writable_state_dir_is_refused_even_for_a_private_group():
     # The user's private group can't be shown to have no other member, so 0775 is refused.
     with pytest.raises(endpoint.PathRefused, match="group can write"):
         _check(STATE_SOCK, {**STATE, "/home/someone/.local/state": (UID, 0o775)})
 
 
+@POSIX_WALK
 def test_the_tmp_fallback_is_refused():
     tree = {"/": (0, 0o755), "/tmp": (0, 0o1777), f"/tmp/moxi-{UID}": (UID, 0o700)}
     with pytest.raises(endpoint.PathRefused) as err:
@@ -137,6 +148,7 @@ def test_the_tmp_fallback_is_refused():
     assert err.value.failed_dir == "/tmp"
 
 
+@POSIX_WALK
 def test_a_link_another_user_owns_is_refused_and_a_link_is_followed():
     linked = {**STATE, "/home": (OTHER, stat.S_IFLNK | 0o777), "/var": (0, 0o755),
               "/var/home": (0, 0o755)}
@@ -174,7 +186,8 @@ def test_the_real_login_runtime_dir_passes():
 
 @pytest.fixture
 def plain(tmp_path):
-    return {"HOME": str(tmp_path / "home"), "XDG_RUNTIME_DIR": str(tmp_path / "run")}
+    return {"HOME": str(tmp_path / "home"), "XDG_RUNTIME_DIR": str(tmp_path / "run"),
+            **windows_profile_env(tmp_path / "home")}
 
 
 @pytest.mark.parametrize("name", ["MOXI_UI_HOME", "MOXI_UI_RUNTIME_DIR"])
@@ -196,7 +209,9 @@ def test_a_tagged_home_moves_nothing(plain, tmp_path):
 
 def test_a_locator_that_leaves_the_runtime_dir_where_it_was_passes(plain):
     assert endpoint.runtime_problem(plain, platform="linux") is None
-    same = {**plain, "MOXI_UI_RUNTIME_DIR": plain["XDG_RUNTIME_DIR"] + "/moxi"}
+    # The locator names the runtime root, which the module's folder sits in.
+    root = str(Layout("ui").runtime_dir(plain).parent)
+    same = {**plain, "MOXI_UI_RUNTIME_DIR": root}
     assert endpoint.runtime_problem(same, platform="linux") is None
 
 

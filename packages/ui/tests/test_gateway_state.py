@@ -13,6 +13,7 @@ from types import SimpleNamespace
 from typing import Any
 
 import pytest
+from gateway_kit import windows_profile_env
 from moxi.paths import Layout
 from moxi_ui import page, settings
 from moxi_ui.gateway import Gateway, desk, pairing
@@ -47,7 +48,8 @@ class Address:
 def env(tmp_path_factory):
     root = tempfile.mkdtemp(prefix="gw", dir=tmp_path_factory.getbasetemp())
     shell_env = {"HOME": os.path.join(root, "h"), "XDG_RUNTIME_DIR": os.path.join(root, "r"),
-                 "XDG_STATE_HOME": os.path.join(root, "s")}
+                 "XDG_STATE_HOME": os.path.join(root, "s"),
+                 **windows_profile_env(os.path.join(root, "h"))}
     os.makedirs(shell_env["XDG_RUNTIME_DIR"], mode=0o700)
     Layout("ui").runtime_dir(shell_env, create=True)
     return shell_env

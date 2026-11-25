@@ -227,7 +227,7 @@ def test_another_shells_lock_exits_75(monkeypatch):
          f"with files.lock({str(lock)!r}):\n print('held', flush=True); time.sleep(30)"],
         stdout=subprocess.PIPE, env=os.environ.copy())
     try:
-        assert holder.stdout.readline() == b"held\n"
+        assert holder.stdout.readline().rstrip() == b"held"
         monkeypatch.setattr(serve, "LOCK_WAIT", 0.2)
         said = []
         assert serve.run(say=said.append) == 75

@@ -708,7 +708,9 @@ def test_two_topics_and_ui_servers_on_one_stream_current_value_first_down_then_u
             assert answer.status == 200 and json.loads(await answer.read()) == {"ok": True}
         assert await reader.until("pspage.alpha") == {"n": 7}
 
-        os.kill(server.child.pid, signal.SIGKILL)
+        # The server's own pid: on Windows the child is a venv launcher, and killing it
+        # leaves the interpreter serving. Windows has no SIGKILL; its SIGTERM is a kill.
+        os.kill(server.info.pid, getattr(signal, "SIGKILL", signal.SIGTERM))
         assert await reader.until("moxi.state") == {
             "module": "pspage", "state": "down", "detail": "stream lost"}
         assert await reader.until("moxi.state", up) == {

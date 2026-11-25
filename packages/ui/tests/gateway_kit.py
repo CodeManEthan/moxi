@@ -11,6 +11,7 @@ import os
 from dataclasses import dataclass, field
 from typing import Any
 
+from moxi_dev.testing import WINDOWS, WINDOWS_HOMES
 from moxi_ui.loopback.api import Table, gateway, guard
 from moxi_ui.gateway.access import COOKIE, Access
 from moxi_ui.gateway.address import Kept
@@ -18,6 +19,15 @@ from moxi_ui.gateway.address import Kept
 HOST = "gw.example.test"
 ORIGIN = f"https://{HOST}"
 KEPT = Kept("r1.1", HOST, 443, "cloudflare")
+
+
+def windows_profile_env(home: str | os.PathLike) -> dict[str, str]:
+    """On Windows, the profile folders under `home` an environment a test builds must name
+    (the core finds Windows' folders from platformdirs' overrides or the shell, never from
+    `HOME` or the XDG homes); elsewhere none."""
+    if not WINDOWS:
+        return {}
+    return {key: os.path.normpath(os.path.join(home, rel)) for key, rel in WINDOWS_HOMES.items()}
 
 
 def b64(data: bytes) -> str:

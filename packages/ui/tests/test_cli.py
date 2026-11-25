@@ -501,4 +501,8 @@ def test_open_print_starts_a_shell_and_its_ticket_signs_in(monkeypatch, capsys):
             deadline = time.monotonic() + PROC_WAIT_S
             while cli.lock_held() and time.monotonic() < deadline:
                 time.sleep(0.05)
-    assert read_runtime("ui") is None
+    assert not cli.lock_held()
+    # A shell ended by SIGTERM removes its runtime file; on Windows SIGTERM is
+    # TerminateProcess, which no process outlives to clean up.
+    if os.name == "posix":
+        assert read_runtime("ui") is None

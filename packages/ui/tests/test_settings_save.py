@@ -368,10 +368,10 @@ def test_the_body_is_capped_and_its_lists_are_of_one_length(shell):
 
 
 HOLDER = textwrap.dedent("""
-    import sys, time
+    import os, sys, time
     from moxi import files
     with files.lock(sys.argv[1]):
-        print("held", flush=True)
+        print("held", os.getpid(), flush=True)
         time.sleep(60)
 """)
 
@@ -382,13 +382,16 @@ def test_a_write_waiting_on_the_files_lock_answers_busy_not_failed(shell):
     holder = subprocess.Popen([sys.executable, "-c", HOLDER, str(lock)],
                               stdout=subprocess.PIPE, text=True)
     try:
-        assert holder.stdout.readline().strip() == "held"
+        # Its own pid: on Windows a venv's python.exe is a launcher, and the lock is
+        # held by the interpreter it starts.
+        said, own_pid = holder.stdout.readline().split()
+        assert said == "held"
         status, data = _save(shell, "fixture", [("limit", "12", False, "10")])
     finally:
         holder.kill()
         holder.wait()
     assert _outcomes(data) == [("limit", "busy")]
-    assert str(holder.pid) in data["results"][0]["problem"]
+    assert own_pid in data["results"][0]["problem"]
 
 
 def test_the_save_answer_holds_its_declared_shape():

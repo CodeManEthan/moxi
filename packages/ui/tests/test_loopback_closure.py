@@ -76,8 +76,10 @@ def _assert_closure(names: list[str], what: str) -> None:
 async def _stream_once(info) -> bytes:
     """Open the page's stream, read its head and first event, and close it."""
     reader, writer = await open_connection(info)
+    # Over TCP (Windows) the guard takes only the address and port it listens on.
+    host = f"{info.address}:{info.port}" if info.transport == "tcp" else "localhost"
     try:
-        writer.write(("GET /api/events HTTP/1.1\r\nHost: localhost\r\n"
+        writer.write((f"GET /api/events HTTP/1.1\r\nHost: {host}\r\n"
                       f"X-Moxi-Token: {info.token}\r\n\r\n").encode())
         await writer.drain()
         data = b""

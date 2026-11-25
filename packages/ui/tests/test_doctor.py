@@ -5,6 +5,7 @@ and a row per page server from the shell's `/servers` data or, with the shell do
 from __future__ import annotations
 
 import json
+import os
 import socket
 import threading
 import time
@@ -60,7 +61,12 @@ def runtime():
 def _set_port(port):
     path = Layout("ui").config_file()
     path.parent.mkdir(parents=True, exist_ok=True)
+    before = path.stat().st_mtime_ns if path.exists() else None
     path.write_text(f"port = {port}\n")
+    # The core reads the file again when its size or time moves. Windows' clock moves in
+    # steps of about 15 ms, so a rewrite of the same size could keep its time.
+    if before is not None and path.stat().st_mtime_ns <= before:
+        os.utime(path, ns=(before + 1_000_000, before + 1_000_000))
 
 
 # --- the rows from recorded data ----------------------------------------------------------
@@ -256,6 +262,8 @@ def test_with_no_socket_the_doctor_connects_once_and_a_listener_is_another_progr
     row = next(doctor.rows())
     assert row.state == "fail" and "another program" in row.detail
     assert listener.connects() == 1
+    # systemd's row: on Windows an unknown task read goes on to the connect (no socket).
+    monkeypatch.setattr(health, "_platform", lambda: "linux")
     monkeypatch.setattr(health, "_units_status", lambda: [
         SimpleNamespace(module="ui", name="shell", kind="daemon", state="unknown",
                         detail="read failed", backend="systemd")])

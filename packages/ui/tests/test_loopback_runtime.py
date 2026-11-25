@@ -269,7 +269,10 @@ def _corpus():
         yield json.dumps(good(**changes))
 
 
-@pytest.mark.parametrize("data", list(_corpus()))
+# A long case gets a short id: pytest puts the id in an environment variable, which
+# Windows caps at 32,767 characters.
+@pytest.mark.parametrize("data", list(_corpus()),
+                         ids=lambda data: None if len(data) < 200 else f"{len(data)}-long")
 def test_parse_refuses_everything_but_format_one_and_never_raises(data):
     assert parse_runtime(data) is None
 
@@ -299,12 +302,17 @@ def test_a_reader_holding_the_file_open_does_not_make_the_next_write_fail(run_di
     write_unix()
     handle = runtime._win_open(run_dir / RUNTIME_FILE)
     assert handle is not None
+    # The reader closes its handle while the write waits on it, as a read does. Windows
+    # refuses to replace a file another handle holds, delete sharing or not, so the write
+    # tries again until the reader is done.
+    closer = threading.Timer(0.3, runtime._win_close, (handle,))
+    closer.start()
     try:
         second = write_unix()
-        assert read_runtime(MODULE) == second
-        assert remove_runtime(MODULE, second.server_id) is True
     finally:
-        runtime._win_close(handle)
+        closer.join()
+    assert read_runtime(MODULE) == second
+    assert remove_runtime(MODULE, second.server_id) is True
 
 
 @windows

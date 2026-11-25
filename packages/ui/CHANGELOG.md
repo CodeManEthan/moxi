@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- On Windows, two sign-ins at the same moment could both spend one sign-in ticket or one
+  phone pairing code, since Windows lets two holders of a file each delete it. A ticket's
+  spend now takes turns with every other spend in the shell, on every system.
 - For module authors: a test shell that a module- or session-scoped fixture starts through
   `ui_shells` (the `ui_shell` fixture among them) keeps the core's record of the
   terminal's environment under its own home, as it did before moxi-dev's test kit gave
