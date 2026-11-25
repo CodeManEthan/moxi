@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- The module contract's write-site check reads `getattr(os, "O_NAME", <constant>)` in an
+  `os.open` flags value as the flag `O_NAME`, so a read that adds a flag only some
+  systems have (`O_NOFOLLOW`, `O_BINARY`) is a read, not an unlisted write.
 - `moxi-dev check --package NAME` checks exactly the named packages, with no dependent
   added, and `--leave-out NAME` every package the check would otherwise take but the
   named ones; each is given once per package, by its folder or distribution name. The

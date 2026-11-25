@@ -169,9 +169,8 @@ def answer(arg: str, env) -> Answer:
 
 # --------------------------------------------------------------------------- reading
 
-#: The open's flags where the system has them; Windows has neither.
+#: `O_NOFOLLOW` where the system has it; Windows has none.
 _NOFOLLOW = getattr(os, "O_NOFOLLOW", 0)
-_NONBLOCK = getattr(os, "O_NONBLOCK", 0)
 
 
 class NotACard(Exception):
@@ -209,7 +208,8 @@ def _read(path: Path) -> tuple[bytes, bool]:
         if not stat.S_ISREG(seen.st_mode):
             raise NotACard("it is not a regular file, and comms reads only regular "
                            "files here")
-    fd = os.open(path, os.O_RDONLY | _NOFOLLOW | _NONBLOCK | getattr(os, "O_BINARY", 0))
+    fd = os.open(path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
+                 | getattr(os, "O_NONBLOCK", 0) | getattr(os, "O_BINARY", 0))
     try:
         held = os.fstat(fd)
         if not stat.S_ISREG(held.st_mode):

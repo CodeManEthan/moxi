@@ -1052,6 +1052,8 @@ class Store:
         Path(path).write_text("x")
         Path(path).write_bytes(b"x")
         fd = os.open(path, os.O_WRONLY | os.O_CREAT)
+        os.open(path, os.O_RDONLY | getattr(os, "O_APPEND", 0))
+        os.open(path, os.O_RDONLY | getattr(os, flag, 0))
         with os.fdopen(fd, "a") as fh:
             pass
         with Path(path).open("w") as fh:
@@ -1074,6 +1076,7 @@ def read(path, mode):
     with Path(path).open() as fh:
         fh.read()
     os.open(path, os.O_RDONLY)
+    os.open(path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_BINARY", 0))
     webbrowser.open(path)
     webbrowser.open("https://example.org/")
     zipfile.ZipFile(path).open("data.txt")
@@ -1087,7 +1090,8 @@ def test_every_write_site_is_found_and_reads_are_not(repo):
     found = repo.findings("8")
     assert [m.split(": writes a file itself ")[1].split(";")[0] for m in found] == [
         "(save open)", "(save os.replace)", "(Store.keep .write_text)",
-        "(Store.keep .write_bytes)", "(Store.keep os.open)", "(Store.keep os.fdopen)",
+        "(Store.keep .write_bytes)", "(Store.keep os.open)", "(Store.keep os.open)",
+        "(Store.keep os.open)", "(Store.keep os.fdopen)",
         "(Store.keep .open)", "(Store.keep sqlite3.connect)"]
     assert found[0].startswith("src/moxi_alpha/writes.py:7:")
 

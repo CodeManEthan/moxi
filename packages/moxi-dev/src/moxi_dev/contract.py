@@ -1368,11 +1368,37 @@ def _path_mode_writes(node: ast.AST | None) -> bool:
     return bool(letters) and letters <= _MODE_LETTERS and bool(letters & _WRITE_MODE)
 
 
+def _optional_flag(node: ast.AST) -> str | None:
+    """The flag `getattr(os, "O_NAME", <constant>)` names, a flag only some systems have
+    (`O_NOFOLLOW`, `O_BINARY`), or None for any other node."""
+    if not (isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+            and node.func.id == "getattr" and len(node.args) == 3 and not node.keywords):
+        return None
+    owner, name, default = node.args
+    if (isinstance(owner, ast.Name) and owner.id == "os" and isinstance(name, ast.Constant)
+            and isinstance(name.value, str) and isinstance(default, ast.Constant)):
+        return name.value
+    return None
+
+
+def _flag_names(node: ast.AST) -> set[str]:
+    optional = _optional_flag(node)
+    if optional is not None:
+        return {"os", optional}
+    named = set()
+    if isinstance(node, ast.Attribute):
+        named.add(node.attr)
+    elif isinstance(node, ast.Name):
+        named.add(node.id)
+    for child in ast.iter_child_nodes(node):
+        named |= _flag_names(child)
+    return named
+
+
 def _flags_write(node: ast.AST | None) -> bool:
     if node is None:
         return False
-    named = {n.attr if isinstance(n, ast.Attribute) else n.id
-             for n in ast.walk(node) if isinstance(n, (ast.Attribute, ast.Name))}
+    named = _flag_names(node)
     if named & _WRITE_FLAGS:
         return True
     # A flags value the check can't read (a variable, a call) counts as a write.
