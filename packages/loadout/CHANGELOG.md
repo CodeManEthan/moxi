@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- The git hook pieces reinstall only on the repo's main branch: the branch
+  `origin/HEAD` points to, else git's `init.defaultBranch`, else `main`. A commit or
+  merge on another branch, or on a detached HEAD, prints one line saying the change
+  reinstalls when it reaches the main branch, and installs nothing.
 - `moxi loadout install --replace` asks before it moves aside a skill or agent whose
   contents differ from what it would place, naming the files only on one side and the
   files that differ. Without a terminal (or with `--json`) such a replace is refused,

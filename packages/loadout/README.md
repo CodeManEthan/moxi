@@ -61,7 +61,10 @@ and `moxi loadout status` says what has drifted.
    when the manifest sets none and someone is at the keyboard.
 9. With repo installed (`moxi install loadout --with repo`) and the folder in a git work
    tree, install registers two git hook pieces there, so a commit or a merge that
-   changes the folder runs `moxi loadout install` in that work tree, on whatever branch.
+   changes the folder runs `moxi loadout install` in that work tree, while it is on the
+   repo's main branch (the one `origin/HEAD` names, else git's `init.defaultBranch`,
+   else `main`). On another branch it prints one line and installs nothing; the change
+   is placed when it reaches the main branch.
    The install runs with git's own variables taken out of its environment; one that
    fails prints the command to run and leaves a doctor record, which the next clean
    install clears. `moxi config set loadout reinstall_on_commit false` turns it off, and

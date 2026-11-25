@@ -452,6 +452,65 @@ def test_a_merge_that_changes_the_loadout_dir_runs_the_install(tree, installs):
 
 @pytest.mark.slow
 @pytest.mark.touches(*GLOBS)
+def test_a_commit_on_another_branch_prints_the_line_and_installs_nothing(tree, installs):
+    main = gitpiece.main_branch(repo_link.api()[0], str(tree))
+    git(tree, "checkout", "-q", "-b", "side")
+    commit(tree, "loadout/loadout.toml", "[user]\n")
+    outcome = gitpiece.run(Ctx("post-commit", tree))
+    assert outcome.kind == "notice"
+    assert outcome.lines == (f"loadout: not reinstalled: side is not {main}; "
+                             f"it reinstalls when the change reaches {main}",)
+    assert installs.calls == [] and records() == {}
+
+
+@pytest.mark.slow
+@pytest.mark.touches(*GLOBS)
+def test_a_detached_head_is_skipped_with_the_line(tree, installs):
+    commit(tree, "loadout/loadout.toml", "[user]\n")
+    git(tree, "checkout", "-q", "--detach")
+    commit(tree, "loadout/loadout.toml", "[user]\n# more\n")
+    outcome = gitpiece.run(Ctx("post-commit", tree))
+    assert outcome.kind == "notice"
+    assert outcome.lines[0].startswith("loadout: not reinstalled: a detached HEAD is not ")
+    assert installs.calls == []
+
+
+@pytest.mark.slow
+@pytest.mark.touches(*GLOBS)
+def test_origin_head_names_the_main_branch(tree, installs):
+    """A repo whose `origin/HEAD` names `trunk` reinstalls on `trunk`, and not on the
+    branch git's default would name."""
+    first = git(tree, "branch", "--show-current")
+    git(tree, "checkout", "-q", "-b", "trunk")
+    git(tree, "update-ref", "refs/remotes/origin/trunk", "HEAD")
+    git(tree, "symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/trunk")
+    commit(tree, "loadout/loadout.toml", "[user]\n")
+    assert gitpiece.run(Ctx("post-commit", tree)).kind == "ok"
+    assert len(installs.calls) == 1
+    git(tree, "checkout", "-q", first)
+    commit(tree, "loadout/loadout.toml", "[user]\n# on the old one\n")
+    outcome = gitpiece.run(Ctx("post-commit", tree))
+    assert outcome.kind == "notice" and f"{first} is not trunk" in outcome.lines[0]
+    assert len(installs.calls) == 1
+
+
+def test_the_main_branch_falls_back_to_init_default_branch_then_main():
+    class Link:
+        def __init__(self, answers):
+            self.answers = answers
+
+        def git(self, root, *args, timeout_s=30.0):
+            code, out = self.answers.get(args[-1], (1, ""))
+            return subprocess.CompletedProcess(args, code, out, "")
+
+    assert gitpiece.main_branch(Link({"refs/remotes/origin/HEAD": (0, "origin/dev\n"),
+                                      "init.defaultBranch": (0, "trunk\n")}), "r") == "dev"
+    assert gitpiece.main_branch(Link({"init.defaultBranch": (0, "trunk\n")}), "r") == "trunk"
+    assert gitpiece.main_branch(Link({}), "r") == "main"
+
+
+@pytest.mark.slow
+@pytest.mark.touches(*GLOBS)
 def test_a_merge_with_no_orig_head_is_skipped(tree, installs):
     commit(tree, "loadout/loadout.toml", "[user]\n")
     orig = tree / ".git" / "ORIG_HEAD"
