@@ -511,9 +511,13 @@ WINDOWS_HOMES = {
 #: On Windows, the system's variables carried into the fence unchanged, when set: what a
 #: process needs to start and load its libraries (`SYSTEMROOT` above all: sockets and
 #: OpenSSL need it), `PATHEXT` to find a program by its bare name, `COMSPEC` for a
-#: shell, and `USERNAME`, the only place `getpass.getuser` finds the user's name there.
+#: shell, `USERNAME`, the only place `getpass.getuser` finds the user's name there, and
+#: `PROGRAMDATA`, the machine's shared settings folder, without which Windows' own
+#: OpenSSH exits 255 at once. It is no user's folder, and Windows hands a program that
+#: folder whatever the variable says, so clearing it moved nothing.
 WINDOWS_KEPT_ENV = ("SYSTEMROOT", "SYSTEMDRIVE", "WINDIR", "COMSPEC", "PATHEXT", "OS",
-                    "PROCESSOR_ARCHITECTURE", "NUMBER_OF_PROCESSORS", "USERNAME")
+                    "PROCESSOR_ARCHITECTURE", "NUMBER_OF_PROCESSORS", "USERNAME",
+                    "PROGRAMDATA")
 
 #: The child keys that name a folder uv writes, each under the run's roots (module doc,
 #: The run).

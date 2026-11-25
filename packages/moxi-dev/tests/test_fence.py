@@ -191,7 +191,7 @@ def test_on_windows_the_fence_moves_the_user_s_dirs_and_keeps_the_system_s(
         "WINDIR": "C:\\Windows", "COMSPEC": "C:\\Windows\\system32\\cmd.exe",
         "PATHEXT": ".COM;.EXE;.BAT;.CMD", "OS": "Windows_NT",
         "PROCESSOR_ARCHITECTURE": "AMD64", "NUMBER_OF_PROCESSORS": "4", "USERNAME": "ann",
-        "HOME": "D:\\t\\home", "XDG_CONFIG_HOME": "D:\\t\\home\\.config",
+        "PROGRAMDATA": "C:\\ProgramData", "HOME": "D:\\t\\home", "XDG_CONFIG_HOME": "D:\\t\\home\\.config",
         "XDG_DATA_HOME": "D:\\t\\home\\.local\\share",
         "XDG_STATE_HOME": "D:\\t\\home\\.local\\state",
         "XDG_CACHE_HOME": "D:\\t\\home\\.cache", "CLAUDE_CONFIG_DIR": "D:\\t\\home\\.claude",

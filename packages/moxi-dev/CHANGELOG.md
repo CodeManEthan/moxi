@@ -13,6 +13,9 @@
   the program that started it passed them (cmd.exe cut one at a newline and read `&`,
   `|`, `^`, `%`, `<` and `>`), a start by bare name finds it, and `os.getpid()` in it
   is the pid of the process that was started, not the Python child the launcher runs.
+- On Windows the test fence keeps `PROGRAMDATA`, the machine's shared settings folder,
+  as it keeps `SYSTEMROOT`: Windows' own OpenSSH (`ssh-keygen`, and git's SSH signing
+  through it) exited 255 without it.
 - `toml_string(value)` gives a path, or any text, as a TOML basic string that reads back
   as it is. A test writes a path into a TOML file through it, so a Windows path's
   backslashes don't read as escapes.
