@@ -60,7 +60,8 @@
   macOS); on native Windows, where no such route runs today, comms could not place it.
 - A slot fork is exited through the launcher once its recall's last round is settled,
   by the child, a taker, or a discard of a line whose owner is gone, and the line notes
-  how (`fork_exit`). An exit still held after a minute is left: memory's doctor lists
+  how (`fork_exit`). The last answer is sent first; when comms refuses it, the fork is
+  exited at that refusal, so the slot isn't held while the send is tried again. An exit still held after a minute is left: memory's doctor lists
   the fork with its session, slot and age, and memory never ends it on its own.
 - memory's side of Codex's host fork (`host-fork` in the log): its rounds through turns'
   Codex `fork` and `fork.continue`, its answers sent by comms, nothing to exit. No

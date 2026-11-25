@@ -231,11 +231,31 @@ def test_the_child_ends_its_slot_fork_after_the_stream_unless_a_round_is_still_o
     monkeypatch.setattr(recall_child, "read_config", lambda: None)
     monkeypatch.setattr(recall_child, "write_brief", lambda recall: "the brief")
     monkeypatch.setattr(recall_child, "take_others", lambda *a, **kw: None)
-    monkeypatch.setattr(recall_stream, "run", lambda recall, route, brief: ended)
+    monkeypatch.setattr(recall_stream, "run", lambda recall, route, brief, **kw: ended)
     assert recall_child.run(SESSION, recall.recall_id, route=route) == 0
     assert launcher.exited == ([FORK] if exits else [])
     line = recalls.find_line(SESSION, recall.recall_id)
     assert line.get("fork_exit") == ("exited" if exits else None)
+
+
+def test_a_fork_the_child_ended_at_a_refused_send_is_not_ended_again(monkeypatch):
+    recall = a_recall("slot", fork=FORK)
+    launcher = Launcher()
+    route = recall_route.Slot(SESSION, recall.recall_id, fork=FORK, launcher=launcher)
+    monkeypatch.setattr(recall_child, "read_config", lambda: None)
+    monkeypatch.setattr(recall_child, "write_brief", lambda recall: "the brief")
+    monkeypatch.setattr(recall_child, "take_others", lambda *a, **kw: None)
+    seen = []
+
+    def stream(recall, route, brief, *, on_last_refused):
+        on_last_refused()
+        seen.append(list(launcher.exited))
+        on_last_refused()
+        return "ended"
+
+    monkeypatch.setattr(recall_stream, "run", stream)
+    assert recall_child.run(SESSION, recall.recall_id, route=route) == 0
+    assert seen == [[FORK]] and launcher.exited == [FORK]
 
 
 def a_dead_line(**fields):

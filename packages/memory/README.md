@@ -586,9 +586,12 @@ senders doesn't count: it starts no recall and resets no on-demand count. When a
 delivery has other senders as well, the lines memory already sent this session are taken out of the
 query and given to the fork as already recalled.
 
-**The slot fork's end.** Once its recall's last round is settled, the child exits the
-fork through the launcher's exit-session, and notes how on the line (`fork_exit`:
-`exited`, `at-dialog`, `not-exited`, `held: <what holds it>`, or the refusal). An exit
+**The slot fork's end.** Once its recall's last round is settled and its answer sent,
+the child exits the fork through the launcher's exit-session, and notes how on the line
+(`fork_exit`: `exited`, `at-dialog`, `not-exited`, `held: <what holds it>`, or the
+refusal). When comms refuses the send of that last answer, the fork is exited at the
+refusal, its last turn having ended, so the slot isn't held while the send is tried
+again. An exit
 the launcher holds (a person in the slot's pane, a background shell) is asked again
 every 5 seconds for at most a minute, then left: the fork keeps its slot, memory's
 doctor lists it with its session, slot and age, and memory never ends it on its own;

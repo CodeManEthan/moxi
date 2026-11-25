@@ -160,6 +160,16 @@ def why_stop(record: dict, settings, round_number: int, *, now: float) -> str | 
     return None
 
 
+def is_last(recall, settings, round_number: int, *, now: float) -> bool:
+    """Whether settled round `round_number` is the stream's last: its text ends the
+    stream, or `why_stop` gives a reason from the record as it reads now."""
+    rounds = recall.line.get("rounds") or [{}]
+    if ends_stream(rounds[-1].get("text")):
+        return True
+    record = records.read(recall.session_id, recall.recall_id) or recall.record
+    return why_stop(record, settings, round_number, now=now) is not None
+
+
 def by_comms(route) -> bool:
     """Whether `route` (a route, or a route's name) answers by comms."""
     from . import recall_start
@@ -198,10 +208,13 @@ def start_name(recall) -> str | None:
     return recall.line.get("comms_name") or recall.record.get("comms_name") or None
 
 
-def deliver(recall, *, send=None, sleep=time.sleep, clock=time.time) -> str:
+def deliver(recall, *, send=None, sleep=time.sleep, clock=time.time,
+            on_refused=None) -> str:
     """Send a `sending` line's newest text under the session's recall sender until comms
     takes it, and return the line's state then: `back`, or the state someone else set
-    (`discarded`). Never gives up: a refusal is kept on the line and tried again."""
+    (`discarded`). Never gives up: a refusal is kept on the line and tried again.
+    `on_refused`, when given, is called after each refusal is written, outside the
+    session's lock."""
     if send is None:
         from .recall_send import send
     began = clock()
@@ -225,6 +238,8 @@ def deliver(recall, *, send=None, sleep=time.sleep, clock=time.time) -> str:
             if recall.line.get("state") != recalls.SENDING:
                 return str(recall.line.get("state"))
             recall.write(send_tries=tries + 1, send_reason=sent.reason)
+        if on_refused is not None:
+            on_refused()
         sleep(RESEND_FAST_S if now - began < RESEND_FAST_FOR_S else RESEND_SLOW_S)
 
 
@@ -250,12 +265,12 @@ def note_bound(recall, round_number: int, *, now: float | None = None) -> None:
 
 
 def settle_late(recall, round_number: int, end, route: Route, *, now: float | None = None,
-                send=None, sleep=time.sleep) -> str:
+                send=None, sleep=time.sleep, on_refused=None) -> str:
     """Settle a round its bound ended, on a route that answers by comms, with turns'
     `end` for it: an answer with points is a late text, written on the line `sending`,
     then acked, the mark cleared, and sent; any other end is acked and the mark cleared,
     the line keeping the bound's state. The record keeps the state the bound set. Returns
-    the line's state at the end."""
+    the line's state at the end. `on_refused` is `deliver`'s."""
     from moxi_turns import Ended
 
     now = time.time() if now is None else now
@@ -274,7 +289,7 @@ def settle_late(recall, round_number: int, end, route: Route, *, now: float | No
         else:
             recall.write(kept=False)
     if recall.line.get("state") == recalls.SENDING:
-        return deliver(recall, send=send, sleep=sleep)
+        return deliver(recall, send=send, sleep=sleep, on_refused=on_refused)
     return str(recall.line.get("state"))
 
 
@@ -382,7 +397,7 @@ def lose_hurried(recall) -> None:
 
 
 def _past_bound(recall, route: Route, handle, round_number: int, *, clock, send,
-                sleep) -> str:
+                sleep, on_last_refused=None) -> str:
     """A round its bound ended on a route that answers by comms: note the bound, wait on
     at most `LATE_WAIT_S` only to settle the round, and return how the recall ended."""
     note_bound(recall, round_number, now=clock())
@@ -393,19 +408,22 @@ def _past_bound(recall, route: Route, handle, round_number: int, *, clock, send,
     if recall.line.get("fork") is None:
         note_fork(recall, route.started(handle))
     if settle_late(recall, round_number, end, route, now=clock(), send=send,
-                   sleep=sleep) == recalls.DISCARDED:
+                   sleep=sleep, on_refused=on_last_refused) == recalls.DISCARDED:
         return recalls.DISCARDED
     current = records.read(recall.session_id, recall.recall_id) or recall.record
     return str(current.get("state"))
 
 
 def run(recall, route: Route, brief: str, *, clock=time.time, send=None,
-        sleep=time.sleep) -> str:
+        sleep=time.sleep, on_last_refused=None) -> str:
     """Run the recall's rounds to the stream's end, and return how it ended: `ended`,
     `lost`, `discarded` (a person discarded its line; no further round is asked), or
     `unsettled` (a round's end never came; the line keeps its mark). A round whose ack
     turns did not take ends the stream there, its ref and mark left on the line. On a
-    route that answers by comms, `send` and `sleep` are `deliver`'s."""
+    route that answers by comms, `send` and `sleep` are `deliver`'s, and
+    `on_last_refused` is called when comms refuses the send of an answer no further
+    round follows (its text ends the stream, `why_stop` gives a reason as the refusal
+    is written, or its round was past its bound): its fork's last turn has ended."""
     settings = recall.settings
     bound = round_bound_s(settings)
     handle = None
@@ -440,13 +458,18 @@ def run(recall, route: Route, brief: str, *, clock=time.time, send=None,
             if not comms:
                 return UNSETTLED
             return _past_bound(recall, route, handle, round_number, clock=clock,
-                               send=send, sleep=sleep)
+                               send=send, sleep=sleep, on_last_refused=on_last_refused)
         if recall.line.get("fork") is None:
             # the start was not read in its wait; once the round has ended it is known
             note_fork(recall, route.started(handle))
         got = settle(recall, round_number, end, route, now=clock())
         if recall.line.get("state") == recalls.SENDING:
-            deliver(recall, send=send, sleep=sleep, clock=clock)
+            on_refused = None
+            if on_last_refused is not None:
+                def on_refused(number=round_number):
+                    if is_last(recall, settings, number, now=clock()):
+                        on_last_refused()
+            deliver(recall, send=send, sleep=sleep, clock=clock, on_refused=on_refused)
         if recall.line.get("state") == recalls.DISCARDED:
             return recalls.DISCARDED
         if not got:
@@ -471,5 +494,5 @@ def run(recall, route: Route, brief: str, *, clock=time.time, send=None,
 __all__ = ["ROUND_MARGIN_S", "END_WAIT_MARGIN_S", "LATE_WAIT_S", "RESEND_FAST_S",
            "RESEND_FAST_FOR_S", "RESEND_SLOW_S", "GONE", "PAST_BOUND", "UNSETTLED", "NOTHING",
            "END_LINE", "CONTINUE", "Route", "ref", "round_bound_s", "ends_stream",
-           "continue_text", "why_stop", "by_comms", "has_points", "start_name", "deliver", "note_bound",
-           "settle_late", "settle", "KEPT", "open_round", "note_fork", "lose_hurried", "run"]
+           "continue_text", "why_stop", "is_last", "by_comms", "has_points", "start_name",
+           "deliver", "note_bound", "settle_late", "settle", "KEPT", "open_round", "note_fork", "lose_hurried", "run"]

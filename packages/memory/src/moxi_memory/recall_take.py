@@ -50,7 +50,8 @@ line and the other leaves it. A line a taker left is free again once that taker 
   the record as the stream's end does.
 - On the slot route, every path above that settles the line (all but `none` and a line
   left for turns' end) then ends the slot fork (`recall_route.end_fork`), the recall
-  getting no further round.
+  getting no further round. Where comms refuses the send, the fork is ended at that
+  refusal, so the slot isn't held while the send is tried again.
 
 Standard library at import; the core and turns are imported at use.
 """
@@ -223,10 +224,16 @@ def take(session_id: str, recall_id: str, *, identity: dict | None = None,
     recall = recall_child.Recall(record, line=line)
     if route is None:
         route = recall_route.for_recall(recall)
+    end_fork = recall_route.ForkEnder(recall, route, sleep=sleep)
+
+    def on_refused() -> None:
+        if not awaits_end(recall.line):
+            end_fork()
+
     outcome = _finish(recall, line, route, read_end=read_end, read_start=read_start,
-                      send=send, sleep=sleep)
+                      send=send, sleep=sleep, on_refused=on_refused)
     if outcome != NONE and not awaits_end(recall.line):
-        recall_route.end_fork(recall, route, sleep=sleep)
+        end_fork()
     return outcome
 
 
@@ -237,7 +244,8 @@ def awaits_end(line: dict) -> bool:
                                          or bool(line.get("past_bound")))
 
 
-def _finish(recall, line: dict, route, *, read_end, read_start, send, sleep) -> str:
+def _finish(recall, line: dict, route, *, read_end, read_start, send, sleep,
+            on_refused=None) -> str:
     """What `take` does with a line it claimed."""
     from . import recall_child, recall_stream
 
@@ -246,7 +254,7 @@ def _finish(recall, line: dict, route, *, read_end, read_start, send, sleep) -> 
     if line.get("state") == recalls.SENDING:
         if ref and line.get("kept") is True:
             _ack_kept(recall, str(ref), route)
-        recall_stream.deliver(recall, send=send, sleep=sleep)
+        recall_stream.deliver(recall, send=send, sleep=sleep, on_refused=on_refused)
         _end_record(recall)
         return SETTLED
     if line.get("state") != recalls.OPEN:
@@ -259,7 +267,7 @@ def _finish(recall, line: dict, route, *, read_end, read_start, send, sleep) -> 
             except Exception:  # noqa: BLE001 - no end yet: left for the next taker
                 return LEFT
             recall_stream.settle_late(recall, round_number(ref) or 1, _as_gone(end), route,
-                                      send=send, sleep=sleep)
+                                      send=send, sleep=sleep, on_refused=on_refused)
             _end_record(recall)
             return SETTLED
         outcome = _ack_kept(recall, str(ref), route)
@@ -277,7 +285,7 @@ def _finish(recall, line: dict, route, *, read_end, read_start, send, sleep) -> 
                read_start or _read_end(_turns_session(route, session_id), "started"))
     recall_stream.settle(recall, number or 1, _as_gone(end), route)
     if recall.line.get("state") == recalls.SENDING:
-        recall_stream.deliver(recall, send=send, sleep=sleep)
+        recall_stream.deliver(recall, send=send, sleep=sleep, on_refused=on_refused)
     _end_record(recall)
     return SETTLED
 

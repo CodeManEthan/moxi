@@ -322,6 +322,24 @@ def end_fork(recall, route, *, held_s: float = EXIT_HELD_S, sleep=time.sleep) ->
     return outcome
 
 
+class ForkEnder:
+    """Ends one recall's fork (`end_fork`) the first time it is called, and does nothing
+    after: called when comms refuses the send of the recall's last answer, so the slot
+    isn't held while comms refuses, and again once the recall ends."""
+
+    def __init__(self, recall, route, *, sleep=time.sleep):
+        self.recall = recall
+        self.route = route
+        self.sleep = sleep
+        self.done = False
+
+    def __call__(self) -> None:
+        if self.done:
+            return
+        self.done = True
+        end_fork(self.recall, self.route, sleep=self.sleep)
+
+
 def for_recall(recall) -> Subagent | HostFork | Slot:
     """The route recall `recall`'s record names, else its log line."""
     record = getattr(recall, "record", None) or {}
@@ -336,4 +354,4 @@ def for_recall(recall) -> Subagent | HostFork | Slot:
 
 
 __all__ = ["BY", "EXITED", "HELD", "EXIT_RETRY_S", "EXIT_HELD_S", "HOST_FORK_TURNS_BOUND_S",
-           "Subagent", "HostFork", "Slot", "end_fork", "for_recall"]
+           "Subagent", "HostFork", "Slot", "end_fork", "ForkEnder", "for_recall"]

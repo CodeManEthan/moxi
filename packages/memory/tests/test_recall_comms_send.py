@@ -8,8 +8,8 @@ import types
 import pytest
 from moxi_turns import Ended
 
-from moxi_memory import (recall_child, recall_cli, recall_send, recall_start, recall_stream,
-                         recall_take, recalls, records)
+from moxi_memory import (recall_child, recall_cli, recall_route, recall_send, recall_start,
+                         recall_stream, recall_take, recalls, records)
 
 SESSION = "0190b000-0000-7000-8000-000000000021"
 ROUTE = "comms-route"
@@ -130,6 +130,56 @@ def test_a_refused_send_is_tried_again_and_its_reason_kept():
     assert line["state"] == "back" and line["send_tries"] == 2
 
 
+def test_a_refused_last_answer_ends_the_fork_before_comms_takes_it():
+    recall = a_recall({"max_rounds": 1})
+    events = []
+    sender = Sender(2, on_send=lambda: events.append("send"))
+    run(recall, Route([ended("- a\nEnd of recall.")]), sender,
+        on_last_refused=lambda: events.append("exit"))
+    assert events == ["send", "exit", "send", "exit", "send"]
+    assert recalls.find_line(SESSION, recall.recall_id)["state"] == "back"
+
+
+def test_a_refused_answer_a_further_round_follows_keeps_the_fork():
+    recall = a_recall({"max_rounds": 2})
+    exits = []
+    route = Route([ended("- a"), ended("NOTHING")])
+    assert run(recall, route, Sender(1), on_last_refused=lambda: exits.append(1)) == \
+        "ended"
+    assert len(route.asked) == 2 and exits == []
+
+
+def test_a_limit_passing_while_comms_refuses_makes_the_answer_the_last():
+    recall = a_recall({"max_rounds": 3, "limit_s": 60})
+    start = float(recall.record["at"])
+    now = [start]
+    exits = []
+    sender = Sender(1, on_send=lambda: now.__setitem__(0, start + 61))
+    route = Route([ended("- a")])
+    assert run(recall, route, sender, clock=lambda: now[0],
+               on_last_refused=lambda: exits.append(now[0])) == "ended"
+    assert exits == [start + 61] and len(route.asked) == 1
+
+
+def test_a_refused_late_answer_ends_the_fork():
+    recall = a_recall()
+    exits = []
+    route = Route([TimeoutError(), ended("- late point")])
+    assert run(recall, route, Sender(1), on_last_refused=lambda: exits.append(1)) == "lost"
+    assert exits == [1]
+
+
+def test_the_fork_ender_ends_the_fork_once():
+    recall = a_recall()
+    exits = []
+    route = types.SimpleNamespace(exit=lambda **kw: exits.append(kw) or "exited")
+    end_fork = recall_route.ForkEnder(recall, route, sleep=lambda s: None)
+    end_fork()
+    end_fork()
+    assert len(exits) == 1 and end_fork.done
+    assert recalls.find_line(SESSION, recall.recall_id)["fork_exit"] == "exited"
+
+
 def test_tries_go_every_ten_seconds_for_a_minute_then_every_five_minutes():
     recall = a_recall()
     now = [1000.0]
@@ -225,6 +275,21 @@ def test_the_late_waits_last_limit_leaves_the_line_kept_for_a_taker():
     assert line["state"] == "lost" and line["kept"] is True and line["past_bound"] is True
     assert route.acked == []
     assert records.read(SESSION, recall.recall_id)["state"] == "lost"
+
+
+def test_a_taker_ends_the_fork_at_comms_first_refusal():
+    recall = a_recall(child=DEAD, state=recalls.SENDING, kept=True,
+                      rounds=[{"round": 1, "text": "- a"}])
+    recall.put(ref=f"{recall.recall_id}:1")
+    events = []
+    sender = Sender(2, on_send=lambda: events.append("send"))
+    sender.recall_id = recall.recall_id
+    route = Route([])
+    route.exit = lambda **kw: events.append("exit") or "exited"
+    assert recall_take.take(SESSION, recall.recall_id, identity=DEAD, route=route,
+                            send=sender, sleep=lambda s: None) == "settled"
+    assert events == ["send", "exit", "send", "send"]
+    assert recalls.find_line(SESSION, recall.recall_id)["fork_exit"] == "exited"
 
 
 def test_a_taker_sends_a_sending_line_whose_child_died():

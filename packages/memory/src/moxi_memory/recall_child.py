@@ -29,7 +29,9 @@ record holds, never on a fresh read of memory's config:
    on the line and acked to turns, and the record ended. On the slot route it then
    ends the slot fork (`recall_route.end_fork`), unless a round's end never came within
    the late wait (`unsettled`): that fork's turn still runs, and the taker that settles
-   the line ends it.
+   the line ends it. Where comms refuses the send of the last answer, the fork is ended
+   at that refusal, its last turn having ended, so the slot isn't held while the send is
+   tried again.
 
 From its start, beside these steps, a thread takes over every session's lines whose
 owner is gone (`moxi_memory.recall_take.take_all`) and then sweeps the records a day
@@ -183,22 +185,19 @@ def run(session_id: str, recall_id: str, *, route=None) -> int:
             lose(recall, CONFIG, error)
             return 0
         text_brief = write_brief(recall)
-        from . import recall_stream
+        from . import recall_route, recall_stream
 
         if route is None:
-            from . import recall_route
-
             route = recall_route.for_recall(recall)
+        end_fork = recall_route.ForkEnder(recall, route)
         try:
-            ended = recall_stream.run(recall, route, text_brief)
+            ended = recall_stream.run(recall, route, text_brief, on_last_refused=end_fork)
         finally:
             close = getattr(route, "close", None)
             if close is not None:
                 close()
         if ended != recall_stream.UNSETTLED:
-            from . import recall_route
-
-            recall_route.end_fork(recall, route)
+            end_fork()
         return 0
     finally:
         taking.join()
