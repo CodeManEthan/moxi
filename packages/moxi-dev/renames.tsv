@@ -3270,7 +3270,7 @@ launcher	packages/launcher/src/moxi_launcher/api.py	launch_kinds	name	timeout	ti
 launcher	packages/launcher/src/moxi_launcher/api.py	preview	name	environ	env
 launcher	packages/launcher/src/moxi_launcher/cachetimers.py	- `launcher.keep-warm` (`KEEP_WARM`): from 900 s before the session's cache expires until	use	`KEEP_WARM`	`KEEP_WARM_ENV`
 launcher	packages/launcher/src/moxi_launcher/cachetimers.py	__all__ = ["JOB", "KEEP_WARM", "TIMERS"]	keep	KEEP_WARM	KEEP_WARM
-launcher	packages/launcher/src/moxi_launcher/catalog.py	WHEN_FIELDS = ("requires", "condition", "target", "refused", "hint")	keep	refused	refused
+launcher	packages/launcher/src/moxi_launcher/catalog.py	WHEN_FIELDS = ("requires", "condition", "target", "refused", "hint", "applies_with")	keep	refused	refused
 launcher	packages/launcher/src/moxi_launcher/catalog.py	`refused` and `hint`, the words a launch or preset that breaks it is refused	keep	refused	refused
 launcher	packages/launcher/src/moxi_launcher/catalog.py	code = "refused"	keep	refused	refused
 launcher	packages/launcher/src/moxi_launcher/catalog.py	elif values is not None and set(danger) - set(values):	keep	set	set
@@ -3334,6 +3334,7 @@ launcher	packages/launcher/src/moxi_launcher/catalog.py	raise bad(f"has since {s
 launcher	packages/launcher/src/moxi_launcher/catalog.py	raise bad(f"has type {kind!r}; use one of {', '.join(TYPES)}")	keep	bad	bad
 launcher	packages/launcher/src/moxi_launcher/catalog.py	raise bad(f"has typed_with {typed_with!r}, which is not a module name")	keep	bad	bad
 launcher	packages/launcher/src/moxi_launcher/catalog.py	raise bad(f"has unknown field(s) {', '.join(unknown)}")	keep	bad	bad
+launcher	packages/launcher/src/moxi_launcher/catalog.py	raise bad(f"has when.{value} applies_with {applies_with!r}, which is not a "	keep	bad	bad
 launcher	packages/launcher/src/moxi_launcher/catalog.py	raise bad(f"has when for {value!r}, which is not one of its values")	keep	bad	bad
 launcher	packages/launcher/src/moxi_launcher/catalog.py	raise bad(f"has when.{value} target {target!r}, which is not a target's name")	keep	bad	bad
 launcher	packages/launcher/src/moxi_launcher/catalog.py	raise bad(f"has when.{value} without the words it is refused with (refused "	keep	bad	bad
