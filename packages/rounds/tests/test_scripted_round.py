@@ -246,7 +246,13 @@ def test_a_full_round_runs_from_open_to_its_close_on_what_next_names(script):
     s.read(cwd=reader)
     s.names(f"round {FULL}   flow full   stage B1   step finish   by builder")
     finished = s.do("moxi rounds finish", by=BUILDER, cwd=reader)
-    assert "finished B1" in finished and not reader.exists()
+    assert "finished B1" in finished
+    if sys.platform == "win32":
+        # Windows removes no folder a process works in, and the finish runs from inside
+        # the worktree: it stays for the sweep, and the finish says so.
+        assert f"kept {reader}: removal: git did not remove it" in finished
+    else:
+        assert not reader.exists()
 
     # The operator rules Q1 from the waiting list, which also holds B1's decision.
     s.read("proj-a/scripted")

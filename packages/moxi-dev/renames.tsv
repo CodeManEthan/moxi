@@ -18139,3 +18139,4 @@ rounds	packages/rounds/tests/test_removal.py	assert any(line.startswith(f"pid {o
 rounds	packages/rounds/tests/test_removal.py	shown = set(os.stat_result.__match_args__)	keep	set	set
 rounds	packages/rounds/tests/test_sweep.py	assert any(line.startswith(f"pid {own_pid} ") for line in scratch.kept.work)	keep	any	any
 moxi-dev	packages/moxi-dev/tests/test_fence.py	"PROGRAMDATA": "C:\\ProgramData", "HOME": "D:\\t\\home", "XDG_CONFIG_HOME": "D:\\t\\home\\.config",	keep	HOME	HOME
+rounds	packages/rounds/tests/test_build_drop.py	assert any(line.startswith(f"pid {proc.own_pid} (") for line in kept.work)	keep	any	any

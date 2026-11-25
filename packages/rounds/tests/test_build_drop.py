@@ -175,7 +175,8 @@ def test_a_drop_keeps_dirs_outside_rounds_roots_and_names_the_check(a_round, git
 @pytest.fixture
 def scratch_in_use(a_round, git_repo, tmp_path):
     """B1 commissioned again with a scratch folder that a live process has as its
-    working folder. Returns the folder and the process."""
+    working folder. Returns the folder and the process, with `own_pid` the pid it
+    prints itself: on Windows a venv's python.exe runs the interpreter as its child."""
     scratch = tmp_path / "scratch"
     scratch.mkdir()
     log.append(a_round, "build.dropped", {"stage": "B1", "by": "lead",
@@ -185,8 +186,11 @@ def scratch_in_use(a_round, git_repo, tmp_path):
         "stage": "B1", "repo": "proj-a", "branch": "work", "base": git_repo.rev("main"),
         "target": "main", "builder": "coder", "scratch": str(scratch),
         "host": places.host()}, by="planner")
-    proc = subprocess.Popen([sys.executable, "-c", "import sys; sys.stdin.read()"],
-                            cwd=scratch, stdin=subprocess.PIPE)
+    proc = subprocess.Popen(
+        [sys.executable, "-c", "import os, sys; print(os.getpid(), flush=True); "
+         "sys.stdin.read()"], cwd=scratch, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+        text=True)
+    proc.own_pid = int(proc.stdout.readline())
     yield scratch, proc
     proc.communicate(timeout=30)
 
@@ -208,7 +212,7 @@ def test_a_drop_goes_through_while_a_process_uses_the_builds_scratch_and_leaves_
     [kept] = [one for one in dropped.kept if one.kind == "scratch"]
     assert (kept.place, kept.check, kept.why) == (scratch, "D",
                                                   "a running process uses it")
-    assert kept.work[0].startswith(f"pid {proc.pid} (")
+    assert any(line.startswith(f"pid {proc.own_pid} (") for line in kept.work)
     assert scratch.is_dir()
 
 
@@ -221,8 +225,8 @@ def test_the_command_names_the_process_that_keeps_a_dropped_builds_scratch(
 
     [line] = [one for one in capsys.readouterr().out.splitlines()
               if one.startswith(f"kept {scratch}:")]
-    assert line.startswith(f"kept {scratch}: D: a running process uses it (pid "
-                           f"{proc.pid} (")
+    assert line.startswith(f"kept {scratch}: D: a running process uses it (pid ")
+    assert f"pid {proc.own_pid} (" in line
     assert line.endswith("; it is left for the sweep of leftover folders")
 
 

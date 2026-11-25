@@ -54,7 +54,9 @@ def test_a_config_path_outside_the_tests_tmp_fails_the_test(fixture, monkeypatch
 
 def test_the_config_file_is_the_tests_own(write_config, config_file, fence):
     assert write_config("x = 1\n") == config_file
-    assert config_file.resolve().is_relative_to(fence.short.resolve())
+    # Under the fence's rounds home: in its short directory, or on Windows in the test's
+    # own profile.
+    assert config_file.resolve().is_relative_to(fence.module_home("rounds").resolve())
 
 
 def _conftest():

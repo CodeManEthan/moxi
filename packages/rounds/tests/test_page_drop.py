@@ -16,7 +16,7 @@ import pytest
 from test_page_acts import ROUND, everything_logged, folded, kit  # noqa: F401 -- fixture
 from test_page_answers import Comms
 
-from moxi_rounds import builds, log, opening, pageacts, pointers
+from moxi_rounds import builds, log, opening, pageacts, places, pointers
 from moxi_rounds.pageacts import RECORDED, REFUSED, Receipts
 
 LEADLESS = "atlas/payroll"
@@ -32,8 +32,13 @@ def act() -> str:
 
 
 def commissioned(round_dir) -> dict:
-    return next(one for one in log.read(log.round_log(round_dir))
-                if one["type"] == "build.commissioned")
+    """B1's commission, its worktree and scratch read as rounds reads a record: a place
+    under the home folder is recorded from `~` (on Windows rounds' own folders are under
+    it), and the page names the place itself."""
+    event = next(one for one in log.read(log.round_log(round_dir))
+                 if one["type"] == "build.commissioned")
+    return {**event, **{kind: places.expand_home(event[kind])
+                        for kind in ("worktree", "scratch")}}
 
 
 def drop(*, comms, receipts=None, name=ROUND, stage="B1", act_id=None):

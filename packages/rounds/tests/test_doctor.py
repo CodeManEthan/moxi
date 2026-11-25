@@ -438,7 +438,7 @@ def test_the_doctor_warns_of_a_lock_held_with_no_holder_record(holder):
     row = by_name()["check lock"]
     held.stdin.close()
 
-    assert (row.state, row.detail) == ("warn", f"held by pid {held.pid}, which wrote no "
+    assert (row.state, row.detail) == ("warn", f"held by pid {held.own_pid}, which wrote no "
                                        "holder record; 0 waiting; a check that keeps no "
                                        "holder record holds it")
 

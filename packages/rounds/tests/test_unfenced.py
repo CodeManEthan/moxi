@@ -98,6 +98,26 @@ def _moxi_dirs(env) -> list[Path]:
                         if ancestor.name == plain.namespace) for root in roots})
 
 
+def _strays(fence) -> list[Path]:
+    """What the default `moxi` folders (`_moxi_dirs`) hold that is no module home the
+    fence gave. On Windows the fence keeps each module's home in that folder under the
+    test's own profile, so a writer that lands in the fence's home makes the folder too;
+    elsewhere the folder is never the fence's, and its being there is the stray."""
+    def real(path):
+        return os.path.normcase(os.path.realpath(path))
+
+    found = []
+    for moxi_dir in _moxi_dirs(os.environ):
+        if not os.path.lexists(moxi_dir):
+            continue
+        if real(moxi_dir) != real(fence.module_home(paths.MODULE).parent):
+            found.append(moxi_dir)
+            continue
+        found += [entry for entry in moxi_dir.iterdir()
+                  if real(entry) != real(fence.module_home(entry.name))]
+    return found
+
+
 @pytest.mark.parametrize("writer", sorted(_writers()))
 def test_each_writer_is_refused_when_no_moxi_variable_places_rounds(writer, monkeypatch,
                                                                     fence):
@@ -115,7 +135,7 @@ def test_each_writer_lands_in_the_fences_home(writer, fence):
     found = _writers()[writer]()
     if isinstance(found, Path):
         assert os.path.realpath(found).startswith(home + os.sep)
-    assert [moxi_dir for moxi_dir in _moxi_dirs(os.environ) if os.path.lexists(moxi_dir)] == []
+    assert _strays(fence) == []
 
 
 def test_the_cli_prints_the_refusal_and_exits_1(monkeypatch, capsys):

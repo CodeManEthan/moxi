@@ -240,15 +240,19 @@ def test_with_no_wait_a_held_check_lock_refuses_with_nothing_run(
 
 def test_a_run_waits_for_the_check_lock_and_says_who_holds_it(build, declare, holder):
     # Core's check waited for the lock by default and said once who held it.
-    import threading
-
     path, _tree, _made = build
     declare(PASS)
     held = holder(checking.lock_file())
     said: list[str] = []
-    threading.Timer(2.0, held.stdin.close).start()
 
-    done = checking.check(ROUND, "B1", by="coder", say=said.append)
+    def say(line: str) -> None:
+        # The holder lets go once the run says it waits: a timer set before the run
+        # could fire before the run reaches the lock where git starts are slow.
+        said.append(line)
+        if len(said) == 1:
+            held.stdin.close()
+
+    done = checking.check(ROUND, "B1", by="coder", say=say)
 
     assert done.passed and len(ran(path)) == 1
     assert said[0] == (f"waiting for the machine's check lock, held by pid {held.own_pid}; "
