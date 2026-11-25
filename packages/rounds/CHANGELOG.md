@@ -33,6 +33,15 @@
 - The page reads each round's lead, a question's prepared answer (its recommended option
   marked `recommended`), a question's record in every state with the ruling that put it
   there, and the parked questions, which the foot's count opens.
+- A sent correction's row finds the ruling that replaced the corrected one through the
+  record route's new `what=ruling` record, which gives a ruling of a round or project
+  from its log, shown or not, with the newest ruling that replaces it: the row reads
+  `Recorded as C<n>` with who recorded it, also when that ruling was read back
+  elsewhere first, and `Ruled as C<n> from <pointer>, not from this message` for a
+  ruling recorded from another pointer. Every sent row, a round's as a project's, is
+  read again at each new board value the page takes, so a read-back in the project's log
+  updates a round's row too. A closed round the strip holds is read again when the
+  project's log changes.
 - New page routes, none open to the phone gateway: `GET /api/agents`, `GET /api/drop`,
   `POST /api/answers` and `POST /api/drop/build`. Nothing acts at phone width.
 - `pointers.page_act` gives the act id a page pointer holds.

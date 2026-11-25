@@ -11,7 +11,7 @@
 
 import { timeWord } from "./model.ts";
 import type { Clock } from "./model.ts";
-import type { Waiting } from "./feed.ts";
+import type { RecordValue, RulingFields } from "./feed.ts";
 
 /** The kinds of draft, as the answers route takes them. */
 export type Kind = "pick" | "accept" | "reject" | "read-back" | "done" | "park" | "unpark"
@@ -71,15 +71,9 @@ export interface Message {
   refused: string | null;
 }
 
-/** The ruling a question's record holds, as `/api/record` gives it. */
-export interface RulingOf {
-  id: string;
-  text: string | null;
-  record: string | null;
-  actor: string | null;
-  at: string | null;
-  shown: boolean;
-}
+/** The ruling a question's record holds, or the one that replaces a ruling, as
+ * `/api/record` gives it. */
+export type RulingOf = RulingFields;
 
 /** One answer in the tray. */
 export interface Draft {
@@ -549,18 +543,17 @@ export function readBackOf(draft: Draft): string | null {
   return draft.receipt?.ruling?.id ?? null;
 }
 
-/** For a sent correction, the ruling that supersedes the one it corrects, as the rulings
- * waiting to be read back list it; the newest when there are several, null for none yet. */
-export function correctionFound(draft: Draft, waiting: Waiting): RulingOf | null {
+/** For a sent correction, the ruling that supersedes the one it corrects, as the corrected
+ * ruling's record gives it (`replaced_by`): the newest that replaces it, read from its log
+ * whether or not it was read back; null for none yet, or for a draft of another kind. */
+export function correctionFound(draft: Draft, record: RecordValue): RulingOf | null {
   if (draft.kind !== "correct") return null;
-  let found: RulingOf | null = null;
-  for (const back of waiting.not_shown) {
-    for (const row of back.rows) {
-      if (row.holder !== draft.holder || row.supersedes !== draft.item) continue;
-      if (found !== null && (row.at ?? "") < (found.at ?? "")) continue;
-      found = { id: row.id, text: row.text ?? row.rules ?? null, record: row.record ?? null, actor: null,
-                at: row.at ?? null, shown: false };
-    }
-  }
-  return found;
+  return record.replaced_by ?? null;
+}
+
+/** Whether two found rulings say the same: each field, the actor and shown state included. */
+export function sameRuling(one: RulingOf | null, other: RulingOf | null): boolean {
+  if (one === null || other === null) return one === other;
+  return one.id === other.id && one.text === other.text && one.record === other.record && one.actor === other.actor
+    && one.at === other.at && one.shown === other.shown;
 }

@@ -1,8 +1,8 @@
 """A stored launch made again (`api.ReplayRequest`): the replay's argv against a fresh
 launch of the same values, the environment built from the row and the settings only, a
-scratch launch's directory kept, the brief left out, a self relaunch's handoff header and
-stamp, a director's posture, a resume's argv and session id, and a respawn into the slot
-the relaunch holds."""
+scratch launch's directory kept, the brief left out, a relaunch's handoff header and stamp
+(a self relaunch's and a director's), a director's posture with no handoff, a resume's argv
+and session id, and a respawn into the slot the relaunch holds."""
 
 from __future__ import annotations
 
@@ -330,6 +330,46 @@ def test_a_replay_env_is_the_base_then_the_pass_list_and_nothing_else():
     assert got == {"PATH": "/then/bin", "HOME": "/home/then", "TOKEN": "t"}
 
 
+BUS = "DBUS_SESSION_BUS_ADDRESS"
+
+
+def test_a_launch_records_the_session_bus_when_its_caller_has_one():
+    assert common.base_env({"HOME": "/h", BUS: "unix:path=/run/user/7/bus"},
+                           is_windows=False) == {"HOME": "/h", BUS: "unix:path=/run/user/7/bus"}
+    assert common.base_env({"HOME": "/h"}, is_windows=False) == {"HOME": "/h"}
+    assert common.short_env({BUS: "unix:path=/b"}, is_windows=False) == {BUS: "unix:path=/b"}
+
+
+def test_a_replay_takes_the_session_bus_from_its_caller_and_else_from_the_record():
+    base = {"HOME": "/h", BUS: "unix:path=/run/user/7/then"}
+    now = {"HOME": "/elsewhere", BUS: "unix:path=/run/user/7/now"}
+    assert common.replay_env(base, now) == {"HOME": "/h", BUS: "unix:path=/run/user/7/now"}
+    assert common.replay_env(base, {"HOME": "/elsewhere"}) == base
+    assert common.replay_env(base, {BUS: ""}) == base
+    assert common.replay_env({"HOME": "/h"}, {"HOME": "/elsewhere"}) == {"HOME": "/h"}
+
+
+def test_a_replay_restores_the_session_bus_the_launch_recorded(work, harness, no_exec,
+                                                               monkeypatch):
+    monkeypatch.setenv(BUS, "unix:path=/run/user/7/bus")
+    api.launch(request(work))
+    assert row("r1").base_env[BUS] == "unix:path=/run/user/7/bus"
+    # Replayed from a process with no bus: the recorded one comes back.
+    monkeypatch.delenv(BUS)
+    api.launch(ReplayRequest(row("r1"), relaunch_of="r1", request_id="r2", actor="ann"))
+    assert no_exec[-1]["env"][BUS] == "unix:path=/run/user/7/bus"
+    assert row("r2").base_env[BUS] == "unix:path=/run/user/7/bus"
+
+
+def test_a_launch_with_no_session_bus_adds_none_to_its_replay(work, harness, no_exec,
+                                                              monkeypatch):
+    monkeypatch.delenv(BUS, raising=False)
+    api.launch(request(work))
+    assert BUS not in row("r1").base_env
+    api.launch(ReplayRequest(row("r1"), relaunch_of="r1", request_id="r2", actor="ann"))
+    assert BUS not in no_exec[-1]["env"]
+
+
 def test_no_credentials_when_the_base_shows_a_sign_in_and_nothing_is_passed():
     assert common.no_credentials({"CLAUDE_CODE_OAUTH_TOKEN": None}, [])
     assert common.no_credentials({"CLAUDE_CODE_USE_VERTEX": "1"}, [])
@@ -459,6 +499,35 @@ def test_a_director_relaunch_takes_only_the_directors_listed_names(work, harness
     assert "SELF_ONLY" not in env and "CLAUDE_CODE_OAUTH_TOKEN" not in env
     # A name was passed on purpose: the replay doesn't second-guess it.
     assert got.base == "row"
+
+
+def test_a_director_relaunch_with_a_handoff_is_relaunched_stamped_and_gives_it(
+        work, harness, no_exec, tmp_path):
+    from moxi_launcher import job, presets
+
+    file = presets.path()
+    file.parent.mkdir(parents=True, exist_ok=True)
+    file.write_text("[seat.lead]\n")
+    api.launch(LaunchRequest(seat="lead", cwd=str(work), request_id="r1", session_id=SID,
+                             actor="ann"))
+    handoff = tmp_path / "lead-handoff.md"
+    handoff.write_text("where it stands\n")
+    request = dataclasses.replace(
+        job.replay_request(row("r1"), "run9", mode="director", handoff=str(handoff),
+                           by="boss", slot=None, hold=None, respawn=False, director=True),
+        request_id="r2")
+    api.launch(request)
+    new = row("r2")
+    assert new.relaunch_of == "r1" and new.actor == "boss"
+    assert new.posture == f"relaunched (handoff: {handoff})"
+    assert new.handoff_path == str(handoff)
+    assert new.env[common.RELAUNCH_ENV] == "run9"
+    assert no_exec[-1]["env"][common.RELAUNCH_ENV] == "run9"
+    conn = store.connect(create=False)
+    try:
+        assert store.picked(conn, "lead") == [str(handoff)]
+    finally:
+        conn.close()
 
 
 def test_a_token_seats_director_relaunch_with_none_passed_says_no_credentials(

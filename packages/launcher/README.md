@@ -152,11 +152,10 @@ default, there is no line.
   named. A director is a session that hands this one its work and hears back through
   comms; a launch lists its directors with `--director`. The director sends the first
   message, so a brief under this posture is refused (`posture-brief`). A typed
-  `--handoff` is sent as the first turn, and the director's message comes after it. A
-  director's relaunch starts the new session with this posture.
+  `--handoff` is sent as the first turn, and the director's message comes after it.
 - `relaunched (handoff: <file>)`: the launcher's own, never set by a preset. A session
-  that relaunched itself with a handoff starts with it, and reads that file before
-  anything else; the `moxi-handoff` skill the launcher ships says so.
+  relaunched with a handoff, by itself or by a director, starts with it, and reads that
+  file before anything else; the `moxi-handoff` skill the launcher ships says so.
 
 `moxi launcher preview` takes the same words as `run` and prints the command and the
 environment variables the launch would set, starting nothing.
@@ -410,14 +409,30 @@ the exit and the respawn lasts 510 s. A hold left by a dead run of the same laun
 go and taken again. The handoff must be UTF-8 text and not blank; when the session's
 start was never seen, it must be written since the launch was made.
 
-    moxi launcher relaunch SESSION_ID
-    moxi launcher relaunch IDENTITY
+    moxi launcher relaunch SESSION_ID [--handoff FILE]
+    moxi launcher relaunch IDENTITY [--handoff FILE]
 
 A director relaunches a session it directs, named by its session id or its comms name.
 The caller's comms identity must be one of the directors the session was launched with;
-a session whose cache is still warm is refused (`warm`: send it a message instead), and a
-session that isn't quiet now is held (exit 75). The new session starts with the `with:`
-posture of its director and no first turn. The call follows the run for
+a session whose cache is still warm is refused (`warm`: send it a message instead). A
+director's relaunch always carries a handoff, since the old session can't write one
+without a turn: `--handoff FILE` (a relative path is read from the director's directory),
+else the seat's newest waiting handoff written since the old session began. It is checked
+as a self relaunch's is, against the relaunched session's launch: a readable UTF-8 file
+of at most 64 KiB, not blank, written since that session began, and with notes installed
+in that launch's `handoffs/` folder (`moxi launcher handoffs --key KEY` lists it). With
+neither, the call is refused (`handoff`), and with sessions installed it names `moxi
+sessions read SESSION_ID`, which shows how the session ended. A session that isn't
+quiet now is held (exit 75); a subagent at work is named with how long ago it last wrote
+and when it would read stale, and the words say that a message or ending its shells
+would wake the session, and whether keep-warm was on for it. A session whose turns
+endpoint started before turns could judge stale subagents, held only by subagents
+waiting, is refused (`old-endpoint`, exit 3) instead, since trying again won't help:
+wait for it to relaunch itself, or wake it with a message. A background shell never holds
+the call; the exit dialog stops it. The new session starts with the posture `relaunched`
+and the handoff as its first turn, as a self relaunch's does; the line after the header
+names the old session and whether it went cold or could not take a message, and, with
+sessions installed, the `moxi sessions read` command for it. The call follows the run for
 `relaunch.follow_s` and prints how it ended; past that it exits 75 and names the run.
 An agent making the call gives Bash a timeout of at least `relaunch.follow_s` plus 30 s,
 since Bash's own default is shorter. The job reads the session's cache again just before
@@ -935,7 +950,7 @@ nothing has used it for a while.
 | `moxi launcher handoffs [--key KEY] [--json]` | a key's handoffs, newest first, and which still wait; a `--key` in the folder of its newest launch |
 | `moxi launcher deliver REQUEST_ID --pid PID` | internal: the detached process that sends a launch's first turn |
 | `moxi launcher relaunch --self --handoff FILE [--dry-run] [--json]` | arm a relaunch of this session, with its handoff |
-| `moxi launcher relaunch SESSION_ID \| IDENTITY [--dry-run] [--json]` | relaunch a session you direct |
+| `moxi launcher relaunch SESSION_ID \| IDENTITY [--handoff FILE] [--dry-run] [--json]` | relaunch a session you direct, with a handoff for its new session |
 | `moxi launcher relaunch --status RUN [--json]` | a run and its events |
 | `moxi launcher relaunch --stop RUN [--json]` | stop an armed relaunch run |
 | `moxi launcher relaunch --from-record RUN [--json]` | start again the session a failed relaunch exited |
