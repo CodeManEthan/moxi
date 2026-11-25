@@ -107,6 +107,17 @@ def a_recall(settings=None, **fields):
     return recall
 
 
+def test_turns_takes_the_host_forks_bound():
+    # turns exports no maximum, so memory keeps a copy; this fails the day a turns
+    # release lowers it, where a refused bound would lose every host-fork round.
+    from moxi_turns import client, rpc
+
+    params = client._round_params(float(recall_route.HOST_FORK_TURNS_BOUND_S))
+    assert rpc._round_timeout(params) == recall_route.HOST_FORK_TURNS_BOUND_S
+    assert recall_route.HOST_FORK_TURNS_BOUND_S * 1000 <= rpc.ROUND_TIMEOUT_MAX_MS < (
+        recall_route.HOST_FORK_TURNS_BOUND_S + 1) * 1000
+
+
 def test_rounds_are_turns_forks_of_the_codex_session_with_turns_largest_bound(codex):
     codex["session"] = session = CodexSession([ended("- a")])
     route = recall_route.HostFork(SESSION)
