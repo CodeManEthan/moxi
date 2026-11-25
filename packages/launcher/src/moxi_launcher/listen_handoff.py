@@ -8,15 +8,17 @@ launch, and nothing in a fork (`moxi launcher fork`), a short reader that marks 
 handoff picked.
 
 - **A launch this endpoint holds** (`listeners.claim`): the key comes from the row. The
-  pointer names the newest handoff of the key still waiting, and records it as picked
-  (`shown`), at a resume as at a startup, so the seat's next start doesn't show it again.
-  The handoff given to the launch itself was recorded when its row was written, so the
+  handoff given to the launch itself was recorded when its row was written, so the
   pointer never offers the handoff the first turn carries.
 - **A session the launcher did not start** (no stamp): the key is the comms name in its
-  environment. It is shown the waiting handoff and never marks it, so a session started by
-  hand can't hide a seat's handoff from the seat's next start.
+  environment.
 - **A session carrying the stamp that did not claim the launch** (one started from inside
   the launched session) gets nothing.
+
+The pointer names the newest handoff of the key still waiting and how to take it
+(`handoffs.pointer`). Showing it picks nothing, so it repeats at every start of the seat
+until the handoff is taken (`moxi launcher handoff take`), given to a launch, or a newer
+handoff of the key is.
 
 After the pointer come other seats' waiting handoffs in the same folder, one line each,
 newest first, at most `handoffs.OTHERS_SHOWN`, then how many more (`handoffs.others`). They
@@ -29,7 +31,7 @@ from __future__ import annotations
 
 import os
 
-from . import handoffs, listeners, store
+from . import handoffs, listeners
 
 #: The start sources the lines are shown at.
 SOURCES = ("startup", "resume")
@@ -63,14 +65,7 @@ def _launched(event, conn) -> list[str]:
         where = handoffs.handoff_dir_of_row(row, create=key is not None)
     except handoffs.NoNotesDir:
         return []
-    lines = []
-    found = handoffs.waiting(conn, where, key) if key is not None else None
-    if found is not None:
-        store.add_pick(conn, str(found.path), key, "shown",
-                       session_id=getattr(event, "session_id", None),
-                       request_id=row.request_id)
-        lines.append(handoffs.pointer(found))
-    return lines + handoffs.other_lines(handoffs.others(conn, where, key))
+    return _lines(conn, where, key)
 
 
 def _by_hand(event, env, conn) -> list[str]:
@@ -79,6 +74,11 @@ def _by_hand(event, env, conn) -> list[str]:
         where = handoffs.handoff_dir(_cwd(event, env), create=key is not None)
     except handoffs.NoNotesDir:
         return []
+    return _lines(conn, where, key)
+
+
+def _lines(conn, where, key) -> list[str]:
+    """The pointer for `key`'s waiting handoff in `where`, then other seats' lines."""
     lines = []
     found = handoffs.waiting(conn, where, key) if key is not None else None
     if found is not None:

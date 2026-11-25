@@ -9,7 +9,8 @@ moved forward with `moxi.store.migrate`, and every write runs in one
 - `session_ids`, every session id a launch is known by (the one minted for it, and those a
   sender or the ready recorder learned), so `resolve` finds a launch from any of them;
 - `events`, things that happened to a launch or a session, each a `kind` and a JSON detail;
-- `picks`, the handoffs a launch was given or shown at startup or resume.
+- `picks`, the handoffs a launch was given or a seat took (`shown` is a pick of an older
+  launcher, which recorded a handoff as picked when a seat's start showed it).
 
 Schema version 2 adds the acts on a launched session and changes two things of version 1:
 
@@ -30,6 +31,9 @@ belongs back in a slot, with at most one open entry per slot.
 
 Schema version 4 adds `launches.fork_of`, the session id a fork launch (`moxi launcher
 fork`) copied, null on every other row and on every row made before version 4.
+
+Schema version 5 rebuilds `picks` so its `how` may also be `taken` (`moxi launcher handoff
+take`), keeping every row and its order.
 
 Each later version adds through `migrate`; no row of an earlier one is lost.
 
@@ -96,8 +100,9 @@ UNDER_WAY = ("spawning", "sending")
 #: Where a session id came from. `load` is an id first learned when a new endpoint of the
 #: session loaded (the session was cleared or compacted while its endpoint was replaced).
 SOURCES = ("minted", "sender", "startup", "resume", "clear", "compact", "load")
-#: How a handoff reached a launch: handed to it at insert, or shown at startup or resume.
-HOWS = ("given", "shown")
+#: How a handoff was picked: handed to a launch at insert (`given`), taken by its seat
+#: (`taken`), or shown at a seat's start by an older launcher (`shown`, still read).
+HOWS = ("given", "shown", "taken")
 #: The facts a write may set whatever the state.
 FACTS = ("pid", "pid_started", "pane_id", "slot")
 
@@ -294,8 +299,24 @@ ALTER TABLE launches ADD COLUMN fork_of TEXT;
 CREATE INDEX launches_fork_of ON launches(fork_of);
 """
 
+SCHEMA_5 = """
+CREATE TABLE picks_new (
+  path TEXT NOT NULL,
+  key TEXT NOT NULL,
+  session_id TEXT,
+  request_id TEXT,
+  how TEXT NOT NULL CHECK (how IN ('given','shown','taken')),
+  at TEXT NOT NULL
+);
+INSERT INTO picks_new (rowid, path, key, session_id, request_id, how, at)
+  SELECT rowid, path, key, session_id, request_id, how, at FROM picks ORDER BY rowid;
+DROP TABLE picks;
+ALTER TABLE picks_new RENAME TO picks;
+CREATE INDEX picks_key_at ON picks(key, at);
+"""
+
 #: The schema's steps, one per version; `PRAGMA user_version` counts those run.
-STEPS: tuple[str, ...] = (SCHEMA_1, SCHEMA_2, SCHEMA_3, SCHEMA_4)
+STEPS: tuple[str, ...] = (SCHEMA_1, SCHEMA_2, SCHEMA_3, SCHEMA_4, SCHEMA_5)
 
 
 class TooLarge(store.StoreError):
@@ -921,8 +942,8 @@ def add_event(conn: sqlite3.Connection, kind: str, detail: Mapping[str, Any] | N
 def add_pick(conn: sqlite3.Connection, handoff_path: str, key: str, how: str, *,
              session_id: str | None = None, request_id: str | None = None,
              at: str | None = None) -> None:
-    """Record that the handoff at `handoff_path`, filed under `key`, was given to a launch
-    or shown at a session's start."""
+    """Record that the handoff at `handoff_path`, filed under `key`, was picked: `how` is
+    one of `HOWS`."""
     if how not in HOWS:
         raise ValueError(f"unknown pick {how!r}")
     with _writing(conn):
@@ -1135,9 +1156,9 @@ def last_event(conn: sqlite3.Connection, request_id: str, kind: str) -> Event | 
 def picked(conn: sqlite3.Connection, key: str) -> list[str]:
     """The paths of the handoffs filed under `key` that count as picked, newest first.
 
-    A `shown` pick always counts. A `given` pick counts unless its launch ended `failed`
-    (a launch refused after its row was written ends there too): a handoff handed to a
-    launch that never ran is still waiting for its seat.
+    A `taken` or `shown` pick always counts. A `given` pick counts unless its launch ended
+    `failed` (a launch refused after its row was written ends there too): a handoff handed
+    to a launch that never ran is still waiting for its seat.
     """
     return [p for (p,) in conn.execute(
         "SELECT p.path FROM picks p LEFT JOIN launches l ON l.request_id = p.request_id "

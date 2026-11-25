@@ -120,6 +120,9 @@ PARSES = [
     (["catalog"], {"verb": "catalog", "harness": None, "json": False}),
     (["catalog", "codex", "--json"], {"harness": "codex", "json": True}),
     (["handoff", "dir"], {"verb": "handoff", "what": "dir"}),
+    (["handoff", "take"], {"verb": "handoff", "what": "take", "file": None, "key": None}),
+    (["handoff", "take", "h.md", "--key", "lead", "--json"],
+     {"what": "take", "file": "h.md", "key": "lead", "json": True}),
     (["handoffs", "--key", "planner"], {"verb": "handoffs", "key": "planner"}),
     (["deliver", "r-1", "--pid", "4242"],
      {"verb": "deliver", "request_id": "r-1", "pid": 4242}),
@@ -149,6 +152,8 @@ REFUSED = [
     ["presets", "list", "planner"],
     ["handoff"],
     ["handoff", "file"],
+    ["handoff", "dir", "h.md"],
+    ["handoff", "dir", "--key", "lead"],
     ["deliver", "r-1"],
 ]
 
@@ -774,6 +779,28 @@ def test_handoff_dir_asks_handoffs_for_the_current_session(monkeypatch, capsys):
         "lead", Path("/notes/handoffs"), "r-1"))
     code, out, _ = run(["handoff", "dir"], capsys)
     assert (code, out) == (codes.OK, f"{Path('/notes/handoffs')}\n")
+
+
+def test_handoff_take_takes_this_sessions_waiting_handoff(monkeypatch, capsys, no_notes):
+    monkeypatch.setenv("MOXI_COMMS_NAME", "planner@moxi")
+    handoffs_dir = handoff_files("2026-10-29-planner.md")
+    code, out, _ = run(["handoff", "take"], capsys)
+    path = handoffs_dir / "2026-10-29-planner.md"
+    assert (code, out) == (codes.OK, f"took {path} (planner)\n")
+    code, out, err = run(["handoff", "take", "--json"], capsys)
+    assert code == codes.REFUSED and out == "" and "[nothing-waiting]" in err
+    handoff_files("2026-10-30-planner.md")
+    shown = json.loads(run(["handoff", "take", "--json"], capsys)[1])
+    assert shown == {"key": "planner", "path": str(handoffs_dir / "2026-10-30-planner.md"),
+                     "folder": str(handoffs_dir), "request_id": None}
+
+
+def test_handoff_take_with_no_seat_is_refused_and_says_pass_key(capsys, no_notes):
+    code, out, err = run(["handoff", "take"], capsys)
+    assert code == codes.REFUSED and out == ""
+    assert err == ("moxi launcher handoff: this session has no seat [no-seat]\n"
+                   "hint: pass --key\n")
+    assert not store.path().exists()
 
 
 def handoff_files(*names: str) -> Path:

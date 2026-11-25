@@ -1,5 +1,5 @@
 """Handoffs: the key, the folder (notes' or the launcher's own), the file name, what is
-still waiting, and the current session's folder."""
+still waiting, the current session's folder, and taking a handoff."""
 
 from __future__ import annotations
 
@@ -99,7 +99,7 @@ def test_waiting_is_what_is_newer_than_the_newest_pick(tmp_path):
     assert len(handoffs.unpicked(tmp_path, "lead", ["/a/brief.md"])) == 4
 
 
-def test_a_handoff_shown_once_waits_no_longer(tmp_path):
+def test_a_handoff_with_a_shown_or_taken_pick_waits_no_longer(tmp_path):
     conn = store.connect()
     try:
         (tmp_path / "2026-10-30-lead.md").write_text("x", encoding="utf-8")
@@ -108,15 +108,20 @@ def test_a_handoff_shown_once_waits_no_longer(tmp_path):
         store.add_pick(conn, str(found.path), "lead", "shown")
         assert handoffs.waiting(conn, tmp_path, "lead") is None
         assert handoffs.waiting(None, tmp_path, "lead") is not None
+        (tmp_path / "2026-10-31-lead.md").write_text("x", encoding="utf-8")
+        assert handoffs.waiting(conn, tmp_path, "lead").date == "2026-10-31"
+        store.add_pick(conn, str(tmp_path / "2026-10-31-lead.md"), "lead", "taken")
+        assert handoffs.waiting(conn, tmp_path, "lead") is None
     finally:
         conn.close()
 
 
-def test_the_pointer_names_the_path_and_date(tmp_path):
-    found = handoffs.parse(tmp_path / "2026-10-30-lead-2.md", "lead")
+def test_the_pointer_names_the_path_and_date_and_how_to_take_it(tmp_path):
+    path = tmp_path / "2026-10-30-lead-2.md"
+    found = handoffs.parse(path, "lead")
     assert handoffs.pointer(found) == (
-        f"Handoff waiting: {tmp_path / '2026-10-30-lead-2.md'} (2026-10-30). "
-        "Read it before other work.")
+        f"Handoff waiting: {path} (2026-10-30). Read it before other work, then run: "
+        f"moxi launcher handoff take {path}")
 
 
 # -- other seats' handoffs -----------------------------------------------------------------
@@ -355,3 +360,121 @@ def test_a_keys_dir_is_its_newest_launchs_else_the_callers(notes):
     found = handoffs.handoff_dir_of_key("lead", cwd="/here")
     assert found.launch.request_id == "r-1"
     assert notes.calls[-1] == ("/src/moxi", False, "/srv/notes")
+
+
+# -- taking a handoff --------------------------------------------------------------------------
+
+
+LAUNCHED = {"MOXI_LAUNCHER_REQUEST": "r1"}
+
+
+@pytest.fixture
+def seat():
+    """A launch of seat `lead` (request `r1`), and its handoff folder."""
+    conn = store.connect()
+    try:
+        store.insert(conn, request_id="r1", by="a", harness="claude", target="slot",
+                     cwd="/work", values={}, argv=["claude"], env={}, posture="go",
+                     session_id=CLAUDE_ID, preset_kind="seat", preset_name="lead")
+    finally:
+        conn.close()
+    return handoffs.own_handoffs_dir()
+
+
+def write(handoff_dir, name):
+    path = handoff_dir / name
+    path.write_text("where the work is\n", encoding="utf-8")
+    return path
+
+
+def picks():
+    conn = store.connect()
+    try:
+        return conn.execute("SELECT path, key, request_id, how FROM picks").fetchall()
+    finally:
+        conn.close()
+
+
+def test_take_with_no_file_takes_the_seats_waiting_handoff(seat):
+    write(seat, "2026-10-29-lead.md")
+    newest = write(seat, "2026-10-30-lead.md")
+    taken = handoffs.take(env=LAUNCHED)
+    assert (taken.key, taken.path, taken.handoff_dir, taken.request_id) == (
+        "lead", newest, seat, "r1")
+    assert picks() == [(str(newest), "lead", "r1", "taken")]
+    with pytest.raises(handoffs.TakeRefused) as refused:
+        handoffs.take(env=LAUNCHED)
+    assert refused.value.code == "nothing-waiting"
+    assert len(picks()) == 1
+
+
+def test_take_of_a_file_of_the_seat(seat):
+    older = write(seat, "2026-10-29-lead.md")
+    newer = write(seat, "2026-10-30-lead.md")
+    assert handoffs.take(older, env=LAUNCHED).path == older
+    conn = store.connect()
+    try:
+        assert handoffs.waiting(conn, seat, "lead").path == newer
+    finally:
+        conn.close()
+
+
+def test_a_session_by_hand_takes_under_its_comms_name(tmp_path):
+    waiting = write(handoffs.own_handoffs_dir(), "2026-10-29-planner.md")
+    taken = handoffs.take(env={"MOXI_COMMS_NAME": "planner@moxi"}, cwd=tmp_path)
+    assert (taken.key, taken.path, taken.request_id) == ("planner", waiting, None)
+
+
+def test_take_with_no_key_refuses_and_writes_nothing():
+    with pytest.raises(handoffs.TakeRefused) as refused:
+        handoffs.take(env={})
+    assert (refused.value.code, refused.value.problem, refused.value.hint) == (
+        "no-seat", "this session has no seat", "pass --key")
+    assert not store.path().exists()
+
+
+def test_take_with_nothing_waiting_and_no_file_refuses(seat):
+    with pytest.raises(handoffs.TakeRefused) as refused:
+        handoffs.take(env=LAUNCHED)
+    assert refused.value.code == "nothing-waiting"
+    assert picks() == []
+
+
+def test_a_file_of_another_key_is_refused_unless_key_names_it(seat):
+    other = write(seat, "2026-10-29-planner.md")
+    with pytest.raises(handoffs.TakeRefused) as refused:
+        handoffs.take(other, env=LAUNCHED)
+    assert refused.value.code == "another-key"
+    with pytest.raises(handoffs.TakeRefused) as refused:
+        handoffs.take(other, key="coder", env=LAUNCHED)
+    assert refused.value.code == "another-key"
+    assert picks() == []
+    taken = handoffs.take(other, key="planner", env=LAUNCHED)
+    assert (taken.key, taken.request_id) == ("planner", "r1")
+    assert picks() == [(str(other), "planner", "r1", "taken")]
+
+
+def test_a_file_outside_the_seats_handoff_dir_is_refused_unless_key_names_its_key(
+        seat, tmp_path):
+    elsewhere = write(tmp_path, "2026-10-29-lead.md")
+    with pytest.raises(handoffs.TakeRefused) as refused:
+        handoffs.take(elsewhere, env=LAUNCHED)
+    assert refused.value.code == "another-folder"
+    assert picks() == []
+    assert handoffs.take(elsewhere, key="lead", env=LAUNCHED).path == elsewhere
+
+
+def test_a_file_that_is_not_there_is_refused(seat):
+    with pytest.raises(handoffs.TakeRefused) as refused:
+        handoffs.take(seat / "2026-10-29-lead.md", env=LAUNCHED)
+    assert refused.value.code == "no-handoff"
+    assert picks() == []
+
+
+def test_take_with_a_key_and_no_file_takes_that_keys_waiting_handoff(seat):
+    waiting = write(seat, "2026-10-29-planner.md")
+    taken = handoffs.take(key="planner", env={})
+    assert (taken.key, taken.path, taken.request_id) == ("planner", waiting, None)
+    with pytest.raises(handoffs.TakeRefused) as refused:
+        handoffs.take(key="no/key", env={})
+    assert refused.value.code == "bad-key"

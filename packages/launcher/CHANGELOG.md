@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+- A handoff waits until its seat takes it. A seat's start no longer marks the handoff it
+  points to as picked, so the pointer comes back at every start until the handoff is
+  taken, given to a launch, or a newer one of the key is. The pointer now ends "then run:
+  moxi launcher handoff take <path>". A handoff an older launcher marked as shown stays
+  picked.
+- New `moxi launcher handoff take [FILE] [--key KEY] [--json]` records a handoff as taken:
+  this session's waiting one with no FILE. It refuses, writing nothing, with no key, with
+  nothing waiting, and for a FILE that is missing, named for another key, or outside the
+  session's handoff folder unless `--key` names its key.
+- The launch log moves to schema version 5: the `picks` table is rebuilt so a pick may be
+  `taken`, keeping every row.
 - `recycle_on_expiry = compact` compacts the session shortly before its cache expires,
   no longer after: inside a window from 360 s before the expiry (where keep-warm's
   shuts) to 60 s before it, counted on cache's age plus the last response's length

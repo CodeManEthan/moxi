@@ -312,12 +312,27 @@ installed, that is notes' `handoffs/` folder for the session's directory (or its
 pointed to no handoff, its start names no folder, `moxi launcher handoff dir` refuses
 (`no-notes-dir`), and it can't relaunch itself. Without notes, the folder is the
 launcher's own. With turns,
-a seat's next start or resume is pointed to its newest waiting handoff, then shown one
-line for each other seat's waiting handoff in the same folder (newest first, at most 5, then
-how many more). A session with no key gets only those lines. A handoff counts as used only
-when the launcher gave it to a launch of its seat or showed it to one as that seat's own,
-so a session started by hand, or another seat, never hides a seat's handoff. The launcher ships a `moxi-handoff` skill, which
-`moxi install launcher` offers to place for Claude Code and Codex.
+a seat's start or resume is pointed to its newest waiting handoff:
+
+    Handoff waiting: <path> (<date>). Read it before other work, then run: moxi launcher handoff take <path>
+
+then shown one line for each other seat's waiting handoff in the same folder (newest
+first, at most 5, then how many more). A session with no key gets only those lines.
+Showing a handoff picks nothing, so the pointer comes back at every start of the seat
+until the handoff is taken, given to a launch, or a newer handoff of the key is. A handoff
+given to a launch that ended `failed` still waits. A handoff an older launcher marked as
+shown stays picked. The launcher ships a `moxi-handoff` skill, which `moxi install
+launcher` offers to place for Claude Code and Codex.
+
+    moxi launcher handoff take [FILE] [--key KEY] [--json]
+
+records a handoff as taken. With no FILE it takes this session's waiting handoff; the key
+is the launch's when the session was launched, else its comms name, as the pointer finds
+it. It refuses and writes nothing when the session has no key (`no-seat`: pass `--key`),
+when nothing waits and no FILE is named (`nothing-waiting`), and when FILE is not a file,
+is named for another key (`another-key`), or lies outside this session's handoff folder
+(`another-folder`). With `--key KEY` it takes KEY's waiting handoff, read in the folder of
+KEY's newest launch, or a FILE named for KEY wherever it lies.
 
 `moxi launcher handoffs` lists this session's handoffs, in its own folder. With `--key KEY`
 it lists KEY's handoffs in the folder of KEY's newest launch (that launch's directory and
