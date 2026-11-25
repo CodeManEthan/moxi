@@ -755,16 +755,24 @@ An index from before the writer column is migrated the next time memory writes t
 and the tool refuses `index-unreadable` until then.
 
 **What it returns.** Only what `read_session` would show as text: a row whose writer is
-the person or the model, or `unknown` with a text that opens neither with `<` and a
-letter nor with a redaction placeholder. A text that opens with one of sessions' output
-wrappers (`<task-notification>`, `<local-command-stdout>`, `<system-reminder>` and the
-rest) is never a hit, nor is any other writer's row. These are clauses of the search
-itself, so a hidden row takes no place and changes no count. Leading spaces, no-break
-spaces and invisible characters don't hide a wrapper. Mail from other sessions (`peer`
-and `coordinator` messages) is never a hit, nor are channel, plugin and task-notification
-messages, since memory stores none of them; `read_session` shows that mail, named, in its
-session. With `results`, the ends of tool results are searched too, each a `result` hit
-with no writer.
+the person or the model, `unknown` with a text that opens neither with `<` and a letter
+nor with a redaction placeholder, or a delivered message. A text that opens with one of
+sessions' output wrappers (`<task-notification>`, `<local-command-stdout>`,
+`<system-reminder>` and the rest) is never a hit unless the row is a delivered one, and
+a `harness` or `summary` row never is. These are clauses of the search itself, so a
+hidden row takes no place and changes no count. Leading spaces, no-break spaces and
+invisible characters don't hide a wrapper.
+
+A delivered message is what a plugin (comms mail among them), a channel, another
+session or a background task put into the session: writer `hook`, `channel`, `peer`,
+`coordinator` or `task`. It is a hit exactly when `moxi memory search` would return it.
+Its writer comes from its line's own origin, so the wrapper and tag tests, which judge a
+row whose writer is unsure, don't apply: a background task's notice opens with
+`<task-notification>` and is still found. Its text is redacted, windowed and ranked
+like every row's, the hit's `writer` names who delivered it, and its line in the text
+part reads `delivered by hook` (or the other writer) where a typed row's reads `user`.
+With `results`, the ends of tool results are searched too, each a `result` hit with no
+writer.
 
 **How it picks and ranks.** The tool doesn't take `moxi memory search`'s ranking, which
 is computed over the stored text and so over what the chat redaction hides. It reads the

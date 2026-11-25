@@ -12,6 +12,11 @@
   it, `moxi memory status` (`keeps_delivered` in `--json`) and `moxi doctor memory` say
   it holds no delivered messages for the sessions it had read and name `moxi memory
   reindex`. Nothing reindexes by itself.
+- The chat's `search_memory` returns delivered messages too: rows written by `hook`,
+  `channel`, `peer`, `coordinator` and `task` are hits exactly when `moxi memory search`
+  would return them, so a task's notice that opens with `<task-notification>` is found.
+  `harness` and `summary` rows stay out. A delivered hit's line in the text part reads
+  `delivered by <writer>`, and the tool's description lists the writers it returns.
 - The subconscious, memory's second way to recall: in a session launched with it on (the
   launcher's `subconscious` row, which stamps `MOXI_MEMORY_SUBCONSCIOUS`, exported as
   `api.SUBCONSCIOUS_ENV`), a second agent searches past sessions and notes and sends the
