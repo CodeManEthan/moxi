@@ -367,8 +367,8 @@ describe('the non-interactive rule', () => {
     expect(w.spawned).toEqual([])
   })
 
-  test('MOXI_TURNS_ENDPOINT set and absolute is the command, and endpoint.json is never read', async ($: E, on) => {
-    const w = world(on, { env: { MOXI_TURNS_ENDPOINT: '/opt/launch/bin/moxi-turns-endpoint' } })
+  test('MOXI_TURNS_ENDPOINT set and absolute is the command, and a launch never reads endpoint.json', async ($: E, on) => {
+    const w = world(on, { env: { MOXI_TURNS_ENDPOINT: '/opt/launch/bin/moxi-turns-endpoint', MOXI_TURNS_GUARDS_SEEN: '/state/turns/guards-seen.json' } })
     await start($)
     expect(w.spawned).toEqual([['/opt/launch/bin/moxi-turns-endpoint']])
     expect(w.reads.filter(p => p.endsWith('/endpoint.json'))).toEqual([])
@@ -381,7 +381,7 @@ describe('the non-interactive rule', () => {
   })
 
   test('MOXI_TURNS_ENDPOINT set but not absolute spawns nothing, even with a good endpoint.json', async ($: E, on) => {
-    const w = world(on, { env: { MOXI_TURNS_ENDPOINT: 'moxi-turns-endpoint' } })
+    const w = world(on, { env: { MOXI_TURNS_ENDPOINT: 'moxi-turns-endpoint', MOXI_TURNS_GUARDS_SEEN: '/state/turns/guards-seen.json' } })
     await start($)
     await $.classic.SessionStart({ source: 'startup' })
     expect(w.spawned).toEqual([])
@@ -419,7 +419,7 @@ describe('the report queue', () => {
     expect(w.got).toEqual([])
     await w.hello()
     expect(w.kinds()).toEqual(['session', 'turn.start', 'turn.complete'])
-    expect(w.reports()[0]).toEqual({ seq: 1, kind: 'session', session_id: 'S-1', mod_version: '0.3.2' })
+    expect(w.reports()[0]).toEqual({ seq: 1, kind: 'session', session_id: 'S-1', mod_version: '0.3.3' })
     expect(w.reports().map(r => r.seq)).toEqual([1, 2, 3])
     expect(w.reports()[2]).toEqual({ seq: 3, kind: 'turn.complete', turn_id: 't1', reason: 'answer', is_aborted: false, answer: 'done.' })
   })

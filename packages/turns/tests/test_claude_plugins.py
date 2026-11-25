@@ -50,7 +50,7 @@ def test_the_runner_reports_the_version_its_manifest_names():
 #: runs a user-scope plugin from a cache kept per version, so a runner on a new leg, or a
 #: runner changed on the same leg, needs a new version, or an install made before it keeps
 #: running the old one.
-RUNNER_VERSION_OF_LEG = {5: "0.3.2"}
+RUNNER_VERSION_OF_LEG = {5: "0.3.3"}
 
 
 def test_the_runner_speaks_the_endpoints_leg_under_the_version_named_for_it():
@@ -91,3 +91,13 @@ def test_claude_plugin_test_passes(name):
     out = _claude("test", str(CLAUDE_DIR / name), timeout=420)
     assert out.returncode == 0, (out.stdout + out.stderr)[-4000:]
     assert " 0 fail" in out.stdout + out.stderr
+
+
+def test_the_runners_copy_of_the_removal_pre_filter_is_the_guards():
+    import re
+
+    from moxi_turns.guards import REMOVAL_MATCH
+
+    source = (CLAUDE_DIR / "moxi-turns" / "hooks" / "register.ts").read_text()
+    found = re.search(r"export const REMOVAL_MATCH = String\.raw`([^`]*)`", source)
+    assert found is not None and found.group(1) == REMOVAL_MATCH
