@@ -208,7 +208,7 @@ def test_a_leaked_git_dir_does_not_aim_the_check_elsewhere(app, tmp_path, monkey
 
 @pytest.mark.slow
 @pytest.mark.touches(*GLOBS)
-def test_a_tracked_occupant_reads_would_commit_then_replace_places_over_it(lo, tmp_path):
+def test_a_tracked_occupant_reads_would_commit_and_replace_refuses_it(lo, tmp_path):
     root = work_tree(tmp_path / "app")
     kit.manifest(lo, f'[project."{root}"]\nskills = ["review"]\n'
                      f'[skill.review]\nharnesses = ["codex"]\n')
@@ -220,14 +220,34 @@ def test_a_tracked_occupant_reads_would_commit_then_replace_places_over_it(lo, t
     out = install.install()
     assert out.code == 3
     assert states(out)[("skill", "review", "codex")][0] == "would-commit"
-    # The page offers Replace on this row from the flag status gives it.
+    # The page offers no Replace on this row: status gives it no replace flag.
     [row] = [r for r in install.status().rows if (r.name, r.harness) == ("review", "codex")]
-    assert row.state == "would-commit" and row.replaceable
-    assert row.as_json()["replaceable"] is True
+    assert row.state == "would-commit" and not row.replaceable
+    assert row.as_json()["replaceable"] is False
+    for named in ("skill:review@codex", str(skill_dir)):
+        out = install.install(replace=[named], accept_diff=True)
+        assert out.code == 3
+        state, reason = states(out)[("skill", "review", "codex")]
+        assert state == "would-commit"
+        assert reason == (f"{skill_dir} is tracked by git in {os.path.normpath(root)}; "
+                          "untracking it is a commit in that repo")
+        assert "nothing of loadout's is refused there" not in out.text()
+        assert (skill_dir / "SKILL.md").read_text() == "theirs\n"
+        assert not skill_dir.is_symlink() and untracked(root) == []
+
+
+@pytest.mark.slow
+@pytest.mark.touches(*GLOBS)
+def test_replace_still_places_over_an_untracked_occupant_in_a_work_tree(lo, tmp_path):
+    root = work_tree(tmp_path / "app")
+    kit.manifest(lo, f'[project."{root}"]\nskills = ["review"]\n'
+                     f'[skill.review]\nharnesses = ["codex"]\n')
+    skill_dir = root / ".agents" / "skills" / "review"
+    skill_dir.mkdir(parents=True)
+    (skill_dir / "SKILL.md").write_text("theirs\n")
     out = install.install(replace=["skill:review@codex"], accept_diff=True)
     assert out.code == 0, out.text()
     assert skill_dir.is_symlink()
-    assert ignores.listed(skill_dir.parent / ".gitignore") == {"review"}
 
 
 @pytest.mark.slow

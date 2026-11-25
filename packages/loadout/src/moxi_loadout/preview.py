@@ -27,8 +27,7 @@ row `text` names in `section`, under the sections that row's act runs with (its
   past a bound, a link, or one that isn't UTF-8 text gives no lines and is named in
   `skipped`, `{path, why}`, `why` one of `WHYS`. The act keeps all of it whatever the diff
   leaves out.
-- `tracked`: the occupant is one git tracks. `others`: how many other rows the run
-  changes (rows in its scope reading `missing` or `stale`). `kept_in`: the folder the copy
+- `others`: how many other rows the run changes (rows in its scope reading `missing` or `stale`). `kept_in`: the folder the copy
   goes to; its own path is fixed when the write runs, and the act's outcome names it.
 """
 
@@ -60,13 +59,13 @@ CASES = ("moves", "keeps")
 def replace_preview(text: str, section: str | None = None, *, loadout_dir=None,
                     resolver=planner.resolve_key, git=None,
                     git_seconds: float | None = None) -> dict:
-    """`{case, target, kept_in, tracked, others, label, diff, lines, skipped}` for a
+    """`{case, target, kept_in, others, label, diff, lines, skipped}` for a
     Replace of what `text` (an id or a target path) names in `section` (any section when
     None). `git` and `git_seconds` as for `install.status`."""
     done = install.status_plan(loadout_dir=loadout_dir, resolver=resolver, git=git,
                                git_seconds=git_seconds)
     answer = {"case": None, "target": None, "kept_in": os.fspath(displaced.root()),
-              "tracked": False, "others": 0, "label": "file", "diff": "", "lines": 0,
+              "others": 0, "label": "file", "diff": "", "lines": 0,
               "skipped": []}
     rows, sources = done.outcome.rows, done.sources
     named = [i for i, (row, src) in enumerate(zip(rows, sources))
@@ -91,9 +90,7 @@ def replace_preview(text: str, section: str | None = None, *, loadout_dir=None,
         return answer
     case, target, diff, label = shown
     answer.update(case=case, target=os.fspath(target), label=label, diff=diff,
-                  lines=len(diff.splitlines()), skipped=reader.skipped,
-                  tracked=source == "want" and src.step is not None
-                  and src.step.cause == "tracked")
+                  lines=len(diff.splitlines()), skipped=reader.skipped)
     return answer
 
 
@@ -126,7 +123,7 @@ def _want(plan, want, reader: _Reader):
         then = None if data is _SKIPPED else reader.data(path, data)
         return "keeps", path, _diff({"": now}, {"": then}, path, path), "file"
     step = want.step
-    if step is None or step.action != "refuse" or step.cause not in ("occupant", "tracked"):
+    if step is None or step.action != "refuse" or step.cause != "occupant":
         return None
     occupant = step.occupant or step.target
     if generated is not None and generated[1] is not None:

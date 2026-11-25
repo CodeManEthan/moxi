@@ -236,7 +236,7 @@ def test_every_value_that_can_hold_a_path_carries_a_mark():
              "/api/projects cause", "/api/folder state", "/api/folder more",
              "/api/folder unlisted[].kind", "/api/folder reinstalls",
              "/api/status kept[].how", "/api/job outcome.kept[].how",
-             "/api/replace-preview case", "/api/replace-preview tracked",
+             "/api/replace-preview case",
              "/api/replace-preview others", "/api/replace-preview label",
              "/api/replace-preview lines", "/api/replace-preview skipped[].why"}
     assert not plain & set(marks)

@@ -431,8 +431,6 @@ export interface ReplacePreview {
   target: string | null;
   /** The folder the copy goes to. */
   kept_in: string | null;
-  /** git tracks what is there. */
-  tracked: boolean;
   /** How many other rows the run changes. */
   others: number;
   /** `file`, or `entry` for an MCP server its harness's CLI writes. */
@@ -446,13 +444,13 @@ export interface ReplacePreview {
 /** `/api/replace-preview`'s value, or null when it isn't one. */
 export function parseReplacePreview(data: unknown): ReplacePreview | null {
   if (!isObj(data) || !isStrOrNull(data.problem) || !isStrOrNull(data.case) || !isStrOrNull(data.target)
-      || !isStrOrNull(data.kept_in) || !isBool(data.tracked) || !isInt(data.others) || !isStr(data.label)
+      || !isStrOrNull(data.kept_in) || !isInt(data.others) || !isStr(data.label)
       || !isStr(data.diff) || !isInt(data.lines)
       || !isListOf(data.skipped, (s: unknown): s is Skipped => isObj(s) && isStr(s.path) && isStr(s.why))) {
     return null;
   }
   return { problem: data.problem, case: data.case, target: data.target, kept_in: data.kept_in,
-           tracked: data.tracked, others: data.others, label: data.label, diff: data.diff,
+           others: data.others, label: data.label, diff: data.diff,
            lines: data.lines, skipped: data.skipped };
 }
 

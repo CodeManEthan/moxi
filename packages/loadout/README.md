@@ -134,7 +134,10 @@ copy stays until you delete it.
   points). Equal, it goes ahead. Different, `moxi loadout install` asks at a terminal,
   naming what differs, and refuses without one; `--accept-diff` goes ahead without
   asking, and the page's Replace, which shows what it moves aside first, passes it. If
-  placing fails after the move, the placer puts what was there back.
+  placing fails after the move, the placer puts what was there back. A path git tracks
+  is never replaced: the row reads `would-commit`, and a `--replace` naming it is
+  refused (`<path> is tracked by git in <repo>; untracking it is a commit in that
+  repo`), since placing over it would leave a deletion in that repo's `git status`.
 - **An entry in a harness's file** (Claude Code's `settings.json` and `.claude.json`,
   Codex's `hooks.json` and `config.toml`, OpenCode's `opencode.json`, a managed global
   file), when you edited it or loadout didn't write it (one you had before loadout

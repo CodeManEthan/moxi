@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- `moxi loadout install --replace` no longer places over a path git tracks, which left a
+  deletion in that repo's `git status`. A `--replace` naming one is refused: `<path> is
+  tracked by git in <repo>; untracking it is a commit in that repo`. Status shows the
+  row as before, `would-commit`, but the page offers no Replace on it, and
+  `/api/replace-preview` drops its `tracked` field, which can no longer be true.
 - The git hook pieces reinstall only on the repo's main branch: the branch
   `origin/HEAD` points to, else git's `init.defaultBranch`, else `main`. A commit or
   merge on another branch, or on a detached HEAD, prints one line saying the change

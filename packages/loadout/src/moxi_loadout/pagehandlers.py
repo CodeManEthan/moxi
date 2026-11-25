@@ -310,7 +310,7 @@ def replace_preview(call: Any) -> dict[str, Any]:
                                                  git_seconds=doctor.PLACE_GIT_SECONDS)
     except Exception as exc:  # noqa: BLE001 - a read says what failed, it never raises
         return {"problem": _problem(exc, "the replace preview"), "case": None,
-                "target": None, "kept_in": None, "tracked": False, "others": 0,
+                "target": None, "kept_in": None, "others": 0,
                 "label": "file", "diff": "", "lines": 0, "skipped": []}
     return {"problem": None, **answer}
 

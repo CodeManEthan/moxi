@@ -300,19 +300,17 @@ SOURCE_DIR = {
 #: What a Replace of one row would do, for the confirm: `case` (`moves`: the placer moves
 #: what is there aside under `displaced/` and places loadout's; `keeps`: loadout keeps a
 #: copy of the file there, then writes it; null when the row isn't replaceable), the
-#: `target`, `kept_in` (the folder the copy goes to), `tracked` (git tracks what is
-#: there), `others` (how many other rows the run changes), the unified `diff` of what is
-#: there (-) against what loadout writes (+) and its `lines`, `label` (`file`, or
-#: `entry` for an MCP server its harness's CLI writes, whose diff is its entry), and
-#: `skipped`, each path the diff leaves out and `why` (`link`, `large`, `binary`,
-#: `many`). `target` and `kept_in` are null only with `problem` set, or `target` with
+#: `target`, `kept_in` (the folder the copy goes to), `others` (how many other rows the
+#: run changes), the unified `diff` of what is there (-) against what loadout writes (+)
+#: and its `lines`, `label` (`file`, or `entry` for an MCP server its harness's CLI
+#: writes, whose diff is its entry), and `skipped`, each path the diff leaves out and
+#: `why` (`link`, `large`, `binary`, `many`). `target` and `kept_in` are null only with `problem` set, or `target` with
 #: no case.
 REPLACE_PREVIEW = {
     "problem": _PROBLEM,
     "case": _MAYBE,
     "target": _MAYBE_PATH,
     "kept_in": _MAYBE_PATH,
-    "tracked": lb.Out("bool"),
     "others": lb.Out("int"),
     "label": _TEXT,
     "diff": _SAYS,

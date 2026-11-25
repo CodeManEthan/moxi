@@ -13,7 +13,9 @@
 4. plan through the core placer and apply the steps in scope: each `add`, `update` and
    `keep`; each `remove` whose record names a section in scope (a `remove` with no record
    only in an unscoped run in which every section resolved); a refusal `--replace` names,
-   or a link of loadout's own under the folder the last install read; a module skill
+   or a link of loadout's own under the folder the last install read, but never an
+   occupant git tracks, which `--replace` refuses, since untracking it is a commit in
+   that repo; a module skill
    nobody has placed, as its module, then taken over seeded, and so is one whose
    occupant `--replace` names (moved aside as the module), so loadout never holds a
    module's skill the module didn't hand over;
@@ -471,8 +473,10 @@ def _install(scope: Scope, replace: list[str], loadout_dir, resolver, lines: lis
         if want.state is not None or step is None:
             rows.append(planner.row(want))
             continue
-        in_the_way = step.action == "refuse" and step.cause in ("occupant", "tracked")
-        if want.module and step.action == "add":
+        in_the_way = step.action == "refuse" and step.cause == "occupant"
+        if step.action == "refuse" and step.cause == "tracked" and _claimed(claims, want):
+            rows.append(planner.row(want, reason=_tracked_refusal(step.target)))
+        elif want.module and step.action == "add":
             seeded.append(want)
         elif want.module and in_the_way and _claimed(claims, want):
             # A module skill is placed as its module and handed over, never as loadout.
@@ -658,6 +662,18 @@ def _claimed(claims: dict[str, bool], want) -> bool:
 def named_by(text: str, want) -> bool:
     """Whether `--replace text` names `want`, by its target or its id. Reads only."""
     return _claimed({text: False}, want)
+
+
+def _tracked_refusal(target, *, git: ignores.Git | None = None) -> str:
+    """The line refusing a `--replace` of a path git tracks: placing over it would leave a
+    deletion in that repo, so the untracking is the repo's own commit to make."""
+    path = os.fspath(target)
+    try:
+        repo = (git or ignores.Git()).toplevel(os.path.dirname(path))
+    except ignores.GitError:
+        repo = None
+    return (f"{path} is tracked by git in {repo or 'its repo'}; untracking it is a commit "
+            "in that repo")
 
 
 def _moved(step, mine: set[str], old_source) -> bool:
