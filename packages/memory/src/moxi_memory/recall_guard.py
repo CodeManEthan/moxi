@@ -54,9 +54,14 @@ judge (`moxi_memory.guards`).
   the plain-read test knows, so a command the test reads as one plain read could run
   more there, and its `Monitor` tool runs a command in the background.
 - A Codex slot fork's calls reach the judge under the names Codex's hooks give them:
-  its shell is `Bash`, with the command text under `command`, judged as above; it has
-  no read tools, so it reads through the shell alone; `apply_patch`, `spawn_agent`,
-  `write_stdin` and MCP tools are refused like any other call.
+  its shell is `Bash`, with the command text under `command`, judged as above; a
+  `command` that is not text (an argv) is refused, since the hook hands only text and
+  the test judges only what it can see whole. It has no read tools, so it reads through
+  the shell alone; `apply_patch`, `spawn_agent`, `write_stdin` and MCP tools are refused
+  like any other call. The hook doesn't hand the guard the shell's `yield_time_ms`, so a
+  plain read that doesn't end (`tail -f`) yields and goes on running in the background,
+  where the fork can't read it (`write_stdin` is refused), until the slot fork exits
+  with its recall.
 
 Each call allowed is counted on the record, under the session's lock. A judge has
 `BUDGET_S` from its start, inside its guard's deadline: the wait for a fork's

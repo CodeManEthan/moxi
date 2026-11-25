@@ -334,6 +334,7 @@ def test_a_codex_slot_forks_calls_are_judged_by_the_same_rule_as_turns_delivers_
     assert records.read(SESSION, rid)["tools"] == 1
     refused = [("Bash", {"command": "rm notes.md"}),
                ("Bash", {"command": "grep lock notes.md > out"}),
+               # Codex's hook hands the command as text; anything else is refused.
                ("Bash", {"command": ["grep", "lock", "notes.md"]}),
                ("apply_patch", {"command": "*** Begin Patch\n*** Delete File: a\n"
                                            "*** End Patch"}),

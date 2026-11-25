@@ -622,7 +622,9 @@ id (a fork whose record isn't found has every call refused, and a fault in the j
 refuses the call), and `memory.subconscious-slot-ask` refuses every permission ask of a
 Claude Code slot fork. Codex names its shell `Bash` to the guard, so a Codex fork's shell
 calls meet the same plain-read rule; `apply_patch` and every other Codex tool are
-refused.
+refused. Codex's hook doesn't tell the guard how long a command may run before it yields,
+so on Codex a plain read that doesn't end (`tail -f`) goes on running in the background
+until the slot fork exits with its recall.
 
 **The log.** `moxi memory subconscious list` prints one line per recall (its id, state,
 start, session, how it started, the head of its prompt or topic, its route, rounds and
