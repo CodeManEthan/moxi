@@ -10,6 +10,7 @@ import json
 import os
 import random
 import shlex
+import shutil
 import sys
 import textwrap
 import time
@@ -19,7 +20,7 @@ import pytest
 
 from moxi import proc
 from moxi_dev.testing import PROC_WAIT_S
-from moxi_statusline import detect, offers
+from moxi_statusline import detect, offers, shell
 
 SEGMENTS = ["cache", "usage"]
 DEFAULT = ["dir", "branch", "model", "effort", "context", "usage", "cache"]
@@ -30,8 +31,11 @@ ALL = r"""
 import json, os, subprocess, sys
 sys.stdout.reconfigure(encoding="utf-8")
 d = json.load(sys.stdin)
-b = subprocess.run(["git", "branch", "--show-current"], capture_output=True,
-                   text=True).stdout.strip()
+try:  # no branch where git isn't on PATH
+    b = subprocess.run(["git", "branch", "--show-current"], capture_output=True,
+                       text=True).stdout.strip()
+except OSError:
+    b = ""
 r = d["rate_limits"]
 print(f"\033[34m{d['workspace']['current_dir']}\033[0m │ {b} │ "
       f"{d['model']['display_name']} {d['effort']['level']} │ "
@@ -349,6 +353,43 @@ def test_a_command_naming_home_is_found(throwaway):
     assert "model" in found.pieces()
 
 
+#: A home whose name a shell would split or read: a space, a quote and a dollar.
+ODD_HOME = "First O'Last $x"
+
+
+def _odd_home(tmp_path) -> tuple[Path, dict[str, str]]:
+    """A home named `ODD_HOME` holding the line script, and an environment that places it."""
+    home = tmp_path / ODD_HOME
+    home.mkdir()
+    (home / "my line.py").write_text(ALL, encoding="utf-8")
+    return home, dict(os.environ, HOME=str(home), USERPROFILE=str(home))
+
+
+@pytest.mark.parametrize("command", ["{exe} ~/'my line.py'", '{exe} "$HOME/my line.py"',
+                                     "{exe} '${{HOME}}/my line.py'", "{exe} ~/my\\ line.py"])
+def test_a_home_with_a_space_is_found(throwaway, tmp_path, command):
+    _home, env = _odd_home(tmp_path)
+    if shell.find(env).kind == "powershell":
+        pytest.skip("Windows without Git Bash: PowerShell's forms are tested below")
+    found = run(command.format(exe=shlex.quote(sys.executable)), throwaway, env=env)
+    assert found.problem is None and "model" in found.pieces()
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="PowerShell runs a line only on Windows")
+@pytest.mark.parametrize("command", ["& {exe} ~/'my line.py'", '& {exe} "$HOME/my line.py"',
+                                     "& {exe} $HOME/'my line.py'"])
+def test_a_home_with_a_space_is_found_under_powershell(throwaway, tmp_path, command):
+    _home, env = _odd_home(tmp_path)
+    env.pop(shell.GIT_BASH_PATH_ENV, None)
+    env["PATH"] = os.pathsep.join(
+        part for part in env["PATH"].split(os.pathsep)
+        if part and shutil.which("git", path=part) is None)
+    assert shell.find(env).kind == "powershell"
+    exe = "'" + sys.executable.replace("'", "''") + "'"
+    found = run(command.format(exe=exe), throwaway, env=env)
+    assert found.problem is None and "model" in found.pieces()
+
+
 def test_a_command_that_cannot_run_detects_nothing(throwaway):
     found = run("/no/such/line.sh", throwaway)
     assert found.pieces() == [] and "exited with code 127" in found.problem
@@ -423,3 +464,26 @@ def test_the_sandbox_unsets_homes_and_moxi_variables():
 def test_home_in_the_command_is_the_real_one():
     assert detect.homed("~/a.sh --x=~/b $HOME/c ${HOME}/d a~b $HOMEY", "/h") == \
         "/h/a.sh --x=/h/b /h/c /h/d a~b $HOMEY"
+
+
+@pytest.mark.parametrize(("command", "sh", "powershell"), [
+    ("~/a", "'/a b'/a", "$HOME/a"),
+    ("$HOME/a ${HOME}/b", "'/a b'/a '/a b'/b", "$HOME/a ${HOME}/b"),
+    ("--x=~/b", "--x='/a b'/b", "--x=$HOME/b"),
+    ('"$HOME/a" "~/b"', '"/a b/a" "/a b/b"', '"$HOME/a" "$HOME/b"'),
+    ("'$HOME/a' '~/b'", "'/a b/a' '/a b/b'", "'/a b/a' '/a b/b'"),
+    ("\\$HOME/a", "\\$HOME/a", "\\$HOME/a"),
+    ("`$HOME/a", "`'/a b'/a", "`$HOME/a"),
+])
+def test_the_home_is_quoted_where_it_sits(command, sh, powershell):
+    assert detect.homed(command, "/a b", "sh") == sh
+    assert detect.homed(command, "/a b", "bash") == sh
+    assert detect.homed(command, "/a b", "powershell") == powershell
+
+
+def test_a_quote_and_a_dollar_in_the_home_are_quoted():
+    home = "/h O'L $x"
+    assert detect.homed("~/a", home) == "'/h O'\"'\"'L $x'/a"
+    assert detect.homed('"$HOME/a"', home) == '"/h O\'L \\$x/a"'
+    assert detect.homed("'$HOME/a'", home) == "'/h O'\\''L $x/a'"
+    assert detect.homed("'~/a'", home, "powershell") == "'/h O''L $x/a'"

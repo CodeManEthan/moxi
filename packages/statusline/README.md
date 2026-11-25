@@ -64,7 +64,8 @@ output shows which pieces your line prints, and where. It runs in a fresh folder
 system temp folder, with that folder's empty `home` as `HOME` and no `XDG_*_HOME`,
 `MOXI_*` (but the start mark every process Moxi starts carries) or `CLAUDE_CONFIG_DIR`
 set, so what the script writes under its home lands there and is removed after; a `~` or
-`$HOME` in the command itself is still your own home. It gets 5 seconds, then it and every
+`$HOME` in the command itself is still your own home, quoted by the shell's rules, so a
+home with a space in its name works. It gets 5 seconds, then it and every
 process it started are ended, and what it left running is ended once it exits too: on
 POSIX its process group, on Windows its job. Writes to absolute paths, and processes that
 leave the group, are not caught.

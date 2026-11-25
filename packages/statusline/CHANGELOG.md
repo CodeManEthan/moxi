@@ -32,6 +32,10 @@ The first version.
   name. Under PowerShell `pieces` measures nothing and says its commands need Git Bash.
   The test run ends what the line left running once it exits on every system, through
   the core's `run(..., end_tree=True)`.
+- The test run puts your own home in for a `~` or `$HOME` in the command quoted by the
+  shell's rules where it sits (bare, in double quotes or in single quotes), so a home with
+  a space or a quote in its name stays one word. Under PowerShell, whose own `$HOME` is
+  your home, a `~` becomes `$HOME`.
 - Moxi's line is written for the shell Claude Code runs it with: on Windows, under Git
   Bash with forward slashes and bash's quoting, since bash drops the backslashes of a bare
   Windows path and the line didn't run; under PowerShell as `& '<path>'`. The form written

@@ -48,7 +48,10 @@ the throwaway folder, and every `XDG_*_HOME`, every `MOXI_*` variable but the co
 mark, and `CLAUDE_CONFIG_DIR` are unset, so a script's writes under its home and default
 folders land in the throwaway folder and go with it. A `~` or `$HOME` in the
 command's own text is replaced by the real home folder first (with forward slashes under
-Git Bash), so the command is still found. Writes to absolute paths, and processes that leave the group, still escape. The
+Git Bash), quoted by the shell's rules where it sits, so the command is still found and a
+home with a space stays one word. PowerShell's own `$HOME` is the real home (it follows
+`USERPROFILE`, which the run keeps), and PowerShell can't join a quoted piece to the rest
+of a bare word, so there a `~` becomes `$HOME` and `$HOME` is left as it is. Writes to absolute paths, and processes that leave the group, still escape. The
 throwaway folder is made fresh under the system temp folder and removed every time.
 
 **Reading the output.** Escape sequences (colours, links) are stripped, then each marker
@@ -64,6 +67,7 @@ import json
 import os
 import random
 import re
+import shlex
 import shutil
 import stat
 import subprocess
@@ -396,10 +400,54 @@ def sandbox(base: Mapping[str, str], home: str) -> dict[str, str]:
     return out
 
 
-def homed(command: str, home: str) -> str:
-    """`command` with a leading `~` of a word and `$HOME`/`${HOME}` replaced by `home`."""
-    command = re.sub(r"\$\{HOME\}|\$HOME(?!\w)", lambda _: home, command)
-    return re.sub(r"(?<![^\s=:'\"])~(?=/|\s|$|['\"])", lambda _: home, command)
+#: Where a command names the home: `$HOME`, `${HOME}`, and a `~` that starts a word.
+_HOME_AT = re.compile(r"\$\{HOME\}|\$HOME(?!\w)|(?<![^\s=:'\"])~(?=/|\s|$|['\"])")
+
+
+def homed(command: str, home: str, kind: str = "sh") -> str:
+    """`command` with a leading `~` of a word and `$HOME`/`${HOME}` replaced by `home`,
+    quoted by the rules of the shell `kind` (one of `shell.KINDS`) where each sits, so a
+    home with a space stays one word. sh and bash: bare, `shlex.quote`; inside double
+    quotes, `\\`, `"`, `$` and `` ` `` escaped; inside single quotes, each `'` closed,
+    escaped and reopened. PowerShell: bare or inside double quotes a `~` becomes `$HOME`,
+    PowerShell's own home, and `$HOME` stays; inside single quotes the home, `'` doubled.
+    An escaped character is left as it is."""
+    escape = "`" if kind == "powershell" else "\\"
+    out: list[str] = []
+    quote: str | None = None
+    at = 0
+    while at < len(command):
+        named = _HOME_AT.match(command, at)
+        if named is not None:
+            out.append(_quoted(home, named.group(), quote, kind))
+            at = named.end()
+            continue
+        char = command[at]
+        if char == escape and quote != "'":
+            out.append(command[at:at + 2])
+            at += 2
+            continue
+        if quote is None and char in "'\"":
+            quote = char
+        elif char == quote:
+            quote = None
+        out.append(char)
+        at += 1
+    return "".join(out)
+
+
+def _quoted(home: str, named: str, quote: str | None, kind: str) -> str:
+    """`home` in place of `named` (`~`, `$HOME` or `${HOME}`), inside `quote` (None, `'`
+    or `"`), by the rules of the shell `kind`."""
+    if kind == "powershell":
+        if quote == "'":
+            return home.replace("'", "''")
+        return "$HOME" if named == "~" else named
+    if quote is None:
+        return shlex.quote(home)
+    if quote == '"':
+        return re.sub(r'([\\"$`])', r"\\\1", home)
+    return home.replace("'", "'\\''")
 
 
 def run(command: str, data: bytes, *, cwd: str, env: Mapping[str, str],
@@ -485,9 +533,10 @@ def detect(command: str, *, tmp: str | None = None, now: Callable[[], float] = t
             real_home = str(paths.home(base))
         except LookupError:
             real_home = None
-        if real_home is not None and shell.find(run_env).kind == "bash":
+        kind = shell.find(run_env).kind
+        if real_home is not None and kind == "bash":
             real_home = real_home.replace("\\", "/")  # Git Bash drops a bare backslash
-        line = command if real_home is None else homed(command, real_home)
+        line = command if real_home is None else homed(command, real_home, kind)
         data = json.dumps(drawn.payload()).encode("utf-8")
         try:
             code, out = run(line, data, cwd=drawn.work_dir, env=run_env, limit=limit)
