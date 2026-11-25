@@ -71,7 +71,7 @@ def test_a_skill_the_manifest_lists_is_placed_as_the_module_and_seeded(demo, loa
     out = install.install()
     assert out.code == 0, out.text()
     target = kit.claude() / "moxi-demo"
-    assert os.readlink(target) == str(demo / "moxi-demo")
+    assert kit.placed(target, demo / "moxi-demo")
     assert kit.owner_of(target) == "loadout"
     assert next(iter(kit.handed("demo").values()))["seeded"] is True
     record = next(iter(ledger.read()["placed"].values()))
@@ -111,7 +111,7 @@ def test_replace_on_a_module_skill_places_it_as_the_module_seeded(demo, loadout_
     named = "skill:demo/moxi-demo@claude" if form == "id" else str(target)
     out = install.install(replace=[named])
     assert out.code == 0, out.text()
-    assert os.readlink(target) == str(demo / "moxi-demo")
+    assert kit.placed(target, demo / "moxi-demo")
     assert kit.owner_of(target) == "loadout"
     assert kit.handed("demo")[str(target)]["seeded"] is True
     assert ledger.read()["placed"][str(target)]["seeded"] is True
@@ -212,7 +212,7 @@ def test_the_users_own_skill_wins_its_name_over_a_module_skill(demo, loadout_dir
     assert out.code == 3
     rows = {(r.name, r.harness): r for r in out.rows}
     assert rows["demo/moxi-demo", "claude"].state == "blocked"
-    assert os.readlink(kit.claude() / "moxi-demo") == str(loadout_dir / "skills" / "moxi-demo")
+    assert kit.placed(kit.claude() / "moxi-demo", loadout_dir / "skills" / "moxi-demo")
 
 
 def test_take_lists_every_module_placement_in_one_write(demo, loadout_dir):

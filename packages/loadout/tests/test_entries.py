@@ -446,7 +446,7 @@ def test_a_tilde_in_claude_config_dir_puts_settings_and_mcp_file_under_the_home(
     work = tmp_path / "work"
     work.mkdir()
     monkeypatch.chdir(work)   # where a `~` taken literally would land
-    given = {"HOME": "/given/home", "CLAUDE_CONFIG_DIR": "~/cc"}
+    given = {"HOME": "/given/home", "USERPROFILE": "/given/home", "CLAUDE_CONFIG_DIR": "~/cc"}
     assert harness.claude_home(given) / "settings.json" == Path("/given/home/cc/settings.json")
     assert harness.claude_json(given) == Path("/given/home/cc/.claude.json")
     monkeypatch.setenv("CLAUDE_CONFIG_DIR", "~/cc")

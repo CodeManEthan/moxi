@@ -8,6 +8,7 @@ from __future__ import annotations
 import json
 import os
 import shutil
+import sys
 from pathlib import Path
 
 import loadout_kit as kit
@@ -20,6 +21,10 @@ from moxi_loadout import gitpiece, harness_row, homes, install, ledger, pagejob,
 @pytest.fixture
 def lo(loadout_dir):
     return make(loadout_dir)
+
+
+#: The variable that places the home folder (`moxi.paths.home`).
+HOME_VARIABLE = "USERPROFILE" if sys.platform == "win32" else "HOME"
 
 
 def make(loadout_dir: Path) -> Path:
@@ -89,7 +94,7 @@ def test_a_job_refuses_while_only_the_terminal_sets_moxi_home_and_runs_once_the_
     # Once the shell has it, the job agrees and acts on the terminal's ledger.
     monkeypatch.setenv("MOXI_HOME", str(there))
     assert pagejob.run("j2", ["add", "skill", "review", "--user"]) == 0
-    assert os.readlink(kit.claude() / "review") == str(loadout_dir / "skills" / "review")
+    assert kit.placed(kit.claude() / "review", loadout_dir / "skills" / "review")
     assert ledger.read()["placed"]
 
 
@@ -109,20 +114,20 @@ def test_a_job_refuses_when_only_moxis_own_state_dir_and_settings_file_differ(
 
 def test_a_job_refuses_when_a_harness_rows_dir_differs(
         lo, monkeypatch, tmp_path, terminal_record):
-    # The opencode row loadout adds is written under ~, so HOME moves it.
+    # The opencode row loadout adds is written under ~, so the home's variable moves it.
     assert harness_row.add(say=lambda line: None) == "added"
     terminal_record()
-    monkeypatch.setenv("HOME", str(tmp_path / "other-home"))
+    monkeypatch.setenv(HOME_VARIABLE, str(tmp_path / "other-home"))
     page(monkeypatch)
     assert pagejob.run("j1", ["add", "skill", "review", "--user"]) == 3
     line = refused("j1", lo)
     assert f"opencode's skills folder here is {tmp_path / 'other-home'}" in line
-    assert "the home folder here is" in line and "HOME to " in line
+    assert "the home folder here is" in line and f"{HOME_VARIABLE} to " in line
 
 
 @pytest.mark.parametrize("variable, label", [
     ("CLAUDE_CONFIG_DIR", "Claude Code's home"), ("CODEX_HOME", "Codex's home"),
-    ("XDG_CONFIG_HOME", "OpenCode's home"), ("HOME", "the home folder")])
+    ("XDG_CONFIG_HOME", "OpenCode's home"), (HOME_VARIABLE, "the home folder")])
 def test_a_job_under_another_harness_home_is_refused(
         lo, monkeypatch, tmp_path, terminal_record, variable, label):
     terminal_record()
@@ -132,7 +137,7 @@ def test_a_job_under_another_harness_home_is_refused(
     assert pagejob.run("j1", ["add", "skill", "review", "--user"]) == 3
     line = refused("j1", lo)
     assert f"{label} here is {tmp_path / 'elsewhere'}" in line
-    assert f"{variable} to " in line and "moxi ui stop" in line
+    assert f"{variable} to " in line and kit.UI_STEP in line
     assert ledger.read() == before
 
 
@@ -222,7 +227,7 @@ def test_status_notes_a_difference_without_a_row_or_a_code(
     [note] = [n for n in after.notes if "terminal" in n]
     assert "Claude Code's home here is" in note and "CLAUDE_CONFIG_DIR" in note
     # A terminal is told what the page does, not given the page's own advice.
-    assert "The browser page refuses to write" in note and "moxi ui stop" in note
+    assert "The browser page refuses to write" in note and kit.UI_STEP in note
     assert "run the command in a terminal" not in note
     with homes.as_page():
         [note] = [n for n in install.status().notes if "terminal" in n]

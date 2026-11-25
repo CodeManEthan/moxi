@@ -123,10 +123,11 @@ def test_add_to_a_project_finds_its_section_or_makes_one(loadout_dir):
     assert writes.add("agent", "lead", project="WEB", loadout_dir=loadout_dir)
     assert writes.add("skill", "deploy", project=os.path.expanduser("~/code/app"),
                       loadout_dir=loadout_dir)
-    assert writes.add("skill", "x", project="/srv/other", loadout_dir=loadout_dir)
+    other = os.path.abspath("/srv/other")
+    assert writes.add("skill", "x", project=other, loadout_dir=loadout_dir)
     m = read(loadout_dir)
     assert m.section("web").names("agent") == ("lead",)
-    assert [s.name for s in m.projects] == ["web", "~/code/app", "/srv/other"]
+    assert [s.name for s in m.projects] == ["web", "~/code/app", other]
     assert writes.add("skill", "more", project="~/code/app/", loadout_dir=loadout_dir)
     assert read(loadout_dir).section("~/code/app").names("skill") == ("deploy", "more")
 

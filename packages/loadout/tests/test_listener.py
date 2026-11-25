@@ -90,12 +90,12 @@ def test_a_disabled_skill_the_module_places_again_is_removed_in_that_run(demo, l
     module_install(demo, ("moxi-demo", "claude"), ("moxi-demo", "codex"))
     assert kit.owner_of(codex) == "demo"
     before = ledger_bytes()
-    claude_link = os.readlink(kit.claude() / "moxi-demo")
+    claude_placed = kit.placement_of(kit.claude() / "moxi-demo")
     said, say = lines()
     listener.on_install("demo", found(), say=say)
     assert not os.path.lexists(codex)
     assert "loadout: removed moxi-demo for codex (disabled)" in said
-    assert os.readlink(kit.claude() / "moxi-demo") == claude_link
+    assert kit.placement_of(kit.claude() / "moxi-demo") == claude_placed
     assert kit.owner_of(kit.claude() / "moxi-demo") == "loadout"
     assert ledger_bytes() == before
     assert install.install().code == 0
@@ -168,7 +168,7 @@ def test_a_listener_that_fails_leaves_the_placement_for_the_next_install(demo, l
         m.setattr(place, "apply", lambda steps, **kwargs: [])
         with pytest.raises(RuntimeError, match="moxi loadout install removes it"):
             listener.on_install("demo", found(), say=lambda line: None)
-    assert os.path.islink(target)
+    assert kit.placed(target)
     out = install.install()
     assert out.code == 0, out.text()
     assert not os.path.lexists(target)
@@ -232,12 +232,12 @@ def test_a_failed_removal_at_module_uninstall_is_ended_by_the_next_install(demo,
     assert str(target) in str(raised.value)
     assert "moxi loadout install removes it" in str(raised.value)
     monkeypatch.setattr(place, "apply", real_apply)
-    # The package goes; the link it left dangles.
+    # The package goes; the link it left dangles (a copy, on Windows, stays whole).
     for path in site.root.iterdir():
         if path.name.startswith("moxi_demo"):
             shutil.rmtree(path)
     moxi.modules.reset()
-    assert os.path.islink(target) and not os.path.exists(target)
+    assert os.path.lexists(target) and (kit.DIR_FORM == "copy" or not os.path.exists(target))
     before = install.status()
     assert before.code == 1
     assert any(r.target == str(target) and r.state == "stale" for r in before.rows)
@@ -266,7 +266,7 @@ def test_the_uninstall_listener_leaves_the_users_own_skill_of_that_name(demo, lo
                          'harnesses = ["claude"]\n')
     assert install.install().code == 0
     listener.on_uninstall("demo", say=lambda line: None)
-    assert os.readlink(kit.claude() / "moxi-demo") == str(loadout_dir / "skills" / "moxi-demo")
+    assert kit.placed(kit.claude() / "moxi-demo", loadout_dir / "skills" / "moxi-demo")
 
 
 def test_the_listener_adopts_while_a_cli_install_waits_and_neither_times_out(demo, site,

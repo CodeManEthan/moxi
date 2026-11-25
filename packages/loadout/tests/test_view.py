@@ -72,7 +72,7 @@ def test_form_says_how_loadout_places_each_item(lo):
     kit.manifest(lo, '[user]\nskills = ["review"]\nagents = ["helper"]\nhooks = ["guard-rm"]\n'
                      + HOOK)
     found = rows()
-    assert found[("skill", "review", "claude", "user")]["form"] == "link"
+    assert found[("skill", "review", "claude", "user")]["form"] == kit.DIR_FORM
     assert found[("agent", "helper", "claude", "user")]["form"] == "link"
     assert found[("agent", "helper", "codex", "user")]["form"] == "generated"
     assert found[("hook", "guard-rm", "claude", "user")]["form"] == "entry"
@@ -92,7 +92,7 @@ def test_a_removal_keeps_the_form_it_was_placed_in(lo):
     assert install.install().code == 0
     kit.manifest(lo, '[user]\nskills = ["review"]\n')
     gone = rows()[("skill", "other", "claude", "user")]
-    assert (gone["state"], gone["form"]) == ("stale", "link")
+    assert (gone["state"], gone["form"]) == ("stale", kit.DIR_FORM)
 
 
 # -- edited ---------------------------------------------------------------------------------
@@ -112,10 +112,10 @@ def test_a_skill_saved_over_loadouts_link_reads_edited(lo):
     kit.manifest(lo, '[user]\nskills = ["review"]\n')
     assert install.install().code == 0
     target = kit.claude() / "review"
-    target.unlink()
+    kit.unplace(target)
     kit.skill(kit.claude(), "review", "saved over\n")
     row = rows()[("skill", "review", "claude", "user")]
-    assert (row["state"], row["form"], row["edited"]) == ("blocked", "link", True)
+    assert (row["state"], row["form"], row["edited"]) == ("blocked", kit.DIR_FORM, True)
 
 
 def test_a_link_pointing_elsewhere_and_a_strangers_skill_are_not_edited(lo, tmp_path):
@@ -123,7 +123,7 @@ def test_a_link_pointing_elsewhere_and_a_strangers_skill_are_not_edited(lo, tmp_
     assert install.install().code == 0
     elsewhere = kit.skill(tmp_path / "elsewhere", "review")
     target = kit.claude() / "review"
-    target.unlink()
+    kit.unplace(target)
     target.symlink_to(elsewhere)
     row = rows()[("skill", "review", "claude", "user")]
     assert (row["state"], row["edited"]) == ("blocked", False)

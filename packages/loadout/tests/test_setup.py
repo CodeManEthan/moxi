@@ -232,7 +232,7 @@ def test_after_setup_install_places_for_opencode(loadout_dir):
     out = install.install()
     assert out.code == 0, out.text()
     placed = os.path.join(os.environ["XDG_CONFIG_HOME"], "opencode", "skills", "review")
-    assert os.readlink(placed) == str(loadout_dir / "skills" / "review")
+    assert kit.placed(placed, loadout_dir / "skills" / "review")
 
 
 def test_the_announcement_names_setup_and_the_listener():

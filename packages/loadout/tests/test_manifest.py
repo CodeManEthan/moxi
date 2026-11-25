@@ -240,7 +240,7 @@ def test_source_expands_quoted_in_a_command_and_plain_elsewhere(tmp_path):
         f'python3 "{loadout_dir}"/hooks/guard.py')
     assert manifest.expand("{source}/docs", loadout_dir) == f"{loadout_dir}/docs"
     plain = tmp_path / "plain"
-    assert manifest.expand_command(command, plain, is_windows=False) == (
+    assert manifest.expand_command(command, plain) == (
         f"python3 {plain}/hooks/guard.py")
 
 

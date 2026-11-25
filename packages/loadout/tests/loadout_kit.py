@@ -14,6 +14,10 @@ from pathlib import Path
 #: where a folder links only as a junction the `skills.form` setting asks for, a copy.
 DIR_FORM = "copy" if sys.platform == "win32" else "link"
 
+#: The step ui's line gives for the browser shell to take a change (`moxi_ui.terminal.where`).
+UI_STEP = ("log out and back in" if sys.platform in ("darwin", "win32")
+           else "moxi ui stop")
+
 
 def configure(loadout_dir: Path) -> Path:
     """Make `loadout_dir` the configured loadout folder; return it."""
@@ -43,6 +47,43 @@ def agent(path: Path, name: str, extra: str = "") -> Path:
     path.write_text(f"---\nname: {name}\ndescription: An agent.\n{extra}---\nYou help.\n",
                     encoding="utf-8")
     return path
+
+
+def _same_path(a: str | os.PathLike, b: str | os.PathLike) -> bool:
+    def norm(p):
+        text = os.fspath(p)
+        return os.path.normcase(os.path.normpath(text.removeprefix("\\\\?\\")))
+    return norm(a) == norm(b)
+
+
+def placed(path: Path, source: Path | str | None = None) -> bool:
+    """Whether the placer's own form stands at `path`, of `source` when it is named: a link
+    to it, or, on Windows, a copy (a folder holding the placer's mark, or a file with the
+    source's bytes where the account can't make symlinks)."""
+    from moxi import place
+
+    path = Path(path)
+    if path.is_symlink():
+        return source is None or _same_path(os.readlink(path), source)
+    if sys.platform != "win32":
+        return False
+    if path.is_dir():
+        mark = path / place.MARK
+        if not mark.is_file():
+            return False
+        named = json.loads(mark.read_text(encoding="utf-8")).get("source")
+        return source is None or (named is not None and _same_path(named, source))
+    return path.is_file() and (source is None
+                               or path.read_bytes() == Path(source).read_bytes())
+
+
+def placement_of(path: Path) -> str | bytes:
+    """What the placer left at `path`, to compare across a run: a link's text, or a copied
+    folder's mark (which holds the copy's hash)."""
+    from moxi import place
+
+    path = Path(path)
+    return os.readlink(path) if path.is_symlink() else (path / place.MARK).read_bytes()
 
 
 def unplace(path: Path) -> None:

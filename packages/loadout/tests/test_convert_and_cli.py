@@ -82,7 +82,7 @@ def test_add_writes_the_manifest_then_installs_only_that_item(lo, capsys):
     assert main(["add", "skill", "review"]) == 0
     out = capsys.readouterr().out
     assert "listed skill review in user" in out
-    assert (kit.claude() / "review").is_symlink()
+    assert kit.placed(kit.claude() / "review")
     assert not os.path.lexists(kit.claude() / "other")
     assert "# my loadout" in (lo / "loadout.toml").read_text()
 
@@ -91,7 +91,7 @@ def test_disable_and_remove_install_their_item_and_leave_no_lock_file(lo, capsys
     main(["install"])
     assert main(["disable", "skill:other@codex"]) == 0
     assert not os.path.lexists(kit.codex_skills() / "other")
-    assert (kit.claude() / "other").is_symlink()
+    assert kit.placed(kit.claude() / "other")
     assert main(["remove", "skill", "other"]) == 0
     assert not os.path.lexists(kit.claude() / "other")
     assert sorted(os.listdir(lo)) == ["loadout.toml", "skills"]

@@ -90,7 +90,7 @@ def test_a_job_runs_the_verb_and_writes_its_outcome(lo, page, recorded):
     record = end("j1")
     assert record["exit"] == 0 and record["outcome"]["exit"] == 0
     assert "listed skill review in user" in record["outcome"]["lines"]
-    assert os.readlink(kit.claude() / "review") == str(lo / "skills" / "review")
+    assert kit.placed(kit.claude() / "review", lo / "skills" / "review")
     assert os.environ[homes.CALLER_ENV] == pagejob.CALLER
     assert not {"homes", "git"} & set(ledger.read())
     assert pagejob.read("j1")["state"] == "done"
@@ -171,8 +171,8 @@ def test_a_job_with_no_claude_on_path_writes_the_rest(lo, monkeypatch, page, rec
     rows = {(r["kind"], r["name"], r["harness"]): r for r in end("j1")["outcome"]["rows"]}
     standing = rows[("mcp", "docs", "claude")]
     assert standing["state"] == "blocked"
-    assert "no claude on PATH" in standing["reason"] and "moxi ui stop" in standing["reason"]
-    assert os.readlink(kit.claude() / "review") == str(lo / "skills" / "review")
+    assert "no claude on PATH" in standing["reason"] and kit.UI_STEP in standing["reason"]
+    assert kit.placed(kit.claude() / "review", lo / "skills" / "review")
     assert not harness.claude_json().exists()
 
 
@@ -323,4 +323,4 @@ def test_a_spawned_job_runs_to_its_end(lo, recorded):
         assert time.monotonic() < deadline, found
         time.sleep(0.1)
     assert found["state"] == "done" and found["exit"] == 0, found
-    assert os.readlink(kit.claude() / "review") == str(lo / "skills" / "review")
+    assert kit.placed(kit.claude() / "review", lo / "skills" / "review")

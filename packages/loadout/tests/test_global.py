@@ -399,7 +399,8 @@ def test_the_assembled_text_drops_empty_files(lo):
     assert assemble(["", "Part.\n\n"]) == "Part."
     assert assemble(["\n", "  \n"]) == ""
     assert assemble(["Shared.\n", "Part.\n"]) == "Shared.\n\nPart."
-    assert block(["/a", "/b"], "") == ("<!-- moxi loadout: from /a and /b; edit there -->\n"
+    a, b = os.path.abspath("/a"), os.path.abspath("/b")
+    assert block(["/a", "/b"], "") == (f"<!-- moxi loadout: from {a} and {b}; edit there -->\n"
                                        "<!-- moxi loadout end -->")
     (lo / "global.md").write_text("")
     (lo / "global.codex.md").write_text("Codex only.\n")
@@ -715,7 +716,7 @@ def test_an_instructions_entry_naming_the_global_text_is_noted_and_left(lo):
     home.mkdir(parents=True, exist_ok=True)
     (home / "rules.md").write_text("Theirs.\n")
     jsonc = home / "opencode.jsonc"
-    tilde = "~/" + os.path.relpath(lo / "global.codex.md", os.path.expanduser("~"))
+    tilde = "~/" + Path(os.path.relpath(lo / "global.codex.md", os.path.expanduser("~"))).as_posix()
     body = ('{\n  // the user\'s own config\n  "instructions": [\n'
             f'    "{tilde}",  /* a part, by ~ */\n    "rules.md",\n  ],\n}}\n')
     jsonc.write_text(body)

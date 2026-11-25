@@ -330,7 +330,7 @@ def test_a_failed_removal_keeps_what_is_left_for_a_second_run(lo, monkeypatch):
     real = proc.run
 
     def stuck(argv, **kwargs):
-        if "remove" in argv and os.path.basename(argv[0]) == "claude":
+        if "remove" in argv and Path(argv[0]).stem == "claude":
             return subprocess.CompletedProcess(argv, 1, b"", b"busy")
         return real(argv, **kwargs)
 
@@ -390,7 +390,7 @@ def test_a_skill_from_the_modules_yes_goes_back_and_a_seeded_one_is_removed(demo
     lines, say = said()
     assert teardown.teardown(say=say) == 0, lines
     yes, seeded = kit.claude() / "moxi-demo", kit.claude() / "moxi-other"
-    assert kit.owner_of(yes) == "demo" and os.path.islink(yes)
+    assert kit.owner_of(yes) == "demo" and kit.placed(yes)
     assert str(yes) not in kit.handed("demo")
     assert "loadout: handed skill moxi-demo for claude back to demo" in lines
     assert not any("was seeded" in line for line in lines)
@@ -460,4 +460,4 @@ def test_an_edited_ignore_file_refuses(app):
     path.write_text(path.read_text() + "/mine\n")
     reason = refusal(lambda line: None)
     assert f"{path} was edited since loadout wrote it" in reason
-    assert os.path.islink(app / ".claude" / "skills" / "review")
+    assert kit.placed(app / ".claude" / "skills" / "review")

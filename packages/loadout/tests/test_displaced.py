@@ -382,14 +382,14 @@ def test_a_file_saved_over_loadouts_link_is_moved_aside_on_replace(lo):
     write(lo, '[user]\nskills = ["review"]\n')
     assert install.install().code == 0
     target = kit.claude() / "review"
-    target.unlink()
+    kit.unplace(target)
     kit.skill(kit.claude(), "review", "saved over\n")
     out = install.install(replace=["skill:review@claude"])
     assert out.code == 0, out.text()
     [kept] = out.kept
     assert kept["how"] == "replaced" and kept["target"] == str(target)
     assert (Path(kept["copy"]) / "SKILL.md").read_text().endswith("saved over\n")
-    assert target.is_symlink()
+    assert kit.placed(target)
 
 
 def test_an_edited_copy_is_moved_aside_on_replace_and_on_removal(lo):
@@ -517,7 +517,7 @@ def test_an_instructions_entry_edited_by_hand_is_his_and_left_with_no_copy(lo, r
     # The entry is its path: one edited names another path, which is the user's, so no
     # run writes over it and none keeps a copy of it.
     config, shared = _recorded_instructions(lo)
-    config.write_text(config.read_text().replace(shared, shared + ".mine"))
+    config.write_text(config.read_text().replace(json.dumps(shared), json.dumps(shared + ".mine")))
     before = config.read_bytes()
     out = install.install(replace=replace)
     assert out.code == 0, out.text()

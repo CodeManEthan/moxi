@@ -106,7 +106,7 @@ def test_the_ignore_file_is_written_before_the_placement(app):
     out = install.install()
     assert out.code == 0, out.text()
     for skills_dir in (app / ".claude" / "skills", app / ".agents" / "skills"):
-        assert (skills_dir / "review").is_symlink()
+        assert kit.placed(skills_dir / "review")
         assert ignores.state(skills_dir / ".gitignore") == "ours"
         assert ignores.listed(skills_dir / ".gitignore") == {"review"}
     assert untracked(app) == []
@@ -153,7 +153,7 @@ def test_a_gitignore_of_the_users_is_left_and_the_target_not_placed(app):
     assert not os.path.lexists(skills_dir / "review")
     assert (skills_dir / ".gitignore").read_text() == "/other\n"
     # Codex's folder has no ignore file, so loadout writes its own there and places.
-    assert (app / ".agents" / "skills" / "review").is_symlink()
+    assert kit.placed(app / ".agents" / "skills" / "review")
 
 
 @pytest.mark.slow
@@ -164,7 +164,7 @@ def test_a_users_rule_that_covers_the_target_is_enough(app):
     (skills_dir / ".gitignore").write_text("/review\n")
     out = install.install()
     assert out.code == 0, out.text()
-    assert (skills_dir / "review").is_symlink()
+    assert kit.placed(skills_dir / "review")
     assert (skills_dir / ".gitignore").read_text() == "/review\n"
 
 
@@ -227,7 +227,7 @@ def test_a_tracked_occupant_reads_would_commit_then_replace_places_over_it(lo, t
     assert row.as_json()["replaceable"] is True
     out = install.install(replace=["skill:review@codex"])
     assert out.code == 0, out.text()
-    assert skill_dir.is_symlink()
+    assert kit.placed(skill_dir)
     assert ignores.listed(skill_dir.parent / ".gitignore") == {"review"}
 
 
@@ -242,7 +242,7 @@ def test_a_held_item_in_place_is_never_would_commit(lo, tmp_path):
     out = install.install()
     assert out.code == 0, out.text()
     assert not (root / ".claude" / "skills" / ".gitignore").exists()
-    assert (root / ".agents" / "skills" / "own").is_symlink()
+    assert kit.placed(root / ".agents" / "skills" / "own")
     assert ignores.listed(root / ".agents" / "skills" / ".gitignore") == {"own"}
     after = install.status()
     assert states(after)[("skill", "own", "claude")][0] == "ok"

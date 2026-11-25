@@ -39,14 +39,14 @@ def test_install_places_skills_and_agents_for_each_harness(lo):
     assert set(states(before).values()) == {"missing"}
     out = install.install()
     assert out.code == 0, out.text()
-    assert os.readlink(kit.claude() / "review") == str(lo / "skills" / "review")
-    assert os.readlink(kit.codex_skills() / "review") == str(lo / "skills" / "review")
-    assert os.readlink(kit.claude("agents") / "helper.md") == str(lo / "agents" / "helper.md")
+    assert kit.placed(kit.claude() / "review", lo / "skills" / "review")
+    assert kit.placed(kit.codex_skills() / "review", lo / "skills" / "review")
+    assert kit.placed(kit.claude("agents") / "helper.md", lo / "agents" / "helper.md")
     # The Codex agent is generated, and goes to the Codex home's agents folder.
     toml = kit.codex_agents() / "helper.toml"
     from moxi_loadout import stores
 
-    assert toml.is_symlink()
+    assert kit.placed(toml)
     assert os.path.realpath(toml).startswith(os.path.realpath(stores.generated_dir()))
     assert 'name = "helper"' in toml.read_text()
     after = install.status()
@@ -63,7 +63,7 @@ def test_harness_list_and_disabled_choose_the_harnesses(lo):
                      '[skill.review]\nharnesses = ["claude"]\n')
     out = install.install()
     assert out.code == 0
-    assert (kit.claude() / "review").is_symlink()
+    assert kit.placed(kit.claude() / "review")
     assert not os.path.lexists(kit.codex_skills() / "review")
     assert not os.path.lexists(kit.codex_agents() / "helper.toml")
     assert states(out)[("agent", "helper", "codex", "user")] == "off"
@@ -75,12 +75,12 @@ def test_install_user_leaves_project_placements_as_they_are(lo, tmp_path):
     kit.manifest(lo, f'[user]\nskills = ["review"]\n[project.{toml_string(root)}]\nskills = ["deploy"]\n')
     out = install.install(Scope(user=True))
     assert out.code == 0
-    assert (kit.claude() / "review").is_symlink()
+    assert kit.placed(kit.claude() / "review")
     assert not os.path.lexists(root / ".claude" / "skills" / "deploy")
     out = install.install(Scope(projects=(str(root),)))
     assert out.code == 0
-    assert (root / ".claude" / "skills" / "deploy").is_symlink()
-    assert (root / ".agents" / "skills" / "deploy").is_symlink()
+    assert kit.placed(root / ".claude" / "skills" / "deploy")
+    assert kit.placed(root / ".agents" / "skills" / "deploy")
 
 
 def test_one_items_scope_applies_only_its_steps(lo):
@@ -88,7 +88,7 @@ def test_one_items_scope_applies_only_its_steps(lo):
     kit.manifest(lo, '[user]\nskills = ["review", "other"]\n')
     out = install.install(Scope(item=("skill", "review")))
     assert out.code == 0
-    assert (kit.claude() / "review").is_symlink()
+    assert kit.placed(kit.claude() / "review")
     assert not os.path.lexists(kit.claude() / "other")
 
 
@@ -100,14 +100,14 @@ def test_a_dropped_item_is_removed_and_a_remove_outside_the_scope_waits(lo, tmp_
     root = project(tmp_path)
     kit.manifest(lo, f'[user]\nskills = ["review"]\n[project.{toml_string(root)}]\n')
     assert install.install(Scope(projects=(str(root),))).code == 0
-    assert (kit.claude() / "other").is_symlink()
+    assert kit.placed(kit.claude() / "other")
     status = install.status()
     assert any(r.state == "stale" and r.name == "other" for r in status.rows)
     assert any(r.name == "other" and r.reason == "no longer wanted; install removes it"
                for r in status.rows)
     assert install.install().code == 0
     assert not os.path.lexists(kit.claude() / "other")
-    assert (kit.claude() / "review").is_symlink()
+    assert kit.placed(kit.claude() / "review")
     assert {r["item"] for r in ledger.read()["placed"].values()} == {"review"}
 
 
@@ -117,7 +117,7 @@ def test_a_disabled_harness_removes_only_that_placement(lo):
     kit.manifest(lo, '[user]\nskills = ["review"]\ndisabled = ["skill:review@codex"]\n')
     assert install.install().code == 0
     assert not os.path.lexists(kit.codex_skills() / "review")
-    assert (kit.claude() / "review").is_symlink()
+    assert kit.placed(kit.claude() / "review")
 
 
 @pytest.mark.parametrize("break_it", ["delete", "clash", "name"])
@@ -132,7 +132,7 @@ def test_a_bad_source_is_carried_with_its_placement_kept(lo, tmp_path, break_it)
         shutil.rmtree(lo / "skills" / "review")
         broken = ("skill", "review", "claude", "user")
     elif break_it == "clash":
-        os.unlink(root / ".claude" / "skills" / "deploy")
+        kit.unplace(root / ".claude" / "skills" / "deploy")
         kit.skill(root / ".claude" / "skills", "deploy")
         broken = ("skill", "deploy", "claude", str(root))
     else:
@@ -155,7 +155,7 @@ def test_a_held_item_is_kept_in_place_and_linked_relatively(lo, tmp_path):
     assert held.is_dir() and not held.is_symlink()
     link = root / ".agents" / "skills" / "own"
     assert os.readlink(link) == os.path.join("..", "..", ".claude", "skills", "own")
-    assert (root / ".codex" / "agents" / "lead.toml").is_symlink()
+    assert kit.placed(root / ".codex" / "agents" / "lead.toml")
     assert set(states(install.status()).values()) == {"ok"}
 
 
@@ -196,8 +196,8 @@ def test_two_project_sections_place_one_name_each(lo, tmp_path):
     kit.manifest(lo, f'[project.{toml_string(a)}]\nskills = ["review"]\n'
                      f'[project.{toml_string(b)}]\nskills = ["review"]\n')
     assert install.install().code == 0
-    assert (a / ".claude" / "skills" / "review").is_symlink()
-    assert (b / ".claude" / "skills" / "review").is_symlink()
+    assert kit.placed(a / ".claude" / "skills" / "review")
+    assert kit.placed(b / ".claude" / "skills" / "review")
 
 
 def test_an_occupant_is_blocked_until_replace_moves_it_aside(lo):
@@ -211,7 +211,7 @@ def test_an_occupant_is_blocked_until_replace_moves_it_aside(lo):
     assert row.replaceable and row.as_json()["replaceable"] is True
     assert install.install(replace=["skill:review@claude"]).code == 0
     assert not any(r.replaceable for r in install.status().rows)
-    assert (kit.claude() / "review").is_symlink()
+    assert kit.placed(kit.claude() / "review")
     # A --replace that names nothing refused is refused.
     out = install.install(replace=["skill:nothing@claude"])
     assert out.code == 3 and any("nothing of loadout's" in line for line in out.lines)
@@ -284,14 +284,14 @@ def test_a_key_section_refused_carries_its_items(lo, tmp_path, site):
     kit.manifest(lo, '[project.app]\nskills = ["review"]\n')
     assert install.install(resolver=lambda key: Resolution(str(root))).code == 0
     target = root / ".claude" / "skills" / "review"
-    assert target.is_symlink()
+    assert kit.placed(target)
     for code in (3, 75):
         refused = install.install(resolver=lambda key: Resolution(None, "no", code))
         assert refused.code == code
-        assert target.is_symlink()
+        assert kit.placed(target)
     # Without projects, a key section is refused and nothing is removed.
     absent = install.install()
-    assert absent.code == 3 and target.is_symlink()
+    assert absent.code == 3 and kit.placed(target)
     assert any("moxi install projects" in line for line in absent.text())
     # Outside the scope, the refusal is a line, not a code.
     kit.manifest(lo, '[user]\nskills = ["review"]\n[project.app]\nskills = ["review"]\n')
@@ -321,7 +321,7 @@ def test_a_moved_loadout_dir_updates_its_links(lo, tmp_path):
     shutil.move(lo, moved)
     kit.configure(moved)
     assert install.install().code == 0
-    assert os.readlink(kit.claude() / "review") == str(moved / "skills" / "review")
+    assert kit.placed(kit.claude() / "review", moved / "skills" / "review")
 
 
 def test_entries_written_before_an_interrupt_are_recorded(lo, monkeypatch):
