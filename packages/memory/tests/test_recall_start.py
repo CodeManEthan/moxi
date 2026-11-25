@@ -2,7 +2,9 @@
 record and its child, and the child's first steps (its line, its config read, the first
 search and the brief)."""
 
+import re
 import types
+from pathlib import Path
 
 import pytest
 
@@ -420,6 +422,25 @@ def test_the_notes_are_read_whole_and_each_line_cut(tmp_path):
     assert lines == ["1: " + ("ingest " + "x" * 400)[:200]]
 
 
+def test_the_notes_search_keeps_no_files_text_past_its_score(tmp_path, monkeypatch):
+    for i in range(6):
+        (tmp_path / f"n{i}.md").write_text("ingest lock\n" if i % 2 else "ingest\n")
+    read, held = [], []
+    real = recall_brief._note_text
+
+    def counted(path):
+        text = real(path)
+        read.append(path.name)
+        held.append(text)
+        return text
+
+    monkeypatch.setattr(recall_brief, "_note_text", counted)
+    shown = [Path(p).name for p, _ in recall_brief._notes(["ingest", "lock"],
+                                                          [str(tmp_path)])]
+    assert shown == ["n1.md", "n3.md", "n5.md"]
+    assert sorted(read) == sorted([f"n{i}.md" for i in range(6)] + shown)
+
+
 def test_files_that_match_alike_are_ordered_by_path(tmp_path):
     for name in ("b.md", "a.md", "c.md", "d.md"):
         (tmp_path / name).write_text("ingest\n")
@@ -487,7 +508,7 @@ def test_the_brief_holds_the_prompt_the_hits_and_the_limits():
     assert "moxi memory search, moxi sessions read, grep" in text
     assert "End of recall." in text
     assert 'Recalled from past sessions and notes for "why did the ingest stall":' in text
-    assert "{" not in text
+    assert re.search(r"\{[a-z_]+\}", text) is None, "a placeholder left unfilled"
 
 
 def test_project_first_shows_the_project_first_and_names_it():
@@ -528,11 +549,15 @@ def test_the_brief_asks_for_a_first_answer_at_once_and_a_stream_after_it():
 
 def test_the_brief_says_a_backslash_is_refused():
     text = " ".join(brief().split())
-    assert "no backslash, (, ), $ or ! anywhere, even inside quotes" in text
+    assert ("No ;, & or &&, redirection, variable or cd, and no backslash, (, ), {, }, `, "
+            "$ or ! anywhere, even inside quotes") in text
     assert 'grep -E "one|other"' in text
+    assert "spell a repeat out (xx, not x{2})" in text
     assert "the Grep tool, which takes any pattern" in text
-    for refused in ("\\", "(", ")", "$", "!"):
-        assert refused in recall_guard.REFUSED_CHARS
+    shell = text[text.index("No ;"):text.index("anywhere, even inside quotes")]
+    for refused in recall_guard.REFUSED_CHARS - frozenset("<>\\"):
+        assert refused in shell
+    assert "redirection" in shell and "backslash" in shell
     assert recall_guard.plain_read('grep -E "one|other" notes.md', ["grep"])
     assert not recall_guard.plain_read('grep "one\\|other" notes.md', ["grep"])
 

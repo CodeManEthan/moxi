@@ -11,8 +11,9 @@ whole conversation) and subagent rows, and reading the notes: the Markdown files
 the part's notes directories whose text holds the most of the keywords, at most
 `NOTES_SHOWN` of each part, each with the lines around its matches, every shown line cut
 at `NOTES_LINE_CHARS` characters. Every file under a directory is read, however many
-there are; a file larger than `NOTES_FILE_MAX_BYTES` is skipped, and files that match
-alike are ordered by path. A notes directory that doesn't exist is none.
+there are, and only its score is kept; the files shown are read again for their lines.
+A file larger than `NOTES_FILE_MAX_BYTES` is skipped, and files that match alike are
+ordered by path. A notes directory that doesn't exist is none.
 
 `subconscious.scope` says where. `project`: one part, the session's project and its
 notes directory. `everywhere`: one part, the whole index and the notes root.
@@ -101,10 +102,10 @@ further:
 Limits: at most {max_tools} tool calls and about {limit_s} seconds in all. Only read:
 change no file, send no message, start no agent, and run no command that waits or follows
 a file. A shell call is one command, or several joined by |, each starting with one of:
-{fork_commands}. No ;, &&, redirection, variable or cd, and no backslash, (, ), $ or !
-anywhere, even inside quotes: for one word or another use grep -E "one|other", since a |
-inside quotes is part of the pattern, or use the Grep tool, which takes any pattern. To
-read part of a file, use the Read tool. Calls that do more are refused, and once your
+{fork_commands}. No ;, & or &&, redirection, variable or cd, and no backslash, (, ), {{, }},
+`, $ or ! anywhere, even inside quotes: for one word or another use grep -E "one|other",
+since a | inside quotes is part of the pattern, spell a repeat out (xx, not x{{2}}), or
+use the Grep tool, which takes any pattern. To read part of a file, use the Read tool. Calls that do more are refused, and once your
 time is up every call is refused: then answer at once from what you have.
 
 Your answer is your last message, and the main agent reads it as it stands.
@@ -274,19 +275,19 @@ def _notes(words: list[str], roots: list[str], *,
         if key in seen:
             continue
         seen.add(key)
-        try:
-            if path.stat().st_size > NOTES_FILE_MAX_BYTES:
-                continue
-            text = path.read_text(encoding="utf-8")
-        except (OSError, UnicodeDecodeError):
+        text = _note_text(path)
+        if text is None:
             continue
         low = text.casefold()
         score = sum(1 for w in folded if w in low)
         if score:
-            scored.append((-score, str(path), text))
+            scored.append((-score, str(path)))
     scored.sort()
     out = []
-    for _score, path, text in scored[:NOTES_SHOWN]:
+    for _score, path in scored:
+        text = _note_text(Path(path))
+        if text is None:
+            continue
         lines = text.splitlines()
         shown: list[int] = []
         for i, line in enumerate(lines):
@@ -296,7 +297,20 @@ def _notes(words: list[str], roots: list[str], *,
                     break
         keep = sorted({j for i in shown for j in (i - 1, i, i + 1) if 0 <= j < len(lines)})
         out.append((path, [f"{j + 1}: {lines[j][:NOTES_LINE_CHARS]}" for j in keep]))
+        if len(out) >= NOTES_SHOWN:
+            break
     return out
+
+
+def _note_text(path: Path) -> str | None:
+    """Notes file `path`'s text, or None when it is past `NOTES_FILE_MAX_BYTES`, can't
+    be read or isn't UTF-8."""
+    try:
+        if path.stat().st_size > NOTES_FILE_MAX_BYTES:
+            return None
+        return path.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError):
+        return None
 
 
 def notes_places(cwd: str | None, override: str | None) -> tuple[str | None, str | None]:
