@@ -45,6 +45,8 @@ TOOLS = {
     "notes": ["list_notes", "read_note", "search_notes"],
 }
 NAMES = [name for names in TOOLS.values() for name in names]
+#: The tools those modules list beside their read tools: memory's `recall` starts work.
+NOT_READ = frozenset({"recall"})
 
 _secrets = modules.load("secrets")
 if (not all(modules.load(m).ok for m in TOOLS) or not _secrets.ok
@@ -214,6 +216,7 @@ def test_each_read_tool_answers_through_the_door_redacted_and_unchanged_by_the_s
     rows = [r for r in registry.status_rows() if r.name.split()[0] in TOOLS]
     assert not [r for r in rows if r.level == "fail"], rows
     listed, got, _ = _calls(registry, ASKS)
+    listed = [t for t in listed if t["name"] not in NOT_READ]
 
     assert sorted(t["name"] for t in listed) == sorted(NAMES)
     for tool in listed:
@@ -289,6 +292,7 @@ def test_a_withheld_read_tool_is_absent_and_answers_as_no_tool(world):
     registry = _registry(withheld=["search_notes"])
     listed, got, rows = _calls(registry, [("search_notes", {"words": "rollout key"}),
                                           ("read_note", {"path": "plans/rollout.md"})])
+    listed = [t for t in listed if t["name"] not in NOT_READ]
     assert sorted(t["name"] for t in listed) == sorted(n for n in NAMES
                                                         if n != "search_notes")
     withheld = got["search_notes"]

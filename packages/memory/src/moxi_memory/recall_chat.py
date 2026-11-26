@@ -352,12 +352,14 @@ class Skip:
 
 @dataclass
 class Context:
-    """What the start checks read: memory's settings, and what earlier checks found."""
+    """What the start checks read: memory's settings, and what earlier checks found
+    (the launcher, the launch they ask about, and the fence's verdict)."""
 
     settings: Mapping[str, object]
     env: Mapping[str, str] | None = None
     launcher: Any = None
     spec: Any = None
+    verdict: Any = None
 
 
 def check_spec(settings: Mapping[str, object]):
@@ -407,6 +409,7 @@ def check_fence(ctx: Context) -> Skip | None:
     from . import recall_fence
 
     found = recall_fence.verdict(ctx.launcher, ctx.spec, env=ctx.env)
+    ctx.verdict = found
     if found.reason == recall_fence.NO_HARNESS:
         return Skip(NO_HARNESS, found.detail)
     if found.reason is not None:
@@ -419,15 +422,22 @@ START_CHECKS: tuple[Callable[[Context], Skip | None], ...] = (
     check_enabled, check_launcher, check_harness, check_fence)
 
 
-def why_not(settings: Mapping[str, object], *, env: Mapping[str, str] | None = None,
-            checks=START_CHECKS) -> Skip | None:
-    """Why no chat recall can start now, or None when one can."""
+def checked(settings: Mapping[str, object], *, env: Mapping[str, str] | None = None,
+            checks=START_CHECKS) -> tuple[Skip | None, Context]:
+    """The checks run in order to the first that fails: (why no chat recall can start
+    now, or None when one can; what the checks found)."""
     ctx = Context(settings, env)
     for check in checks:
         found = check(ctx)
         if found is not None:
-            return found
-    return None
+            return found, ctx
+    return None, ctx
+
+
+def why_not(settings: Mapping[str, object], *, env: Mapping[str, str] | None = None,
+            checks=START_CHECKS) -> Skip | None:
+    """Why no chat recall can start now, or None when one can."""
+    return checked(settings, env=env, checks=checks)[0]
 
 
 # -- the start ----------------------------------------------------------------------------
@@ -441,6 +451,13 @@ def running(session_key: str) -> int:
     """How many recalls under `session_key` run now."""
     return sum(1 for r in records.session_records(session_key)
                if r.get("state") not in records.DONE)
+
+
+def started_since(at: float) -> int:
+    """How many chat recalls, over every conversation, the log has opened since `at`."""
+    return sum(1 for s in recalls.logged_sessions() if conversation_of(s)
+               for line in recalls.read_lines(s)
+               if line.get("recall") and float(line.get("at") or 0) >= at)
 
 
 _start_gate = threading.Lock()
@@ -569,5 +586,5 @@ __all__ = ["CONVERSATION", "KEY_PREFIX", "CHATS_RUNNING_MAX", "PIECES_MAX", "HAN
            "CHAT_PREAMBLE", "WEB_WORDS", "NO_CONTEXT", "key", "conversation_of",
            "chat_dir", "read_state", "write_state", "handed_lines", "Piece", "Collected",
            "release", "collect", "settle", "Skip", "Context", "check_spec", "check_enabled",
-           "check_launcher", "check_harness", "check_fence", "START_CHECKS", "why_not",
-           "running_chats", "running", "start_lock", "start", "preamble", "chat_brief", "prepare"]
+           "check_launcher", "check_harness", "check_fence", "START_CHECKS", "checked",
+           "why_not", "running_chats", "running", "started_since", "start_lock", "start", "preamble", "chat_brief", "prepare"]

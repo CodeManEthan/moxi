@@ -52,7 +52,9 @@
   launcher can say, how its exit came out and its age, which memory leaves running; and
   the recalls whose child never ran or whose fork's id never came. `warn` for each of
   those. With the subconscious on in a live session it also says that a recall fork's
-  permission asks are refused.
+  permission asks are refused. Last, the chat recall: off, or on with the reason none
+  can start (`warn`) and the fence record's outcome for the `claude` the launcher would
+  start, a failed part named (`warn`).
 
 No row writes anything: the index is opened to read, and the state store only when it
 is there.
@@ -91,7 +93,7 @@ def rows() -> Iterator[Row]:
               ("sessions", _sessions, ()), ("links", _links, ()),
               ("retention", _retention, (harnesses,)),
               ("subconscious",
-               partial(_subconscious, config_in_error=config is None), ()))
+               partial(_subconscious, config_in_error=config is None, config=config), ()))
     for name, check, args in checks:
         try:
             yield check(*args)
@@ -450,6 +452,7 @@ UNTAKEN_GRACE_S = 30.0
 SUBCONSCIOUS_LIST = "moxi memory subconscious list"
 SUBCONSCIOUS_DISCARD = "moxi memory subconscious discard RECALL_ID"
 EXIT_SESSION = "moxi launcher exit-session SESSION_ID"
+CHAT_ON = "moxi config set memory subconscious.chat.enabled true"
 
 
 def _age(seconds: float) -> str:
@@ -608,7 +611,33 @@ def _config_losses(lines: list[dict]) -> list[dict]:
     return out
 
 
-def _subconscious(*, config_in_error: bool, now: float | None = None) -> Row:
+def _chat(config) -> tuple[str, bool]:
+    """The chat recall's part of the subconscious row, and whether it warns: off, or on
+    with the reason none can start (its start checks, as the connector's `recall` tool
+    asks them) and the fence record's outcome for the `claude` the launcher would start."""
+    from . import recall_chat
+
+    if not config["subconscious.chat.enabled"]:
+        return (f"the chat recall is off ({CHAT_ON} turns it on)", False)
+    skip, ctx = recall_chat.checked(config)
+    if skip is not None and skip.reason != recall_chat.FENCE:
+        return (f"the chat recall is on, but none can start: {skip.reason}"
+                f"{f' ({skip.detail})' if skip.detail else ''}", True)
+    verdict = ctx.verdict
+    outcome = verdict.outcome if verdict is not None else None
+    if outcome is None:
+        fence = ("the fence isn't probed yet for the claude the launcher would start; the "
+                 "first chat recall probes it")
+    elif outcome.passed:
+        fence = f"the fence passed for claude {outcome.version or '(no version)'}"
+    else:
+        return (f"the chat recall is on, but none can start: the fence failed for claude "
+                f"{outcome.version or '(no version)'}, part {outcome.part}: "
+                f"{outcome.detail}; it stands until claude changes", True)
+    return (f"the chat recall is on; {fence}", False)
+
+
+def _subconscious(*, config_in_error: bool, config=None, now: float | None = None) -> Row:
     import time
 
     from . import recall_take, recalls
@@ -678,6 +707,10 @@ def _subconscious(*, config_in_error: bool, now: float | None = None) -> Row:
         parts.append(never_ran)
     if not parts:
         parts.append("on in no live session")
+    if config is not None:
+        chat, chat_warn = _chat(config)
+        parts.append(chat)
+        warn = warn or chat_warn
     fix = CONFIG if config_in_error and warn else (SUBCONSCIOUS_LIST if warn else None)
     return Row(MODULE, "subconscious", "warn" if warn else "ok", "; ".join(parts), fix)
 

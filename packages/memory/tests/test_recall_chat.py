@@ -318,7 +318,7 @@ class CheckLauncher:
     def settable_rows(self, harness):
         return ()
 
-    def LaunchRequest(self, **fields):  # noqa: N802 - stands in for the class
+    def LaunchRequest(self, **fields):  # noqa: N802 -- stands in for the class
         return types.SimpleNamespace(**fields)
 
     def check(self, req, env=None):
@@ -410,7 +410,7 @@ def test_a_fence_that_fails_or_gives_no_outcome_ends_the_recall_lost(verdict, re
     assert records.read(KEY, recall.recall_id)["state"] == records.LOST
 
 
-def test_a_passed_fence_gives_the_headless_route_with_the_notes_folders(monkeypatch):
+def test_a_passed_fence_gives_the_headless_route_with_the_notes_dirs(monkeypatch):
     from moxi_memory import recall_route
 
     recall = a_chat_recall()

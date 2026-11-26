@@ -80,7 +80,7 @@ class FakeLauncher:
     def settable_rows(self, harness):
         return ("identity", "keep_warm")
 
-    def LaunchRequest(self, **fields):  # noqa: N802 - stands in for the class
+    def LaunchRequest(self, **fields):  # noqa: N802 -- stands in for the class
         return types.SimpleNamespace(**fields)
 
     def reap(self):
