@@ -76,11 +76,15 @@ PERMISSION_MODE = "dontAsk"
 BUDGET_USD = 0.50
 #: The oldest Claude Code that takes every fence flag: `--permission-prompts` came last.
 FENCE_MIN_VERSION = "2.1.259"
-#: How long the probe waits for the session's `system/init`, and how long another
-#: child waits for the probe that runs, in seconds.
+#: How long the probe waits for the session's `system/init`, in seconds.
 PROBE_S = 30.0
 #: How long `claude --version` may take, in seconds.
 VERSION_S = 10.0
+#: How long a probe's launch and end may take besides, in seconds: the launcher's
+#: two-second grace between TERM and KILL, and a margin.
+PROBE_END_S = 5.0
+#: The longest a probe runs, and so how long another child waits for it, in seconds.
+PROBE_MAX_S = VERSION_S + PROBE_S + PROBE_END_S
 #: The probe's brief.
 PROBE_PROMPT = "Reply with the single word OK."
 
@@ -291,7 +295,7 @@ def verdict(launcher: Any, spec: Spec, *, env: Mapping[str, str] | None = None) 
 # -- the probe ---------------------------------------------------------------------------
 
 def ensure(launcher: Any, spec: Spec, *, env: Mapping[str, str] | None = None,
-           wait_s: float = PROBE_S) -> Verdict:
+           wait_s: float = PROBE_MAX_S) -> Verdict:
     """The verdict a recall's child goes on by: `verdict`, after probing the binary when
     the record holds no outcome for it. One probe runs at a time; a child that waits for
     another's (at most `wait_s`) reads its outcome. A probe with no outcome (no
@@ -481,7 +485,7 @@ def _older(version: str, floor: str) -> bool:
 __all__ = ["BUDGET_USD", "CHAT_DIR", "END_TOOL", "FENCE", "FENCE_LOCK", "FENCE_MIN_VERSION",
            "FENCE_RECORD", "FLAGS", "HARMLESS_TOOLS", "HARNESS", "JSON_OUTPUT", "MCP", "NO_HARNESS", "NO_MCP",
            "NO_OUTCOME", "PARTS", "PERMISSION_MODE", "PROBE_OUTPUT_FLAGS", "PROBE_PROMPT",
-           "PROBE_S", "READ_TOOLS", "TARGET", "TOOLS", "WEB_TOOLS", "Binary", "Outcome",
+           "PROBE_END_S", "PROBE_MAX_S", "PROBE_S", "READ_TOOLS", "TARGET", "TOOLS", "WEB_TOOLS", "Binary", "Outcome",
            "Spec", "Verdict", "binary", "chat_dir", "ensure", "fence_flags",
            "fence_tools", "judge", "probe", "probe_request", "recorded", "request",
            "verdict"]

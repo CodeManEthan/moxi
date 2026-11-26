@@ -251,6 +251,25 @@ def test_an_exit_with_no_init_for_another_reason_records_nothing(claude):
     assert len(claude.runs()) == 2          # the next recall probed again
 
 
+def test_a_waiting_child_waits_out_a_probes_longest_run(monkeypatch):
+    from moxi import files
+
+    assert fence.PROBE_MAX_S >= fence.VERSION_S + fence.PROBE_S + fence.PROBE_END_S
+    assert fence.PROBE_END_S > 2.0                  # the launcher's TERM-to-KILL grace
+    unprobed = fence.Verdict(None, "", fence.Binary("/x/claude", 1, 1))
+    monkeypatch.setattr(fence, "verdict", lambda launcher, spec, env=None: unprobed)
+    waited = []
+
+    def lock(path, *, timeout_s):
+        waited.append(timeout_s)
+        raise files.LockTimeout(path, None)
+
+    monkeypatch.setattr(files, "lock", lock)
+    v = fence.ensure(api, spec())
+    assert waited == [fence.PROBE_MAX_S]
+    assert v.reason == fence.NO_OUTCOME and f"{fence.PROBE_MAX_S:.0f} s" in v.detail
+
+
 @POSIX
 def test_a_changed_binary_is_probed_again(claude):
     first = fence.ensure(api, spec())
