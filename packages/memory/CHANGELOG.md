@@ -12,6 +12,12 @@
   it, `moxi memory status` (`keeps_delivered` in `--json`) and `moxi doctor memory` say
   it holds no delivered messages for the sessions it had read and name `moxi memory
   reindex`. Nothing reindexes by itself.
+- The subconscious's recall answers stay out of the index: a background task's notice
+  whose `<task-id>` is a recall fork's id in memory's recall log gives no row, so search,
+  a recall's first search and `search_memory` never return an earlier recall's answer.
+  A subagent's or a background command's notice is indexed as before, and a message of
+  several notices keeps all but the recall's. No released index holds recall answers, so
+  no reindex is needed for them.
 - The chat's `search_memory` returns delivered messages too: rows written by `hook`,
   `channel`, `peer`, `coordinator` and `task` are hits exactly when `moxi memory search`
   would return them, so a task's notice that opens with `<task-notification>` is found.

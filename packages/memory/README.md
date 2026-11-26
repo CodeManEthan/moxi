@@ -339,7 +339,8 @@ and `moxi doctor memory` say so, and one `moxi memory reindex` reads them in. No
 reindexes by itself.
 
 Not indexed: system and developer messages; other messages the harness says it added
-itself, or flags as meta (sessions' writer `harness`), and compaction summaries; reasoning; this module's own start line and reminder; markers, requests and
+itself, or flags as meta (sessions' writer `harness`), and compaction summaries; the
+subconscious's recall answers (below); reasoning; this module's own start line and reminder; markers, requests and
 rate-limit readings; whole tool results; subagent tool results; and Codex threads that
 Codex imported from another harness, whose original is that harness's transcript.
 
@@ -353,6 +354,15 @@ OpenCode's child sessions. A subagent that ran as a subconscious recall's fork i
 indexed, even with `index.include_subagents` on: it holds a copy of its parent's
 conversation. memory knows it by the fork id in its recall log, and takes out any rows
 of it read before that id was written.
+
+A recall's answers are not indexed either. On Claude Code each answer reaches the main
+session as a background task's notice (`<task-notification>`) whose `<task-id>` is the
+fork's id; memory leaves out every notice whose task id its recall log names, so search,
+a later recall's first search and the chat's `search_memory` never return an earlier
+recall's answer. Other notices, a subagent's or a background command's, are indexed as
+before; a message that holds several notices keeps all but the recall's. A notice that
+comes in before its fork's id reaches the log is still left out when memory reads the
+log again within a minute of the notice.
 
 ### Project labels
 
@@ -662,7 +672,8 @@ until memory's line holds it. If a recall's child dies, the next recall child of
 session, or a taker memory starts when that session ends, finishes its line from what
 turns kept. A recall's working record is removed after a day unless its line still
 waits on turns. The log itself is never swept: memory leaves each recall's fork out of
-its index by the fork id the log holds, so a sweep added later must keep those ids. Each
+its index by the fork id the log holds, and the answers it hands back too, so a sweep
+added later must keep those ids. Each
 recall child and each read of a subagent transcript reads the whole log, so that work
 grows with every session that ever ran the subconscious.
 

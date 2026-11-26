@@ -15,7 +15,7 @@ module only decides which of them count and what text each row holds.
 - each tool call, as its summary line and its input.
 
 A message the harness composed (writer `harness`), a compaction summary and a thought
-stay out. Each tier 1 row records its writer, from sessions' `writer(record)`:
+stay out, and so do the subconscious's recall answers (below). Each tier 1 row records its writer, from sessions' `writer(record)`:
 `person`, `model` (a tool call's too), `unknown`, one of `DELIVERED_WRITERS`, or the
 kind of a message sessions doesn't mark injected.
 
@@ -49,6 +49,14 @@ nested objects counted, and a string that holds a JSON object or list read into.
 call keeps one line, the tool's name and the path, and loses its input; its
 result gives no tail. The path shown is the matched word alone, never a run of text with
 whitespace in it, so a heredoc or a patch into a secret file doesn't reach the index.
+
+**Recall answers.** On Claude Code a recall's fork answers each round as a background
+task: Claude Code hands the answer to the main session as a `task` message holding a
+`<task-notification>` notice whose `<task-id>`, the notice's first element, is the
+fork's agent id. A notice whose task id `convert`'s `recall_fork` names as a recall's
+fork is left out, so no search finds an earlier recall's answer, which restates other
+sessions' text. A message of several notices keeps the others, and one left with none
+gives no row. Every other notice, a subagent's or a background command's, stays.
 
 **The key.** A row's key names one record: the harness, then the line's own id where the
 harness writes one (Claude Code's `uuid`, OpenCode's row id) or else the source and the
@@ -339,6 +347,10 @@ def keys(records: Iterable[Any], source_key: str) -> list[str]:
 #: a plugin's (`hook`, every comms message among them), a channel's, a peer's, a
 #: coordinator's and a background task's.
 DELIVERED_WRITERS = ("hook", "channel", "peer", "coordinator", "task")
+#: The writer of a background task's notice.
+TASK_WRITER = "task"
+#: Where a notice opens: Claude Code's tag and its first element, the task's id.
+_NOTICE = re.compile(r"<task-notification>\s*<task-id>([^<>\s]+)</task-id>")
 
 
 def _known(value: Any) -> Any:
@@ -369,6 +381,25 @@ def tier_one_message(record: Any, writer: str | None = None) -> bool:
     return bool(record.text and record.text.strip())
 
 
+def without_recall_answers(text: str, recall_fork: Callable[[str], bool]) -> str | None:
+    """`text` less each notice whose task id `recall_fork` names a recall's fork, from its
+    opening to the next notice's or the text's end; None when it held notices and every
+    one was a recall's. A text with no recall's notice comes back as it was."""
+    opens = list(_NOTICE.finditer(text))
+    if not opens:
+        return text
+    ends = [m.start() for m in opens[1:]] + [len(text)]
+    out, dropped = [text[:opens[0].start()]], False
+    for match, end in zip(opens, ends):
+        if recall_fork(match.group(1)):
+            dropped = True
+        else:
+            out.append(text[match.start():end])
+    if not dropped:
+        return text
+    return "".join(out) if len(out) > 1 else None
+
+
 def model_answer(record: Any) -> bool:
     """Whether a record is the model's own answer: a tool call, or an assistant message
     that is not a thought and that the harness didn't make up."""
@@ -393,14 +424,18 @@ def _tool_name(record: Any) -> str:
 def convert(records: Iterable[Any], *, source_key: str, main_id: str,
             agent_id: str | None, label: str | None, policy: Policy,
             writer: Callable[[Any], str | None],
-            secret_calls: set[str] | frozenset[str] = frozenset()) -> Converted:
+            secret_calls: set[str] | frozenset[str] = frozenset(),
+            recall_fork: Callable[[str, float | None], bool] | None = None) -> Converted:
     """The rows and tails one batch of records gives.
 
     `main_id` is the main session's id, which every row carries; `agent_id` is the
     subagent's own id for a subagent's records, else None. `writer` is sessions'
     `writer`, which names each row's writer. `secret_calls` holds the call
     ids already known to be secret-path calls of this source, whose results give no
-    tail. A subagent's records give tier 1 rows only."""
+    tail. `recall_fork(task_id, time)` says whether a task id is a recall's fork, for a
+    notice of that time (the record's, None when unknown); a `task` message's recall
+    notices are left out (the module's "Recall answers"). A subagent's records give tier 1
+    rows only."""
     from moxi_secrets import secret_path
 
     records = list(records)
@@ -418,7 +453,13 @@ def convert(records: Iterable[Any], *, source_key: str, main_id: str,
             wrote = writer(record)
             if not tier_one_message(record, wrote):
                 continue
-            text = keep_head(record.text, MESSAGE_CHARS, policy.sets)
+            body = record.text
+            if wrote == TASK_WRITER and recall_fork is not None:
+                at = common["time"]
+                body = without_recall_answers(body, lambda tid, at=at: recall_fork(tid, at))
+                if body is None or not body.strip():
+                    continue
+            text = keep_head(body, MESSAGE_CHARS, policy.sets)
             out.rows.append(Row(**common, agent_id=agent_id, kind=record.role, text=text,
                                 writer=wrote))
         elif record.kind == "tool_call":
@@ -454,5 +495,5 @@ def convert(records: Iterable[Any], *, source_key: str, main_id: str,
 __all__ = ["KINDS", "MESSAGE_CHARS", "TOOL_CHARS", "MARGIN", "EDGE_CHARS", "TOOL",
            "UNSCANNED", "Policy", "Row", "Tail", "Converted", "redact_version", "redact",
            "keep_head", "keep_tail", "recut_head", "recut_tail", "hide_cut_edges",
-           "line_id", "keys", "DELIVERED_WRITERS", "tier_one_message", "model_answer",
-           "convert"]
+           "line_id", "keys", "DELIVERED_WRITERS", "TASK_WRITER", "tier_one_message",
+           "without_recall_answers", "model_answer", "convert"]

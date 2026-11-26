@@ -41,7 +41,11 @@ replaced only when its text differs.
 with `index.include_subagents` on, their rows under their main session's id. A subagent
 that was a subconscious recall's fork (its agent id is a fork id in memory's recall log)
 is never read, and any rows of it read before its id reached the log are taken out when
-it is next met, since the fork holds a copy of its parent's conversation. A Codex thread whose
+it is next met, since the fork holds a copy of its parent's conversation. The fork's
+answers, the task notices Claude Code hands the main session for it, are left out of the
+main session's rows (`moxi_memory.rows`'s "Recall answers"); a notice whose task id the
+run's read of the log doesn't name reads the log again when the notice is within
+`FORK_LOG_SLACK_S` of that read or newer. A Codex thread whose
 import marks say it was imported (it is listed in Codex's imports file, or its turns
 carry the import prefix) is skipped: the Claude Code transcript is the original. A
 compressed Codex rollout, which sessions doesn't read, is recorded in `sources` and counted
@@ -146,6 +150,9 @@ COMPRESSED = "compressed"
 REPLACED_KEY = "replaced_redact_version"
 #: How far up a chain of subagents a child looks for the main session.
 MAX_DEPTH = 16
+#: How long before the recall log's last read a task notice can be and still send the
+#: log to be read again when its task id is not a fork the log names.
+FORK_LOG_SLACK_S = 60.0
 #: How a probe of sessions' `find` that couldn't read its root begins.
 UNREADABLE_PROBE = "unreadable"
 
@@ -364,6 +371,8 @@ class Ingest:
         self.seen: set[tuple[str, str]] = set()
         self.report = Report(mode)
         self._forks: frozenset[tuple[str, str]] | None = None
+        #: When the recall log was last read for `_forks`, or None before the first read.
+        self._forks_at: float | None = None
 
     # -- the launcher ------------------------------------------------------------------
 
@@ -535,11 +544,26 @@ class Ingest:
         if self._forks is None:
             from . import recalls
 
+            self._forks_at = time.time()
             try:
                 self._forks = recalls.fork_ids()
             except (OSError, ValueError):
                 self._forks = frozenset()
         return (harness, agent) in self._forks
+
+    def recall_notice(self, harness: str, task_id: str, when: float | None) -> bool:
+        """Whether a task notice's `task_id` is a subconscious recall's fork. An id the
+        log read for this run doesn't name sends the log to be read again, once per
+        notice, when the notice may be newer than that read (`FORK_LOG_SLACK_S` before
+        it, or of no known time): a fork's id can reach the log just after its answer
+        reaches the session."""
+        if self.recall_fork(harness, task_id):
+            return True
+        if when is not None and self._forks_at is not None \
+                and when < self._forks_at - FORK_LOG_SLACK_S:
+            return False
+        self._forks = None
+        return self.recall_fork(harness, task_id)
 
     def leave_out_fork(self, src, skey: str, role: Role) -> None:
         """Pass a recall fork's source by, taking out any rows of it already stored."""
@@ -596,7 +620,9 @@ class Ingest:
             read_any = True
             got = rows.convert(batch.records, source_key=skey, main_id=role.main,
                                agent_id=role.agent, label=label, policy=self.policy,
-                               writer=api.writer, secret_calls=secret)
+                               writer=api.writer, secret_calls=secret,
+                               recall_fork=lambda tid, when, h=src.harness:
+                               self.recall_notice(h, tid, when))
             secret |= got.secret_calls
             with store.transaction(self.conn):
                 self._write(src, skey, role, got, batch.cursor, reuse)

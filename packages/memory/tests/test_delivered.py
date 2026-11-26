@@ -156,3 +156,68 @@ def test_a_rebuild_of_an_old_generation_adds_the_deliveries_it_had_left_out():
     assert writers()["mail the old rule dropped"] == ("user", "hook")
     with index.open_read() as reader:
         assert index.keeps_delivered(reader.conn)
+
+
+# -- recall answers --------------------------------------------------------------------
+
+FORK = "a0397f1d6156529b1"
+
+
+def notice(task_id, summary, result):
+    return (f"<task-notification>\n<task-id>{task_id}</task-id>\n"
+            f"<tool-use-id>toolu_x</tool-use-id>\n<status>completed</status>\n"
+            f"<summary>{summary}</summary>\n<result>{result}</result>\n"
+            "</task-notification>")
+
+
+RECALL = notice(FORK, 'Agent "subconscious" finished', "the platypus decision, recalled")
+AGENT = notice("a5a71cb8ef81bceab", 'Agent "survey" finished', "the platypus survey")
+SHELL = notice("b2vujz1dx", 'Background command "build" completed (exit code 0)',
+               "platypus build done")
+
+
+def log_fork(session_id, fork=FORK):
+    from moxi_memory import recalls
+
+    with recalls.session_lock(session_id):
+        recalls.put_line(session_id, {"recall": f"r-{fork}", "state": recalls.BACK,
+                                      "harness": "claude", "fork": fork})
+
+
+def test_a_recall_answer_gives_no_row_and_other_task_notices_do(capsys):
+    t = transcript()
+    log_fork(t.session_id)
+    for text in (RECALL, AGENT, SHELL):
+        t.user(text, origin="task-notification")
+    t.write()
+    run()
+    assert set(writers()) == {AGENT, SHELL}
+    code, out, _ = memory(capsys, "search", "platypus", "--json")
+    assert code == 0
+    assert not any("recalled" in h["snippet"] for h in json.loads(out)["hits"])
+    run("rebuild")
+    assert set(writers()) == {AGENT, SHELL}
+
+
+def test_a_message_of_several_notices_loses_only_the_recall_answers():
+    t = transcript()
+    log_fork(t.session_id)
+    t.user(f"[a preface]\n{AGENT}\n\n{RECALL}\n\n{SHELL}", origin="task-notification")
+    t.user(f"[a preface]\n{RECALL}", origin="task-notification")
+    t.write()
+    run()
+    assert set(writers()) == {f"[a preface]\n{AGENT}\n\n{SHELL}"}
+
+
+def test_a_fork_id_the_log_gains_after_the_runs_read_is_still_found():
+    import time
+
+    ing = ingest.Ingest(None, None, config())
+    assert not ing.recall_notice("claude", FORK, time.time())
+    log_fork("0190b000-0000-7000-8000-000000000001")
+    assert ing.recall_notice("claude", FORK, time.time())
+    assert ing.recall_notice("claude", FORK, None)
+    log_fork("0190b000-0000-7000-8000-000000000001", "a0000000000000old")
+    old = ing._forks_at - 2 * ingest.FORK_LOG_SLACK_S
+    assert not ing.recall_notice("claude", "a0000000000000old", old)
+    assert not ing.recall_notice("codex", FORK, time.time())
