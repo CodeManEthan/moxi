@@ -153,7 +153,7 @@ turn, an agent, a shell) is a plain object with no `kind`.
 
 | kind | fields |
 |---|---|
-| `facts` | `session_id`, `turn_number`, `turn_open`, `turn`, `agents`, `draft`, `at`, `stale`, `ready` |
+| `facts` | `session_id`, `turn_number`, `turn_open`, `turn`, `agents`, `draft`, `at`, `stale`, `ready`, `ended_at`, `box`, `live_error` |
 | `agents` | `entries`, `complete`, `at` |
 | `started` | `delivery`, `ref`, `turn_id`, `agent_id` |
 | `refused` | `delivery`, `ref`, `reason` (a delivery's); `reason` alone (a command's) |
@@ -199,10 +199,28 @@ is null but for a `fork`'s. turns never acts on a
 - `ready` is the last `session.ready` the endpoint raised, `{source, session_id, at}`, or
   null before the first. A caller that found the endpoint after its ready reads it here
   instead of racing the watch.
+- `ended_at` is the wall-clock time the endpoint recorded the end of the current session's
+  last main-loop turn, or null before the first end at this session id; a new session id
+  clears it. A turn the endpoint closed without its end (closed at the next turn's start)
+  leaves it as it was. A caller that found the session idle reads here since when.
+- `box` is the prompt box as read for this reading: `draft` when the person has typed into
+  it, `empty` when not, and null when it was not read: the box could not be read, the
+  live read did not answer, or the harness has no box (Codex and OpenCode). `draft` true
+  with `box` null is a box that was not read, never known to hold a draft. An older
+  Claude Code runner that does not send the box reads as null.
+- `live_error` is why the live part did not read: `timeout` when the harness did not
+  answer within the bound, `failed` when its read failed (the line to the harness closed,
+  or it answered with an error or with something that could not be read); null when it
+  answered.
+- An endpoint of an older turns sends none of `ended_at`, `box` and `live_error`, and
+  `moxi_turns` reads each as null. They are added result fields a caller of this version
+  can ignore, so the version stays 2 (see "Versions"). From such an endpoint a null
+  `live_error` does not say the live part answered: `draft` true with `agents` null is
+  still unreadable.
 
-The live part of the facts (`draft`, `agents`) is read from the harness within a bound: 1 s
-on Claude Code, 2 s on Codex and OpenCode. Past the bound it reads unreadable: `draft` true
-and `agents` null. That refuses and never passes.
+The live part of the facts (`draft`, `agents`, `box`) is read from the harness within a
+bound: 1 s on Claude Code, 2 s on Codex and OpenCode. Past the bound it reads unreadable:
+`draft` true, `agents` null and `box` null. That refuses and never passes.
 
 **Agents.** `entries` is a list of
 `{id, kind, state, final, description, parent_id, is_fork, last_write_at}`:

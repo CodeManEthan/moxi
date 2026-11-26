@@ -84,6 +84,12 @@ AGENT_STATES = ("pending", "running", "waiting", "idle", "done", "failed", "stop
 #: The states that keep an agent live for the busy checks, unless its notice is final.
 BUSY_STATES = ("pending", "running", "waiting")
 
+#: What `Facts.box` says of a prompt box that was read.
+BOX_STATES = ("draft", "empty")
+
+#: Why the live part of `Facts` did not read (`Facts.live_error`).
+LIVE_ERRORS = ("timeout", "failed")
+
 #: The longest `ref`, in bytes of UTF-8.
 REF_MAX_BYTES = 256
 
@@ -394,6 +400,14 @@ class Facts(_Value):
     is the wall-clock time of the read. `stale` is True when the turn ledger moved while
     the live facts were read, so the reading is not one moment. `ready` is the last
     `session.ready` the endpoint raised, with its `at`, or None before the first.
+
+    `ended_at` is the wall-clock time the current session's last main-loop turn ended,
+    None before the first end at this session id. `box` is the prompt box as read for this
+    reading: `draft` (`BOX_STATES`) when the person has typed into it, `empty` when not,
+    None when it was not read (it could not be, the live read did not answer, or the
+    harness has no box). `live_error` says why the live part did not read: `timeout` (the
+    harness did not answer within the live bound) or `failed` (`LIVE_ERRORS`); None when
+    it answered.
     """
 
     KIND = "facts"
@@ -407,6 +421,9 @@ class Facts(_Value):
     at: float
     stale: bool = False
     ready: Ready | None = None
+    ended_at: float | None = None
+    box: str | None = None
+    live_error: str | None = None
 
 
 @dataclass(frozen=True)
@@ -655,7 +672,8 @@ __all__ = ["CAPABILITIES", "ENV_MAX_NAMES", "MCP_SETTLE_S", "OUTCOMES",
            "DELIVERY_REFUSALS", "COMMAND_REFUSALS",
            "READY_SOURCES", "COMMANDS", "COMMAND_WAIT_S", "STOP_SHELLS_WAIT_S",
            "DELIVERY_HOW", "AGENT_KINDS", "AGENT_STATES",
-           "BUSY_STATES", "REF_MAX_BYTES", "ERROR_GONE", "ERROR_CAPABILITY",
+           "BUSY_STATES", "BOX_STATES", "LIVE_ERRORS", "REF_MAX_BYTES", "ERROR_GONE",
+           "ERROR_CAPABILITY",
            "ERROR_STOP_HANDLER_TAKEN", "ERRORS", "REFUSED_GONE", "LOST_UNTIED",
            "LOST_EXPIRED", "LOST_UNKNOWN", "LOST_UNANSWERED", "LOST_DENIED", "LOST_GONE",
            "FAILED_UNANSWERED",

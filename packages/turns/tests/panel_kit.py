@@ -10,7 +10,9 @@ The fence. A shell's page server reads the reach through `claude_setup.reach`, w
 the `claude` its PATH finds. Each shell's PATH holds the stand-in's folder first and none
 of this process's folders that hold a `claude`, so the page server runs the stand-in or no
 `claude` at all, never a real one. The stand-in answers `plugin list --json` from a file
-the test writes; its placed copy is in the shell's own data folder.
+the test writes; its placed copy is in the shell's own data folder. The page server's
+`CLAUDE_CONFIG_DIR` is a folder in the shell's home, so the Claude Code records it reads for
+typed names are the ones a test writes (`Panel.name_session`), never a real one.
 
 Launcher's `running` is answered in the browser by `LauncherStub`, in launcher's declared
 shape, its entries joined to the endpoints' session ids: its route, and its topic on the
@@ -122,9 +124,11 @@ def shell_path(stub: Stub) -> str:
 class Panel:
     """One test shell with its stand-in `claude`; `is_small` when it is the small install."""
 
-    def __init__(self, shell: Any, stub: Stub, runtime_root: Path, *, is_small: bool) -> None:
+    def __init__(self, shell: Any, stub: Stub, runtime_root: Path, *, is_small: bool,
+                 claude_dir: Path | None = None) -> None:
         self.shell = shell
         self.runtime_root = runtime_root
+        self.claude_dir = claude_dir
         self.stub = stub
         self.is_small = is_small
         self._http: Any = None
@@ -146,6 +150,21 @@ class Panel:
         tmp = target.with_name(".endpoint.json.tmp")
         tmp.write_text(json.dumps({"command": str(claude_setup.endpoint_command(self.shell.env))}))
         os.replace(tmp, target)
+
+    def name_session(self, pid: int, session_id: str, name: str, *,
+                     source: str | None = "user") -> None:
+        """Claude Code's record of process `pid` in the shell's Claude Code folder, as
+        Claude Code writes it: session `session_id` named `name`, the name from `source`
+        (None leaves `nameSource` out, as `--name` does)."""
+        record: dict[str, Any] = {"pid": pid, "sessionId": session_id, "name": name,
+                                  "status": "idle"}
+        if source is not None:
+            record["nameSource"] = source
+        sessions_dir = self.claude_dir / "sessions"
+        sessions_dir.mkdir(parents=True, exist_ok=True)
+        tmp = sessions_dir / f".{pid}.json.tmp"
+        tmp.write_text(json.dumps(record))
+        os.replace(tmp, sessions_dir / f"{pid}.json")
 
     def list(self) -> dict:
         """The page server's list now, through the shell."""
@@ -187,11 +206,13 @@ def panel_shell(ui_shells, reach: str = "start", *, small: bool = False) -> Iter
         if reach != "absent":
             stub.put()
         runtime_root = home / "rt"
+        claude_dir = home / "cc"
         env = {"PATH": shell_path(stub), "FAKE_CLAUDE_DIR": str(stub.state),
-               "FAKE_CLAUDE_VERSION": "2.1.296", "MOXI_TURNS_RUNTIME_DIR": str(runtime_root)}
+               "FAKE_CLAUDE_VERSION": "2.1.296", "MOXI_TURNS_RUNTIME_DIR": str(runtime_root),
+               "CLAUDE_CONFIG_DIR": str(claude_dir)}
         shell = ui_shells(home=home, env=env, leave_out=others() if small else [])
         try:
-            panel = Panel(shell, stub, runtime_root, is_small=small)
+            panel = Panel(shell, stub, runtime_root, is_small=small, claude_dir=claude_dir)
             if reach == "start":
                 stub.runner_listed()
                 panel.write_endpoint_file()

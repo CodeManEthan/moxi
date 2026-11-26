@@ -159,6 +159,47 @@ def test_an_unreadable_subagent_list_is_unknown_and_counts_as_busy(make_endpoint
     fake.live_fails = True
     f = s.facts()
     assert f.agents is None and f.draft is True
+    assert f.box is None and f.live_error == "failed"
+
+
+def test_the_facts_tell_a_draft_from_a_box_not_read_and_say_why_a_live_read_did_not(
+        make_endpoint):
+    ep, fake = make_endpoint()
+    s = turns.find(session_id="s-1")
+    f = s.facts()
+    assert (f.draft, f.box, f.live_error) == (False, "empty", None)
+    fake.draft = True
+    f = s.facts()
+    assert (f.draft, f.box, f.live_error) == (True, "draft", None)
+    fake.draft, fake.box_fails = False, True
+    f = s.facts()
+    assert (f.draft, f.box, f.live_error) == (True, None, None)
+    fake.box_fails, fake.live_wait_s, fake.live_delay_s = False, 0.2, 1.0
+    f = s.facts()
+    assert (f.draft, f.box, f.agents, f.live_error) == (True, None, None, "timeout")
+    # The watch's first facts say it too.
+    with s.watch() as watch:
+        assert watch.facts.live_error == "timeout"
+
+
+def test_the_facts_keep_when_the_last_turn_ended(make_endpoint):
+    ep, fake = make_endpoint()
+    s = turns.find(session_id="s-1")
+    assert s.facts().ended_at is None
+    fake.start_turn()
+    assert s.facts().ended_at is None
+    before = time.time()
+    fake.end_turn()
+    ended = s.facts().ended_at
+    assert before <= ended <= time.time()
+    fake.start_turn()
+    f = s.facts()
+    assert f.turn_open and f.ended_at == ended
+    fake.end_turn()
+    assert s.facts().ended_at >= ended
+    ep.ready("clear", "s-2")
+    f = s.facts()
+    assert f.session_id == "s-2" and f.ended_at is None
 
 
 def test_a_turn_typed_between_the_submit_and_the_entry_refuses_the_start(make_endpoint):
