@@ -330,15 +330,18 @@ async def open_connection(info: RuntimeInfo, *, timeout: float = 5.0) -> tuple[A
     try:
         conn = h11.Connection(h11.CLIENT)
         nonce = secrets.token_urlsafe(32)
-        limit = min(PROVE_LIMIT, deadline - time.monotonic())
+        left = deadline - time.monotonic()
+        # Which bound a timeout was is known from the bounds, not from the clock after:
+        # a loop's timer can fire up to its clock's step early (about 15 ms on Windows).
+        is_callers_bound = left <= PROVE_LIMIT
         try:
-            async with asyncio.timeout(max(limit, 0)):
+            async with asyncio.timeout(max(min(PROVE_LIMIT, left), 0)):
                 writer.write(_prove_request(conn, host, nonce))
                 await writer.drain()
                 # A proof answer has no body, so its head is the whole answer.
                 head = await reader.readuntil(b"\r\n\r\n")
         except TimeoutError:
-            if time.monotonic() >= deadline:
+            if is_callers_bound:
                 raise
             raise NotOurServer(f"no answer to {PROVE_PATH} within {PROVE_LIMIT} s") from None
         except (OSError, asyncio.IncompleteReadError, asyncio.LimitOverrunError) as exc:
@@ -388,7 +391,7 @@ def call(info: RuntimeInfo, method: str, path: str, body: Any = None, *,
             _send(sock, _prove_request(conn, host, nonce), proof_deadline)
             status, headers, _ = _receive(sock, conn, proof_deadline)
         except TimeoutError:
-            if time.monotonic() >= deadline:
+            if proof_deadline == deadline:
                 raise
             raise NotOurServer(f"no answer to {PROVE_PATH} within {PROVE_LIMIT} s") from None
         except (OSError, h11.ProtocolError) as exc:

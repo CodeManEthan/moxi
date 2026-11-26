@@ -11,6 +11,7 @@ import socketserver
 import sys
 import threading
 import time
+import types
 from http.server import BaseHTTPRequestHandler
 
 import pytest
@@ -26,6 +27,7 @@ from moxi_ui.loopback.check import (
     token_matches,
     upstream,
 )
+from moxi_ui.loopback import transport
 from moxi_ui.loopback.routes import Table
 from moxi_ui.loopback.runtime import RuntimeInfo, read_runtime, write_runtime
 from moxi_ui.loopback.transport import (
@@ -512,3 +514,19 @@ def test_open_connection_times_out_at_the_callers_deadline(stubs, stand_ins):
     with pytest.raises(TimeoutError):
         asyncio.run(open_connection(info, timeout=0.3))
     assert time.monotonic() - start < 0.9
+
+
+#: A clock that never moves: read after a timeout, it is still before the deadline, as a
+#: timer that fires a clock step early leaves it (on Windows a step is about 15 ms).
+STOPPED_CLOCK = types.SimpleNamespace(monotonic=lambda: 100.0)
+
+
+def test_the_callers_deadline_is_a_timeout_even_when_its_timer_fires_early(
+        stubs, stand_ins, monkeypatch):
+    stub, info = freed_port(stubs)
+    stand_ins(stub.port, None)
+    monkeypatch.setattr(transport, "time", STOPPED_CLOCK)
+    with pytest.raises(TimeoutError):
+        asyncio.run(open_connection(info, timeout=0.3))
+    with pytest.raises(TimeoutError):
+        call(info, "GET", "/api/echo", timeout=0.3)

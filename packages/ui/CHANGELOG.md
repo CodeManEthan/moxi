@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- On Windows, a loopback connection whose own deadline ran out while the server was
+  still to prove itself could raise "no answer to /api/prove within 1.0 s" rather than
+  `TimeoutError`, since a timer there can fire a clock step before its time. The bound
+  that applied is now read from the bounds themselves, on every system.
 - On Windows, two sign-ins at the same moment could both spend one sign-in ticket or one
   phone pairing code, since Windows lets two holders of a file each delete it. A ticket's
   spend now takes turns with every other spend in the shell, on every system.
