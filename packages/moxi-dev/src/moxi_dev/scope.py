@@ -171,8 +171,12 @@ class Figures:
         named = [name for name, given in ((MEMORY_HIGH_ENV, self.high_set),
                                           (MEMORY_MAX_ENV, self.max_set)) if given]
         if not named:
-            return f"the default for {self.workers} worker{'s' * (self.workers != 1)}"
+            return self.default_source()
         return "set by " + " and ".join(named)
+
+    def default_source(self) -> str:
+        """`the default for 8 workers`."""
+        return f"the default for {self.workers} worker{'s' * (self.workers != 1)}"
 
 
 def _mib(env: Mapping[str, str], name: str) -> int | None:
@@ -197,8 +201,9 @@ def figures(env: Mapping[str, str], workers: int) -> Figures | None:
                     max_mib=default_max_mib(workers) if top is None else top,
                     high_set=high is not None, max_set=top is not None)
     if found.high_mib >= found.max_mib:
-        high_from = MEMORY_HIGH_ENV if found.high_set else found.source()
-        max_from = MEMORY_MAX_ENV if found.max_set else found.source()
+        high_from = f"set by {MEMORY_HIGH_ENV}" if found.high_set \
+            else found.default_source()
+        max_from = f"set by {MEMORY_MAX_ENV}" if found.max_set else found.default_source()
         raise ScopeError(f"MemoryHigh {found.high_mib} MiB ({high_from}) is not below "
                          f"MemoryMax {found.max_mib} MiB ({max_from}); set "
                          f"{MEMORY_HIGH_ENV} below {MEMORY_MAX_ENV}")

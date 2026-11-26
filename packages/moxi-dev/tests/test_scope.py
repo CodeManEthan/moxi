@@ -90,6 +90,22 @@ def test_a_bad_value_or_a_high_not_below_the_max_is_refused(env):
         scope.figures(env, 8)
 
 
+@pytest.mark.parametrize("env, high_from, max_from", [
+    ({scope.MEMORY_MAX_ENV: "6000"}, "the default for 8 workers",
+     f"set by {scope.MEMORY_MAX_ENV}"),
+    ({scope.MEMORY_HIGH_ENV: "8128"}, f"set by {scope.MEMORY_HIGH_ENV}",
+     "the default for 8 workers"),
+    ({scope.MEMORY_HIGH_ENV: "900", scope.MEMORY_MAX_ENV: "800"},
+     f"set by {scope.MEMORY_HIGH_ENV}", f"set by {scope.MEMORY_MAX_ENV}")])
+def test_the_refusal_names_where_each_figure_came_from(env, high_from, max_from):
+    with pytest.raises(ScopeError) as caught:
+        scope.figures(env, 8)
+    high, top = int(env.get(scope.MEMORY_HIGH_ENV, 6592)), int(env.get(scope.MEMORY_MAX_ENV,
+                                                                         8128))
+    assert str(caught.value).startswith(f"MemoryHigh {high} MiB ({high_from}) is not below "
+                                        f"MemoryMax {top} MiB ({max_from});")
+
+
 def test_a_max_below_the_default_warns_with_the_default_figure():
     found = scope.figures({scope.MEMORY_MAX_ENV: "7000"}, 8)
     assert scope.below_default(found) == (
