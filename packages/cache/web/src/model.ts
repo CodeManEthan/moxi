@@ -13,7 +13,8 @@
 // - An opened row's lines, and the page's last lines.
 // - Where launcher or usage is installed, what each says of a row (`launched.ts`,
 //   `cost.ts`): a launch's name, where it runs, its effort and its keep-warm case, the loud
-//   row first, and its next keep-alive; what going cold costs. A piece another module did not give is not drawn.
+//   row first, and its next keep-alive; what going cold costs. A piece another module did
+//   not give is not drawn.
 //
 // Every string here goes into the page as text.
 
