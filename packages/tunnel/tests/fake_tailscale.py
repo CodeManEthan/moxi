@@ -9,7 +9,8 @@ current `<host>:<port>` and keeps any other mount there; `off` takes out the por
 key and the current host's `Web` and `AllowFunnel` keys for it, and leaves keys under any
 other host. `fail` in the state makes a command fail: `{"apply": {"stderr": "..."}}`, with
 `"after": true` to make the change first and fail after it. `hang` lists commands that
-never answer. Every call is appended to `calls`.
+never answer. Every call is appended to `calls`. Calls at once take turns: each holds a
+lock file beside the state while it reads and writes it.
 """
 
 from __future__ import annotations
@@ -31,6 +32,34 @@ sys.stdout.reconfigure(newline="\n")
 sys.stderr.reconfigure(newline="\n")
 
 STATE = Path(__file__).with_name("tailscale-state.json")
+
+def lock():
+    """Hold the state's lock until this call ends or `unlock`. A call reads, changes and
+    writes the state whole, so two calls at once would lose one's change, and on Windows
+    the state can't be replaced while another call has it open."""
+    fd = os.open(STATE.with_name("tailscale-state.lock"), os.O_RDWR | os.O_CREAT)
+    if sys.platform != "win32":
+        import fcntl
+
+        fcntl.flock(fd, fcntl.LOCK_EX)
+        return fd
+    import msvcrt
+
+    while True:
+        try:
+            msvcrt.locking(fd, msvcrt.LK_NBLCK, 1)
+            return fd
+        except OSError:
+            time.sleep(0.01)
+
+def unlock(fd):
+    if sys.platform == "win32":
+        import msvcrt
+
+        msvcrt.locking(fd, msvcrt.LK_UNLCK, 1)
+    os.close(fd)
+
+held = lock()
 state = json.loads(STATE.read_text())
 args = sys.argv[1:]
 state["calls"].append(args)
@@ -56,6 +85,7 @@ def kind():
 what = kind()
 save()
 if what in state.get("hang", []):
+    unlock(held)
     time.sleep(3600)
 fail = state.get("fail", {}).get(what)
 if fail and not fail.get("after"):
