@@ -22,6 +22,8 @@ export const LINES_MAX = 6;
 export const ORDER_MAX = 999;
 /** The `order` a report with none, or a wrong one, takes. */
 export const ORDER_DEFAULT = 500;
+/** The most sessions a report's `live` may name; more refuses it whole. */
+export const LIVE_MAX = 100;
 
 /** A project as the page gives it to every component, in the `projects` attribute. */
 export interface Given {
@@ -51,12 +53,16 @@ export interface Part {
   /** The sessions it names, `<harness>/<session id>`. */
   claims: string[];
   count: Count | null;
+  /** The part holds only while the line's session is not in a turn (a `last active`). */
+  idle_only: boolean;
 }
 
 /** One line of an opened project's section. */
 export interface Line {
   parts: Part[];
   claims: string[];
+  /** Its module says the line's session runs now. */
+  runs: boolean;
 }
 
 /** A link a section draws at its right: a press is `navigate(module, route)`. */
@@ -82,6 +88,15 @@ export interface Say {
   runs: boolean;
   state: string;
   where: string | null;
+}
+
+/**
+ * What one module says of a session, by claim: `in_turn`, whether it says the session is in
+ * a turn now; `state`, its words for that.
+ */
+export interface Live {
+  in_turn: boolean;
+  state: string;
 }
 
 /** What a report says of one project. Sections, agents and stays are the open one's only. */
@@ -112,6 +127,8 @@ export interface Report {
   projects: Map<string, Facts>;
   folders: FolderFacts[];
   more_folders: number;
+  /** By claim, `<harness>/<session id>`: the sessions it says are in a turn or not. */
+  live: Map<string, Live>;
 }
 
 /** A report read: what is kept, null for nothing to say, and each refusal in a line. */
@@ -242,6 +259,7 @@ function readPart(value: unknown, place: string, refused: Refusals): Part | null
     rank: readRank(value.rank, `${place}.rank`, refused),
     claims: readTexts(value.claims, `${place}.claims`, refused),
     count,
+    idle_only: readFlag(value.idle_only, `${place}.idle_only`, refused),
   };
 }
 
@@ -272,7 +290,8 @@ function readLine(value: unknown, place: string, refused: Refusals): Line | null
   }
   const parts = readParts(value.parts, `${place}.parts`, refused);
   if (parts.length === 0) return null;
-  return { parts, claims: readTexts(value.claims, `${place}.claims`, refused) };
+  return { parts, claims: readTexts(value.claims, `${place}.claims`, refused),
+           runs: readFlag(value.runs, `${place}.runs`, refused) };
 }
 
 function readLink(value: unknown, place: string, refused: Refusals): Link | null {
@@ -467,6 +486,46 @@ function readFolders(value: unknown, activity: Activity | null, refused: Refusal
   return folders;
 }
 
+/** A `Live`: `in_turn` true or false, and its `state` words. */
+function readLiveOne(value: unknown, place: string, refused: Refusals): Live | null {
+  if (!isObj(value)) {
+    refused.add(place, "not an object");
+    return null;
+  }
+  if (typeof value.in_turn !== "boolean") {
+    refused.add(`${place}.in_turn`, "not true or false");
+    return null;
+  }
+  const state = readText(value.state, `${place}.state`, refused);
+  return state === null ? null : { in_turn: value.in_turn, state };
+}
+
+/** `live`, by claim. Over `LIVE_MAX` sessions refuses it whole; a claim that is no text
+ * of 1 to 200 characters, or an entry that won't read, is left out. */
+function readLive(value: unknown, refused: Refusals): Map<string, Live> {
+  const live = new Map<string, Live>();
+  if (value === undefined) return live;
+  if (!isObj(value)) {
+    refused.add("live", "not an object");
+    return live;
+  }
+  const entries = Object.entries(value);
+  if (entries.length > LIVE_MAX) {
+    refused.add("live", `more than ${LIVE_MAX} sessions`);
+    return live;
+  }
+  for (const [claim, item] of entries) {
+    const place = `live[${JSON.stringify(claim)}]`;
+    if (claim === "" || charsOf(claim) > TEXT_MAX_CHARS) {
+      refused.add(place, `not a claim of 1 to ${TEXT_MAX_CHARS} characters`);
+      continue;
+    }
+    const one = readLiveOne(item, place, refused);
+    if (one !== null) live.set(claim, one);
+  }
+  return live;
+}
+
 function readOrder(value: unknown, refused: Refusals): number {
   if (Number.isInteger(value) && (value as number) >= 0 && (value as number) <= ORDER_MAX) {
     return value as number;
@@ -500,7 +559,8 @@ function readMore(value: unknown, refused: Refusals): number {
  * dropped and named in `refused`, and the rest is kept: a key or an agent the page did not
  * give, a field of the wrong type, a text over `TEXT_MAX_CHARS`, more than `PARTS_MAX`
  * parts on a row or a line, more than `LINES_MAX` lines in a section, an open project's
- * field on another, and a folder's `at` from a report with no `activity`. Fields the
+ * field on another, a folder's `at` from a report with no `activity`, and a `live` of
+ * more than `LIVE_MAX` sessions. Fields the
  * contract doesn't name are ignored.
  */
 export function readReport(detail: unknown, given: readonly Given[], open: string | null): Read {
@@ -522,6 +582,7 @@ export function readReport(detail: unknown, given: readonly Given[], open: strin
     projects: readProjects(detail.projects, given, open, refused),
     folders: readFolders(detail.folders, activity, refused),
     more_folders: readMore(detail.more_folders, refused),
+    live: readLive(detail.live, refused),
   };
   return { report, refused: refused.lines };
 }

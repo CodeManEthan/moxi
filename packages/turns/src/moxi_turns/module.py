@@ -54,14 +54,23 @@ TEARDOWN = "moxi_turns.claude_setup:teardown"
 SEGMENT = None
 #: turns' page server, which the browser UI shell starts. Nothing here imports it.
 PAGE = "moxi_turns.page:PAGE"
-#: What turns offers the browser UI shell: its panel, and no other component. Where sessions
-#: is installed its page shows the running sessions with turns' live state, so the panel
-#: leaves the band; its address still opens it.
+#: What turns offers the browser UI shell. `page` is its panel; where sessions is installed
+#: its page shows the running sessions with turns' live state, so the panel leaves the band;
+#: its address still opens it. `project-facts`, which draws nothing, tells the Projects page
+#: which sessions are in a turn, by session, so that page can say which running lines work.
 COMPONENTS = {
     "page": {"script": "page.js", "title": "Live sessions", "contract": 1, "place": "page",
              "group": "daily", "order": 25, "band_unless": ["sessions"],
              "doc": "Every running session turns can reach: its turn, its agents and its "
                     "trouble, read-only"},
+    "project-facts": {"script": "project-facts.js", "title": "Live sessions",
+                      "doc": "Which sessions turns can read are in a turn now, by session, "
+                             "for the Projects page",
+                      "contract": 1, "place": "inline",
+                      "attributes": {"projects": {"type": "string",
+                                                  "doc": "the projects the page holds, JSON"},
+                                     "open": {"type": "string",
+                                              "doc": "the key of the opened project"}}},
 }
 DOCTOR = "moxi_turns.doctor:check"
 #: A hook may cost the agent at most twice the floor, `python -I -c pass`.

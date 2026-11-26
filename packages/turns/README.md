@@ -254,6 +254,26 @@ the panel.
   is read again when the tab is shown, and is redrawn once a minute for its day words.
   A Claude Code run with no window (headless) spawns no endpoint and is not listed.
 
+### On the Projects page
+
+With `moxi-projects` in the shell too, turns' `project-facts` component tells the Projects
+page which sessions are in a turn now. turns knows a session's folder, not its project,
+so it names no project: its report (`order` 20, no `activity`, an empty `projects`)
+carries `live`, by session claim (`<harness>/<session id>`, such as `claude/<id>`), each
+`{in_turn, state}`: `in_turn` is whether the session's facts say a turn is open, and
+`state` the panel's word for it, `working` or `idle`. The page joins it onto the lines
+that claim the same session; a running session launched by `moxi-launcher` reads
+`working` there in place of when it was last active.
+
+A session is in `live` only when turns can say: it has a harness and a session id, its
+facts were read under that same id and are one moment (not stale), and no run of unread
+readings is going on. Two sessions with one claim are both left out, and past 100,
+newest first, the rest are. The component reads only turns' own `/api/sessions`, when
+it is placed, on the `sessions` topic and every 30 seconds; while the page is hidden it
+reads nothing. A read that fails, is refused (the route is not the phone gateway's), or
+comes before the first scan has finished reports nothing, and the page draws its lines as
+the other modules give them.
+
 ## Requirements
 
 - Linux and Python 3.12 or later.

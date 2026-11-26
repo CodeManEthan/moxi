@@ -32,6 +32,7 @@ import time
 from datetime import datetime
 from pathlib import Path
 from typing import Any, NamedTuple
+from urllib.parse import parse_qs, urlsplit
 
 from moxi import modules
 
@@ -175,6 +176,27 @@ def given(shell: Any, rows: tuple[Row, ...] = SEVEN) -> list[dict[str, Any]]:
     """The `projects` attribute the page gives each facts component for `rows`."""
     return [{"key": row.key, "root": root(shell, row), "lead": row.lead,
              "associated": list(row.associated)} for row in rows]
+
+
+#: What turns' own `project-facts` component asks of turns: its script, its one route and
+#: that route's topic. A turns request the page makes in a full install is one of these.
+TURNS_PATHS = ("/m/turns/project-facts.js", "/m/turns/api/sessions")
+TURNS_TOPICS = ("turns.sessions",)
+
+
+def turns_asked(requests: list[str]) -> list[str]:
+    """Each of `requests` that asks turns for anything but its `project-facts` component's
+    own script, route and topic: the contract admits only those."""
+    stray = []
+    for url in requests:
+        parts = urlsplit(url)
+        if parts.path.startswith("/m/turns/") and parts.path not in TURNS_PATHS:
+            stray.append(url)
+        elif parts.path == "/m/ui/api/push":
+            topics = ",".join(parse_qs(parts.query).get("topics", [])).split(",")
+            if any(topic.startswith("turns.") and topic not in TURNS_TOPICS for topic in topics):
+                stray.append(url)
+    return stray
 
 
 # --- the fixture ---------------------------------------------------------------------------

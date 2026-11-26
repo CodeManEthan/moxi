@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
+import { inTurn, turnWord } from "../src/claims.ts";
 import { readReport } from "../src/facts.ts";
 import {
   addBackBody, agentPhrase, agentsLine, emptySentence, folderAsk, folderGroup, GOES, joinNames, MAY_BE_REMOVED, mintJob,
@@ -206,6 +207,112 @@ test("a where on a say whose runs is false is refused, so it draws nothing", () 
 test("the phrase is drawn after the lead only", () => {
   const line = agentsLine(ATLAS, [says(20, { planner: NOT_RUNNING, reviewer: NOT_RUNNING })]);
   assert.deepEqual(line.parts.map((part) => part.text), ["builder-1 leads", "planner and reviewer also work here"]);
+});
+
+// -- a running line's turn word -----------------------------------------------------------------
+
+const KESTREL = listed("kestrel-web");
+const BOTH = [...GIVEN, { key: "kestrel-web", root: KESTREL.root, lead: null, associated: [] }];
+const PLANNER = "claude/0190b000-0000-7000-8000-000000000001";
+const BUILDER = "codex/019a2b3c-4d5e-7f60-8192-a3b4c5d6e7f8";
+/** A report read as the page reads it, with `atlas-api` open. */
+const said = (detail) => {
+  const read = readReport({ version: 1, projects: {}, ...detail }, BOTH, "atlas-api");
+  assert.deepEqual(read.refused, []);
+  return read.report;
+};
+/** A running line as the launcher gives it. */
+const runningLine = (name, where, claim, active = "last active 18:40") => ({
+  parts: [{ text: name }, { text: where }, ...(active === null ? [] : [{ text: active, idle_only: true }])],
+  claims: [claim], runs: true,
+});
+const launcherSaid = (lines, more = {}) => said({ order: 10, projects: {
+  "atlas-api": { parts: [{ text: "", count: { one: "running", many: "running" }, claims: lines.flatMap((one) => one.claims) }],
+                 sections: [{ label: "Sessions", lines }] }, ...more } });
+const turnsSaid = (live, order = 20) => said({ order, live });
+const sessionsOf = (reports) => texts(opened(ATLAS, reports).find((row) => row.label === "Sessions"));
+const LINES = [runningLine("planner", "headless", PLANNER), runningLine("builder-1", "slot 4", BUILDER)];
+
+test("a running line whose session is in a turn reads working, in place of last active; an idle one is as given", () => {
+  const live = { [PLANNER]: { in_turn: true, state: "working" }, [BUILDER]: { in_turn: false, state: "idle" } };
+  assert.deepEqual(sessionsOf([launcherSaid(LINES), turnsSaid(live)]),
+                   ["planner · headless · working", "builder-1 · slot 4 · last active 18:40"]);
+  // A line with no last-active part gets the word at its end.
+  assert.deepEqual(sessionsOf([launcherSaid([runningLine("planner", "headless", PLANNER, null)]), turnsSaid(live)]),
+                   ["planner · headless · working"]);
+  // The words are the lowest order's among the reports saying so.
+  assert.deepEqual(sessionsOf([launcherSaid(LINES), turnsSaid({ [PLANNER]: { in_turn: true, state: "busy" } }, 40),
+                               turnsSaid(live)]),
+                   ["planner · headless · working", "builder-1 · slot 4 · last active 18:40"]);
+});
+
+test("without a report saying, or one that doesn't know the session, every line is as given", () => {
+  const given = ["planner · headless · last active 18:40", "builder-1 · slot 4 · last active 18:40"];
+  assert.deepEqual(sessionsOf([launcherSaid(LINES)]), given);
+  assert.deepEqual(sessionsOf([launcherSaid(LINES), turnsSaid({})]), given);
+  assert.deepEqual(sessionsOf([launcherSaid(LINES), turnsSaid({ "claude/another-id": { in_turn: true, state: "working" } })]),
+                   given);
+  // A launch with no session id yet claims itself, which no session's claim matches.
+  assert.deepEqual(sessionsOf([launcherSaid([runningLine("planner", "headless", "request/req-1")]),
+                               turnsSaid({ [PLANNER]: { in_turn: true, state: "working" } })]),
+                   ["planner · headless · last active 18:40"]);
+});
+
+test("two reports disagreeing on a session leave its line as given", () => {
+  const working = turnsSaid({ [PLANNER]: { in_turn: true, state: "working" } });
+  const idle = turnsSaid({ [PLANNER]: { in_turn: false, state: "idle" } }, 40);
+  assert.deepEqual(sessionsOf([launcherSaid(LINES), working, idle]),
+                   ["planner · headless · last active 18:40", "builder-1 · slot 4 · last active 18:40"]);
+  assert.deepEqual([...inTurn([working, idle])], []);
+  assert.deepEqual([...inTurn([working, turnsSaid({ [PLANNER]: { in_turn: true, state: "busy" } }, 40)])],
+                   [[PLANNER, "working"]]);
+});
+
+test("a session claimed by more than one line, or on another project too, gets no word", () => {
+  const live = turnsSaid({ [PLANNER]: { in_turn: true, state: "working" } });
+  // Two running lines carry one session id: neither reads working.
+  const twice = [runningLine("planner", "headless", PLANNER), runningLine("planner-2", "slot 2", PLANNER)];
+  assert.deepEqual(sessionsOf([launcherSaid(twice), live]),
+                   ["planner · headless · last active 18:40", "planner-2 · slot 2 · last active 18:40"]);
+  // The other is in the `<n> more` line.
+  const more = [runningLine("planner", "headless", PLANNER), { parts: [{ text: "1 more" }], claims: [PLANNER] }];
+  assert.deepEqual(sessionsOf([launcherSaid(more), live]), ["planner · headless · last active 18:40", "1 more"]);
+  // The same report claims the session on another project.
+  const elsewhere = launcherSaid([LINES[0]], { "kestrel-web": { parts: [{ text: "", count: { one: "running", many: "running" },
+                                                                         claims: [PLANNER] }] } });
+  assert.deepEqual(sessionsOf([elsewhere, live]), ["planner · headless · last active 18:40"]);
+  // Another report counting the session on this project's row is no second line.
+  const counted = said({ order: 30, projects: { "atlas-api": { parts: [{ text: "", count: { one: "active recently",
+                                                                     many: "active recently" }, claims: [PLANNER] }] } } });
+  assert.deepEqual(sessionsOf([launcherSaid([LINES[0]]), live, counted]), ["planner · headless · working"]);
+});
+
+test("only a running line with one claim is joined", () => {
+  const live = turnsSaid({ [PLANNER]: { in_turn: true, state: "working" }, [BUILDER]: { in_turn: true, state: "working" } });
+  const notRunning = { ...runningLine("planner", "headless", PLANNER), runs: false };
+  const two = { ...runningLine("pair", "slot 1", PLANNER), claims: [PLANNER, BUILDER] };
+  assert.deepEqual(sessionsOf([launcherSaid([notRunning]), live]), ["planner · headless · last active 18:40"]);
+  assert.deepEqual(sessionsOf([launcherSaid([two]), live]), ["pair · slot 1 · last active 18:40"]);
+  const line = launcherSaid([notRunning]).projects.get("atlas-api").sections[0].lines[0];
+  assert.equal(turnWord(line, launcherSaid([notRunning]), [], "atlas-api", inTurn([live])), null);
+});
+
+test("the word changes no count, claim, agents phrase or stays line", () => {
+  const live = turnsSaid({ [PLANNER]: { in_turn: true, state: "working" } });
+  const launcher = said({ order: 10, projects: { "atlas-api": {
+    sections: [{ label: "Sessions", lines: [LINES[0]] }],
+    agents: { planner: { runs: true, state: "running now", where: "headless" } },
+    stays: ["the one running now keeps running"] } } });
+  const sessions = said({ order: 30, projects: { "atlas-api": { sections: [{ label: "Sessions", lines: [{ parts: [
+    { text: "", count: { one: "session this week", many: "sessions this week", after_one: "more this week",
+                         after_many: "more this week" }, claims: [PLANNER, "claude/other"] }] }] }] } } });
+  const without = opened(ATLAS, [launcher, sessions]);
+  const withIt = opened(ATLAS, [launcher, sessions, live]);
+  assert.deepEqual(texts(withIt.find((row) => row.label === "Sessions")),
+                   ["planner · headless · working", "1 more this week"]);
+  assert.deepEqual(withIt.find((row) => row.label === "Agents"), without.find((row) => row.label === "Agents"));
+  assert.deepEqual(removeStep(ATLAS, { home: HOME, notesInstalled: true, reports: [launcher, sessions, live] }),
+                   removeStep(ATLAS, { home: HOME, notesInstalled: true, reports: [launcher, sessions] }));
 });
 
 test("the Agents line's three forms", () => {
