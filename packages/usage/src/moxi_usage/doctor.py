@@ -21,14 +21,14 @@ at what usage's answers rest on:
   its file cannot be read. The models and populations seen in the last 30 days that the
   measure gives no row (too few files, headless sessions, short ones, or no usable input
   price) are counted, not warned on: measuring again would not give them one.
-* `marks`: deletes the warn-at mark's fired-mark files older than `marks.max_age_days`
-  and the worker ceiling's agent markers older than `ceiling.max_age_days`, and says how
+* `marks`: deletes the warn-at mark's fired-mark files and the stop's latches older than
+  `marks.max_age_days` and the worker ceiling's agent markers older than `ceiling.max_age_days`, and says how
   many it deleted and kept; `warn` when one could not be deleted, or when the worker
   ceiling runs (by `ceiling.enabled`, or by turns' `guards.run` as turns' guard loader reports
   it) while `ceiling.warn_tokens` or `ceiling.hard_tokens` is 0, so it allows every call.
 * `turns`: `off` when turns is not installed, saying what needs it; else `ok`, naming
-  the events usage registers with turns and what each is for, and the worker ceiling's
-  guard.
+  the events usage registers with turns and what each is for, and its two guards, the
+  worker ceiling's and the stop's.
 
 Every other check only reads: the index is opened as it is, and no pass runs.
 """
@@ -457,7 +457,8 @@ def _named(pairs: list[tuple[str, str]]) -> str:
 # --- marks ------------------------------------------------------------------------------
 
 def marks_row(*, now: float, env: Mapping[str, str] | None = None) -> Row:
-    """Sweep the fired-mark files and the ceiling's markers past their ages, and count."""
+    """Sweep the fired-mark files, the stop latches and the ceiling's markers past their
+    ages, and count."""
     from . import marks
     from .settings import current
 
@@ -470,8 +471,8 @@ def marks_row(*, now: float, env: Mapping[str, str] | None = None) -> Row:
                    f"was swept: {exc}", _CONFIG)
     swept = marks.sweep(now=now, marks_days=marks_days, ceiling_days=ceiling_days, env=env)
     detail = (f"{_n(swept.kept, 'session')} with fired marks kept; deleted "
-              f"{_n(swept.marks, 'fired-mark file')} older than {_days(int(marks_days))} "
-              f"and the ceiling markers of {_n(swept.ceiling, 'agent')} older than "
+              f"{_n(swept.marks, 'fired-mark file')} and {_n(swept.stops, 'stop latch', 'stop latches')} "
+              f"older than {_days(int(marks_days))} and the ceiling markers of {_n(swept.ceiling, 'agent')} older than "
               f"{_days(int(ceiling_days))}")
     if swept.problems:
         shown = "; ".join(swept.problems[:REASONS_SHOWN])
@@ -556,14 +557,16 @@ def turns_row() -> Row:
                    f"turns is not installed: {OPTIONAL['turns']} need turns")
     from .ceiling import GUARD_ID
     from .listeners import LISTENERS
+    from .stop import GUARD_ID as STOP_ID
 
     said = []
     for row in LISTENERS:
         for event in row[0]:
             said.append(f"{event} ({TURNS_EVENTS.get(event, row[1])})")
     return Row(MODULE, "turns", "ok", "turns is installed; usage registers "
-               + ", ".join(said) + f", and the guard {GUARD_ID} (the worker ceiling, "
-               "off until turned on)")
+               + ", ".join(said) + f", and the guards {GUARD_ID} (the worker ceiling, "
+               f"off until turned on) and {STOP_ID} (the stop, on in a session whose "
+               "launch set a stop mark)")
 
 
 # --- text -------------------------------------------------------------------------------

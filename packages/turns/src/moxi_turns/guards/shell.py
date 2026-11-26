@@ -25,7 +25,8 @@ what the reader doesn't read, and one that fails closed refuses it by a mark.
   or `{name}` written against it or none, the here-string `<<<`, and the heredocs `<<`
   and `<<-`. A `#` that starts a word comments out the rest of its line.
 - `powershell` (text for `pwsh` and `powershell`). Words split at unquoted spaces and
-  tabs. `'...'` is verbatim with `''` an apostrophe; `"..."` expands substitutions with
+  tabs, and after an assignment's operator written against what follows it (`$x=cmd`).
+  `'...'` is verbatim with `''` an apostrophe; `"..."` expands substitutions with
   `""` a quote; a backtick escapes the next character outside `'...'`, and the named
   escapes (`` `n ``, `` `t ``, `` `0 `` and the rest) are kept as written. Substitutions
   are `$(...)`, `@(...)` and a `(...)` group, bare, in `"..."` and in `@"..."@`. The
@@ -299,13 +300,13 @@ class _Reader:
             r.target = sw
             self.took_target(r, w)
             return None
-        self.add_word(sw, plain=w.plain)
+        self.add_word(sw, plain=w.plain, end=end)
         return sw
 
     def took_target(self, r: _Redir, w: _Word) -> None:
         pass
 
-    def add_word(self, sw: ShellWord, *, plain: bool) -> None:
+    def add_word(self, sw: ShellWord, *, plain: bool, end: int | None = None) -> None:
         self.cur.words.append(sw)
         self.cur.plain.append(plain)
 
@@ -407,7 +408,7 @@ class _Sh(_Reader):
                      None)
         return named is None or named in _DECLARES
 
-    def add_word(self, sw: ShellWord, *, plain: bool) -> None:
+    def add_word(self, sw: ShellWord, *, plain: bool, end: int | None = None) -> None:
         text = sw.text
         if sw.fields and self.keeps_value(text):
             object.__setattr__(sw, "fields", ())
@@ -432,7 +433,7 @@ class _Sh(_Reader):
                 self.testing = True
         if self.testing and plain and text == "]]":
             self.testing = False
-        super().add_word(sw, plain=plain)
+        super().add_word(sw, plain=plain, end=end)
 
     def operator(self, op: str, position: int) -> None:
         super().operator(op, position)
@@ -1055,6 +1056,23 @@ class _Ps(_Reader):
             return raw.startswith("$(") and raw.endswith(")")
         return raw.startswith(("$(", "@(", "(")) and raw.endswith(")")
 
+    def add_word(self, sw: ShellWord, *, plain: bool, end: int | None = None) -> None:
+        """Add `sw`, split where an assignment's operator is written against what follows
+        it (`$x=Stop-Process`, `$x =Stop-Process`): PowerShell ends a variable at `=`, so
+        the pipeline after it starts a word of its own."""
+        while end is not None and _ps_targets_only([w.text for w in self.cur.words]):
+            cut = _ps_assignment_cut(sw.text, first=not self.cur.words)
+            if cut is None or self.t[sw.position:sw.position + cut] != sw.text[:cut]:
+                break
+            position = sw.position + cut
+            rest = sw.text[cut:]
+            is_sub = (rest == "\0" and len(sw.subs) == 1
+                      and self.whole_sub(self.t[position:end]))
+            super().add_word(_shell_word(sw.text[:cut], sw.position, (), is_sub=False),
+                             plain=True)
+            sw = _shell_word(rest, position, sw.subs, is_sub=is_sub, kept=sw._kept_escape)
+        super().add_word(sw, plain=plain, end=end)
+
     def read(self, i: int, *, close: bool = False) -> int:
         t, n = self.t, self.n
         while i < n:
@@ -1361,30 +1379,49 @@ class _Cmd(_Reader):
 # --- the command word --------------------------------------------------------------------
 
 #: Each `sh` wrapper: its options without a value, its options with one, and what comes
-#: after its options ("command", "assignments" for `env`, "duration" for `timeout`).
-#: `nice` also takes `-N`, a number.
+#: after its options ("command", "assignments" for `env`, "duration" for `timeout`). Each
+#: option of the tool that still runs the command is named, short and long, as the tool's
+#: own manual gives it. `nice` also takes `-N`, a number. `env -S`'s value is itself a
+#: command line env splits; it is read as a value, so what it runs isn't read.
 _WRAPPERS: dict[str, tuple[frozenset[str], frozenset[str], str]] = {
-    "sudo": (frozenset({"-A", "-b", "-E", "-H", "-k", "-n", "-P", "-S", "--preserve-env"}),
-             frozenset({"-C", "-D", "-g", "-h", "-p", "-r", "-R", "-t", "-u", "-U",
-                        "--user", "--group"}), "command"),
+    "sudo": (frozenset({"-A", "-b", "-B", "-E", "-H", "-k", "-n", "-N", "-P", "-S",
+                        "--askpass", "--background", "--bell", "--preserve-env",
+                        "--set-home", "--reset-timestamp", "--non-interactive",
+                        "--no-update", "--preserve-groups", "--stdin"}),
+             frozenset({"-C", "-D", "-g", "-h", "-p", "-r", "-R", "-t", "-T", "-u", "-U",
+                        "--close-from", "--chdir", "--group", "--host", "--prompt",
+                        "--role", "--chroot", "--type", "--command-timeout", "--user",
+                        "--other-user"}),
+             "command"),
     "doas": (frozenset({"-n"}), frozenset({"-a", "-u"}), "command"),
-    "env": (frozenset({"-i", "-0", "-"}), frozenset({"-u", "-C"}), "assignments"),
+    "env": (frozenset({"-i", "-0", "-v", "-", "--ignore-environment", "--null", "--debug",
+                       "--block-signal", "--default-signal", "--ignore-signal",
+                       "--list-signal-handling"}),
+            frozenset({"-a", "-u", "-C", "-S", "--argv0", "--unset", "--chdir",
+                       "--split-string"}), "assignments"),
     "nohup": (frozenset(), frozenset(), "command"),
     "builtin": (frozenset(), frozenset(), "command"),
     "exec": (frozenset({"-c", "-l"}), frozenset({"-a"}), "command"),
     "command": (frozenset({"-p"}), frozenset(), "command"),
-    "nice": (frozenset(), frozenset({"-n"}), "command"),
-    "timeout": (frozenset({"-v", "--foreground", "--preserve-status"}),
-                frozenset({"-s", "-k"}), "duration"),
-    "setsid": (frozenset({"-c", "-f", "-w"}), frozenset(), "command"),
-    "stdbuf": (frozenset(), frozenset({"-i", "-o", "-e"}), "command"),
+    "nice": (frozenset(), frozenset({"-n", "--adjustment"}), "command"),
+    "timeout": (frozenset({"-f", "-p", "-v", "--foreground", "--preserve-status",
+                           "--verbose"}),
+                frozenset({"-s", "-k", "--signal", "--kill-after"}), "duration"),
+    "setsid": (frozenset({"-c", "-f", "-w", "--ctty", "--fork", "--wait"}), frozenset(),
+               "command"),
+    "stdbuf": (frozenset(), frozenset({"-i", "-o", "-e", "--input", "--output", "--error"}),
+               "command"),
 }
+
+#: PowerShell's assignment operators: the pipeline on their right is a command.
+_PS_ASSIGNMENTS = ("??=", "+=", "-=", "*=", "/=", "%=", "=")
 
 
 def command_word_index(command: ShellCommand, *, dialect: str = "sh") -> int | None:
     """The index in `command.words` of the word that names what it runs: past
     `NAME=value` words, the reserved words that start a command and the wrappers with
-    the options their table names (`sh`), the call operators `&` and `.` (`powershell`),
+    the options their table names, short or long (`sh`), an assignment's targets and its
+    operator (`$x =`, `[int]$x +=`) and the call operators `&` and `.` (`powershell`),
     or a leading `@` (`cmd`). None when nothing is left, when the command starts with a
     word that runs nothing (`}`, `fi`, `done`, `esac`, `for`, `select`, `case`, `[[`, a
     `((...))` word, a PowerShell statement word, cmd's `if`, `for`, `call`, `start` and
@@ -1394,6 +1431,8 @@ def command_word_index(command: ShellCommand, *, dialect: str = "sh") -> int | N
     words = [w.text for w in command.words]
     if dialect == "powershell":
         k = 0
+        while (past := _ps_past_assignment(words, k)) is not None:
+            k = past
         while k < len(words) and words[k] in ("&", "."):
             k += 1
         if k >= len(words) or words[k].lower() in _PS_STATEMENTS:
@@ -1407,6 +1446,58 @@ def command_word_index(command: ShellCommand, *, dialect: str = "sh") -> int | N
             return None
         return k
     return _sh_command_word(words)
+
+
+def _ps_targets_only(words: list[str]) -> bool:
+    """Whether `words`, the start of a PowerShell command, are assignments and then
+    assignment targets only, so a word after them may still be a target or an operator."""
+    k = 0
+    while (past := _ps_past_assignment(words, k)) is not None:
+        k = past
+    return all(_ps_target_piece(word, first=j == k) for j, word in enumerate(words[k:], k))
+
+
+def _ps_target_piece(word: str, *, first: bool) -> bool:
+    """Whether `word` can be part of an assignment's targets: a variable or a cast, after
+    a comma written against it, or a lone comma after the first target."""
+    target = word.lstrip(",")
+    return target.startswith(("$", "[")) or (not target and not first)
+
+
+def _ps_assignment_cut(word: str, *, first: bool) -> int | None:
+    """Where the pipeline starts in `word` when an assignment's operator is written
+    against it: past `$x=` in `$x=Stop-Process`, past `=` in `=Stop-Process` when a
+    target comes before; None otherwise."""
+    if not first:
+        for op in _PS_ASSIGNMENTS:
+            if word.startswith(op) and len(word) > len(op):
+                return len(op)
+    if not word.startswith(("$", "[")):
+        return None
+    for position, ch in enumerate(word):
+        if ch in "\0\"' \t":
+            return None
+        for op in _PS_ASSIGNMENTS:
+            if word.startswith(op, position) and position + len(op) < len(word):
+                return position + len(op) if position else None
+        if ch == "=":
+            return None
+    return None
+
+
+def _ps_past_assignment(words: list[str], k: int) -> int | None:
+    """The index past an assignment that starts at `k` (its targets, each a variable or a
+    cast such as `$x`, `$x.y`, `[int]$x` or `$a, $b`, and its operator, standing alone or
+    written against the last target), or None when none starts there."""
+    for j in range(k, len(words)):
+        word = words[j]
+        if j > k and word in _PS_ASSIGNMENTS:
+            return j + 1
+        if not _ps_target_piece(word, first=j == k):
+            return None
+        if word.lstrip(",").endswith(_PS_ASSIGNMENTS):
+            return j + 1
+    return None
 
 
 def _is_assignment(word: str) -> bool:

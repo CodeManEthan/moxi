@@ -40,7 +40,8 @@ DEFAULTS = {
 def test_every_key_and_default():
     current = settings.current()
     keys = set(current)
-    assert keys == set(DEFAULTS) | {"ceiling.warning_text", "ceiling.deny_text"}
+    assert keys == set(DEFAULTS) | {"ceiling.warning_text", "ceiling.deny_text",
+                                    "stop.deny_text"}
     for key, value in DEFAULTS.items():
         assert current[key] == value, key
     for key in ("ceiling.warning_text", "ceiling.deny_text"):
@@ -48,6 +49,8 @@ def test_every_key_and_default():
     assert {"{growth}", "{current}", "{hard}"} <= {
         part for part in ("{growth}", "{current}", "{hard}")
         if part in current["ceiling.warning_text"]}
+    stop_text = current["stop.deny_text"]
+    assert "{mark}" in stop_text and "{folder}" in stop_text and "~" not in stop_text
 
 
 ROW = '[[model]]\nid = "m-1"\ninput = 1\noutput = 2\n'
@@ -163,7 +166,7 @@ GROUPS = {
     "Reading": ["index.workers", "index.wait_s"],
     "Limits": ["limits.codex_pull_after_s", "limits.history_days",
                "limits.projection_minutes"],
-    "Marks": ["marks.max_age_days", "marks.handler_wait_ms"],
+    "Marks": ["marks.max_age_days", "marks.handler_wait_ms", "stop.deny_text"],
     "Restart point": ["restart_point.days", "restart_point.interactive_only",
                       "restart_point.interactive_originators"],
     "Worker ceiling": ["ceiling.return_tools", "ceiling.warning_text", "ceiling.deny_text",

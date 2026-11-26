@@ -4,7 +4,8 @@ Moxi's usage module answers four questions about the coding-agent sessions on a 
 
 - how much of each plan window is used, and when it will run out (limits);
 - how full a session's context is, and whether it has passed its mark (context and marks);
-- whether a subagent should stop (the worker ceiling);
+- whether a subagent should stop (the worker ceiling), and whether a session is past the
+  stop mark its launch set (the stop);
 - what the tokens cost, by day, model, session or project (the token index).
 
 It decodes no harness file of its own: every record it reads comes through Moxi's sessions
@@ -18,8 +19,8 @@ moxi install usage
 ```
 
 `moxi install usage` brings sessions with it and asks about usage's optional extras:
-`turns` (Claude limits, Codex limits pulled from its app-server, the warn-at mark and the
-worker ceiling), `projects` (a session's project in the reports) and `ui` (the page). Add
+`turns` (Claude limits, Codex limits pulled from its app-server, the warn-at mark, the
+worker ceiling and the stop), `projects` (a session's project in the reports) and `ui` (the page). Add
 one later with `moxi install usage --with <extra>`. The core's README, at
 [CodeManEthan/moxi](https://github.com/CodeManEthan/moxi/tree/main/packages/moxi), covers
 the `moxi` command.
@@ -318,6 +319,42 @@ Fired marks are kept in `STATE/usage/marks/`, so a restarted endpoint doesn't sa
 twice; a session's file goes when its endpoint ends. `moxi usage marks SESSION` prints a
 session's marks, thresholds and states; `moxi usage marks` lists the fired marks on disk.
 
+## The stop
+
+A launch can also set a stop mark past its warn-at mark (the launcher's `stop_at`). It is
+a multiple `<k>x`, k a decimal of at most two places and at least 1, such as `2.5x` or
+`3x`, on the same equation as the named marks: the mark `<k>x` is where the read cost per
+call has grown to k times the least it can be, so `1x`, `1.5x` and `2x` are the multiples
+1, 1.5 and 2. The launcher stamps it as `MOXI_USAGE_STOP_AT`, with the launch's handoff
+folder as `MOXI_USAGE_STOP_HANDOFFS`.
+
+The first time the main session's context is at or above the stop mark, the stop fires:
+usage writes a latch, `STATE/usage/stop/<harness>-<session>.json`, and tells the model in
+one line (`stop.deny_text`). The stop never re-arms: a compaction leaves it latched, the
+latch outlives the endpoint so a resumed session stays stopped, and the doctor's `marks`
+row deletes latches older than `marks.max_age_days`.
+
+From then on usage's guard `usage.stop` refuses every tool call of the main session
+except the wrap-up: git's status, diff, add and commit forms in its working directory;
+writing, editing and reading (with a `limit`) `.md` files under the handoff folder;
+`moxi repo rules`; comms' tools and `moxi comms send`, `reply`, `agents`, `whoami`,
+`history` and `remove` on the shell; `moxi launcher handoff dir`;
+`moxi launcher relaunch --self --handoff FILE` with FILE a `.md` file under the handoff
+folder; and Claude's `Skill` and `ToolSearch`, which load a skill (the handoff skill) or a
+held-back tool (comms' own) and act on nothing themselves. A tool `ToolSearch` loads is
+judged when it is called. A skill that runs forked in a subagent (`context: fork` in its
+frontmatter) would act where the stop doesn't reach, so `Skill` loads only a skill whose
+file the guard finds (under Claude's folder, the project's `.claude` folders up to the
+repository's root, or the skills synced from the account) and none of whose files
+forks; any other, Claude Code's own bundled skills among them, is refused. A plugin's
+skill, `<plugin>:<name>`, is looked for only in the plugin's installed copies, as Claude
+Code lists them, never among other skills of the same bare name, and is refused when
+the plugin isn't found.
+A refusal gives `stop.deny_text`, its `{mark}` and `{folder}` filled in, and the reason
+in brackets. The guard runs only in a session whose launch set a stop mark, and
+only on Claude; a subagent's calls are not stopped, since only the main session's calls
+grow the context the stop measures.
+
 ## The worker ceiling
 
 With turns installed, usage offers turns a guard, `usage.ceiling`, that stops a subagent
@@ -342,10 +379,12 @@ may still call the return tools (`ceiling.return_tools`, `StructuredOutput`), wr
 and read `.md` files under `ceiling.handoff_roots`, run git's status, diff, add and commit
 forms in its working directory or under `ceiling.work_roots`, and run the commands whose
 words are, whole, an entry of `ceiling.allow_commands`, such as `[["make", "handoff"]]`.
-A word written `<...>` stands for one name word (a letter or digit, then letters, digits,
-`.`, `_` and `-`): `[["moxi", "repo", "rules"], ["make", "trailers", "<key>"]]` allows
-`moxi repo rules` with no argument and `make trailers` with one key, and refuses either
-with a word more or fewer.
+The word `<handoff>` stands for the path of a `.md` file under `ceiling.handoff_roots`,
+held to the same rule as a hand-off file. Any other word written `<...>` stands for one
+name word (a letter or digit, then letters, digits, `.`, `_` and `-`):
+`[["moxi", "repo", "rules"], ["make", "trailers", "<key>"]]` allows `moxi repo rules` with
+no argument and `make trailers` with one key, and refuses either with a word more or
+fewer.
 Both root lists start empty, and the one command allowed beyond git is `moxi repo rules`,
 which the refusal names.
 Markers live in `STATE/usage/ceiling/<session>/<agent>/`; `moxi usage marks` lists the

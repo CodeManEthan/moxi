@@ -11,8 +11,9 @@ there; on disk it keeps only each session's fired purposes. This module reads th
   from what the session's file recorded at its last firing, else both are off (nothing
   to read them from: no config default stands in). `marks_from` says which.
 * `fired()`: every session's file of fired purposes (`Fired`).
-* `sweep(*, now)`: delete fired-mark files older than `marks.max_age_days` and the
-  ceiling's agent markers older than `ceiling.max_age_days`, for the doctor's `marks` row.
+* `sweep(*, now)`: delete fired-mark files and stop latches older than
+  `marks.max_age_days` and the ceiling's agent markers older than `ceiling.max_age_days`,
+  for the doctor's `marks` row.
 """
 
 from __future__ import annotations
@@ -265,18 +266,20 @@ def fired(env: Mapping[str, str] | None = None) -> list[Fired]:
 
 @dataclass(frozen=True)
 class Swept:
-    """What one sweep deleted, and the fired-mark files it kept."""
+    """What one sweep deleted, and the fired-mark files it kept: `marks` fired-mark files,
+    `ceiling` agents' ceiling markers, `stops` stop latches."""
 
     marks: int = 0
     ceiling: int = 0
     kept: int = 0
     problems: tuple[str, ...] = ()
+    stops: int = 0
 
 
 def sweep(*, now: float, marks_days: float, ceiling_days: float,
           env: Mapping[str, str] | None = None) -> Swept:
-    """Delete the fired-mark files (and their lock files) last changed more than
-    `marks_days` days before `now`, and each agent's ceiling markers,
+    """Delete the fired-mark files and the stop latches (and their lock files) last
+    changed more than `marks_days` days before `now`, and each agent's ceiling markers,
     `ceiling/<session>/<agent>/`, last changed more than `ceiling_days` before it; a
     session directory left empty goes too. Never raises: a file that can't be deleted is
     named in `problems`."""
@@ -308,7 +311,11 @@ def sweep(*, now: float, marks_days: float, ceiling_days: float,
 
     swept_ceiling, more = sweep_ceiling(now=now, max_age_days=ceiling_days, env=env)
     problems.extend(more)
-    return Swept(swept_marks, swept_ceiling, kept, tuple(problems))
+    from .stop import sweep as sweep_stops
+
+    swept_stops, more = sweep_stops(now=now, max_age_days=marks_days, env=env)
+    problems.extend(more)
+    return Swept(swept_marks, swept_ceiling, kept, tuple(problems), swept_stops)
 
 
 def _utc(epoch: float) -> str:

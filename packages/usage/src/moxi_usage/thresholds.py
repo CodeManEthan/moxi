@@ -15,6 +15,12 @@ cache-read price over its input price), both from the model table:
     C(1.5x) = S + g(1.5 + sqrt(1.25))N*     ~= S + 2.618gN*
     C(2x)   = S + g(2 + sqrt(3))N*          ~= S + 3.732gN*
 
+Each is one equation at one point. The mark `<k>x` is the restart interval at which the read
+cost per call is k times the least it can be, and it sits at `k + sqrt(k^2 - 1)` times N*.
+Besides the three named marks, a threshold may be asked for at any multiple `<k>x`, k a
+decimal of at most two places and at least 1 (`2.5x`, `3x`), on the same equation
+(`multiple`); the named marks are the multiples 1, 1.5 and 2.
+
 The exact coefficients are used, not the rounded ones. A mark's threshold is the smallest
 whole token count at or above the exact C (`ceil`), so `tokens >= threshold.tokens` on an
 integer count is the same comparison as `tokens >= C` on the real number.
@@ -54,6 +60,8 @@ MARK_MULTIPLES = {
 }
 MARKS = tuple(MARK_MULTIPLES)
 OFF = "off"
+#: The most decimal places the k of a multiple `<k>x` may have.
+MULTIPLE_PLACES = 2
 
 #: The populations a measure has rows for: a main session, and a subagent (a workflow's
 #: agents included).
@@ -86,8 +94,9 @@ class Threshold:
     """One mark for one model and population, or why there is none.
 
     `model` is the base model the row is keyed by (a bracket suffix and a date suffix
-    taken off), `mark` one of `MARKS`, `population` `main` or `subagent`. `tokens` is the
-    threshold, None exactly when the mark is unavailable, and then `reason` says why.
+    taken off), `mark` one of `MARKS` or a multiple `<k>x`, `population` `main` or
+    `subagent`. `tokens` is the threshold, None exactly when the mark is unavailable, and
+    then `reason` says why.
     `exact` is C as a real number. `fallback` is `main` when a subagent's mark comes from
     a main row. `borrowed_from` names the model whose row the mark was worked out from,
     None unless the row was borrowed (`BORROWED_ROW`)."""
@@ -193,10 +202,41 @@ def optimum_calls(restart: float, r: float, g: float) -> float:
     return math.sqrt(2.0 * restart / (r * g))
 
 
+def cost_multiple(mark: object) -> float | None:
+    """k of a mark written `<k>x`, k a decimal of at most `MULTIPLE_PLACES` places and at
+    least 1 (`1x`, `2x`, `2.5x`, `3.25x`); None for anything else. A named mark is read
+    the same way: `1.5x` is 1.5."""
+    if not isinstance(mark, str) or not mark.endswith("x"):
+        return None
+    whole, dot, places = mark[:-1].partition(".")
+    if not (whole.isascii() and whole.isdigit()):
+        return None
+    if dot and not (places.isascii() and places.isdigit()
+                    and 1 <= len(places) <= MULTIPLE_PLACES):
+        return None
+    k = float(mark[:-1])
+    return k if math.isfinite(k) and k >= 1.0 else None
+
+
+def multiple(mark: object) -> float | None:
+    """The multiple of N* at which `mark` sits: a named mark's (`MARK_MULTIPLES`), or for
+    a mark `<k>x`, `k + sqrt(k^2 - 1)`; None for anything that is not a mark."""
+    if isinstance(mark, str) and mark in MARK_MULTIPLES:
+        return MARK_MULTIPLES[mark]
+    k = cost_multiple(mark)
+    if k is None:
+        return None
+    return k + math.sqrt(k * k - 1.0)
+
+
 def mark_exact(s: float, p: float, g: float, w: float, r: float, mark: str) -> float:
-    """C(mark) as a real number of context tokens."""
+    """C(mark) as a real number of context tokens, for a named mark or a multiple
+    `<k>x`. Raises `ValueError` for anything that is not a mark."""
+    at = multiple(mark)
+    if at is None:
+        raise ValueError(f"{mark!r} is not a mark")
     restart = restart_cost(s, p, w, r)
-    return s + g * MARK_MULTIPLES[mark] * optimum_calls(restart, r, g)
+    return s + g * at * optimum_calls(restart, r, g)
 
 
 # --- model ids --------------------------------------------------------------------------
@@ -351,8 +391,8 @@ _UNSET: Any = object()
 
 def threshold(model: Any, mark: str, population: str = MAIN, *, doc: Any = _UNSET,
               table: Any = None, env: Mapping[str, str] | None = None) -> Threshold:
-    """The token threshold for `model` at `mark` in `population` (`main` or
-    `subagent`), or `unavailable` with its reason.
+    """The token threshold for `model` at `mark` (a named mark or a multiple `<k>x`) in
+    `population` (`main` or `subagent`), or `unavailable` with its reason.
 
     `doc` is the measure's document (None for no measure); left out, it is the measure
     in effect (`params`). `table` is the model table; left out, the table in effect.
@@ -360,7 +400,7 @@ def threshold(model: Any, mark: str, population: str = MAIN, *, doc: Any = _UNSE
     A model in `BORROWED_ROW` with no row of its own for `population` uses the lender's
     row for it, and the answer's `borrowed_from` names the lender. A config or model
     table that cannot be read gives `unavailable` with why."""
-    if mark not in MARK_MULTIPLES:
+    if multiple(mark) is None:
         return Threshold(None, mark, population, None, f"{mark!r} is not a mark")
     if population not in POPULATIONS:
         return Threshold(None, mark, population, None,
@@ -444,7 +484,8 @@ def all_marks(model: Any, population: str = MAIN, *, doc: Any = _UNSET, table: A
             for mark in MARKS}
 
 
-__all__ = ["MARK_MULTIPLES", "MARKS", "OFF", "MAIN", "SUBAGENT", "POPULATIONS",
+__all__ = ["MARK_MULTIPLES", "MARKS", "OFF", "MULTIPLE_PLACES", "cost_multiple", "multiple",
+           "MAIN", "SUBAGENT", "POPULATIONS",
            "FALLBACK_MAIN", "PARAMS_FILE", "BORROWED_ROW", "measured_row",
            "PARAMS_SCHEMA", "ParamsError", "Threshold", "write_multiplier",
            "measured_write_multiplier", "restart_cost",

@@ -5221,6 +5221,8 @@ launcher	packages/launcher/tests/test_waits.py	assert coder.closed == 1	keep	clo
 launcher	packages/launcher/tests/test_waits.py	monkeypatch.setattr(waits, "_logged", set())	keep	set	set
 launcher	packages/launcher/src/moxi_launcher/fork.py	result = (launch or api.launch)(request, env=caller_env, warn=warn)	keep	env	env
 launcher	packages/launcher/src/moxi_launcher/fork.py	return any(key == name or (key.endswith("_") and name.startswith(key))	keep	any	any
+launcher	packages/launcher/src/moxi_launcher/guards.py	name=NAME, calls=CALLS, who="any", match=MATCH, match_flags="i",	keep	any	any
+launcher	packages/launcher/src/moxi_launcher/guards.py	sessions="moxi_launcher.wake:on_for",	keep	sessions	sessions
 launcher	packages/launcher/src/moxi_launcher/keepwarm.py	directed join. With `dry_run` the ask writes nothing and ends, where it would nudge,	keep	dry_run	dry_run
 launcher	packages/launcher/tests/test_fork.py	assert calls == [((SID,), {"dry_run": True, "caller_env": {"A": "1"}})]	keep	dry_run	dry_run
 launcher	packages/launcher/tests/test_keepwarm.py	assert got.verdict.word == "off" and not got.session.delivered	keep	delivered	delivered
@@ -17210,7 +17212,7 @@ usage	packages/usage/src/moxi_usage/models.py	return sorted(set(self.rows) | exa
 usage	packages/usage/src/moxi_usage/models.py	return table(env).lookup(model, provider=provider, at=at)	keep	at	at
 usage	packages/usage/src/moxi_usage/models.py	self._dated = any(row.dated for row in self.overrides)	keep	any	any
 usage	packages/usage/src/moxi_usage/module.py	#: Interface 2 is interface 1 plus `report`'s `folder` filter, the `projects` report by	use	`folder`	`work_dir`
-usage	packages/usage/src/moxi_usage/module.py	#: folder, `saving` on a `terms` total and `opened` on a limits row. A caller that needs	keep	opened	opened
+usage	packages/usage/src/moxi_usage/module.py	#: folder, `saving` on a `terms` total and `opened` on a limits row. Interface 3 is 2 plus	keep	opened	opened
 usage	packages/usage/src/moxi_usage/page.py	"agent": lb.Field("string", required=False, max=512), **FILTERS},	keep	required	required
 usage	packages/usage/src/moxi_usage/page.py	"cost": lb.Out("table", nullable=True, items={	keep	nullable	nullable
 usage	packages/usage/src/moxi_usage/page.py	"first": lb.Out("table", nullable=True, items=_READING),	keep	nullable	nullable
@@ -17607,6 +17609,8 @@ usage	packages/usage/tests/test_allowlist.py	expect_bash("a <key> word and a wor
 usage	packages/usage/tests/test_allowlist.py	expect_bash("a <key> word filled by an option", "make trailers --all", want=False)	keep	want	want
 usage	packages/usage/tests/test_allowlist.py	expect_bash("a <key> word filled by a path", "make trailers ../x", want=False)	keep	want	want
 usage	packages/usage/tests/test_allowlist.py	expect_bash("a <key> word filled by the placeholder", "make trailers '<key>'", want=False)	keep	want	want
+usage	packages/usage/tests/test_allowlist.py	work_roots=[p["WORK"]], commands=(RELAUNCH,), home=p["HOME"])	keep	HOME	HOME
+usage	packages/usage/tests/test_allowlist.py	handoff_roots=[p["NOTES"]], commands=COMMANDS, home=p["HOME"])	keep	HOME	HOME
 usage	packages/usage/tests/test_bench.py	assert any(row.harness == "codex" and row.state == "fresh" for row in got.rows)	keep	any	any
 usage	packages/usage/tests/test_bench.py	codex = root / "harness" / ".codex" / "sessions"	keep	sessions	sessions
 usage	packages/usage/tests/test_bench.py	path.parent.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
@@ -17720,7 +17724,7 @@ usage	packages/usage/tests/test_context.py	t.assistant("ok", usage=usage(input=3
 usage	packages/usage/tests/test_convert.py	"minimax-m3.1-flash-free", "space-bunny-free"} <= set(own)	keep	set	set
 usage	packages/usage/tests/test_doctor.py	"restart_point", "marks", "turns"} <= set(names)	keep	set	set
 usage	packages/usage/tests/test_doctor.py	assert set(found.optional) == {"turns", "projects", "ui"}	keep	set	set
-usage	packages/usage/tests/test_doctor.py	assert set(found.session_env) == {"MOXI_USAGE_WARN_AT", "MOXI_USAGE_CROSSING_AT"}	keep	set	set
+usage	packages/usage/tests/test_doctor.py	assert set(found.session_env) == {"MOXI_USAGE_WARN_AT", "MOXI_USAGE_CROSSING_AT",	keep	set	set
 usage	packages/usage/tests/test_doctor.py	assert set(found.stores) == {"index", "index_lock", "readings", "marks", "ceiling",	keep	set	set
 usage	packages/usage/tests/test_doctor.py	assert set(found.timers) == {"measure"}	keep	set	set
 usage	packages/usage/tests/test_doctor.py	path.parent.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
@@ -18007,7 +18011,7 @@ usage	packages/usage/tests/test_segment.py	@pytest.mark.parametrize("used", [Tru
 usage	packages/usage/tests/test_segment.py	@pytest.mark.parametrize(("used", "band", "colour"), [	keep	used	used
 usage	packages/usage/tests/test_settings.py	("[limits]\ncodex_pull_after_s = -1\n", "limits.codex_pull_after_s", "stale"),	keep	stale	stale
 usage	packages/usage/tests/test_settings.py	assert cli.main(["config", "usage", "show", "--json"]) == 0	keep	show	show
-usage	packages/usage/tests/test_settings.py	assert keys == set(DEFAULTS) | {"ceiling.warning_text", "ceiling.deny_text"}	keep	set	set
+usage	packages/usage/tests/test_settings.py	assert keys == set(DEFAULTS) | {"ceiling.warning_text", "ceiling.deny_text",	keep	set	set
 usage	packages/usage/tests/test_settings.py	keys = set(current)	keep	set	set
 usage	packages/usage/tests/test_store.py	input=10, cache_read=0, cache_write=0, cache_write_1h=0, output=5,	keep	input	input
 usage	packages/usage/tests/test_store.py	sidechain=0, synthetic=0, turn_id=None, agent_id=None, unknown=None)	keep	synthetic	synthetic
@@ -18296,6 +18300,18 @@ launcher	packages/launcher/src/moxi_launcher/target.py	and `find` does not wait.
 launcher	packages/launcher/src/moxi_launcher/target.py	For the callers that read a launch before `find`, so they find the launch `find`	keep	find	find
 launcher	packages/launcher/src/moxi_launcher/target.py	return turns.find(session_id=session_id)	keep	find	find
 launcher	packages/launcher/src/moxi_launcher/target.py	"Unclaimed", "by_process", "caller", "check_claim", "claims", "find", "replaces",	keep	find	find
+launcher	packages/launcher/src/moxi_launcher/wake.py	if any(n in (p.name, _base(p.cmdline[0]) if p.cmdline else "")	keep	any	any
+launcher	packages/launcher/src/moxi_launcher/wake.py	flags: set[str] = set()	keep	set	set
+launcher	packages/launcher/src/moxi_launcher/wake.py	if flags & _PGREP_UNREAD or set(values) - _PGREP_READ:	keep	set	set
+launcher	packages/launcher/src/moxi_launcher/wake.py	if pattern is None and not set(values) - {"d"}:	keep	set	set
+launcher	packages/launcher/src/moxi_launcher/wake.py	hit = any(re.search(name, n, re.IGNORECASE if ignore else 0)	keep	any	any
+launcher	packages/launcher/src/moxi_launcher/wake.py	hit = any(name.lower() == n.lower() if ignore else name == n for n in own)	keep	any	any
+launcher	packages/launcher/src/moxi_launcher/wake.py	if any(_wild(n, bare) for n in names):	keep	any	any
+launcher	packages/launcher/src/moxi_launcher/wake.py	j = text.find("'", i + 1)	keep	find	find
+launcher	packages/launcher/src/moxi_launcher/wake.py	j = text.find("\n", i)	keep	find	find
+launcher	packages/launcher/src/moxi_launcher/wake.py	j = text.find("`", i + 1)	keep	find	find
+launcher	packages/launcher/src/moxi_launcher/wake.py	j = text.find('"', i + 1)	keep	find	find
+launcher	packages/launcher/src/moxi_launcher/wake.py	__all__ = ["CALLS", "GUARD_ID", "Live", "Looked", "MATCH", "NAME", "Proc", "Procs",	keep	NAME	NAME
 launcher	packages/launcher/tests/test_defaults.py	file.parent.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
 launcher	packages/launcher/tests/test_defaults.py	return Table(available=available).change(name, op, value, by="test", env=os.environ)	keep	env	env
 launcher	packages/launcher/tests/test_defaults.py	assert len(listed) == len(set(listed))	keep	set	set
@@ -18354,7 +18370,28 @@ launcher	packages/launcher/tests/test_replay.py	assert any(said.startswith("recy
 launcher	packages/launcher/tests/test_target.py	assert session.closed == 0	keep	closed	closed
 launcher	packages/launcher/tests/test_target.py	# `find` of the live id resolves the same way, asking turns for that id.	keep	find	find
 launcher	packages/launcher/tests/test_target.py	assert asked.closed == 1	keep	closed	closed
+launcher	packages/launcher/tests/test_wake.py	"wake", "any", "moxi_launcher.wake:judge", "moxi_launcher.wake:on_for", "allow",	keep	any	any
+launcher	packages/launcher/tests/test_wake.py	got = guards.load(on=["launcher.wake"], sessions=lambda target: (False, None))	keep	on	on
+launcher	packages/launcher/tests/test_wake.py	got = guards.load(on=["launcher.wake"], sessions=lambda target: (False, None))	keep	sessions	sessions
+launcher	packages/launcher/tests/test_wake.py	path.parent.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
+launcher	packages/launcher/tests/test_wake.py	loaded = guards.load(on=["launcher.wake"], sessions=lambda target: (False, None))	keep	on	on
+launcher	packages/launcher/tests/test_wake.py	loaded = guards.load(on=["launcher.wake"], sessions=lambda target: (False, None))	keep	sessions	sessions
+launcher	packages/launcher/tests/test_wake.py	record=lambda *a: None, clear=lambda key: None)	keep	record	record
 usage	packages/usage/src/moxi_usage/mark.py	if any(name == CROSSING and fired(name, mark) for name, mark in wanted):	keep	any	any
+usage	packages/usage/src/moxi_usage/guards.py	on_error="allow", sessions="moxi_usage.stop:on_for",	keep	sessions	sessions
+usage	packages/usage/src/moxi_usage/stop.py	return text.format_map({"mark": mark, "folder": handoff_dir})	keep	folder	folder
+usage	packages/usage/src/moxi_usage/stop.py	home = session_env.get("HOME")	keep	HOME	HOME
+usage	packages/usage/src/moxi_usage/stop.py	if any(word is AND for word in words):	keep	any	any
+usage	packages/usage/src/moxi_usage/stop.py	_said: set[str] = set()	keep	set	set
+usage	packages/usage/src/moxi_usage/stop.py	__all__ = ["GUARD_ID", "NAME", "DENY_TEXT_KEY", "STATE_DIR", "SCHEMA", "COMMS_TOOL_PREFIX",	keep	NAME	NAME
+usage	packages/usage/tests/test_stop.py	"HOME": where.home}	keep	HOME	HOME
+usage	packages/usage/tests/test_stop.py	tool_use_id="toolu_1", input=tool_input or {}, cwd=where.work,	keep	input	input
+usage	packages/usage/tests/test_stop.py	record_path=None, env=stamps(where) if env is None else env)	keep	env	env
+usage	packages/usage/tests/test_stop.py	on = loader().load(on=[], env=stamps(where)).get("usage.stop")	keep	env	env
+usage	packages/usage/tests/test_stop.py	on = loader().load(on=[], env=stamps(where)).get("usage.stop")	keep	on	on
+usage	packages/usage/tests/test_stop.py	got = loader().load(on=[], env={})	keep	env	env
+usage	packages/usage/tests/test_stop.py	got = loader().load(on=[], env={})	keep	on	on
+usage	packages/usage/tests/test_stop.py	env = {"MOXI_USAGE_STOP_AT": "2.5x", "HOME": where.home}	keep	HOME	HOME
 rounds	packages/rounds/src/moxi_rounds/brake.py	was, now = (set(entry.get("checklist") or ()) for entry in (before, current))	keep	set	set
 rounds	packages/rounds/src/moxi_rounds/checklist.py	seen = set()	keep	set	set
 rounds	packages/rounds/src/moxi_rounds/checklist.py	return any(items(settings, one) for one in projects)	keep	any	any

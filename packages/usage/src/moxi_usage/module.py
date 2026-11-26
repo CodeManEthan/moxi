@@ -1,16 +1,17 @@
 """The announcement of Moxi's usage module, which moxi.modules reads."""
 
 #: Interface 2 is interface 1 plus `report`'s `work_dir` filter, the `projects` report by
-#: folder, `saving` on a `terms` total and `opened` on a limits row. A caller that needs
-#: any of those asks for 2; one written against 1 still loads.
-INTERFACES = frozenset({1, 2})
+#: folder, `saving` on a `terms` total and `opened` on a limits row. Interface 3 is 2 plus
+#: the stop: its stamps' names, `cost_multiple` and `threshold` at a multiple `<k>x`. A
+#: caller that needs any of those asks for 2 or 3; one written against 1 still loads.
+INTERFACES = frozenset({1, 2, 3})
 API = "moxi_usage.api"
 CLI = "moxi_usage.cli:main"
 SUMMARY = ("How much of each plan window is used, how full a session's context is, and "
            "what the tokens cost, from each harness's own records.")
 OPTIONAL = {
-    "turns": "Claude limits, Codex limits from the app-server, the warn-at mark and the "
-             "worker ceiling",
+    "turns": "Claude limits, Codex limits from the app-server, the warn-at mark, the "
+             "worker ceiling and the stop",
     "projects": "the token index records each session's project, so the projects report "
                 "and --project keep one project across worktrees and harnesses",
     "ui": "the usage page, with its limits and cost blocks and its row on Home, in the "
@@ -22,6 +23,9 @@ INTERNAL_ENV = {
     "MOXI_USAGE_WARN_AT": "launcher stamp: the launch's warn-at mark",
     "MOXI_USAGE_CROSSING_AT": "launcher stamp: the mark whose crossing goes to crossing "
                               "handlers",
+    "MOXI_USAGE_STOP_AT": "launcher stamp: the launch's stop mark, a multiple <k>x",
+    "MOXI_USAGE_STOP_HANDOFFS": "launcher stamp: the handoff folder a stopped session may "
+                                "still write in",
 }
 #: Per-session variables a launcher stamps for usage, so it scrubs them from what a launch
 #: inherits.
@@ -29,6 +33,9 @@ SESSION_ENV = {
     "MOXI_USAGE_WARN_AT": "launcher stamp: the launch's warn-at mark",
     "MOXI_USAGE_CROSSING_AT": "launcher stamp: the mark whose crossing goes to crossing "
                               "handlers",
+    "MOXI_USAGE_STOP_AT": "launcher stamp: the launch's stop mark, a multiple <k>x",
+    "MOXI_USAGE_STOP_HANDOFFS": "launcher stamp: the handoff folder a stopped session may "
+                                "still write in",
 }
 SETTINGS = "settings.toml"
 #: The install question: the worker ceiling's switch, asked as "usage: <text>? [y/N]".
@@ -65,8 +72,9 @@ CONFIG_CHECK = "moxi_usage.settings:check"
 #: What usage keeps, for `moxi paths usage`, the doctor's checks and `moxi uninstall
 #: --purge`. Each is made by its first write. The index and the model snapshot can be
 #: made again (a rebuild, `moxi usage prices update`); the restart-point measure by
-#: `moxi usage restart-point --measure`. Limits readings, fired marks and the ceiling's
-#: markers are history no harness file holds whole, so nothing rebuilds them. The index's
+#: `moxi usage restart-point --measure`. Limits readings, fired marks, the ceiling's
+#: markers and the stop's latches are history no harness file holds whole, so nothing
+#: rebuilds them. The index's
 #: lock is declared beside it so `--purge` takes it with the index.
 STORES = {
     "index": {"root": "state", "path": "index.db", "kind": "sqlite", "private": True,
@@ -79,6 +87,8 @@ STORES = {
               "retention": "7d", "rebuildable": False, "lazy": True},
     "ceiling": {"root": "state", "path": "ceiling", "kind": "dir", "private": True,
                 "retention": "7d", "rebuildable": False, "lazy": True},
+    "stop": {"root": "state", "path": "stop", "kind": "dir", "private": True,
+             "retention": "7d", "rebuildable": False, "lazy": True},
     "restart_point": {"root": "state", "path": "restart-point.json", "kind": "file",
                       "private": True, "retention": "keep", "rebuildable": True,
                       "lazy": True},
@@ -86,8 +96,8 @@ STORES = {
                  "private": True, "retention": "keep", "rebuildable": True, "lazy": True},
 }
 #: usage's own checks: the model table's age and gaps, the token index, Codex's imports,
-#: the restart-point measure, the sweep of fired marks and ceiling markers, and what usage
-#: registers with turns.
+#: the restart-point measure, the sweep of fired marks, ceiling markers and stop latches,
+#: and what usage registers with turns.
 DOCTOR = "moxi_usage.doctor:rows"
 #: The weekly restart-point measure, off until `restart_point.measure_weekly` is turned
 #: on. A timer runs every few minutes or hours, or at set times on set days; this one

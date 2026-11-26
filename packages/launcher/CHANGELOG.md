@@ -107,6 +107,40 @@
   own address wins when it has one, since the address can change at each login.
   Elsewhere the name is absent and nothing changes. A seat already relaunched without it
   gets it back at its next launch or relaunch from a process that has it.
+- The wake guard `launcher.wake` (turns' guard, on where cache runs; `wake_guard.enabled`
+  turns it off) refuses a shell call that would end a process under another live session
+  whose cache reads cold, and names a relaunch command for each such session. It reads
+  the call through turns' shell reader: every command `read_shell` gives, each
+  substitution's text, and each script `shell_scripts` finds handed to a shell (a `-c`,
+  `-Command` or `/c` argument, a heredoc or here-string, literal text piped in), three
+  shells deep at most; what the reader doesn't read goes through. It resolves `kill`,
+  `pkill`, `killall` (macOS's `-m` as a pattern), `pgrep`/`pidof` substitutions,
+  `pgrep | xargs kill`, `taskkill` (`/PID`, `/IM`, and Git Bash's `//PID`, `//IM`) and
+  PowerShell's `Stop-Process` (its `-Id:211` and `-Name:x` forms too, and on the right of
+  an assignment, `$null = Stop-Process ...`); a redirection is no target, and a `${...}`
+  default bash splits gives the words bash gives (`kill ${x:- 211 }`). On Windows a Codex
+  shell call is read as PowerShell, and Git Bash's `kill`, `pkill` and `killall`, which
+  take the MSYS runtime's pids, are let through unjudged. Without turns, or with a turns
+  that has no shell reader, it resolves no target and every call goes through. The
+  `turns` extra asks for moxi-turns 0.2.9 or later.
+- The `stop_at` row (needs usage, turns and slots; unset unless set) sets a hard stop past
+  the relaunch line, a multiple `<k>x` such as `2.5x`. It is taken only on a launch that
+  relaunches itself and is warned at a `warn_at` mark below it. A `stop_at` typed or set
+  by the preset is refused (`stop-mark`, exit 3) off the `<k>x` form, on a launch with no
+  `warn_at` mark (set `warn_at` first), at or below `warn_at`, or on a launch that can't
+  relaunch itself; one from `[defaults]` is left out of a launch that can't relaunch
+  itself, with a warning. `presets check` flags a preset whose `stop_at` has no
+  `warn_at` mark under it or is not past it, and warns of one on a launch it can show
+  can't relaunch itself (`recycle_at_limit` not `relaunch`, a Codex preset, a scratch
+  folder); the handoff folder is left to the launch. A `[defaults]` `stop_at` is left
+  out of what `presets check` tests for a launch it can show can't relaunch itself, as
+  the launch leaves it out, so a Codex preset or a launch with no preset that has no
+  `warn_at` mark is not flagged for it. Beside a `[defaults]`
+  `recycle_at_limit = compact`, which the launch holds `off`, a stop is refused or left
+  out as on any launch that can't relaunch itself, and `presets check` names it the same
+  way. A launch with a stop stamps
+  `MOXI_USAGE_STOP_AT` and `MOXI_USAGE_STOP_HANDOFFS` (its handoff folder) through usage's
+  interface 3, and both join the stamps a launch from inside a session scrubs.
 - The `subconscious` row (`off`, `automatic`, `on-demand`; needs turns and memory) turns
   memory's subconscious on for one launch, or for every launch of a preset that sets it:
   a launch with it on stamps the mode under memory's `SUBCONSCIOUS_ENV`, read from

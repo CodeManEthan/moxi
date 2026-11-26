@@ -2,6 +2,26 @@
 
 ## Unreleased
 
+- The stop. A launch with a stop mark stamps `MOXI_USAGE_STOP_AT` (a multiple `<k>x`) and
+  `MOXI_USAGE_STOP_HANDOFFS` (its handoff folder). The warn-at listener's third purpose,
+  `stop`, fires the first time the main session's context reaches the mark: it writes a
+  latch under `STATE/usage/stop/` and adds the stop text as one line. The latch never
+  re-arms and outlives the endpoint; the doctor's `marks` row sweeps it after
+  `marks.max_age_days`. A new guard, `usage.stop`, runs on Claude in a session whose
+  launch stamped a stop mark, and once latched refuses every main-loop tool call but
+  wrap-up (git's wrap-up forms, `.md` notes in the handoff folder, `moxi repo rules`,
+  comms, `moxi launcher handoff dir`, `moxi launcher relaunch --self --handoff FILE`,
+  and Claude's `Skill` and `ToolSearch`, whose loaded tools are judged when called) with
+  `stop.deny_text`, a new setting. `Skill` loads only a skill that runs inline: one whose
+  file is found and sets no `context: fork`; a forked skill, or one with no file found,
+  is refused. A plugin's skill, `<plugin>:<name>`, is looked for only in that plugin's
+  installed copies, and is refused when the plugin isn't found.
+- A mark may be a multiple `<k>x`, k a decimal of at most two places and at least 1:
+  `threshold` works it out on the same equation as `1x`, `1.5x` and `2x`, and
+  `cost_multiple` reads its k. Interface 3 is interface 2 plus these and the stop's two
+  stamp names.
+- The allowlist's word `<handoff>`, in a listed command, stands for a `.md` file's path
+  under a hand-off root, held to the hand-off file rule.
 - The worker ceiling's allowlist reads shell text through turns' shell reader
   (`read_shell`) in place of a lexer of its own. It refuses and allows the same commands
   with the same reasons; `lex` keeps its signature, `AND` and `Refused`. The `turns`

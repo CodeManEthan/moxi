@@ -350,15 +350,19 @@ def test_the_announcement_offers_the_page_its_blocks_its_row_and_the_ui_extra():
     assert set(found.components) == {"page", "limits", "cost", "row"}
 
 
-def test_usage_offers_interfaces_1_and_2_and_no_other():
+def test_usage_offers_interfaces_1_to_3_and_no_other():
     from moxi_usage import api, module
 
-    assert module.INTERFACES == {1, 2}
-    for interface in (1, 2):
+    assert module.INTERFACES == {1, 2, 3}
+    for interface in (1, 2, 3):
         found = modules.load("usage", interface=interface)
         assert found.ok, found.reason
         assert found.api is api
-    assert not modules.load("usage", interface=3).ok
+    assert not modules.load("usage", interface=4).ok
+    # what interface 3 adds is there to call: the stop's stamps and the multiple form
+    assert (api.STOP_AT_ENV, api.STOP_HANDOFFS_ENV) == ("MOXI_USAGE_STOP_AT",
+                                                        "MOXI_USAGE_STOP_HANDOFFS")
+    assert api.cost_multiple("2.5x") == 2.5
     # what interface 2 adds is there to call: the folder filter and projects by folder
     assert reports.report("projects", by="folder", work_dir="/w/app", fresh=False).rows == []
     assert "opened" in limits.Row.__dataclass_fields__
