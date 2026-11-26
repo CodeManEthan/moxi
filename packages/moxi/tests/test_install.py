@@ -274,7 +274,8 @@ class Fake:
         importlib.invalidate_caches()
         return cli.describe()
 
-    def run_settle(self, python, module, *, replace=False, install_skills=None):
+    def run_settle(self, python, module, *, replace=False, install_skills=None,
+                   accept_diff=False):
         from moxi import _settle, files, paths
 
         # The install holds the core lock while it settles each module.

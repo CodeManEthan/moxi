@@ -1,6 +1,6 @@
 [project]
 name = "moxi-projects"
-version = "0.1.4"
+version = "0.1.5"
 description = "Moxi's list of named places: projects, their roots, kinds and agents."
 readme = "README.md"
 requires-python = ">=3.12"

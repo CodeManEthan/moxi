@@ -6,12 +6,19 @@ module only decides which of them count and what text each row holds.
 **Tier 1** (`Row`, the `rows` table) holds what a person or an agent wrote in the session:
 
 - each message whose role is `user` or `assistant`, that is not a thought (`reasoning`),
-  that sessions doesn't mark `injected`, that the harness doesn't flag as meta, and that
-  is not a compaction summary. A message sessions marks `injected` as unknown is kept;
+  and that sessions' `writer(record)` names as delivered (`DELIVERED_WRITERS`: a
+  plugin's, a channel's, a peer's, a coordinator's or a background task's message),
+  whatever its meta flag says;
+- each other such message that sessions doesn't mark `injected`, that the harness
+  doesn't flag as meta, and that is not a compaction summary. A message sessions marks
+  `injected` as unknown is kept;
 - each tool call, as its summary line and its input.
 
-Each tier 1 row records its writer, from sessions' `writer(record)`: `person`, `model`
-(a tool call's too), `unknown`, or the kind of a message sessions doesn't mark injected.
+A message the harness composed (writer `harness`), a compaction summary and a thought
+stay out, and so do the subconscious's recall answers (below). Each tier 1 row records
+its writer, from sessions' `writer(record)`:
+`person`, `model` (a tool call's too), `unknown`, one of `DELIVERED_WRITERS`, or the
+kind of a message sessions doesn't mark injected.
 
 **Tier 2** (`Tail`, the `tails` table) holds the end of each main-session tool result,
 `tail_chars` characters long, with whether the tool failed. A subagent's results give no
@@ -43,6 +50,23 @@ nested objects counted, and a string that holds a JSON object or list read into.
 call keeps one line, the tool's name and the path, and loses its input; its
 result gives no tail. The path shown is the matched word alone, never a run of text with
 whitespace in it, so a heredoc or a patch into a secret file doesn't reach the index.
+
+**Recall answers.** On Claude Code a recall's fork answers each round as a background
+task: Claude Code hands the answer to the main session as a `task` message holding a
+`<task-notification>` notice whose `<task-id>`, the notice's first element, is the
+fork's agent id. A notice whose task id `convert`'s `recall_fork` names as a recall's
+fork is left out, so no search finds an earlier recall's answer, which restates other
+sessions' text. A message of several notices keeps the others, and one left with none
+gives no row. Every other notice, a subagent's or a background command's, stays.
+
+On a route that answers by comms the answer comes back as comms mail, which a plugin
+delivers (writer `hook`). memory knows it by the id comms gave it, which the recall log
+keeps, never by its wording: `convert`'s `read_delivered` is comms' reader of a
+delivered text (`delivered_messages`), which gives each message comms framed in it, its
+id and where it runs, and a message whose id `recall_message` names as a recall's answer
+is left out. A delivery of several messages keeps the others, and one left with none
+gives no row.
+Without comms, `read_delivered` is None and every delivery stays.
 
 **The key.** A row's key names one record: the harness, then the line's own id where the
 harness writes one (Claude Code's `uuid`, OpenCode's row id) or else the source and the
@@ -329,6 +353,16 @@ def keys(records: Iterable[Any], source_key: str) -> list[str]:
 
 # -- records to rows -------------------------------------------------------------------
 
+#: The writers of a message something delivered into the session, which tier 1 keeps:
+#: a plugin's (`hook`, every comms message among them), a channel's, a peer's, a
+#: coordinator's and a background task's.
+DELIVERED_WRITERS = ("hook", "channel", "peer", "coordinator", "task")
+#: The writer of a background task's notice.
+TASK_WRITER = "task"
+#: Where a notice opens: Claude Code's tag and its first element, the task's id.
+_NOTICE = re.compile(r"<task-notification>\s*<task-id>([^<>\s]+)</task-id>")
+
+
 def _known(value: Any) -> Any:
     """`value`, or None for the sessions' unknown sentinel and anything that is not a
     plain string or number."""
@@ -339,10 +373,14 @@ def _known(value: Any) -> Any:
     return None
 
 
-def tier_one_message(record: Any) -> bool:
-    """Whether a message record belongs in tier 1."""
+def tier_one_message(record: Any, writer: str | None = None) -> bool:
+    """Whether a message record belongs in tier 1. `writer` is the record's writer as
+    sessions' `writer(record)` names it: a delivered one (`DELIVERED_WRITERS`) is let
+    through before the injected and meta tests, which would drop it."""
     if record.role not in ("user", "assistant") or record.reasoning:
         return False
+    if writer in DELIVERED_WRITERS:
+        return bool(record.text and record.text.strip())
     if record.injected is True:
         return False
     flags = record.flags if isinstance(record.flags, Mapping) else {}
@@ -351,6 +389,44 @@ def tier_one_message(record: Any) -> bool:
     if flags.get("summary") is True:     # a summary the harness wrote of the session
         return False
     return bool(record.text and record.text.strip())
+
+
+def without_recall_answers(text: str, recall_fork: Callable[[str], bool]) -> str | None:
+    """`text` less each notice whose task id `recall_fork` names a recall's fork, from its
+    opening to the next notice's or the text's end; None when it held notices and every
+    one was a recall's. A text with no recall's notice comes back as it was."""
+    opens = list(_NOTICE.finditer(text))
+    if not opens:
+        return text
+    ends = [m.start() for m in opens[1:]] + [len(text)]
+    out, dropped = [text[:opens[0].start()]], False
+    for match, end in zip(opens, ends):
+        if recall_fork(match.group(1)):
+            dropped = True
+        else:
+            out.append(text[match.start():end])
+    if not dropped:
+        return text
+    return "".join(out) if len(out) > 1 else None
+
+
+def without_recall_mail(text: str, read_delivered: Callable[[str], Iterable[Any]],
+                        recall_message: Callable[[str], bool]) -> str | None:
+    """`text` less each message `read_delivered` finds in it whose id `recall_message`
+    names a recall's answer, frame line to closing line; None when it held messages and
+    every one was a recall's. A text with no recall's message comes back as it was."""
+    found = list(read_delivered(text))
+    drop = [m for m in found if recall_message(str(m.message_id))]
+    if not drop:
+        return text
+    if len(drop) == len(found):
+        return None
+    out, at = [], 0
+    for message in sorted(drop, key=lambda m: m.start):
+        out.append(text[at:message.start])
+        at = max(at, message.end)
+    out.append(text[at:])
+    return "".join(out)
 
 
 def model_answer(record: Any) -> bool:
@@ -377,14 +453,24 @@ def _tool_name(record: Any) -> str:
 def convert(records: Iterable[Any], *, source_key: str, main_id: str,
             agent_id: str | None, label: str | None, policy: Policy,
             writer: Callable[[Any], str | None],
-            secret_calls: set[str] | frozenset[str] = frozenset()) -> Converted:
+            secret_calls: set[str] | frozenset[str] = frozenset(),
+            recall_fork: Callable[[str, float | None], bool] | None = None,
+            read_delivered: Callable[[str], Iterable[Any]] | None = None,
+            recall_message: Callable[[str, float | None], bool] | None = None
+            ) -> Converted:
     """The rows and tails one batch of records gives.
 
     `main_id` is the main session's id, which every row carries; `agent_id` is the
     subagent's own id for a subagent's records, else None. `writer` is sessions'
     `writer`, which names each row's writer. `secret_calls` holds the call
     ids already known to be secret-path calls of this source, whose results give no
-    tail. A subagent's records give tier 1 rows only."""
+    tail. `recall_fork(task_id, time)` says whether a task id is a recall's fork, for a
+    notice of that time (the record's, None when unknown); a `task` message's recall
+    notices are left out (the module's "Recall answers"). `read_delivered` reads a
+    delivered message's text into the comms messages in it, and `recall_message(
+    message_id, time)` says whether one is a recall's answer; a delivered message's
+    recall answers are left out the same way. A subagent's records give tier 1 rows
+    only."""
     from moxi_secrets import secret_path
 
     records = list(records)
@@ -399,11 +485,24 @@ def convert(records: Iterable[Any], *, source_key: str, main_id: str,
                   else None, "turn_id": None if _known(record.turn_id) is None
                   else str(record.turn_id)}
         if record.kind == "message":
-            if not tier_one_message(record):
+            wrote = writer(record)
+            if not tier_one_message(record, wrote):
                 continue
-            text = keep_head(record.text, MESSAGE_CHARS, policy.sets)
+            body = record.text
+            at = common["time"]
+            if wrote == TASK_WRITER and recall_fork is not None:
+                body = without_recall_answers(body, lambda tid, at=at: recall_fork(tid, at))
+                if body is None or not body.strip():
+                    continue
+            if wrote in DELIVERED_WRITERS and read_delivered is not None \
+                    and recall_message is not None:
+                body = without_recall_mail(body, read_delivered,
+                                           lambda mid, at=at: recall_message(mid, at))
+                if body is None or not body.strip():
+                    continue
+            text = keep_head(body, MESSAGE_CHARS, policy.sets)
             out.rows.append(Row(**common, agent_id=agent_id, kind=record.role, text=text,
-                                writer=writer(record)))
+                                writer=wrote))
         elif record.kind == "tool_call":
             name = _tool_name(record)
             path = secret_path(record.input)
@@ -437,4 +536,5 @@ def convert(records: Iterable[Any], *, source_key: str, main_id: str,
 __all__ = ["KINDS", "MESSAGE_CHARS", "TOOL_CHARS", "MARGIN", "EDGE_CHARS", "TOOL",
            "UNSCANNED", "Policy", "Row", "Tail", "Converted", "redact_version", "redact",
            "keep_head", "keep_tail", "recut_head", "recut_tail", "hide_cut_edges",
-           "line_id", "keys", "tier_one_message", "model_answer", "convert"]
+           "line_id", "keys", "DELIVERED_WRITERS", "TASK_WRITER", "tier_one_message",
+           "without_recall_answers", "without_recall_mail", "model_answer", "convert"]

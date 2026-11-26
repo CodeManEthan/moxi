@@ -3,7 +3,9 @@
 // `parseAddress` reads a route into that piece and `addressRoute` writes it back, so
 // that every address the page writes is read back as the piece it was written for. The
 // range, the filters and the measure are not in the address: they are held for the
-// document's life (`filter-model.ts`). No DOM here.
+// document's life (`filter-model.ts`). One address sets a filter instead of opening a
+// piece: `project/<key>`, which other pages link to, sets the Project filter to that key
+// and opens nothing. No DOM here.
 
 /** The sections that open under the filter line and take nothing after their name. */
 export type SectionName = "projects" | "folders" | "models" | "kinds" | "prices";
@@ -21,6 +23,9 @@ export type Address =
    * `agent`, that subagent's requests opened in the session. `agent` is null without a
    * session, and `harness` and `session` are null together. */
   | { piece: "sessions"; harness: string | null; session: string | null; agent: string | null }
+  /** The page with the Project filter set to `key`, the range as it stands, nothing
+   * opened. */
+  | { piece: "project"; key: string }
   | { piece: SectionName };
 
 export const NOTHING_OPEN: Address = { piece: "none" };
@@ -28,6 +33,8 @@ export const SESSIONS: Address = { piece: "sessions", harness: null, session: nu
 
 const SECTIONS: readonly SectionName[] = ["projects", "folders", "models", "kinds", "prices"];
 const UNKNOWN: Address = { piece: "unknown" };
+/** A route that names nothing the page has. */
+export const UNKNOWN_ADDRESS: Address = UNKNOWN;
 
 /** A route's segments decoded; null when one is empty or is not a percent-encoding. */
 function segments(path: string): string[] | null {
@@ -51,6 +58,7 @@ function segments(path: string): string[] | null {
  *   number of one or more, written without a leading zero.
  * - `sessions`, `sessions/<harness>/<id>`, `sessions/<harness>/<id>/<agent>`.
  * - `projects`, `folders`, `models`, `kinds`, `prices`.
+ * - `project/<key>`: the Project filter set to that key, nothing opened.
  *
  * Every other route is unknown, among them the views the page had before its sections:
  * `daily`, `terms` and `session/<id>`.
@@ -72,6 +80,7 @@ export function parseAddress(route: string): Address {
     if (rest.length < 2 || rest.length > 3) return UNKNOWN;
     return { piece: "sessions", harness: rest[0], session: rest[1], agent: rest[2] ?? null };
   }
+  if (head === "project") return rest.length === 1 ? { piece: "project", key: rest[0] } : UNKNOWN;
   if (rest.length === 0 && (SECTIONS as readonly string[]).includes(head)) return { piece: head as SectionName };
   return UNKNOWN;
 }
@@ -91,6 +100,8 @@ export function addressRoute(address: Address): string {
       if (address.agent !== null) parts.push(address.agent);
       return parts.map(encodeURIComponent).join("/");
     }
+    case "project":
+      return `project/${encodeURIComponent(address.key)}`;
     default:
       return address.piece;
   }
@@ -118,13 +129,19 @@ export function sessionAddress(harness: string, session: string, agent: string |
   return { piece: "sessions", harness, session, agent };
 }
 
+/** The page filtered to project `key`, which the Projects page links to. */
+export function projectAddress(key: string): Address {
+  return { piece: "project", key };
+}
+
 /** One plan window's row. */
 export function limitAddress(harness: string, limit: string, minutes: number): Address {
   return { piece: "limit", harness, limit, minutes };
 }
 
 /** The view of the page an address stands in, as far as history goes: the page itself
- * (nothing open, a limit row, Models, Kinds, or an address it does not have), Sessions,
+ * (nothing open, a project's filter, a limit row, Models, Kinds, or an address it does not
+ * have), Sessions,
  * one session, a session's subagents, Projects (or Folders), or Prices. Opening a limit
  * row or a subagent of the one open moves to no other view. */
 export function historyView(address: Address): string {
@@ -132,6 +149,7 @@ export function historyView(address: Address): string {
     case "none":
     case "unknown":
     case "limit":
+    case "project":
     case "models":
     case "kinds":
       return "";

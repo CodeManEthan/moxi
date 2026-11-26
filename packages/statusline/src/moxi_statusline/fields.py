@@ -8,7 +8,8 @@ leaves it out with its separator.
                 past `dir.parts` parts
     branch      the branch in the repository's `HEAD` file, read from the files (`branch`)
     model       `model.display_name`, with a leading `Claude ` cut
-    effort      `effort.level`, as given
+    effort      `effort.level`, as given; when it is missing or blank, the
+                `CLAUDE_EFFORT` environment variable, trimmed
     context     `context_window.used_percentage` as `ctx:42%`, yellow from
                 `context.warn_at`, red from `context.alert_at`; `ctx:—` while it is null
     session     `#` and the first 6 characters of `session_id`
@@ -173,8 +174,15 @@ def _model(payload, options: Options) -> str | None:
     return name.removeprefix("Claude ") or None
 
 
+#: The variable whose value names the effort when the input names none.
+CLAUDE_EFFORT_ENV = "CLAUDE_EFFORT"
+
+
 def _effort(payload, options: Options) -> str | None:
-    return _text(_get(payload, "effort", "level"))
+    level = _text(_get(payload, "effort", "level"))
+    if level is not None and level.strip():
+        return level
+    return os.environ.get(CLAUDE_EFFORT_ENV, "").strip() or None
 
 
 def _context(payload, options: Options) -> str | None:

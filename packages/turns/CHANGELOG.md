@@ -1,7 +1,49 @@
 # Changelog
 
+## 0.2.9 (unreleased)
+
+- `command_word_index` reads every option of each wrapper that still runs the command,
+  short and long, as the tool's own manual gives it, with a value in the next word or
+  after `=`: `sudo`'s `-B`/`--bell`, `-N`/`--no-update`, `-T`/`--command-timeout`,
+  `--askpass`, `--background`, `--set-home`, `--reset-timestamp`, `--non-interactive`,
+  `--preserve-groups`, `--stdin`, `--close-from`, `--chdir`, `--host`, `--prompt`,
+  `--role`, `--chroot`, `--type` and `--other-user`; `env`'s `-a`/`--argv0`,
+  `-v`/`--debug`, `-S`/`--split-string`, `--ignore-environment`, `--null`, `--unset`,
+  `--chdir` and the signal options; `nice`'s `--adjustment`; `timeout`'s `-f`, `-p`,
+  `--verbose`, `--signal` and `--kill-after`; `setsid`'s `--ctty`, `--fork` and
+  `--wait`; `stdbuf`'s `--input`, `--output` and `--error`. So `sudo --non-interactive
+  kill 1`, `sudo --bell kill 1` and `env --unset=X kill 1` name `kill`, where the read
+  used to end at the option. `env -S`'s value is read as a value: the command line in
+  it isn't read.
+- In PowerShell, `command_word_index` finds the command word past an assignment: the
+  pipeline on the right of `$x = ...`, `$null = ...`, `[int]$x = ...`, `$a, $b = ...`
+  (`$a , $b` too), the compound forms (`+=`, `-=`, `*=`, `/=`, `%=`, `??=`) and a chain
+  of them is a command. `read_shell` ends a word where an assignment's operator is
+  written against the pipeline (`$x=Stop-Process` gives `$x=` and `Stop-Process`, `$x
+  =Stop-Process` gives `=` and `Stop-Process`), as PowerShell ends a variable there; a
+  quoted or escaped `=`, and one in an argument, stay in their word. `shell_scripts`
+  reads the command as any other (`$x = pwsh -c '...'`).
+
 ## 0.2.8 (unreleased)
 
+- Before a Claude Code session's first guard table, the runner refuses what the last
+  table's guards could have refused, with a reason that says the table didn't load: a
+  subagent's `Agent` or `Task` call when no-nested-agents was on, a `Bash` command the
+  removal guard's pre-filter matches when the removal guard was on, and a bypass-mode
+  permission ask (not `ExitPlanMode` or `EnterPlanMode`) when an ask-step guard was on.
+  It reads the record once, at the first session start; with no usable record it refuses
+  all three. Headless sessions and sessions with a table are unchanged. The runner is
+  version 0.3.3, so `moxi install turns` updates an install at user scope.
+- The Claude endpoint records the guard table it hands the runner, at its first line and
+  at each ready, in `STATE/turns/guards-seen.json`: the time, and whether the table held
+  the removal guard, the no-nested-agents guard and any ask-step guard (all false for an
+  empty table). A table made while turns' config doesn't read is not recorded, so the
+  record before it stands. A launch names the path in `MOXI_TURNS_GUARDS_SEEN` (in `INTERNAL_ENV`
+  and `SESSION_ENV`), setup writes it as `guards_seen` in `endpoint.json`, and the store
+  is declared as `guards-seen`. `moxi_turns.guards.seen` reads and writes it.
+- Setup still replaces its own placed Claude plugin copy whatever it holds, moving the
+  old copy to the core's displaced folder: it passes the placer's new `accept_diff`, since
+  the copy is turns' own and setup runs with no one to ask. Needs `moxi>=0.1.11`.
 - The guard API gains a shell reader, exported from `moxi_turns`: `read_shell(text,
   dialect="sh")` reads `sh`, `powershell` or `cmd` command text (`DIALECTS`) without
   running it, as a `ShellText` of `ShellCommand`s (words, redirects, and the operator

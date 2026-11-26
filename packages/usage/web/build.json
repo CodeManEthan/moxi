@@ -1,4 +1,5 @@
 {
   "entries": {"page.js": "src/page.ts", "limits.js": "src/limits.ts", "cost.js": "src/cost.ts",
-              "row.js": "src/row.ts"}
+              "row.js": "src/row.ts",
+              "project-facts.js": "src/project-facts.ts"}
 }

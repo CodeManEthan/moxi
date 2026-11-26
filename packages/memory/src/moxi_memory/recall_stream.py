@@ -42,7 +42,8 @@ the child sends it under the session's recall sender (`moxi_memory.recall_send.s
 to the session's live comms name, else the one the recall started under (`start_name`),
 until comms takes it (`deliver`): a send comms refuses is tried again every
 `RESEND_FAST_S` for `RESEND_FAST_FOR_S`, then every `RESEND_SLOW_S`, with no last try,
-each refusal's reason kept on the line. The line goes `back` once comms takes it. An
+each refusal's reason kept on the line. The line goes `back` once comms takes it, with
+comms' id for the message on the line and on the round's entry. An
 answer of `NOTHING` sends nothing. Before each try the line is read again under the lock,
 and a line a person discarded is left alone; a try comms took while the discard was made
 is noted on the line, not undone.
@@ -202,6 +203,16 @@ def _newest_text(line: dict) -> str:
     return ""
 
 
+def _with_message_id(line: dict, text: str, message_id: str | None) -> list:
+    """The line's rounds, the newest whose text is `text` carrying `message_id`."""
+    rounds = [dict(e) if isinstance(e, dict) else e for e in line.get("rounds") or []]
+    for entry in reversed(rounds):
+        if isinstance(entry, dict) and entry.get("text") == text:
+            entry["message_id"] = message_id
+            break
+    return rounds
+
+
 def start_name(recall) -> str | None:
     """The session's comms name as it stood when the recall started, from its line or
     its record: where the answer goes once the session's binding has ended."""
@@ -230,7 +241,8 @@ def deliver(recall, *, send=None, sleep=time.sleep, clock=time.time,
             _refresh(recall)
             tries = int(recall.line.get("send_tries") or 0)
             if sent.taken:
-                fields = {"sent_at": now, "message_id": sent.message_id}
+                fields = {"sent_at": now, "message_id": sent.message_id,
+                          "rounds": _with_message_id(recall.line, text, sent.message_id)}
                 if recall.line.get("state") == recalls.SENDING:
                     fields["state"] = recalls.BACK
                 recall.write(**fields)

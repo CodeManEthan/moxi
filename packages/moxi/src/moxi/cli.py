@@ -1170,6 +1170,15 @@ def _config_change(op: str, argv: list[str]) -> int:
 
     if config.table_of(args.module, args.key) is not None:
         return _table_change(args, op, value)
+    refused = _timer_fence(args.module, args.key, op, value)
+    if refused is not None:
+        if args.json:
+            _change_json(changed=False, problem=refused, fix=None, units=[])
+        else:
+            _error(f"config {op} {args.module} {args.key}: {refused}")
+        from . import exit as codes
+
+        return codes.REFUSED
     try:
         changed = config._change(args.module, args.key, op, value, by=args.by, text=True)
     except config.ConfigError as exc:
@@ -1194,6 +1203,27 @@ def _config_change(op: str, argv: list[str]) -> int:
         if any(not a.ok for a in applied):
             return 1
     return 0
+
+
+def _timer_fence(module: str, key: str, op: str, value) -> str | None:
+    """The refusal of a `set` or `unset` that would turn one of the module's timers on
+    from inside an agent's session (`moxi.terminal.agent()`), else None. A change the
+    key refuses, or one that turns nothing on, is left to the change itself."""
+    from . import config
+
+    if module == names.HARNESS or op not in ("set", "unset"):
+        return None
+    from . import terminal, units
+
+    try:
+        if not units.timer_turned_on(module, key, op, value):
+            return None
+    except config.ConfigError:
+        return None
+    harness = terminal.agent()
+    if harness is None:
+        return None
+    return units.TIMER_ON_REFUSED.format(harness=harness)
 
 
 def _change_refused(args, exc) -> int:

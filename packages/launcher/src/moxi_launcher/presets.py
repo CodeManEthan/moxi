@@ -378,6 +378,7 @@ def check(file: str | os.PathLike | None = None, *, env: Mapping[str, str] | Non
     avail = _avail(available)
     found = presets if presets is not None else read(file, env=env)
     defaults, problems = _check_defaults(found.defaults, avail)
+    left_out = frozenset(p.key for p in problems if p.code == RETIRED)
     problems += _bare_launch(defaults, avail)
     # An empty harness is unset, as `resolve` reads it: the shipped default.
     base_harness = defaults.get("harness") or catalog.launcher()["harness"].default
@@ -385,7 +386,8 @@ def check(file: str | os.PathLike | None = None, *, env: Mapping[str, str] | Non
         values, more = _check_preset(preset, base_harness, avail)
         problems += more
         if not any(p.level == ERROR for p in more):
-            problems += _value_rules(preset, values, defaults, base_harness, avail)
+            problems += _value_rules(preset, values, defaults, base_harness, avail,
+                                     left_out=left_out)
         if not any(p.level == ERROR for p in more):
             problems += _check_deep(preset, values, defaults, base_harness, avail, env)
     return problems
@@ -393,13 +395,19 @@ def check(file: str | os.PathLike | None = None, *, env: Mapping[str, str] | Non
 
 def _value_rules(preset: Preset, values: Mapping[str, object],
                  defaults: Mapping[str, object], base_harness: str,
-                 avail) -> list[Problem]:
+                 avail, *, left_out: frozenset[str] = frozenset()) -> list[Problem]:
     """The rules between rows (`catalog.refuse_values`) over what a launch of the preset
     resolves to with nothing typed: the shipped defaults, `[defaults]`, then the preset,
     whose place, when it names one, replaces the one `[defaults]` names. As `resolve`
-    holds them: on a scratch launch a `[defaults]` relaunch holds `off`, and a retired
-    value or row from `[defaults]` is left out (`defaults` as checked holds none), so a
-    `[defaults]` `recycle_at_limit = compact` the preset doesn't override holds `off`."""
+    holds them: on a scratch launch a `[defaults]` relaunch holds `off`, a retired value
+    or row from `[defaults]` is left out (`defaults` as checked holds none; `left_out`
+    names those rows), so a `[defaults]` `recycle_at_limit = compact` the preset doesn't
+    override holds `off`, source `left-out`, and a seat or Codex launch that sets no
+    `warn_at` holds none, so a `stop_at` it sets is refused here as at its launch. A
+    `[defaults]` `stop_at` the preset doesn't override is left out where a launch of it
+    can't relaunch itself (`_no_way_out`), as `_settle_stop` leaves it out, before the
+    rules see it. A `stop_at` the preset sets on a launch that can't relaunch itself is
+    warned of (`_stop_way_out`)."""
     harness = preset.harness if preset.harness in catalog.HARNESSES else base_harness
     rows = catalog.offered(harness, avail)
     effective = {name: row.default for name, row in rows.items()}
@@ -407,14 +415,60 @@ def _value_rules(preset: Preset, values: Mapping[str, object],
     if [k for k in PLACE if catalog.is_set(values.get(k))]:
         effective.update({k: rows[k].default for k in PLACE if k in rows})
     effective.update({k: v for k, v in values.items() if k in rows})
+    recycle_source = (LEFT_OUT if RECYCLE_AT_LIMIT in left_out
+                      and RECYCLE_AT_LIMIT not in values else None)
     if (effective.get("scratch") and RECYCLE_AT_LIMIT not in values
             and effective.get(RECYCLE_AT_LIMIT) == "relaunch"):
-        effective[RECYCLE_AT_LIMIT] = "off"
+        effective[RECYCLE_AT_LIMIT], recycle_source = "off", LEFT_OUT
+    if (WARN_AT in effective and WARN_AT not in values and WARN_AT not in defaults
+            and _no_default_mark(harness, preset, scratch=bool(effective.get("scratch")),
+                                 source=SHIPPED)):
+        effective[WARN_AT] = ""
+    if (STOP_AT not in values and catalog.is_set(effective.get(STOP_AT))
+            and _no_way_out(harness, effective, recycle_source, avail) is not None):
+        effective[STOP_AT] = ""
     try:
         catalog.refuse_values(harness, effective, chosen=values, available=avail)
     except Refused as exc:
         return [Problem.of(preset.where, exc.row, exc)]
+    if STOP_AT in values and catalog.is_set(effective.get(STOP_AT)):
+        return _stop_way_out(preset, harness, effective, recycle_source, avail)
     return []
+
+
+#: A preset's `stop_at` on a launch `presets check` can show can't relaunch itself.
+STOP_NO_WAY_OUT_PRESET = ("stop_at needs a launch that can relaunch itself, its one way "
+                          "out, and a launch of this preset {problem}, so each such launch "
+                          "refuses it")
+
+
+def _stop_way_out(preset: Preset, harness: str, effective: Mapping[str, object],
+                  recycle_source: str | None, avail) -> list[Problem]:
+    """A warning for a `stop_at` the preset sets where a launch of it, with nothing
+    typed, fails the self-relaunch test (`selfrecycle.missing`, armed) on an item the
+    preset shows: `recycle_at_limit` not relaunch, a Codex launch, a target other than a
+    slot, slots not running here, a scratch folder. The handoff folder needs the launch's
+    folder, and is left to the launch. A warning, not an error: a launch may type what
+    the preset lacks (`--target slot`)."""
+    found = _no_way_out(harness, effective, recycle_source, avail)
+    if found is None:
+        return []
+    return [Problem(preset.where, STOP_AT, STOP_NO_WAY_OUT_PRESET.format(
+        problem=found.problem), found.hint, catalog.StopMark.code, WARNING)]
+
+
+def _no_way_out(harness: str, effective: Mapping[str, object],
+                recycle_source: str | None, avail):
+    """The first item of the self-relaunch test (`selfrecycle.missing`, armed) that a
+    launch of `effective`, with nothing typed, fails among those that need no launch
+    folder; None when it fails none."""
+    from . import selfrecycle
+
+    target = effective.get("target")
+    return selfrecycle.missing(
+        harness=harness, target=str(target or ""), in_slot=target == "slot", cwd=None,
+        values=effective, source=recycle_source,
+        slots_here=lambda: avail(slots.MODULE) and catalog.slots_here(), unplaced=True)
 
 
 def defaults_problems(table: Mapping[str, object], *,
@@ -1168,10 +1222,13 @@ def resolve(request, *, presets: Presets | None = None,
     `recycle_at_limit = off`, with the `SCRATCH_RECYCLE_OFF` warning, when `relaunch` came
     from `[defaults]`; typed or set by the preset, the pair is refused
     (`catalog.ScratchRecycle`). Then `_settle_recycle`: a relaunch set for a launch that
-    can't act on it is warned of. Reads projects when a place needs it. Raises a
+    can't act on it is warned of; and `_settle_stop`: a `stop_at` on a launch that can't
+    relaunch itself is refused, or left out when it came from `[defaults]`. Reads
+    projects when a place needs it. Raises a
     `catalog.Refused`: `UnknownPreset`, `BadPreset`, `OffPosture`, `PostureBrief`,
     `NotYet`, `NeedsProjects`, `UnknownProject`, `ProjectsUnreadable`, `ProjectsBusy`, or the
-    catalog's `BadValue`; a `moxi.config.ConfigError` when the file can't be read."""
+    catalog's `BadValue` or `StopMark`; a `moxi.config.ConfigError` when the file can't be
+    read."""
     avail = _avail(available)
     laid = layered(request, presets=presets, env=env, available=avail)
     preset, harness, place = laid.preset, laid.harness, laid.place
@@ -1197,6 +1254,7 @@ def resolve(request, *, presets: Presets | None = None,
     if _no_default_mark(harness, preset, scratch=scratch, source=sources.get(WARN_AT)):
         values[WARN_AT] = ""
     warnings += _settle_recycle(harness, values, sources, cwd=cwd, available=avail)
+    warnings += _settle_stop(harness, values, sources, cwd=cwd, available=avail)
 
     _check_posture_rows(harness, values, sources, laid.defaults, off_posture)
     catalog.refuse_values(harness, values, chosen=chosen, available=avail)
@@ -1293,6 +1351,46 @@ def _settle_recycle(harness: str, values: dict, sources: dict, *, cwd: str | Non
     if found is not None:
         warnings.append(RELAUNCH_NOT_APPLIED.format(problem=found.problem, hint=found.hint))
     return warnings
+
+
+#: The row holding the mark past which a session may only wrap up.
+STOP_AT = "stop_at"
+#: The warning of a `stop_at` from `[defaults]` on a launch that can't relaunch itself.
+STOP_AT_LEFT_OUT = ("stop_at is left out: a stop needs a launch that can relaunch "
+                    "itself, and this launch {problem}")
+#: A `stop_at` chosen for a launch that can't relaunch itself: the problem, then the hint.
+STOP_NO_WAY_OUT = ("stop_at needs a launch that can relaunch itself, its one way out, and "
+                   "this launch {problem}")
+
+
+def _settle_stop(harness: str, values: dict, sources: dict, *, cwd: str | None,
+                 available: Callable[[str], bool]) -> list[str]:
+    """Settle `stop_at` before the values are checked, and return the warnings. A stop
+    leaves a session only wrap-up, the self relaunch last, so it is taken only where the
+    session can relaunch itself (`selfrecycle.missing`, armed). Chosen for the launch (a
+    flag, the page or its preset), a `stop_at` is checked by `catalog.refuse_stop_mark`
+    first, then refused (`catalog.StopMark`) where the launch can't relaunch itself. One
+    from `[defaults]`, which serves every launch, is left out of such a launch, with a
+    warning; `catalog.refuse_values` checks the rest."""
+    from . import selfrecycle
+
+    if not catalog.is_set(values.get(STOP_AT)):
+        return []
+    from_defaults = sources.get(STOP_AT) == DEFAULTS
+    if not from_defaults:
+        catalog.refuse_stop_mark(values)
+    target = values.get("target")
+    found = selfrecycle.missing(
+        harness=harness, target=str(target or ""), in_slot=target == "slot", cwd=cwd,
+        values=values, source=sources.get(RECYCLE_AT_LIMIT),
+        slots_here=lambda: available(slots.MODULE) and catalog.slots_here())
+    if found is None:
+        return []
+    if from_defaults:
+        values[STOP_AT], sources[STOP_AT] = "", LEFT_OUT
+        return [STOP_AT_LEFT_OUT.format(problem=found.problem)]
+    raise catalog.StopMark(STOP_AT, STOP_NO_WAY_OUT.format(problem=found.problem),
+                           found.hint)
 
 
 #: The row holding the context mark usage warns at.

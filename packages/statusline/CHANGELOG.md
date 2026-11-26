@@ -2,6 +2,10 @@
 
 ## 0.1.0 (unreleased)
 
+- The `effort` field falls back to the `CLAUDE_EFFORT` environment variable, trimmed,
+  when Claude Code's input names no effort or a blank one. The input still wins when it
+  names one.
+
 The first version.
 
 - `moxi-statusline-render`, the command Claude Code runs for its status line: base fields

@@ -169,6 +169,20 @@ def resolve(ident: str) -> Row:
                   "`moxi services list` shows every row's id")
 
 
+def adopted_kind(ref: str, *, is_timer: bool = False) -> str | None:
+    """The kind, `daemon` or `timer`, a row adopting foreign unit `ref` takes on this
+    system's supervisor (`rows.check_ref`): on systemd a `.timer` is a timer whether or not
+    `is_timer` says so. None where there is no supervisor or the ref is refused, which the
+    add itself then says."""
+    backend = units.backend()
+    if backend is None:
+        return None
+    try:
+        return rows.check_ref(ref, backend, is_timer=is_timer)
+    except ServicesError:
+        return None
+
+
 def _refuse_unless_actable(row: Row) -> None:
     """Refuse (exit 3) every act but `remove` and the reads on a row being removed, a
     row of another system, and any row while there is no supervisor."""

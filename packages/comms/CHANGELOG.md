@@ -6,6 +6,9 @@
   keep-alive where launcher gives one (`next_keep_alive_at`): `kept warm while 1 agent
   works, next keep-alive 19:49`, or `next keep-alive due` once that time has come. A null
   or missing time, or a failed read, draws nothing.
+- A `project-facts` component for the Projects page: the opened project's lead and
+  agents read `not running now` where no session holds the name, while comms' roster
+  can say so.
 - With launcher, an opened agent's `Session` line names the model and effort its launch
   was started with (`planner · claude · opus · high`). Without launcher, or while its read
   fails, neither shows.
@@ -31,6 +34,11 @@
   comms.db gains the table `scoped` and moves to schema step 5 at its next write; a
   comms older than this one can't open it afterwards, so a downgrade needs the store's
   backup.
+- `api.delivered_messages(text)`, in interface 3, reads a text a session was handed (a
+  delivered digest, with whatever the harness put around it) back into the messages
+  comms framed in it: each one's id, and where it runs in the text, frame line to closing
+  line (`DeliveredMessage`). It reads the text alone; a body's lines, all indented, name
+  no message.
 - comms' config gains `[policy] directors`, by default the plain name `fleet-lead`:
   names that direct every comms session on the box that doesn't opt out, after its
   launch's own directors. Each directs only while its name holds a standing row

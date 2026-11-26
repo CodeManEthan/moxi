@@ -2,7 +2,7 @@
 which handoffs are still waiting for their seat.
 
 A handoff is a short file a session writes for the next session of its seat. The launcher
-points a seat to its waiting handoff at the seat's next start or resume (`listen_handoff`),
+points a seat to its waiting handoff at the seat's start, resume or `/clear` (`listen_handoff`),
 and gives a handoff to a launch as its first turn.
 
 **The key.** For a launch, from its row: the comms identity without its `@scope`; else the
@@ -33,10 +33,17 @@ waiting handoff, and `lead`'s other-seat lines leave it out even on a date with 
 in its folder (`others`), newest first, at most `OTHERS_SHOWN` lines, then how many more.
 Listing one picks nothing: it waits for its own seat.
 
-**A handoff is used up only by the seat it was written for.** It counts as picked when the
-launcher gave it to a launch, or showed it at startup or resume to a session that claimed a
-launch of the same key. A handoff waits while it is newer than the newest handoff of its key a pick
-names.
+**A handoff waits until it is picked.** Showing it picks nothing: the pointer comes back at
+every start of the seat. It counts as picked when the launcher gave it to a launch (unless
+that launch ended `failed`), or when it was taken (`take`, `moxi launcher handoff take`). A
+`shown` pick an older launcher recorded at a seat's start counts too. A handoff waits while
+it is newer than the newest handoff of its key a pick names.
+
+**Taking a handoff.** `take` records a `taken` pick for a handoff and its key. The key is
+the one passed, else the caller's (`current`); with neither it refuses (`TakeRefused`). With
+no file it takes the key's waiting handoff, and refuses when none waits. A file named
+without a key must be in the caller's handoff folder and be named for the caller's key; a
+file named with a key must be named for that key, wherever it is. A refusal writes nothing.
 """
 
 from __future__ import annotations
@@ -78,6 +85,18 @@ class NoKey(Exception):
     """The session has no key, so it has no handoff folder of its own."""
 
     exit_code = exits.REFUSED
+
+
+class TakeRefused(Exception):
+    """`take` can't pick the handoff asked for; nothing was written."""
+
+    exit_code = exits.REFUSED
+
+    def __init__(self, code: str, problem: str, hint: str | None = None):
+        self.code = code
+        self.problem = problem
+        self.hint = hint
+        super().__init__(problem if hint is None else f"{problem}; {hint}")
 
 
 class NoNotesDir(Exception):
@@ -306,7 +325,15 @@ def waiting(conn, where: str | Path, key: str) -> Handoff | None:
 
 def pointer(handoff: Handoff) -> str:
     """The line a seat's start shows for its waiting handoff."""
-    return f"Handoff waiting: {handoff.path} ({handoff.date}). Read it before other work."
+    return (f"Handoff waiting: {handoff.path} ({handoff.date}). Read it before other work, "
+            f"then run: {take_command(handoff.path)}")
+
+
+def take_command(path: str | Path) -> str:
+    """The command that takes the handoff at `path`, the path quoted where it needs it."""
+    from .cli import command_line
+
+    return command_line(["moxi", "launcher", "handoff", "take", os.fspath(path)])
 
 
 def keyed(where: str | Path) -> list[tuple[str, Handoff]]:
@@ -421,9 +448,113 @@ def current(env: Mapping[str, str] | None = None, *, cwd: str | Path | None = No
     return Current(key, handoff_dir(cwd if cwd is not None else Path.cwd(), create=create), None)
 
 
+def start_dir() -> str | None:
+    """The folder the session this process runs in started in, where turns knows it:
+    the `cwd` of the live endpoint above this process. None without turns, without such
+    an endpoint, or when it can't be asked. A by-hand session's start lines read the
+    handoff folder of that folder, and so does `take`, so a later `cd` doesn't move it."""
+    from .first import turns_api
+
+    turns = turns_api(quiet=True)
+    if turns is None:
+        return None
+    try:
+        session = turns.find(pid=os.getpid())
+    except Exception:  # noqa: BLE001 - an unread start folder falls back to this one
+        return None
+    if session is None:
+        return None
+    try:
+        found = session.info.get("cwd")
+    finally:
+        session.close()
+    return found if isinstance(found, str) and found else None
+
+
+# -- taking a handoff --------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class Taken:
+    """The handoff `take` picked, the key it was taken under and the folder read."""
+
+    key: str
+    path: Path
+    handoff_dir: Path
+    request_id: str | None
+
+
+def take(file: str | Path | None = None, *, key: str | None = None,
+         env: Mapping[str, str] | None = None, cwd: str | Path | None = None) -> Taken:
+    """Record a `taken` pick for the handoff `file`, or with no file for the waiting
+    handoff of the key, and return what was taken.
+
+    `key` names the key; without it the key and folder are the caller's (`current`, with
+    `env` this process's by default and `cwd` the session's start folder where turns
+    knows it, else this directory). `env` is read for the
+    session's launch stamp and comms name only; the launch log and the folders are this
+    process's. Raises `TakeRefused`,
+    writing nothing, when there is no key, when `file` is not a file, is named for
+    another key, or (with no `key` passed) lies outside the caller's handoff folder, and
+    when no file is named and nothing waits. Raises `NoNotesDir` as `handoff_dir` does.
+    """
+    from . import listeners, store
+
+    env = os.environ if env is None else env
+    request_id = env.get(listeners.REQUEST_ENV) or None
+    if key is not None:
+        checked = check_key(key)
+        if checked is None:
+            raise TakeRefused("bad-key", f"{key!r} can't be a handoff key",
+                              "a key is letters, digits, '.', '_' and '-'")
+        key = checked
+        where = handoff_dir_of_key(key, cwd=cwd).handoff_dir
+        named = True
+    else:
+        try:
+            here = current(env, cwd=cwd if cwd is not None else start_dir(),
+                           create=False)
+        except NoKey:
+            raise TakeRefused("no-seat", "this session has no seat",
+                              "pass --key") from None
+        key, where, named = here.key, here.handoff_dir, False
+    if file is not None:
+        path = Path(file).expanduser().absolute()
+        if not path.is_file():
+            raise TakeRefused("no-handoff", f"{path} is not a file")
+        if parse(path, key) is None:
+            raise TakeRefused("another-key", f"{path.name} is not a handoff of {key}",
+                              None if named else "pass --key with the key it names")
+        if not named and not _same_dir(path.parent, where):
+            raise TakeRefused("another-folder",
+                              f"{path} is not in {key}'s handoff folder {where}",
+                              "pass --key with the key it names")
+    conn = store.connect()
+    try:
+        if file is None:
+            found = waiting(conn, where, key)
+            if found is None:
+                raise TakeRefused("nothing-waiting",
+                                  f"no handoff of {key} is waiting in {where}",
+                                  f"moxi launcher handoffs --key {key} lists them")
+            path = found.path
+        store.add_pick(conn, str(path), key, "taken", request_id=request_id)
+    finally:
+        conn.close()
+    return Taken(key, path, where, request_id)
+
+
+def _same_dir(one: Path, other: Path) -> bool:
+    try:
+        return one.resolve() == Path(other).resolve()
+    except OSError:
+        return False
+
+
 __all__ = ["comms_name_env", "HANDOFFS_DIR", "OTHERS_SHOWN", "Current", "Handoff",
-           "KeyFolder", "NoKey", "NoNotesDir", "check_key", "current", "file_name",
+           "KeyFolder", "NoKey", "NoNotesDir", "TakeRefused", "Taken", "check_key",
+           "current", "file_name",
            "handoff_dir", "handoff_dir_of_key", "handoff_dir_of_row", "handoffs",
            "key_of_env", "key_of_row", "keyed", "newest_launch", "notes_home",
-           "other_lines", "others", "own_handoffs_dir", "parse", "pointer", "unpicked",
-           "waiting"]
+           "other_lines", "others", "own_handoffs_dir", "parse", "pointer", "take",
+           "take_command", "unpicked", "waiting"]

@@ -5,6 +5,7 @@ import {
   addedSaid, addPanel, addPanelBody, agentAdded, alsoHere, answerNow, createOffered, createWords, editPanel,
   editReread, editTouched, filled, FOLDER_WAIT_MS, folderRoute, folderSays, MAY_BE_ADDED, MAY_BE_SAVED, moreLine,
   named, NAME_STAYS, nameTaken, parseAtPath, partlySaved, saveSteps, setChanges, takenOff,
+  answerOf, answersSent, questionId, questionsRoute, shownQuestions,
 } from "../src/panel-model.ts";
 
 const at = (fields = {}) => ({
@@ -142,12 +143,13 @@ test("the add sends the paths as typed, and create only while it is offered and 
 test("what an add came to: added with its notes and warnings, refused with its text, or may have been", () => {
   const project = { ...listed("finch-scripts"), root: "/home/me/code/finch-scripts" };
   delete project.exists;
-  assert.deepEqual(addedSaid({ outcome: "done", value: { project, notes: ["made it and ran git init"], warnings: [] } },
+  assert.deepEqual(addedSaid({ outcome: "done", value: { project, notes: ["made it and ran git init"], warnings: [], asked: [] } },
                              "/home/me"),
                    { outcome: "done", lines: ["Added finch-scripts at ~/code/finch-scripts.", "made it and ran git init"] });
-  assert.deepEqual(addedSaid({ outcome: "done", value: { project, notes: [], warnings: ["skipped broken"] } }, null),
+  assert.deepEqual(addedSaid({ outcome: "done", value: { project, notes: [], warnings: ["skipped broken"],
+                                                     asked: ["fake asks: Keep it clean?"] } }, null),
                    { outcome: "done", lines: ["Added finch-scripts at /home/me/code/finch-scripts.",
-                                              "Warning: skipped broken"] });
+                                              "Warning: skipped broken", "Not asked: fake asks: Keep it clean?"] });
   assert.deepEqual(addedSaid({ outcome: "refused", code: 422, text: "a project has that root; fix: ..." }, null),
                    { outcome: "refused", lines: ["a project has that root; fix: ..."] });
   assert.deepEqual(addedSaid({ outcome: "unknown", text: "x" }, null), { outcome: "unknown", lines: [MAY_BE_ADDED] });
@@ -258,4 +260,50 @@ test("a project read again restarts an untouched form, and marks a touched one s
   assert.equal(editReread(stale, crewed(), FACTS).stale, false);
   // Only a name typed, not yet added, counts as touched.
   assert.equal(editTouched({ ...form, agent: "scout" }, FACTS), true);
+});
+
+const QUESTIONS = [
+  { module: "fake", key: "clean", text: "Keep it clean?", choices: ["yes", "no"], suggested: "yes", preset: null,
+    after: null, later: "fake clean enable /w" },
+  { module: "fake", key: "push", text: "Guard pushes?", choices: ["yes", "no"], suggested: "no", preset: null,
+    after: null, later: "fake push enable" },
+  { module: "fake", key: "branches", text: "Which branches?", choices: [], suggested: null, preset: null,
+    after: ["push", "yes"], later: "fake push enable --branch NAME" },
+];
+
+test("the questions route names the folder, the kind and a create only while it is offered", () => {
+  const form = { ...addPanel({ folder: "~/code/a b" }), create: true };
+  assert.equal(questionsRoute(form, { canCreate: true }), "api/questions?path=~%2Fcode%2Fa%20b&kind=project&create=true");
+  assert.equal(questionsRoute(form, { canCreate: false }), "api/questions?path=~%2Fcode%2Fa%20b&kind=project");
+  assert.equal(questionsRoute(addPanel(), { canCreate: true }), null);
+});
+
+test("each question shows set to its suggestion, and a follow-up only while its answer is held", () => {
+  assert.equal(questionId(QUESTIONS[0]), "fake.clean");
+  assert.deepEqual(shownQuestions(QUESTIONS, {}).map(questionId), ["fake.clean", "fake.push"]);
+  assert.equal(answerOf(QUESTIONS[0], {}), "yes");
+  assert.deepEqual(answersSent(QUESTIONS, {}), ["fake.clean=yes", "fake.push=no"]);
+  const picked = { "fake.push": "yes", "fake.branches": "main" };
+  assert.deepEqual(shownQuestions(QUESTIONS, picked).map(questionId), ["fake.clean", "fake.push", "fake.branches"]);
+  assert.deepEqual(answersSent(QUESTIONS, picked), ["fake.clean=yes", "fake.push=yes", "fake.branches=main"]);
+  assert.deepEqual(answersSent(QUESTIONS, { "fake.push": "yes" }), ["fake.clean=yes", "fake.push=yes", "fake.branches="]);
+});
+
+test("a preset question is not shown, and its preset opens its follow-up", () => {
+  const preset = QUESTIONS.map((q) => (q.key === "push" ? { ...q, preset: "yes" } : q));
+  assert.deepEqual(shownQuestions(preset, {}).map(questionId), ["fake.clean", "fake.branches"]);
+  assert.deepEqual(answersSent(preset, {}), ["fake.clean=yes", "fake.branches="]);
+});
+
+test("a menu with no suggestion sends nothing until one is picked", () => {
+  const open = [{ ...QUESTIONS[0], suggested: null }];
+  assert.deepEqual(answersSent(open, {}), []);
+  assert.deepEqual(answersSent(open, { "fake.clean": "no" }), ["fake.clean=no"]);
+});
+
+test("the add sends the answers only when there are some", () => {
+  const form = { ...addPanel({ folder: "/w" }), name: "w" };
+  assert.deepEqual(addPanelBody(form, { notesInstalled: false, canCreate: false, answers: ["fake.clean=yes"] }),
+                   { key: "w", root: "/w", kind: "project", answers: ["fake.clean=yes"] });
+  assert.equal("answers" in addPanelBody(form, { notesInstalled: false, canCreate: false }), false);
 });

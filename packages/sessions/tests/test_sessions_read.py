@@ -529,3 +529,173 @@ def test_list_text_redacts_a_marked_line_and_a_split_token(env, capsys):
         assert "[REDACTED:github-pat]" in row["prompt"]["text"]
     finally:
         catalog.reset()
+
+
+# --- tool output -----------------------------------------------------------------------------
+
+OUTPUT_KEYS = ("output", "output_cut_chars", "withheld_why")
+
+
+def without_output(out: str) -> str:
+    """A `--results` read's text with each result's output lines taken out."""
+    kept, in_output = [], False
+    for line in out.splitlines():
+        if in_output and line.startswith("  "):
+            continue
+        in_output = "Result:" in line
+        kept.append(line)
+    return "\n".join(kept)
+
+
+@pytest.mark.parametrize("harness", ["claude", "codex", "opencode"])
+def test_results_shows_each_harnesss_tool_output(env, capsys, harness):
+    session = harness_session(env, harness)
+    code, out, err = run(capsys, "read", session, "--harness", harness, "--results")
+    assert code == 0 and err == ""
+    lines = out.splitlines()
+    for n in range(3):
+        at = lines.index(f"  {OUTPUT_ONLY} {n}")
+        assert "Result:" in lines[at - 1]
+    assert INPUT_ONLY not in out
+    data = json.loads(run(capsys, "read", session, "--harness", harness, "--results",
+                          "--json")[1])
+    results = [row for row in data["records"] if row["kind"] == "tool_result"]
+    assert [row["output"] for row in results] == [f"{OUTPUT_ONLY} {n}" for n in range(3)]
+    assert all(row["output_cut_chars"] == 0 and row["withheld_why"] is None
+               for row in results)
+
+
+@pytest.mark.parametrize("harness", ["claude", "codex", "opencode"])
+@pytest.mark.parametrize("flags", FLAGS, ids=lambda f: " ".join(f) or "default")
+def test_without_results_the_read_is_the_results_read_less_its_output(env, capsys, harness,
+                                                                      flags):
+    session = harness_session(env, harness)
+    plain = run(capsys, "read", session, "--harness", harness, *flags)
+    shown = run(capsys, "read", session, "--harness", harness, "--results", *flags)
+    assert plain[0] == shown[0] == 0 and plain[2] == shown[2] == ""
+    if "--json" in flags:
+        rows = json.loads(shown[1])["records"]
+        assert any("output" in row for row in rows)
+        stripped = [{k: v for k, v in row.items() if k not in OUTPUT_KEYS} for row in rows]
+        assert stripped == json.loads(plain[1])["records"]
+    else:
+        assert OUTPUT_ONLY in shown[1]
+        assert without_output(shown[1]) == plain[1].rstrip("\n")
+
+
+def long_output_session(env, output: str) -> ClaudeTranscript:
+    t = ClaudeTranscript(env / ".claude" / "projects")
+    t.user("go")
+    call = t.request().tool_use("Bash", {"command": "cat build.log"})
+    t.tool_result(call, output)
+    t.write()
+    return t
+
+
+def test_a_long_output_keeps_its_first_and_last_4000_characters(env, capsys):
+    output = "H" * 3000 + "\n" + "h" * 2000 + "M" * 5000 + "t" * 3999 + "T"
+    t = long_output_session(env, output)
+    out = run(capsys, "read", t.session_id, "--results")[1]
+    assert "  [cut: 6,001 characters between the first and last 4,000]" in out
+    assert "M" not in out.split("[cut:")[1].split("\n", 1)[1].replace("MB", "")
+    data = json.loads(run(capsys, "read", t.session_id, "--results", "--json")[1])
+    row = next(r for r in data["records"] if r["kind"] == "tool_result")
+    assert row["output"] == output[:4000] + output[-4000:]
+    assert row["output_cut_chars"] == len(output) - 8000 == 6001
+
+
+@pytest.mark.parametrize("before", [view.OUTPUT_KEEP_CHARS - 10,
+                                    20000 - view.OUTPUT_KEEP_CHARS - 10])
+def test_a_credential_in_an_output_is_redacted_even_across_the_cut(env, capsys, before):
+    output = "a" * before + TOKEN + "b" * (20000 - before - len(TOKEN))
+    pieces = (TOKEN[:10], TOKEN[10:])
+    cut_first = view.redactor().redact(view.cut_output(output)[0])
+    assert any(piece in cut_first for piece in pieces)   # the order the read must not use
+    t = long_output_session(env, output)
+    for flags in ((), ("--json",)):
+        code, out, err = run(capsys, "read", t.session_id, "--results", *flags)
+        assert code == 0 and err == ""
+        assert not any(piece in out for piece in pieces)
+    row = next(r for r in json.loads(out)["records"] if r["kind"] == "tool_result")
+    assert row["output_cut_chars"] > 0
+
+
+def test_a_short_output_with_a_credential_is_redacted(env, capsys):
+    t = long_output_session(env, f"token={TOKEN}\n")
+    out = run(capsys, "read", t.session_id, "--results")[1]
+    assert TOKEN_HEAD not in out and "[REDACTED:github-pat]" in out
+
+
+@pytest.mark.parametrize("harness", ["claude", "codex", "opencode"])
+def test_a_secret_path_calls_output_is_withheld(env, capsys, harness):
+    command, secret = "cat /work/project/.env", "DB_PASS=plain-words-no-pattern-knows"
+    if harness == "claude":
+        t = ClaudeTranscript(env / ".claude" / "projects")
+        t.user("go")
+        t.tool_result(t.request().tool_use("Bash", {"command": command}), secret)
+        t.write()
+        session = t.session_id
+    elif harness == "codex":
+        r = CodexRollout(env / ".codex" / "sessions")
+        r.turn()
+        r.user("go")
+        call = r.tool_call("shell", {"command": command}, kind="function_call")
+        r.tool_output(call, secret, kind="function_call_output")
+        r.turn_end()
+        r.write()
+        session = r.thread_id
+    else:
+        db = OpenCodeDb(env / ".local" / "share" / "opencode")
+        oc = db.session()
+        oc.user("go")
+        answer = oc.assistant()
+        answer.tool("bash", {"command": command}, output=secret)
+        answer.complete()
+        db.write()
+        session = oc.id
+    out = run(capsys, "read", session, "--harness", harness, "--results")[1]
+    assert secret not in out
+    assert f"  {view.WITHHELD_SECRET}" in out.splitlines()
+    data = json.loads(run(capsys, "read", session, "--harness", harness, "--results",
+                          "--json")[1])
+    row = next(r for r in data["records"] if r["kind"] == "tool_result")
+    assert row["output"] is None and row["withheld_why"] == view.WITHHELD_SECRET
+
+
+def test_a_result_whose_call_is_not_read_is_withheld(env, capsys):
+    t = ClaudeTranscript(env / ".claude" / "projects")
+    t.user("go")
+    t.tool_result("toolu_not_in_this_session", OUTPUT_ONLY)
+    t.write()
+    out = run(capsys, "read", t.session_id, "--results")[1]
+    assert OUTPUT_ONLY not in out and f"  {view.WITHHELD_UNSEEN}" in out.splitlines()
+
+
+def no_secrets(monkeypatch):
+    real = modules.load
+
+    def load(name, **kw):
+        if name == "secrets":
+            return modules.Found(name="secrets", state=modules.ABSENT,
+                                 reason="moxi-secrets is not installed")
+        return real(name, **kw)
+
+    monkeypatch.setattr(modules, "load", load)
+
+
+@pytest.mark.parametrize("flags", [(), ("--json",)])
+def test_results_without_redaction_refuses_with_exit_3(env, capsys, monkeypatch, flags):
+    t = claude(env, turns=2)
+    no_secrets(monkeypatch)
+    code, out, err = run(capsys, "read", t.session_id, "--results", *flags)
+    assert code == 3 and out == ""
+    assert "secrets module is absent" in err and "moxi install secrets" in err
+    assert run(capsys, "read", t.session_id, *flags)[0] == 0
+
+
+def test_results_refuses_when_secrets_offers_no_secret_path(env, capsys, monkeypatch):
+    t = claude(env, turns=2)
+    monkeypatch.setattr(view, "redactor", lambda: view.Redactor(lambda text: text))
+    code, out, err = run(capsys, "read", t.session_id, "--results")
+    assert code == 3 and out == ""
+    assert "no secret_path" in err and "moxi install secrets" in err

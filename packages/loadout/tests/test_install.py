@@ -208,7 +208,10 @@ def test_an_occupant_is_blocked_until_replace_moves_it_aside(lo):
     assert states(out)[("skill", "review", "claude", "user")] == "blocked"
     [row] = [r for r in install.status().rows if (r.name, r.harness) == ("review", "claude")]
     assert row.replaceable and row.as_json()["replaceable"] is True
-    assert install.install(replace=["skill:review@claude"]).code == 0
+    refused = install.install(replace=["skill:review@claude"])
+    assert refused.code != 0
+    assert any("pass --accept-diff to replace it" in line for line in refused.lines)
+    assert install.install(replace=["skill:review@claude"], accept_diff=True).code == 0
     assert not any(r.replaceable for r in install.status().rows)
     assert (kit.claude() / "review").is_symlink()
     # A --replace that names nothing refused is refused.

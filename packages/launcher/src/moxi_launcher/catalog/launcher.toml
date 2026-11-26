@@ -236,6 +236,16 @@ hint = "launch it in a slot (--target slot) where tmux slots run, or set recycle
 [limit_at]
 retired = "the launcher no longer compacts at a context mark; remove limit_at (the relaunch line comes at warn_at)"
 
+[stop_at]
+type = "string"
+default = ""
+requires = ["usage", "turns", "slots"]
+doc = "The context mark past which the session may only wrap up (commit, write its handoff, use comms, relaunch itself): a multiple <k>x past warn_at, such as 2.5x; only on a launch that relaunches itself and warns at a mark. Unset, no stop."
+fork = "drop"
+group = "lifecycle"
+sub = "Context"
+label = "Stop mark"
+
 [headless_exit]
 type = "list"
 default = []

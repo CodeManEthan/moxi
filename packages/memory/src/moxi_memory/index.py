@@ -73,6 +73,10 @@ REBUILD_LOCK = "rebuild.lock"
 TOKENIZER = "porter unicode61 remove_diacritics 2"
 #: The `meta` key that says which secrets `redact` stored a generation's rows.
 REDACT_VERSION_KEY = "redact_version"
+#: The `meta` key, `1`, that says a generation's rows were made under the rule that keeps
+#: delivered messages (`rows.DELIVERED_WRITERS`). A generation without it holds none for
+#: the sessions it read before memory kept them.
+DELIVERED_KEY = "keeps_delivered"
 #: How long a reader waits for a generation's shared lock. Only a child removing that
 #: generation holds it exclusively, for the moment the removal takes.
 READ_LOCK_WAIT = 2.0
@@ -315,6 +319,12 @@ def stored_redact_version(conn: sqlite3.Connection) -> int:
         return int(value) if value is not None else 1
     except ValueError:
         return 1
+
+
+def keeps_delivered(conn: sqlite3.Connection) -> bool:
+    """Whether a generation's rows were made under the rule that keeps delivered
+    messages: its `meta` holds `DELIVERED_KEY`."""
+    return meta_get(conn, DELIVERED_KEY) == "1"
 
 
 def schema_version(conn: sqlite3.Connection) -> int:
@@ -652,6 +662,7 @@ class Writer:
                 from .rows import redact_version
 
                 meta_set(conn, REDACT_VERSION_KEY, redact_version())
+                meta_set(conn, DELIVERED_KEY, 1)
         except BaseException:
             conn.close()
             raise
@@ -706,6 +717,7 @@ __all__ = ["INDEX_DIR", "POINTER", "WRITER_LOCK", "REBUILD_LOCK", "TOKENIZER", "
            "Writer", "index_dir",
            "db_path", "lock_path", "pointer_path", "writer_lock_path", "rebuild_lock_path",
            "current", "generations", "meta_get", "meta_set", "stored_redact_version",
+           "DELIVERED_KEY", "keeps_delivered",
            "WRITER_SCHEMA", "schema_version", "has_writer", "rows_without_writer",
            "REDACT_VERSION_KEY", "open_read",
            "rebuild_running", "writer"]

@@ -57,6 +57,11 @@ roster lists it.
   `can_send`, `reason`, one of `SCOPED_REASONS` when it can't, and `why` in words).
 * Both reads open comms' store read-only and never ask the daemon, so a listener can ask
   at each prompt.
+* `delivered_messages(text)` reads a text a session was handed (a delivered digest, with
+  whatever its harness put around it) back into the messages comms framed in it: one
+  `DeliveredMessage` (`message_id`, and `start` and `end`, where it runs in the text,
+  frame line to closing line) per message, in order. It reads the text alone, never the
+  store or the daemon, and a body's text names no message.
 
 **The other surfaces.**
 
@@ -111,6 +116,7 @@ from types import SimpleNamespace
 from moxi import modules as _modules
 
 from .. import cache as _cache
+from .. import delivered as _delivered
 from .. import claimfile as _claimfile
 from .. import config as _config
 from .. import directors as _directors
@@ -874,6 +880,15 @@ def _launch_name(name, scope) -> tuple[str, str]:
     return name, scope
 
 
+DeliveredMessage = _delivered.DeliveredMessage
+
+
+def delivered_messages(text: str) -> tuple[DeliveredMessage, ...]:
+    """The messages comms framed in `text`, a text a session was handed, in order: each
+    one's id and where it runs in `text`. Empty for a text that holds none."""
+    return _delivered.read(text)
+
+
 def record_dir() -> Path:
     """The directory that holds the box's record file (`[local] record`, else comms.db
     under comms' state directory)."""
@@ -889,7 +904,7 @@ def daemon_socket() -> Path:
 __all__ = [
     "INTERFACE", "send", "send_as", "send_under", "check", "delete", "DeleteResult", "Sender", "SendResult",
     "send_scoped", "scoped_sender", "scoped_state", "ScopedSender", "ScopedState",
-    "SCOPED_REASONS",
+    "SCOPED_REASONS", "delivered_messages", "DeliveredMessage",
     "Recipient", "Refusal", "CODEX_RESUME", "ENDS_ON_BIND_TIMEOUT", "BIND_WAIT",
     "HEADLESS", "parse_exit", "OUTCOMES", "DELIVERIES", "EXIT_CODES", "POSTURES", "ClaimServer", "attributed",
     "session", "session_of", "caller_identity", "roster", "owner", "Roster", "Agent",

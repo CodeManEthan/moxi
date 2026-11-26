@@ -134,7 +134,7 @@ test("the root is sent as typed, so the page server refuses a relative one", () 
 });
 
 test("an add's answer: done, refused with its line, or unknown", () => {
-  const written = { project: PROJECT, notes: ["made /w/alpha and ran git init"], warnings: [] };
+  const written = { project: PROJECT, notes: ["made /w/alpha and ran git init"], warnings: [], asked: [] };
   const done = actedOf(200, written, parseAdded);
   assert.deepEqual(done, { outcome: "done", value: written });
   assert.deepEqual(addSaid(done, true),
@@ -150,7 +150,7 @@ test("an add's answer: done, refused with its line, or unknown", () => {
 test("an add made past a contribution that won't load shows its warning beside the success", () => {
   const warning = "skipped fake, which won't load (fake: the entry fake won't load: ImportError: x), "
     + "so its defaults and checks were not applied; fix: repair fake or uninstall it (`moxi uninstall fake`)";
-  const done = actedOf(200, { project: PROJECT, notes: [], warnings: [warning] }, parseAdded);
+  const done = actedOf(200, { project: PROJECT, notes: [], warnings: [warning], asked: [] }, parseAdded);
   assert.deepEqual(addSaid(done, false), {
     tone: "ok", lines: ["Added alpha at /w/alpha."], warnings: [`Warning: ${warning}`],
   });

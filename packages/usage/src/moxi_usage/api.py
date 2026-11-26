@@ -1,9 +1,12 @@
-"""usage's interfaces 1 and 2, the module other Moxi modules import (`moxi_usage.api`).
+"""usage's interfaces 1 to 3, the module other Moxi modules import (`moxi_usage.api`).
 
 Interface 2 is interface 1 plus four things, each marked below: `report`'s `work_dir`
 filter, the `projects` kind by folder, `saving` on a `terms` total, and `opened` on a
 limits row. The names are the same under both; a caller that reads one of the four loads
 usage with `interface=2`, so an older usage refuses it and does not answer without them.
+Interface 3 is interface 2 plus the stop, marked below: the names of its two stamps,
+`cost_multiple`, and `threshold` at a multiple `<k>x`. A caller that stamps a stop loads
+usage with `interface=3`.
 
 Model facts (`moxi_usage.models`):
 
@@ -47,7 +50,9 @@ The restart point (`moxi_usage.measure`, `moxi_usage.thresholds`):
   `subagent`) and each warn-at mark's threshold in tokens, as a `RestartPoint`. A mark
   that cannot be worked out is unavailable with its reason, never guessed.
 * `threshold(model, mark, population="main")`: one mark's `Threshold`; `stamp()`, which
-  changes whenever the measure or the model table does.
+  changes whenever the measure or the model table does. Under interface 3, `mark` may be
+  a multiple `<k>x` (k a decimal of at most two places, at least 1) besides the named
+  marks, and `cost_multiple(mark)` reads its k, None for anything that is not one.
 
 The warn-at mark (`moxi_usage.marks`; the listener is `moxi_usage.mark`):
 
@@ -56,6 +61,9 @@ The warn-at mark (`moxi_usage.marks`; the listener is `moxi_usage.mark`):
   with a `Crossing`), each mark's threshold for the session's model, its current
   context and each purpose's state, `armed`, `fired` with when, or `off`, as a
   `MarkState`; its agents' fired notices in `agents`.
+* `WARN_AT_ENV` and `CROSSING_AT_ENV`: the names of the launcher's stamps for the notice
+  and the crossing. Under interface 3, `STOP_AT_ENV` and `STOP_HANDOFFS_ENV`: the stop's
+  mark and the handoff folder a stopped session may still write in (`moxi_usage.stop`).
 
 Reports (`moxi_usage.reports`):
 
@@ -110,7 +118,9 @@ _HOMES: dict[str, str] = {
     **dict.fromkeys(("restart_point", "RestartPoint"), "measure"),
     **dict.fromkeys(("threshold", "Threshold", "stamp", "MARKS"), "thresholds"),
     **dict.fromkeys(("mark", "MarkState", "PurposeState"), "marks"),
-    **dict.fromkeys(("WARN_AT_ENV", "CROSSING_AT_ENV"), "mark"),
+    **dict.fromkeys(("WARN_AT_ENV", "CROSSING_AT_ENV", "STOP_AT_ENV", "STOP_HANDOFFS_ENV"),
+                    "mark"),
+    **dict.fromkeys(("cost_multiple",), "thresholds"),
     "Crossing": "mark",
 }
 

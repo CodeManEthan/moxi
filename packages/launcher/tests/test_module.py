@@ -56,7 +56,8 @@ def test_session_env_names_the_exact_stamps_not_the_prefix(found):
     assert set(found.session_env) == {"MOXI_LAUNCHER_REQUEST", "MOXI_LAUNCHER_RELAUNCH",
                                      "MOXI_LAUNCHER_KEEP_WARM",
                                      "MOXI_LAUNCHER_RECYCLE_ON_EXPIRY",
-                                     "MOXI_USAGE_CROSSING_AT", "MOXI_USAGE_WARN_AT"}
+                                     "MOXI_USAGE_CROSSING_AT", "MOXI_USAGE_WARN_AT",
+                                     "MOXI_USAGE_STOP_AT", "MOXI_USAGE_STOP_HANDOFFS"}
     assert not any(name.endswith("_") for name in found.session_env)
     assert {"MOXI_LAUNCHER_REQUEST", "MOXI_LAUNCHER_RELAUNCH"} <= modules.session_env()
 

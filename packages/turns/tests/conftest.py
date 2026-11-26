@@ -43,6 +43,22 @@ def no_installed_listeners(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def only_turns_guards(monkeypatch, no_installed_listeners):
+    """The guard group reads turns' own entry alone, so no installed module's guard joins
+    a test's table. The workspace installs modules whose guards are on by default where
+    another module is installed (the launcher's wake guard, with cache), and a test reads
+    the table it builds. A test that wants another module's guard passes `entries`, or
+    sets `moxi.modules.extensions` itself."""
+    from moxi import modules
+    from moxi_turns import guards
+
+    real = modules.extensions
+    monkeypatch.setattr(modules, "extensions", lambda group: (
+        [e for e in real(group) if e.name == "turns"] if group == guards.GROUP
+        else real(group)))
+
+
+@pytest.fixture(autouse=True)
 def state_home(monkeypatch, tmp_path_factory):
     """Every test keeps turns' state (the hook times among it) in a folder of its own."""
     root = tmp_path_factory.mktemp("state")

@@ -11,8 +11,11 @@ each harness at once. Both pieces are open: one that breaks never stops git.
 - `ctx.root` is the work tree that holds the folder; a linked worktree has a root of its
   own and is skipped, and so is a commit in any other repository;
 - the commit (`HEAD^..HEAD`, or the empty tree to `HEAD` for a root commit) or the merge
-  (`ORIG_HEAD..HEAD`) changed a path under the folder. There is no branch condition:
-  install reads the folder as this work tree has it, on whatever branch.
+  (`ORIG_HEAD..HEAD`) changed a path under the folder;
+- the work tree is on the repo's main branch: the branch `refs/remotes/origin/HEAD`
+  points to when the repo has it, else git's `init.defaultBranch`, else `main`. On
+  another branch, or with a detached HEAD, the piece prints one line saying the change
+  reinstalls when it reaches the main branch, and does nothing else.
 
 The install runs as its own process, `python -m moxi_loadout install` in this
 environment, with three minutes before it is stopped with everything it started. Rule:
@@ -87,6 +90,11 @@ def run(ctx):
     paths = () if rel == os.curdir else (rel,)
     if not link.changes(ctx.root, rev_range=span, paths=paths, timeout_s=GIT_SECONDS):
         return link.Outcome.ok()
+    branch, main = _branch(link, ctx.root), main_branch(link, ctx.root)
+    if branch != main:
+        here = "a detached HEAD" if branch is None else branch
+        return link.Outcome.notice(f"loadout: not reinstalled: {here} is not {main}; "
+                                   f"it reinstalls when the change reaches {main}")
     failure = _install()
     if failure is None:
         return link.Outcome.ok()
@@ -147,6 +155,42 @@ def _verify(link, root: str, rev: str) -> str | None:
     return found if done.returncode == 0 and found else None
 
 
+def _branch(link, root: str) -> str | None:
+    """The work tree's current branch, or None for a detached HEAD."""
+    done = link.git(root, "symbolic-ref", "-q", "--short", "HEAD", timeout_s=GIT_SECONDS)
+    name = done.stdout.strip()
+    return name if done.returncode == 0 and name else None
+
+
+#: The names a repo's main branch is looked for under, in order, when nothing names it.
+MAIN_NAMES = ("main", "master")
+
+
+def main_branch(link, root: str) -> str:
+    """The repo's main branch: the one `refs/remotes/origin/HEAD` points to when the repo
+    has it; else git's `init.defaultBranch` when it is set and the repo has that branch;
+    else the first of `main` and `master` the repo has; else `main`. A repo made by `git
+    init` with no `init.defaultBranch`, and never cloned, sits on `master`."""
+    done = link.git(root, "symbolic-ref", "-q", "--short", "refs/remotes/origin/HEAD",
+                    timeout_s=GIT_SECONDS)
+    name = done.stdout.strip()
+    if done.returncode == 0 and name.startswith("origin/") and name != "origin/":
+        return name[len("origin/"):]
+    done = link.git(root, "config", "--get", "init.defaultBranch", timeout_s=GIT_SECONDS)
+    name = done.stdout.strip()
+    named = [name] if done.returncode == 0 and name else []
+    for candidate in (*named, *MAIN_NAMES):
+        if _has_branch(link, root, candidate):
+            return candidate
+    return MAIN_NAMES[0]
+
+
+def _has_branch(link, root: str, name: str) -> bool:
+    done = link.git(root, "rev-parse", "-q", "--verify", f"refs/heads/{name}",
+                    timeout_s=GIT_SECONDS)
+    return done.returncode == 0 and bool(done.stdout.strip())
+
+
 def _head(link, root: str) -> str | None:
     import subprocess
 
@@ -195,4 +239,4 @@ def _last_line(data) -> str:
 
 
 __all__ = ["REINSTALL_COMMIT", "REINSTALL_MERGE", "INSTALL_SECONDS", "COMMAND",
-           "RECORD_KEY", "run", "clean_env"]
+           "RECORD_KEY", "run", "clean_env", "main_branch"]

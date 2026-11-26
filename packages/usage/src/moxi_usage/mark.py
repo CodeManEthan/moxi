@@ -6,7 +6,7 @@ the context below which the main loop's calls skip the row. `gone(event)` is cal
 the endpoint is ending.
 
 **Readers and purposes.** A reader is the main session or one of its agents; each has
-its own context and its own marks. A reader carries up to two purposes, each with a mark
+its own context and its own marks. A reader carries up to three purposes, each with a mark
 (`1x`, `1.5x`, `2x`, a multiple of the restart point, `moxi_usage.thresholds`):
 
 * the **notice**, one line to the model. Its mark is the launch's `MOXI_USAGE_WARN_AT`.
@@ -16,9 +16,14 @@ its own context and its own marks. A reader carries up to two purposes, each wit
   group `moxi.usage.crossings` are called with a `Crossing`. Its mark is
   `MOXI_USAGE_CROSSING_AT`, which the launcher stamps when its recycle at limit is on;
   there is no config default.
+* the **stop**, for the main session only. Its mark is `MOXI_USAGE_STOP_AT`, a multiple
+  `<k>x` (`thresholds.cost_multiple`), which the launcher stamps from its `stop_at`.
+  Firing writes the session's latch and adds the stop text as one line
+  (`moxi_usage.stop`). A fired stop never re-arms: the latch is on disk, outlives a
+  compaction and `gone`, and only the doctor's sweep removes it.
 
-With both off the listener returns at once, having imported nothing beyond this module
-and read no config.
+With all three off the listener returns at once, having imported nothing beyond this
+module and read no config.
 
 **The measure.** The reader's newest request, by sessions' `last_request`: its input
 tokens are the whole prompt. turns hands the file the harness writes (`record_path`);
@@ -31,22 +36,23 @@ session and `subagent` for an agent; thresholds are kept per (model, mark, popul
 and worked out again when the measure, the model table or usage's config changes.
 
 **Firing.** A purpose fires the first time its reader's context is at or above its
-threshold while it is armed, and is then fired. It is armed again by a later reading of
-the same reader below the threshold (after a compaction, or a clear that keeps the
-session id). So a mark fires once per rise past its threshold, not once per session: a
-session that compacts and climbs past the mark again is warned again.
+threshold while it is armed, and is then fired. The notice and the crossing are armed
+again by a later reading of the same reader below the threshold (after a compaction, or a
+clear that keeps the session id). So those marks fire once per rise past their threshold,
+not once per session: a session that compacts and climbs past the mark again is warned
+again. The stop fires once per session and stays latched.
 
 **Delivery.** The notice is one line, `context 412k: past the 1x mark for <model>` (the
 context in thousands, halves up). The lines crossing handlers return on the same call are
 appended to it, each after `. `, so the model sees one line; a crossing on a call with no
-notice gives its handlers' lines on their own. A notice for an agent is the agent's own
-line, and leaves one line for its parent, `subagent agent-<id> <line>`; the main
-session's next call adds its agents' waiting lines after its own. Waiting lines live in
-memory only.
+notice gives its handlers' lines on their own. The stop text follows on its own line. A
+notice for an agent is the agent's own line, and leaves one line for its parent,
+`subagent agent-<id> <line>`; the main session's next call adds its agents' waiting lines
+after its own. Waiting lines live in memory only.
 
-**State.** In memory per session, in the endpoint's process. Only the fired purposes are
-kept on disk, in `STATE/usage/marks/<harness>-<session_id>.json` (written with
-`moxi.files.update` on a firing and on a re-arm), so an endpoint that starts again does
+**State.** In memory per session, in the endpoint's process. Only the fired notice and
+crossing are kept on disk, in `STATE/usage/marks/<harness>-<session_id>.json` (written
+with `moxi.files.update` on a firing and on a re-arm), so an endpoint that starts again does
 not fire twice; `gone` deletes the files of the sessions the endpoint held, and the
 doctor's `marks` row sweeps any older than `marks.max_age_days`.
 
@@ -54,9 +60,10 @@ doctor's `marks` row sweeps any older than `marks.max_age_days`.
 it, and after an agent's call the parent's next call must come, to take its line. For
 the main session it is 0 while a line waits or a main purpose is fired (so the reading
 that re-arms it is seen); otherwise the smallest threshold among the main session's armed
-purposes for the models it has used, or over every model the measure has a row for when
-it has used none yet. With no threshold known it is 0; with both purposes off it is
-`NEVER`, since the listener has nothing to do. turns reads the floor again at each
+purposes for the models it has used (the stop counts until it has latched), or over
+every model the measure has a row for when it has used none yet. With no threshold known
+it is 0; with every purpose off, the stop latched or off, it is `NEVER`, since the
+listener has nothing to do. turns reads the floor again at each
 `ready` and after each call.
 
 **Fail open.** Every error is logged once per kind and the listener answers None. A
@@ -69,16 +76,21 @@ from __future__ import annotations
 import _thread
 import os
 
-#: The launcher's stamps.
+#: The launcher's stamps: the notice's mark, the crossing's, the stop's (a multiple
+#: `<k>x`), and the handoff folder the stop holds a stopped session's notes to.
 WARN_AT_ENV = "MOXI_USAGE_WARN_AT"
 CROSSING_AT_ENV = "MOXI_USAGE_CROSSING_AT"
+STOP_AT_ENV = "MOXI_USAGE_STOP_AT"
+STOP_HANDOFFS_ENV = "MOXI_USAGE_STOP_HANDOFFS"
 #: The selectable marks (`moxi_usage.thresholds.MARKS`, repeated so the off path imports
 #: nothing), and the absence of one.
 MARKS = ("1x", "1.5x", "2x")
 OFF = "off"
-#: The purposes a reader can carry.
+#: The purposes a reader can carry. `PURPOSES` are the ones the file of fired purposes
+#: keeps; the stop keeps its own latch (`moxi_usage.stop`).
 NOTICE = "notice"
 CROSSING = "crossing"
+STOP = "stop"
 PURPOSES = (NOTICE, CROSSING)
 #: The group crossing handlers register on.
 GROUP = "moxi.usage.crossings"
@@ -112,6 +124,17 @@ def selected(env) -> tuple[str | None, str | None]:
     """The notice's mark and the crossing's, each None for off, from a session's
     environment alone: an unstamped purpose is off."""
     return _stamped(env.get(WARN_AT_ENV)), _stamped(env.get(CROSSING_AT_ENV))
+
+
+def stop_selected(env) -> str | None:
+    """The stop's mark from a session's environment, a multiple `<k>x`; None for no
+    stamp and for one that is not a multiple. With no stamp nothing is imported."""
+    value = env.get(STOP_AT_ENV)
+    if not value:
+        return None
+    from .thresholds import cost_multiple
+
+    return value if cost_multiple(value) is not None else None
 
 
 # --- the crossing -----------------------------------------------------------------------
@@ -228,6 +251,9 @@ def reset() -> None:
     _thresholds_stamp[:] = [None]
     _said.clear()
     _handlers_cache[:] = [None]
+    from . import stop
+
+    stop.reset()
 
 
 # --- the file of fired purposes ---------------------------------------------------------
@@ -482,20 +508,23 @@ def agent_label(agent_id: str) -> str:
 
 def on_tool(event) -> str | None:
     """turns' after-tool listener: the notice when one fired, the crossing handlers'
-    lines, and for the main session its agents' waiting lines; else None."""
+    lines, the stop text when the stop fired, and for the main session its agents'
+    waiting lines; else None."""
     try:
-        notice, crossing = selected(_env(event))
-        if notice is None and crossing is None:
+        env = _env(event)
+        notice, crossing = selected(env)
+        stop = stop_selected(env)
+        if notice is None and crossing is None and stop is None:
             return None
         if getattr(event, "agent_id", None) is not None and notice is None:
-            return None                          # an agent has no crossing
-        return observe(event, notice=notice, crossing=crossing)
+            return None                          # an agent has no crossing and no stop
+        return observe(event, notice=notice, crossing=crossing, stop=stop)
     except Exception:  # noqa: BLE001 - the listener fails open
         _fail("listener", "the warn-at mark failed on a tool call; it adds nothing")
         return None
 
 
-def observe(event, *, notice: str | None, crossing: str | None,
+def observe(event, *, notice: str | None, crossing: str | None, stop: str | None = None,
             now: float | None = None) -> str | None:
     """One after-tool event with the marks in force (`on_tool` without the selection
     and the fail-open wrap). `now` stands in for the clock."""
@@ -523,6 +552,7 @@ def observe(event, *, notice: str | None, crossing: str | None,
     wanted = {name: mark for name, mark in wanted.items() if mark is not None}
     own: str | None = None
     crossed: Crossing | None = None
+    stopped: str | None = None
     changed = False
     if reading is not None:
         tokens, model, at = reading
@@ -556,6 +586,8 @@ def observe(event, *, notice: str | None, crossing: str | None,
                     changed = True
             if own is not None and agent_id is not None:
                 session.pending.append(f"subagent {agent_label(agent_id)} {own}")
+        if stop is not None and agent_id is None:
+            stopped = _stop(session, stop, tokens, shown, when, _env(event))
     if changed:
         try:
             _persist(session, reader, {NOTICE: notice or OFF, CROSSING: crossing or OFF},
@@ -567,12 +599,34 @@ def observe(event, *, notice: str | None, crossing: str | None,
     if own is not None and agent_id is None and handed:
         own = ". ".join([own, *handed])          # one line: the notice, then each handler's
         handed = []
-    lines = ([own] if own else []) + handed
+    lines = ([own] if own else []) + handed + ([stopped] if stopped else [])
     if agent_id is None:
         with session.lock:
             lines.extend(session.pending)
             session.pending.clear()
     return "\n".join(lines) if lines else None
+
+
+def _stop(session: _Session, mark: str, tokens: int, model: str | None, when: float,
+          env) -> str | None:
+    """Fire the main session's stop when `tokens` is at or above the stop mark's threshold
+    and it has not latched: write the latch and give the stop text. None otherwise, and
+    when the latch can't be written (logged once)."""
+    from . import stop
+    from .thresholds import MAIN
+
+    limit = _threshold(model, mark, MAIN)
+    if limit is None or tokens < limit:
+        return None
+    if stop.latched(session.harness, session.session_id) is not None:
+        return None
+    try:
+        made = stop.latch(session.harness, session.session_id, mark=mark, tokens=tokens,
+                          threshold=limit, model=model, at=when)
+    except Exception:  # noqa: BLE001 - no latch: the next reading past the mark tries again
+        _fail("stop", "the stop latch could not be written; the stop has not fired")
+        return None
+    return stop.stop_text(env) if made else None
 
 
 def floor(event) -> int:
@@ -581,16 +635,26 @@ def floor(event) -> int:
     try:
         if getattr(event, "agent_id", None) is not None:
             return 0
-        notice, crossing = selected(_env(event))
-        if notice is None and crossing is None:
+        env = _env(event)
+        notice, crossing = selected(env)
+        stop = stop_selected(env)
+        if notice is None and crossing is None and stop is None:
             return NEVER
         harness = _text(getattr(event, "harness", None))
         session_id = _text(getattr(event, "session_id", None))
         if harness is None or session_id is None:
             return 0
+        if stop is not None:
+            from . import stop as stopping
+
+            if stopping.latched(harness, session_id) is not None:
+                stop = None                      # a latched stop never fires again
+        if notice is None and crossing is None and stop is None:
+            return NEVER
         session = _session(harness, session_id)
         wanted = [(name, mark) for name, mark in ((NOTICE, notice), (CROSSING, crossing))
                   if mark is not None]
+        lowest = list(wanted) + ([(STOP, stop)] if stop is not None else [])
         with session.lock:
             if session.pending:
                 return 0
@@ -601,7 +665,7 @@ def floor(event) -> int:
                 return 0
             models = set(session.models)
         _fresh_thresholds()
-        known = [t for t in (_lowest(mark, models) for _name, mark in wanted)
+        known = [t for t in (_lowest(mark, models) for _name, mark in lowest)
                  if t is not None]
         return min(known) if known else 0
     except Exception:  # noqa: BLE001 - a floor's fault is "always call"
@@ -736,8 +800,9 @@ def _warn(message: str) -> None:
     logging.getLogger(LOGGER).warning(message)
 
 
-__all__ = ["WARN_AT_ENV", "CROSSING_AT_ENV", "MARKS", "OFF", "NOTICE", "CROSSING", "PURPOSES",
-           "GROUP", "STATE_DIR", "SCHEMA", "NEVER", "MAIN_READER", "Crossing", "selected",
+__all__ = ["WARN_AT_ENV", "CROSSING_AT_ENV", "STOP_AT_ENV", "STOP_HANDOFFS_ENV", "MARKS",
+           "OFF", "NOTICE", "CROSSING", "STOP", "PURPOSES", "GROUP", "STATE_DIR", "SCHEMA",
+           "NEVER", "MAIN_READER", "Crossing", "selected", "stop_selected",
            "on_tool", "observe", "floor", "gone", "handlers",
            "handler_wait", "run_handlers", "notice_line", "thousands", "agent_label", "safe_id",
            "state_dir", "state_file", "read_record", "reset"]

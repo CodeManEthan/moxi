@@ -59,6 +59,25 @@ row of its kind before it is written, and refuse a remove while it still holds t
 project: services while a service names it, notes while removing it would move where the
 project's sessions find notes that are already there.
 
+## Questions at add
+
+Once a project is added, other modules may ask about it: publishing, for one, asks whether
+to keep a git repository's history publishable. Run in a terminal (on both stdin and
+stdout) and without `--json`, `moxi projects add` asks each question, its suggestion the
+default answer; press Enter to take it. Run from a script or an agent's shell, or with
+`--json`, it asks nothing and turns nothing on: it prints one `not asked:` line per
+question naming the command that sets it later (with `--json`, the project carries them
+as `asked`). A question a module's own setting already answers is not asked, and that
+answer is acted on either way (`answered` in `--json`). An answer that fails leaves the
+project added, and a warning names the failure and the command to run.
+
+The Projects page's Add panel shows the same questions as fields under `Name`, each set
+to its suggestion, once the folder has been read, and sends the answers with the add.
+
+A module asks through projects' contribution interface 3: `questions(fields)` gives the
+questions for the new row, and `answer(project, key, value)` acts on each answer
+(`moxi_projects/contributions.py` holds the contract).
+
 A module whose part of projects won't load blocks only what it bears on: a remove, since
 it can't say whether it holds the project, and an add or set of a kind no loaded module
 declares. Any other add goes ahead with a warning naming it. `moxi projects kinds` and
@@ -450,4 +469,4 @@ lists the other modules.
 
 ## License
 
-MIT. See [LICENSE](https://github.com/CodeManEthan/moxi/blob/moxi-projects-v0.1.4/packages/projects/LICENSE).
+MIT. See [LICENSE](https://github.com/CodeManEthan/moxi/blob/moxi-projects-v0.1.5/packages/projects/LICENSE).

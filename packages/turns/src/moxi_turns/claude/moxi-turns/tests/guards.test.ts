@@ -3,9 +3,9 @@
 // the ask step at a permission request.
 
 import { describe, expect, test } from 'claude-code/testing'
-import { world } from './world'
+import { ROOT_ARGV as ROOT, world } from './world'
 import type { World } from './world'
-import { NO_TABLE_DENY, catchRefuses, catchRefusesAsk, decide, globRegex, noTableRefuses, parseTable } from '../hooks/register'
+import { NO_TABLE_ASK_DENY, NO_TABLE_DENY, NO_TABLE_NESTED_DENY, NO_TABLE_REMOVAL_DENY, catchRefuses, catchRefusesAsk, decide, globRegex, noTableAskDeny, noTableDeny, noTableRefuses, parseLastTable, parseTable } from '../hooks/register'
 import TABLE from './guard-cases'
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -754,5 +754,145 @@ describe('no table yet', () => {
     expect(noTableRefuses('AskUserQuestion', false, true)).toBe(false)
     expect(noTableRefuses('Bash', false, false)).toBe(false)
     expect(noTableRefuses(undefined, false, false)).toBe(false)
+  })
+})
+
+describe('no table yet: the record of the last table', () => {
+  const RECORD = '/state/turns/guards-seen.json'
+  const record = (facts: Json) => JSON.stringify({ at: 1.5, removal: false, no_nested_agents: false, ask_step: false, ...facts })
+  /** A world whose launch names the record, holding `text` (none: the read fails). */
+  const named = (on: E, text?: string) => world(on, { env: { MOXI_TURNS_GUARDS_SEEN: RECORD }, files: text === undefined ? {} : { [RECORD]: text } })
+  const nested = ($: E) => $.tool.call({ tool: 'Agent', tool_use_id: 'g1', agentId: 'a1', prompt: 'go' })
+  const bash = ($: E, command: string) => $.tool.call({ tool: 'Bash', tool_use_id: 'b1', command })
+  const permission = ($: E, fields: Json = {}) => $.classic.PermissionRequest({
+    session_id: 's1', transcript_path: '/t/s1.jsonl', cwd: '/work', permission_mode: 'bypassPermissions',
+    tool_name: 'Bash', tool_input: { command: 'cd /work && ls' }, ...fields,
+  })
+  const refusedAll = async ($: E, w: World) => {
+    expect(await nested($)).toEqual({ deny: NO_TABLE_NESTED_DENY })
+    for (const command of ['rm -rf build', 'R\\m x', "'r'm x", 'cd t && rmdir d'])
+      expect(await bash($, command)).toEqual({ deny: NO_TABLE_REMOVAL_DENY })
+    expect((await permission($)).decision).toEqual({ behavior: 'deny', message: NO_TABLE_ASK_DENY })
+    expect(ran(w)).toEqual([])
+    expect(asks(w)).toEqual([])
+  }
+
+  test('each reason names the table and says what to do', () => {
+    for (const reason of [NO_TABLE_NESTED_DENY, NO_TABLE_REMOVAL_DENY, NO_TABLE_ASK_DENY]) {
+      expect(reason).toMatch(/^turns' guard table didn't load, so /)
+    }
+    expect(NO_TABLE_REMOVAL_DENY).toBe("turns' guard table didn't load, so the removal guard can't check this command; nothing ran. Remove files with literal paths once guards load, or ask the person.")
+  })
+
+  test('with no record named, all three are refused, with no trip, and logged', async ($: E, on) => {
+    const w = world(on)
+    await start($)
+    await refusedAll($, w)
+    expect(w.logs).toContain('moxi-turns: no record of the last guard table is named; before a table, every guard counts as on')
+    expect(w.logs).toContain('moxi-turns: refused Bash: no guard table has come from the endpoint')
+    expect(w.logs).toContain('moxi-turns: refused the Bash ask: no guard table has come from the endpoint')
+  })
+
+  for (const [what, text] of [
+    ['missing', undefined],
+    ['not JSON', 'not json'],
+    ['lacking a fact', JSON.stringify({ removal: false, no_nested_agents: false })],
+    ['holding a fact that is no boolean', JSON.stringify({ removal: 'no', no_nested_agents: false, ask_step: false })],
+  ] as const) {
+    test(`a record ${what} is no record: all three are refused`, async ($: E, on) => {
+      const w = named(on, text)
+      await start($)
+      await refusedAll($, w)
+    })
+  }
+
+  test('a record of removal alone refuses the rm, and lets the subagent call and the bypass ask pass', async ($: E, on) => {
+    const w = named(on, record({ removal: true }))
+    await start($)
+    expect(await bash($, 'rm -rf build')).toEqual({ deny: NO_TABLE_REMOVAL_DENY })
+    expect((await nested($)).deny).toBeUndefined()
+    expect((await permission($)).decision).toBeUndefined()
+    expect(ran(w)).toEqual(['Agent'])
+  })
+
+  test('a record of all three false refuses none of them', async ($: E, on) => {
+    const w = named(on, record({}))
+    await start($)
+    expect((await nested($)).deny).toBeUndefined()
+    expect((await bash($, 'rm -rf build')).deny).toBeUndefined()
+    expect((await permission($)).decision).toBeUndefined()
+    expect(ran(w)).toEqual(['Agent', 'Bash'])
+  })
+
+  test('the record endpoint.json names is read when the variable is unset', async ($: E, on) => {
+    const w = world(on, { endpointJson: JSON.stringify({ argv: ROOT, guards_seen: '/elsewhere/guards-seen.json' }), files: { '/elsewhere/guards-seen.json': record({}) } })
+    await start($)
+    expect((await bash($, 'rm -rf build')).deny).toBeUndefined()
+    expect(w.reads.filter(p => p.endsWith('/endpoint.json')).length).toBe(1)
+  })
+
+  test('MOXI_TURNS_GUARDS_SEEN wins over the path endpoint.json names', async ($: E, on) => {
+    const w = world(on, {
+      endpointJson: JSON.stringify({ argv: ROOT, guards_seen: '/elsewhere/guards-seen.json' }),
+      env: { MOXI_TURNS_GUARDS_SEEN: RECORD },
+      files: { '/elsewhere/guards-seen.json': record({}), [RECORD]: record({ removal: true }) },
+    })
+    await start($)
+    expect(await bash($, 'rm -rf build')).toEqual({ deny: NO_TABLE_REMOVAL_DENY })
+    expect(w.reads).not.toContain('/elsewhere/guards-seen.json')
+  })
+
+  test('a call before the record is read counts as no record', async ($: E, on) => {
+    const w = named(on, record({}))
+    expect(await bash($, 'rm -rf build')).toEqual({ deny: NO_TABLE_REMOVAL_DENY })
+    expect(ran(w)).toEqual([])
+  })
+
+  test('a main-loop Agent call, a Bash call with no rm word, a non-bypass ask and a plan ask always pass', async ($: E, on) => {
+    const w = world(on)
+    await start($)
+    expect((await $.tool.call({ tool: 'Agent', tool_use_id: 'g0', prompt: 'go' })).deny).toBeUndefined()
+    expect((await bash($, 'git status && form x && perm y')).deny).toBeUndefined()
+    expect((await permission($, { permission_mode: 'default' })).decision).toBeUndefined()
+    expect((await permission($, { tool_name: 'ExitPlanMode', tool_input: {} })).decision).toBeUndefined()
+    expect((await permission($, { tool_name: 'EnterPlanMode', tool_input: {} })).decision).toBeUndefined()
+    expect(ran(w)).toEqual(['Agent', 'Bash'])
+  })
+
+  test('after a table, even an empty one, every call goes to the table', async ($: E, on) => {
+    const w = world(on)
+    await attached($, w, [])
+    expect((await nested($)).deny).toBeUndefined()
+    expect((await bash($, 'rm -rf build')).deny).toBeUndefined()
+    expect((await permission($)).decision).toBeUndefined()
+    expect(ran(w)).toEqual(['Agent', 'Bash'])
+  })
+
+  test('a headless session refuses none of them', async ($: E, on) => {
+    const w = world(on)
+    await $.session.start({ cwd: '/work', surface: 'terminal', isInteractive: false })
+    expect((await nested($)).deny).toBeUndefined()
+    expect((await bash($, 'rm -rf build')).deny).toBeUndefined()
+    expect((await permission($)).decision).toBeUndefined()
+    expect(ran(w)).toEqual(['Agent', 'Bash'])
+  })
+
+  test('the rules the hooks and their catches share', () => {
+    const all = parseLastTable({ removal: true, no_nested_agents: true, ask_step: true })
+    expect(all).toEqual({ removal: true, noNestedAgents: true, askStep: true })
+    expect(parseLastTable({ removal: true, no_nested_agents: true })).toBeNull()
+    expect(parseLastTable([])).toBeNull()
+    expect(noTableDeny('Agent', 'a1', {}, false, false, null)).toBe(NO_TABLE_NESTED_DENY)
+    expect(noTableDeny('Task', 'a1', {}, false, undefined, all)).toBe(NO_TABLE_NESTED_DENY)
+    expect(noTableDeny('Agent', null, {}, false, false, null)).toBeNull()
+    expect(noTableDeny('Bash', null, { command: 'RM x' }, false, false, null)).toBe(NO_TABLE_REMOVAL_DENY)
+    expect(noTableDeny('Bash', null, { command: 'rm x' }, true, false, null)).toBeNull()
+    expect(noTableDeny('Bash', null, { command: 'rm x' }, false, true, null)).toBeNull()
+    expect(noTableDeny('Bash', null, { command: 'rmx' }, false, false, null)).toBeNull()
+    expect(noTableDeny('AskUserQuestion', null, {}, false, false, parseLastTable({ removal: false, no_nested_agents: false, ask_step: false }))).toBe(NO_TABLE_DENY)
+    expect(noTableAskDeny({ permission_mode: 'bypassPermissions', tool_name: 'Write' }, false, false, null)).toBe(NO_TABLE_ASK_DENY)
+    expect(noTableAskDeny({ permission_mode: 'bypassPermissions', tool_name: 'ExitPlanMode' }, false, false, null)).toBeNull()
+    expect(noTableAskDeny({ permission_mode: 'acceptEdits', tool_name: 'Write' }, false, false, null)).toBeNull()
+    expect(noTableAskDeny({ permission_mode: 'bypassPermissions', tool_name: 'Write' }, false, false, { removal: true, noNestedAgents: true, askStep: false })).toBeNull()
   })
 })

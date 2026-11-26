@@ -1,12 +1,13 @@
 // The words and the bodies of the page's panel, worked out with no DOM so the Node tests
 // can read them: what the Add panel says under its folder field, the name it fills from
-// the folder, the `More` fold's line, the body `/api/add` is sent, and what an add came to;
+// the folder, the `More` fold's line, the questions it shows and the answers it sends, the
+// body `/api/add` is sent, and what an add came to;
 // what the Edit panel holds, the requests a save sends and in what order, and what a save
 // that stopped part way says.
 
 import type { Acted } from "./views.ts";
-import { DEFAULT_KIND, kindOf, warningLine } from "./views.ts";
-import type { Added, Kinds, Listed, Project } from "./feed.ts";
+import { DEFAULT_KIND, kindOf, notAskedLine, warningLine } from "./views.ts";
+import type { Added, Kinds, Listed, Project, Question } from "./feed.ts";
 import { joinNames } from "./opened-model.ts";
 import { homeForm, kindPhrase } from "./words.ts";
 
@@ -154,15 +155,62 @@ export function moreLine(form: AddPanel, { notesInstalled }: { notesInstalled: b
  * module may give it. The notes folder goes only while notes is installed, and create
  * only while the box is offered (`canCreate`) and ticked.
  */
-export function addPanelBody(form: AddPanel, { notesInstalled, canCreate }: { notesInstalled: boolean; canCreate: boolean }):
-    Record<string, string | boolean> {
-  const body: Record<string, string | boolean> = { key: form.name.trim() };
+export function addPanelBody(form: AddPanel, { notesInstalled, canCreate, answers = [] }:
+    { notesInstalled: boolean; canCreate: boolean; answers?: string[] }): Record<string, string | boolean | string[]> {
+  const body: Record<string, string | boolean | string[]> = { key: form.name.trim() };
   if (form.folder !== "") body.root = form.folder;
   if (form.kind !== "") body.kind = form.kind;
   if (form.lead.trim() !== "") body.lead = form.lead.trim();
   if (notesInstalled && form.notesRoot !== "") body.notes_root = form.notesRoot;
   if (canCreate && form.create) body.create = true;
+  if (answers.length > 0) body.answers = [...answers];
   return body;
+}
+
+// -- the questions an add puts ---------------------------------------------------------------
+
+/** The route that lists the questions an add of `form` would put, or null while the folder
+ * is empty. `create` goes only while the box is offered (`canCreate`) and ticked. */
+export function questionsRoute(form: AddPanel, { canCreate }: { canCreate: boolean }): string | null {
+  if (form.folder.trim() === "") return null;
+  let route = `api/questions?path=${encodeURIComponent(form.folder)}`;
+  if (form.kind !== "") route += `&kind=${encodeURIComponent(form.kind)}`;
+  if (canCreate && form.create) route += "&create=true";
+  return route;
+}
+
+/** A question's name among every module's: `module.key`. */
+export function questionId(q: Question): string {
+  return `${q.module}.${q.key}`;
+}
+
+/** The answer a field for `q` holds: what the user picked or typed, else its suggestion,
+ * else nothing (`""`). */
+export function answerOf(q: Question, answers: Readonly<Record<string, string>>): string {
+  return answers[questionId(q)] ?? q.suggested ?? "";
+}
+
+/** The questions the panel shows as fields, in order: each with no preset (a module's
+ * setting answered it) whose `after` is met by the answer its earlier question holds, a
+ * preset one's by its preset. */
+export function shownQuestions(questions: readonly Question[], answers: Readonly<Record<string, string>>): Question[] {
+  const held = new Map<string, string>();
+  const shown: Question[] = [];
+  for (const q of questions) {
+    if (q.after !== null && held.get(`${q.module}.${q.after[0]}`) !== q.after[1]) continue;
+    held.set(questionId(q), q.preset ?? answerOf(q, answers));
+    if (q.preset === null) shown.push(q);
+  }
+  return shown;
+}
+
+/** The `answers` an add sends, `module.key=value`, one per field shown: a field with
+ * choices sends nothing while none is picked, and a text field sends what it holds,
+ * empty included. */
+export function answersSent(questions: readonly Question[], answers: Readonly<Record<string, string>>): string[] {
+  return shownQuestions(questions, answers)
+    .filter((q) => q.choices.length === 0 || answerOf(q, answers) !== "")
+    .map((q) => `${questionId(q)}=${answerOf(q, answers)}`);
 }
 
 /** What the panel says under its button after an act: its lines, and whether it was
@@ -175,13 +223,13 @@ export interface PanelSaid {
 /** The line an add whose answer was lost says. */
 export const MAY_BE_ADDED = "It may have been added.";
 
-/** What an add came to: the project and its folder in `~` form, then the answer's notes
- * and warnings; the refusal's own text; or that it may have been added. */
+/** What an add came to: the project and its folder in `~` form, then the answer's notes,
+ * warnings and questions not put; the refusal's own text; or that it may have been added. */
 export function addedSaid(acted: Acted<Added>, home: string | null): PanelSaid {
   if (acted.outcome === "done") {
-    const { project, notes, warnings } = acted.value;
+    const { project, notes, warnings, asked } = acted.value;
     return { outcome: "done", lines: [`Added ${project.key} at ${homeForm(project.root, home)}.`, ...notes,
-                                      ...warnings.map(warningLine)] };
+                                      ...warnings.map(warningLine), ...asked.map(notAskedLine)] };
   }
   if (acted.outcome === "refused") return { outcome: "refused", lines: [acted.text] };
   return { outcome: "unknown", lines: [MAY_BE_ADDED] };

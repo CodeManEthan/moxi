@@ -143,3 +143,17 @@ def test_session_and_transcript_left_out_when_absent():
     del payload["session_id"], payload["transcript_path"]
     assert field("session", payload, opts()) is None
     assert field("transcript", payload, opts()) is None
+
+
+def test_effort_falls_back_to_claude_effort_and_the_payload_wins(monkeypatch):
+    monkeypatch.setenv("CLAUDE_EFFORT", "  low \n")
+    assert field("effort", with_("effort.level", "high"), opts()) == "high"
+    for blank in (None, "", "   "):
+        assert field("effort", with_("effort.level", blank), opts()) == "low"
+    payload = copy.deepcopy(INPUT)
+    payload.pop("effort", None)
+    assert field("effort", payload, opts()) == "low"
+    monkeypatch.setenv("CLAUDE_EFFORT", "  ")
+    assert field("effort", payload, opts()) is None
+    monkeypatch.delenv("CLAUDE_EFFORT")
+    assert field("effort", payload, opts()) is None
