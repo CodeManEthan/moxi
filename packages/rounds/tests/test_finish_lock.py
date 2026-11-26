@@ -232,6 +232,27 @@ def test_a_swap_git_refuses_because_another_finish_cleared_first_reads_the_new_h
     assert f"pilot pid={other[0].own_pid} " in refused.value.unmet[0].reason
 
 
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX's signal 0 tells a process "
+                    "this account can't read from none")
+def test_a_live_holder_this_account_cant_read_is_not_cleared(git_repo, monkeypatch):
+    from moxi import proc
+
+    def refused(pid, signal_number):
+        raise PermissionError(1, "Operation not permitted")
+
+    monkeypatch.setattr(proc, "identity", lambda pid: None)   # psutil's AccessDenied
+    monkeypatch.setattr(os, "kill", refused)
+    holder = finish_lock.parse(dead_line(pid=4242))
+    assert finish_lock._dead(holder) is False
+
+
+def test_a_holder_no_process_has_is_dead(monkeypatch):
+    from moxi import proc
+
+    monkeypatch.setattr(proc, "identity", lambda pid: None)
+    assert finish_lock._dead(finish_lock.parse(dead_line())) is True
+
+
 def test_a_holder_of_another_machine_is_not_cleared_even_with_a_dead_pid(git_repo):
     held = blob_of(git_repo, dead_line(host="box-1"))
     git_repo.git("update-ref", REF, held)

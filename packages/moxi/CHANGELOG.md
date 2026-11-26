@@ -12,6 +12,10 @@
   are a file or a pipe, and a gate run from a terminal shares its console with the
   command. The command started with no window of its own, so it read and wrote a hidden
   console, and a supervisor's log or a caller's pipe got nothing.
+- `moxi.files.writable(path)`: whether this account can write a file or folder. On
+  Windows `os.access` reads only the read-only attribute, so a folder its access list
+  closes read as writable; there it tries a write. The doctor's record row reads a
+  record's folder through it.
 - On Windows a watched `proc.spawn` whose Job Object can't be made kills the child it
   started suspended and raises, where the child was left suspended for good.
 - On Windows `files.append_record` raises an error from the byte lock it holds while it

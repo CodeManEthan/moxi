@@ -610,6 +610,20 @@ def _reparse(found: os.stat_result) -> bool:
 
 # -- the removal -------------------------------------------------------------------------
 
+def _in_use(place: Path) -> str:
+    """The words a kept worktree's line adds when this process works inside it: Windows
+    removes no folder a process works in, and a later sweep takes it."""
+    try:
+        here = Path(os.getcwd()).resolve()
+        inside = here == Path(place).resolve() or Path(place).resolve() in here.parents
+    except OSError:
+        return ""
+    if not inside:
+        return ""
+    return ("; this command runs inside it, and the system keeps a folder in use, so a "
+            "later sweep removes it once no process works there")
+
+
 def take(proven: Proven, *, env=None, on_rename: Callable[[Path], None] | None = None,
          on_delete: Callable[[Path, bool], None] | None = None) -> Path | Kept:
     """Remove the folder `proven`, which the caller has just judged: the place removed,
@@ -620,7 +634,8 @@ def take(proven: Proven, *, env=None, on_rename: Callable[[Path], None] | None =
         try:
             _B1Git(proven.root)._run("worktree", "remove", str(proven.place))
         except GitError as exc:
-            return Kept(proven.place, "removal", f"git did not remove it: {exc.reason}")
+            return Kept(proven.place, "removal",
+                        f"git did not remove it: {exc.reason}{_in_use(proven.place)}")
         return proven.place
     trash = trash_dir(env)
     entry = trash / proven.build

@@ -731,7 +731,7 @@ def test_add_takes_a_command_or_a_unit(body):
     ({"name": "web", "kind": "daemon", "command": PY, "cwd": "here"}, "cwd"),
     pytest.param({"name": "web", "kind": "daemon", "command": "'unbalanced"}, "quotes",
                  marks=pytest.mark.skipif(sys.platform == "win32", reason=(
-                     "Windows' command-line rules read an open quote to the end"))),
+                     "Windows' command-line rules take a single quote as a plain character"))),
     ({"name": "web", "kind": "daemon", "unit": "backup.service", "cwd": "/"}, "cwd"),
 ])
 def test_add_refuses_fields_out_of_shape_before_any_job(body, says):

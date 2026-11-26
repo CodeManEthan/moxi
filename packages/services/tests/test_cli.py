@@ -240,7 +240,7 @@ def test_add_a_timer_splits_at_and_days(fake, capsys):
     (["add", "web", "--health", "", "--", PY], "--health is empty"),
     pytest.param(["add", "web", "--health", "'open", "--", PY], "--health",
                  marks=pytest.mark.skipif(sys.platform == "win32", reason=(
-                     "Windows' command-line rules read an open quote to the end"))),
+                     "Windows' command-line rules take a single quote as a plain character"))),
     (["add", "web", "--enable", "--disable", "--", PY], "not allowed with"),
     (["frobnicate"], "invalid choice"),
 ])

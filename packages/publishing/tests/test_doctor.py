@@ -3,6 +3,7 @@ config mode and its shim mode."""
 
 from __future__ import annotations
 
+import contextlib
 import os
 import stat
 
@@ -150,19 +151,43 @@ def test_a_missing_scan_workflow_warns_and_a_missing_release_one_does_not(repo, 
     assert found[0].fix.startswith("moxi publishing workflows write ")
 
 
-@pytest.mark.skipif(os.name == "nt", reason="an unwritable folder made by mode bits is "
-                                             "POSIX's; Windows reads no mode bits")
-def test_an_empty_names_list_and_an_unwritable_push_log_warn_once(repo, tmp_path,
-                                                                     monkeypatch):
+@contextlib.contextmanager
+def unwritable(locked_dir):
+    """`locked_dir` made unwritable to this account for the block: by mode bits on POSIX, by
+    an access list entry that denies this user the right to add a file on Windows."""
+    if os.name != "nt":
+        locked_dir.chmod(0o500)
+        try:
+            yield
+        finally:
+            locked_dir.chmod(0o700)
+        return
+    import getpass
+    import subprocess
+
+    who = getpass.getuser()
+    subprocess.run(["icacls", str(locked_dir), "/deny", f"{who}:(WD,AD)"], check=True,
+                   capture_output=True)
+    try:
+        yield
+    finally:
+        subprocess.run(["icacls", str(locked_dir), "/remove:d", who], check=True,
+                       capture_output=True)
+
+
+def test_an_empty_names_list_warns_once(repo):
+    enabled(repo)
+    once = [(r.name, r.state) for r in doctor.rows() if not r.name.startswith("repo ")]
+    assert once == [("private names", "warn")]
+
+
+def test_an_unwritable_push_log_warns_once(repo, tmp_path, monkeypatch):
     enabled(repo)
     locked = tmp_path / "locked"
     locked.mkdir()
-    locked.chmod(0o500)
-    monkeypatch.setattr(push, "log_path", lambda: locked / "state" / "pushes.jsonl")
-    try:
+    with unwritable(locked):
+        monkeypatch.setattr(push, "log_path", lambda: locked / "state" / "pushes.jsonl")
         once = [(r.name, r.state) for r in doctor.rows() if not r.name.startswith("repo ")]
-    finally:
-        locked.chmod(0o700)
     assert once == [("private names", "warn"), ("push log", "warn")]
 
 

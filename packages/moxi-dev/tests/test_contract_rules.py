@@ -4,6 +4,7 @@ The import rules import-linter and deptry check are proved in test_lint.py; here
 names an import takes, which those tools cannot see.
 """
 
+import os
 import subprocess
 import sys
 import textwrap
@@ -828,9 +829,17 @@ def test_staged_a_skills_dir_missing_or_a_file_in_the_index_fails(repo):
 
 def symlink(path: Path, target: str) -> None:
     """A symlink at `path` whose target is `target`, as written; the test skips where
-    this account may not make one (Windows without Developer Mode or the privilege)."""
+    this account may not make one (Windows without Developer Mode or the privilege).
+
+    On Windows the target is written with `\\` and the link made as a folder's link when
+    the target is a folder, since Windows follows neither a relative target spelled with
+    `/` nor a file's link to a folder (git reads either form back with `/`)."""
     need_symlinks()
-    path.symlink_to(target)
+    if sys.platform == "win32":
+        real = os.path.join(path.parent, target)
+        path.symlink_to(target.replace("/", "\\"), target_is_directory=os.path.isdir(real))
+    else:
+        path.symlink_to(target)
 
 
 def link(repo, rel, target):

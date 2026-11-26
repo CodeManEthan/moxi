@@ -136,19 +136,36 @@ _USERINFO_IN = re.compile(r"([A-Za-z][A-Za-z0-9+.-]*://)[^/\s]*@")
 
 
 def _redacted(text: str, urls) -> str:
-    """`text` with no remote URL's userinfo, whichever program wrote it: each of `urls`'
-    userinfo, as written and percent-decoded, is taken out wherever it stands (Git for
-    Windows prints a file URL with a host as a local path, `//user:token@host/...`), and
-    any `scheme://userinfo@` left is cleaned as `_shown_url` cleans a URL."""
+    """`text` with no remote URL's secret, whichever program wrote it: each of `urls`'
+    userinfo that holds one, as written and percent-decoded, is taken out wherever it
+    stands (Git for Windows prints a file URL with a host as a local path,
+    `//user:token@host/...`), with the `@` after it, and so is its password alone; any
+    `scheme://userinfo@` left is cleaned as `_shown_url` cleans a URL. A userinfo holds a
+    secret when it has a password (`user:password`), or when it is an http(s) URL's alone,
+    where a token stands as the user. A bare login name (ssh's `git`) is no secret: taking
+    out every `git` would garble the line, so it is left in the text."""
     from urllib.parse import unquote
 
     for url in urls:
-        found = _USERINFO.match(url or "")
-        info = found.group(0)[len(found.group(1)):-1] if found else ""
-        for form in dict.fromkeys((info, unquote(info))):
-            if form:
-                text = text.replace(form + "@", "").replace(form, "")
+        for form in _secrets(url or ""):
+            for spelled in dict.fromkeys((form, unquote(form))):
+                text = text.replace(spelled + "@", "").replace(spelled, "")
     return _USERINFO_IN.sub(r"\1", text)
+
+
+def _secrets(url: str) -> tuple[str, ...]:
+    """The parts of `url`'s userinfo that are secret: the whole userinfo and its password
+    for `user:password`; the userinfo of an http(s) URL with no password; else none."""
+    found = _USERINFO.match(url)
+    if not found:
+        return ()
+    info = found.group(0)[len(found.group(1)):-1]
+    if ":" in info:
+        password = info.split(":", 1)[1]
+        return tuple(part for part in (info, password) if part)
+    if found.group(1).lower() in ("http://", "https://") and info:
+        return (info,)
+    return ()
 
 
 #: A good `standing-branch` value: a fixed prefix of one or more path parts, each ending

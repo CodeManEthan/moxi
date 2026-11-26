@@ -324,6 +324,7 @@ def _warn_rows(root: str, name: str) -> Iterator[Row]:
 
 
 def _once_rows() -> Iterator[Row]:
+    from moxi import files
     from moxi_publishing import flag, push
 
     warning = flag._names_empty()
@@ -331,7 +332,7 @@ def _once_rows() -> Iterator[Row]:
         yield Row(MODULE, "private names", "warn", warning.removeprefix("warning: "))
     log = push.log_path()
     where = log if log.exists() else next((p for p in log.parents if p.exists()), None)
-    if where is None or not os.access(where, os.W_OK):
+    if where is None or not files.writable(where):
         yield Row(MODULE, "push log", "warn",
                   f"{log} can't be written, so the push piece refuses every push",
                   f"make {where or log.parent} writable")

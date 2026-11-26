@@ -37,6 +37,7 @@ from __future__ import annotations
 import calendar
 import os
 import re
+import sys
 import time
 from collections.abc import Iterable
 from dataclasses import dataclass
@@ -236,9 +237,27 @@ def _dead(found_holder: Holder | None) -> bool:
         # No pid can be that number: it counts as live, so nothing is cleared on a guess.
         return False
     if now is None:
-        return True
+        return not _unreadable(found_holder.pid)
     taken = calendar.timegm(time.strptime(found_holder.at, "%Y-%m-%dT%H:%M:%SZ"))
     return now.started > taken + _TAKEN_SLACK_S
+
+
+def _unreadable(pid: int) -> bool:
+    """Whether `pid`, which `moxi.proc.identity` can't read, is a running process this
+    account may not read (another user's where the system hides other users' processes, say). POSIX's signal 0 tells
+    that from no process at all. Windows has no such probe, and a None there counts as no
+    process."""
+    if sys.platform == "win32":
+        return False
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    except OSError:
+        return False
+    return True
 
 
 def _held(now: Held) -> Unmet:

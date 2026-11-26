@@ -308,6 +308,26 @@ def test_git_text_is_shown_without_the_push_urls_userinfo():
         "fatal: https://example.test/a@b.git"
 
 
+def test_a_login_name_is_no_secret_and_stays_in_git_text():
+    from moxi_publishing import push as piece
+
+    line = "github.com/git/r: git push refused by git@github.com"
+    assert piece._redacted(line, ("ssh://git@github.com/o/r.git",)) == line
+    assert piece._redacted("fatal: the gitlab remote", ("file://git@host/r.git",)) == \
+        "fatal: the gitlab remote"
+
+
+def test_a_password_is_taken_out_alone_too_and_a_token_standing_as_the_user():
+    from moxi_publishing import push as piece
+
+    secret = token(12)
+    url = with_userinfo("https", secret, "example.test/a.git")
+    text = f"x{secret}y and alice:{secret}@example.test and {secret}."
+    assert piece._redacted(text, (url,)) == "xy and example.test and ."
+    bare = f"https://{secret}" + "@example.test/a.git"   # a token as the user
+    assert piece._redacted(f"denied for {secret}", (bare,)) == "denied for "
+
+
 def test_a_shown_url_drops_userinfo_up_to_the_last_at_before_the_path():
     from moxi_publishing import push as piece
 

@@ -1456,3 +1456,39 @@ def test_an_append_waits_out_another_holder_of_the_byte(tmp_path, monkeypatch):
     monkeypatch.setattr(msvcrt, "locking", held_a_while)
     files.append_record(tmp_path / "log.jsonl", {"a": 1})
     assert files.read_records(tmp_path / "log.jsonl") == [{"a": 1}] and busy == [0]
+
+
+def test_writable_says_yes_for_a_dir_and_a_file_this_account_writes(tmp_path):
+    own = tmp_path / "own"
+    own.mkdir()
+    (own / "f.txt").write_text("x")
+    assert files.writable(own) and files.writable(own / "f.txt")
+    assert sorted(p.name for p in own.iterdir()) == ["f.txt"], "no probe is left"
+
+
+@WINDOWS
+def test_writable_reads_an_access_list_on_windows(tmp_path):
+    import getpass
+
+    locked = tmp_path / "locked"
+    locked.mkdir()
+    who = getpass.getuser()
+    subprocess.run(["icacls", str(locked), "/deny", f"{who}:(WD,AD)"], check=True,
+                   capture_output=True)
+    try:
+        assert os.access(locked, os.W_OK), "os.access reads no access list"
+        assert not files.writable(locked)
+    finally:
+        subprocess.run(["icacls", str(locked), "/remove:d", who], check=True,
+                       capture_output=True)
+
+
+@POSIX
+def test_writable_reads_mode_bits_elsewhere(tmp_path):
+    locked = tmp_path / "locked"
+    locked.mkdir()
+    locked.chmod(0o500)
+    try:
+        assert files.writable(locked) is (os.geteuid() == 0)
+    finally:
+        locked.chmod(0o700)

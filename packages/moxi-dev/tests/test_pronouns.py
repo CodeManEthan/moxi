@@ -4,6 +4,7 @@ genuine use stand."""
 from __future__ import annotations
 
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -336,6 +337,17 @@ def test_the_pronoun_step_passes_a_clean_tree(repo):
     result = check.Result()
     steps = check._Steps(repo, [], (), {}, lambda *a: 0, lambda *a: [], result)
     assert steps.pronouns() is True and result.pronouns == "pass"
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="a backslash separates a path only "
+                    "on Windows")
+def test_only_selects_a_path_written_with_backslashes_on_windows(repo, capsys):
+    write(repo, "packages/a/README.md", "Ask him.\n")
+    write(repo, "packages/b/README.md", "Ask him.\n")
+    assert check.only(repo, "pronouns", ["packages\\b"]) == 1
+    out = capsys.readouterr().out
+    assert "packages/b/README.md:1: him" in out and "packages/a" not in out
+    assert check.only(repo, "pronouns", [".\\packages\\b\\README.md"]) == 1
 
 
 def test_only_pronouns_runs_the_step_alone_and_filters_by_path(repo, capsys):

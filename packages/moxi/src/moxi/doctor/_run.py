@@ -1389,11 +1389,13 @@ def _unwritable(record: Path) -> OSError | None:
     nearest folder above it that exists must be writable by this account."""
     import errno
 
+    from .. import files
+
     check_dir = record.parent
     while not check_dir.exists() and check_dir.parent != check_dir:
         check_dir = check_dir.parent
     for path in ((record,) if record.exists() else ()) + (check_dir,):
-        if not os.access(path, os.W_OK):
+        if not files.writable(path):
             return PermissionError(errno.EACCES, f"{path}: {os.strerror(errno.EACCES)}")
     return None
 

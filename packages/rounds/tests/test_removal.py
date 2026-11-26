@@ -381,6 +381,28 @@ def test_a_file_written_between_the_first_read_and_the_removal_keeps_the_worktre
     assert (tree.root / ".env").is_file()
 
 
+@pytest.mark.parametrize("inside", [True, False])
+def test_a_worktree_git_wont_remove_says_when_this_command_works_inside_it(
+        made, monkeypatch, inside):
+    from moxi_rounds.gitreads import GitError
+
+    _path, tree, event = made
+
+    def refused(self, *argv, **kwargs):
+        if argv[:2] == ("worktree", "remove"):
+            raise GitError(["git", *argv], "failed: Permission denied")
+        return run(self, *argv, **kwargs)
+
+    run = removal._B1Git._run
+    monkeypatch.setattr(removal._B1Git, "_run", refused)
+    monkeypatch.chdir(tree.root if inside else tree.root.parent)
+    found = remove(event)
+    assert kept_by(found) == "removal"
+    assert found.why.startswith("git did not remove it")
+    assert ("this command runs inside it" in found.why) is inside
+    assert ("a later sweep removes it" in found.why) is inside
+
+
 # -- the drops -----------------------------------------------------------------------------
 
 def test_a_build_drop_removes_its_dirs_and_keeps_its_branch(made, repo):

@@ -18,6 +18,7 @@ imports nothing heavy at module level, so a hook can import `moxi.files` cheaply
   returns. Its options refuse records that hold given field names, and collapse a busy
   class of records into one summary row a minute or an hour (`Collapse`).
 - `private_dir` makes a directory only its owner can enter.
+- `writable` says whether this account can write a file or folder, on Windows by trying.
 """
 
 from __future__ import annotations
@@ -838,6 +839,31 @@ def _lines_backwards(path: Path) -> Iterator[bytes]:
 
 
 # -- directories -------------------------------------------------------------------------
+
+def writable(path: str | os.PathLike) -> bool:
+    """Whether this account can write `path`, an existing file or folder.
+
+    On Linux and macOS it is `os.access(path, os.W_OK)`. On Windows `os.access` reads only
+    the read-only attribute, never the access list, so it says yes for nearly every folder;
+    there a file is opened for appending and a folder is asked to hold a new file (made
+    and removed at once), and a refusal is no."""
+    if not _WINDOWS:
+        return os.access(path, os.W_OK)
+    import secrets
+
+    target = os.fspath(path)
+    try:
+        if os.path.isdir(target):
+            probe = os.path.join(target, f".moxi-write-{secrets.token_hex(4)}")
+            os.close(os.open(probe, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600))
+            os.unlink(probe)
+        else:
+            with open(target, "ab"):
+                pass
+    except OSError:
+        return False
+    return True
+
 
 def private_dir(path: str | os.PathLike) -> Path:
     """Make directory `path` (and its parents) so that only its owner can use it.
