@@ -287,6 +287,7 @@ SH, PS = "Bash", "PowerShell"
     (SH, "env --unset=X kill 211"),
     (SH, "env --unset X --ignore-environment kill 211"),
     (SH, "timeout --signal=KILL 5 kill 211"),
+    (SH, "sudo --bell kill 211"),
     # Heredocs with an unquoted delimiter: the body's substitutions run.
     (SH, "cat <<EOF\n$(kill 211)\nEOF"),
     (SH, "cat <<EOF\n`kill 211`\nEOF"),
@@ -302,6 +303,8 @@ SH, PS = "Bash", "PowerShell"
     (PS, "$x = Stop-Process -Id 211 -PassThru"),
     (PS, "[array]$x += Stop-Process -Id 211 -PassThru"),
     (PS, "$x = $null = Stop-Process -Id:211"),
+    (PS, "$x=Stop-Process -Id 211"),
+    (PS, "$a , $b = Stop-Process -Id 211"),
     # cmd.
     (SH, "cmd /c taskkill /PID 211"),
     (SH, 'cmd.exe //c "taskkill /PID 211"'),
