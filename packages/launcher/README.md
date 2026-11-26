@@ -805,10 +805,20 @@ cache whether that session is cold. If one is, the call is refused before it run
 naming the session and how long its cache has been cold, and saying to relaunch it
 (`moxi launcher relaunch NAME`, as its director) or leave it.
 
+The guard reads the call through turns' shell reader, so a kill is found wherever the
+shell would run it: after `&&`, `;` or `|`, inside `if`, `while` or `{ }`, behind
+`sudo`, `env`, `nohup` or `timeout`, in a `$(...)` or backtick substitution, in an
+unquoted heredoc's body, and in a script handed to another shell (`bash -c '...'`,
+`pwsh -Command '...'`, `cmd /c ...`, a heredoc on `bash`, `echo '...' | sh`), three
+shells deep. A kill in a quoted heredoc or a single-quoted string is text, and ends
+nothing.
+
 What passes: a kill of your own session's processes, of a session's own harness process
 (that ends the session rather than waking it), of processes under no session, or under a
-session whose cache is warm, fresh or can't be read. A target the guard can't work out
-(a variable, a file it reads, an option it doesn't know) passes too, and so does a kill
+session whose cache is warm, fresh or can't be read. A command the shell reader doesn't
+read passes too: one that needs running to know what it does (a variable, `eval`,
+`printf ... | sh`, a script file, an option of `sudo` or `env` the reader doesn't know,
+such as `sudo --login`), a target the guard can't work out (a file it reads), and a kill
 written in another language, which the guard doesn't see. If the guard breaks or runs
 late, the call goes ahead.
 

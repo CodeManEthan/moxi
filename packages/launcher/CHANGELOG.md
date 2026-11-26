@@ -94,12 +94,17 @@
 - The wake guard `launcher.wake` (turns' guard, on where cache runs; `wake_guard.enabled`
   turns it off) refuses a shell call that would end a process under another live session
   whose cache reads cold, and names a relaunch command for each such session. It reads
-  `kill`, `pkill`, `killall` (macOS's `-m` as a pattern), `pgrep`/`pidof` substitutions,
+  the call through turns' shell reader: every command `read_shell` gives, each
+  substitution's text, and each script `shell_scripts` finds handed to a shell (a `-c`,
+  `-Command` or `/c` argument, a heredoc or here-string, literal text piped in), three
+  shells deep at most; what the reader doesn't read goes through. It resolves `kill`,
+  `pkill`, `killall` (macOS's `-m` as a pattern), `pgrep`/`pidof` substitutions,
   `pgrep | xargs kill`, `taskkill` (`/PID`, `/IM`, and Git Bash's `//PID`, `//IM`) and
-  PowerShell's `Stop-Process`; a redirection's file-descriptor number (`2>/dev/null`,
-  `2>&1`) is no target. On Windows a Codex shell call is read as PowerShell, and Git
-  Bash's `kill`, `pkill` and `killall`, which take the MSYS runtime's pids, are let
-  through unjudged.
+  PowerShell's `Stop-Process`; a redirection is no target, and a `${...}` default bash
+  splits gives the words bash gives (`kill ${x:- 211 }`). On Windows a Codex shell call is
+  read as PowerShell, and Git Bash's `kill`, `pkill` and `killall`, which take the MSYS
+  runtime's pids, are let through unjudged. The `turns` extra asks for moxi-turns 0.2.8
+  or later.
 - The `stop_at` row (needs usage, turns and slots; unset unless set) sets a hard stop past
   the relaunch line, a multiple `<k>x` such as `2.5x`. It is taken only on a launch that
   relaunches itself and is warned at a `warn_at` mark below it. A `stop_at` typed or set

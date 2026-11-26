@@ -4,6 +4,7 @@ caches refuse, its declaration and switch, and a break letting the call through.
 from __future__ import annotations
 
 import importlib
+import shlex
 
 import pytest
 from moxi import modules
@@ -213,6 +214,148 @@ def test_killall_m_is_a_pattern_off_macos_too():
 ])
 def test_powershell_forms_resolve_too(command, pids):
     assert wake.targets(command, table(), powershell=True) == pids
+
+
+# -- every command the shell reader gives --------------------------------------------------
+
+def nested(text: str, times: int) -> str:
+    """`text` handed to `bash -c`, `times` shells deep."""
+    for _ in range(times):
+        text = "bash -c " + shlex.quote(text)
+    return text
+
+
+SH, PS = "Bash", "PowerShell"
+
+
+@pytest.mark.parametrize("tool, command", [
+    # Operators.
+    (SH, "true && kill 211"),
+    (SH, "a | kill 211"),
+    # Quoting.
+    (SH, "echo $'a\\'b' ; kill 211"),
+    # Escapes.
+    (SH, "\\kill 211"),
+    # Substitutions.
+    (SH, "echo $(kill 211)"),
+    (SH, "x=$(kill 211)"),
+    (SH, 'echo "$(kill 211)"'),
+    (SH, "echo `kill 211`"),
+    (SH, "cat <(kill 211)"),
+    (SH, "echo ${x:-$(kill 211)}"),
+    (PS, '"$(Stop-Process -Id 211)"'),
+    (PS, "@(Stop-Process -Id 211)"),
+    # Arithmetic.
+    (SH, "echo $((1<<2)); kill 211"),
+    (SH, "while (( n << 1 )); do\nkill 211\ndone"),
+    (SH, "for ((i=0; i<(1<<3); i++)); do kill 211; done"),
+    # Reserved words.
+    (SH, "{ kill 211; }"),
+    (SH, "! kill 211"),
+    (SH, "if true; then kill 211; fi"),
+    (SH, "while :; do kill 211; done"),
+    (SH, "if a; then :; elif b; then :; else kill 211; fi"),
+    (SH, "time -p kill 211"),
+    (SH, "case x in x) kill 211;; esac"),
+    (SH, 'echo "$(case x in x) kill 211;; esac)"'),
+    (SH, "function f { kill 211; }"),
+    # Wrappers.
+    (SH, "sudo -u root kill 211"),
+    (SH, "env -i X=1 nohup kill 211"),
+    (SH, "timeout 5 kill 211"),
+    (SH, "sudo --preserve-env kill 211"),
+    # Heredocs with an unquoted delimiter: the body's substitutions run.
+    (SH, "cat <<EOF\n$(kill 211)\nEOF"),
+    (SH, "cat <<EOF\n`kill 211`\nEOF"),
+    (SH, "cat <<EOF\nsay \"hi\" it's $(kill 211)\nEOF"),
+    # Here-strings.
+    (PS, '$s = @"\nhello $(Stop-Process -Id 211)\n"@'),
+    # PowerShell statements.
+    (PS, "if ($true) { Stop-Process -Id 211 }"),
+    (PS, "try {Stop-Process -Id 211} catch {}"),
+    (PS, "& Stop-Process -Id 211"),
+    # cmd.
+    (SH, "cmd /c taskkill /PID 211"),
+    (SH, 'cmd.exe //c "taskkill /PID 211"'),
+    (SH, "cmd /q /c taskkill /PID 211"),
+    (SH, "cmd /c if exist x (taskkill /PID 211)"),
+    (SH, 'cmd /c "if exist x (taskkill /PID 211)"'),
+    # A shell's argument.
+    (SH, "bash -c 'kill 211'"),
+    (SH, 'sh -lc "kill 211"'),
+    (SH, "bash -o pipefail -c 'kill 211'"),
+    (SH, "/bin/zsh -c 'bash -c \"kill 211\"'"),
+    (SH, "sudo -u x bash -c 'kill 211'"),
+    (SH, "pwsh -Command 'Stop-Process -Id 211'"),
+    (SH, "pwsh -NoProfile -com 'Stop-Process -Id 211'"),
+    (SH, 'powershell "Stop-Process -Id 211"'),
+    (SH, nested("kill 211", 3)),
+    # A shell's input.
+    (SH, "bash <<'EOF'\nkill 211\nEOF"),
+    (SH, "bash -s <<< 'kill 211'"),
+    (SH, "pwsh -Command - <<'EOF'\nStop-Process -Id 211\nEOF"),
+    # The pipe.
+    (SH, "echo 'kill 211' | bash"),
+    (SH, "echo -n kill 211 | sh"),
+    (SH, "cat <<'EOF' | sh\nkill 211\nEOF"),
+    (SH, "cat <<< 'kill 211' | sh"),
+    (SH, "echo 'Stop-Process -Id 211' | pwsh -Command -"),
+    # A kill read wherever it may run, a dead branch included.
+    (SH, "if false; then kill 211; fi"),
+    # A `${...}` default bash splits gives the words kill reads.
+    (SH, "kill ${x:- 211 }"),
+])
+def test_every_command_the_reader_gives_is_refused_on_a_cold_target(tool, command):
+    assert wake.targets(command, table(), powershell=tool == PS, system=LINUX) == [211]
+    reason, asked = judged(command, tool=tool)
+    assert reason is not None and asked == [OTHER]
+
+
+@pytest.mark.parametrize("tool, command", [
+    # What the grammar keeps as data.
+    (SH, "echo 'kill 211'"),
+    (SH, "cat <<'EOF'\nkill 211\nEOF"),
+    (SH, "cat <<'EOF'\n$(kill 211)\nEOF"),
+    (SH, "git commit -m \"$(cat <<'EOF'\ndon't kill 211\nEOF\n)\""),
+    (PS, "$s = @'\nit's Stop-Process -Id 211\n'@"),
+    (SH, nested("kill 211", 4)),
+    (SH, "bash script.sh <<'EOF'\nkill 211\nEOF"),
+    # Values.
+    (SH, "k=kill; $k 211"),
+    # Escapes a program processes.
+    (SH, "printf 'kill 211\\n' | sh"),
+    (SH, "printf '%s' x | sh"),
+    (SH, "echo -e 'kill 211' | sh"),
+    # Strings run as code.
+    (SH, "eval 'kill 211'"),
+    (PS, "iex 'Stop-Process -Id 211'"),
+    # cmd's control words.
+    (SH, "cmd /c start /b taskkill /PID 211"),
+    (SH, "cmd /c call taskkill /PID 211"),
+    # Options the tables don't name.
+    (SH, "env -S 'kill 211'"),
+    (SH, "bash --frob -c 'kill 211'"),
+    (SH, "sudo --login kill 211"),
+    # Programs the tables don't name.
+    (SH, "ssh host kill 211"),
+    (SH, "xargs sh -c 'kill 211'"),
+    # Text from outside the command.
+    (SH, "cat pids.txt | sh"),
+    # The reader's named misread: `$((` is always arithmetic.
+    (SH, "echo $((true); (kill 211))"),
+])
+def test_what_the_reader_does_not_read_ends_nothing(tool, command):
+    assert wake.targets(command, table(), powershell=tool == PS, system=LINUX) == []
+    reason, asked = judged(command, tool=tool)
+    assert reason is None and asked == []
+
+
+def test_a_quoted_kill_word_never_reaches_the_judge():
+    """`"ki"ll 211` runs `kill`, but the raw text holds no kill-family word, so turns'
+    pre-filter passes it by unjudged."""
+    import re
+
+    assert not re.search(wake.MATCH["command"], '"ki"ll 211', re.IGNORECASE)
 
 
 def test_windows_names_match_without_their_extension():

@@ -9,8 +9,20 @@ on a cold cache: it wakes. The guard closes that way in.
 main loop and in subagents. turns' case-blind pre-filter (`MATCH`) passes only a command
 holding a kill-family word, so other calls never reach the judge.
 
-**Which processes a command ends** (`targets`). The judge lexes the command into
-pipelines of simple commands:
+**Which commands it reads** (`targets`). turns' shell reader reads the command, as
+PowerShell for Claude's `PowerShell` tool and Codex's `Bash` on Windows and as `sh`
+otherwise; this module reads no shell text itself. Every command `read_shell` gives is
+read for a kill, its command word found by `command_word_index` (past assignments,
+reserved words and the wrappers turns names, with their options). So is the text of each
+substitution in it (a word's, a redirect's, an unquoted heredoc body's), read again in the
+same dialect, and each script it hands a shell (`shell_scripts`: a `-c`, `-Command` or
+`/c` argument, a heredoc or here-string on a shell, or literal text piped into one), read
+in that shell's dialect, three shells deep at most (`SCRIPT_DEPTH`). A `cmd` script's
+commands are read for `taskkill`. What the reader doesn't read (a value, an escape a
+program processes, `eval`, an option or a program its tables don't name, a script file)
+goes through.
+
+**Which processes a command ends**:
 
 - `kill`: numeric pids, and `-PGID` process groups after a signal or `--`. `kill -0`,
   `kill -l` and `kill -L` end nothing. `%job`, `$!` and `$$` are the caller's own shell
@@ -26,8 +38,10 @@ pipelines of simple commands:
   too as Git Bash needs them, and in PowerShell `Stop-Process` (and its aliases `spps`
   and `kill`) by `-Id` or `-Name`.
 
-A redirection (`2>/dev/null`, `2>&1`, `>&2`, `&>log`) is no target: its file-descriptor
-number and the word it redirects to are dropped.
+An argument word holding a `${...}` default or alternate that bash splits stands for the
+words bash gives in its place (its `fields`), so `kill ${x:- 211 }` names 211. A
+redirection (`2>/dev/null`, `2>&1`, `>&2`, `&>log`) is no target: the reader keeps it
+apart from the words.
 
 **On Windows** Claude's `Bash` tool runs Git Bash, whose `kill` takes the MSYS runtime's
 own pids, not the Windows pids the process table holds; `pkill` and `killall` there read
@@ -52,7 +66,7 @@ config folder when the launcher started it (`recycle.cache_read`). `cold` refuse
 `wake_guard.enabled` isn't false; naming `launcher.wake` on turns' `guards.run` turns it
 on too. A judge that breaks or runs late lets the call through (`on_error = "allow"`).
 
-Importing this module imports only the standard library; the core, psutil and the
+Importing this module imports only the standard library; the core, psutil, turns and the
 launcher's other modules load at the first call that needs them.
 """
 
@@ -64,7 +78,7 @@ import os
 import re
 import sys
 from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass, replace
 from typing import Any
 
 log = logging.getLogger("moxi.launcher.wake")
@@ -86,10 +100,6 @@ WALK_LIMIT = 64
 
 _SHELL_TOOLS = frozenset({"Bash"})
 _POWERSHELL_TOOLS = frozenset({"PowerShell"})
-#: Words that run the command after them (and their options), skipped to the command.
-_PREFIXES = frozenset({"sudo", "command", "builtin", "exec", "nohup", "env", "time", "doas"})
-#: `sudo`'s options that take a value, so the value is not the command.
-_SUDO_VALUED = frozenset({"-u", "-g", "-h", "-p", "-C", "-U", "-r", "-t", "-D", "-R"})
 _OWN_SHELL = frozenset({"$!", "$$", "${!}", "${$}"})
 #: The platforms whose shells read differently (`sys.platform`'s names).
 WINDOWS, MACOS = "win32", "darwin"
@@ -347,82 +357,148 @@ def _read_table() -> Iterator[Proc]:
 
 # -- which processes a command ends ------------------------------------------------------
 
+#: How many shells deep a script handed to a shell is read: a script inside a script
+#: inside a script is read, and one deeper goes through.
+SCRIPT_DEPTH = 3
+_TASKKILL = ("taskkill", "taskkill.exe")
+
+
 def targets(command: str, procs: Procs, *, powershell: bool = False,
             system: str | None = None) -> list[int]:
-    """The pids `command` would end, as far as they can be resolved, each once. `system`
-    is the platform as `sys.platform` names it, this one's when None."""
-    system = system or sys.platform
+    """The pids `command` would end, as far as they can be resolved, each once. It is read
+    by turns' shell reader as PowerShell with `powershell`, as `sh` otherwise. `system` is
+    the platform as `sys.platform` names it, this one's when None."""
     found: list[int] = []
-    pipelines = _ps_split(command) if powershell else _sh_split(command)
-    for pipeline in pipelines:
-        for i, words in enumerate(pipeline):
-            words = _command_words(words)
-            if not words:
-                continue
-            before = pipeline[i - 1] if i else None
-            ends = _ps_command(words, procs, before) if powershell else \
-                _sh_command(words, procs, before, system)
-            found.extend(pid for pid in ends if pid not in found)
+    _read(command, "powershell" if powershell else "sh", SCRIPT_DEPTH, procs,
+          system or sys.platform, found)
     return found
 
 
-def _sh_command(words: list[Word], procs: Procs, before: list[Word] | None,
-                system: str) -> list[int]:
-    name = _base(words[0])
-    if name in ("taskkill", "taskkill.exe"):
+def _read(text: str, dialect: str, depth: int, procs: Procs, system: str,
+          found: list[int]) -> None:
+    """Add to `found` the pids each command of `text`, read in `dialect`, ends; then those
+    of each substitution in it, read in the same dialect, and while `depth` is above 0
+    those of each script it hands a shell, read in that shell's dialect at `depth - 1`."""
+    turns = _turns()
+    if turns is None:
+        return
+    shell = turns.read_shell(text, dialect=dialect)
+    scripts = turns.shell_scripts(shell, dialect=dialect) if depth > 0 else ()
+    commands = shell.commands
+    for index, command in enumerate(commands):
+        before = commands[index - 1] if index and commands[index - 1].ended_by == "|" \
+            else None
+        ends = _command(command, dialect, procs, before, system)
+        found.extend(pid for pid in ends if pid not in found)
+        for sub in _subs(command):
+            _read(sub, dialect, depth, procs, system, found)
+        for script in scripts:
+            if script.command_index == index:
+                _read(script.text, script.dialect, depth - 1, procs, system, found)
+
+
+def _turns() -> Any:
+    """turns' API, or None when turns can't be loaded."""
+    from moxi import modules
+
+    found = modules.load("turns")
+    return found.api if found.ok else None
+
+
+def _subs(command: Any) -> Iterator[str]:
+    """The text of each substitution in `command`: in its words, in its redirects' targets
+    and in an unquoted heredoc's body."""
+    for word in command.words:
+        yield from word.subs
+    for redirect in command.redirects:
+        yield from redirect.subs
+        if redirect.target is not None:
+            yield from redirect.target.subs
+
+
+def _command(command: Any, dialect: str, procs: Procs, before: Any,
+             system: str) -> list[int]:
+    """The pids one command ends. `before` is the command piped into it, or None."""
+    words = _command_words(command, dialect)
+    if not words:
+        return []
+    if dialect == "powershell":
+        return _ps_command(words, procs)
+    if dialect == "cmd":
+        return _taskkill(words[1:], procs) if _word_base(words[0]).lower() in _TASKKILL else []
+    return _sh_command(words, procs, before, system)
+
+
+def _sh_command(words: list[Any], procs: Procs, before: Any, system: str) -> list[int]:
+    name = _word_base(words[0])
+    if name in _TASKKILL:
         return _taskkill(words[1:], procs)
     if system == WINDOWS and (name in _MSYS_KILLS or name == "xargs"):
         # Git Bash: these read the MSYS runtime's pids and processes, not the table's.
         log.info("the wake guard does not judge %s in a Windows shell", name)
         return []
     if name == "kill":
-        return _kill(words[1:], procs)
+        return _kill(_args(words[1:]), procs)
     if name == "pkill":
-        return _pgrep(words[1:], procs)
+        return _pgrep(_args(words[1:]), procs)
     if name == "killall":
-        return _killall(words[1:], procs, system)
+        return _killall(_args(words[1:]), procs, system)
     if name == "xargs" and before is not None:
         rest = _past_xargs(words[1:])
-        if rest and _base(rest[0]) == "kill":
-            return _found_by(_command_words(before), procs) or []
+        if rest and _word_base(rest[0]) == "kill":
+            return _found_by(_command_words(before, "sh"), procs) or []
     return []
 
 
-def _kill(args: list[Word], procs: Procs) -> list[int]:
+def _args(words: Sequence[Any]) -> list[Any]:
+    """A command's argument words as bash gives them: a word with `fields` (a `${...}`
+    default or alternate bash splits) stands for those words."""
+    out: list[Any] = []
+    for word in words:
+        if word.fields:
+            out += [replace(word, text=text, subs=(), is_sub=False, fields=())
+                    for text in word.fields]
+        else:
+            out.append(word)
+    return out
+
+
+def _kill(args: list[Any], procs: Procs) -> list[int]:
     out: list[int] = []
     options, signal = True, False
     i = 0
     while i < len(args):
         word = args[i]
         i += 1
-        if isinstance(word, Sub):
+        if word.is_sub:
             out += _substituted(word, procs)
             continue
+        text = word.text
         if options:
-            if word == "--":
+            if text == "--":
                 options = False
                 continue
-            if word in ("-l", "-L", "--list", "--table"):
+            if text in ("-l", "-L", "--list", "--table"):
                 return []
-            if word in ("-s", "-n", "--signal") or word.startswith("--signal="):
-                value = word.partition("=")[2] if "=" in word else \
-                    (args[i] if i < len(args) else "")
-                i += 0 if "=" in word else 1
+            if text in ("-s", "-n", "--signal") or text.startswith("--signal="):
+                value = text.partition("=")[2] if "=" in text else \
+                    (args[i].text if i < len(args) else "")
+                i += 0 if "=" in text else 1
                 if _null_signal(value):
                     return []
                 signal = True
                 continue
-            if word.startswith("-") and len(word) > 1 and not signal:
+            if text.startswith("-") and len(text) > 1 and not signal:
                 # The first option is the signal: -9, -KILL, -SIGTERM.
-                if _null_signal(word[1:]):
+                if _null_signal(text[1:]):
                     return []
                 signal = True
                 continue
-        if _PID.fullmatch(word):
-            if int(word) > 0:  # kill 0 is the caller's own process group
-                out.append(int(word))
-        elif _GROUP.fullmatch(word):
-            out += _group(int(word[1:]), procs)
+        if _PID.fullmatch(text):
+            if int(text) > 0:  # kill 0 is the caller's own process group
+                out.append(int(text))
+        elif _GROUP.fullmatch(text):
+            out += _group(int(text[1:]), procs)
         # Anything else (%job, $!, $$, a variable) is the caller's own or unresolved.
     return out
 
@@ -432,12 +508,15 @@ def _null_signal(value: object) -> bool:
     return isinstance(value, str) and value.upper().removeprefix("SIG") in ("0", "NULL")
 
 
-def _substituted(word: Sub, procs: Procs) -> list[int]:
+def _substituted(word: Any, procs: Procs) -> list[int]:
     """The pids a substitution prints when it is one `pgrep` or `pidof`; none otherwise."""
-    inner = _sh_split(word.text)
-    if len(inner) != 1 or len(inner[0]) != 1:
+    turns = _turns()
+    if turns is None:
         return []
-    return _found_by(_command_words(inner[0][0]), procs) or []
+    inner = [c for c in turns.read_shell(word.subs[0]).commands if c.words]
+    if len(inner) != 1:
+        return []
+    return _found_by(_command_words(inner[0], "sh"), procs) or []
 
 
 def _group(pgid: int, procs: Procs) -> list[int]:
@@ -446,15 +525,16 @@ def _group(pgid: int, procs: Procs) -> list[int]:
     return [p.pid for p in procs.all() if p.pgid == pgid]
 
 
-def _found_by(words: list[Word], procs: Procs) -> list[int] | None:
+def _found_by(words: list[Any], procs: Procs) -> list[int] | None:
     """The pids a `pgrep` or `pidof` command prints; None for any other command."""
     if not words:
         return None
-    name = _base(words[0])
+    name = _word_base(words[0])
     if name == "pgrep":
-        return _pgrep(words[1:], procs)
+        return _pgrep(_args(words[1:]), procs)
     if name == "pidof":
-        names = [w for w in words[1:] if isinstance(w, str) and not w.startswith("-")]
+        names = [w.text for w in _args(words[1:])
+                 if not w.is_sub and not w.text.startswith("-")]
         return [p.pid for p in procs.all()
                 if any(n in (p.name, _base(p.cmdline[0]) if p.cmdline else "")
                        for n in names)]
@@ -475,7 +555,7 @@ _PGREP_UNREAD = frozenset("nov")
 _SIGNAL_NAME = re.compile(r"(SIG)?[A-Z][A-Z0-9+-]+|\d+")
 
 
-def _pgrep(args: list[Word], procs: Procs) -> list[int]:
+def _pgrep(args: list[Any], procs: Procs) -> list[int]:
     """What `pgrep` with `args` prints (and `pkill` with them ends), as pids."""
     flags: set[str] = set()
     values: dict[str, str] = {}
@@ -484,10 +564,11 @@ def _pgrep(args: list[Word], procs: Procs) -> list[int]:
     while i < len(args):
         word = args[i]
         i += 1
-        if isinstance(word, Sub):
+        if word.is_sub:
             return []
-        if word.startswith("--") and len(word) > 2:
-            key, eq, value = word.partition("=")
+        text = word.text
+        if text.startswith("--") and len(text) > 2:
+            key, eq, value = text.partition("=")
             if key == "--signal":
                 i += 0 if eq else 1
                 continue
@@ -496,31 +577,31 @@ def _pgrep(args: list[Word], procs: Procs) -> list[int]:
                 return []
             if short in _PGREP_VALUED:
                 if not eq:
-                    if i >= len(args) or isinstance(args[i], Sub):
+                    if i >= len(args) or args[i].is_sub:
                         return []
-                    value, i = args[i], i + 1
+                    value, i = args[i].text, i + 1
                 values[short] = value
             else:
                 flags.add(short)
             continue
-        if word.startswith("-") and len(word) > 1 and pattern is None:
-            body = word[1:]
+        if text.startswith("-") and len(text) > 1 and pattern is None:
+            body = text[1:]
             if _SIGNAL_NAME.fullmatch(body) and (body.isdigit() or len(body) > 1):
                 continue  # a signal: -9, -KILL, -SIGTERM
             for j, ch in enumerate(body):
                 if ch in _PGREP_VALUED:
                     value = body[j + 1:]
                     if not value:
-                        if i >= len(args) or isinstance(args[i], Sub):
+                        if i >= len(args) or args[i].is_sub:
                             return []
-                        value, i = args[i], i + 1
+                        value, i = args[i].text, i + 1
                     values[ch] = value
                     break
                 flags.add(ch)
             continue
         if pattern is not None:
             return []
-        pattern = word
+        pattern = text
     if flags & _PGREP_UNREAD or set(values) - _PGREP_READ:
         return []
     if pattern is None and not set(values) - {"d"}:
@@ -552,28 +633,29 @@ def _narrowed(p: Proc, values: Mapping[str, str]) -> bool:
     return True
 
 
-def _killall(args: list[Word], procs: Procs, system: str) -> list[int]:
+def _killall(args: list[Any], procs: Procs, system: str) -> list[int]:
     names: list[str] = []
     regex = ignore = False
     i = 0
     while i < len(args):
         word = args[i]
         i += 1
-        if isinstance(word, Sub):
+        if word.is_sub:
             return []
-        if word in ("-l", "--list") or (system == MACOS and word in ("-s", "-d")):
+        text = word.text
+        if text in ("-l", "--list") or (system == MACOS and text in ("-s", "-d")):
             return []  # lists signals; on macOS -s and -d only show what would be done
-        if word in ("-r", "--regexp", "-m"):
+        if text in ("-r", "--regexp", "-m"):
             regex = True  # -m is macOS's regular expression
-        elif word in ("-I", "--ignore-case"):
+        elif text in ("-I", "--ignore-case"):
             ignore = True
-        elif word in ("-s", "--signal"):
+        elif text in ("-s", "--signal"):
             i += 1
-        elif word in ("-u", "--user", "-o", "--older-than", "-y", "--younger-than",
+        elif text in ("-u", "--user", "-o", "--older-than", "-y", "--younger-than",
                       "-n", "--ns", "-Z", "--context", "-c", "-t", "-j"):
             return []  # a narrowing the judge doesn't read
-        elif not word.startswith("-"):
-            names.append(word)
+        elif not text.startswith("-"):
+            names.append(text)
     out = []
     for p in procs.all():
         own = (p.name, _base(p.cmdline[0]) if p.cmdline else p.name)
@@ -594,18 +676,19 @@ def _killall(args: list[Word], procs: Procs, system: str) -> list[int]:
     return out
 
 
-def _taskkill(args: list[Word], procs: Procs) -> list[int]:
+def _taskkill(args: list[Any], procs: Procs) -> list[int]:
     out: list[int] = []
     i = 0
     while i < len(args):
         word = args[i]
         i += 1
-        if isinstance(word, Sub) or not word[:1] in ("/", "-"):
+        if word.is_sub or word.text[:1] not in ("/", "-"):
             continue
         # Git Bash turns a lone /PID into a path, so a switch there is written //PID.
-        switch = (word[2:] if word.startswith("//") else word[1:]).lower()
-        if switch in ("pid", "im") and i < len(args) and isinstance(args[i], str):
-            value, i = args[i], i + 1
+        text = word.text
+        switch = (text[2:] if text.startswith("//") else text[1:]).lower()
+        if switch in ("pid", "im") and i < len(args) and not args[i].is_sub:
+            value, i = args[i].text, i + 1
             if switch == "pid":
                 out += [int(v) for v in value.split(",") if _PID.fullmatch(v)]
             else:
@@ -619,54 +702,41 @@ def _wild(pattern: str, name: str) -> bool:
     return fnmatch.fnmatchcase(name.lower(), pattern.lower())
 
 
-def _past_xargs(words: list[Word]) -> list[Word]:
+def _past_xargs(words: list[Any]) -> list[Any]:
     """The command `xargs` runs: its words past xargs' own options."""
     valued = {"-n", "-L", "-P", "-I", "-d", "-E", "-s", "-a", "--max-args", "--max-procs",
               "--delimiter", "--arg-file", "--max-lines", "--replace"}
     i = 0
     while i < len(words):
         word = words[i]
-        if not isinstance(word, str) or not word.startswith("-"):
+        if word.is_sub or not word.text.startswith("-"):
             break
-        i += 2 if word in valued else 1
+        i += 2 if word.text in valued else 1
     return words[i:]
 
 
-def _command_words(words: list[Word]) -> list[Word]:
-    """`words` from the command word on: past `NAME=value` assignments and words that run
-    the command after them (`sudo`, `env`, `nohup`, ...) with their options."""
-    i = 0
-    while i < len(words):
-        word = words[i]
-        if not isinstance(word, str):
-            break
-        name, eq, _ = word.partition("=")
-        if eq and name and (name[0].isalpha() or name[0] == "_") and \
-                all(ch.isalnum() or ch == "_" for ch in name):
-            i += 1
-            continue
-        if _base(word) in _PREFIXES:
-            prefix = _base(word)
-            i += 1
-            while i < len(words) and isinstance(words[i], str) and \
-                    words[i].startswith("-"):
-                i += 2 if prefix in ("sudo", "doas") and words[i] in _SUDO_VALUED else 1
-            continue
-        break
-    return words[i:]
+def _command_words(command: Any, dialect: str) -> list[Any]:
+    """`command`'s words from the one that names what it runs (turns'
+    `command_word_index`) on; none when no word does."""
+    turns = _turns()
+    at = None if turns is None else turns.command_word_index(command, dialect=dialect)
+    return [] if at is None else list(command.words[at:])
 
 
-def _base(word: Word) -> str:
-    if not isinstance(word, str):
-        return ""
-    return word.replace("\\", "/").rsplit("/", 1)[-1]
+def _word_base(word: Any) -> str:
+    """The last part of a word's path, across `/` and `\\`; empty for a substitution."""
+    return "" if word.is_sub else _base(word.text)
+
+
+def _base(path: str) -> str:
+    return path.replace("\\", "/").rsplit("/", 1)[-1]
 
 
 # -- PowerShell --------------------------------------------------------------------------
 
-def _ps_command(words: list[Word], procs: Procs, before: list[Word] | None) -> list[int]:
-    name = _base(words[0]).lower()
-    if name in ("taskkill", "taskkill.exe"):
+def _ps_command(words: list[Any], procs: Procs) -> list[int]:
+    name = _word_base(words[0]).lower()
+    if name in _TASKKILL:
         return _taskkill(words[1:], procs)
     if name not in ("stop-process", "spps", "kill"):
         return []
@@ -674,308 +744,32 @@ def _ps_command(words: list[Word], procs: Procs, before: list[Word] | None) -> l
     names: list[str] = []
     wanted: list | None = None
     for word in words[1:]:
-        if isinstance(word, Sub):
+        if word.is_sub:
             wanted = None
             continue
-        if word.startswith("-") and len(word) > 1 and not word[1:].isdigit():
-            param = word[1:].rstrip(":").lower()
+        text = word.text
+        if text.startswith("-") and len(text) > 1 and not text[1:].isdigit():
+            param = text[1:].rstrip(":").lower()
             if "whatif".startswith(param) and len(param) >= 2:
                 return []
             wanted = ids if "id".startswith(param) else \
                 names if "name".startswith(param) or "processname".startswith(param) \
                 else None
             continue
-        values = [v for v in word.split(",") if v]
+        values = [v for v in text.split(",") if v]
         if wanted is None and not ids and not names:
             wanted = ids  # the first positional is -Id
         if wanted is ids:
             ids += [int(v) for v in values if _PID.fullmatch(v)]
         elif wanted is names:
             names += values
-        wanted = wanted if word.endswith(",") else None
+        wanted = wanted if text.endswith(",") else None
     out = list(ids)
     for p in procs.all() if names else ():
         bare = p.name[:-4] if p.name.lower().endswith(".exe") else p.name
         if any(_wild(n, bare) for n in names):
             out.append(p.pid)
     return out
-
-
-# -- lexing ------------------------------------------------------------------------------
-
-@dataclass(frozen=True)
-class Sub:
-    """A word that is one command substitution, `$(...)` or a backtick pair: its text."""
-
-    text: str
-
-
-Word = str | Sub
-
-
-@dataclass
-class _Lexer:
-    text: str
-    pipelines: list[list[list[Word]]] = field(default_factory=list)
-    pipeline: list[list[Word]] = field(default_factory=list)
-    words: list[Word] = field(default_factory=list)
-    word: list[str] = field(default_factory=list)
-    sub: Sub | None = None
-    started: bool = False
-    #: Whether the word holds quoted or escaped text.
-    quoted: bool = False
-    #: Whether the next word is a redirection's target, dropped when it ends.
-    drop: bool = False
-
-    def end_word(self) -> None:
-        if self.sub is not None or self.started:
-            if self.drop:
-                self.drop = False
-            elif self.sub is not None:
-                self.words.append(self.sub)
-            else:
-                self.words.append("".join(self.word))
-        self.word.clear()
-        self.sub, self.started, self.quoted = None, False, False
-
-    def redirect(self, *, fds: re.Pattern[str] | None, target: bool) -> None:
-        """A redirection operator: the word written against it is its file-descriptor
-        number when it is plain text `fds` matches, and is dropped; with `target`, the word
-        after the operator is what it redirects to, dropped too."""
-        if fds is not None and self.sub is None and self.started and not self.quoted and \
-                fds.fullmatch("".join(self.word)):
-            self.word.clear()
-            self.started = False
-        else:
-            self.end_word()
-        self.drop = target
-
-    def mixed(self) -> None:
-        """Text joins a word that holds a substitution, or a substitution joins text: the
-        word resolves as nothing."""
-        self.sub = None
-        self.word.append("\0")
-        self.started = True
-
-    def end_command(self) -> None:
-        self.end_word()
-        self.drop = False
-        if self.words:
-            self.pipeline.append(list(self.words))
-        self.words.clear()
-
-    def end_pipeline(self) -> None:
-        self.end_command()
-        if self.pipeline:
-            self.pipelines.append(list(self.pipeline))
-        self.pipeline.clear()
-
-
-def _closing(text: str, i: int) -> int:
-    """Where the `)` closing a `$(` that opened before `i` is, or len(text)."""
-    depth, n = 1, len(text)
-    while i < n:
-        c = text[i]
-        if c == "\\":
-            i += 2
-            continue
-        if c == "'":
-            j = text.find("'", i + 1)
-            i = n if j < 0 else j + 1
-            continue
-        if c == '"':
-            i += 1
-            while i < n and text[i] != '"':
-                i += 2 if text[i] == "\\" else 1
-            i += 1
-            continue
-        if c == "(":
-            depth += 1
-        elif c == ")":
-            depth -= 1
-            if depth == 0:
-                return i
-        i += 1
-    return n
-
-
-#: A shell redirection operator: `>`, `>>`, `<`, `<<`, `<<<`, `<>`, `>|`, `>&`, `<&`, `&>`
-#: and `&>>`.
-_SH_REDIRECT = re.compile(r"&?[<>]+[&|]?")
-#: The file-descriptor word written against a shell redirection: `2` in `2>`, `{fd}`.
-_SH_FD = re.compile(r"[0-9]+|\{[A-Za-z_][A-Za-z0-9_]*\}")
-#: A PowerShell redirection: `>`, `>>`, `2>`, `*>`, `2>&1`; and its stream word.
-_PS_REDIRECT = re.compile(r">>?(&[1-6])?")
-_PS_FD = re.compile(r"[1-6*]")
-
-
-def _sh_split(text: str) -> list[list[list[Word]]]:
-    """`text` as pipelines of simple commands of words, quotes taken off. A pipeline ends
-    at `;`, `&`, `&&`, `||`, `(`, `)` and a newline outside quotes; `|` joins its
-    commands. A word that is one `$(...)` or backtick substitution, bare or alone in
-    double quotes, is a `Sub`; a word with one inside other text holds a NUL, so it
-    resolves as nothing. A redirection is no word: its operator, the file-descriptor
-    number written against it (`2>`) and the word it redirects to are dropped."""
-    lx = _Lexer(text)
-    i, n = 0, len(text)
-    while i < n:
-        c = text[i]
-        if c == "'":
-            j = text.find("'", i + 1)
-            j = n if j < 0 else j
-            if lx.sub is not None:
-                lx.mixed()
-            lx.word.append(text[i + 1:j])
-            lx.started, lx.quoted, i = True, True, j + 1
-            continue
-        if c == '"':
-            whole = not lx.started and lx.sub is None
-            if lx.sub is not None:
-                lx.mixed()
-            lx.quoted = True
-            i += 1
-            while i < n and text[i] != '"':
-                if text[i] == "$" and text[i + 1:i + 2] == "(":
-                    j = _closing(text, i + 2)
-                    if whole and not lx.word and text[j + 1:j + 2] == '"':
-                        lx.sub = Sub(text[i + 2:j])  # "$(...)": the word is the substitution
-                    else:
-                        lx.mixed()
-                    i = j + 1
-                    continue
-                if text[i] == "\\" and i + 1 < n and text[i + 1] in '"\\$`\n':
-                    if text[i + 1] != "\n":
-                        lx.word.append(text[i + 1])
-                    i += 2
-                    continue
-                lx.word.append(text[i])
-                i += 1
-            if lx.sub is None:
-                lx.started = True
-            i += 1
-            continue
-        if c == "\\":
-            if i + 1 < n and text[i + 1] != "\n":
-                if lx.sub is not None:
-                    lx.mixed()
-                lx.word.append(text[i + 1])
-                lx.started = lx.quoted = True
-            i += 2
-            continue
-        if c in "<>" or text[i:i + 2] == "&>":
-            op = _SH_REDIRECT.match(text, i)
-            lx.redirect(fds=_SH_FD if c != "&" else None, target=True)
-            i = op.end() if op else i + 1
-            continue
-        if c == "#" and not lx.started and lx.sub is None:
-            j = text.find("\n", i)
-            i = n if j < 0 else j
-            continue
-        if c == "$" and text[i + 1:i + 2] == "(":
-            j = _closing(text, i + 2)
-            if lx.started or lx.sub is not None:
-                lx.mixed()
-            else:
-                lx.sub = Sub(text[i + 2:j])
-            i = j + 1
-            continue
-        if c == "`":
-            j = text.find("`", i + 1)
-            j = n if j < 0 else j
-            if lx.started or lx.sub is not None:
-                lx.mixed()
-            else:
-                lx.sub = Sub(text[i + 1:j])
-            i = j + 1
-            continue
-        if c == "|" and text[i + 1:i + 2] != "|":
-            lx.end_command()
-            i += 1
-            continue
-        if c in ";&|()\n":
-            lx.end_pipeline()
-            i += 2 if text[i:i + 2] in ("&&", "||") else 1
-            continue
-        if c in " \t\r":
-            lx.end_word()
-            i += 1
-            continue
-        if lx.sub is not None:
-            lx.mixed()
-        lx.word.append(c)
-        lx.started = True
-        i += 1
-    lx.end_pipeline()
-    return lx.pipelines
-
-
-def _ps_split(text: str) -> list[list[list[Word]]]:
-    """`text` read as PowerShell: pipelines end at `;` and a newline, `|` joins commands,
-    a word ends at a space or tab; quotes are taken off; a `(...)` or `$(...)` group is a
-    `Sub`; a backtick escapes the next character. A redirection (`>`, `>>`, `2>`, `*>`,
-    `2>&1`) is no word: its operator, its stream and the word it redirects to are
-    dropped."""
-    lx = _Lexer(text)
-    i, n = 0, len(text)
-    while i < n:
-        c = text[i]
-        if c == "'":
-            j = text.find("'", i + 1)
-            j = n if j < 0 else j
-            if lx.sub is not None:
-                lx.mixed()
-            lx.word.append(text[i + 1:j])
-            lx.started, lx.quoted, i = True, True, j + 1
-            continue
-        if c == '"':
-            j = text.find('"', i + 1)
-            j = n if j < 0 else j
-            if lx.sub is not None:
-                lx.mixed()
-            lx.word.append(text[i + 1:j])
-            lx.started, lx.quoted, i = True, True, j + 1
-            continue
-        if c == "`" and i + 1 < n:
-            lx.word.append(text[i + 1])
-            lx.started, lx.quoted, i = True, True, i + 2
-            continue
-        if c == ">":
-            op = _PS_REDIRECT.match(text, i)
-            lx.redirect(fds=_PS_FD, target=not op.group(1))
-            i = op.end()
-            continue
-        if c == "#" and not lx.started:
-            j = text.find("\n", i)
-            i = n if j < 0 else j
-            continue
-        if c == "(" or (c == "$" and text[i + 1:i + 2] == "("):
-            start = i + (2 if c == "$" else 1)
-            j = _closing(text, start)
-            if lx.started or lx.sub is not None:
-                lx.mixed()
-            else:
-                lx.sub = Sub(text[start:j])
-            i = j + 1
-            continue
-        if c == "|" and text[i + 1:i + 2] != "|":
-            lx.end_command()
-            i += 1
-            continue
-        if c in ";\n" or text[i:i + 2] in ("&&", "||"):
-            lx.end_pipeline()
-            i += 2 if text[i:i + 2] in ("&&", "||") else 1
-            continue
-        if c in " \t\r":
-            lx.end_word()
-            i += 1
-            continue
-        if lx.sub is not None:
-            lx.mixed()
-        lx.word.append(c)
-        lx.started = True
-        i += 1
-    lx.end_pipeline()
-    return lx.pipelines
 
 
 __all__ = ["CALLS", "GUARD_ID", "Live", "Looked", "MATCH", "NAME", "Proc", "Procs",
