@@ -109,6 +109,9 @@ test("each problem case, and a row with two", () => {
 
 test("the live part that did not read says why: no answer in time, a read that failed, a list not whole", () => {
   assert.equal(NO_ANSWER_IN_TIME, "the session did not answer in time");
+  // `failed` covers a line to the session that closed, an error answer and one that could
+  // not be read: the sentence holds for each.
+  assert.equal(LIVE_READ_FAILED, "the session gave no answer Moxi could use");
   assert.equal(liveReason("timeout"), NO_ANSWER_IN_TIME);
   assert.equal(liveReason("failed"), LIVE_READ_FAILED);
   assert.equal(liveReason(null), LIST_NOT_WHOLE);

@@ -18109,9 +18109,9 @@ turns	packages/turns/tests/test_stale_agents.py	self.record.write_text("")	keep	
 turns	packages/turns/tests/test_stale_agents.py	path.parent.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
 turns	packages/turns/tests/test_stale_agents.py	out = judge(listed, str(self.record), now=NOW, **kw)	keep	record	record
 turns	packages/turns/src/moxi_turns/client.py	WHYS = ("unreachable", "timeout", "closed", "gone", "version", "refused", "unreadable")	keep	closed	closed
-turns	packages/turns/src/moxi_turns/client.py	"""Why a connection failed with `exc`: `timeout` when its time ran out, else	keep	timeout	timeout
+turns	packages/turns/src/moxi_turns/client.py	"""Why a connection failed with `exc`: `timeout` when its time ran out, `unreadable`	keep	timeout	timeout
 turns	packages/turns/src/moxi_turns/client.py	`closed`."""	keep	closed	closed
-turns	packages/turns/src/moxi_turns/client.py	return "timeout" if isinstance(exc, TimeoutError) else "closed"	keep	closed	closed
+turns	packages/turns/src/moxi_turns/client.py	return "closed"	keep	closed	closed
 turns	packages/turns/src/moxi_turns/client.py	code=exc.code, data=exc.data, why="refused")	keep	refused	refused
 turns	packages/turns/src/moxi_turns/client.py	error = TurnsError("this Session is closed", why="closed")	keep	closed	closed
 turns	packages/turns/src/moxi_turns/endpoint.py	value = self.future().result(timeout=max(0.0, timeout))	keep	timeout	timeout
@@ -18126,6 +18126,7 @@ turns	packages/turns/tests/test_claude_record.py	return {"CLAUDE_CONFIG_DIR": st
 turns	packages/turns/tests/test_client.py	assert caught.value.why == "refused"	keep	refused	refused
 turns	packages/turns/tests/test_client.py	assert client.WHYS == ("unreachable", "timeout", "closed", "gone", "version", "refused",	keep	closed	closed
 turns	packages/turns/tests/test_client.py	assert caught.value.why == "closed"	keep	closed	closed
+turns	packages/turns/tests/test_client.py	# A link that closes before the answer is still `closed`.	keep	closed	closed
 turns	packages/turns/tests/test_page.py	assert pagehandlers._reader_now._held[key].ended is None	keep	_held	_held
 turns	packages/turns/tests/test_page.py	pagehandlers._reader_now._held["claude-named"].dirty.set()	keep	_held	_held
 turns	packages/turns/tests/test_page.py	raise turns.TurnsError("the endpoint did not answer agents", why="closed")	keep	closed	closed

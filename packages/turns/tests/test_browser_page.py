@@ -214,7 +214,7 @@ def test_a_trouble_row_and_an_unread_one_are_problems_that_keep_their_state(
     expect(trouble).to_have_attribute("fact", re.compile(rf"^working since {T}$"))
     unread_row = row(root, key_of(unread))
     expect(unread_row).to_have_attribute("lead", "Moxi can't read its live state")
-    expect(unread_row).to_have_attribute("rest", "the session could not be asked")
+    expect(unread_row).to_have_attribute("rest", "the session gave no answer Moxi could use")
     expect(unread_row).to_have_attribute("fact", "idle")
     # The box was not read either: no draft is told, so line three is empty.
     expect(unread_row).not_to_have_attribute("note", re.compile("."))

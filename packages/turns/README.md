@@ -238,18 +238,20 @@ the panel.
 `/m/turns/api/sessions` is what the panel draws: `listed`, `reach`, and one entry per
 session. Besides its harness, ids, folder and state, an entry carries:
 
-- `typed_name`: the name typed for a Claude Code session (`--name` or `/rename`), read
-  from Claude Code's own record of the process in its config folder (`CLAUDE_CONFIG_DIR`,
-  else `.claude` in the home folder) as the page server's environment places it; null
-  when there is none, the record is of another session, or the name was not typed (made
-  from the folder, written by the model, changed to tell it from another session's, or
-  set by another session or a hook). It is marked `redact`.
+- `typed_name`: the name typed for a Claude Code session (`--name`, or `/rename` in this
+  or another process of the same session), read from Claude Code's own record of the
+  process in its config folder (`CLAUDE_CONFIG_DIR`, else `.claude` in the home folder) as
+  the page server's environment places it; null when there is none, the record is of
+  another session, or the name was not typed (made from the folder, written by the model,
+  changed to tell it from another session's, or set by a hook). It is marked `redact`.
 - `ended_at`: while no turn is open, when the last turn ended: the endpoint's own time
   (`facts.ended_at`), else the time the page server's watch saw it end; null otherwise.
 - `facts.draft`: true for a draft in the prompt box, false for an empty box, null when the
   box was not read.
 - `facts.live_error`: why the live part did not read, `timeout` (the session did not
-  answer in time) or `failed`; null when it did.
+  answer in time) or `failed` (the session gave no answer Moxi could use: the line to it
+  closed, or it answered with an error or with something that could not be read); null
+  when it did.
 - `read_error`: null while every read answers; with one failed, one sentence for the kind
   of failure: `the session did not answer in time`, `Moxi can't reach it`, `its link
   closed during the read`, `the session is ending`, `it speaks another version of turns`,

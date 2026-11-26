@@ -105,8 +105,9 @@ export const UNREAD_LEAD = "Moxi can't read its live state";
 export const LIST_NOT_WHOLE = "its agent list could not be read whole";
 /** The reason when the session did not answer the live read in time. */
 export const NO_ANSWER_IN_TIME = "the session did not answer in time";
-/** The reason when the session's live read failed. */
-export const LIVE_READ_FAILED = "the session could not be asked";
+/** The reason when the session's live read failed: the line to it closed, or it answered
+ * with an error or with something that could not be read. */
+export const LIVE_READ_FAILED = "the session gave no answer Moxi could use";
 
 /** Why the live part did not read, by the facts' `live_error`: the session did not answer
  * in time, its live read failed, or, when it answered, its agent list was not whole. */

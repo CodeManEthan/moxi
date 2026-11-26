@@ -57,13 +57,13 @@ def test_a_config_dir_under_the_home_is_read_from_the_home_given(env, tmp_path):
         tmp_path / "home" / "elsewhere" / "sessions" / "4242.json")
 
 
-@pytest.mark.parametrize("source", ["user", ...])
+@pytest.mark.parametrize("source", ["user", "peer", ...])
 def test_a_name_given_at_start_or_typed_with_rename_is_read(env, source):
     write(config_dir(env), record(nameSource=source))
     assert claude_record.typed_name(PID, SID, env) == "orders-skeleton"
 
 
-@pytest.mark.parametrize("source", ["derived", "auto", "collision", "peer", "hook", 7])
+@pytest.mark.parametrize("source", ["derived", "auto", "collision", "hook", 7])
 def test_a_name_the_person_did_not_type_is_not_read(env, source):
     write(config_dir(env), record(nameSource=source))
     assert claude_record.typed_name(PID, SID, env) is None

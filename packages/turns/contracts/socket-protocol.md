@@ -209,7 +209,9 @@ is null but for a `fork`'s. turns never acts on a
   with `box` null is a box that was not read, never known to hold a draft. An older
   Claude Code runner that does not send the box reads as null.
 - `live_error` is why the live part did not read: `timeout` when the harness did not
-  answer within the bound, `failed` when its read failed; null when it answered.
+  answer within the bound, `failed` when its read failed (the line to the harness closed,
+  or it answered with an error or with something that could not be read); null when it
+  answered.
 
 The live part of the facts (`draft`, `agents`, `box`) is read from the harness within a
 bound: 1 s on Claude Code, 2 s on Codex and OpenCode. Past the bound it reads unreadable:

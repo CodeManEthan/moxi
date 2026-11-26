@@ -115,10 +115,21 @@ _HELLO_REFUSED = -32001
 WHYS = ("unreachable", "timeout", "closed", "gone", "version", "refused", "unreadable")
 
 
+#: What `moxi.ipc`'s client says of a line past its cap, which it raises as a plain
+#: `IpcError`: the only way to tell it from a connection that closed.
+_LINE_TOO_LONG = "line longer than"
+
+
 def _why_lost(exc: BaseException) -> str:
-    """Why a connection failed with `exc`: `timeout` when its time ran out, else
+    """Why a connection failed with `exc`: `timeout` when its time ran out, `unreadable`
+    when the endpoint sent a line that is not JSON-RPC or one past the line cap, else
     `closed`."""
-    return "timeout" if isinstance(exc, TimeoutError) else "closed"
+    if isinstance(exc, TimeoutError):
+        return "timeout"
+    if isinstance(exc, ipc.NotRpc) or (type(exc) is ipc.IpcError
+                                       and _LINE_TOO_LONG in str(exc)):
+        return "unreadable"
+    return "closed"
 
 
 class TurnsError(Exception):

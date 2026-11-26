@@ -249,6 +249,30 @@ def test_a_read_says_why_it_failed(scripted, monkeypatch):
     assert caught.value.why == "timeout"
 
 
+def test_an_answer_that_cannot_be_read_says_so_not_that_the_link_closed(scripted):
+    from moxi.ipc import _wire
+
+    def not_rpc(conn, params):
+        # A line that isn't JSON-RPC, written ahead of the answer.
+        server.loop.call_soon_threadsafe(conn._writer.write, b"not json\n")
+        time.sleep(0.2)
+        return {}
+
+    server, s = scripted({"agents": not_rpc,
+                          "facts": lambda conn, params: {"pad": "x" * _wire.MAX_LINE}})
+    with pytest.raises(turns.TurnsError) as caught:
+        s.agents()
+    assert caught.value.why == "unreadable"
+    with pytest.raises(turns.TurnsError) as caught:       # a line past the cap
+        s.facts()
+    assert caught.value.why == "unreadable"
+    # A link that closes before the answer is still `closed`.
+    server.script["agents"] = _dropped({})
+    with pytest.raises(turns.TurnsError) as caught:
+        s.agents()
+    assert caught.value.why == "closed"
+
+
 def test_every_why_is_one_the_library_names():
     assert client.WHYS == ("unreachable", "timeout", "closed", "gone", "version", "refused",
                            "unreadable")

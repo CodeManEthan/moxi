@@ -14,9 +14,11 @@ fields are `sessionId`, `name` and `nameSource`, which says where the name came 
 | `derived` | made from the folder, with no name given |
 | `auto` | written by the model |
 | `collision` | a name changed to tell it from another session's |
-| `peer`, `hook` | set by another session, or by a hook |
+| `peer` | typed with `/rename` in another process of the same session, which wrote it |
+| `hook` | set by a hook |
 
-Only the first two are a name the person typed, so only they are read. A record whose
+Absent, `user` and `peer` are a name the person typed (Claude Code lists `peer` names with
+`user` ones), so only they are read. A record whose
 `sessionId` is not the session's current id is not read either: it may be one a process
 that has ended left behind, under a pid used again.
 
@@ -35,7 +37,7 @@ from moxi import paths
 log = logging.getLogger("moxi.turns.claude")
 
 #: The `nameSource` values of a name the person typed; None is a record with none.
-TYPED_SOURCES = (None, "user")
+TYPED_SOURCES = (None, "user", "peer")
 #: The largest record read, in bytes; Claude Code reads no more of one.
 RECORD_MAX_BYTES = 262_144
 
