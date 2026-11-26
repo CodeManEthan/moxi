@@ -19,7 +19,9 @@
    by the module, the requirement is each such extra (`moxi-comms[cache]`), so every
    depending module's version range applies. `--from` gives requirements with a direct
    URL (`moxi-turns @ git+...`), for before PyPI holds the modules: give one for each Moxi
-   distribution the module needs that the environment lacks.
+   distribution the module needs that the environment lacks. On Windows the executables
+   the running `moxi` can be are moved aside for the command's run (`moxi_moved_aside`),
+   since Windows refuses to remove or write over a running one.
 3. Run the settle step of each module the step installed, in a fresh process
    (`moxi._settle`): the move of its data out of an old host folder, its `SETUP`, and its
    units, with every daemon the move stopped started again however the step ends; then
@@ -54,6 +56,8 @@ import json
 import os
 import subprocess
 import sys
+from collections.abc import Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -441,6 +445,84 @@ def _quote(arg: str) -> str:
     return shlex.quote(arg)
 
 
+#: Put between a `moxi` executable's name and a hex part when it is moved aside on Windows.
+ASIDE_MARK = ".old-"
+_WINDOWS = sys.platform == "win32"
+
+
+def _moxi_executables(env: InstallEnv) -> list[Path]:
+    """The executables a re-run may remove or write over that a running `moxi` can be: the
+    environment's own `Scripts\\moxi.exe` and, in a uv tool environment, each executable
+    uv put on PATH for the tool."""
+    found = [env.prefix / "Scripts" / "moxi.exe"]
+    tool = (env.receipt or {}).get("tool")
+    entries = tool.get("entrypoints") if isinstance(tool, dict) else None
+    for entry in entries if isinstance(entries, list) else ():
+        if isinstance(entry, dict) and isinstance(entry.get("install-path"), str):
+            found.append(Path(entry["install-path"]))
+    return list(dict.fromkeys(found))
+
+
+@contextmanager
+def moxi_moved_aside(env: InstallEnv) -> Iterator[list[Path]]:
+    """On Windows, while the install or uninstall command runs: each executable a running
+    `moxi` can be is renamed to `<name>.old-<hex>` and a copy put back in its place.
+    Yields the renamed files.
+
+    Windows refuses to delete or write over an executable a process is running, which
+    the `moxi` that runs the command is, and uv's re-run removes and writes the tool's
+    executables again. Renaming a running executable is allowed, so the copy, which
+    nothing runs, is what uv removes or writes over, and the environment looks to uv as
+    it did. Afterwards each renamed file is removed; one still running stays, and the next
+    install or uninstall removes what is left of earlier ones first. Elsewhere it does
+    nothing: POSIX removes a running executable's name and the process keeps running.
+
+    A rename is refused while a file is open without delete sharing, and this process
+    holds its own executable open so: Python runs it as a zip, and `importlib.metadata`
+    keeps each zip on `sys.path` it has read open in its cache. The import caches are
+    cleared first, which closes them.
+    """
+    moved: list[Path] = []
+    if not _WINDOWS:
+        yield moved
+        return
+    import gc
+    import importlib
+    import secrets
+    import shutil
+
+    importlib.invalidate_caches()
+    gc.collect()
+
+    for path in _moxi_executables(env):
+        for left in path.parent.glob(f"{path.name}{ASIDE_MARK}*"):
+            try:
+                left.unlink()
+            except OSError:
+                pass
+        if not path.is_file():
+            continue
+        aside = path.with_name(f"{path.name}{ASIDE_MARK}{secrets.token_hex(4)}")
+        try:
+            path.rename(aside)
+        except OSError:
+            continue
+        try:
+            shutil.copy2(aside, path)
+        except OSError:
+            aside.replace(path)
+            continue
+        moved.append(aside)
+    try:
+        yield moved
+    finally:
+        for aside in moved:
+            try:
+                aside.unlink()
+            except OSError:
+                pass
+
+
 _SNAPSHOT = "import sys\nfrom moxi.cli import main\nsys.exit(main(['modules', '--json']))\n"
 
 
@@ -745,14 +827,17 @@ class Installer:
             with tempfile.TemporaryDirectory(prefix="moxi-install-") as scratch:
                 argv, extra_env, _ = tool_command(env.receipt, env.prefix, reqs, uv,
                                                   Path(scratch))
-                code = run(argv, extra_env)
+                with moxi_moved_aside(env):
+                    code = run(argv, extra_env)
         else:
             sourced = []
             for req in reqs:
                 source = None if req.url or req.editable else installed_source(req.name)
                 sourced.append(source.merged(req) if source else req)
             reqs = sourced
-            code = run(_plain_command(reqs))
+            argv = _plain_command(reqs)
+            with moxi_moved_aside(env):
+                code = run(argv)
         if code != 0:
             print(f"moxi install: the install failed (exit {code}); nothing was set up.",
                   file=sys.stderr)

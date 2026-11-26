@@ -12,6 +12,7 @@ import io
 import os
 import shutil
 import sys
+import time
 from pathlib import Path
 
 import pytest
@@ -813,3 +814,115 @@ def test_a_listed_name_installs_the_catalogue_s_distribution(fake, capsys, monke
     assert code == 0, err
     assert seen[0].distribution == "moxi-turns"
     assert fake.runs[0][5] == "moxi-turns"
+
+
+# -- the running moxi's executables on Windows ------------------------------------------------
+
+
+def _tool_env(root: Path) -> install.InstallEnv:
+    """A uv tool environment's layout on Windows: its own `Scripts\\moxi.exe` and the copy
+    on PATH the receipt names."""
+    prefix, bin_dir = root / "tools" / "moxi", root / "bin"
+    (prefix / "Scripts").mkdir(parents=True)
+    bin_dir.mkdir()
+    (prefix / "Scripts" / "moxi.exe").write_bytes(b"own")
+    (bin_dir / "moxi.exe").write_bytes(b"on path")
+    receipt = {"tool": {"requirements": [{"name": "moxi"}], "entrypoints": [
+        {"name": "moxi", "install-path": (bin_dir / "moxi.exe").as_posix(), "from": "moxi"}]}}
+    return install.InstallEnv(install.TOOL, prefix, "python", receipt)
+
+
+def test_the_moxi_executables_are_moved_aside_with_a_copy_left_in_place(
+        tmp_path, monkeypatch):
+    monkeypatch.setattr(install, "_WINDOWS", True)
+    env = _tool_env(tmp_path)
+    own, on_path = env.prefix / "Scripts" / "moxi.exe", tmp_path / "bin" / "moxi.exe"
+    left = on_path.with_name("moxi.exe.old-0000")
+    left.write_bytes(b"an earlier run's")
+    with install.moxi_moved_aside(env) as moved:
+        assert sorted(p.parent for p in moved) == sorted([own.parent, on_path.parent])
+        for aside, path, data in zip(moved, (own, on_path), (b"own", b"on path"),
+                                     strict=True):
+            assert aside.name.startswith("moxi.exe.old-") and aside.read_bytes() == data
+            assert path.read_bytes() == data
+        assert not left.exists(), "an earlier run's file is removed first"
+        own.unlink()  # what uv removes is the copy
+    assert [p.name for p in on_path.parent.iterdir()] == ["moxi.exe"]
+    assert list(own.parent.iterdir()) == []
+
+
+def test_a_plain_env_moves_its_own_moxi_aside(tmp_path, monkeypatch):
+    monkeypatch.setattr(install, "_WINDOWS", True)
+    (tmp_path / "Scripts").mkdir()
+    (tmp_path / "Scripts" / "moxi.exe").write_bytes(b"own")
+    with install.moxi_moved_aside(install.InstallEnv(install.PLAIN, tmp_path, "py")) as moved:
+        assert [p.parent.name for p in moved] == ["Scripts"]
+    assert [p.name for p in (tmp_path / "Scripts").iterdir()] == ["moxi.exe"]
+
+
+def test_nothing_is_moved_aside_off_windows(tmp_path, monkeypatch):
+    monkeypatch.setattr(install, "_WINDOWS", False)
+    env = _tool_env(tmp_path)
+    with install.moxi_moved_aside(env) as moved:
+        assert moved == []
+    assert sorted(p.name for p in (tmp_path / "bin").iterdir()) == ["moxi.exe"]
+
+
+@pytest.mark.skipif(sys.platform != "win32",
+                    reason="Windows refuses to remove a running executable; POSIX doesn't")
+def test_a_running_moxi_is_moved_aside_so_its_name_can_be_removed(tmp_path):
+    import subprocess
+
+    from moxi_dev.testing import console_script
+
+    scripts = tmp_path / "Scripts"
+    scripts.mkdir()
+    path = console_script(scripts, "moxi", "import time\ntime.sleep(60)\n")
+    env = install.InstallEnv(install.PLAIN, tmp_path, "py")
+    running = subprocess.Popen([str(path)])
+    try:
+        deadline = time.monotonic() + PROC_WAIT_S
+        while True:  # held once Windows has mapped the image
+            try:
+                with open(path, "r+b"):
+                    pass
+            except PermissionError:
+                break
+            assert time.monotonic() < deadline, "the stand-in never ran"
+            time.sleep(0.05)
+        with install.moxi_moved_aside(env) as moved:
+            path.unlink()
+            path.write_bytes(b"a new moxi")
+        assert moved[0].exists(), "the running one stays until it exits"
+    finally:
+        running.kill()
+        running.wait()
+    with install.moxi_moved_aside(env):
+        pass
+    assert [p.name for p in scripts.iterdir()] == ["moxi.exe"]
+    assert path.read_bytes() == b"a new moxi"
+
+
+@pytest.mark.skipif(sys.platform != "win32",
+                    reason="Windows refuses to rename a file open without delete sharing")
+def test_a_moxi_whose_zip_this_process_has_read_is_moved_aside(tmp_path, monkeypatch):
+    """Python runs a console script's `.exe` as a zip on `sys.path`, and
+    `importlib.metadata` keeps a zip it has read open: the `moxi` running the install
+    holds its own executable that way."""
+    import importlib.metadata
+    import zipfile
+
+    scripts = tmp_path / "Scripts"
+    scripts.mkdir()
+    path = scripts / "moxi.exe"
+    with zipfile.ZipFile(path, "w") as zip_fh:
+        zip_fh.writestr("__main__.py", "")
+    monkeypatch.syspath_prepend(str(path))
+    importlib.invalidate_caches()
+    list(importlib.metadata.distributions())
+    with pytest.raises(PermissionError):
+        path.rename(path.with_name("moxi.exe.held"))
+    with install.moxi_moved_aside(install.InstallEnv(install.PLAIN, tmp_path, "py")) as moved:
+        assert [p.parent for p in moved] == [scripts]
+        path.unlink()
+    assert list(scripts.iterdir()) == []

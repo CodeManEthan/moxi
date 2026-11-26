@@ -348,16 +348,24 @@ def offline_uv_env(tmp_path, uv_env):
     env = {k: v for k, v in os.environ.items()
            if not k.startswith(("UV_", "VIRTUAL_ENV", "PYTHON"))}
     # No other moxi on PATH (the workspace's own), which the tool's moxi would tell as
-    # holding strays.
+    # holding strays, but uv's own folder stays (uv's installer and `uv tool install moxi`
+    # can share one). `shutil.which` finds `moxi.exe` too on Windows.
+    uv_dir = os.path.dirname(shutil.which("uv"))
     env["PATH"] = os.pathsep.join(
         p for p in env.get("PATH", "").split(os.pathsep)
-        if p and not os.path.isfile(os.path.join(p, "moxi")))
+        if p and (shutil.which("moxi", path=p) is None or _same_dir(p, uv_dir)))
     env.update(UV_TOOL_DIR=str(tmp_path / "tools"), UV_TOOL_BIN_DIR=str(tmp_path / "bin"),
                UV_CACHE_DIR=str(tmp_path / "uv-cache"), UV_OFFLINE="1",
                UV_PYTHON_INSTALL_DIR=uv_env["UV_PYTHON_INSTALL_DIR"],
                UV_PYTHON_DOWNLOADS="never", UV_NO_CONFIG="1", UV_NO_PROGRESS="1",
                MOXI_HOME=str(tmp_path / "moxi-home"))
     return env
+
+
+def _same_dir(a: str, b: str) -> bool:
+    import os
+
+    return os.path.normcase(os.path.realpath(a)) == os.path.normcase(os.path.realpath(b))
 
 
 def module_wheel(out: Path, name: str, *, requires: tuple[str, ...] = (),

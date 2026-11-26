@@ -29,6 +29,7 @@ its pid, and the event. The box's layout is in the JSON file `MOXITEST_BOX` name
 
 from __future__ import annotations
 
+import contextlib
 import json
 import os
 import signal
@@ -207,6 +208,8 @@ def parent(argv: list[str]) -> int:
             install.install_env = lambda: install.InstallEnv(
                 install.PLAIN, Path(sys.prefix), sys.executable)
             install.run = lambda argv, env=None: note("parent", ran=argv) or 0
+            # The environment is the suite's own: nothing of it is moved aside.
+            install.moxi_moved_aside = lambda env: contextlib.nullcontext([])
             uninstall.run_teardown = (
                 lambda python, module: run_settle(python, module, teardown=True))
             args = uninstall._parser("moxi uninstall").parse_args([names[0]])

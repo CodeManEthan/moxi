@@ -17,8 +17,9 @@ from pathlib import Path
 import pytest
 
 
+WINDOWS = sys.platform == "win32"
 #: The folder of an environment's scripts on this system.
-SCRIPTS = "Scripts" if sys.platform == "win32" else "bin"
+SCRIPTS = "Scripts" if WINDOWS else "bin"
 
 
 def exe(name: str) -> str:
@@ -109,21 +110,37 @@ def test_an_upgrade_keeps_a_with(uv):
     assert uv.modules(uv.bin / "moxi") == ["cache", "comms", "turns"]
 
 
+def _site(uv) -> Path:
+    lib = uv.tools / "moxi-comms" / ("Lib" if WINDOWS else "lib")
+    return next(lib.glob("site-packages" if WINDOWS else "python*/site-packages"))
+
+
 def test_a_re_run_without_a_with_removes_it_and_with_it_moxi(uv):
     uv.tool("install", "moxi-comms", "--with", "moxi-cache")
-    done = uv.tool("install", "moxi-comms")
-    assert "Installed 2 executables: moxi, moxi-comms-daemon" in done.stderr
-    site = next((uv.tools / "moxi-comms" / "lib").glob("python*/site-packages"))
-    assert not list(site.glob("moxi_cache-*.dist-info"))
-    # moxi-cache's RECORD listed bin/moxi, and its removal deleted the file moxi-comms
-    # also wrote: the PATH link dangles.
-    assert not (uv.tools / "moxi-comms" / "bin" / "moxi").exists()
-    assert (uv.bin / "moxi").is_symlink() and not (uv.bin / "moxi").exists()
+    done = uv.tool("install", "moxi-comms", check=not WINDOWS)
+    assert not list(_site(uv).glob("moxi_cache-*.dist-info"))
+    # moxi-cache's RECORD listed the environment's moxi, and its removal deleted the file
+    # moxi-comms also wrote.
+    assert not (uv.tools / "moxi-comms" / SCRIPTS / exe("moxi")).exists()
+    if WINDOWS:
+        # uv copies a tool's executables to PATH there, and the copy has no source left:
+        # the re-run fails, moxi is gone from PATH too, and the receipt is the old one.
+        assert done.returncode != 0
+        assert "Failed to install entrypoint" in done.stderr
+        assert not (uv.bin / exe("moxi")).exists()
+        assert uv.receipt("moxi-comms")["requirements"] == [{"name": "moxi-comms"},
+                                                            {"name": "moxi-cache"}]
+    else:
+        # The PATH link dangles.
+        assert "Installed 2 executables: moxi, moxi-comms-daemon" in done.stderr
+        assert (uv.bin / "moxi").is_symlink() and not (uv.bin / "moxi").exists()
 
 
 def test_a_dangling_moxi_link_is_no_clash(uv):
+    """After the re-run above, PATH holds a dangling link (POSIX) or no moxi at all
+    (Windows): either way another tool's moxi installs."""
     uv.tool("install", "moxi-comms", "--with", "moxi-cache")
-    uv.tool("install", "moxi-comms")
+    uv.tool("install", "moxi-comms", check=not WINDOWS)
     done = uv.tool("install", "moxi")
     assert "Installed 1 executable: moxi" in done.stderr
 
@@ -138,7 +155,7 @@ def test_another_tool_s_internal_scripts_stay_off_path(uv):
 
 def test_reinstall_package_repairs_a_lost_moxi(uv):
     uv.tool("install", "moxi-comms", "--with", "moxi-cache")
-    uv.tool("install", "moxi-comms")
+    uv.tool("install", "moxi-comms", check=not WINDOWS)  # fails on Windows, as above
     uv.tool("install", "moxi-comms", "--reinstall-package", "moxi-comms")
     assert (uv.tools / "moxi-comms" / SCRIPTS / exe("moxi")).exists()
     assert uv.modules(uv.bin / "moxi") == ["comms", "turns"]

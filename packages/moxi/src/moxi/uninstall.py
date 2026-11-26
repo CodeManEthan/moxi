@@ -24,7 +24,8 @@
 5. Its placements (`_placements`).
 6. The package: in a uv tool environment, `uv tool install` run again from the receipt
    without `moxi-<module>` and without any extra named `<module>` on another
-   requirement; in a plain one, `uv pip uninstall` (or `pip uninstall`). Modules it
+   requirement; in a plain one, `uv pip uninstall` (or `pip uninstall`), each with the
+   running `moxi`'s executables moved aside on Windows, as install does. Modules it
    pulled in stay installed (in a uv tool environment they are written into the receipt
    for that), and the report names each that nothing else requires, with its own
    uninstall line.
@@ -333,9 +334,11 @@ class Uninstaller:
                     say(f"moxi uninstall: {exc}", err=True)
                     self.failed.append("package")
                     return
-                code = install.run(argv, extra_env)
+                with install.moxi_moved_aside(env):
+                    code = install.run(argv, extra_env)
         else:
-            code = install.run(uninstall_command(dist))
+            with install.moxi_moved_aside(env):
+                code = install.run(uninstall_command(dist))
         if code != 0:
             say(f"moxi uninstall: removing {dist} failed (exit {code})", err=True)
             self.failed.append("package")

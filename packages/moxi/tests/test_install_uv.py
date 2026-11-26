@@ -7,6 +7,7 @@ find-links directory, so only `--from` reaches them, as before PyPI holds the mo
 from __future__ import annotations
 
 import json
+import re
 import subprocess
 import sys
 import tomllib
@@ -77,7 +78,7 @@ def tool(tmp_path, offline_uv_env, wheels):
             wheel = next(direct.glob(f"moxi_{name}-*.whl"))
             return f"moxi-{name} @ {wheel.as_uri()}"
 
-        def moxi(self, *args: str, code: int = 0) -> str:
+        def moxi(self, *args: str, code: int = 0, stdout_only: bool = False) -> str:
             # The tool's own options must carry the re-runs: the environment sets none.
             env = {k: v for k, v in offline_uv_env.items()
                    if k not in ("UV_TOOL_DIR", "UV_TOOL_BIN_DIR")}
@@ -85,13 +86,14 @@ def tool(tmp_path, offline_uv_env, wheels):
                                   capture_output=True, text=True, timeout=300,
                                   stdin=subprocess.DEVNULL)
             assert done.returncode == code, done.stdout + done.stderr
-            return done.stdout + done.stderr
+            return done.stdout if stdout_only else done.stdout + done.stderr
 
         def receipt(self) -> dict:
             return tomllib.loads((self.prefix / "uv-receipt.toml").read_text())["tool"]
 
         def modules(self) -> dict[str, dict]:
-            info = json.loads(self.moxi("modules", "--json"))
+            # stdout alone: a moxi beside uv on PATH is told on stderr as holding strays.
+            info = json.loads(self.moxi("modules", "--json", stdout_only=True))
             return {m["name"]: m for m in info["modules"]}
 
         def setups(self) -> list[str]:
@@ -194,5 +196,6 @@ def test_install_in_a_plain_env(tool, tmp_path, offline_uv_env):
                           env=offline_uv_env, capture_output=True, text=True, timeout=300,
                           stdin=subprocess.DEVNULL)
     assert done.returncode == 0, done.stdout + done.stderr
-    assert "uv pip install --python" in done.stdout
+    # uv by its found path, which on Windows ends `uv.exe` in any case and is quoted.
+    assert re.search(r"\buv(\.exe)?'? pip install --python", done.stdout, re.IGNORECASE)
     assert "installed comms" in done.stdout and "installed turns" in done.stdout

@@ -2,6 +2,13 @@
 
 ## 0.1.11 (unreleased)
 
+- On Windows `moxi install` and `moxi uninstall` work in the environment the running
+  `moxi` lives in. Windows refuses to remove or write over a running executable, and uv's
+  re-run of the `moxi` tool removes and writes its executables again, so the install
+  failed and uv then tried to delete the whole tool environment. While the command runs,
+  each `moxi` executable is renamed to `<name>.old-<hex>` with a copy left in its place;
+  the renamed file is removed afterwards, or by the next install or uninstall when it was
+  still running.
 - On Windows a closed `proc.lifeline` wakes a main thread asleep in `time.sleep`, so the
   default close raises `KeyboardInterrupt` there as on POSIX. It interrupted through
   `_thread.interrupt_main`, which never wakes a sleep on Windows, and the process was
