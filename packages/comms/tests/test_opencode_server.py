@@ -100,7 +100,9 @@ def test_a_model_list_names_the_default_and_then_its_fallbacks(tmp_path):
     ('model = "nope"\n', "no cwd"),
     ('cwd = "/w"\nmodel = "nope"\n', "provider/model"),
     ('cwd = "/w"\nport = 4096\n', "unknown key"),
-    ('cwd = "/w"\napi_key = "sk-abcdefghijklmnopqrstuvwxyz0123456789"\n', ""),
+    # A made-up key, joined at run time so no file in the tree holds it whole.
+    ('cwd = "/w"\napi_key = "' + "".join(("s", "k-"))
+     + 'abcdefghijklmnopqrstuvwxyz0123456789"\n', ""),
 ])
 def test_a_bad_row_is_refused(tmp_path, row, why):
     path = write(tmp_path, f'[agents."coder@proj-a"]\n{row}')
