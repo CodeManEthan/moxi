@@ -631,13 +631,35 @@ def test_a_page_without_health_reports_ok_and_no_check(pages):
 # --- the idle counts and busy holds ------------------------------------------------------
 
 
-def test_health_probes_and_proofs_never_count_and_never_restart_an_idle_run(pages):
+class HeldClock:
+    """The server's `time`, with a `monotonic` the test holds and moves itself, so an
+    idle run is read without a sleep: Windows' clock steps by 15.6 ms and fires a sleep
+    early by up to one step. Everything else is the real `time`."""
+
+    def __init__(self) -> None:
+        self.now = time.monotonic()
+
+    def monotonic(self) -> float:
+        return self.now
+
+    def __getattr__(self, name):
+        return getattr(time, name)
+
+
+@pytest.fixture
+def clock(monkeypatch):
+    held = HeldClock()
+    monkeypatch.setattr(server, "time", held)
+    return held
+
+
+def test_health_probes_and_proofs_never_count_and_never_restart_an_idle_run(pages, clock):
     chain, inner = served(pages)
     activity = inner.activity
 
     async def go():
         first = activity.quiet()
-        await asyncio.sleep(0.05)
+        clock.now += 0.05
         await drive(chain, scope(path="/api/health"))
         await drive(chain, prove_scope(NONCE))
         await drive(chain, scope(path="/api/summary", token=False))
@@ -645,29 +667,33 @@ def test_health_probes_and_proofs_never_count_and_never_restart_an_idle_run(page
 
     first, after = run(go())
     assert first is not None and after is not None
-    assert after >= first + 0.05
+    assert after == pytest.approx(first + 0.05)
 
 
-def test_a_counted_request_restarts_the_idle_run_when_it_ends(pages):
+def test_a_counted_request_restarts_the_idle_run_when_it_ends(pages, clock):
     chain, inner = served(pages)
     activity = inner.activity
 
     async def go():
-        await asyncio.sleep(0.05)
+        clock.now += 0.05
         before = activity.quiet()
         pages.STATE["wait"] = asyncio.Event()
         task = asyncio.get_running_loop().create_task(drive(chain, scope(path="/api/wait")))
-        await asyncio.sleep(0.02)
+        for _ in range(500):
+            if activity.requests:
+                break
+            await asyncio.sleep(0)
         during = (activity.quiet(), activity.requests, activity.open())
+        clock.now += 0.02
         pages.STATE["wait"].set()
         await task
         return before, during, activity.quiet()
 
     before, during, after = run(go())
-    assert before >= 0.05
+    assert before == pytest.approx(0.05)
     assert during[0] is None and during[1] == 1
     assert during[2]["requests"] == 1
-    assert after < before
+    assert after == 0
 
 
 def test_a_busy_hold_holds_idle_from_any_thread(pages):

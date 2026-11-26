@@ -705,7 +705,8 @@ def test_the_daemon_takes_a_flag_that_agrees_and_mock_with_a_scratch_store(monke
     False])
 def test_the_daemon_stops_on_sigterm_and_on_sighup_where_there_is_one(monkeypatch, tmp_path,
                                                                     has_sighup):
-    """Windows has no SIGHUP; the daemon starts there all the same."""
+    """Windows has no SIGHUP; the daemon starts there all the same, and takes Ctrl+Break
+    (SIGBREAK) where the system has one."""
     import signal
 
     installed: list = []
@@ -727,7 +728,8 @@ def test_the_daemon_stops_on_sigterm_and_on_sighup_where_there_is_one(monkeypatc
         monkeypatch.delattr(signal, "SIGHUP", raising=False)
     with pytest.raises(SystemExit, match="stop here"):
         daemon_mod.main([])
-    expected = [signal.SIGTERM] + ([signal.SIGHUP] if has_sighup else [])
+    expected = [signal.SIGTERM] + ([signal.SIGHUP] if has_sighup else []) + (
+        [signal.SIGBREAK] if hasattr(signal, "SIGBREAK") else [])
     assert installed == expected
 
 

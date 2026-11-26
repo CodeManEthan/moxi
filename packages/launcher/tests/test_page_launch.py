@@ -384,6 +384,9 @@ def test_the_pages_preview_refuses_a_scratch_set_to_recycle_itself(work, monkeyp
 
 def test_a_word_enum_left_out_launches_with_no_recycling(work, monkeypatch):
     monkeypatch.setattr(slots, "links", lambda name: name in ("turns", "cache"))
+    # The preset's recycle_on_expiry needs cache to read session environments, which it
+    # can't on Windows; the row is about leaving the word out, on every system.
+    monkeypatch.setattr(catalog, "session_env_readable", lambda: True)
     write_presets(f'[seat.lead]\ncwd = {toml_string(work)}\nrecycle_on_expiry = "compact"\n')
     body = edited(filled({"seat": "lead"}), {}, ["recycle_on_expiry"])
     request, _ = pagehandlers.launch_request(body, "r1")
