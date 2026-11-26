@@ -333,23 +333,56 @@ def test_two_streams_make_one_upstream_with_the_union_and_a_late_joiner_gets_val
 
 
 def test_the_upstream_reopens_once_50_ms_after_the_union_last_changed():
+    """The reopen waits on the loop's clock, which this test holds and moves itself, so
+    no wait here depends on how fast the machine runs: each change of the union puts the
+    reopen `REOPEN_AFTER` after it, and nothing opens before then."""
     async def body():
+        loop = asyncio.get_running_loop()
+        now = [loop.time()]
+        loop.time = lambda: now[0]
+        upstream = push_mod.REOPEN_AFTER
+
+        async def until(done, what):
+            for _ in range(500):
+                if done():
+                    return
+                await asyncio.sleep(0)
+            raise AssertionError(f"never: {what}")
+
+        async def later(seconds):
+            """Move the clock on and let what came due run."""
+            now[0] += seconds
+            for _ in range(50):
+                await asyncio.sleep(0)
+
+        def reopen_at(at):
+            held = push.upstream("fx")
+            timer = None if held is None else held.timer
+            return timer is not None and abs(timer.when() - at) < 1e-6
+
         push, client = fake_push()
         readers = []
         for topics in ("fx.one", "fx.two", "fx.three"):
             readers.append(Reader(push, ask(topics)).start())
-            await asyncio.sleep(0.02)
-        assert client.requests == []
-        await settle()
+            await until(lambda: reopen_at(now[0] + upstream), f"{topics} moves the reopen")
+            await later(0.02)
+        # 30 ms before the reopen is due: more than the one clock step (15.6 ms) by which
+        # asyncio fires a timer early on Windows.
+        assert client.requests == [], "the last change was 20 ms ago"
+        await later(upstream - 0.02)
+        await until(lambda: client.requests, "the reopen")
         assert client.requests == [("fx", "/api/events?topics=one,three,two")]
 
         readers[2].leave()
         await readers[2].task
-        await asyncio.sleep(0.02)
+        await until(lambda: reopen_at(now[0] + upstream), "the leave moves the reopen")
+        await later(0.02)
         assert len(client.requests) == 1
-        await settle()
+        await later(upstream - 0.02)
+        await until(lambda: len(client.requests) == 2, "the second reopen")
         assert client.requests[-1] == ("fx", "/api/events?topics=one,two")
-        assert len(client.live()) == 1 and client.open[0].closed
+        await until(lambda: len(client.live()) == 1 and client.open[0].closed,
+                    "the first upstream closes")
         states = [item for item in readers[0].drained() if item[0] == "moxi.state"]
         # A slow reader may see only the latest state; a reopen for a new union adds none.
         assert [data["state"] for _, data in states] in (["up"], ["starting", "up"])

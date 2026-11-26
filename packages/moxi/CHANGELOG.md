@@ -12,6 +12,11 @@
   are a file or a pipe, and a gate run from a terminal shares its console with the
   command. The command started with no window of its own, so it read and wrote a hidden
   console, and a supervisor's log or a caller's pipe got nothing.
+- `moxi.files.replace(src, dst)`: `os.replace`, which on Windows is tried again for up to
+  a second while another process holds the target open without delete sharing (a
+  reader, a virus scanner, another write of the same file). It is the replace
+  `atomic_write` and the record log's roll already used, now public so a module that
+  writes through a temp file of its own uses the same one.
 - `moxi.files.writable(path)`: whether this account can write a file or folder. On
   Windows `os.access` reads only the read-only attribute, so a folder its access list
   closes read as writable; there it tries a write. The doctor's record row reads a

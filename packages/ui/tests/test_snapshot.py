@@ -492,16 +492,17 @@ def test_the_announcement_declares_the_shell_its_page_and_components():
 
 
 @pytest.mark.skipif(sys.platform != "win32", reason="the logon task is planned on Windows")
-def test_on_windows_the_shell_is_planned_as_a_logon_task_with_no_socket():
+def test_on_windows_the_shell_is_planned_as_a_logon_task_with_no_socket(monkeypatch):
     from moxi import units
+    from moxi.units import _plan
 
+    # Units are written only from an installed release, and the suite runs ui from its
+    # source under the fence's module homes; both refusals are lifted so a plan is made.
+    monkeypatch.setattr(_plan, "_editable", lambda found: False)
+    monkeypatch.setattr(_plan, "locators_set", lambda module, env=None: ())
     changes = units.plan("ui")
-    assert [c.kind for c in changes] == ["daemon"]
-    if changes[0].action == "refuse":
-        # Units are written only from an installed release, and the suite runs ui from
-        # its source, under the fence's module homes.
-        assert changes[0].cause in ("editable", "locator"), changes[0].reason
-        return
+    assert [(c.kind, c.action) for c in changes] == [("daemon", "add")], changes[0].reason
+    assert "<LogonTrigger>" in changes[0].text
     assert "moxi-ui-shell" in changes[0].text and "--restart" in changes[0].text
 
 

@@ -334,8 +334,8 @@ def _windows_long_form(monkeypatch, link: Path, target: Path) -> None:
 
 
 @pytest.mark.skipif(os.name != "nt", reason="the long form is how Windows reads a link back")
-def test_a_link_into_the_moved_folder_reads_as_moved_in_windows_long_form(tmp_path,
-                                                                          monkeypatch):
+def test_a_link_into_the_moved_tree_reads_as_moved_in_windows_long_form(tmp_path,
+                                                                        monkeypatch):
     from types import SimpleNamespace
 
     old = tmp_path / "loadout"

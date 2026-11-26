@@ -428,7 +428,7 @@ def _mode_by_hand(path):
     return lambda: path.chmod(0o600)
 
 
-def _folder_in_its_place(path):
+def _a_dir_in_its_place(path):
     """A folder where the file was: not a regular file, a trigger on every system."""
     aside = path.with_name(path.name + ".aside")
     path.rename(aside)
@@ -444,7 +444,7 @@ def _folder_in_its_place(path):
     pytest.param(_mode_by_hand, id="mode", marks=pytest.mark.skipif(
         sys.platform == "win32",
         reason="Windows: no POSIX mode bits, so a mode changed by hand is not seen there")),
-    pytest.param(_folder_in_its_place, id="folder")])
+    pytest.param(_a_dir_in_its_place, id="folder")])
 def test_another_modules_uninstall_keeps_its_cloudflare_entry_while_the_file_cant_be_written(
         three, tailscale, units, yes, capsys, unwritable):
     acts.add("alpha/gateway", provider_name="cloudflare", hostname="g.example.com", ask=yes)
@@ -457,7 +457,7 @@ def test_another_modules_uninstall_keeps_its_cloudflare_entry_while_the_file_can
     assert "tunnel: removed alpha/connector" in out
     assert "alpha/connector" not in entries()
     assert ("rollback", "alpha/gateway") in [(e["event"], e.get("target")) for e in events()]
-    if unwritable is _folder_in_its_place:
+    if unwritable is _a_dir_in_its_place:
         # The file's text can't be read back either, so the rollback can't put it back:
         # the entry is kept as an act left part-done, for a repair once the file is back.
         assert entries()["alpha/gateway"].state == State.APPLYING

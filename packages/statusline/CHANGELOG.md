@@ -40,7 +40,12 @@ The first version.
   Bash with forward slashes and bash's quoting, since bash drops the backslashes of a bare
   Windows path and the line didn't run; under PowerShell as `& '<path>'`. The form written
   before still counts as Moxi's line, so the next switch rewrites it. `pieces`' commands
-  use the Git Bash form.
+  use the Git Bash form. The doctor's `command` row warns when the line's form is for the
+  other shell, as after Git for Windows is installed or removed, which breaks the line
+  with no sign.
+- On Windows the test run moves only `HOME`: `USERPROFILE`, `APPDATA` and `LOCALAPPDATA`
+  stay your own, so a script that finds its home through them writes into your real
+  profile during the run. The README and the module doc say so.
 - `moxi statusline status [--json]`.
 - `moxi statusline pieces` prints those commands, cache's timer first, with each one's
   measured time.

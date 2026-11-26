@@ -8,7 +8,10 @@
   signed number of the same 64 bits, so reuse compares it as before.
 - On Windows the worker ceiling's path rule let no hand-off through: a path under a
   hand-off or work root was tested with `/` only. It reads paths by this system's rules
-  (on Windows `\` divides and case doesn't count).
+  (on Windows `\` divides and case doesn't count). A directory or `git add --` path in
+  a Bash command may be written in Git Bash's drive form (`/c/Users/...`), which is read
+  as the drive path it names; it was resolved as a folder `c` on the current drive and
+  refused, so an agent on Git Bash was refused its own hand-off commit.
 - `marks.default` is gone: a session with no `MOXI_USAGE_WARN_AT` stamp gets no notice,
   whether the launcher started it with no `warn_at` (a Codex launch that sets none) or
   did not start it. Nothing reads a config default; the key is retired, and a config that

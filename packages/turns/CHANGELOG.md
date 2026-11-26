@@ -6,7 +6,8 @@
   stream, which turns `\n` into `\r\n` there. The process's stdout writes `\n` as it is
   now, so the wire is the same bytes on every system.
 - On Windows two `endpoint.json` writes at once could fail one of them ("Access is
-  denied" from the replace). A replace Windows refuses is tried again for up to a second.
+  denied" from the replace). A replace Windows refuses is tried again for up to a second,
+  through the core's `moxi.files.replace`, so turns needs moxi 0.1.11 or later.
 - On Windows a start list's run entry stopped at the bound is logged at once. Turns closed
   the program's output after the stop while the reader thread still read it, which waited
   for any process the program started that still held the output.

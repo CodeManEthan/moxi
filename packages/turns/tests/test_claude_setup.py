@@ -145,6 +145,23 @@ def test_a_failed_write_leaves_no_temp_file(placed, monkeypatch):
     assert _temps(placed) == []
 
 
+def test_the_write_goes_through_the_cores_retrying_replace(placed, monkeypatch):
+    """The core's replace is the one that waits out a replace Windows refuses for a
+    moment (another write of the same file at once)."""
+    from moxi import files
+
+    moves = []
+    real = files.replace
+
+    def spy(src, dst):
+        moves.append(Path(dst).name)
+        real(src, dst)
+
+    monkeypatch.setattr(files, "replace", spy)
+    claude_setup.write_endpoint_file()
+    assert moves == ["endpoint.json"]
+
+
 @pytest.mark.skipif(os.name == "nt", reason="a read-only folder is made by mode bits, "
                     "which Windows doesn't read")
 def test_a_read_only_runner_dir_is_a_setup_error(placed):

@@ -51,8 +51,13 @@ command's own text is replaced by the real home folder first (with forward slash
 Git Bash), quoted by the shell's rules where it sits, so the command is still found and a
 home with a space stays one word. PowerShell's own `$HOME` is the real home (it follows
 `USERPROFILE`, which the run keeps), and PowerShell can't join a quoted piece to the rest
-of a bare word, so there a `~` becomes `$HOME` and `$HOME` is left as it is. Writes to absolute paths, and processes that leave the group, still escape. The
-throwaway folder is made fresh under the system temp folder and removed every time.
+of a bare word, so there a `~` becomes `$HOME` and `$HOME` is left as it is. Writes to
+absolute paths, and processes that leave the group, still escape. On Windows only `HOME`
+moves: `USERPROFILE`, `APPDATA` and `LOCALAPPDATA` stay the real profile's (PowerShell's
+`$HOME` needs it), so a script that finds its home or its default folders through them
+(Python's `Path.home()`, a native program's profile folders) writes into the real profile,
+with the made-up input. The throwaway folder is made fresh under the system temp folder
+and removed every time.
 
 **Reading the output.** Escape sequences (colours, links) are stripped, then each marker
 is found as a token. Each piece found has its place and its row. What is left once the

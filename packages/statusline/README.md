@@ -68,7 +68,10 @@ set, so what the script writes under its home lands there and is removed after; 
 home with a space in its name works. It gets 5 seconds, then it and every
 process it started are ended, and what it left running is ended once it exits too: on
 POSIX its process group, on Windows its job. Writes to absolute paths, and processes that
-leave the group, are not caught.
+leave the group, are not caught. On Windows only `HOME` moves: `USERPROFILE`, `APPDATA`
+and `LOCALAPPDATA` stay your own (PowerShell's `$HOME` follows `USERPROFILE`), so a script that
+finds its home or its folders through them, as Python's `Path.home()` and native programs
+do, writes into your real profile during the test run, with the made-up input.
 
 **The shell.** Moxi runs a command the way Claude Code runs a status line: `sh -c` on
 Linux and macOS. On Windows, Claude Code's docs say it uses Git Bash when it is installed,

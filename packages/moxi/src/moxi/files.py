@@ -92,7 +92,7 @@ def atomic_write(path: str | os.PathLike, data: bytes | str, *, mode: int = 0o60
             os.fsync(fd)
         finally:
             os.close(fd)
-        _replace(tmp, path)
+        replace(tmp, path)
     except BaseException:
         try:
             os.unlink(tmp)
@@ -103,12 +103,14 @@ def atomic_write(path: str | os.PathLike, data: bytes | str, *, mode: int = 0o60
         _fsync_dir(path.parent)
 
 
-def _replace(src: Path, dst: Path) -> None:
+def replace(src: str | os.PathLike, dst: str | os.PathLike) -> None:
+    """`os.replace(src, dst)`, which on Windows is tried again for up to `REPLACE_RETRY`
+    seconds while it raises `PermissionError`: another process holding `dst` open without
+    delete sharing (a reader, a virus scanner, another write of the same file) makes a
+    replace fail there for a moment. Elsewhere one `os.replace`; its errors are raised."""
     if not _WINDOWS:
         os.replace(src, dst)
         return
-    # Another process holding the target open without delete sharing (a reader, a virus
-    # scanner) makes a replace fail for a moment; it is tried again for up to a second.
     deadline = time.monotonic() + REPLACE_RETRY
     while True:
         try:
@@ -588,7 +590,7 @@ def _write_line(path: Path, line: bytes, max_bytes: int | None, *, durable: bool
         # Another writer may have rolled the file while this one waited for the lock.
         if _size(path) + len(line) > max_bytes:
             try:
-                _replace(path, _older(path))
+                replace(path, _older(path))
             except FileNotFoundError:
                 pass
         _append(path, line, durable=durable)
@@ -964,5 +966,5 @@ def _owner(uid: int) -> str:
         return f"uid {uid}"
 
 
-__all__ = ["LockTimeout", "atomic_write", "lock", "adopt_core_claim", "update", "edit_toml",
-           "append_record", "Collapse", "read_records", "private_dir"]
+__all__ = ["LockTimeout", "atomic_write", "replace", "lock", "adopt_core_claim", "update",
+           "edit_toml", "append_record", "Collapse", "read_records", "writable", "private_dir"]

@@ -53,7 +53,9 @@ inside its root both as the shell or git reads it (as typed, joined to its base,
 `..` taken off lexically) and fully resolved (the real path of the path as typed and of
 that lexical form). If any reading falls outside, the call is refused. `cd` and git's
 pathspecs read `..` lexically, while `git -C` and the file tools follow links, so a path
-must pass both readings.
+must pass both readings. On Windows a `<dir>` or `add --` path in Git Bash's drive form
+(`/c/Users/...`) is read as the drive path it names (`C:/Users/...`), as Git Bash and the
+git it starts read it; a backslash outside quotes is still refused by the lexer.
 
 **The lexer.** The shell text goes through a quote-aware lexer that refuses every control
 operator but the one `&&` after `cd <dir>`, every redirection, `$` and backticks outside
@@ -66,6 +68,7 @@ from __future__ import annotations
 
 import os
 import re
+import sys
 from collections.abc import Iterable, Mapping, Sequence
 
 #: The suffix a hand-off file must have.
@@ -161,8 +164,23 @@ def allowed(tool: object, tool_input: object, cwd: object, *,
 
 # --- paths ------------------------------------------------------------------------------
 
+_WINDOWS = sys.platform == "win32"
+#: Git Bash's spelling of a drive path: `/c` or `/c/rest`.
+_MSYS_DRIVE = re.compile(r"/([A-Za-z])(/.*)?", re.DOTALL)
+
+
 def _real(path: str) -> str:
     return os.path.realpath(path)
+
+
+def _drive_form(path: str) -> str:
+    """On Windows, a path a Bash command gives in Git Bash's drive form (`/c/Users/you`) as
+    the drive path it names (`C:/Users/you`), as Git Bash and the programs it starts read
+    it; any other path, and every path elsewhere, as it is."""
+    found = _MSYS_DRIVE.fullmatch(path) if _WINDOWS else None
+    if found is None:
+        return path
+    return f"{found.group(1).upper()}:{found.group(2) or '/'}"
 
 
 def _under(path: str, root: str) -> bool:
@@ -402,6 +420,7 @@ def _resolve_dir(d: str, cwd: str, work_roots: object, *, logical: bool,
         raise Refused("empty directory")
     if d.startswith("-"):
         raise Refused("a directory may not start with '-'")
+    d = _drive_form(d)
     got = _inside(d, cwd if base is None else base, [cwd] + _abs_roots(work_roots))
     if got is None:
         raise Refused("the repository directory is outside the working directory and "
@@ -435,7 +454,7 @@ def _git_form(args: list[str], repo: str) -> None:
                 raise Refused("git add: empty path")
             if p.startswith(":"):
                 raise Refused("git add: pathspec magic is not allowed")
-            if _inside(p, repo, [repo]) is None:
+            if _inside(_drive_form(p), repo, [repo]) is None:
                 raise Refused("git add: a path outside the repository directory")
         return
     if t[:1] == ("commit",) and len(t) >= 3 and len(t) % 2 == 1:

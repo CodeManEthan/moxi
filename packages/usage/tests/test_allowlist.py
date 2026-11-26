@@ -10,6 +10,9 @@ the user added.
 
 import os
 import re
+import sys
+
+import pytest
 
 from moxi_usage.allowlist import allowed, patch_files
 
@@ -550,3 +553,40 @@ def test_a_patch_path_loses_only_unicode_white_space_at_its_ends():
             "*** Add File: notes/2025\\u\n+x\n"
             "*** End Patch\u3000\n")
     assert patch_files(text) == ["notes/a.conf", "notes/2025\\u"]
+
+
+def test_git_bashs_drive_form_names_the_drive_path_on_windows_only(monkeypatch):
+    from moxi_usage import allowlist
+
+    monkeypatch.setattr(allowlist, "_WINDOWS", True)
+    assert allowlist._drive_form("/c/Users/x/repo") == "C:/Users/x/repo"
+    assert allowlist._drive_form("/d") == "D:/"
+    for kept in ("/tmp/x", "/cc/x", "C:/Users/x", "relative/c/x", "c/x"):
+        assert allowlist._drive_form(kept) == kept
+    monkeypatch.setattr(allowlist, "_WINDOWS", False)
+    assert allowlist._drive_form("/c/Users/x/repo") == "/c/Users/x/repo"
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="Git Bash's /c/... form is Windows'")
+def test_a_hand_off_through_git_bash_may_spell_its_paths_in_the_drive_form(tmp_path):
+    """Past the ceiling an agent on Windows commits its hand-off through Git Bash, which
+    spells `C:\\Users\\...` as `/c/Users/...`; the path rule reads that form as the drive
+    path it is, and a path outside the roots is still refused in it."""
+    cwd, work = tmp_path / "agent", tmp_path / "work"
+    repo = work / "repo"
+    (repo / "notes").mkdir(parents=True)
+    cwd.mkdir()
+
+    def msys(path):
+        drive, rest = os.path.splitdrive(str(path))
+        return "/" + drive[0].lower() + rest.replace("\\", "/")
+
+    def bash(command):
+        return allowed("Bash", {"command": command, "description": "x"}, str(cwd),
+                       handoff_roots=[str(repo)], work_roots=[str(work)], commands=COMMANDS,
+                       home=str(tmp_path / "home"))
+
+    assert bash(f"cd {msys(repo)} && git status --short") == (True, "")
+    assert bash(f"git -C {msys(repo)} add -- {msys(repo / 'notes' / 'h.md')}") == (True, "")
+    ok, reason = bash(f"cd {msys(tmp_path)} && git status --short")
+    assert not ok and "outside the working directory and every work root" in reason

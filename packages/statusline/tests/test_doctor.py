@@ -7,6 +7,8 @@ import os
 import shlex
 import sys
 
+import pytest
+
 from moxi import paths
 from moxi.doctor import Row
 from moxi_statusline import doctor, switch
@@ -88,6 +90,24 @@ def test_moxis_line_here_is_ok():
     row = doctor.command_row()
     assert (row.state, row.detail) == (
         "ok", f"Moxi's line, {switch.moxis_path({'command': command})}")
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="Windows: the line's form follows "
+                    "the shell Claude Code runs it with, Git Bash or PowerShell")
+def test_moxis_line_written_for_the_other_shell_warns(monkeypatch):
+    """Git for Windows installed or removed after the line was written: the line is
+    Moxi's, but the shell Claude Code now runs it with can't read its form."""
+    from moxi_statusline import shell
+
+    for written, now in (("powershell", "bash"), ("bash", "powershell")):
+        _line(switch.render_command(kind=written))
+        monkeypatch.setattr(shell, "find", lambda env=None, now=now: shell.Shell(
+            now, ("bash", "-c") if now == "bash" else shell.POWERSHELL))
+        row = doctor.command_row()
+        assert (row.state, row.fix) == ("warn", "moxi statusline use"), row.detail
+        assert f"another shell than the one it runs a line with here ({now})" in row.detail
+        _line(switch.render_command(kind=now))
+        assert doctor.command_row().state == "ok"
 
 
 def test_moxis_line_at_a_path_that_is_gone_fails():

@@ -2,7 +2,10 @@
 
 - `command`: the command of Claude Code's `statusLine` resolves to an executable. Moxi's
   line must name a render that is there (a `fail` when it isn't: an upgrade or a moved
-  environment left the setting behind; `moxi statusline use` points it at this one). A
+  environment left the setting behind; `moxi statusline use` points it at this one). On
+  Windows it must also be written for the shell Claude Code runs it with now (Git Bash
+  or PowerShell, `shell.find`): installing or removing Git for Windows after the line
+  was written breaks it with no sign, a `warn`. A
   user's own line is checked by its first word, a path or a command on PATH, and a `warn`
   when it doesn't resolve. No line, or a settings file that can't be read, is said and
   is no failure of statusline's.
@@ -85,6 +88,14 @@ def command_row() -> Row:
             return Row(MODULE, "command", "warn",
                        f"Claude Code's status line runs another environment's render, "
                        f"{path}", "moxi statusline use")
+        if switch._WINDOWS and command != switch.render_command(path):
+            from . import shell
+
+            kind = shell.find().kind
+            return Row(MODULE, "command", "warn",
+                       f"Claude Code's status line runs {path} in a form written for "
+                       f"another shell than the one it runs a line with here ({kind}), "
+                       f"so the line shows nothing", "moxi statusline use")
         return Row(MODULE, "command", "ok", f"Moxi's line, {path}")
     try:
         words = shlex.split(command)

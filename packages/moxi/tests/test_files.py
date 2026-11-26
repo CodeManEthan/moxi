@@ -57,7 +57,7 @@ def test_a_failed_atomic_write_leaves_the_file_and_no_temp(work, monkeypatch):
     def broken(src, dst):
         raise OSError("disk full")
 
-    monkeypatch.setattr(files, "_replace", broken)
+    monkeypatch.setattr(files, "replace", broken)
     with pytest.raises(OSError, match="disk full"):
         files.atomic_write(target, "new")
     assert target.read_text() == "old"
@@ -66,13 +66,13 @@ def test_a_failed_atomic_write_leaves_the_file_and_no_temp(work, monkeypatch):
 
 def test_atomic_write_uses_a_dotted_temp_name(tmp_path, monkeypatch):
     seen = []
-    real = files._replace
+    real = files.replace
 
     def spy(src, dst):
         seen.append(Path(src).name)
         real(src, dst)
 
-    monkeypatch.setattr(files, "_replace", spy)
+    monkeypatch.setattr(files, "replace", spy)
     files.atomic_write(tmp_path / "state.json", "{}")
     (name,) = seen
     assert name.startswith(".state.json.") and name.endswith(".tmp")
@@ -885,13 +885,13 @@ def test_the_roll_goes_through_the_retrying_replace(tmp_path, monkeypatch):
     retries a sharing violation rather than losing the record."""
     log = tmp_path / "r.jsonl"
     moves = []
-    real = files._replace
+    real = files.replace
 
     def spy(src, dst):
         moves.append((Path(src).name, Path(dst).name))
         real(src, dst)
 
-    monkeypatch.setattr(files, "_replace", spy)
+    monkeypatch.setattr(files, "replace", spy)
     for i in range(3):
         files.append_record(log, {"i": i}, max_bytes=20)
     assert ("r.jsonl", "r.jsonl.1") in moves
