@@ -323,13 +323,13 @@ def lex(text: str, home: str) -> list:
     read = _turns().read_shell(text)
     unclosed = None
     for mark in read.marks:
-        at = text[mark.position:mark.position + 2]
-        if mark.kind == "operator" and at == "&&":
+        pair = text[mark.position:mark.position + 2]
+        if mark.kind == "operator" and pair == "&&":
             continue
         if mark.kind == "unclosed":
             unclosed = unclosed or mark
             continue
-        raise Refused(_reason(mark.kind, text[mark.position], at))
+        raise Refused(_reason(mark.kind, text[mark.position], pair))
     if unclosed is not None:
         c = text[unclosed.position]
         raise Refused(_UNCLOSED.get(c) or _UNQUOTED_REFUSED.get(c, "unterminated quote"))
@@ -361,14 +361,15 @@ _MARK_REASONS = {
 }
 
 
-def _reason(kind: str, c: str, at: str) -> str:
-    """The reason a mark of `kind` gives, `c` the character at it and `at` the two."""
+def _reason(kind: str, c: str, pair: str) -> str:
+    """The reason a mark of `kind` gives, `c` the character at it and `pair` the two
+    characters from it."""
     if kind == "operator":
         if c == "\n":
             return "newline outside quotes"
         if c == "&":
             return "control operator '&'"
-        return _UNQUOTED_REFUSED.get(c, f"control operator {at!r}")
+        return _UNQUOTED_REFUSED.get(c, f"control operator {pair!r}")
     if kind in ("glob", "brace", "arithmetic"):
         return _UNQUOTED_REFUSED.get(c, f"{kind} {c!r}")
     return _MARK_REASONS.get(kind, kind)
