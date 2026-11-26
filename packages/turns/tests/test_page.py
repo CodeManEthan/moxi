@@ -1307,7 +1307,7 @@ def test_a_failed_read_is_tried_again_and_its_run_is_published_once(make_endpoin
     def facts(self):
         if failing.is_set():
             tries.append(time.monotonic())
-            raise turns.TurnsError("the endpoint did not answer facts")
+            raise turns.TurnsError("the endpoint did not answer facts", why="timeout")
         return real(self)
 
     monkeypatch.setattr(client.Session, "facts", facts)
@@ -1320,8 +1320,7 @@ def test_a_failed_read_is_tried_again_and_its_run_is_published_once(make_endpoin
             data = await stream.until(lambda d: row_of(d, key)["unread_since"] is not None,
                                       LIVE_S)
             since = row_of(data, key)["unread_since"]
-            assert row_of(data, key)["read_error"] == (
-                "its turn could not be read, so what shows may be old")
+            assert row_of(data, key)["read_error"] == "the session did not answer in time"
             # Retries at the fast pace fail again and publish nothing.
             with pytest.raises(TimeoutError):
                 await stream.next(6 * FAST_S)

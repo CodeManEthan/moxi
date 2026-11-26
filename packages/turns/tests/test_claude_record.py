@@ -43,7 +43,7 @@ def config_dir(env):
     return Path(env["CLAUDE_CONFIG_DIR"])
 
 
-def test_the_record_is_under_claude_codes_own_folder(env, tmp_path):
+def test_the_record_is_where_claude_code_keeps_it(env, tmp_path):
     assert claude_record.record_path(PID, env) == tmp_path / "claude" / "sessions" / "4242.json"
     del env["CLAUDE_CONFIG_DIR"]
     assert claude_record.record_path(PID, env) == (

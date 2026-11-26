@@ -229,11 +229,7 @@ def test_a_read_says_why_it_failed(scripted, monkeypatch):
     def refused(conn, params):
         raise ipc.RpcError(-32000, "no")
 
-    server, s = scripted({"facts": lambda conn, params: time.sleep(1) or {},
-                          "agents": refused})
-    with pytest.raises(turns.TurnsError) as caught:
-        s.facts()
-    assert caught.value.why == "timeout"
+    server, s = scripted({"agents": refused})
     with pytest.raises(turns.TurnsError) as caught:
         s.agents()
     assert caught.value.why == "refused"
@@ -246,6 +242,11 @@ def test_a_read_says_why_it_failed(scripted, monkeypatch):
     with pytest.raises(turns.TurnsError) as caught:
         s.facts()
     assert caught.value.why == "unreadable"
+    # Last, since the session answers nothing more until its late answer is written.
+    server.script["facts"] = lambda conn, params: time.sleep(1) or {}
+    with pytest.raises(turns.TurnsError) as caught:
+        s.facts()
+    assert caught.value.why == "timeout"
 
 
 def test_every_why_is_one_the_library_names():

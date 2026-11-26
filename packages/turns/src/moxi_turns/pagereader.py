@@ -331,10 +331,10 @@ class _Held:
         out["facts"] = self.facts
         out["agents"] = self.agents
         out["read_error"] = read_error(self.failed, reread_s=self.reader.reread_s)
-        out["typed_name"] = self.typed_name
         out["ended_at"] = ended_at(self.ended, self.facts)
         out["has_box"] = out["harness"] in BOX_HARNESSES
         out["unread_since"] = self.unread_since
+        out["typed_name"] = self.typed_name
         return out
 
     def is_unread(self) -> bool:
