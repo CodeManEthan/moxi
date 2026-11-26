@@ -130,6 +130,27 @@ def _shown_url(url: str) -> str:
     return _USERINFO.sub(r"\1", url)
 
 
+#: A scheme and its userinfo anywhere in a line, up to an `@` with no `/` or space before
+#: it: what `_shown_url` drops, read inside text.
+_USERINFO_IN = re.compile(r"([A-Za-z][A-Za-z0-9+.-]*://)[^/\s]*@")
+
+
+def _redacted(text: str, urls) -> str:
+    """`text` with no remote URL's userinfo, whichever program wrote it: each of `urls`'
+    userinfo, as written and percent-decoded, is taken out wherever it stands (Git for
+    Windows prints a file URL with a host as a local path, `//user:token@host/...`), and
+    any `scheme://userinfo@` left is cleaned as `_shown_url` cleans a URL."""
+    from urllib.parse import unquote
+
+    for url in urls:
+        found = _USERINFO.match(url or "")
+        info = found.group(0)[len(found.group(1)):-1] if found else ""
+        for form in dict.fromkeys((info, unquote(info))):
+            if form:
+                text = text.replace(form + "@", "").replace(form, "")
+    return _USERINFO_IN.sub(r"\1", text)
+
+
 #: A good `standing-branch` value: a fixed prefix of one or more path parts, each ending
 #: in `/`, then `*`.
 _STANDING = re.compile(r"^((?:[^/*?\[\\\s]+/)+)\*$")
@@ -349,6 +370,10 @@ class _Push(_Reader):
             self.word = None
         self.standing = Standing(settings)
         self.commits: list[str] = []
+
+    def redacted(self, text: str) -> str:
+        """`text` as it may be printed or logged: without the push URL's userinfo."""
+        return _redacted(text, (self.remote, self.url))
 
     def fetch_fix(self) -> str:
         """How to bring the remote's refs here. git passes a push to a bare URL the URL as
@@ -902,10 +927,12 @@ def pre_push(ctx):
     try:
         push.run()
     except Exception as exc:  # noqa: BLE001 - every failure to judge refuses, named
-        return Outcome.refuse(f"this push can't be checked, so it is refused: {exc}")
+        return Outcome.refuse(push.redacted(
+            f"this push can't be checked, so it is refused: {exc}"))
     if push.reasons:
+        # A reason may carry git's own message, which can name the push URL whole.
         return Outcome.refuse("this repo is public, and this push can't go:",
-                              *push.reasons, "Nothing was pushed.")
+                              *map(push.redacted, push.reasons), "Nothing was pushed.")
     try:
         _log(push.record())
     except (OSError, ValueError) as exc:

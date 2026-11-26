@@ -245,7 +245,10 @@ def on_localhost(path) -> str:
     return "localhost" + Path(path).as_uri()[len("file://"):]
 
 
-def test_a_urls_userinfo_is_never_printed_or_logged(repo, names, remote, tmp_path):
+def test_a_urls_userinfo_is_never_printed_or_logged(repo, names, remote, tmp_path,
+                                                    monkeypatch):
+    from moxi_repo.api import HookContext
+
     from moxi_publishing import push as piece
 
     secret = token(13)
@@ -253,12 +256,28 @@ def test_a_urls_userinfo_is_never_printed_or_logged(repo, names, remote, tmp_pat
         "https://example.test/proj-a.git"
     assert piece._shown_url("git@example.test:alice/proj-a.git") == \
         "git@example.test:alice/proj-a.git"
-    if os.name == "nt":
-        pytest.skip("git for Windows reads no file URL with a host: it takes the rest as a "
-                    "local path")
     public_repo(repo, PIECE, sets=("main=main",))
     commit(repo, "Add")
-    done = push(repo, with_userinfo("file", secret, on_localhost(remote)), "main")
+    # The piece as git's pre-push hook runs it for a push to the bare URL. It asks the
+    # remote for its refs: Git for Windows reads no file URL with a host and names the URL
+    # whole in its error, which the piece relays cleaned; elsewhere the remote answers.
+    url = with_userinfo("file", secret, on_localhost(remote))
+    monkeypatch.chdir(repo)
+    outcome = piece.pre_push(HookContext(
+        "pre-push", args=(url, url), settings={"main": ["main"]},
+        stdin=f"refs/heads/main {head(repo)} refs/heads/main {'0' * 40}\n".encode()))
+    said = "\n".join(outcome.lines)
+    assert outcome.kind == "refuse" and secret not in said, said
+    if os.name == "nt":
+        assert f"can't ask file://{on_localhost(remote)} for its refs: " in said, said
+        assert f"'//{on_localhost(remote)}'" in said, said
+    else:
+        assert f"no tracking refs for file://{on_localhost(remote)} here" in said, said
+    assert not log_lines()
+    if os.name == "nt":
+        pytest.skip("Git for Windows reads no file URL with a host, so no push through one "
+                    "reaches the piece: git refuses it first, in its own words")
+    done = push(repo, url, "main")
     refused(done, f"no tracking refs for file://{on_localhost(remote)} here")
     assert secret not in done.stderr
     empty = tmp_path / "empty.git"
@@ -266,6 +285,27 @@ def test_a_urls_userinfo_is_never_printed_or_logged(repo, names, remote, tmp_pat
     passed(push(repo, with_userinfo("file", secret, on_localhost(empty)), "main"))
     logged = log_lines()[-1]
     assert logged["url"] == logged["remote"] == f"file://{on_localhost(empty)}"
+
+
+def test_git_text_is_shown_without_the_push_urls_userinfo():
+    from moxi_publishing import push as piece
+
+    secret = token(15)
+    url = with_userinfo("file", secret, "localhost/C:/w/remote.git")
+    # Git for Windows' own words for that URL: a local path, the userinfo inside.
+    text = ("fatal: '/" + f"/alice:{secret}@localhost/C:/w/remote.git' does not appear "
+            "to be a git repository")
+    assert piece._redacted(text, (url, url)) == \
+        "fatal: '//localhost/C:/w/remote.git' does not appear to be a git repository"
+    # Percent-encoded in the URL, written decoded; and any scheme's userinfo in a line.
+    coded = with_userinfo("https", f"{secret[:6]}%40{secret[6:]}", "example.test/a.git")
+    assert piece._redacted(f"x alice:{secret[:6]}@{secret[6:]}@example.test y",
+                           (coded,)) == "x example.test y"
+    other = with_userinfo("https", token(16), "example.test/b.git")
+    assert piece._redacted(f"see '{other}' and {other}.", ()) == \
+        "see 'https://example.test/b.git' and https://example.test/b.git."
+    assert piece._redacted("fatal: https://example.test/a@b.git", ()) == \
+        "fatal: https://example.test/a@b.git"
 
 
 def test_a_shown_url_drops_userinfo_up_to_the_last_at_before_the_path():

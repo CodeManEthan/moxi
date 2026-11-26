@@ -38,6 +38,10 @@ The first version.
   verify job before it runs the gate with the build's files. A workflow file whose lines
   end CRLF (a Windows checkout with `core.autocrlf`) reads as its template, in `workflows
   write` and in the doctor, so it is not rewritten or warned on.
+- The push piece shows no remote URL's userinfo in git's own words either: a git message
+  it relays has the push URL's userinfo taken out wherever it stands (Git for Windows
+  names a file URL with a host as a local path, `//user:token@host/...`), and any
+  scheme-and-userinfo prefix in it cleaned as a shown URL is, on every system.
 - `moxi publishing github show` and `github apply`: the rulesets, secret scanning and
   `pypi` environment a public repo expects of GitHub, read with `gh` and printed field
   by field, or written. `moxi-main` requires the root `pyproject.toml`'s `check-job`
