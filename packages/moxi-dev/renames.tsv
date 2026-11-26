@@ -6284,7 +6284,7 @@ memory	packages/memory/src/moxi_memory/connector/recall.py	"stale": {"type": "bo
 memory	packages/memory/src/moxi_memory/connector/recall.py	"required": ["id", "for_words", "age_s", "stale", "text"],	keep	stale	stale
 memory	packages/memory/src/moxi_memory/connector/recall.py	if set(args) - set(INPUT["properties"]):	keep	set	set
 memory	packages/memory/src/moxi_memory/connector/recall.py	return self.result.refused(code, text), logged	keep	refused	refused
-memory	packages/memory/src/moxi_memory/connector/recall.py	logged.update(pieces=len(pieces), held_back=unscanned, waiting=collected.waiting,	keep	waiting	waiting
+memory	packages/memory/src/moxi_memory/connector/recall.py	logged.update(pieces=len(pieces), held_back=unscanned + uncut, waiting=collected.waiting,	keep	waiting	waiting
 memory	packages/memory/src/moxi_memory/connector/recall.py	return self.result(text=text, structured={	keep	text	text
 memory	packages/memory/src/moxi_memory/connector/recall.py	earlier = ", earlier" if piece["stale"] else ""	keep	stale	stale
 memory	packages/memory/src/moxi_memory/recall_chat.py	in this process's memory only (`_held`), so a connector restart frees them.	keep	_held	_held
@@ -6303,7 +6303,7 @@ memory	packages/memory/src/moxi_memory/recall_chat.py	recall.put(record={"brief"
 memory	packages/memory/src/moxi_memory/recall_chat.py	recall.put(record={"headless_session": session}, headless_session=session,	keep	record	record
 memory	packages/memory/src/moxi_memory/recall_chat.py	call=recall.record.get("call"))	keep	record	record
 memory	packages/memory/src/moxi_memory/recall_chat.py	chat_dir().mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
-memory	packages/memory/src/moxi_memory/recall_fence.py	request_id=spec.request_id, session_id=spec.session_id, actor="memory",	keep	actor	actor
+memory	packages/memory/src/moxi_memory/recall_fence.py	request_id=spec.request_id, session_id=spec.session_id, actor=ACTOR,	keep	actor	actor
 memory	packages/memory/src/moxi_memory/recall_fence.py	composition = launcher.preview(req, env=env)	keep	env	env
 memory	packages/memory/src/moxi_memory/recall_fence.py	command = launcher.prepare(req, composition, env=env)	keep	env	env
 memory	packages/memory/src/moxi_memory/recall_fence.py	child_env = launcher.child_env(req, composition, env=env)	keep	env	env
@@ -6344,6 +6344,9 @@ memory	packages/memory/tests/test_recall_tool.py	release.set()	keep	set	set
 memory	packages/memory/tests/test_recall_tool.py	assert piece["stale"] is True and piece["for_words"] == "the kiosk approver"	keep	stale	stale
 memory	packages/memory/tests/test_recall_tool.py	assert any("1 piece couldn't be checked for secrets" in n	keep	any	any
 memory	packages/memory/tests/test_recall_tool.py	assert any("1 piece couldn't" in n for n in again.structured["notes"])	keep	any	any
+memory	packages/memory/tests/test_recall_tool.py	home = os.environ["HOME"].rstrip("/")	keep	HOME	HOME
+memory	packages/memory/tests/test_recall_tool.py	assert any("claude isn't there" in n for n in result.structured["notes"])	keep	any	any
+memory	packages/memory/tests/test_recall_tool.py	assert any(recall_tool.NO_CUT in n for n in result.structured["notes"])	keep	any	any
 moxi	packages/moxi/src/moxi/_mark.py	-	name	NAME	STARTED_BY_ENV
 moxi	packages/moxi/src/moxi/_mark.py	for at, part in enumerate(orig[1:], start=1):	keep	start	start
 moxi	packages/moxi/src/moxi/_mark.py	if not any(name.upper() == STARTED_BY_ENV for name in child):	keep	any	any

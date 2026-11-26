@@ -362,7 +362,7 @@ class CwdLauncher(CheckLauncher):
         return [] if os.path.isdir(req.cwd) else [f"the directory {req.cwd} does not exist"]
 
 
-def test_the_checks_make_the_chat_folder_before_the_first_call(monkeypatch):
+def test_the_checks_make_the_chat_dir_before_the_first_call(monkeypatch):
     import shutil
 
     shutil.rmtree(recall_chat.chat_dir(), ignore_errors=True)
