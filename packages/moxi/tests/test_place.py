@@ -1347,11 +1347,11 @@ def test_a_different_file_or_link_is_named_and_accept_diff_replaces_it(home, tmp
     assert [p.state for p in done] == ["ok"] and target.read_text() == "# agent\n"
     other = tmp_path / "other"
     other.mkdir()
-    folder = skill()
+    skill_dir = skill()
     link_target = home / ".claude" / "skills" / "comms-send"
     link_target.parent.mkdir(parents=True)
     link_dir(link_target, other)
-    step = one(place.plan("notes", [Item(folder, "claude", "comms-send")]), "refuse")
+    step = one(place.plan("notes", [Item(skill_dir, "claude", "comms-send")]), "refuse")
     said, say = lines()
     assert place.apply([step], replace=True, say=say) == []
     assert f"(it is a link to {other})" in said[0]

@@ -24,8 +24,8 @@ def lo(loadout_dir):
     return loadout_dir
 
 
-def hand_skill(folder, name="mine", body="mine\n"):
-    target = folder / name
+def hand_skill(skills_dir, name="mine", body="mine\n"):
+    target = skills_dir / name
     target.mkdir(parents=True)
     (target / "SKILL.md").write_text(f"---\nname: {name}\ndescription: Mine.\n---\n{body}")
     (target / "notes.txt").write_text("my notes\n")
@@ -39,7 +39,7 @@ def paths_of(outcome) -> list[str]:
 def test_hand_placed_entries_are_strays_and_placements_are_not(lo, tmp_path):
     from moxi import place
 
-    folder = hand_skill(kit.claude())
+    skill_dir = hand_skill(kit.claude())
     agent = kit.agent(kit.claude("agents") / "helper.md", "helper")
     (kit.claude() / ".hidden").mkdir()
     src = kit.skill(tmp_path / "module-src", "comms-send")
@@ -48,12 +48,12 @@ def test_hand_placed_entries_are_strays_and_placements_are_not(lo, tmp_path):
     out = install.status()
     assert out.code == 0
     found = out.as_json()["strays"]
-    assert {"path": os.fspath(folder), "harness": "claude", "kind": "skill"} in found
+    assert {"path": os.fspath(skill_dir), "harness": "claude", "kind": "skill"} in found
     assert {"path": os.fspath(agent), "harness": "claude", "kind": "agent"} in found
     assert len(found) == 2, found
     text = out.text()
     at = text.index(install.STRAYS_HEADING)
-    assert text[at + 1:at + 3] == [f"  {folder}", f"  {agent}"]
+    assert text[at + 1:at + 3] == [f"  {skill_dir}", f"  {agent}"]
 
 
 def test_a_scoped_status_lists_its_sections_strays_only(lo, tmp_path):
@@ -107,7 +107,7 @@ def test_take_an_agent_file(lo):
     assert kit.owner_of(target) == "loadout"
 
 
-def test_take_refuses_a_path_that_is_no_stray_and_a_name_the_folder_holds(lo, tmp_path):
+def test_take_refuses_a_path_that_is_no_stray_and_a_name_loadout_holds(lo, tmp_path):
     with pytest.raises(strays.Refused, match="no stray"):
         strays.take(kit.claude() / "review")
     elsewhere = hand_skill(tmp_path / "elsewhere")

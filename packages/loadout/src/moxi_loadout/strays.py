@@ -62,8 +62,8 @@ class Refused(Exception):
     """A `take` or `move_aside` that can't go ahead; its text says why."""
 
 
-def folders(plan) -> list[tuple[str, str, str, Path]]:
-    """Each folder loadout places into, as `(section, harness, kind, folder)`: the user
+def place_dirs(plan) -> list[tuple[str, str, str, Path]]:
+    """Each folder loadout places into, as `(section, harness, kind, place_dir)`: the user
     section's from the core's harness table, then each resolved project section's."""
     from moxi import place
 
@@ -71,9 +71,9 @@ def folders(plan) -> list[tuple[str, str, str, Path]]:
     out: list[tuple[str, str, str, Path]] = []
     for name, row in table.items():
         for kind in KIND_DIRS:
-            folder = row.harness_dir(kind)
-            if folder is not None:
-                out.append((USER, name, kind, Path(folder)))
+            kind_dir = row.harness_dir(kind)
+            if kind_dir is not None:
+                out.append((USER, name, kind, Path(kind_dir)))
     for section, root in plan.roots.items():
         for name in table:
             for kind, dir_key in KIND_DIRS.items():
@@ -84,7 +84,7 @@ def folders(plan) -> list[tuple[str, str, str, Path]]:
 
 
 def find(plan, git=None) -> list[Stray]:
-    """Every stray, in the order of `folders` and then by name; `git` an
+    """Every stray, in the order of `place_dirs` and then by name; `git` an
     `ignores.Git` (a fresh one when None). See the module's docs."""
     from moxi import place
 
@@ -100,13 +100,13 @@ def find(plan, git=None) -> list[Stray]:
              if w.item is not None and getattr(w.item, "dest", None) is not None}
     seen: set[str] = set()
     out: list[Stray] = []
-    for section, harness, kind, folder in folders(plan):
-        key = place.target_key(folder)
+    for section, harness, kind, place_dir in place_dirs(plan):
+        key = place.target_key(place_dir)
         if key in seen:
             continue
         seen.add(key)
         try:
-            names = sorted(n for n in os.listdir(folder) if not n.startswith("."))
+            names = sorted(n for n in os.listdir(place_dir) if not n.startswith("."))
         except OSError:
             continue
         tracked = _tracked(key, git) if names else set()
@@ -122,15 +122,15 @@ def find(plan, git=None) -> list[Stray]:
     return out
 
 
-def _tracked(folder: str, git) -> set[str] | None:
-    """The names of `folder`'s entries git tracks (an entry holding a tracked file
+def _tracked(place_dir: str, git) -> set[str] | None:
+    """The names of `place_dir`'s entries git tracks (an entry holding a tracked file
     counts), empty outside a work tree, None when git doesn't answer."""
     from moxi_loadout import ignores, repo_link
 
-    if not repo_link.in_work_tree(folder):
+    if not repo_link.in_work_tree(place_dir):
         return set()
     try:
-        done = git.run(["git", "-C", folder, "ls-files", "-z", "--", "."], None)
+        done = git.run(["git", "-C", place_dir, "ls-files", "-z", "--", "."], None)
     except ignores.GitError:
         return None
     if done.returncode != 0:
@@ -268,5 +268,5 @@ def _remove(path: Path) -> None:
             pass
 
 
-__all__ = ["KIND_DIRS", "AGENT_SUFFIX", "Stray", "Refused", "folders", "find", "stray_at",
+__all__ = ["KIND_DIRS", "AGENT_SUFFIX", "Stray", "Refused", "place_dirs", "find", "stray_at",
            "source_name", "copy_in", "take", "move_aside"]
