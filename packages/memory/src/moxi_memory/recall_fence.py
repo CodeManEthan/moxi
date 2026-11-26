@@ -124,7 +124,8 @@ class Spec:
     """One launch of a chat recall: its brief, its working folder, its typed name, the
     ids memory minted for it, the notes folders its tools may read beside the working
     folder, its model (empty: the harness's default), its tool limit
-    (`subconscious.max_tools`) and whether the web is allowed."""
+    (`subconscious.max_tools`), whether the web is allowed, and the recall's id, which
+    stamps the launch as that recall's fork (none when empty)."""
 
     brief: str
     cwd: str
@@ -135,13 +136,15 @@ class Spec:
     add_dirs: Sequence[str] = ()
     model: str = ""
     web: bool = False
+    recall_id: str = ""
 
 
 def request(launcher: Any, spec: Spec, *, output: Sequence[str] = JSON_OUTPUT) -> Any:
     """The launcher's `LaunchRequest` for `spec`: every row the fence needs typed, and
     every other settable row of the launcher's catalog and Claude's left out, read from
-    the catalogs now, so each holds its shipped default whatever `[defaults]` says.
-    `output` is the output flags, the probe's in its place."""
+    the catalogs now, so each holds its shipped default whatever `[defaults]` says, and
+    the launch stamped as recall `spec.recall_id`'s fork. `output` is the output flags,
+    the probe's in its place."""
     tools = [*READ_TOOLS, *(WEB_TOOLS if spec.web else ())]
     typed: dict[str, object] = {
         "harness": HARNESS, "target": TARGET, "cwd": spec.cwd, "name": spec.name,
@@ -159,6 +162,10 @@ def request(launcher: Any, spec: Spec, *, output: Sequence[str] = JSON_OUTPUT) -
     fields = dict(typed=typed, extra=extra, left_out=left_out, cwd=spec.cwd,
                   request_id=spec.request_id, session_id=spec.session_id, actor="memory",
                   off_posture=True)
+    if spec.recall_id:
+        from .recall_start import SUBCONSCIOUS_FORK_ENV
+
+        fields["stamps"] = {SUBCONSCIOUS_FORK_ENV: spec.recall_id}
     return launcher.LaunchRequest(**fields)
 
 

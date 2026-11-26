@@ -319,3 +319,10 @@ def test_two_children_at_once_run_one_probe(claude, tmp_path):
     outs = [k.communicate(timeout=60)[0].strip() for k in kids]
     assert outs == ["true", "true"]
     assert len(claude.runs()) == 1
+
+
+def test_the_recalls_fork_stamp_is_one_the_launcher_takes():
+    req = fence.request(api, spec(recall_id="c1"))
+    assert req.stamps == {"MOXI_MEMORY_SUBCONSCIOUS_FORK": "c1"}
+    assert api.check(req) == []
+    assert api.preview(req).argv[0] == "claude"

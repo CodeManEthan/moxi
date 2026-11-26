@@ -25,9 +25,10 @@ search went past the project, and no counts per part), the child's start-up
 time, whether the recall was hurried or ran past its limit, each round's text and when
 it came back (`rounds`), and when the line was first and last written. A chat recall's
 line (start `chat`, route `headless`) also holds its agent's Claude Code session id
-(`headless_session`, written before the agent starts) and the number of the
-conversation's call that started it (`call`), and each of its rounds the launch request
-id that ran it (`request`) and what it cost (`cost_usd`).
+(`headless_session`, written before the agent starts), the number of the
+conversation's call that started it (`call`), and the launch request id of its current
+round (`request`, written before that round is launched); each of its rounds keeps the
+request id that ran it (`request`) and what it cost (`cost_usd`).
 
 A line's state says where the recall's answer is (`LINE_STATES`): `open` while its child
 runs a round and holds no answer for it yet, `back` once an answer came back, `lost`
@@ -83,7 +84,8 @@ LINE_FIELDS = ("recall", "session", "harness", "state", "reason", "error", "star
                "project_hits", "beyond_hits", "widened", "startup_s", "hurried",
                "past_limit", "past_bound", "rounds", "sending_at",
                "send_tries", "send_reason", "sent_at", "message_id", "discarded_by",
-               "discarded_at", "headless_session", "call", "at", "updated")
+               "discarded_at", "headless_session", "call", "request", "at",
+               "updated")
 #: A session id the log may name a file after.
 _SAFE = re.compile(r"[A-Za-z0-9_][A-Za-z0-9_.-]{0,199}")
 

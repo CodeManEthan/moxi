@@ -57,7 +57,8 @@ as above, the record left as the bound set it; any other end is acked, the line 
 the bound's state. At the wait's last limit it stops, the line kept for a taker.
 
 A route (`Route`) asks turns for the rounds; `moxi_memory.recall_route` holds the
-subagent route's.
+subagent route's. A route that keeps more on a settled round's entry (the headless
+route's request id and cost) gives it by `round_fields`.
 
 Standard library at import; turns' result values are imported at use.
 """
@@ -293,6 +294,13 @@ def settle_late(recall, round_number: int, end, route: Route, *, now: float | No
     return str(recall.line.get("state"))
 
 
+def round_fields(route) -> dict:
+    """What `route` keeps on a settled round's entry beyond its text (the headless
+    route's request id and cost); nothing for a route that keeps none."""
+    fields = getattr(route, "round_fields", None)
+    return dict(fields()) if fields is not None else {}
+
+
 def _reason(end) -> tuple[str, str]:
     text = str(getattr(end, "reason", "") or "gone")
     return text.split(":")[0].split()[0] if text.strip() else "gone", text
@@ -316,7 +324,8 @@ def settle(recall, round_number: int, end, route: Route, *, now: float | None = 
             got = False
         elif isinstance(end, Ended):
             answer = end.answer or ""
-            rounds.append({"round": round_number, "text": answer, "at": now})
+            rounds.append({"round": round_number, "text": answer, "at": now,
+                           **round_fields(route)})
             state = recall.record.get("state")
             fields = {"answered": True}
             if state in (records.STARTING, records.RUNNING):
@@ -334,7 +343,7 @@ def settle(recall, round_number: int, end, route: Route, *, now: float | None = 
                              state=recalls.LOST, reason=reason, error=error)
             else:
                 rounds.append({"round": round_number, "lost": reason, "error": error,
-                               "at": now})
+                               "at": now, **round_fields(route)})
                 recall.write(state=recalls.BACK, rounds=rounds)
             got = False
         try:
@@ -495,4 +504,4 @@ __all__ = ["ROUND_MARGIN_S", "END_WAIT_MARGIN_S", "LATE_WAIT_S", "RESEND_FAST_S"
            "RESEND_FAST_FOR_S", "RESEND_SLOW_S", "GONE", "PAST_BOUND", "UNSETTLED", "NOTHING",
            "END_LINE", "CONTINUE", "Route", "ref", "round_bound_s", "ends_stream",
            "continue_text", "why_stop", "is_last", "by_comms", "has_points", "start_name",
-           "deliver", "note_bound", "settle_late", "settle", "KEPT", "open_round", "note_fork", "lose_hurried", "run"]
+           "deliver", "note_bound", "settle_late", "round_fields", "settle", "KEPT", "open_round", "note_fork", "lose_hurried", "run"]
