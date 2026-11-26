@@ -634,4 +634,4 @@ The `ui` extra (`moxi-ui`, the browser UI shell) adds the git hooks page; see
 
 ## License
 
-MIT. See [LICENSE](https://github.com/CodeManEthan/moxi/blob/moxi-repo-v0.1.2/packages/repo/LICENSE).
+MIT. See [LICENSE](https://github.com/CodeManEthan/moxi/blob/moxi-repo-v0.1.3/packages/repo/LICENSE).
