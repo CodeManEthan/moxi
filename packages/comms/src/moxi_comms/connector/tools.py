@@ -173,12 +173,18 @@ TITLES = {"agents": "Who can be messaged", "send": "Send a message",
 #: How each delivery is said for one recipient.
 SPOKEN = {
     sending.DELIVERY_LIVE: "delivered now",
+    sending.DELIVERY_UNCHECKED: "delivered now, but comms can't tell whether its cache is "
+                                "warm",
     sending.DELIVERY_HELD_COLD: "held for its next turn",
     sending.DELIVERY_HELD_FLAG: "held for its next turn",
     sending.DELIVERY_WAITING: "waiting for its session to take mail",
     sending.DELIVERY_UNBOUND: "waiting, since no session holds that name now",
     sending.DELIVERY_OPERATOR: "delivered",
 }
+
+
+#: The deliveries `send_and_wait` waits on: the message reached the session now.
+DELIVERED = (sending.DELIVERY_LIVE, sending.DELIVERY_UNCHECKED)
 
 
 class Tools:
@@ -451,7 +457,7 @@ class Tools:
         fields = self._sent_fields(result)
         del fields["outcome"]
         recipient = result.recipients[0] if result.recipients else None
-        if recipient is None or recipient.delivery != sending.DELIVERY_LIVE:
+        if recipient is None or recipient.delivery not in DELIVERED:
             return self.result(_with_notes(f"{self._sent_text(result)} {LATER}", result),
                                {**fields, "outcome": "not-delivered", "reply": None,
                                 "other_new": 0})

@@ -158,8 +158,8 @@ def test_the_outcomes_deliveries_and_exit_codes():
                               "unknown": 1}
     assert api.EXIT_CODES["cache-unread"] == moxi_exit.TEMPFAIL
     assert api.EXIT_CODES["unknown"] == moxi_exit.ERROR, "never try-again: it may be sent"
-    assert api.DELIVERIES == ("live", "held-cold", "held-flag", "waiting", "unbound",
-                              "operator")
+    assert api.DELIVERIES == ("live", "unchecked", "held-cold", "held-flag", "waiting",
+                              "unbound", "operator")
     assert [f.name for f in api.SendResult.__dataclass_fields__.values()] == [
         "outcome", "message_id", "recipients", "refusal", "notes", "said", "code"]
     assert list(api.Recipient.__dataclass_fields__) == ["qualified", "delivery",

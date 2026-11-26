@@ -136,7 +136,9 @@ _ENDS = {_REFUSED: (OUTCOME_REFUSED, moxi_exit.REFUSED),
          _COLD: (OUTCOME_CACHE_UNREAD, moxi_exit.TEMPFAIL)}
 
 #: How a posted message reaches one recipient:
-#:   live       delivered now (a warm, fresh or no-cache read);
+#:   live       delivered now (a warm or fresh read, a person, or a free model);
+#:   unchecked  delivered now as `live` is, but comms has no clock to read the cache by
+#:              (`cache.NO_CLOCK_CODES`), so the delivery may wake a cold session;
 #:   held-cold  held for the recipient's next release point, its cache read cold;
 #:   held-flag  held because the send carried `[held]`;
 #:   waiting    the recipient is bound and its session has no endpoint, so its adapter
@@ -145,8 +147,13 @@ _ENDS = {_REFUSED: (OUTCOME_REFUSED, moxi_exit.REFUSED),
 #:   operator   the operator, who has no session to hold for.
 DELIVERY_LIVE, DELIVERY_HELD_COLD, DELIVERY_HELD_FLAG = "live", "held-cold", "held-flag"
 DELIVERY_WAITING, DELIVERY_UNBOUND, DELIVERY_OPERATOR = "waiting", "unbound", "operator"
-DELIVERIES = (DELIVERY_LIVE, DELIVERY_HELD_COLD, DELIVERY_HELD_FLAG, DELIVERY_WAITING,
-              DELIVERY_UNBOUND, DELIVERY_OPERATOR)
+DELIVERY_UNCHECKED = "unchecked"
+DELIVERIES = (DELIVERY_LIVE, DELIVERY_UNCHECKED, DELIVERY_HELD_COLD, DELIVERY_HELD_FLAG,
+              DELIVERY_WAITING, DELIVERY_UNBOUND, DELIVERY_OPERATOR)
+
+#: An `unchecked` recipient's reason.
+UNCHECKED_NOTE = ("delivered now, unchecked: comms can't read {name}'s cache ({why}), so "
+                  "this may wake a cold session.")
 
 
 @dataclass(frozen=True)
@@ -161,8 +168,8 @@ class Refusal:
 class Recipient:
     """One resolved name of a send. `cold_at` is line zero's value for it, the time (epoch
     seconds) its cache goes or went cold, None when it is delivered live without a
-    clock or the send carried `[held]`. `reason` says why the mail waits, None when it
-    does not."""
+    clock or the send carried `[held]`. `reason` says why the mail waits, or for an
+    `unchecked` one why its cache was not read; None when there is nothing to say."""
 
     qualified: str
     delivery: str
@@ -1010,6 +1017,7 @@ def _send_resolved(args, ctx: Context, *, sender, operator_id, tags, reply_to,
         # line each, right after the `sent` line, which scripts read for the id.
         for state in held:
             ctx.say(cache.hold_line(state))
+    _say_unchecked(ctx, plan)
     # What an open thread's sender learns from its own send: none of these opens with a
     # caller's line marker or carries an id.
     for line in plan.sent_lines:
@@ -1252,7 +1260,22 @@ def _say_would_send(ctx: Context, plan, count: int) -> None:
     if plan.held:
         for state in plan.held:
             ctx.say(cache.hold_line(state))
+    _say_unchecked(ctx, plan)
     _say_notes(ctx, plan)
+
+
+def _say_unchecked(ctx: Context, plan) -> None:
+    """One line per recipient delivered with no clock to read its cache by, after the
+    `held:` lines: the same reason its `Recipient` carries. A flagged send holds them
+    all, so it says none."""
+    if plan.flagged:
+        return
+    unbound = {q for q, _tier in plan.deferred}
+    held = {state.target for state in plan.held}
+    for qualified, state in plan.unchecked.items():
+        if qualified in unbound or qualified in held or qualified in plan.waiting:
+            continue
+        ctx.say(unchecked_line(state))
 
 
 def _say_notes(ctx: Context, plan) -> None:
@@ -1319,6 +1342,9 @@ class SendPlan:
     waiting: dict = field(default_factory=dict)
     #: Line zero carries `[interrupt]` (`--interrupt`, to a non-operator).
     interrupt: bool = False
+    #: The recipients delivered with no clock to read their cache by, each with its read
+    #: (`DELIVERY_UNCHECKED`).
+    unchecked: dict = field(default_factory=dict)
     #: Seconds from the post to the message's expiry (`--expires`, else the config's
     #: default); None: it never expires.
     expires_in: int | None = None
@@ -1584,6 +1610,12 @@ def _send_checks(args, ctx: Context, *, sender, operator_id, tags, reply_to, pro
     states = [cache.kind_of(target) for target in targets]
     refused = [state for state in states
                if state.kind not in cache.PASSING and state.kind != cache.COLD]
+    absent = [state for state in states
+              if state.kind == cache.NO_CACHE and state.code == cache.MODULE_ABSENT]
+    if absent and config.load(env=ctx.env).cache.required:
+        # The box asks for the hold (`[cache] required`), and the cache module is gone
+        # under a running daemon: refused as an unread cache is, never pushed unread.
+        refused += absent
     if refused:
         _refuse(ctx, "cache-unread", _hold_text(refused,
                            others=len(set(resolved)) > len({s.target for s in refused})))
@@ -1611,11 +1643,14 @@ def _send_checks(args, ctx: Context, *, sender, operator_id, tags, reply_to, pro
             _refuse(ctx, "audience-differs", refusal)
             return _REFUSED, None
     waiting = {t.label: t.endpoint_for for t in targets if t.endpoint is False}
+    unchecked = {state.target: state for state in states
+                 if state.kind == cache.NO_CACHE and state.code in cache.NO_CLOCK_CODES}
     return None, SendPlan(resolved=resolved, deferred=deferred, tiers=tiers, held=held,
                           audience=audience, posture=posture, flagged=flagged,
                           cold_at=cold_at, marks=marks, sent_lines=sent_lines,
                           notes=notes, ask_notes=ask_notes, waiting=waiting,
-                          interrupt=interrupt, expires_in=expires_in)
+                          interrupt=interrupt, expires_in=expires_in,
+                          unchecked=unchecked)
 
 
 #: A `moxi comms send` to an identity comms has never seen bound, without `--new-name`.
@@ -2378,6 +2413,10 @@ def _refusal_reason(state) -> str:
     q = state.target
     if state.reason == cache.NOT_BOUND:
         return f"{q} unbound while comms was checking it"
+    if state.kind == cache.NO_CACHE and state.code == cache.MODULE_ABSENT:
+        return (f"comms could not read {q}'s cache: the cache module is not installed "
+                f"or does not load, and comms' config sets [cache] required = true "
+                f"(install it: {cache.INSTALL})")
     if state.adapter is None:
         return (f"comms could not ask the daemon about {q} "
                 f"({state.reason or 'no reason given'})")
@@ -2635,6 +2674,13 @@ def _result(code: int, capture: _Capture, ctx, *, check: bool) -> SendResult:
                       notes=notes, said=said)
 
 
+def unchecked_line(state) -> str:
+    """An `unchecked` recipient's reason: comms delivered it with no clock to read its
+    cache by, and says which."""
+    return UNCHECKED_NOTE.format(name=state.target,
+                                 why=state.reason or state.code or "no clock to count by")
+
+
 def _recipients(plan, ctx) -> tuple:
     """One `Recipient` per resolved name, in line zero's order, from the plan the checks
     made: the plan is what the post printed its lines from, so the data and the text say
@@ -2665,6 +2711,8 @@ def _recipients(plan, ctx) -> tuple:
         elif qualified in plan.waiting:
             delivery, reason = DELIVERY_WAITING, _waiting_note(
                 qualified, plan.waiting[qualified], ctx)
+        elif qualified in plan.unchecked:
+            delivery, reason = DELIVERY_UNCHECKED, unchecked_line(plan.unchecked[qualified])
         else:
             delivery, reason = DELIVERY_LIVE, None
         at = cold_at.get(qualified)

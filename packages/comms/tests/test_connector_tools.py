@@ -777,6 +777,37 @@ def test_send_and_wait_to_a_held_recipient_answers_at_once(rig, tools):
     assert got.text.endswith(tools_mod.LATER)
 
 
+def reads_no_row(monkeypatch):
+    """The daemon's read of a claude-shim binding: `no-cache`, no lifetime row."""
+    from moxi_comms import cache
+    real = cache.clock_state
+
+    def reads(adapter, session_id, **kw):
+        if adapter == "claude-shim":
+            return cache.Clock(cache.NO_CACHE, reason="no lifetime row for this model",
+                               code=cache.NO_ROW)
+        return real(adapter, session_id, **kw)
+
+    monkeypatch.setattr(cache, "clock_state", reads)
+
+
+def test_a_send_to_a_cache_comms_cant_read_says_unchecked_and_send_and_wait_waits(
+        rig, tools, monkeypatch):
+    """A recipient delivered with no clock to read its cache by is `unchecked`, said as
+    delivered with the doubt; `send_and_wait` waits on it as on a live one."""
+    planner(rig)
+    reads_no_row(monkeypatch)
+    got, _ = call(tools, "send", {"to": "planner@proj-a", "text": "status?",
+                                  "posture": "none"})
+    assert not got.is_error, got.text
+    (r,) = got.structured["recipients"]
+    assert (r["name"], r["delivery"]) == ("planner@proj-a", "unchecked")
+    assert ("planner@proj-a: delivered now, but comms can't tell whether its cache is "
+            "warm") in got.text
+    waited = wait_call(tools, {"to": "planner@proj-a", "text": "ok?", "wait_s": 1})
+    assert waited.structured["outcome"] == "no-reply", waited.text
+
+
 def test_other_new_messages_never_count_the_reply_found_in_the_pushes(rig, tools, link):
     shim = planner(rig)
     post(rig, [ME], "one")

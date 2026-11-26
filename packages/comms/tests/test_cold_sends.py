@@ -358,6 +358,69 @@ def test_a_failed_read_refuses_the_post(rig):
     assert "held:" not in out
 
 
+def reads_no_cache(monkeypatch, code, reason=None):
+    """The daemon's read of a claude-shim binding gives `no-cache` with `code`."""
+    real = cache.clock_state
+
+    def reads(adapter, session_id, **kw):
+        if adapter == "claude-shim":
+            return cache.Clock(cache.NO_CACHE, reason=reason, code=code)
+        return real(adapter, session_id, **kw)
+
+    monkeypatch.setattr(cache, "clock_state", reads)
+
+
+NO_CLOCK_REASONS = {cache.MODULE_ABSENT: "cache is not installed",
+                    cache.NO_CLOCK: "comms has no cache clock for claude-shim agents",
+                    cache.NO_ROW: "no lifetime row for this model",
+                    cache.UNKNOWN_HARNESS: "cache has no clock for this harness"}
+
+
+@pytest.mark.parametrize("code", cache.NO_CLOCK_CODES)
+def test_a_cache_comms_has_no_clock_for_is_delivered_unchecked_and_says_why(
+        rig, monkeypatch, code):
+    """A `no-cache` read for want of a clock is delivered as live mail is, and the send
+    says it went unchecked, with the reason, on the line after its `sent` line."""
+    reviewer = reviewer_with_session(rig)
+    reads_no_cache(monkeypatch, code, NO_CLOCK_REASONS[code])
+    code_, out = send(rig, REVIEWER_Q)
+    assert code_ == 0, out
+    lines = out.splitlines()
+    assert lines[1] == ("delivered now, unchecked: comms can't read reviewer@proj-a's "
+                        f"cache ({NO_CLOCK_REASONS[code]}), so this may wake a cold "
+                        "session."), out
+    assert "held" not in out
+    (msg,) = posted(rig)
+    assert wait_until(lambda: msg.id in queued_ids(reviewer))
+
+
+@pytest.mark.parametrize("code", [cache.PERSON, cache.FREE])
+def test_a_person_or_a_free_model_is_live_with_nothing_to_say(rig, monkeypatch, code):
+    reviewer_with_session(rig)
+    reads_no_cache(monkeypatch, code)
+    code_, out = send(rig, REVIEWER_Q)
+    assert code_ == 0 and out.splitlines()[1:] == [], out
+
+
+def test_a_box_that_requires_cache_refuses_a_send_when_the_module_is_gone(
+        rig, monkeypatch):
+    """`[cache] required = true` and the cache module gone under a running daemon: the
+    send is refused as an unread cache is, nothing posted. The other no-clock codes
+    still deliver unchecked: they are about the recipient, not a missing module."""
+    reviewer_with_session(rig)
+    write_config(None, "[cache]\nrequired = true\n")
+    reads_no_cache(monkeypatch, cache.MODULE_ABSENT, "cache is not installed")
+    code, out = send(rig, REVIEWER_Q)
+    assert code == moxi_exit.TEMPFAIL and posted(rig) == [], out
+    assert out.splitlines()[0].startswith(
+        "Nothing was sent: comms could not read reviewer@proj-a's cache: the cache "
+        "module is not installed or does not load, and comms' config sets [cache] "
+        "required = true"), out
+    reads_no_cache(monkeypatch, cache.NO_ROW, "no lifetime row for this model")
+    code, out = send(rig, REVIEWER_Q)
+    assert code == 0 and "unchecked" in out.splitlines()[1], out
+
+
 def test_no_session_id_refuses_the_post_young_or_old(rig):
     """A binding with no session id reported reads unknown: the send is refused, young
     or old."""

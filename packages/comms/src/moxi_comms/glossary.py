@@ -151,6 +151,17 @@ TERMS: tuple[Entry, ...] = (
         aliases=("--held", "pending", "cold"),
     ),
     Entry(
+        "unchecked",
+        "a send's delivery for a recipient whose cache comms has no clock to read: the "
+        "cache module isn't installed or doesn't load, comms has no clock for the "
+        "recipient's kind of agent, or none for its model or harness. The message is "
+        "delivered at once, as `live` mail is, and the send says which reason applied, "
+        "since it may wake a session whose cache has gone cold. A box whose comms config "
+        "sets `[cache] required = true` refuses the send instead when the cache module "
+        "is missing.",
+        aliases=("no clock",),
+    ),
+    Entry(
         "interrupt",
         "`[interrupt]` on a frame line means the sender asked for the message to reach "
         "you while you work, between the steps of a running turn, instead of after the "

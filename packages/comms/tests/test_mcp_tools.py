@@ -188,6 +188,26 @@ def test_a_send_answers_its_fields_and_the_verbs_lines(rig, planner, reviewer, t
                or reviewer.digests)
 
 
+def test_a_send_to_a_cache_comms_cant_read_answers_unchecked(rig, planner, reviewer,
+                                                             tools, monkeypatch):
+    from moxi_comms import cache
+    real = cache.clock_state
+
+    def reads(adapter, session_id, **kw):
+        if adapter == "claude-shim":
+            return cache.Clock(cache.NO_CACHE, reason="cache has no clock for this "
+                               "harness", code=cache.UNKNOWN_HARNESS)
+        return real(adapter, session_id, **kw)
+
+    monkeypatch.setattr(cache, "clock_state", reads)
+    got = send(tools, ["reviewer"], "hello")
+    assert not got.is_error, text_of(got)
+    (r,) = got.structured_content["recipients"]
+    assert (r["name"], r["delivery"]) == ("reviewer", "unchecked")
+    assert ("delivered now, unchecked: comms can't read reviewer's cache (cache has no "
+            "clock for this harness)") in text_of(got)
+
+
 def test_a_send_with_no_expires_takes_the_configs_and_never_has_none(rig, planner,
                                                                      reviewer, tools):
     default = send(tools, ["reviewer"], "a").structured_content
