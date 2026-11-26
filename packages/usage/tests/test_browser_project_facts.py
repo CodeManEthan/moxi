@@ -1,9 +1,9 @@
 """usage's facts on the Projects page, and the Usage page's project address, in a browser,
 through a real shell that starts the real page servers, on two installs:
 
-- The full one: the core, ui, projects, sessions, usage, comms and repo. atlas-api was
-  worked in an hour ago and kestrel-web three days ago, and a folder in no project an hour
-  ago, each a Claude Code session the shell's own `moxi usage index` read. atlas-api's
+- The full one: the core, ui, projects, sessions, usage, comms and repo. atlas-api and a
+  folder in no project were worked in earlier today and kestrel-web three days ago, each
+  a Claude Code session the shell's own `moxi usage index` read. atlas-api's
   closed row says its cost today; opened, its `Cost` row says today, 7 days and 30 days
   and `an estimate`, and its `Usage` link opens Usage with the Project filter at
   atlas-api, the range as it was and nothing opened. kestrel-web says no cost today on its
@@ -14,7 +14,9 @@ through a real shell that starts the real page servers, on two installs:
   is read.
 
 The transcripts are written and indexed with the shell's own environment, so they sit
-under the shell's home where its page servers read them.
+under the shell's home where its page servers read them. "Earlier today" is halfway
+between the local day's start and `ui_days`' anchor, so it falls on the page's today at
+any hour, just after midnight included.
 """
 
 from __future__ import annotations
@@ -23,6 +25,7 @@ import json
 import re
 import subprocess
 import sys
+from datetime import datetime, time
 from pathlib import Path
 
 import pytest
@@ -40,15 +43,14 @@ FULL = ("projects", "sessions", "usage", "comms", "repo")
 COST = r"\$\d+\.\d\d\+?"
 
 SEED = """
-import json, sys, time
+import json, sys
 from pathlib import Path
 from moxi_sessions import api as sessions
 T = sessions.testing
-now = time.time()
 for n, spec in enumerate(json.loads(sys.argv[1])):
     t = T.ClaudeTranscript(Path(sessions.root("claude")), session_id=spec["session"],
                            project="-" + spec["cwd"].strip("/").replace("/", "-"),
-                           cwd=spec["cwd"], start=now - spec["hours_ago"] * 3600)
+                           cwd=spec["cwd"], start=spec["start"])
     for m in range(3):
         t.user("Fix the failing test.")
         t.assistant("Done.", usage=T.usage(input_tokens=200, output=1000 + m * 500),
@@ -83,33 +85,37 @@ def run(shell, *argv: str) -> str:
     return done.stdout
 
 
-def seed(shell, *, index: bool) -> None:
+def seed(shell, days, *, index: bool) -> None:
     """atlas-api and kestrel-web as projects, and three sessions: in atlas-api and the loose
-    folder an hour ago, in kestrel-web three days ago; indexed by usage when `index`."""
+    folder earlier today, in kestrel-web three days ago (`days`, a `ui_days`); indexed by
+    usage when `index`."""
     home = Path(shell.env["HOME"])
     for key in ("atlas-api", "kestrel-web"):
         (home / "code" / key).mkdir(parents=True)
         run(shell, sys.executable, "-m", "moxi", "projects", "add", key, "--root", str(home / "code" / key))
     (home / "code" / "finch-scripts").mkdir(parents=True)
+    now = days.now
+    today = now - (now - datetime.combine(now.date(), time())) / 2
     specs = [{"session": f"0190b000-0000-7000-8000-0000000000b{n}", "cwd": str(home / "code" / name),
-              "hours_ago": ago, "model": MODEL}
-             for n, (name, ago) in enumerate((("atlas-api", 1), ("kestrel-web", 72), ("finch-scripts", 1)))]
+              "start": at.timestamp(), "model": MODEL}
+             for n, (name, at) in enumerate((("atlas-api", today), ("kestrel-web", days.noon(3)),
+                                             ("finch-scripts", today)))]
     run(shell, sys.executable, "-c", SEED, json.dumps(specs))
     if index:
         run(shell, sys.executable, "-m", "moxi", "usage", "index")
 
 
 @pytest.fixture(scope="module")
-def full(ui_shells, tmp_path_factory):
+def full(ui_shells, ui_days, tmp_path_factory):
     shell = ui_shells(**install(tmp_path_factory, FULL))
-    seed(shell, index=True)
+    seed(shell, ui_days, index=True)
     return shell
 
 
 @pytest.fixture(scope="module")
-def without_usage(ui_shells, tmp_path_factory):
+def without_usage(ui_shells, ui_days, tmp_path_factory):
     shell = ui_shells(**install(tmp_path_factory, tuple(name for name in FULL if name != "usage")))
-    seed(shell, index=False)
+    seed(shell, ui_days, index=False)
     return shell
 
 

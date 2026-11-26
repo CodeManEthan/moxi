@@ -561,9 +561,9 @@ again and opens the piece the address names, though not the scroll or how far it
 shown. The range, the filters and Cost / Tokens are not part of the
 address: they are kept until the shell's page is reloaded, which starts again on the last
 30 days with no filter. An address the page does not have opens it with nothing opened
-and a line at the foot. So does `project/<key>` for a key usage holds no cost under, with the Project filter at
-`all`; a key it knows sets the filter and is then written as `/m/usage/`, since the filter
-is not part of the address.
+and a line at the foot. So does `project/<key>` for a key usage holds no cost under,
+with the Project filter at `all`; a key it knows sets the filter and is then written as
+`/m/usage/`, since the filter is not part of the address.
 
 What it leaves out: a heading of its own (the shell's top line names the page); colour
 for bad news (it draws in the theme's text, border and background colours, with no
@@ -588,10 +588,10 @@ lists `what they cost, still listed under <key> on Usage` among what stays, sinc
 keeps the key a session's cost was stored under. Under the projects, each folder in no
 project gets what it cost in the last 7 days, where that is above zero or has a `+`. The
 figures are usage's own, read as its Home row reads them: the component reads only
-`/api/projects`, from today, from 7 days back and, only while a project is open, from 30 days back. It
-reads when it is placed, every 60 seconds while the tab is visible, and once when the tab
-is shown again. A read that fails drops the figures it gave, and the next good one puts
-them back.
+`/api/projects`, from today, from 7 days back and, only while a project is open, from 30
+days back. It reads when it is placed, every 60 seconds while the tab is visible, and
+once when the tab is shown again. A read that fails drops the figures it gave, and the
+next good one puts them back.
 
 ### The row on Home
 

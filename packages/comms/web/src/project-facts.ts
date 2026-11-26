@@ -20,7 +20,7 @@ export class CommsProjectFacts extends HTMLElement {
   static observedAttributes = ["projects", "open"];
 
   #reads: FactsReads | null = null;
-  #shown = (): void => {
+  #onVisibility = (): void => {
     if (document.visibilityState === "visible") void this.#reads?.start();
     else this.#reads?.pause();
   };
@@ -41,12 +41,12 @@ export class CommsProjectFacts extends HTMLElement {
                                  });
     reads.setGiven(this.getAttribute("projects"), this.getAttribute("open"));
     this.#reads = reads;
-    document.addEventListener("visibilitychange", this.#shown);
+    document.addEventListener("visibilitychange", this.#onVisibility);
     if (document.visibilityState === "visible") void reads.start();
   }
 
   disconnectedCallback(): void {
-    document.removeEventListener("visibilitychange", this.#shown);
+    document.removeEventListener("visibilitychange", this.#onVisibility);
     this.#reads?.close();
     this.#reads = null;
   }
