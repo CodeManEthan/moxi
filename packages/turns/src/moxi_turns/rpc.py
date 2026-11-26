@@ -266,10 +266,10 @@ class Rpc:
 
     async def _watch(self, conn, params: dict) -> dict:
         first = self.ep.reading()
-        live = await self.ep.live_async()
+        live, why = await self.ep.live_read_async()
         # Then, with no await between: the facts and the subscription in one hold of the
         # endpoint's lock, and the answer queued before any notification after it.
-        facts = self.ep.watch(conn, first, live)
+        facts = self.ep.watch(conn, first, live, live_error=why)
         if facts is None:
             raise gone(self.ep.gone_reason)
         return {"facts": facts.to_wire()}

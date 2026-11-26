@@ -73,9 +73,9 @@ def live(key: str, session_id: str, *, turn_open: bool = True, agents: list[dict
         "trouble": trouble,
         "facts": {"session_id": session_id, "turn_number": 9, "turn_open": turn_open,
                   "turn_started_at": now - 300 if turn_open else None, "agents": 0, "draft": False, "stale": False,
-                  "ready": None, "at": now},
+                  "ready": None, "at": now, "ended_at": None, "live_error": None},
         "agents": {"entries": agents or [], "complete": True}, "read_error": None, "ended_at": None,
-        "has_box": True, "unread_since": None,
+        "has_box": True, "unread_since": None, "typed_name": None,
     }
 
 

@@ -50,7 +50,7 @@ def test_the_runner_reports_the_version_its_manifest_names():
 #: runs a user-scope plugin from a cache kept per version, so a runner on a new leg, or a
 #: runner changed on the same leg, needs a new version, or an install made before it keeps
 #: running the old one.
-RUNNER_VERSION_OF_LEG = {5: "0.3.2"}
+RUNNER_VERSION_OF_LEG = {5: "0.3.3"}
 
 
 def test_the_runner_speaks_the_endpoints_leg_under_the_version_named_for_it():
