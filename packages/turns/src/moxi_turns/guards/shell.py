@@ -636,10 +636,10 @@ class _Sh(_Reader):
             w.plain = False
             return end
         if nxt == "{":
-            split: list[list[str]] | None = None if in_double else []
+            split: list[tuple[list[str], str]] | None = None if in_double else []
             end, written = self.value(i, i + 2, w.subs, split)
             if split:
-                w.splits[len(w.chars)] = split[0]
+                w.splits[len(w.chars)] = split[0][0]
             w.chars.append("${" + written)
             w.plain = False
             return end
@@ -742,15 +742,19 @@ class _Sh(_Reader):
         return n, "".join(out)
 
     def value(self, open_position: int, i: int, subs: list[str],
-              split: list[list[str]] | None = None) -> tuple[int, str]:
+              split: list[tuple[list[str], str]] | None = None) -> tuple[int, str]:
         """A `${...}` opened at `open_position`, from just inside its brace: where it ends
         and its text from `i` as written, each substitution in it a NUL (its text joins
-        `subs`). Given a `split` list, a closed `${...}` whose operator bash splits its
-        default or alternate for (`_SPLIT_VALUE`) adds that text's words to it, split at
-        its unquoted blanks, quotes taken off and each substitution a NUL; a word that
-        starts or ends with a blank comes with an empty one there, so the word around it
-        is joined only where bash joins it. With `=` or `:=` bash splits the value it
-        assigned, so a quoted blank splits too. A `${...}` inside it is kept as written."""
+        `subs`).
+
+        Given a `split` list, a closed `${...}` whose operator bash splits its default or
+        alternate for (`_SPLIT_VALUE`) adds to it that text's words and the text itself,
+        quotes taken off and each substitution a NUL. The words are split at its unquoted
+        blanks; one that starts or ends with a blank comes with an empty word there, so
+        the word around it is joined only where bash joins it. With `=` or `:=` bash
+        splits the value it assigned, so a quoted blank splits too. A `${...}` of this kind
+        inside it gives its own words where it stands outside quotes, and its text as one
+        piece inside them; any other `${...}` inside it is kept as written."""
         t, n = self.t, self.n
         out: list[str] = []
         found = _SPLIT_VALUE.match(t, i, n) if split is not None else None
@@ -759,28 +763,41 @@ class _Sh(_Reader):
         apart = False
         assigned: list[str] = []
 
-        def put(text: str) -> None:
+        def put(text: str, *more: str) -> None:
             nonlocal apart
             if apart:
                 words.append("")
                 apart = False
             words[-1] += text
-            assigned.append(text)
+            words.extend(more)
 
         while i < n:
             c = t[i]
             reading = i >= words_from
             start = len(out)
+            if reading and t.startswith("${", i):
+                inner: list[tuple[list[str], str]] = []
+                i, written = self.value(i, i + 2, subs, inner)
+                out.append("${" + written)
+                if inner:
+                    put(*inner[0][0])
+                    assigned.append(inner[0][1])
+                else:
+                    put(out[-1])
+                    assigned.append(out[-1])
+                continue
             j = self.inner_expansion(i, subs, out)
             if j is not None:
                 if reading:
                     put("".join(out[start:]))
+                    assigned.append("".join(out[start:]))
                 i = j
                 continue
             if c == "\\" and i + 1 < n:
                 out.append(t[i:i + 2])
                 if reading and t[i + 1] != "\n":
                     put(t[i + 1])
+                    assigned.append(t[i + 1])
                 i += 2
                 continue
             if c == "'":
@@ -789,45 +806,56 @@ class _Sh(_Reader):
                 out.append(t[i:j + 1])
                 if reading:
                     put(t[i + 1:j])
+                    assigned.append(t[i + 1:j])
                 i = j + 1
                 continue
             if c == '"':
-                i = self.value_double(i, subs, out)
+                piece: list[str] = []
+                i = self.value_double(i, subs, out, piece if reading else None)
                 if reading:
-                    put("".join(_unescaped(out[start + 1:-1])))
+                    put("".join(piece))
+                    assigned.append("".join(piece))
                 continue
             out.append(c)
             i += 1
             if c == "}":
                 if found and split is not None:
+                    text = "".join(assigned)
                     if found.group().endswith("="):
-                        split.append(_BLANK_RUN.split("".join(assigned)))
+                        split.append((_BLANK_RUN.split(text), text))
                     else:
-                        split.append(words + [""] if apart else words)
+                        split.append((words + [""] if apart else words, text))
                 return i, "".join(out)
             if reading:
+                assigned.append(c)
                 if c in _BLANKS:
                     apart = True
-                    assigned.append(c)
                 else:
                     put(c)
         self.mark("unclosed", open_position)
         return n, "".join(out)
 
-    def value_double(self, i: int, subs: list[str], out: list[str]) -> int:
+    def value_double(self, i: int, subs: list[str], out: list[str],
+                     piece: list[str] | None = None) -> int:
         """A `"..."` inside `${...}` at `i`, read as `double` reads one, so a `'` or `}`
         in it is an ordinary character: where it ends, with its text as written on `out`
-        and each substitution's text on `subs`."""
+        and each substitution's text on `subs`. Given a `piece` list, its text as bash
+        gives it goes there too: escapes taken off, each substitution a NUL, and a
+        `${...}` whose default bash splits given as that default's text, unsplit."""
         t, n = self.t, self.n
         out.append('"')
         i += 1
         while i < n:
             c = t[i]
+            start = len(out)
             if c == '"':
                 out.append(c)
                 return i + 1
             if c == "\\" and i + 1 < n:
                 out.append(t[i:i + 2])
+                if piece is not None:
+                    d = t[i + 1]
+                    piece.append(("" if d == "\n" else d) if d in '$`"\\\n' else c + d)
                 i += 2
                 continue
             if c == "`":
@@ -836,13 +864,25 @@ class _Sh(_Reader):
                     self.mark("unclosed", i)
                 subs.append(text)
                 out.append("\0")
+                if piece is not None:
+                    piece.append("\0")
                 i = j
+                continue
+            if piece is not None and t.startswith("${", i):
+                inner: list[tuple[list[str], str]] = []
+                i, written = self.value(i, i + 2, subs, inner)
+                out.append("${" + written)
+                piece.append(inner[0][1] if inner else out[-1])
                 continue
             j = self.inner_expansion(i, subs, out) if c == "$" else None
             if j is not None:
+                if piece is not None:
+                    piece.append("".join(out[start:]))
                 i = j
                 continue
             out.append(c)
+            if piece is not None:
+                piece.append(c)
             i += 1
         return n
 
@@ -971,17 +1011,6 @@ class _Sh(_Reader):
             out.append(_untab(t[i:j]) if r.strip else t[i:j])
             i = j
         r.input = "".join(out)
-
-
-def _unescaped(pieces: list[str]) -> list[str]:
-    """The pieces `value_double` wrote of a `"..."`, each `\\` escape it takes off taken
-    off, as bash reads them."""
-    out = []
-    for piece in pieces:
-        if len(piece) == 2 and piece[0] == "\\" and piece[1] in '$`"\\\n':
-            piece = "" if piece[1] == "\n" else piece[1]
-        out.append(piece)
-    return out
 
 
 def _untab(text: str) -> str:

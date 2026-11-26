@@ -185,6 +185,18 @@ def test_sh_a_default_in_double_quotes_or_a_check_gives_no_words():
     assert word('cat "${x:- /p }"${y:+ /q r }', 1).fields == ("${x:- /p }", "/q", "r")
 
 
+def test_sh_a_default_nested_in_a_default_gives_its_own_words():
+    assert word("cat ${x:- a ${y:- /t } }", 1).fields == ("a", "/t")
+    assert word("cat ${x:- ${y:-/t}}", 1).fields == ("/t",)
+    assert word("cat ${x:- ${y:- ${z:- /t q } } }", 1).fields == ("/t", "q")
+    assert word("cat ${x:= a ${y:- /t q } }", 1).fields == ("a", "/t", "q")
+    # In double quotes inside the default it is one piece, as bash keeps it.
+    assert word('cat ${x:- "${y:- /t q }" r }', 1).fields == (" /t q ", "r")
+    assert word('cat ${x:- "a ${y:-/t}" }', 1).fields == ("a /t",)
+    # A value bash would have to look up stays as written.
+    assert word("cat ${x:- ${y#a} /t }", 1).fields == ("${y#a}", "/t")
+
+
 def test_sh_a_substitution_in_a_default_stays_a_nul_in_its_words():
     w = word("cat ${x:- $(kill 211)/p q }", 1)
     assert w.fields == ("\0/p", "q") and w.subs == ("kill 211",)

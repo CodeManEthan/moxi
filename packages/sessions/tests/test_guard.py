@@ -176,7 +176,8 @@ def test_text_between_two_substitutions_that_starts_a_path_is_judged(home):
 def test_each_word_bash_splits_a_default_into_is_judged(home):
     t = transcript(home)
     for command in (f"cat ${{x:- {t} }}", f"cat ${{x:- {t} }}cmd", f"cat ${{x:-{t}}}",
-                    f"cat ${{y:+ a {t} }}", f"cat < ${{x:- {t} }}"):
+                    f"cat ${{y:+ a {t} }}", f"cat < ${{x:- {t} }}",
+                    f"cat ${{x:- a ${{y:- {t} }} }}", f"cat ${{x:- ${{y:-{t}}}}}"):
         assert refused("Bash", {"command": command}, home), command
     for command in (f'cat "${{x:- {t} }}"', f"X=${{x:- {t} }} true"):
         assert not refused("Bash", {"command": command}, home), command
