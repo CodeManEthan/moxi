@@ -50,7 +50,7 @@ MINT_GLOBS = ("packages/projects/src/moxi_projects/acts.py",
 BROKEN = "INTERFACE = 1\nimport fake_module_that_is_not_there\n"
 #: The empty list's sentence once every facts component in a test shell has reported.
 FULL_SENTENCE = ("A project is a folder with a short name. "
-                 "Its sessions and services are then gathered under that name.")
+                 "Its sessions, cost, services and git hooks are then gathered under that name.")
 
 
 def fake_site(base: Path, package: str, entry: str, source: str) -> Path:
