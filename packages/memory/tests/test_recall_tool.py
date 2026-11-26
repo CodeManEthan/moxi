@@ -10,7 +10,6 @@ import os
 import time
 import types
 
-import jsonschema
 import pytest
 from moxi import modules
 
@@ -20,6 +19,8 @@ from moxi_memory.connector import recall as recall_tool
 from moxi_memory.connector.redaction import Gate
 
 HOST = modules.load("connector", interface=1).api
+#: The schema checker the host validates a call's arguments with.
+jsonschema = pytest.importorskip("jsonschema")
 CONV = "kiosk-approver-1530"
 KEY = recall_chat.KEY_PREFIX + CONV
 ON = "[subconscious.chat]\nenabled = true\n"

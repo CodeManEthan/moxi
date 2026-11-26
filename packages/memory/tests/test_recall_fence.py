@@ -5,6 +5,7 @@ every chat recall launches, and the probe that checks the fence on the machine, 
 from __future__ import annotations
 
 import dataclasses
+import importlib
 import json
 import os
 import subprocess
@@ -13,10 +14,13 @@ import time
 from pathlib import Path
 
 import pytest
+from moxi import modules
 from moxi.paths import Layout
-from moxi_launcher import api
 
 from moxi_memory import recall_fence as fence
+
+#: The real launcher, reached as memory reaches it: by `moxi.modules.load`.
+api = modules.load("launcher", interface=4).api
 
 POSIX = pytest.mark.skipif(sys.platform == "win32",
                            reason="the fake claude is a script run by its #! line")
@@ -139,8 +143,9 @@ def test_the_request_carries_every_fence_flag_and_nothing_of_the_defaults():
 def moxi_additions() -> list[str]:
     """The words Moxi's own launcher additions (turns') give a Claude launch without
     comms here; none when turns can't give them."""
-    from moxi_launcher import compose
-
+    # The launcher's API doesn't give its additions alone, so the test reads them from
+    # its compose step, by name, as the connector's join tests reach an optional module.
+    compose = importlib.import_module("moxi_launcher.compose")
     try:
         return list(compose.launch_additions(cwd=str(fence.chat_dir()), env=os.environ,
                                              session_id=SID).argv)
