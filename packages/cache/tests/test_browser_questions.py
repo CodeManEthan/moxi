@@ -4,8 +4,10 @@ a person would, in a browser, through a real shell that starts cache's real page
 1. Is my session still warm, and until when?
 2. What goes cold next?
 3. How many are warm and how many cold?
-4. What does going cold cost? Nothing on the page says.
-5. Is anything keeping a session warm? Nothing on the page says.
+4. What does going cold cost? Nothing on the page says here: no launch runs these
+   sessions and usage holds no index of them; the page's reads of launcher and usage
+   are walked in test_browser_others.py.
+5. Is anything keeping a session warm? Nothing on the page says here, for the same reason.
 6. Can I trust these readings?
 
 Each walk starts at the page's own address and reads only what the page shows. Each runs
@@ -71,7 +73,7 @@ CACHE_LINE = re.compile(r"^A session shows here from its first request")
 NAMES_FAILED = "Moxi couldn't read these sessions' names"
 READ_TAIL = "not rewritten since; this reading may be old"
 
-#: Words of pieces no fact of this page carries: a cost, and what keeps a session warm.
+#: Words of pieces no fact these walks write carries: a cost, and what keeps a session warm.
 LEFT_OUT = re.compile(r"\$|re-read|keep warm|kept warm|keep-alive|\bslot\b|\bproject\b", re.I)
 
 #: The Sessions page's rule for a row's name, in that page's own source.
