@@ -161,7 +161,8 @@ def test_a_subagents_fallback_row_gives_the_main_mark_and_says_so():
     ("claude-opus-5", "1x", "main", None,
      "the restart point has not been measured; run `moxi usage restart-point --measure`"),
     (None, "1x", "main", PARAMS, "no model is known for the session"),
-    ("claude-opus-5", "3x", "main", PARAMS, "'3x' is not a mark"),
+    ("claude-opus-5", "0.5x", "main", PARAMS, "'0.5x' is not a mark"),
+    ("claude-opus-5", "2.125x", "main", PARAMS, "'2.125x' is not a mark"),
     ("claude-opus-5", "1x", "workflow", PARAMS,
      "'workflow' is not a population (main, subagent)"),
 ])
@@ -462,3 +463,54 @@ def test_a_measure_from_before_the_share_was_stored_keeps_its_w():
     found = thresholds.threshold("claude-opus-5", "1x")
     assert found.tokens == EXACT["claude-opus-5"]["1x"]
 
+
+
+# --- the multiple form ------------------------------------------------------------------
+
+@pytest.mark.parametrize("mark,k", [
+    ("1x", 1.0), ("1.5x", 1.5), ("2x", 2.0), ("2.25x", 2.25), ("2.5x", 2.5), ("3x", 3.0),
+    ("1.0x", 1.0), ("2.50x", 2.5), ("10x", 10.0),
+])
+def test_a_multiple_is_k_x_with_k_at_least_1_and_at_most_two_places(mark, k):
+    assert thresholds.cost_multiple(mark) == k
+    assert thresholds.multiple(mark) == pytest.approx(k + math.sqrt(k * k - 1))
+
+
+@pytest.mark.parametrize("mark", [
+    "0.5x", "0x", "2.125x", "x", "2", "2.x", ".5x", "-2x", "+2x", "2,5x", "2.5X", " 2x",
+    "2x ", "1e2x", "inf" + "x", "nanx", "٣x", "off", "", None, 2, 2.5,
+])
+def test_anything_else_is_no_multiple(mark):
+    assert thresholds.cost_multiple(mark) is None
+    assert thresholds.multiple(mark) is None
+
+
+def test_the_named_marks_are_points_on_the_same_equation():
+    for mark, at in thresholds.MARK_MULTIPLES.items():
+        assert thresholds.multiple(mark) == at
+        k = thresholds.cost_multiple(mark)
+        assert at == pytest.approx(k + math.sqrt(k * k - 1), rel=1e-15)
+    for model, marks in EXACT.items():
+        for mark, tokens in marks.items():
+            spelled = f"{thresholds.cost_multiple(mark):.2f}x"     # 1.00x, 1.50x, 2.00x
+            assert thresholds.threshold(model, spelled, doc=PARAMS,
+                                        table=table()).tokens == tokens
+
+
+def test_a_multiple_past_2x_gives_a_threshold_past_the_2x_mark():
+    row = PARAMS["models"]["claude-opus-5-5"]["main"]
+    r = READS["claude-opus-5-5"]
+    found = thresholds.threshold("claude-opus-5-5", "2.5x", doc=PARAMS, table=table())
+    exact = thresholds.mark_exact(row["S"], row["P"], row["g"], row["w"], r, "2.5x")
+    n_star = thresholds.optimum_calls(thresholds.restart_cost(row["S"], row["P"],
+                                                              row["w"], r), r, row["g"])
+    assert exact == pytest.approx(row["S"] + row["g"] * (2.5 + math.sqrt(5.25)) * n_star)
+    assert (found.tokens, found.exact, found.mark) == (math.ceil(exact), exact, "2.5x")
+    assert found.tokens > EXACT["claude-opus-5-5"]["2x"]
+    three = thresholds.threshold("claude-opus-5-5", "3x", doc=PARAMS, table=table())
+    assert three.tokens > found.tokens
+
+
+def test_mark_exact_refuses_what_is_not_a_mark():
+    with pytest.raises(ValueError, match="'soon' is not a mark"):
+        thresholds.mark_exact(1.0, 1.0, 1.0, 1.0, 1.0, "soon")

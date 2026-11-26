@@ -2,6 +2,38 @@
 
 ## Unreleased
 
+- `moxi loadout status` lists, after its rows and under `not loadout's:`, each entry of
+  a harness's skills or agents folder that no placement holds (not loadout's, not any
+  module's, not tracked by git, not a dotted name), as information that changes no exit
+  code. `--json` and `/api/status` give them as `strays`, each with `path`, `harness`
+  and `kind`. Two new verbs act on one: `moxi loadout take PATH [--user | --project P]`
+  copies it into the loadout folder as a source, lists it and installs it, the original
+  kept under `displaced/`; `moxi loadout move-aside PATH` moves it under `displaced/`
+  and prints the command that puts it back. When a move across volumes copies it whole
+  but removes it only partly, `move-aside` exits 1 saying what is left may be only part
+  of it and where the whole copy is.
+- `moxi loadout status` says when the git hook's last automatic reinstall failed or ran
+  out of time: its first line is `The last automatic reinstall failed (<when>): run moxi
+  doctor loadout` until a clean install clears the record. `--json` and `/api/status`
+  give it as `reinstall_failed`, `{at, text}`, or null.
+- `moxi loadout install --replace` no longer places over a path git tracks, which left a
+  deletion in that repo's `git status`. A `--replace` naming one is refused: `<path> is
+  tracked by git in <repo>; untracking it is a commit in that repo`. Status shows the
+  row as before, `would-commit`, but the page offers no Replace on it, and
+  `/api/replace-preview` drops its `tracked` field, which can no longer be true.
+- The git hook pieces reinstall only on the repo's main branch: the branch
+  `origin/HEAD` points to, else git's `init.defaultBranch` where the repo has that
+  branch, else `main` where it has one, else `master` (a repo `git init` made with no
+  default set, never cloned), else `main`. A commit or
+  merge on another branch, or on a detached HEAD, prints one line saying the change
+  reinstalls when it reaches the main branch, and installs nothing.
+- `moxi loadout install --replace` asks before it moves aside a skill or agent whose
+  contents differ from what it would place, naming the files only on one side and the
+  files that differ. Without a terminal (or with `--json`) such a replace is refused,
+  naming the new `--accept-diff`, which places over it without asking. An occupant equal
+  to loadout's is replaced as before, with no question. The page's Replace passes
+  `--accept-diff`, since the page shows what it moves aside before it runs. A place that
+  fails after the move puts the occupant back.
 - `moxi loadout add --harness H` (it may repeat) lists an item for those harnesses only,
   in that section alone: the section's `disabled` switches it off for each harness not
   named, and its line names the harnesses it is on for. The page's Add has a `For`

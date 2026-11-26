@@ -22,6 +22,10 @@ code: 0 done; 1 an act or a write failed, or the state read after it does not ma
 2 asked wrongly; 3 refused; 75 the store or the core lock stayed busy (try again). A
 failure prints its lines and the command that fixes it to stderr.
 
+Turning a timer on (`enable` of a timer, `add --timer --enable`) is for the person at the
+keyboard: run inside an agent's session (`moxi.terminal.agent()` names its harness), it is
+refused with exit 3 and nothing written. Turning one off, and every act on a daemon, is not.
+
 `--health "CMD ARGS"` is split as this system splits a command line (POSIX shell words,
 or the Windows rules `CommandLineToArgvW` follows), stored as a list and printed back.
 `--at` and `--days` take comma-separated lists.
@@ -40,7 +44,7 @@ from collections.abc import Sequence
 import moxi.exit as codes
 
 from . import acts, rows, state, store
-from .errors import ServicesError, Usage
+from .errors import Refused, ServicesError, Usage
 from .rows import ModuleRow, UserRow
 from .verdict import View, last_run, views
 
@@ -268,12 +272,40 @@ def _say(outcome: acts.Outcome, out) -> None:
 
 def _act(args, out) -> int:
     act = getattr(acts, args.verb)
+    if args.verb == "enable" and any(_is_timer(ident) for ident in args.ids):
+        _refuse_in_agent()
     found = []
     for ident in args.ids:
         outcome = act(ident)
         _say(outcome, out)
         found.append(outcome.code)
     return worst(found)
+
+
+def _is_timer(ident: str) -> bool:
+    """Whether `ident` names a timer row; an id that names nothing is left to the act."""
+    try:
+        return acts.resolve(ident).kind == "timer"
+    except ServicesError:
+        return False
+
+
+def _refuse_in_agent() -> None:
+    """Refuse turning a timer on when an agent's session started this run."""
+    import moxi.terminal
+    import moxi.units
+
+    harness = moxi.terminal.agent()
+    if harness is not None:
+        raise Refused(moxi.units.TIMER_ON_REFUSED.format(harness=harness))
+
+
+def _adds_a_timer(args) -> bool:
+    """Whether `moxi services add` makes a timer row: a written row with `--timer`, an
+    adopted one by the kind its unit takes (a systemd `.timer` is one without `--timer`)."""
+    if args.unit is None:
+        return bool(args.timer)
+    return acts.adopted_kind(args.unit, is_timer=args.timer) == "timer"
 
 
 def _remove(args, out) -> int:
@@ -283,6 +315,8 @@ def _remove(args, out) -> int:
 
 
 def _add(args, out) -> int:
+    if args.enable and _adds_a_timer(args):
+        _refuse_in_agent()
     health = split_command(args.health) if args.health is not None else None
     if args.unit is not None:
         given = [flag for flag, value in (("--every", args.every), ("--at", args.at),

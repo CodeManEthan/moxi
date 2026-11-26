@@ -197,7 +197,8 @@ def test_every_value_that_can_hold_a_path_carries_a_mark():
         "/api/folder unlisted[].source", "/api/status kept[].target",
         "/api/status kept[].copy", "/api/job outcome.kept[].target",
         "/api/job outcome.kept[].copy", "/api/replace-preview target",
-        "/api/replace-preview kept_in", "/api/replace-preview skipped[].path"}
+        "/api/replace-preview kept_in", "/api/replace-preview skipped[].path",
+        "/api/status strays[].path", "/api/job outcome.strays[].path"}
     for said in ("/api/status problem", "/api/status rows[].reason", "/api/status rows[].name",
                  "/api/status rows[].scope", "/api/status lines[]", "/api/status notes[]",
                  "/api/list items[].source", "/api/list items[].scope",
@@ -236,7 +237,7 @@ def test_every_value_that_can_hold_a_path_carries_a_mark():
              "/api/projects cause", "/api/folder state", "/api/folder more",
              "/api/folder unlisted[].kind", "/api/folder reinstalls",
              "/api/status kept[].how", "/api/job outcome.kept[].how",
-             "/api/replace-preview case", "/api/replace-preview tracked",
+             "/api/replace-preview case",
              "/api/replace-preview others", "/api/replace-preview label",
              "/api/replace-preview lines", "/api/replace-preview skipped[].why"}
     assert not plain & set(marks)
@@ -1003,12 +1004,14 @@ def test_a_job_whose_pid_cant_be_recorded_is_still_accepted(lo, spawned, monkeyp
 
 @pytest.mark.parametrize("path, body, verb", [
     ("/api/replace", {"replace": "skill:review@claude", "project": "alpha", "job": JOB},
-     ["install", "--replace=skill:review@claude", "--project=alpha"]),
+     ["install", "--replace=skill:review@claude", "--accept-diff",
+      "--project=alpha"]),
     ("/api/replace", {"replace": "/srv/alpha/.claude/skills/x", "user": True, "job": JOB},
-     ["install", "--replace=/srv/alpha/.claude/skills/x", "--user"]),
+     ["install", "--replace=/srv/alpha/.claude/skills/x", "--accept-diff",
+      "--user"]),
     # A row a whole run applies (the global file's part): no section.
     ("/api/replace", {"replace": "global:global@claude", "job": JOB},
-     ["install", "--replace=global:global@claude"]),
+     ["install", "--replace=global:global@claude", "--accept-diff"]),
     ("/api/global-remove", {"job": JOB}, ["global", "remove"]),
 ])
 def test_a_named_act_runs_its_verb_and_nothing_else_as_the_job_it_names(

@@ -367,8 +367,8 @@ describe('the non-interactive rule', () => {
     expect(w.spawned).toEqual([])
   })
 
-  test('MOXI_TURNS_ENDPOINT set and absolute is the command, and endpoint.json is never read', async ($: E, on) => {
-    const w = world(on, { env: { MOXI_TURNS_ENDPOINT: '/opt/launch/bin/moxi-turns-endpoint' } })
+  test('MOXI_TURNS_ENDPOINT set and absolute is the command, and a launch never reads endpoint.json', async ($: E, on) => {
+    const w = world(on, { env: { MOXI_TURNS_ENDPOINT: '/opt/launch/bin/moxi-turns-endpoint', MOXI_TURNS_GUARDS_SEEN: '/state/turns/guards-seen.json' } })
     await start($)
     expect(w.spawned).toEqual([['/opt/launch/bin/moxi-turns-endpoint']])
     expect(w.reads.filter(p => p.endsWith('/endpoint.json'))).toEqual([])
@@ -381,7 +381,7 @@ describe('the non-interactive rule', () => {
   })
 
   test('MOXI_TURNS_ENDPOINT set but not absolute spawns nothing, even with a good endpoint.json', async ($: E, on) => {
-    const w = world(on, { env: { MOXI_TURNS_ENDPOINT: 'moxi-turns-endpoint' } })
+    const w = world(on, { env: { MOXI_TURNS_ENDPOINT: 'moxi-turns-endpoint', MOXI_TURNS_GUARDS_SEEN: '/state/turns/guards-seen.json' } })
     await start($)
     await $.classic.SessionStart({ source: 'startup' })
     expect(w.spawned).toEqual([])

@@ -109,7 +109,7 @@ def test_replace_on_a_module_skill_places_it_as_the_module_seeded(demo, loadout_
     (target / "mine.txt").write_text("in the way\n")
     assert install.install().code == 3
     named = "skill:demo/moxi-demo@claude" if form == "id" else str(target)
-    out = install.install(replace=[named])
+    out = install.install(replace=[named], accept_diff=True)
     assert out.code == 0, out.text()
     assert os.readlink(target) == str(demo / "moxi-demo")
     assert kit.owner_of(target) == "loadout"

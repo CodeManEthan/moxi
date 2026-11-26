@@ -52,12 +52,29 @@ FIELDS = {
 }
 
 
+#: The site's `sitecustomize.py`: the core's agent test, faked to name no harness in each
+#: process started with the site on its path (the shell, its page servers and the
+#: `moxi config` runs a save starts), so a save that turns the fixture's timer on is
+#: judged the same inside an agent's session and outside it.
+NO_AGENT = '''"""ui's fixture kit wrote this: the core's agent test names no harness here."""
+
+try:
+    import moxi.terminal
+except ImportError:
+    pass
+else:
+    moxi.terminal.agent = lambda *args, **kwargs: None
+'''
+
+
 def install(site: Path, version: str = "0.1.0", *, main: bool = False, fields: bool = False,
             table: bool = False) -> Path:
-    """Copy the fixture's package into `site` and write its `.dist-info` beside it. With
-    `main` the copy also announces a piece for Home's main spot; with `fields` its schema
-    carries `FIELDS`; with `table` it declares its table of rows (`TABLE`)."""
+    """Copy the fixture's package into `site` and write its `.dist-info` beside it, with
+    `NO_AGENT` as the site's `sitecustomize.py`. With `main` the copy also announces a
+    piece for Home's main spot; with `fields` its schema carries `FIELDS`; with `table` it
+    declares its table of rows (`TABLE`)."""
     site.mkdir(parents=True, exist_ok=True)
+    (site / "sitecustomize.py").write_text(NO_AGENT)
     target = site / "moxi_fixture"
     if not target.exists():
         shutil.copytree(SOURCE, target, ignore=shutil.ignore_patterns("__pycache__"))

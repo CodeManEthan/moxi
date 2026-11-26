@@ -181,8 +181,8 @@ def test_the_gate_matrix_passes():
 def test_the_page_declares_its_reads_and_acts_none_the_gateways():
     routes = {r["path"]: r for r in LB.export(page.PAGE)["routes"]}
     assert {p for p, r in routes.items() if r["kind"] == "read"} == {
-        "/api/projects", "/api/project", "/api/folder", "/api/kinds", "/api/where",
-        "/api/remove-check", "/api/remove-status"}
+        "/api/projects", "/api/project", "/api/folder", "/api/kinds", "/api/questions",
+        "/api/where", "/api/remove-check", "/api/remove-status"}
     assert {p for p, r in routes.items() if r["kind"] == "act"} == {
         "/api/add", "/api/set", "/api/agents-add", "/api/agents-remove", "/api/remove"}
     assert {p for p, r in routes.items() if r.get("confirmed")} == set()
@@ -216,7 +216,8 @@ def test_every_root_is_marked_path_and_every_sentence_redact():
         "/api/projects home", "/api/folder path", "/api/where store", "/api/where git"}
     assert {k for k, v in marks.items() if v == "redact"} == {
         "/api/kinds broken[].reason", "/api/add notes[]", "/api/add warnings[]",
-        "/api/set notes[]", "/api/where note",
+        "/api/add asked[]", "/api/questions questions[].text",
+        "/api/questions questions[].later", "/api/set notes[]", "/api/where note",
         "/api/remove-check refusals[].sentence", "/api/remove-check refusals[].fix",
         "/api/remove-status reason", "/api/remove-status fix",
         "/api/remove-status sentences[]", "/api/remove reason", "/api/remove fix",
@@ -1489,3 +1490,71 @@ def test_the_page_states_its_group_and_order_among_the_pages():
 
     page_decl = module.COMPONENTS["page"]
     assert (page_decl["group"], page_decl["order"]) == ("daily", 60)
+
+
+# --- the questions an add puts ------------------------------------------------------------
+
+ASKS = """
+INTERFACE = 3
+KINDS = {"plain": ("a plain folder", lambda fields: None, "dir")}
+SEEN = []
+ANSWERS = []
+
+def questions(fields):
+    SEEN.append(dict(fields))
+    return [
+        {"key": "clean", "text": "Keep it clean?", "choices": ["yes", "no"],
+         "suggested": "yes", "later": "fake clean enable " + fields["root"]},
+        {"key": "push", "text": "Guard pushes?", "choices": ["yes", "no"],
+         "suggested": "no", "preset": "yes", "later": "fake push enable"},
+        {"key": "branches", "text": "Which branches?", "after": ["push", "yes"],
+         "later": "fake push enable --branch NAME"},
+    ]
+
+def answer(project, key, value):
+    ANSWERS.append((project.key, key, value))
+    return None
+"""
+
+
+def test_questions_lists_what_an_add_at_the_path_would_put(site, tmp_path):
+    site.contribution("fake", ASKS)
+    body = read("/api/questions", f"path={tmp_path}")
+    assert [q["key"] for q in body["questions"]] == ["clean", "push", "branches"]
+    assert body["questions"][0] == {
+        "module": "fake", "key": "clean", "text": "Keep it clean?", "choices": ["yes", "no"],
+        "suggested": "yes", "preset": None, "after": None,
+        "later": f"fake clean enable {tmp_path}"}
+    assert body["questions"][2]["after"] == ["push", "yes"]
+    link = sys.modules["fake_fake.projects_link"]
+    assert link.SEEN[-1] == {"key": "", "root": str(tmp_path), "kind": "project",
+                             "lead": None, "notes_root": None, "mint": None}
+    read("/api/questions", f"path={tmp_path}&kind=plain&create=true")
+    assert link.SEEN[-1]["kind"] == "plain" and link.SEEN[-1]["mint"] == "dir"
+
+
+def test_questions_for_a_path_the_server_cant_take_are_none(site):
+    site.contribution("fake", ASKS)
+    assert read("/api/questions", "path=relative/web") == {"questions": []}
+
+
+def test_the_add_acts_on_the_answers_sent_and_names_those_not_sent(site, tmp_path):
+    site.contribution("fake", ASKS)
+    body = done("/api/add", {"key": "web", "root": str(tmp_path),
+                             "answers": ["fake.branches=main"]})
+    link = sys.modules["fake_fake.projects_link"]
+    assert link.ANSWERS == [("web", "push", "yes"), ("web", "branches", "main")]
+    assert body["asked"] == [f"fake asks: Keep it clean? (suggested: yes); to set it "
+                             f"later: fake clean enable {tmp_path}"]
+    done("/api/add", {"key": "app", "root": str(tmp_path / "app"),
+                      "answers": ["fake.clean=no", "fake.branches="]})
+    assert link.ANSWERS[-3:] == [("app", "clean", "no"), ("app", "push", "yes"),
+                                 ("app", "branches", "")]
+
+
+def test_an_answer_out_of_shape_is_refused_before_the_add(site, tmp_path, store_path):
+    site.contribution("fake", ASKS)
+    said = refused(post("/api/add", {"key": "web", "root": str(tmp_path),
+                                     "answers": ["clean=yes"]}))
+    assert "is not module.key=value" in said
+    assert not store_path.exists()

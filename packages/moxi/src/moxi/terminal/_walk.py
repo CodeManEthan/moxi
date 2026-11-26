@@ -56,6 +56,15 @@ an N1 `Undecided`; on Windows, which never reparents, it ends the walk, as does 
 pid with no process. A parent the system hides (Linux `hidepid`) ends the walk too. A process
 whose parent ends the walk in any of these ways is judged first, a shielded one by its
 command line, so a pid namespace's first process is judged before the walk ends there.
+
+`agent(view, run)` is the agent test: the harness (`claude`, `codex` or `opencode`) whose
+session the run was started in, or None. It looks for E2 alone, by the same signs, and
+climbs past what would stop `walk` (a Moxi program, a unit, the start mark, a tmux
+server), since a session a Moxi launcher started carries the start mark. A tool mark names
+the harness `TOOL_MARKS` gives it, and a namespace top run from a file descriptor names
+`claude`, whose Linux sandbox runs so. Where the walk can't go on (a process it can't read,
+past `LIMIT`, a loop) it names no harness. It is a fence, not a lock: a process that clears
+its environment and runs outside the harness's process tree is not caught.
 """
 
 from __future__ import annotations
@@ -161,10 +170,45 @@ def walk(view=None, run: Run | None = None) -> Found:
     return _Walk(view, run, is_windows=windows).go()
 
 
+#: The harness a namespace top run from a file descriptor is: Claude Code's Linux sandbox
+#: runs its own binary so.
+FD_HARNESS = "claude"
+
+
+def agent(view=None, run: Run | None = None) -> str | None:
+    """The harness whose session `run` (default: this process) was started in, or None
+    (module doc)."""
+    view = _view.default_view() if view is None else view
+    run = Run.here() if run is None else run
+    windows = bool(getattr(view, "windows", False))
+    return _Walk(view, run, is_windows=windows).harness_above()
+
+
 class _Walk:
     def __init__(self, view, run: Run, *, is_windows: bool):
         self.view, self.run, self.windows = view, run, is_windows
         self.seen: set[int] = set()
+
+    def harness_above(self) -> str | None:
+        """The agent test: E2's signs alone, from the run's own start environment up."""
+        from moxi import _mark
+
+        for mark in _mark.TOOL_MARKS:
+            if mark in self.run.tool_marks:
+                return _mark.TOOL_MARKS[mark]
+        try:
+            above = self.view.read(self.run.pid)
+        except (Gone, Unread):
+            return None
+        self.seen.add(above.pid)
+        above = self.up(above)
+        while isinstance(above, Proc):
+            if above.argv and (harness := self.harness(above.argv)) is not None:
+                return harness
+            top, above = above, self.up(above)
+            if above is None and self.fd_top(top) is not None:
+                return FD_HARNESS
+        return None
 
     def go(self) -> Found:
         if (found := self.own_env()) is not None:

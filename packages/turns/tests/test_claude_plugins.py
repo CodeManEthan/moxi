@@ -91,3 +91,13 @@ def test_claude_plugin_test_passes(name):
     out = _claude("test", str(CLAUDE_DIR / name), timeout=420)
     assert out.returncode == 0, (out.stdout + out.stderr)[-4000:]
     assert " 0 fail" in out.stdout + out.stderr
+
+
+def test_the_runners_copy_of_the_removal_pre_filter_is_the_guards():
+    import re
+
+    from moxi_turns.guards import REMOVAL_MATCH
+
+    source = (CLAUDE_DIR / "moxi-turns" / "hooks" / "register.ts").read_text()
+    found = re.search(r"export const REMOVAL_MATCH = String\.raw`([^`]*)`", source)
+    assert found is not None and found.group(1) == REMOVAL_MATCH

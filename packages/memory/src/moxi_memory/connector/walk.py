@@ -1,8 +1,13 @@
 """`search_memory`'s search: a private variant of memory's own, run in one reader of the
 index, that never lets text the chat can't see choose, place or count a hit.
 
-**Which rows.** A row is a candidate only when its writer is `person`, `model` or
-`unknown` (`SHOWN_WRITERS`), and a row with no writer never is. Its stored text, after
+**Which rows.** A row is a candidate only when its writer is `person`, `model`,
+`unknown` or one of the delivered writers, `hook`, `channel`, `peer`, `coordinator` and
+`task` (`SHOWN_WRITERS`); a `harness` or `summary` row, and a row with no writer, never
+is. A delivered row (`rows.DELIVERED_WRITERS`) is a candidate exactly when memory's own
+search would return it: its writer comes from its line's own origin, so the two clauses
+below, which judge rows whose writer is unsure, don't apply to it (a task's delivery
+opens with `<task-notification>`, an output wrapper). Any other row's stored text, after
 the opening characters, must not open with an output wrapper, and an `unknown` row's
 must not open with `<` and a letter (any Unicode letter, as `str.isalpha` says) or with a
 placeholder. These are clauses of the query: the opening characters are skipped with
@@ -58,8 +63,9 @@ from .. import index, roots, rows, search
 from ..index import IndexUnreadable, StateUnreadable
 from .redaction import PLACEHOLDER, UNSCANNED
 
-#: The writers whose rows a search may return.
-SHOWN_WRITERS = ("person", "model", "unknown")
+#: The writers whose rows a search may return: a person's, the model's, an unknown
+#: submitter's, and each delivered message's (`rows.DELIVERED_WRITERS`).
+SHOWN_WRITERS = ("person", "model", "unknown", *rows.DELIVERED_WRITERS)
 #: How many kept rows each window holds at most.
 WINDOW = 500
 #: The most tokens a snippet holds, and its cut in characters.
@@ -193,9 +199,11 @@ class _Hidden:
         trimmed = f"ltrim({alias}.text, ?)"
         wraps = " OR ".join(f"substr({trimmed}, 1, {len(w)}) = ?" for w in self.wrappers)
         shown = ", ".join(f"'{w}'" for w in SHOWN_WRITERS)
-        sql = (f"{alias}.writer IN ({shown}) AND NOT ({wraps}) AND "
+        delivered = ", ".join(f"'{w}'" for w in rows.DELIVERED_WRITERS)
+        sql = (f"{alias}.writer IN ({shown}) AND ({alias}.writer IN ({delivered}) OR ("
+               f"NOT ({wraps}) AND "
                f"({alias}.writer != 'unknown' OR NOT ({trimmed} GLOB '<[A-Za-z]*' OR "
-               f"substr({trimmed}, 1, {len(PLACEHOLDER)}) = ?))")
+               f"substr({trimmed}, 1, {len(PLACEHOLDER)}) = ?))))")
         params: list[object] = [x for w in self.wrappers for x in (self.bound, w)]
         params += [self.bound, self.bound, PLACEHOLDER]
         return sql, params
@@ -209,7 +217,10 @@ class _Hidden:
             trimmed[:1] == "<" and len(trimmed) > 1 and not trimmed[1].isascii())
 
     def hides(self, writer: str | None, text: str) -> bool:
-        """Python's verdict, over every opening character."""
+        """Python's verdict, over every opening character. A delivered row is never
+        hidden by what it opens with."""
+        if writer in rows.DELIVERED_WRITERS:
+            return False
         s = self.sessions
         if s.opens_with_output(text):
             return True

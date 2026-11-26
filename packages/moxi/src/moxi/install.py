@@ -1,7 +1,7 @@
 """`moxi install`: install a module and its required modules, set them up, offer extras.
 
     moxi install <module> [--with EXTRA,...] [--without EXTRA,...] [--all | --none]
-                          [--from SPEC]... [--third-party] [--replace]
+                          [--from SPEC]... [--third-party] [--replace [--accept-diff]]
                           [--skills | --no-skills] [--skills-form auto|link|copy]
     moxi install <module> --setup-only
 
@@ -458,13 +458,14 @@ def snapshot(python: str) -> dict:
 
 
 def run_settle(python: str, module: str, *, replace: bool = False,
-               install_skills: bool | None = None):
+               accept_diff: bool = False, install_skills: bool | None = None):
     """Run module `module`'s settle step in a fresh process under this install's hold of
     the core lock, and wait for it however long it takes (`moxi._settle.run_child`).
     Returns its `moxi._settle.Outcome`."""
     from . import _settle
 
     return _settle.run_child(_settle.child_argv(python, module, replace=replace,
+                                                accept_diff=accept_diff,
                                                 install_skills=install_skills))
 
 
@@ -505,6 +506,10 @@ def _parser(prog: str):
     parser.add_argument("--replace", action="store_true",
                         help="move a unit file or a placed skill moxi did not write out "
                              "of the way of the module's own (to DATA/moxi/displaced/)")
+    parser.add_argument("--accept-diff", action="store_true",
+                        help="with --replace, move a placed skill's occupant aside though "
+                             "its contents differ from the module's, without asking; at "
+                             "a terminal you are asked, and without one it is refused")
     answer = parser.add_mutually_exclusive_group()
     answer.add_argument("--skills", dest="skills", action="store_true", default=None,
                         help="place each module's skills without asking")
@@ -525,6 +530,7 @@ def _parser(prog: str):
 _OTHERS = (("with_", [], "--with"), ("without", [], "--without"), ("all", False, "--all"),
            ("none", False, "--none"), ("from_", [], "--from"),
            ("third_party", False, "--third-party"), ("replace", False, "--replace"),
+           ("accept_diff", False, "--accept-diff"),
            ("skills", None, "--skills"), ("skills_form", None, "--skills-form"))
 
 
@@ -572,6 +578,7 @@ class Installer:
         self.froms = [parse_from(spec) for spec in args.from_]
         self.third_party = bool(getattr(args, "third_party", False))
         self.replace = bool(getattr(args, "replace", False))
+        self.accept_diff = bool(getattr(args, "accept_diff", False))
         self.skills = getattr(args, "skills", None)
         self.skills_form = getattr(args, "skills_form", None)
         self.setup_only = bool(getattr(args, "setup_only", False))
@@ -788,7 +795,7 @@ class Installer:
                 continue
             guard_streams()
             outcome = run_settle(self.env.python, name, replace=self.replace,
-                                 install_skills=self.skills)
+                                 accept_diff=self.accept_diff, install_skills=self.skills)
             if outcome.interrupted:
                 raise InstallError(f"interrupted in {name}'s settle step; no later step "
                                    f"ran. Run `moxi install {self.module}` again to finish.")

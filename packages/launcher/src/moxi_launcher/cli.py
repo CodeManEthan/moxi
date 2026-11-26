@@ -9,6 +9,7 @@ launched.
     moxi launcher presets [list | show NAME | check] [--project KEY] [--json]
     moxi launcher catalog [HARNESS] [--json]
     moxi launcher handoff dir [--json]
+    moxi launcher handoff take [FILE] [--key KEY] [--json]
     moxi launcher handoffs [--key KEY] [--json]
     moxi launcher deliver REQUEST_ID --pid PID
     moxi launcher relaunch --self --handoff FILE [--dry-run] [--json]
@@ -34,9 +35,10 @@ launched.
 nothing. `log` lists launches, newest first, or with `--table` the runs, the exits or the
 holds. `presets` lists, shows or checks the seats and project presets, and with `--project
 KEY` lists a project's agents beside the seat of each. `catalog` lists the flag rows this
-install offers. `handoff dir` prints the handoff folder for this session; `handoffs` lists
-a key's handoffs and which still wait for their seat, a `--key` in the folder of that key's
-newest launch. `deliver` is internal: the detached process that sends a terminal launch's
+install offers. `handoff dir` prints the handoff folder for this session; `handoff take`
+records a handoff as picked, this session's waiting one when no FILE is named, so its seat's
+next start no longer points to it; `handoffs` lists a key's handoffs and which still wait
+for their seat, a `--key` in the folder of that key's newest launch. `deliver` is internal: the detached process that sends a terminal launch's
 first turn.
 
 The acts on a launched session: `relaunch` arms a relaunch of this session (`--self`), or
@@ -128,7 +130,7 @@ def _errors() -> tuple[type[BaseException], ...]:
     from . import catalog, first, handoffs
 
     return (catalog.Refused, ConfigError, core_store.StoreError, handoffs.NoKey,
-            handoffs.NoNotesDir, first.HandoffUnreadable, NoPreset)
+            handoffs.NoNotesDir, handoffs.TakeRefused, first.HandoffUnreadable, NoPreset)
 
 
 def refusal_lines(error: BaseException) -> tuple[str, str | None]:
@@ -484,6 +486,14 @@ def _catalog(args: argparse.Namespace, prog: str) -> int:
 def _handoff(args: argparse.Namespace, prog: str) -> int:
     from . import handoffs
 
+    if args.what == "take":
+        taken = handoffs.take(args.file, key=args.key)
+        if args.json:
+            print(_dump({"key": taken.key, "path": str(taken.path),
+                         "folder": str(taken.handoff_dir), "request_id": taken.request_id}))
+        else:
+            print(f"took {taken.path} ({taken.key})")
+        return codes.OK
     here = handoffs.current()
     if args.json:
         print(_dump({"key": here.key, "folder": str(here.handoff_dir),
@@ -800,10 +810,20 @@ def build_parser(prog: str = "moxi launcher") -> argparse.ArgumentParser:
                          help="list only this harness's rows")
     catalog.add_argument("--json", action="store_true", help="print JSON")
 
-    handoff = verbs.add_parser("handoff", help="print this session's handoff folder",
-                               description="Print the handoff folder for this session's "
-                                           "key.")
-    handoff.add_argument("what", choices=("dir",), help="dir")
+    handoff = verbs.add_parser("handoff", help="print this session's handoff folder, or take "
+                                               "a handoff",
+                               description="dir prints the handoff folder for this "
+                                           "session's key. take records a handoff as "
+                                           "picked, so its seat's next start no longer "
+                                           "points to it: FILE, or this session's waiting "
+                                           "handoff.")
+    handoff.add_argument("what", choices=("dir", "take"), help="dir or take")
+    handoff.add_argument("file", nargs="?", metavar="FILE",
+                         help="take: the handoff to take; this session's waiting one when "
+                              "left out")
+    handoff.add_argument("--key", metavar="KEY",
+                         help="take: the key the handoff is filed under, when it is not "
+                              "this session's")
     handoff.add_argument("--json", action="store_true", help="print JSON")
 
     handoffs = verbs.add_parser("handoffs", help="list a key's handoffs",
@@ -1029,6 +1049,8 @@ def parse(argv: Sequence[str] | None = None, *, prog: str = "moxi launcher"
         parser.error(f"presets {args.action} takes no NAME")
     if args.verb == "presets" and args.action == "show" and args.name is None:
         parser.error("presets show needs a NAME")
+    if args.verb == "handoff" and args.what == "dir" and (args.file or args.key):
+        parser.error("handoff dir takes no FILE or --key")
     if args.verb == "relaunch":
         _check_relaunch(parser, args)
     if args.verb == "keep-warm":

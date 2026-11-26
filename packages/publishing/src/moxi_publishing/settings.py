@@ -1,9 +1,18 @@
 """publishing's config, read through `moxi.config` at each use.
 
-Keys: `provenance.rules`, the provenance rules that run; `push.word_pattern`, the shape a
-push word must match in full; and `defaults.drop_trailers`, `defaults.main` and
-`defaults.word_required`, which seed a repo's piece settings when `enable` first
-registers a piece there. Every value scoped to one repo lives in that repo's git config.
+Keys:
+
+- `provenance.rules`, the provenance rules that run;
+- `push.word_pattern`, the shape a push word must match in full;
+- `defaults.drop_trailers` and `defaults.main`, which seed a repo's piece settings when
+  `enable` first registers a piece there;
+- `defaults.refused_trailers`, the keys clean history adds to the repo's commit-rules
+  piece;
+- `project_add.clean_history`, `project_add.push_approval` and
+  `project_add.approval_branches`, which answer the questions `moxi projects add` puts
+  for a new project in a git repo.
+
+Every value scoped to one repo lives in that repo's git config.
 """
 
 from __future__ import annotations
@@ -15,8 +24,11 @@ SCHEMA_RESOURCE = "settings.toml"
 RULES = "provenance.rules"
 WORD_PATTERN = "push.word_pattern"
 DROP_TRAILERS = "defaults.drop_trailers"
+REFUSED_TRAILERS = "defaults.refused_trailers"
 MAIN = "defaults.main"
-WORD_REQUIRED = "defaults.word_required"
+CLEAN_AT_ADD = "project_add.clean_history"
+APPROVAL_AT_ADD = "project_add.push_approval"
+BRANCHES_AT_ADD = "project_add.approval_branches"
 
 _schema: Schema | None = None
 

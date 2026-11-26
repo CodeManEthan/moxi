@@ -98,7 +98,8 @@ def test_replace_keeps_the_edited_agent_file_with_an_edit_made_after_the_confirm
         fh.write("# a later change\n")
     edited = target.read_bytes()
     confirm.locator('[data-action="confirm-replace"]').click()
-    kit.job_line(panel, "moxi loadout install --replace=agent:code-reviewer@codex --user: done")
+    kit.job_line(panel, "moxi loadout install --replace=agent:code-reviewer@codex --accept-diff "
+                        "--user: done")
     [copy] = kit.displaced(world.home, target.name)
     assert copy.read_bytes() == edited
     assert target.read_bytes() != edited
@@ -133,7 +134,8 @@ def test_replace_moves_what_is_in_the_way_and_says_to_turn_it_off_first(world):
         "Put the folder's version of release-checklist back for Claude Code?")
     expect(confirm.locator('[data-line="what"]')).to_contain_text("what is there to")
     confirm.locator('[data-action="confirm-replace"]').click()
-    kit.job_line(panel, "moxi loadout install --replace=skill:release-checklist@claude --user: done")
+    kit.job_line(panel, "moxi loadout install --replace=skill:release-checklist@claude "
+                        "--accept-diff --user: done")
     [copy] = kit.displaced(world.home, "release-checklist")
     assert (copy / "SKILL.md").read_bytes() == own
     assert target.is_symlink()
@@ -164,7 +166,8 @@ def test_replace_of_an_edited_entry_keeps_the_whole_harness_file(world):
     confirm.locator('[data-action="confirm-replace"]').click()
     # The run over Your items leaves the edited agent file, which still needs him; the
     # Replace itself did its work.
-    kit.job_line(panel, "moxi loadout install --replace=hook:guard-rm@claude --user: done, but "
+    kit.job_line(panel, "moxi loadout install --replace=hook:guard-rm@claude --accept-diff --user: "
+                        "done, but "
                         "the agent code-reviewer still needs you")
     [copy] = kit.displaced(world.home, settings.name)
     assert copy.read_bytes() == edited

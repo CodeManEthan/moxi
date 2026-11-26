@@ -50,7 +50,8 @@ def test_the_launchers_own_stamps_are_named_exactly_so_its_configuration_stays()
     assert set(found.session_env) == {"MOXI_LAUNCHER_REQUEST", "MOXI_LAUNCHER_RELAUNCH",
                                      "MOXI_LAUNCHER_KEEP_WARM",
                                      "MOXI_LAUNCHER_RECYCLE_ON_EXPIRY",
-                                     "MOXI_USAGE_CROSSING_AT", "MOXI_USAGE_WARN_AT"}
+                                     "MOXI_USAGE_CROSSING_AT", "MOXI_USAGE_WARN_AT",
+                                     "MOXI_USAGE_STOP_AT", "MOXI_USAGE_STOP_HANDOFFS"}
     assert not any(name.endswith("_") for name in found.session_env)
     kept = common.scrub(CALLER, modules.session_env(), is_windows=False)
     assert "MOXI_LAUNCHER_REQUEST" not in kept and "MOXI_LAUNCHER_RELAUNCH" not in kept
@@ -330,3 +331,74 @@ def test_a_config_naming_a_default_mark_moves_no_launch_mark():
     path.write_text('[marks]\ndefault = "1.5x"\n', encoding="utf-8")
     assert common.limit_mark({"recycle_at_limit": "relaunch", "warn_at": ""}) == ""
     assert common.option_stamps({"recycle_at_limit": "relaunch", "warn_at": ""}) == {}
+
+
+# -- the stop -------------------------------------------------------------------------------
+
+
+#: A relaunch launch warned at 2x that stops at 2.5x.
+STOP_LAUNCH = {**SLOT_LAUNCH, "warn_at": "2x", "stop_at": "2.5x"}
+
+
+def test_a_stop_stamps_its_mark_and_the_launchs_handoff_dir(slot_here):
+    from moxi_launcher import handoffs
+
+    handoff_dir = str(handoffs.own_handoffs_dir(create=False))
+    assert common.stop_holds(STOP_LAUNCH)
+    assert common.option_stamps(STOP_LAUNCH) == {
+        "MOXI_USAGE_CROSSING_AT": "2x", "MOXI_USAGE_STOP_AT": "2.5x",
+        "MOXI_USAGE_STOP_HANDOFFS": handoff_dir}
+    # Naming the handoff folder doesn't make it.
+    assert not handoffs.own_handoffs_dir(create=False).exists()
+
+
+def test_the_stops_handoff_dir_is_the_one_notes_gives_the_launch(slot_here, monkeypatch):
+    from pathlib import Path
+
+    from moxi_launcher import handoffs
+
+    asked = []
+
+    def notes_handoff_dir(cwd, **kw):
+        asked.append((cwd, kw.get("notes_dir"), kw.get("create")))
+        return Path("/notes/work/handoffs")
+
+    monkeypatch.setattr(handoffs, "handoff_dir", notes_handoff_dir)
+    stamped = common.option_stamps({**STOP_LAUNCH, "notes_dir": "/notes/work"})
+    assert stamped["MOXI_USAGE_STOP_HANDOFFS"] == str(Path("/notes/work/handoffs"))
+    assert ("/work", "/notes/work", False) in asked
+
+
+@pytest.mark.parametrize("change", [
+    {"stop_at": ""}, {"target": "terminal"}, {"harness": "codex"}, {"scratch": True},
+    {"recycle_at_limit": "off"}, {"recycle_at_limit": "compact"}, {"warn_at": "off"},
+    {"warn_at": ""}, {"stop_at": "2x"}, {"stop_at": "1.5x"}, {"stop_at": "2.5"}])
+def test_a_launch_whose_stop_cannot_act_stamps_no_stop(slot_here, change):
+    # A launch is refused before it gets here; a replay whose relaunch no longer holds,
+    # or a row that holds a stop_at no longer taken, stamps no stop.
+    values = {**STOP_LAUNCH, **change}
+    assert not common.stop_holds(values)
+    stamped = common.option_stamps(values)
+    assert "MOXI_USAGE_STOP_AT" not in stamped and "MOXI_USAGE_STOP_HANDOFFS" not in stamped
+
+
+def test_a_stop_where_slots_do_not_run_is_not_stamped(slot_here, monkeypatch):
+    from moxi_launcher import catalog
+
+    monkeypatch.setattr(catalog, "slots_here", lambda: False)
+    assert common.option_stamps(STOP_LAUNCH) == {}
+
+
+def test_a_usage_without_the_stop_gets_no_stop_stamps(slot_here, monkeypatch):
+    real = modules.load
+    monkeypatch.setattr(modules, "load", lambda name, **kw: (
+        SimpleNamespace(ok=False, api=None) if name == "usage" and kw.get("interface") == 3
+        else real(name, **kw)))
+    assert common.option_stamps(STOP_LAUNCH) == {"MOXI_USAGE_CROSSING_AT": "2x"}
+
+
+def test_a_launch_from_a_stopped_session_scrubs_the_stop_stamps():
+    caller = {"PATH": "/usr/bin", "MOXI_USAGE_STOP_AT": "2.5x",
+              "MOXI_USAGE_STOP_HANDOFFS": "/handoffs"}
+    assert common.scrub(caller, modules.session_env(), is_windows=False) == {
+        "PATH": "/usr/bin"}

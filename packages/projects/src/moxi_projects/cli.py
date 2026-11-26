@@ -24,9 +24,20 @@ working directory; an empty `--root` or `--notes-root` is a usage error. Notes t
 refuse nothing (a root that doesn't exist yet, what `--create` made, what `promote`
 moved) go to stderr. So does a warning: an `add` or `promote` goes ahead past a
 contribution that won't load, unless the kind may be its own, and says on one line which
-it skipped and the fix; with `--json` the project also carries it, as `warnings`. A refusal prints its reason and the command that fixes it to
-stderr, and exits 1 (an error), 2 (usage), 3 (refused) or 75 (the store stayed locked;
-try again).
+it skipped and the fix; with `--json` the project also carries it, as `warnings`.
+
+Once the row is written, `add` puts the questions other modules offer about the new
+project (publishing, say, offers to keep a git repository's history publishable). Run
+with a terminal on both stdin and stdout and without `--json`, it asks each one, its
+suggestion the default answer; a question a module's setting already answers is not
+asked. Otherwise it asks nothing, turns nothing on, and prints to stderr one `not asked:`
+line per question naming the command that sets it later; with `--json` the project
+carries those lines as `asked`, and the answers acted on as `answered`, each only when
+there is one. An answer that fails leaves the project added: a warning names the
+failure and the command to run.
+
+A refusal prints its reason and the command that fixes it to stderr, and exits 1 (an
+error), 2 (usage), 3 (refused) or 75 (the store stayed locked; try again).
 """
 
 from __future__ import annotations
@@ -40,7 +51,7 @@ from collections.abc import Sequence
 from moxi import exit as codes
 
 from . import acts, api
-from .api import DEFAULT_KIND, Kinds, Project, ProjectsError
+from .api import DEFAULT_KIND, Kinds, Project, ProjectsError, Question
 from .rules import absolutize
 
 _PARSERS: dict[str, argparse.ArgumentParser] = {}
@@ -158,10 +169,56 @@ def _path(text: str | None) -> str | None:
 
 
 def _add(args, out) -> int:
+    asks = not args.json and _is_terminal(sys.stdin) and _is_terminal(out)
     added = acts.add(args.key, root=_path(args.root), kind=args.kind, lead=args.lead,
-                     notes_root=_path(args.notes_root), create=args.create)
+                     notes_root=_path(args.notes_root), create=args.create,
+                     ask=_Asker(sys.stdin, out) if asks else None)
     _print_added(added, as_json=args.json, out=out)
     return codes.OK
+
+
+def _is_terminal(stream) -> bool:
+    try:
+        return bool(stream.isatty())
+    except (AttributeError, ValueError, OSError):
+        return False
+
+
+class _Asker:
+    """Asks a question on the terminal: its suggestion is the default, an answer not
+    among its choices asks again, and an end of input (or Ctrl-C) stops the asking, so
+    that question and every later one goes unanswered."""
+
+    def __init__(self, stdin, out):
+        self.stdin = stdin
+        self.out = out
+        self.stopped = False
+
+    def __call__(self, q: Question) -> str | None:
+        if self.stopped:
+            return None
+        shown = f" [{'/'.join(q.choices)}]" if q.choices else ""
+        default = f" ({q.suggested})" if q.suggested is not None else ""
+        while True:
+            print(f"{q.module}: {q.text}{shown}{default} ", end="", file=self.out,
+                  flush=True)
+            try:
+                line = self.stdin.readline()
+            except KeyboardInterrupt:
+                line = ""
+            if not line:
+                print(file=self.out)
+                self.stopped = True
+                return None
+            text = line.strip()
+            if not text:
+                if q.suggested is not None:
+                    return q.suggested
+                if not q.choices:
+                    return ""
+            elif not q.choices or any(c.casefold() == text.casefold() for c in q.choices):
+                return text
+            print(f"  answer {' or '.join(q.choices)}", file=self.out)
 
 
 def _set(args, out) -> int:
@@ -273,15 +330,20 @@ def _kinds_dict(found: Kinds) -> dict:
 
 
 def _print_added(added: acts.Added, *, as_json: bool, out) -> None:
-    """An add's notes and warnings on stderr, then the project; with `as_json`, a warning
-    is also in the project's JSON, as `warnings`, present only when there is one."""
+    """An add's notes, warnings and questions not asked on stderr, then the project; with
+    `as_json`, the project's JSON also carries `warnings`, `asked` and `answered`, each
+    present only when there is one."""
     for note in added.notes:
         print(f"note: {note}", file=sys.stderr)
     for warning in added.warnings:
         print(f"warning: {warning}", file=sys.stderr)
-    if as_json and added.warnings:
-        print(json.dumps({**added.project.as_dict(), "warnings": added.warnings}, indent=2),
-              file=out)
+    for line in added.asked:
+        print(f"not asked: {line}", file=sys.stderr)
+    if as_json:
+        extra = {name: value for name, value in (("warnings", added.warnings),
+                                                 ("asked", added.asked),
+                                                 ("answered", added.answered)) if value}
+        print(json.dumps({**added.project.as_dict(), **extra}, indent=2), file=out)
         return
     _print(added.project, as_json=as_json, out=out)
 

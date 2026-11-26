@@ -30,6 +30,11 @@
   comms.db gains the table `scoped` and moves to schema step 5 at its next write; a
   comms older than this one can't open it afterwards, so a downgrade needs the store's
   backup.
+- `api.delivered_messages(text)`, in interface 3, reads a text a session was handed (a
+  delivered digest, with whatever the harness put around it) back into the messages
+  comms framed in it: each one's id, and where it runs in the text, frame line to closing
+  line (`DeliveredMessage`). It reads the text alone; a body's lines, all indented, name
+  no message.
 - comms' config gains `[policy] directors`, by default the plain name `fleet-lead`:
   names that direct every comms session on the box that doesn't opt out, after its
   launch's own directors. Each directs only while its name holds a standing row

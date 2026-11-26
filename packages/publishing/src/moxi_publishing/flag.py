@@ -3,17 +3,26 @@
 The flag is `moxi-publishing.public = true` in the repo's own git config, beside the two
 keys `enable` also writes: `moxi-publishing.github` (OWNER/REPO, for the GitHub verbs and
 the tag gate) and `moxi-publishing.interpreter` (the Python the hook entries were written
-with, which the doctor compares). Each piece reads the flag first; a piece registered in a
-repo without it refuses.
+with, which the doctor compares). The clean flag, `moxi-publishing.clean = true`, is a
+repo's choice to keep its history publishable without being public (`clean.py`). The push
+piece reads the public flag first, and the message and content pieces the clean or public
+flag; a piece registered in a repo without its flag refuses. The left-out mark,
+`moxi-publishing.left-out = true`, keeps `moxi projects add` from turning clean history or
+push approval on in the repo, whatever its answers or `project_add.*` presets say
+(`projects_link`); `moxi publishing project-add disable PATH` writes it and `project-add
+enable PATH` removes it.
 
-`enable` writes the flag, then registers the three pieces through repo's API, each
-piece's settings seeded from publishing's `defaults.*` keys and overridden by `--set`.
+`enable` registers the three pieces through repo's API, each piece's settings seeded
+from publishing's `defaults.*` keys and overridden by `--set`, then writes the flag. It
+turns clean history on as well (`clean.Prepared`): a public repo always keeps it.
 A seed is written only where the piece is first registered: enabling a repo again leaves
 the settings it has, as repo does with its own seeds. Every `--set` for one key together
 give that key's whole list, replacing the seed or what the repo had. A call that sets the
 push piece's `standing-branch`, `main` or `protected` is refused, writing nothing, when a
 `standing-branch` pattern would then be bad (`push.Standing`). `disable` removes the
-pieces, then the flag.
+push piece, then the flag, then turns clean history off where `enable` turned it on or
+the repo has no clean flag (one enabled before clean history existed); a repo that kept a
+clean history before it was public keeps it.
 """
 
 from __future__ import annotations
@@ -22,8 +31,10 @@ import os
 import re
 
 FLAG = "moxi-publishing.public"
+CLEAN = "moxi-publishing.clean"
 GITHUB = "moxi-publishing.github"
 INTERPRETER = "moxi-publishing.interpreter"
+LEFT_OUT = "moxi-publishing.left-out"
 MESSAGE = "publishing/message"
 CONTENT = "publishing/content"
 PUSH = "publishing/push"
@@ -94,27 +105,63 @@ def config_get(root: str, key: str) -> str | None:
     return done.stdout.strip() if done.returncode == 0 else None
 
 
-def is_public(root: str) -> bool:
-    done = _git(root, "config", "--type=bool", "--get", FLAG)
+def config_get_all(root: str, key: str) -> list[str]:
+    """Every value of `key` in the repo's git config, in order; none when it is unset."""
+    done = _git(root, "config", "--get-all", key)
+    return done.stdout.splitlines() if done.returncode == 0 else []
+
+
+def _is_true(root: str, key: str) -> bool:
+    done = _git(root, "config", "--type=bool", "--get", key)
     return done.returncode == 0 and done.stdout.strip() == "true"
 
 
-def registered(root: str) -> dict[str, dict]:
-    """publishing's pieces registered in the repo: id -> {"enabled": bool,
-    "settings": {name: [values]}}."""
-    done = _git(root, "config", "--get-regexp", r"^moxi-repo\.piece\.publishing/")
+def is_public(root: str) -> bool:
+    return _is_true(root, FLAG)
+
+
+def is_clean(root: str) -> bool:
+    """Whether the repo keeps clean history: the clean flag, or the public flag, since a
+    public repo always does."""
+    return _is_true(root, CLEAN) or is_public(root)
+
+
+def is_left_out(root: str) -> bool:
+    """Whether the repo is left out of `moxi projects add`'s clean history and push
+    approval."""
+    return _is_true(root, LEFT_OUT)
+
+
+def _pieces(root: str, owner: str) -> dict[str, dict]:
+    """The pieces registered in the repo whose id starts with `owner` and `/`."""
+    done = _git(root, "config", "--get-regexp", r"^moxi-repo\.piece\.")
     if done.returncode not in (0, 1):
         raise Failure(f"git config can't be read in {root}: {done.stderr.strip()}")
     out: dict[str, dict] = {}
     for line in done.stdout.splitlines():
         name, _, value = line.partition(" ")
         section, _, key = name[len("moxi-repo.piece."):].rpartition(".")
+        if not section.startswith(owner + "/"):
+            continue
         piece = out.setdefault(section, {"enabled": True, "settings": {}})
         if key == "enabled":
             piece["enabled"] = value.strip().lower() not in ("false", "no", "off", "0")
         elif key not in _REGISTRATION:
             piece["settings"].setdefault(key, []).append(value)
     return out
+
+
+def registered(root: str) -> dict[str, dict]:
+    """publishing's pieces registered in the repo: id -> {"enabled": bool,
+    "settings": {name: [values]}}."""
+    return _pieces(root, "publishing")
+
+
+def piece_settings(root: str, piece_id: str) -> dict[str, list[str]] | None:
+    """The settings of any owner's piece `piece_id` in the repo, {name: [values]}, or
+    None when it isn't registered there."""
+    found = _pieces(root, piece_id.partition("/")[0]).get(piece_id)
+    return None if found is None else found["settings"]
 
 
 # -- free-ref patterns -------------------------------------------------------------------
@@ -185,9 +232,11 @@ def _check_sets(planned: dict[str, list[str]]) -> None:
         if why is not None:
             raise Failure(f"--set {push.FREE_REF}: {why}; nothing was written", 2)
     for value in planned.get(push.WORD_REQUIRED, []):
-        if value not in ("", "true", "false"):
-            raise Failure(f"--set {push.WORD_REQUIRED}: {value!r} is not true or false; "
-                          "nothing was written", 2)
+        if value != "":
+            raise Failure(f"--set {push.WORD_REQUIRED}: the setting is retired, and push "
+                          "approval asks for the word now (moxi publishing approval "
+                          f"enable PATH --branch PATTERN); only --set {push.WORD_REQUIRED}= "
+                          "to remove it is taken; nothing was written", 2)
 
 
 def _check_standing(planned: dict[str, list[str]], current: dict[str, list[str]]) -> None:
@@ -217,9 +266,7 @@ def _seeds() -> dict[str, dict[str, list[str]]]:
     except config.ConfigError as exc:
         raise Failure(f"publishing's config can't be read: {exc}") from None
     return {MESSAGE: {message.DROP_TRAILER: [str(k) for k in values[settings.DROP_TRAILERS]]},
-            PUSH: {push.MAIN: [str(values[settings.MAIN])],
-                   push.WORD_REQUIRED: ["true" if values[settings.WORD_REQUIRED]
-                                        else "false"]}}
+            PUSH: {push.MAIN: [str(values[settings.MAIN])]}}
 
 
 def _names_empty() -> str | None:
@@ -238,13 +285,15 @@ def _names_empty() -> str | None:
 
 def enable(path: str | os.PathLike, *, github: str | None = None,
            sets: list[str] | tuple = ()) -> list[str]:
-    """Mark the repo at `path` public and register the three pieces. Returns the lines to
-    print. Raises `Failure`; a refused `--set` writes nothing.
+    """Mark the repo at `path` public, register the three pieces and turn clean history
+    on. Returns the lines to print. Raises `Failure`; a refused `--set` writes nothing.
 
     repo registers the pieces first, judging every `--set` before it writes, and the flag
     is written after: a run that stops between them leaves pieces that refuse every commit
     until the flag is there, never a flag with nothing guarding it."""
     from moxi_repo import api
+
+    from moxi_publishing import clean
 
     root = resolve(path)
     planned = _planned(sets)
@@ -263,18 +312,27 @@ def enable(path: str | os.PathLike, *, github: str | None = None,
                 given += [f"{key}={value}" for value in values]
     known = config_get(root, GITHUB)
     github = github or (None if known else _github_from_origin(root))
+    prepared = clean.Prepared(root)
+    clean_before = _is_true(root, CLEAN)
     try:
-        report = api.add(root, *PIECES, sets=given)
+        report = api.add(root, *PIECES, *prepared.named, sets=given + prepared.sets)
     except api.Failure as exc:
         raise Failure(exc.text, exc.code) from None
-    for key, value in ((FLAG, "true"), (INTERPRETER, api.interpreter()),
+    prepared.remember(root)
+    if not clean_before:
+        done = _git(root, "config", clean.CLEAN_WITH_PUBLIC, "true")
+        if done.returncode != 0:
+            raise Failure(f"git config {clean.CLEAN_WITH_PUBLIC} failed in {root}: "
+                          f"{done.stderr.strip()}")
+    for key, value in ((CLEAN, "true"), (FLAG, "true"), (INTERPRETER, api.interpreter()),
                        *(((GITHUB, github),) if github else ())):
         done = _git(root, "config", key, value)
         if done.returncode != 0:
             raise Failure(f"git config {key} failed in {root}: {done.stderr.strip()}; the "
                           "pieces are registered and refuse every commit until moxi "
                           f"publishing enable {root} runs again")
-    lines = [f"marked {root} public ({FLAG})", *report.lines, *report.problems]
+    lines = [f"marked {root} public ({FLAG}); it keeps a clean history ({CLEAN})",
+             *report.lines, *report.problems, *prepared.lines()]
     if not (github or known):
         lines.append(f"note: no GitHub repo is known; name it with: moxi publishing enable "
                      f"{root} --github OWNER/REPO")
@@ -285,13 +343,19 @@ def enable(path: str | os.PathLike, *, github: str | None = None,
 
 
 def disable(path: str | os.PathLike) -> list[str]:
-    """Remove the pieces from the repo at `path`, then the flag. Returns the lines to
-    print. Raises `Failure`."""
+    """Remove the push piece from the repo at `path`, then the flag, then clean history
+    where `enable` turned it on or no clean flag is set. Returns the lines to print.
+    Raises `Failure`."""
     from moxi_repo import api
+    from moxi_repo.api import quote_arg
+
+    from moxi_publishing import clean
 
     root = resolve(path)
     lines = []
-    present = [piece for piece in PIECES if piece in registered(root)]
+    clean_off = (config_get(root, clean.CLEAN_WITH_PUBLIC) == "true"
+                 or not _is_true(root, CLEAN))
+    present = [piece for piece in (PUSH,) if piece in registered(root)]
     if present:
         try:
             report = api.remove(root, *present)
@@ -303,16 +367,28 @@ def disable(path: str | os.PathLike) -> list[str]:
         raise Failure(f"git config --unset-all {FLAG} failed in {root}: "
                       f"{done.stderr.strip()}")
     lines.append(f"{root} is no longer marked public")
+    if clean_off:
+        lines += clean.disable(root)
+    else:
+        lines.append(f"{root} still keeps the clean history it kept before it was public; "
+                     "turn that off with: moxi publishing clean-history disable "
+                     f"{quote_arg(root)}")
     return lines
 
 
 # -- the listing -------------------------------------------------------------------------
 
 def listing() -> list[dict]:
-    """Every repo repo has indexed that carries the flag: {"root", "github",
-    "interpreter", "pieces": {id: {"enabled", "settings"} or None when missing}}, sorted
-    by root. A repo that can't be opened is left out."""
+    """Every repo repo has indexed that keeps a clean history, has push approval, is
+    marked public or is left out of project add: {"root", "github", "interpreter",
+    "public", "clean", "approval" (its branch patterns, or None without the piece),
+    "left_out", "pieces": {id: {"enabled", "settings"} or None when missing}}, sorted by
+    root. `pieces` holds the pieces the repo's choices
+    want (the three for a public repo, message and content for a clean one) and the
+    approval piece where it is registered. A repo that can't be opened is left out."""
     from moxi_repo import api
+
+    from moxi_publishing import approval, clean
 
     try:
         repos = api.indexed_repos()
@@ -323,15 +399,26 @@ def listing() -> list[dict]:
         if repo is None:
             continue
         root = str(repo.root)
-        if not is_public(root):
-            continue
+        public, kept = is_public(root), is_clean(root)
         have = registered(root)
+        approved = have.get(approval.PIECE_ID)
+        left_out = is_left_out(root)
+        if not (public or kept or approved or left_out):
+            continue
+        wanted = PIECES if public else clean.PIECES if kept else ()
+        if approved:
+            wanted = (*wanted, approval.PIECE_ID)
         out.append({"root": root, "github": config_get(root, GITHUB),
-                    "interpreter": config_get(root, INTERPRETER),
-                    "pieces": {piece: have.get(piece) for piece in PIECES}})
+                    "interpreter": config_get(root, INTERPRETER), "public": public,
+                    "clean": kept,
+                    "approval": (approval.patterns_of(approved["settings"]) if approved
+                                 else None),
+                    "left_out": left_out,
+                    "pieces": {piece: have.get(piece) for piece in wanted}})
     return sorted(out, key=lambda item: item["root"])
 
 
-__all__ = ["FLAG", "GITHUB", "INTERPRETER", "PIECES", "Failure", "config_get", "disable",
-           "enable", "free_ref_problem", "is_public", "listing", "looks_like_release_tag",
-           "registered", "resolve", "work_tree"]
+__all__ = ["FLAG", "CLEAN", "GITHUB", "INTERPRETER", "LEFT_OUT", "PIECES", "Failure",
+           "config_get", "config_get_all", "disable", "enable", "free_ref_problem",
+           "is_clean", "is_left_out", "is_public", "listing", "looks_like_release_tag",
+           "piece_settings", "registered", "resolve", "work_tree"]

@@ -3,7 +3,7 @@ import test from "node:test";
 
 import {
   CHANGED, Feed, parseAdded, parseKinds, parseListing, parseOne, parseProjects, parseRemoveCheck, parseRemoveStatus, parseWhere,
-  parseWritten,
+  parseQuestions, parseWritten,
   PICKED, RETRIES, saidOf,
 } from "../src/feed.ts";
 
@@ -56,9 +56,10 @@ test("one project, and an add's answer with its notes", () => {
   assert.deepEqual(parseWritten({ project: PROJECT, notes: ["made /w/alpha"] }),
                    { project: PROJECT, notes: ["made /w/alpha"] });
   assert.equal(parseWritten({ project: PROJECT }), null);
-  assert.deepEqual(parseAdded({ project: PROJECT, notes: [], warnings: ["skipped fake"] }),
-                   { project: PROJECT, notes: [], warnings: ["skipped fake"] });
+  assert.deepEqual(parseAdded({ project: PROJECT, notes: [], warnings: ["skipped fake"], asked: ["fake asks: x"] }),
+                   { project: PROJECT, notes: [], warnings: ["skipped fake"], asked: ["fake asks: x"] });
   assert.equal(parseAdded({ project: PROJECT, notes: [] }), null);
+  assert.equal(parseAdded({ project: PROJECT, notes: [], warnings: [] }), null);
   assert.equal(parseAdded({ project: PROJECT, notes: [], warnings: [3] }), null);
 });
 
@@ -168,4 +169,14 @@ test("a refresh while one runs reads once more after it; a closed feed changes n
   await closed.feed.refresh();
   assert.equal(closed.feed.value, null);
   assert.equal(closed.changes(), 0);
+});
+
+test("questions take their fields, an after of two, and nothing else", () => {
+  const q = { module: "fake", key: "clean", text: "Keep it clean?", choices: ["yes", "no"], suggested: "yes",
+              preset: null, after: null, later: "fake clean enable /w" };
+  const follow = { ...q, key: "branches", choices: [], suggested: null, after: ["push", "yes"] };
+  assert.deepEqual(parseQuestions({ questions: [q, follow] }), [q, follow]);
+  assert.equal(parseQuestions({ questions: [{ ...q, after: ["push"] }] }), null);
+  assert.equal(parseQuestions({ questions: [{ ...q, later: null }] }), null);
+  assert.equal(parseQuestions({}), null);
 });

@@ -19,7 +19,8 @@ page's writes are not refused.
 
 The fixture's page server answers the report in `report.json` in its state directory, or
 null while there is none; `say` writes it, `fail` makes the read fail, `hold` makes its
-link with projects refuse every remove, and `reads` counts the reads it answered.
+link with projects refuse every remove, `asks` makes an add put its two questions (and
+`answers` reads what was answered), and `reads` counts the reads it answered.
 """
 
 from __future__ import annotations
@@ -233,6 +234,23 @@ def hold(shell: Any, *, enabled: bool = True) -> None:
     _flag(shell, "hold", enabled=enabled)
 
 
+def asks(shell: Any, *, enabled: bool = True) -> None:
+    """While on, an add puts the fixture's two questions, and `answers` reads what was
+    answered."""
+    _flag(shell, "asks", enabled=enabled)
+    if not enabled:
+        (_state(shell) / "answers.jsonl").unlink(missing_ok=True)
+
+
+def answers(shell: Any) -> list[list[str]]:
+    """Each answer the fixture's link acted on, `[key, question, value]`, in order."""
+    try:
+        text = (_state(shell) / "answers.jsonl").read_text(encoding="utf-8")
+    except FileNotFoundError:
+        return []
+    return [json.loads(line) for line in text.splitlines()]
+
+
 def held_sentence(key: str) -> str:
     return f"the fixture holds {key}; let it go on the fixture's page"
 
@@ -250,6 +268,7 @@ def reset(shell: Any) -> None:
     say(shell, None)
     fail(shell, enabled=False)
     hold(shell, enabled=False)
+    asks(shell, enabled=False)
 
 
 #: How long ago each project was last active in the full report, in seconds.

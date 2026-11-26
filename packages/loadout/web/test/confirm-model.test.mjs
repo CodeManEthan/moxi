@@ -6,7 +6,7 @@ import { confirmView, DIFF_SHOWN, questionOf } from "../src/confirm-model.ts";
 import { fullView, HOME, row, withRow } from "./fixtures.mjs";
 
 const KEPT_IN = `${HOME}/.local/share/moxi/moxi/displaced`;
-const preview = (over) => ({ problem: null, case: "keeps", target: null, kept_in: KEPT_IN, tracked: false,
+const preview = (over) => ({ problem: null, case: "keeps", target: null, kept_in: KEPT_IN,
                              others: 0, label: "file", diff: "--- a\n+++ b\n-x\n+y\n", lines: 4, skipped: [], ...over });
 const UNTIL = "~/.local/share/moxi/moxi/displaced, where it stays until you delete it.";
 
@@ -95,11 +95,10 @@ test("each optional line only when its fact is set", () => {
   const view = withRow(fullView(), { name: "api-lead", harness: "claude" },
                        { state: "would-commit", replaceable: true });
   const rows = view.rows.filter((r) => r.name === "api-lead" && r.harness === "claude");
-  const c = confirmView(rows, preview({ case: "moves", tracked: true, others: 2, skipped: [
+  const c = confirmView(rows, preview({ case: "moves", others: 2, skipped: [
     { path: `${HOME}/code/x/a.bin`, why: "binary" }, { path: `${HOME}/code/x/l`, why: "link" },
     { path: `${HOME}/code/x/big`, why: "large" }, { path: `${HOME}/code/x/d`, why: "many" }] }), view);
   assert.deepEqual(c.notes, [
-    "git tracks it, so git will show it deleted, and the row reads would be committed until you commit that.",
     "This runs Install for atlas-api, so 2 other changes waiting there are made too.",
     "Not shown here: ~/code/x/a.bin (not text)", "Not shown here: ~/code/x/l (a link)",
     "Not shown here: ~/code/x/big (too large)", "Not shown here: ~/code/x/d (past 200 files)",

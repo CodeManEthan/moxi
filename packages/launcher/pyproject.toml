@@ -24,8 +24,8 @@ classifiers = [
 dependencies = ["moxi>=0.1.11,<0.2", "psutil>=5.9"]
 
 [project.optional-dependencies]
-# The first turn, readiness, Codex ids, and the start listeners.
-turns = ["moxi-turns>=0.2.6,<0.3"]
+# The first turn, readiness, Codex ids, the start listeners and the wake guard.
+turns = ["moxi-turns>=0.2.9,<0.3"]
 # Identities, scopes, directors, the with: posture and the console name.
 comms = ["moxi-comms>=0.3,<0.4"]
 # Project keys for a launch's place, a directory's key on its row, and a project's agents.
@@ -36,9 +36,9 @@ slots = ["moxi-slots>=0.1.1,<0.2"]
 ui = ["moxi-ui>=0.2.8,<0.3"]
 # notes' handoff folder, which a launch's handoff pointer and a relaunch's handoff use.
 notes = ["moxi-notes>=0.1,<0.2"]
-# cache's timer, for keep-warm and recycle on expiry.
+# cache's timer, for keep-warm and recycle on expiry; its reads turn the wake guard on.
 cache = ["moxi-cache>=0.1.7,<0.2"]
-# usage's context warning: the warn_at and recycle_at_limit rows.
+# usage's context warning and stop: the warn_at, recycle_at_limit and stop_at rows.
 usage = ["moxi-usage>=0.2,<0.3"]
 # The latest thing said in each running session, on Home's Sessions row.
 sessions = ["moxi-sessions>=0.2.8,<0.3"]
@@ -58,6 +58,11 @@ launcher = "moxi_launcher.module"
 # a session's endpoint process.
 [project.entry-points."moxi.turns.listeners"]
 launcher = "moxi_launcher.listeners"
+
+# The wake guard, which refuses ending a cold session's background work from outside it,
+# read by turns' guard loader.
+[project.entry-points."moxi.turns.guards"]
+launcher = "moxi_launcher.guards"
 
 # The launcher's subscriptions to cache's timer (clear on expiry, compact before it,
 # keep-warm), read by cache's watcher.
