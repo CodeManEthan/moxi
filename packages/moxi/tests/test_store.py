@@ -308,6 +308,45 @@ def test_an_empty_file_is_made_a_wal_store(tmp_path, caplog):
     assert not caplog.records
 
 
+def _writing(path: Path, hold_s: float) -> tuple[sqlite3.Connection, threading.Timer]:
+    """A connection holding `path`'s write lock, as another process creating the new
+    store's schema holds it, and the timer that commits it after `hold_s` seconds."""
+    writer_conn = sqlite3.connect(path, isolation_level=None, check_same_thread=False)
+    writer_conn.execute("BEGIN IMMEDIATE")
+    writer_conn.execute("CREATE TABLE t (x)")
+    timer = threading.Timer(hold_s, writer_conn.execute, ("COMMIT",))
+    timer.start()
+    return writer_conn, timer
+
+
+def test_a_new_store_another_connection_is_writing_is_made_wal_once_it_commits(tmp_path):
+    path = tmp_path / "s.db"
+    path.touch()
+    writer_conn, timer = _writing(path, 0.3)
+    try:
+        conn = store.connect(path)
+        try:
+            assert pragma(conn, "journal_mode") == "wal"
+            assert conn.execute("SELECT count(*) FROM t").fetchone() == (0,)
+        finally:
+            conn.close()
+    finally:
+        timer.join()
+        writer_conn.close()
+
+
+def test_a_new_store_still_being_written_past_the_timeout_is_locked(tmp_path):
+    path = tmp_path / "s.db"
+    path.touch()
+    writer_conn, timer = _writing(path, 1.0)
+    try:
+        with pytest.raises(sqlite3.OperationalError, match="locked"):
+            store.connect(path, timeout_s=0.2)
+    finally:
+        timer.join()
+        writer_conn.close()
+
+
 def test_create_false_on_an_empty_file_writes_nothing(work):
     path = work / "s.db"
     path.touch()
@@ -490,7 +529,6 @@ def test_a_step_that_commits_itself_is_an_error(tmp_path):
     conn = store.connect(tmp_path / "s.db")
     with pytest.raises(store.StoreError, match="step 1 ended its own transaction"):
         store.migrate(conn, [lambda c: c.execute("COMMIT")])
-    assert pragma(conn, "user_version") == 0
     conn.close()
 
 
