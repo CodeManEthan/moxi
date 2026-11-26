@@ -101,12 +101,19 @@ def test_headless_sessions_names_every_chat_recalls_agent():
 
 # -- the conversation: collecting, stale and dedupe -----------------------------------------
 
+import os  # noqa: E402
 import subprocess  # noqa: E402
 import sys  # noqa: E402
 import time  # noqa: E402
 import types  # noqa: E402
+import uuid  # noqa: E402
+
+from moxi import modules  # noqa: E402
 
 from moxi_memory import recall_chat, recall_fence, settings as memory_settings  # noqa: E402
+
+#: The real launcher, reached as memory reaches it: by `moxi.modules.load`.
+api = modules.load("launcher", interface=4).api
 
 CONV = "kiosk-approver-1530"
 DROP_S = 900.0
@@ -309,8 +316,13 @@ def test_with_the_start_lock_held_elsewhere_a_start_is_busy_within_its_budget():
 
 # -- the checks ---------------------------------------------------------------------------
 
+def refusal(problem):
+    """A refusal of the launcher's `check`, as the real launcher gives one."""
+    return api.Refusal(None, problem, "change the launch")
+
+
 class CheckLauncher:
-    Refusal = RuntimeError
+    Refusal = api.Refusal
 
     def __init__(self, refusals=()):
         self.refusals = list(refusals)
@@ -340,9 +352,11 @@ def test_each_check_gives_its_reason_in_order(monkeypatch):
     monkeypatch.setattr(links, "launcher_headless",
                         lambda: links.Link(links.NONE, None, "launcher not installed"))
     assert recall_chat.why_not(on).reason == recall_chat.NO_LAUNCHER
-    with_launcher(monkeypatch, CheckLauncher(["no claude on PATH"]))
+    with_launcher(monkeypatch, CheckLauncher([refusal("a launcher row is refused")]))
     skip = recall_chat.why_not(on)
-    assert skip.reason == recall_chat.NO_HARNESS and "no claude on PATH" in skip.detail
+    assert skip.reason == recall_chat.REFUSED
+    assert skip.detail.startswith("the launcher refused this launch: a launcher row")
+    assert "PATH" not in skip.detail
     with_launcher(monkeypatch, CheckLauncher())
     monkeypatch.setattr(recall_fence, "verdict", lambda launcher, spec, env=None:
                         recall_fence.Verdict(recall_fence.FENCE, "tools: extra Bash"))
@@ -359,7 +373,39 @@ class CwdLauncher(CheckLauncher):
     def check(self, req, env=None):
         import os
 
-        return [] if os.path.isdir(req.cwd) else [f"the directory {req.cwd} does not exist"]
+        return [] if os.path.isdir(req.cwd) else [
+            refusal(f"the directory {req.cwd} does not exist")]
+
+
+class BrokenLauncher(CheckLauncher):
+    """A `check` that fails with something that is no refusal."""
+
+    def check(self, req, env=None):
+        raise KeyError("rows")
+
+
+def test_a_check_that_breaks_is_refused_and_not_worded_as_a_launcher_refusal(monkeypatch):
+    with_launcher(monkeypatch, BrokenLauncher())
+    skip = recall_chat.why_not(chat_settings(**{"subconscious.chat.enabled": True}))
+    assert skip.reason == recall_chat.REFUSED
+    assert skip.detail.startswith("the launcher's check failed: KeyError")
+    assert "refused this launch" not in skip.detail
+
+
+@pytest.mark.parametrize("verdict, reason, words", [
+    (recall_fence.Verdict(recall_fence.REFUSED, "the launcher refused this launch: x"),
+     recall_chat.REFUSED, "refused this launch: x"),
+    (recall_fence.Verdict(recall_fence.NO_HARNESS, "claude is not found on PATH"),
+     recall_chat.NO_HARNESS, "a connector run as a service may have a shorter PATH"),
+])
+def test_the_fence_checks_refusal_is_reported_as_what_it_is(monkeypatch, verdict, reason,
+                                                            words):
+    with_launcher(monkeypatch, CheckLauncher())
+    monkeypatch.setattr(recall_fence, "verdict", lambda launcher, spec, env=None: verdict)
+    skip = recall_chat.why_not(chat_settings(**{"subconscious.chat.enabled": True}))
+    assert skip.reason == reason and words in skip.detail
+    if reason == recall_chat.REFUSED:
+        assert "PATH" not in skip.detail
 
 
 def test_the_checks_make_the_chat_dir_before_the_first_call(monkeypatch):
@@ -408,11 +454,24 @@ def test_the_brief_is_the_preamble_then_recall_briefs_output():
         settings=recall.settings)
 
 
-@pytest.mark.parametrize("verdict, reason", [
-    (recall_fence.Verdict(recall_fence.FENCE, "tools: extra Bash"), "fence"),
-    (recall_fence.Verdict(recall_fence.NO_OUTCOME, "no system/init: it exited"), "gone"),
+def no_search(*args, **kw):
+    return []
+
+
+def no_places(cwd, notes_dir):
+    return None, None
+
+
+@pytest.mark.parametrize("verdict, reason, error", [
+    (recall_fence.Verdict(recall_fence.FENCE, "tools: extra Bash"), "fence",
+     "tools: extra Bash"),
+    (recall_fence.Verdict(recall_fence.NO_OUTCOME, "no system/init: it exited"), "gone",
+     "no system/init: it exited"),
+    (recall_fence.Verdict(recall_fence.REFUSED, "the launcher refused this launch: x"),
+     "denied", "the launcher: the launcher refused this launch: x"),
 ])
-def test_a_fence_that_fails_or_gives_no_outcome_ends_the_recall_lost(verdict, reason):
+def test_a_fence_that_fails_or_gives_no_outcome_ends_the_recall_lost(verdict, reason,
+                                                                      error):
     recall = a_chat_recall()
     seen = []
 
@@ -421,11 +480,13 @@ def test_a_fence_that_fails_or_gives_no_outcome_ends_the_recall_lost(verdict, re
                      spec.session_id, spec.recall_id))
         return verdict
 
-    assert recall_chat.prepare(recall, launcher=CheckLauncher(), ensure=ensure) is None
+    assert recall_chat.prepare(recall, launcher=CheckLauncher(), ensure=ensure,
+                               search=no_search, places=no_places) is None
     [(written, minted, stamped)] = seen
     assert written == minted and stamped == recall.recall_id   # minted before the fence
     line = recalls.find_line(KEY, recall.recall_id)
     assert line["state"] == recalls.LOST and line["reason"] == reason
+    assert line["error"] == error
     assert line["headless_session"] == minted and line["call"] == 1
     assert records.read(KEY, recall.recall_id)["state"] == records.LOST
 
@@ -436,9 +497,106 @@ def test_a_passed_fence_gives_the_headless_route_with_the_notes_dirs(monkeypatch
     recall = a_chat_recall()
     monkeypatch.setattr(recall_chat, "chat_brief",
                         lambda recall, **kw: ("the brief", ["/notes"]))
-    brief, route = recall_chat.prepare(
-        recall, launcher=CheckLauncher(),
-        ensure=lambda launcher, spec: recall_fence.Verdict(None))
+    checked_specs = []
+
+    def ensure(launcher, spec):
+        checked_specs.append(spec)
+        return recall_fence.Verdict(None)
+
+    brief, route = recall_chat.prepare(recall, launcher=CheckLauncher(), ensure=ensure)
     assert brief == "the brief" and isinstance(route, recall_route.Headless)
     assert route.spec.add_dirs == ("/notes",) and route.spec.name == f"recall-{recall.recall_id}"
     assert route.session == recalls.find_line(KEY, recall.recall_id)["headless_session"]
+    [checked] = checked_specs                       # the fence checks the round's own launch
+    assert checked == route.spec and checked.brief == "the brief"
+    assert str(uuid.UUID(checked.request_id)) == checked.request_id
+
+
+# -- the child's chat branch through the real launcher ------------------------------------
+# No `claude` runs in these: the fence record holds a passed outcome for the one on PATH,
+# so no probe starts, and `prepare` launches nothing.
+
+def a_claude(bin_dir):
+    """An executable the launcher's PATH lookup finds as `claude`, never run."""
+    bin_dir.mkdir(parents=True, exist_ok=True)
+    if sys.platform == "win32":
+        path = bin_dir / "claude.cmd"
+        path.write_text("@exit /b 1\r\n")
+    else:
+        path = bin_dir / "claude"
+        path.write_text("#!/bin/sh\nexit 1\n")
+        path.chmod(0o755)
+    return path
+
+
+def passed_for(path):
+    """Record a passed fence outcome for `path`, as a probe that passed would."""
+    real = os.path.realpath(path)
+    st = os.stat(real)
+    recall_fence._write_outcome(recall_fence.Outcome(
+        recall_fence.Binary(real, st.st_size, st.st_mtime_ns), "2.1.332", passed=True,
+        at=time.time()))
+
+
+@pytest.fixture
+def claude_on_path(tmp_path, monkeypatch):
+    path = a_claude(tmp_path / "bin")
+    monkeypatch.setenv("PATH", f"{path.parent}{os.pathsep}{os.environ.get('PATH', '')}")
+    passed_for(path)
+    return path
+
+
+@pytest.fixture
+def notes_dir(tmp_path):
+    found = tmp_path / "notes"
+    found.mkdir()
+    return found
+
+
+def notes_at(notes):
+    return lambda cwd, nd: (None, str(notes))
+
+
+def test_a_passed_fence_reaches_the_launch_with_its_brief(claude_on_path, notes_dir):
+    recall = a_chat_recall()
+    prepared = recall_chat.prepare(recall, search=no_search, places=notes_at(notes_dir))
+    line = recalls.find_line(KEY, recall.recall_id)
+    assert prepared is not None, line
+    brief, route = prepared
+    assert line["state"] != recalls.LOST
+    assert route.spec.brief == brief and brief.startswith(recall_chat.preamble("kiosk talk"))
+    assert route.spec.add_dirs == (str(notes_dir),)
+    composition = api.preview(recall_fence.request(api, route.spec))
+    assert brief in composition.prompt
+    words = list(composition.argv)
+    assert [words[i + 1] for i, w in enumerate(words[:-1]) if w == "--add-dir"] == [
+        str(notes_dir)]
+
+
+def test_claude_missing_from_path_is_still_no_harness(tmp_path, monkeypatch, notes_dir):
+    empty = tmp_path / "empty"
+    empty.mkdir()
+    monkeypatch.setenv("PATH", str(empty))
+    recall = a_chat_recall()
+    assert recall_chat.prepare(recall, search=no_search, places=notes_at(notes_dir)) is None
+    line = recalls.find_line(KEY, recall.recall_id)
+    assert line["state"] == recalls.LOST and line["reason"] == "gone"
+    assert "claude is not found on PATH" in line["error"]
+    skip = recall_chat.why_not(chat_settings(**{"subconscious.chat.enabled": True}))
+    assert skip.reason == recall_chat.NO_HARNESS
+    assert "claude is not found on PATH" in skip.detail
+
+
+def test_a_brief_past_the_launch_logs_cap_is_denied_not_a_missing_claude(claude_on_path,
+                                                                          notes_dir):
+    from moxi_memory import recall_child
+
+    record, skip = recall_chat.start(CONV, "the kiosk approver", "k" * 70_000, call=1,
+                                     settings=chat_settings(),
+                                     spawn=lambda session_id, recall_id: 4242)
+    assert skip is None
+    recall = recall_child.Recall(records.read(KEY, record["recall"]))
+    assert recall_chat.prepare(recall, search=no_search, places=notes_at(notes_dir)) is None
+    line = recalls.find_line(KEY, recall.recall_id)
+    assert line["state"] == recalls.LOST and line["reason"] == "denied"
+    assert "past the launch log's cap" in line["error"] and "PATH" not in line["error"]

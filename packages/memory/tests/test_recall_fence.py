@@ -209,6 +209,54 @@ def test_every_other_settable_row_is_left_out():
     assert flag_values(words, "--add-dir") == ["/notes"]
 
 
+# -- a refusal, reported as what it is -----------------------------------------------------
+
+def raised(req, env=None) -> BaseException:
+    """What the real launcher raises when it previews and prepares `req`."""
+    try:
+        api.prepare(req, api.preview(req, env=env), env=env)
+    except Exception as exc:  # noqa: BLE001 - the refusal is what the test reads
+        return exc
+    raise AssertionError("the launcher took the launch")
+
+
+def test_refusal_verdict_names_each_refusal_by_its_code(tmp_path):
+    from moxi.store import StoreError
+
+    empty = tmp_path / "empty"
+    empty.mkdir()
+    missing = raised(fence.request(api, spec()), env={**os.environ, "PATH": str(empty)})
+    assert getattr(missing, "code", None) == "not-found"
+    v = fence.refusal_verdict(missing)
+    assert v.reason == fence.NO_HARNESS and "claude is not found on PATH" in v.detail
+
+    no_brief = raised(fence.request(api, spec(brief="")))
+    v = fence.refusal_verdict(no_brief)
+    assert v.reason == fence.REFUSED
+    assert v.detail.startswith("the launcher refused this launch (no-brief): ")
+    assert "PATH" not in v.detail
+
+    too_large = raised(fence.request(api, spec(brief="k" * 70_000)))
+    assert isinstance(too_large, StoreError) and getattr(too_large, "code", None) is None
+    v = fence.refusal_verdict(too_large)
+    assert v.reason == fence.REFUSED
+    assert v.detail.startswith("the launcher refused this launch: ")
+    assert "past the launch log's cap" in v.detail
+
+    plain = fence.refusal_verdict(api.Refusal(None, "a row is refused", "change it"))
+    assert plain.detail == "the launcher refused this launch: a row is refused; change it"
+
+    unread = fence.refusal_verdict(PermissionError(13, "Permission denied", "/x/claude"))
+    assert unread.reason == fence.NO_HARNESS
+    assert unread.detail.startswith("the launcher found /x/claude but can't read it: ")
+
+
+def test_verdict_reports_a_refusal_as_what_it_is_not_as_a_missing_claude():
+    v = fence.verdict(api, spec(brief=""))
+    assert v.reason == fence.REFUSED and "(no-brief)" in v.detail
+    assert "PATH" not in v.detail
+
+
 # -- the probe ----------------------------------------------------------------------------
 
 @POSIX

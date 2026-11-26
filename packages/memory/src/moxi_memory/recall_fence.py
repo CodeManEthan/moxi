@@ -35,8 +35,11 @@ on the launcher's `PATH` is a change and is probed again. One probe runs at a ti
 
 The rest of memory asks this module only whether a chat recall may start (`verdict`,
 which starts no process), and with what request (`request`); the probe runs in a recall's
-child (`ensure`). Adding a tool or an MCP server the fence allows by name is a change
-here alone. Standard library at import; the core and the launcher are reached at use.
+child (`ensure`). A refusal the launcher gives on the way is reported as what it is
+(`refusal_verdict`): `no-harness` only when the launcher's PATH lookup finds no `claude`
+(the refusal's code `not-found`) or can't read the one it found, and `refused`, naming
+the refusal, for any other. Adding a tool or an MCP server the fence allows by name is a
+change here alone. Standard library at import; the core and the launcher are reached at use.
 """
 
 from __future__ import annotations
@@ -103,7 +106,12 @@ PARTS = (FLAGS, TOOLS, MCP)
 
 #: Why `verdict` says a chat recall can't start.
 NO_HARNESS = "no-harness"
+REFUSED = "refused"
 FENCE = "fence"
+#: The code of the launcher's refusal when its PATH lookup finds no command.
+NOT_FOUND = "not-found"
+#: The code every launcher refusal has unless its kind gives its own.
+PLAIN_REFUSAL = "refused"
 
 
 def chat_dir(env: Mapping[str, str] | None = None) -> Path:
@@ -190,16 +198,14 @@ class Binary:
         return {"path": self.path, "size": self.size, "mtime_ns": self.mtime_ns}
 
 
-def binary(launcher: Any, req: Any, *, env: Mapping[str, str] | None = None) -> Binary | None:
+def binary(launcher: Any, req: Any, *, env: Mapping[str, str] | None = None) -> Binary:
     """The binary `req`'s composition starts, as the launcher's `PATH` finds it, read
-    with one stat; None when the launcher finds none. Starts no process."""
-    try:
-        composition = launcher.preview(req, env=env)
-        command = launcher.prepare(req, composition, env=env)
-        path = os.path.realpath(command)
-        st = os.stat(path)
-    except (launcher.Refusal, OSError):
-        return None
+    with one stat. Raises what the launcher's `preview` or `prepare` raised, or the
+    `OSError` of the stat. Starts no process."""
+    composition = launcher.preview(req, env=env)
+    command = launcher.prepare(req, composition, env=env)
+    path = os.path.realpath(command)
+    st = os.stat(path)
     return Binary(path, st.st_size, st.st_mtime_ns)
 
 
@@ -267,8 +273,9 @@ def _write_outcome(outcome: Outcome) -> None:
 @dataclass(frozen=True)
 class Verdict:
     """Whether a chat recall may start: `reason` None when it may (`outcome` the
-    binary's passed outcome, or None when its child probes first), else `no-harness` or
-    `fence`, with `detail` naming the failed part."""
+    binary's passed outcome, or None when its child probes first), else `no-harness`,
+    `refused` or `fence` (or `no-outcome`, from `ensure`), with `detail` saying why: the
+    launcher's words, or the failed part."""
 
     reason: str | None
     detail: str = ""
@@ -280,14 +287,34 @@ class Verdict:
         return self.reason is None
 
 
+def refusal_verdict(exc: BaseException) -> Verdict:
+    """The verdict for what the launcher raised, told apart by its `code`: `no-harness`
+    for code `not-found`, which only the launcher's PATH lookup raises, or for an
+    `OSError` reading the binary it found; `refused` for any other, naming its code when
+    it has one of its own (a launch log refusal has none)."""
+    code = getattr(exc, "code", None)
+    if code == NOT_FOUND:
+        return Verdict(NO_HARNESS, str(exc))
+    if isinstance(exc, OSError):
+        where = exc.filename if exc.filename is not None else "claude"
+        why = exc.strerror or str(exc)
+        return Verdict(NO_HARNESS, f"the launcher found {where} but can't read it: {why}")
+    named = f" ({code})" if isinstance(code, str) and code and code != PLAIN_REFUSAL else ""
+    return Verdict(REFUSED, f"the launcher refused this launch{named}: {exc}")
+
+
 def verdict(launcher: Any, spec: Spec, *, env: Mapping[str, str] | None = None) -> Verdict:
-    """Whether a chat recall of `spec` may start on this machine: the launcher finds
-    `claude` (else `no-harness`), and the record holds no failed outcome for it (else
-    `fence`). A binary the record holds no outcome for may start: its child probes
-    before its first round. Starts no process."""
-    found = binary(launcher, request(launcher, spec), env=env)
-    if found is None:
-        return Verdict(NO_HARNESS, "the launcher can't find claude on its PATH")
+    """Whether a chat recall of `spec` may start on this machine: the launcher takes its
+    launch and finds `claude` (else `refusal_verdict`'s `no-harness` or `refused`), and
+    the record holds no failed outcome for it (else `fence`). A binary the record holds
+    no outcome for may start: its child probes before its first round. Starts no
+    process."""
+    from moxi.store import StoreError
+
+    try:
+        found = binary(launcher, request(launcher, spec), env=env)
+    except (launcher.Refusal, StoreError, OSError) as exc:
+        return refusal_verdict(exc)
     outcome = recorded(found)
     if outcome is not None and not outcome.passed:
         return Verdict(FENCE, f"{outcome.part}: {outcome.detail}", found, outcome)
@@ -486,8 +513,8 @@ def _older(version: str, floor: str) -> bool:
 
 __all__ = ["ACTOR", "BUDGET_USD", "CHAT_DIR", "END_TOOL", "FENCE", "FENCE_LOCK", "FENCE_MIN_VERSION",
            "FENCE_RECORD", "FLAGS", "HARMLESS_TOOLS", "HARNESS", "JSON_OUTPUT", "MCP", "NO_HARNESS", "NO_MCP",
-           "NO_OUTCOME", "PARTS", "PERMISSION_MODE", "PROBE_OUTPUT_FLAGS", "PROBE_PROMPT",
+           "NO_OUTCOME", "NOT_FOUND", "PLAIN_REFUSAL", "REFUSED", "PARTS", "PERMISSION_MODE", "PROBE_OUTPUT_FLAGS", "PROBE_PROMPT",
            "PROBE_END_S", "PROBE_MAX_S", "PROBE_S", "READ_TOOLS", "TARGET", "TOOLS", "WEB_TOOLS", "Binary", "Outcome",
            "Spec", "Verdict", "binary", "chat_dir", "ensure", "fence_flags",
-           "fence_tools", "judge", "probe", "probe_request", "recorded", "request",
-           "verdict"]
+           "fence_tools", "judge", "probe", "probe_request", "recorded", "refusal_verdict",
+           "request", "verdict"]
