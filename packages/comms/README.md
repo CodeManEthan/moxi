@@ -371,10 +371,14 @@ narrow.
 **An agent opened** (pressing the row, `Message` or `Reply`) speaks for one address: the
 row's lead, or the address line you pressed. In order, each line only when its fact is
 there: `Address` (each of the name's addresses, to press); `Session`, launcher's name for
-the session and its harness, or, where launcher gives none, the name typed for it in the
+the session, its harness, and the model and effort it was launched with where launcher
+has them (`planner · claude · opus · high`), or, where launcher gives none, the name typed for it in the
 harness (else its folder), when it started and its harness as sessions has them, with
 `Sessions` (sessions is asked again each time the row is opened, so a name typed since
-shows); `Cache`, the cache fact in full, with `Cache`; the mail in the books for that
+shows); `Cache`, the cache fact in full, with `Cache`, and for a session launcher keeps
+warm its next keep-alive (`kept warm while 1 agent works, next keep-alive 19:49`), the
+time keep-warm first asks to nudge it, 15 minutes before the cache goes cold, shown while
+that time is ahead; the mail in the books for that
 address, `Held` (running) or `Waiting` (not running) and `Unread` (in its session but not
 yet read), each message with its time, author and text cut at four lines with `Show all`,
 and `Take back` on yours while the books can still take it back; `Waits on`, each name it
@@ -455,11 +459,12 @@ reply.`
 **What each other module adds.** The page needs only comms and the shell; each module it
 reads adds to it when installed:
 
-- **launcher**: where each session it runs works, its `Session` line, launcher's cache
-  words, the row for a warm session waiting on other agents with nothing keeping it warm,
+- **launcher**, read from its `/api/running`: where each session it runs works, its
+  `Session` line with the model and effort the launch was started with, launcher's cache
+  words and a kept-warm session's next keep-alive, the row for a warm session waiting on other agents with nothing keeping it warm,
   and `Keep warm` on it when launcher can keep it warm. A press is disabled until launcher
   answers and its next reading comes, or for 20 s; a refusal leads line three with `Not
-  kept warm: <why>` until then. Without launcher: none of these, the cache fact from comms
+  kept warm: <why>` until then. Without launcher, or while its read fails: none of these, the cache fact from comms
   alone, and the empty state gives the command instead of `Launch one from Home`.
 - **connector**: the words `Claude's apps, through the connector` as the where of the
   name the connector's binding holds. Without it, that row has no where.
