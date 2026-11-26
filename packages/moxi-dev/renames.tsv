@@ -18510,3 +18510,8 @@ cache	packages/cache/tests/test_browser_others.py	self.answer: dict = {"refused"
 cache	packages/cache/tests/test_browser_others.py	self._fulfill(route, {"state": "up", "detail": None, "refused": None, "sessions": self.states})	keep	refused	refused
 cache	packages/cache/tests/test_browser_others.py	stub.answer = {"refused": {"code": "unsupported", "problem": "turns can't nudge this session"}}	keep	refused	refused
 cache	packages/cache/tests/test_browser_others.py	assert any(reads in url for url in check.requests), check.requests	keep	any	any
+comms	packages/comms/tests/test_shutdown.py	started.set()	keep	set	set
+comms	packages/comms/tests/test_shutdown.py	proc.wait(timeout=20)	keep	timeout	timeout
+usage	packages/usage/tests/test_allowlist.py	"git -C %s add -- up/.." % repo, want=DOTS_BEFORE_LINKS)	keep	want	want
+usage	packages/usage/tests/test_allowlist.py	name, {"file_path": notes + "/uplink/../outside.md"}, want=DOTS_BEFORE_LINKS)	keep	want	want
+usage	packages/usage/tests/test_allowlist.py	patch(add(notes + "/uplink/../outside.md", "x")), want=DOTS_BEFORE_LINKS)	keep	want	want
