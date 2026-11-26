@@ -36,6 +36,14 @@ def test_everything_else_is_refused(command):
     assert not recall_guard.plain_read(command, LIST)
 
 
+def test_a_comment_is_refused_and_a_glob_allowed():
+    # A comment hides the rest of its line from the shell, so the test refuses it; a glob
+    # and a leading tilde only name files.
+    assert not recall_guard.plain_read("grep x #c", LIST)
+    assert recall_guard.plain_read("grep x *.md", LIST)
+    assert recall_guard.plain_read("grep x ~/notes/*.md", LIST)
+
+
 def test_a_listed_command_matches_word_for_word():
     assert not recall_guard.plain_read("moxi memory ingest", LIST)
     assert not recall_guard.plain_read("grepx f", LIST)

@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- A recall fork's plain-read test reads the shell text through turns' shell reader
+  (`read_shell`) in place of a splitter of its own, after the same character filter. It
+  now refuses a comment (`grep x #c`), which it allowed; everything else it allowed or
+  refused, it still does. memory asks for moxi-turns 0.2.8 or later.
 - The subconscious, memory's second way to recall: in a session launched with it on (the
   launcher's `subconscious` row, which stamps `MOXI_MEMORY_SUBCONSCIOUS`, exported as
   `api.SUBCONSCIOUS_ENV`), a second agent searches past sessions and notes and sends the
