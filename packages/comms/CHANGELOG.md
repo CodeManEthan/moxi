@@ -37,6 +37,9 @@
   holder serves one by its lock, takes one stamped in `MOXI_COMMS_CLAIM_SOCKET` when it
   is named for this comms' runtime folder, refuses any other pipe stamped there by its
   name without opening it, and removes its lock file from that folder.
+- With launcher, an opened agent's `Session` line names the model and effort its launch
+  was started with (`planner · claude · opus · high`). Without launcher, or while its read
+  fails, neither shows.
 - The launched sessions on the page read launcher's `holds` wait as launcher's Home row
   does: a session whose open holds alone keep it waiting reads `waiting on 1 open hold`,
   or `kept warm while 1 hold is open`, and gets `Keep warm` where a press would cover it.

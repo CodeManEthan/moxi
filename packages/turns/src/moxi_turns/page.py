@@ -9,9 +9,9 @@ a new way in, and turns offers none.
 
 Both routes answer from the live list `moxi_turns.pagereader` keeps in the page server's
 process; `pagehandlers` starts it on the page's first read or subscribe. Every route is a
-read, and none is the gateway's. `cwd` and `home` are marked `path`; `trouble` and an
-agent's `description`, which the harness writes and which can name a path, are marked
-`redact`.
+read, and none is the gateway's. `cwd` and `home` are marked `path`; `trouble`, an
+agent's `description` and the `typed_name`, which the harness or the person writes and
+which can name a path, are marked `redact`.
 
 The page's assets are what the repository's web build writes from `packages/turns/web/`
 into this package's `web/`: `page.js`, the panel, and its build stamp.
@@ -48,18 +48,24 @@ READY = lb.Out("table", nullable=True, items={"source": _MAYBE, "session_id": _M
 #: One observation of a session, `facts()`: null until the first read answers.
 #: `session_id` is the id the reading was taken under; `turn_started_at` is the open
 #: turn's start, null when no turn is open and while an open turn waits for its tie.
-#: `agents` is the count of busy subagents, null when they could not be listed; `at` is
-#: the read's wall-clock time.
+#: `agents` is the count of busy subagents, null when they could not be listed; `draft`
+#: is true for a draft in the prompt box, false for an empty box, and null when the box
+#: was not read; `at` is the read's wall-clock time. `ended_at` is when the session's last
+#: turn ended, as its endpoint keeps it, null before the first end at this session id or
+#: from an endpoint that does not keep it. `live_error` says why the live part did not
+#: read: `timeout` (the session did not answer in time) or `failed`; null when it did.
 FACTS = lb.Out("table", nullable=True, items={
     "session_id": _MAYBE,
     "turn_number": lb.Out("int"),
     "turn_open": _FLAG,
     "turn_started_at": _MAYBE_WHEN,
     "agents": lb.Out("int", nullable=True),
-    "draft": _FLAG,
+    "draft": lb.Out("bool", nullable=True),
     "stale": _FLAG,
     "ready": READY,
     "at": _WHEN,
+    "ended_at": _MAYBE_WHEN,
+    "live_error": _MAYBE,
 })
 
 #: One subagent, teammate or background shell, as `agents()` gives it.
@@ -83,10 +89,13 @@ AGENTS = lb.Out("table", nullable=True, items={
 #: endpoint's life. The fields from `harness` to `trouble` are its `session` answer and its
 #: hello's capabilities, refreshed at each scan; `facts` and `agents` are read again at
 #: least every 30 s; `read_error` is a fixed sentence when its watch or its last facts or
-#: agents read failed, null when none did. `ended_at` is the
-#: page server's wall-clock time when its watch saw the session's last turn end, sent only
-#: while the latest facts show no turn open at that same session id and turn number, else
-#: null. `has_box` is true when turns reads the harness's prompt box, so `facts.draft` can
+#: agents read failed, null when none did: with a read failed, the reason it failed, one
+#: per kind of failure. `ended_at` is when the session's last turn ended, sent only while
+#: the latest facts show no turn open: the endpoint's own `facts.ended_at`, else the page
+#: server's wall-clock time when its watch saw that turn end at that same session id and
+#: turn number, else null. `typed_name` is the name the person typed for the session in
+#: the harness (Claude Code's `--name` or `/rename`), null when there is none or it can't
+#: be read. `has_box` is true when turns reads the harness's prompt box, so `facts.draft` can
 #: be true for a draft; on the other harnesses `draft` is always false. `unread_since` is
 #: the page server's wall-clock time when a run of unread readings began (a facts or
 #: agents read failed, or the facts reading has `agents` null), null when none runs.
@@ -107,6 +116,7 @@ SESSION = lb.Out("table", items={
     "ended_at": _MAYBE_WHEN,
     "has_box": _FLAG,
     "unread_since": _MAYBE_WHEN,
+    "typed_name": lb.Out("string", mark="redact", nullable=True),
 })
 
 #: The list. `listed` is false until the page server's first scan for sessions has

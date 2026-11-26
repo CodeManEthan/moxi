@@ -60,6 +60,20 @@
   its own text as the prompt where the note is gone; the first turn's `turn.ended` then
   does not name it. A steer a request carried ends with its turn as before. The runner is version 0.3.1, so
   `moxi install turns` updates an install at user scope.
+- The panel names a Claude Code session by the name typed for it (`--name` or `/rename`),
+  read from Claude Code's own record of the process, ahead of a launch's name and the
+  folder. The sessions route sends it as `typed_name`.
+- The endpoint keeps when the session's last turn ended and sends it in the facts
+  (`Facts.ended_at`), so a session the panel finds already idle says since when.
+- The facts say whether the prompt box was read: `Facts.box` is `draft`, `empty`, or None
+  when it was not read, and the route's `facts.draft` is null then. The panel says
+  `draft not sent` for a draft and `not known` for a box it could not read, which it no
+  longer shows as a draft. The runner sends the box (version 0.3.3), so `moxi install
+  turns` updates an install at user scope.
+- Why a read failed: `Facts.live_error` is `timeout` or `failed` when the live part did
+  not read, and `TurnsError.why` names the kind of each failed read (`client.WHYS`). The
+  panel gives one reason per kind, such as `the session did not answer in time`, in
+  place of one sentence for all.
 
 ## 0.2.7
 

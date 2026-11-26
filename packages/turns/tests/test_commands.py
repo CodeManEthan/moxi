@@ -14,7 +14,8 @@ from moxi_dev.testing import PROC_WAIT_S
 import moxi_turns as turns
 from fake_harness import FakeHarness
 from moxi_turns import endpoint
-from moxi_turns.results import LeftShell, Shells
+from moxi_turns.harness import Live
+from moxi_turns.results import Agent, Agents, LeftShell, Shells
 
 pytestmark = pytest.mark.skipif(sys.platform == "win32", reason="no pipe server yet")
 
@@ -113,6 +114,17 @@ def test_stop_shells_runs_once_and_ran_carries_the_report(make_endpoint, name):
     assert (r.new_session_id is not None) == (name == "clear")
     assert [c.stop_shells for c in fake.commands] == [True]
     assert s.command(name, stop_shells=True) == turns.Refused("rate")   # one count
+
+
+def test_the_live_count_keeps_its_shells_apart_from_the_box():
+    """`Live.of` puts the shell count in `shells`, not in the box field beside it, so a
+    command with `stop_shells` leaves the shells out and an unread box stays None."""
+    shell = Agent("sh0", "shell", "running", final=False)
+    live = Live.of(Agents((shell,), complete=True, at=time.time()))
+    assert (live.agents, live.shells, live.box) == (1, 1, None)
+    assert live.busy() and not live.busy(include_shells=False)
+    # the positional order is what is pinned here
+    assert Live(1, False, 1) == Live(agents=1, draft=False, shells=1)  # noqa: FBT003 -- see above
 
 
 def test_a_subagent_still_holds_a_command_with_stop_shells(make_endpoint):

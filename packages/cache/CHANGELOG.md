@@ -6,6 +6,15 @@
   be read" for a `requires_env` subscription where a process's environment can't be read
   (always on Windows). It says "not asked: the process's environment cannot be read";
   `timer.ENV_UNREAD` names that entry of `missing_env`.
+- With launcher installed, the page reads launcher's `/api/running` and `/api/state` and,
+  at the desk, follows its topics `running` and `sessions`. A row a running launch holds
+  is named and placed by the launch (`slot 4 · atlas-api`), carries launcher's keep-warm
+  case while warm (`kept warm while …`, or `goes cold at` with `waiting on N agents`, the
+  row first, and `Keep warm`, which posts to launcher's `/api/keep-warm`), and opened, the
+  effort on its `Session` line and a `Keep warm` line.
+- With usage installed, the page reads usage's `/api/session` and `/api/prices`: line two
+  ends in what going cold costs, and an opened row has an `If cold` line with a `Usage`
+  link. Without either module, or while its read fails, its pieces are not drawn.
 - A Claude or Codex clock carries `response_s`: the clock request's stamp minus the
   stamp of the input it answered, the newest prompt or tool result written before it.
   The input is written before the request is sent, so `response_s` is never shorter than

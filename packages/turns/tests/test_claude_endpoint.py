@@ -335,6 +335,20 @@ def test_live_facts_come_from_the_runner_and_an_unanswered_read_holds(claude):
         runner.close(d.id, leg.END_DROP, answer["text"])
 
 
+@pytest.mark.parametrize("answer", [
+    {"error": "the box could not be read"},            # the runner answered with an error
+    {"agents": 0, "draft": "yes"},                     # with something that can't be read
+    {"agents": True, "draft": False}])
+def test_a_live_answer_moxi_cannot_use_reads_failed(claude, answer):
+    ep, runner = claude()
+    s = turns.find(session_id="s-1")
+    runner.live_answer = answer
+    f = s.facts()
+    assert (f.agents, f.draft, f.box, f.live_error) == (None, True, None, "failed")
+    runner.live_answer = None
+    assert s.facts().live_error is None
+
+
 def test_agents_maps_the_runners_list(claude):
     ep, runner = claude()
     s = turns.find(session_id="s-1")
