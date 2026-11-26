@@ -517,7 +517,7 @@ def test_start_dir_is_the_cwd_turns_knows_for_this_session(monkeypatch):
     assert handoffs.start_dir() is None
 
 
-def test_a_by_hand_take_reads_the_start_folders_handoffs(monkeypatch):
+def test_a_by_hand_take_reads_the_start_dirs_handoffs(monkeypatch):
     asked = []
     own = handoffs.own_handoffs_dir()
 
