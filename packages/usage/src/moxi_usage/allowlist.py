@@ -166,8 +166,10 @@ def _real(path: str) -> str:
 
 
 def _under(path: str, root: str) -> bool:
-    """True when `path` is `root` or lies under it."""
-    return path == root or path.startswith(root.rstrip("/") + "/")
+    """True when `path` is `root` or lies under it, both normalized, by this system's
+    rules: on Windows `\\` divides and case doesn't count, as its file system reads them."""
+    path, root = os.path.normcase(path), os.path.normcase(root)
+    return path == root or path.startswith(root.rstrip(os.sep) + os.sep)
 
 
 def _abs_roots(roots: object) -> list[str]:

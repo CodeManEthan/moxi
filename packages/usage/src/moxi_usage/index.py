@@ -658,7 +658,8 @@ def _file_lane(run: _Pass, lane: Lane, listing: Any) -> None:
         if row is not None and _reusable(lane, row, entry, excluded) and not run.rebuild:
             change = {name: value for name, value in (
                 ("rank", lane.rank), ("excluded", excluded), ("held", None),
-                ("dev", entry.dev), ("ino", entry.ino)) if row[name] != value}
+                ("dev", _stored(entry.dev)), ("ino", _stored(entry.ino)))
+                if row[name] != value}
             if change:
                 updates.append((row["id"], change))
             result.reused += 1
@@ -711,15 +712,24 @@ def _reusable(lane: Lane, row: dict, entry: Any, excluded: str | None) -> bool:
                              or not row["prompts_read"]):
         return False
     names = ("size", "mtime_ns") if lane.archive else ("dev", "ino", "size", "mtime_ns")
-    return all(row[name] == getattr(entry, name) for name in names)
+    return all(row[name] == _stored(getattr(entry, name)) for name in names)
+
+
+def _stored(value):
+    """A file key as the index's INTEGER column holds it. On Windows a file's `st_ino` is
+    its 64-bit file id, which can pass SQLite's signed range: such a number is kept as the
+    signed number of the same 64 bits. Anything else is itself."""
+    if isinstance(value, int) and value >= 1 << 63:
+        return value - (1 << 64)
+    return value
 
 
 def _entry_fields(lane: Lane, entry: Any) -> dict[str, Any]:
     source = entry.source
     return {"harness": lane.harness, "rank": lane.rank, "kind": _kind(entry),
             "session_id": source.session_id, "agent_id": source.agent_id,
-            "size": entry.size, "mtime_ns": entry.mtime_ns, "dev": entry.dev,
-            "ino": entry.ino}
+            "size": entry.size, "mtime_ns": entry.mtime_ns, "dev": _stored(entry.dev),
+            "ino": _stored(entry.ino)}
 
 
 def _write_excluded(run: _Pass, lane: Lane, entry: Any, row: dict | None,

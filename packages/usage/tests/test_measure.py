@@ -3,6 +3,7 @@ interactive-only rule, the inherited spec, each model's own `w`, the subagent fa
 the file it writes. Transcripts come from sessions' builders; `now` is an argument."""
 
 import json
+import os
 from pathlib import Path
 
 import pytest
@@ -218,7 +219,9 @@ def test_a_run_writes_the_file_the_thresholds_read(monkeypatch):
                  'cache_read = 1.0\n')
     done = measure.run(now=NOW)
     path = thresholds.params_path()
-    assert done.path == str(path) and path.stat().st_mode & 0o777 == 0o600
+    assert done.path == str(path)
+    if os.name != "nt":                 # mode bits are POSIX's
+        assert path.stat().st_mode & 0o777 == 0o600
     assert json.loads(path.read_text()) == done.doc
     assert "over 2 files and 12 requests" in done.line()
     found = thresholds.threshold(MODEL, "1x")

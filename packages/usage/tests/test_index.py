@@ -64,7 +64,7 @@ class Projects:
     def for_path(self, path):
         self.asked.append(path)
         for root, key in self.roots.items():
-            if path == root or path.startswith(root.rstrip("/") + "/"):
+            if path == root or path.startswith(root.rstrip(os.sep) + os.sep):
                 return self.Project(key)
         return None
 
@@ -177,6 +177,27 @@ def test_an_unchanged_file_is_reused_and_a_grown_one_is_read_from_its_cursor(rea
     grown = run(readings)
     assert (grown.read, grown.reused) == (1, 0)
     assert sorted(r["output"] for r in won()) == [11, 22, 33]
+
+
+def test_a_file_id_past_sqlites_signed_range_is_kept_and_reused(readings, roots,
+                                                                 monkeypatch):
+    import dataclasses
+
+    # On Windows a file's st_ino is its 64-bit file id, which may pass 2**63 - 1.
+    listed = index._list
+
+    def wide(sessions, lane):
+        found = listed(sessions, lane)
+        return dataclasses.replace(found, entries=tuple(
+            dataclasses.replace(e, ino=e.ino | 1 << 63) if e.ino is not None else e
+            for e in found.entries))
+
+    monkeypatch.setattr(index, "_list", wide)
+    transcript(roots["claude"], SESSION_A).write()
+    first = run(readings)
+    assert first.read == 1 and not first.unreadable
+    again = run(readings)
+    assert (again.read, again.reused) == (0, 1)
 
 
 def test_a_record_that_comes_twice_leaves_the_index_as_one_copy_would(readings, roots):
@@ -722,7 +743,8 @@ CONCURRENT = textwrap.dedent("""
 """)
 
 
-def test_two_passes_at_once_never_both_write_and_leave_the_index_whole(readings, roots):
+def test_two_passes_at_once_never_both_write_and_leave_the_index_whole(readings, roots,
+                                                                       tmp_path):
     for n in range(12):
         session = f"0190b000-0000-7000-8000-0000000001{n:02d}"
         t = ClaudeTranscript(roots["claude"], session_id=session, project=f"-p{n}")
@@ -730,13 +752,18 @@ def test_two_passes_at_once_never_both_write_and_leave_the_index_whole(readings,
             t.user("go")
             t.assistant("ok", usage=usage(output=m + 1), request_id=f"req_{n}_{m}")
         t.write()
-    procs = [subprocess.Popen([sys.executable, "-c", CONCURRENT], stdout=subprocess.PIPE,
-                              stderr=subprocess.PIPE) for _ in range(2)]
-    codes = sorted(proc.wait(timeout=120) for proc in procs)
-    for proc in procs:
-        proc.stdout.close()
-        proc.stderr.close()
-    assert codes in ([0, 0], [0, 75])
+    # Each child's output goes to a file: a pipe nobody reads fills (4 KiB on Windows) and
+    # stops the child that writes past it.
+    outs = [open(tmp_path / f"pass-{n}.out", "wb") for n in range(2)]
+    try:
+        procs = [subprocess.Popen([sys.executable, "-c", CONCURRENT], stdout=out,
+                                  stderr=subprocess.STDOUT) for out in outs]
+        codes = sorted(proc.wait(timeout=120) for proc in procs)
+    finally:
+        for out in outs:
+            out.close()
+    said = [(tmp_path / f"pass-{n}.out").read_text(errors="replace") for n in range(2)]
+    assert codes in ([0, 0], [0, 75]), said
     conn = store.connect()
     try:
         assert store.check(conn) == []
@@ -956,7 +983,8 @@ def test_archive_roots_are_read_in_config_order(tmp_path):
     roots = settings.archive_roots(settings.current())
     assert [(r.id, r.lane, r.number) for r in roots] == [("b", "archive:b", 1),
                                                          ("a", "archive:a", 2)]
-    assert roots[0].path == os.path.expanduser("~/old") and roots[1].path == "/mnt/usb"
+    assert roots[0].path == os.path.normpath(os.path.expanduser("~/old"))
+    assert roots[1].path == os.path.normpath("/mnt/usb")
     assert [lane.id for lane in index.configured_lanes()] == [
         "claude", "codex", "opencode", "archive:b", "archive:a"]
 

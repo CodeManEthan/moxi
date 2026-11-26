@@ -286,11 +286,11 @@ def test_past_the_ceiling_the_allowlist_lets_the_hand_off_through(tmp_path):
     a.context(20_000 + HARD)
     cwd = str(tmp_path)
     assert ceiling.judge(a.call("Write", {"file_path": str(notes / "r.md")}, cwd=cwd)) is None
-    assert ceiling.judge(a.call("Bash", {"command": f"git -C {repo} status --short"},
+    assert ceiling.judge(a.call("Bash", {"command": f"git -C {repo.as_posix()} status --short"},
                                 cwd=cwd)) is None
-    assert ceiling.judge(a.call("Bash", {"command": f"cd {repo} && make handoff"},
+    assert ceiling.judge(a.call("Bash", {"command": f"cd {repo.as_posix()} && make handoff"},
                                 cwd=cwd)) is None
-    got = ceiling.judge(a.call("Bash", {"command": f"git -C {repo} push"}, cwd=cwd))
+    got = ceiling.judge(a.call("Bash", {"command": f"git -C {repo.as_posix()} push"}, cwd=cwd))
     assert isinstance(got, turns.Deny) and "git push is not a wrap-up git form" in got.reason
     got = ceiling.judge(a.call("Write", {"file_path": str(tmp_path / "r.md")}, cwd=cwd))
     assert isinstance(got, turns.Deny)
@@ -357,8 +357,8 @@ def test_a_latched_codex_agent_can_still_write_its_hand_off_and_commit(tmp_path)
     assert ceiling.judge(call("apply_patch", {"command": patch(
         "*** Update File: notes/hand-off.md", "@@", "-done: the parser",
         "+done: the parser and its tests")})) is None
-    assert ceiling.judge(call("Bash", {"command": f"cd {repo} && git add -A"})) is None
-    assert ceiling.judge(call("Bash", {"command": f"git -C {repo} commit -m 'hand off'"})) is None
+    assert ceiling.judge(call("Bash", {"command": f"cd {repo.as_posix()} && git add -A"})) is None
+    assert ceiling.judge(call("Bash", {"command": f"git -C {repo.as_posix()} commit -m 'hand off'"})) is None
     for tool, tool_input, why in [
         ("apply_patch", {"command": patch(f"*** Add File: {repo}/x.py", "+x")}, "must end in .md"),
         ("apply_patch", {"command": patch(f"*** Delete File: {report}")}, "deletes a file"),
@@ -366,7 +366,7 @@ def test_a_latched_codex_agent_can_still_write_its_hand_off_and_commit(tmp_path)
                                           f"*** Move to: {notes}/moved.md", "@@", "+x")},
          "moves a file"),
         ("apply_patch", {"input": patch(f"*** Add File: {report}", "+x")}, "no patch text"),
-        ("Bash", {"command": f"git -C {repo} push"}, "git push is not a wrap-up git form"),
+        ("Bash", {"command": f"git -C {repo.as_posix()} push"}, "git push is not a wrap-up git form"),
     ]:
         got = ceiling.judge(call(tool, tool_input))
         assert isinstance(got, turns.Deny) and why in got.reason, (tool_input, got)
@@ -471,7 +471,7 @@ def test_the_config_check_takes_roots_from_home_and_word_lists():
     settings.check('[ceiling]\nhandoff_roots = ["~/notes"]\nwork_roots = ["/tmp/w"]\n'
                    'allow_commands = [["make", "handoff"]]\n')
     write_config('[ceiling]\nhandoff_roots = ["~/notes"]\n')
-    assert ceiling.rules().handoff_roots == (os.path.expanduser("~/notes"),)
+    assert ceiling.rules().handoff_roots == (os.path.normpath(os.path.expanduser("~/notes")),)
 
 
 def test_a_config_that_cannot_be_read_allows_every_call(caplog):
@@ -539,9 +539,9 @@ def test_a_latched_agent_may_get_its_commit_line_with_no_config(tmp_path):
     a = started()
     a.context(20_000 + HARD)
     cwd = str(tmp_path)
-    assert ceiling.judge(a.call("Bash", {"command": f"cd {repo} && moxi repo rules"},
+    assert ceiling.judge(a.call("Bash", {"command": f"cd {repo.as_posix()} && moxi repo rules"},
                                 cwd=cwd)) is None
-    got = ceiling.judge(a.call("Bash", {"command": f"cd {repo} && moxi repo rules x"},
+    got = ceiling.judge(a.call("Bash", {"command": f"cd {repo.as_posix()} && moxi repo rules x"},
                                cwd=cwd))
     assert isinstance(got, turns.Deny) and "CEILING HANDOFF" in got.reason
 

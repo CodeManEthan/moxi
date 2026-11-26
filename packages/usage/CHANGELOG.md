@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- On Windows the index could hold no live file: a file's `st_dev` and `st_ino` there (the
+  volume serial and 64-bit file id) can pass SQLite's signed range, and the pass stopped
+  with "Python int too large to convert to SQLite INTEGER". Such a number is kept as the
+  signed number of the same 64 bits, so reuse compares it as before.
+- On Windows the worker ceiling's path rule let no hand-off through: a path under a
+  hand-off or work root was tested with `/` only. It reads paths by this system's rules
+  (on Windows `\` divides and case doesn't count).
 - `marks.default` is gone: a session with no `MOXI_USAGE_WARN_AT` stamp gets no notice,
   whether the launcher started it with no `warn_at` (a Codex launch that sets none) or
   did not start it. Nothing reads a config default; the key is retired, and a config that

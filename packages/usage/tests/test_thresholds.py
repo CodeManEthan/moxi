@@ -5,6 +5,7 @@ file sits in the test's tmp."""
 import copy
 import json
 import math
+import os
 import subprocess
 import sys
 
@@ -367,6 +368,11 @@ def test_the_measure_in_effect_is_read_from_its_file_and_again_when_it_changes()
     changed = copy.deepcopy(PARAMS)
     changed["models"]["claude-opus-5"]["main"]["g"] = 3490
     write_params(changed)
+    # The file is read again on a new size, mtime or inode; a same-size rewrite inside one
+    # clock step (about 15 ms on Windows) shares the mtime, so this one is a second on.
+    path = thresholds.params_path()
+    st = path.stat()
+    os.utime(path, ns=(st.st_atime_ns, st.st_mtime_ns + 1_000_000_000))
     again = thresholds.threshold("claude-opus-5", "1x", table=table())
     assert again.tokens > first.tokens
 

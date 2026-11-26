@@ -156,7 +156,25 @@ class Corpus:
                 "XDG_CACHE_HOME": str(home / ".cache"),
                 "CLAUDE_CONFIG_DIR": str(self.claude.parent),
                 "CODEX_HOME": str(self.codex.parent),
-                "MOXI_USAGE_HOME": str(self.state), "TMPDIR": str(home)}
+                "MOXI_USAGE_HOME": str(self.state), "TMPDIR": str(home),
+                **self.windows_env(home)}
+
+    @staticmethod
+    def windows_env(home: Path) -> dict[str, str]:
+        """On Windows, the profile's folders under `home`, its temporary folder there
+        (SQLite's temp store is written in TEMP, not TMPDIR) and the system's own
+        variables; nothing elsewhere."""
+        if os.name != "nt":
+            return {}
+        from moxi_dev.testing import WINDOWS_HOMES, WINDOWS_KEPT_ENV
+
+        env = {key: os.environ[key] for key in WINDOWS_KEPT_ENV if key in os.environ}
+        env.update({key: str(home if rel == "." else home / rel)
+                    for key, rel in WINDOWS_HOMES.items()})
+        # Windows' temp folder must exist.
+        home.mkdir(parents=True, exist_ok=True)
+        env["TEMP"] = env["TMP"] = str(home)
+        return env
 
     def copy_index(self, env: dict[str, str] | None = None) -> None:
         """Put this corpus's index and readings where `env` (the test's) keeps them."""

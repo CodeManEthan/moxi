@@ -444,7 +444,14 @@ def test_the_cores_doctor_runs_usages_rows_and_its_stores(capsys):
     code = moxi_cli.main(["doctor", "usage", "--json"])
     out = json.loads(capsys.readouterr().out)
     names = {r["name"]: r["state"] for r in out if r["module"] == "usage"}
-    assert code == 0, out
+    # Where a supervisor runs under the suite (Task Scheduler on Windows), the unit plan
+    # refuses the timers, since the fence sets the module's home and the suite runs from
+    # source; elsewhere the fenced run has no supervisor and the timers skip.
+    refused = [r for r in out if r["name"].startswith("timer ") and r["state"] == "fail"
+               and ("is set, and a unit's name" in r["detail"]
+                    or "is an editable install" in r["detail"])]
+    assert all(r["state"] != "fail" for r in out if r not in refused), out
+    assert code == (1 if refused else 0), out
     assert {"models.snapshot", "models.unpriced", "index", "codex.imports",
             "restart_point", "marks", "turns"} <= set(names)
     assert names["store index"] == names["store readings"] == "ok"
