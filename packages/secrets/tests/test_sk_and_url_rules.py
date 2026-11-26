@@ -5,10 +5,12 @@ through. Every value is built at run time from pieces (see `corpus.py`)."""
 from __future__ import annotations
 
 import re
+import time
 
 import corpus
 
 from moxi_secrets import redact, scan
+from moxi_secrets.scan import UNSCANNED
 
 GITLEAKS = ("credentials", "broad")
 RULES = {"sk-api-key", "url-credential"}
@@ -43,6 +45,7 @@ def url_must_hit(r) -> list[tuple[str, str]]:
                  ("root", "".join(("Pass", "w0rd!"))),
                  ("app", "".join(("change", "me99"))),
                  ("app", "".join(("by", "pass2024"))),
+                 ("app", "".join(("1", "password"))),
                  ("app", corpus.chars(r, 12))]
     return [("dsn " + url(pw, user, "mysql" if user == "root" else "postgres"), pw)
             for user, pw in passwords]
@@ -107,5 +110,20 @@ def test_each_url_password_hits_and_redacts_whole(engine_name):
 def test_a_whole_placeholder_password_stays_quiet(engine_name):
     for password in ["password", "pass", "PASSWORD", "<password>", "[password]",
                      "{password}", "{{password}}", "YOUR_PASSWORD", "$DB_PASSWORD",
-                     "%PASSWORD%", "changeme", "xxxx", "${DB_PASS}", "db_pass", "bypassme"]:
+                     "%PASSWORD%", "changeme", "xxxx", "${DB_PASS}", "db_pass", "bypassme",
+                     "${DB_PW1}"]:
         assert "url-credential" not in rule_hits(url(password)), password
+
+
+def test_a_32_kb_password_of_placeholder_words_is_a_hit_well_inside_a_second(
+        fallback_engine):
+    """Python's re would backtrack across every word of a long password; the
+    allowlist's bounded letter runs keep it linear, and a digit still makes it a hit."""
+    short = "".join(("Pass", "xxxy", "9"))
+    assert "url-credential" in rule_hits(url(short))  # also starts the worker
+    text = url("".join(("Pass", "xxxy")) * 4096 + "9")
+    start = time.perf_counter()
+    hits = {h.rule for h in scan(text, ("credentials",))}
+    assert time.perf_counter() - start < 0.5
+    assert UNSCANNED not in hits
+    assert "url-credential" in hits
