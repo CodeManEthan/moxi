@@ -91,13 +91,13 @@ def without_comms(ui_shells, tmp_path_factory):
 def roster(*live: str) -> dict:
     """comms' `/api/roster` answer, `up`, with a live address for each name in `live` and a
     standing one for planner."""
-    def address(name: str, held: bool) -> dict:
+    def address(name: str, *, held: bool) -> dict:
         return {"qualified": name, "name": name, "scope": None, "live": held, "kind": None if held else "agent",
                 "module": None, "tier": None, "adapter": "claude-code" if held else None,
                 "harness": "claude" if held else None, "directors": [], "policy_directors": [],
                 "session_id": "s-1" if held else None, "bound_at": None, "awaiting": [], "cache": None,
                 "holder": None, "via": None}
-    rows = [address(name, True) for name in live] + [address("planner", False)]
+    rows = [address(name, held=True) for name in live] + [address("planner", held=False)]
     return {"state": "up", "detail": None, "rows": rows, "today": "2026-11-08", "now": 1_800_000_000}
 
 
