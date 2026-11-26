@@ -342,12 +342,16 @@ def test_the_announcement_offers_the_page_its_blocks_its_row_and_the_ui_extra():
     assert {name: (c["place"], c.get("home", False), c["script"])
             for name, c in module.COMPONENTS.items()} == {
         "page": ("page", False, "page.js"), "limits": ("block", True, "limits.js"),
-        "cost": ("block", True, "cost.js"), "row": ("block", True, "row.js")}
+        "cost": ("block", True, "cost.js"), "row": ("block", True, "row.js"),
+        "project-facts": ("inline", False, "project-facts.js")}
     row = module.COMPONENTS["row"]
     assert (row["title"], row["home_as"], row["order"]) == ("Usage", "row", 300)
+    facts = module.COMPONENTS["project-facts"]
+    assert facts["contract"] == 1 and set(facts["attributes"]) == {"projects", "open"}
+    assert all(spec["type"] == "string" for spec in facts["attributes"].values())
     found = modules.load("usage", interface=1)
     assert found.ok and found.page == module.PAGE
-    assert set(found.components) == {"page", "limits", "cost", "row"}
+    assert set(found.components) == {"page", "limits", "cost", "row", "project-facts"}
 
 
 def test_usage_offers_interfaces_1_and_2_and_no_other():

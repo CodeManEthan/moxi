@@ -2,8 +2,8 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
-  addressPath, addressRoute, addressWrite, addsHistoryEntry, historyView, limitAddress, NOTHING_OPEN, parseAddress, sameAddress,
-  sessionAddress, SESSIONS, settled,
+  addressPath, addressRoute, addressWrite, addsHistoryEntry, historyView, limitAddress, NOTHING_OPEN, parseAddress,
+  projectAddress, sameAddress, sessionAddress, SESSIONS, settled, UNKNOWN_ADDRESS,
 } from "../src/address-model.ts";
 
 /** Every address the page has, with the piece it opens. */
@@ -22,6 +22,8 @@ const KNOWN = [
   ["models", { piece: "models" }],
   ["kinds", { piece: "kinds" }],
   ["prices", { piece: "prices" }],
+  ["project/atlas-api", { piece: "project", key: "atlas-api" }],
+  ["project/kestrel.web_2", { piece: "project", key: "kestrel.web_2" }],
 ];
 
 test("every address opens one piece and is written back as the same address", () => {
@@ -55,7 +57,7 @@ test("a route the page does not have is unknown and opens nothing", () => {
     "limit/claude/plan/5h", "limit/claude/plan/-300", "limit/claude/plan/3e2", "limit/claude/plan/300/more",
     "limit/claude//300", "limit/claude/plan/99999999999999999999",
     "sessions/claude", "sessions/claude/s1/agent/more", "sessions//s1", "sessions/claude/%E0%A4%A",
-    "projects/proj-a", "models/m-a", "kinds/x", "prices/x", "folders/x", "Sessions", "session",
+    "projects/proj-a", "project", "project/a/b", "project//", "models/m-a", "kinds/x", "prices/x", "folders/x", "Sessions", "session",
   ];
   for (const route of unknown) {
     assert.deepEqual(parseAddress(route), { piece: "unknown" }, route);
@@ -124,4 +126,19 @@ test("a move adds a history entry only from one view of the page to another", ()
     assert.equal(addsHistoryEntry(first, a), true);
     assert.equal(addsHistoryEntry({ piece: "prices" }, a), true);
   }
+});
+
+test("a project's address sets its filter and opens nothing: it is the page itself in history", () => {
+  const atlas = projectAddress("atlas-api");
+  assert.deepEqual(atlas, { piece: "project", key: "atlas-api" });
+  assert.equal(addressPath(atlas), "/m/usage/project/atlas-api");
+  assert.equal(historyView(atlas), "");
+  assert.equal(addsHistoryEntry(atlas, NOTHING_OPEN), false);
+  assert.equal(addsHistoryEntry(atlas, { piece: "unknown" }), false);
+  assert.equal(addsHistoryEntry(atlas, SESSIONS), true);
+  assert.equal(sameAddress(atlas, projectAddress("kestrel-web")), false);
+  assert.deepEqual(settled(atlas, true), atlas, "only Projects and Folders are settled");
+  assert.deepEqual(parseAddress("project/a%2Fb"), { piece: "project", key: "a/b" });
+  assert.equal(addressRoute(projectAddress("a/b")), "project/a%2Fb");
+  assert.deepEqual(UNKNOWN_ADDRESS, { piece: "unknown" });
 });

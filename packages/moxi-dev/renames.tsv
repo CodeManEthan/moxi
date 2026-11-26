@@ -17769,6 +17769,7 @@ usage	packages/usage/tests/test_page.py	assert count("/api/requests", session="s
 usage	packages/usage/tests/test_page.py	assert count("/api/session", session="s1", folder="/w/app") == 1	keep	folder	folder
 usage	packages/usage/tests/test_page.py	assert count("/api/session", session="s1", folder="/w/tool") == 0	keep	folder	folder
 usage	packages/usage/tests/test_page.py	assert count("/api/terms", by="agent", session="s2", folder="/w/app-wt") == 2	keep	folder	folder
+usage	packages/usage/tests/test_page.py	assert facts["contract"] == 1 and set(facts["attributes"]) == {"projects", "open"}	keep	set	set
 usage	packages/usage/tests/test_page.py	assert get("/api/projects", by="folder")["home"] == "/home/alice"	keep	folder	folder
 usage	packages/usage/tests/test_page.py	assert get("/api/window", **asked)["used"] == {	keep	used	used
 usage	packages/usage/tests/test_page.py	assert get("/api/window", **asked)["used"] is None	keep	used	used
@@ -17798,7 +17799,7 @@ usage	packages/usage/tests/test_page.py	assert set(first) == {"rows", "pull", "n
 usage	packages/usage/tests/test_page.py	assert set(first) == {"today", "rows", "pull", "notes"}	keep	set	set
 usage	packages/usage/tests/test_page.py	assert set(five) == set(page.WINDOW.items)	keep	set	set
 usage	packages/usage/tests/test_page.py	assert set(found) == set(page.PROVENANCE.items)	keep	set	set
-usage	packages/usage/tests/test_page.py	assert set(found.components) == {"page", "limits", "cost", "row"}	keep	set	set
+usage	packages/usage/tests/test_page.py	assert set(found.components) == {"page", "limits", "cost", "row", "project-facts"}	keep	set	set
 usage	packages/usage/tests/test_page.py	assert set(found.components) == {"page", "limits", "cost"}	keep	set	set
 usage	packages/usage/tests/test_page.py	assert set(group) == set(page.GROUP.items)	keep	set	set
 usage	packages/usage/tests/test_page.py	assert set(m_a) == set(page.RATE.items)	keep	set	set
