@@ -14974,6 +14974,18 @@ turns	packages/turns/src/moxi_turns/guards/__init__.py	listed_set = set(listed)	
 turns	packages/turns/src/moxi_turns/guards/__init__.py	loaded_modules: set[str] = set()	keep	set	set
 turns	packages/turns/src/moxi_turns/guards/__init__.py	unknown = sorted(set(t) - _TOML_FIELDS - {"judge"})	keep	set	set
 turns	packages/turns/src/moxi_turns/guards/__init__.py	who: str = "any"	keep	any	any
+turns	packages/turns/src/moxi_turns/guards/shell.py	j = t.find("\n", i, n)	keep	find	find
+turns	packages/turns/src/moxi_turns/guards/shell.py	j = t.find("'", i + 1, n)	keep	find	find
+turns	packages/turns/src/moxi_turns/guards/shell.py	k = t.find("\n", j, n)	keep	find	find
+turns	packages/turns/src/moxi_turns/guards/shell.py	j = t.find("#>", i + 2, n)	keep	find	find
+turns	packages/turns/src/moxi_turns/guards/shell.py	j = t.find("}", i + 2, n)	keep	find	find
+turns	packages/turns/src/moxi_turns/guards/shell.py	body = t.find("\n", i, n) + 1	keep	find	find
+turns	packages/turns/src/moxi_turns/guards/shell.py	j = t.find('"', i + 1, n)	keep	find	find
+turns	packages/turns/src/moxi_turns/guards/shell.py	if any(w._kept_escape for w in words):	keep	any	any
+turns	packages/turns/src/moxi_turns/guards/shell.py	return any((r.operator.startswith(">") and r.fd in (None, "1"))	keep	any	any
+turns	packages/turns/src/moxi_turns/guards/shell.py	if name.lower() not in ("echo", "write-output") or any(	keep	any	any
+turns	packages/turns/src/moxi_turns/guards/shell.py	return None if any(w._kept_escape for w in rest) else "\n".join(w.text for w in rest)	keep	any	any
+turns	packages/turns/src/moxi_turns/guards/shell.py	if any("\\" in w.text for w in words):	keep	any	any
 turns	packages/turns/src/moxi_turns/guards/question.py	if any(not is_launch_prompt(p.text, args) for p in asked):	keep	any	any
 turns	packages/turns/src/moxi_turns/guards/question.py	pairs = set(zip(words, words[1:]))	keep	set	set
 turns	packages/turns/src/moxi_turns/guards/question.py	return set(prose_words).isdisjoint(words)	keep	set	set

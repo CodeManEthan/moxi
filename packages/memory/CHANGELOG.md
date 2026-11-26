@@ -8,8 +8,8 @@
   it returns at once, handing back the pieces earlier recalls of the conversation found
   (each once, oldest first, a line handed in the last six hours cut from later pieces,
   `stale` when a later call carried words first, dropped past
-  `subconscious.chat.drop_after_s`, each redacted through secrets' `chat_redact`, one
-  that comes back unscanned held back with a note) and starting a chat recall for the
+  `subconscious.chat.drop_after_s`, each redacted through secrets' `chat_redact` with sessions' path cut between its
+  passes, as `search_memory` is, one that comes back unscanned held back with a note) and starting a chat recall for the
   words, or saying in `skipped` why none started. It runs under a limit of its own and a
   5-second budget for its work, every lock wait inside it. A chat recall is a fresh
   headless Claude Code agent launched, continued and ended through the launcher's
@@ -28,6 +28,10 @@
   `recall_start.begin` takes `keep_running` and `lock_s`, each defaulting to what it did
   before.
 
+- A recall fork's plain-read test reads the shell text through turns' shell reader
+  (`read_shell`) in place of a splitter of its own, after the same character filter. It
+  now refuses a comment (`grep x #c`), which it allowed; everything else it allowed or
+  refused, it still does. memory asks for moxi-turns 0.2.8 or later.
 - With the secrets release whose credentials set finds `sk-` keys and real URL
   passwords, new rows are stored with those redacted. Rows indexed before it keep them
   until `moxi memory reindex` rebuilds the index.

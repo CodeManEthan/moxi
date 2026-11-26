@@ -607,7 +607,7 @@ sessions with the subconscious on or in a recall's slot fork. A fork may call Re
 shell only for a plain read: one command, or a pipeline of commands joined by `|`, each
 starting with an entry of `subconscious.fork_commands` word for word, in the foreground
 with no timeout of its own. Anything the guard can't see whole (`;`, `&`, redirection,
-substitution, quoting tricks and the like) is refused. Only Claude Code's `Bash` tool
+substitution, a comment, quoting tricks and the like) is refused. Only Claude Code's `Bash` tool
 counts as the shell: its `PowerShell` tool (on Windows) and `Monitor` are refused, so a
 fork with no `Bash` reads with Read, Grep and Glob alone. Every permission ask a recall
 fork raises is refused rather than shown to you; a fault in that guard refuses the ask

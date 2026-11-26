@@ -8,6 +8,7 @@ waits and is not covered, with each fact of the directed join."""
 from __future__ import annotations
 
 import os
+import re
 import threading
 import time
 from types import SimpleNamespace
@@ -393,6 +394,7 @@ def test_a_waiting_session_keep_warm_will_not_nudge_is_not_covered(wired, change
                                                          else [sid])
     got = joined()
     assert got["waits"] == {"kind": "subagents", "count": 1} and got["covered"] is False
+    assert got["next_keep_alive_at"] is None
 
 
 @pytest.mark.parametrize("unread", ["settings", "clock records", "tick"])
@@ -414,6 +416,7 @@ def test_a_waiting_session_is_not_covered_when_a_step_can_t_be_read(wired, monke
         monkeypatch.setattr(joiner, "cache_tick_s", lambda: None)
     got = joined()
     assert got["waits"] == {"kind": "subagents", "count": 1} and got["covered"] is False
+    assert got["cache"]["until"] is not None and got["next_keep_alive_at"] is None
 
 
 #: The reads a waiting session's worker makes, in order, that the next test watches.
@@ -678,6 +681,7 @@ def test_coverable_is_null_outside_an_uncovered_wait_a_press_would_cover(wired, 
     got = joined()
     assert got["coverable"] is None
     assert got["covered"] is (change == "keep warm on")
+    assert (got["next_keep_alive_at"] is not None) is (change == "keep warm on")
 
 
 def joined_with(wired, monkeypatch, found: waits.Directed, *, cover: bool = False) -> dict:
@@ -725,6 +729,63 @@ def test_a_join_that_met_the_deadline_publishes_nothing(wired, monkeypatch):
 def test_under_cover_the_directed_join_decides_covered(wired, monkeypatch, found, covered):
     got = joined_with(wired, monkeypatch, found, cover=True)
     assert got["covered"] is covered and got["coverable"] is None
+
+
+# -- next keep-alive -------------------------------------------------------------------------
+
+#: A UTC time in whole seconds with `Z`.
+WHOLE_Z = re.compile(r"\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ")
+
+
+def window_opens_of(got: dict) -> str:
+    """`cache.until` less `keepwarm.OPEN_S`, written as `until` is."""
+    return joiner._iso(joiner._epoch(got["cache"]["until"]) - keepwarm.OPEN_S, whole=True)
+
+
+def test_a_covered_session_with_its_window_ahead_is_due_when_the_window_opens(wired):
+    sid = seeded(values={"keep_warm": "on"})
+    wired.turns = Turns({sid: live(sid, entries=[agent("a1")])})
+    wired.cache = Cache([sid], age_s=600.0, ttl_s=3600.0)
+    got = joined()
+    assert got["covered"] is True
+    due = got["next_keep_alive_at"]
+    assert WHOLE_Z.fullmatch(due) and due == window_opens_of(got)
+    # 3600 s less the 600 s gone and the 900 s window: due in about 2100 s.
+    assert abs(joiner._epoch(due) - (time.time() + 2100.0)) < 5
+
+
+def test_a_covered_session_inside_its_window_is_due_now_or_before(wired):
+    sid = seeded(values={"keep_warm": "on"})
+    wired.turns = Turns({sid: live(sid, entries=[agent("a1")])})
+    wired.cache = Cache([sid], age_s=3000.0, ttl_s=3600.0)
+    got = joined()
+    assert got["covered"] is True
+    due = got["next_keep_alive_at"]
+    assert due == window_opens_of(got) and joiner._epoch(due) <= time.time()
+
+
+@pytest.mark.parametrize("change", ["no signal", "turn open", "capped", "no ask before shut"])
+def test_a_session_keep_warm_will_not_nudge_has_no_next_keep_alive(wired, change):
+    sid = seeded(values={"keep_warm": "on"})
+    wired.turns = Turns({sid: live(sid, entries=[] if change == "no signal" else
+                                   [agent("a1")], turn_open=change == "turn open")})
+    wired.cache = Cache([sid], age_s=3200.0 if change == "no ask before shut" else 3000.0)
+    if change == "capped":
+        subagent_nudges(sid, 3)
+    got = joined()
+    assert got["covered"] is False and got["cache"]["until"] is not None
+    assert got["next_keep_alive_at"] is None
+
+
+def test_a_coverable_session_has_none_until_a_press_covers_it(wired):
+    sid = seeded(**OFF)
+    wired.turns = Turns({sid: live(sid, entries=[agent("a1")])})
+    wired.cache = Cache([sid], asks=ASKS)
+    got = joined()
+    assert got["coverable"] == {"cap": 3} and got["next_keep_alive_at"] is None
+    pressed(sid)
+    got = joined()
+    assert got["covered"] is True and got["next_keep_alive_at"] == window_opens_of(got)
 
 
 # -- the fake turns' script ------------------------------------------------------------------

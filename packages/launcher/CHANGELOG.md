@@ -4,11 +4,18 @@
 
 - Interface 4, for a caller that runs its own headless agents: a `LaunchRequest`'s
   `stamps` (a fork's rule), kept in the launch's values; `continue_headless`, a headless
-  resume that replays the stored values and stamps; `run_log`, a launch's run log; and
+  resume that replays the stored values and stamps, launched by `by` (the caller's
+  identity when left out); `run_log`, a launch's run log; and
   `end_headless`, which ends a headless launch's whole process tree on every system and
   leaves a pid whose start time no longer matches. Two reads that start nothing come with
   it: `child_env`, the environment a launch's harness would get, and `settable_rows`,
   every row a request may type or leave out.
+- Each entry of `/api/running` and of the `running` topic carries `next_keep_alive_at`:
+  when keep-warm's next nudge is due, `cache.until` less 900 s (`keepwarm.OPEN_S`), the
+  moment keep-warm's window opens, as a UTC time in whole seconds with `Z`. It is set only
+  while `covered` is true and null otherwise, and a time already past means the timer's
+  next ask nudges. It carries no mark, so the phone's gateway sends it as it is.
+  `keepwarm.window_opens(expires_at)` gives that moment for any expiry.
 - Each entry of `/api/running` and of the `running` topic carries `model` and `effort`:
   the values the launch's row records, spelled as the command line spells them, null
   where the launch set none. Both are plain strings with no mark, so the phone's gateway
