@@ -5,7 +5,7 @@ from __future__ import annotations
 import re
 import subprocess
 from dataclasses import dataclass
-from pathlib import Path
+from pathlib import Path, PurePath
 
 import ruff
 
@@ -45,7 +45,8 @@ def scan(root: Path | str) -> list[Hit]:
         location = _LOCATION.fullmatch(line)
         if pending is not None and location:
             code, message = pending
-            hits.append(Hit(location.group(1), int(location.group(2)),
+            # Ruff names a file by this system's separators; a hit names it with `/`.
+            hits.append(Hit(PurePath(location.group(1)).as_posix(), int(location.group(2)),
                             int(location.group(3)), code, message))
             pending = None
     if done.returncode == 1 and not hits:

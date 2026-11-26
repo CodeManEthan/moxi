@@ -460,12 +460,13 @@ def test_the_core_no_longer_holds_the_check():
 
 # --- stacks ----------------------------------------------------------------------------
 
-#: Imports the kit, says so, reads the stacks time from stdin, arms, prints the file it
-#: armed, and sleeps.
+#: Imports the kit, says so with its own pid (on Windows a venv's python is a launcher
+#: whose pid is not the interpreter's), reads the stacks time from stdin, arms, prints
+#: the file it armed, and sleeps.
 ARMED = """\
 import os, sys, time
 from moxi_dev import testing
-print("ready", flush=True)
+print("ready", os.getpid(), flush=True)
 at = sys.stdin.readline().strip()
 print(testing.arm_stacks({**os.environ, testing.STACKS_AT_ENV: at}), flush=True)
 time.sleep(60)
@@ -480,11 +481,12 @@ def test_a_process_still_running_at_the_stacks_time_writes_every_threads_stack(t
     child = subprocess.Popen([sys.executable, "-c", ARMED], env=env, text=True,
                              stdin=subprocess.PIPE, stdout=subprocess.PIPE)
     try:
-        assert child.stdout.readline().strip() == "ready"
+        said, own_pid = child.stdout.readline().split()
+        assert said == "ready"
         child.stdin.write(f"{time.time() + 0.5}\n")
         child.stdin.flush()
         path = Path(child.stdout.readline().strip())
-        assert path == stacks_dir / f"gw3-{child.pid}.txt"
+        assert path == stacks_dir / f"gw3-{own_pid}.txt"
         wait_for(lambda: "most recent call first" in path.read_text(), testing.PROC_WAIT_S,
                  what="the armed process to write its stacks")
         assert 'File "<string>", line 6 in <module>' in path.read_text()

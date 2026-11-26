@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- On Windows, `moxi-dev check --only ruff` names a file with `/`, as its other steps
+  do, and a `PATH` given to `--only` selects files whichever separator it is written
+  with; before, Ruff's `\` paths matched no selection, so a selected run found nothing.
 - The module contract's write-site check reads `getattr(os, "O_NAME", <constant>)` in an
   `os.open` flags value as the flag `O_NAME`, so a read that adds a flag only some
   systems have (`O_NOFOLLOW`, `O_BINARY`) is a read, not an unlisted write.

@@ -20,7 +20,7 @@ def repo(tmp_path, files):
     for name, text in files.items():
         path = root / name
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(text)
+        path.write_text(text, encoding="utf-8")
     git(root, "add", "-A")
     git(root, "commit", "-q", "-m", "start")
     return root
@@ -728,7 +728,7 @@ def test_edits_land_on_their_token_after_non_ascii_text_and_odd_line_breaks(tmp_
         "    return e\n")})
     renames = table(tmp_path, row(path, "show", "name", "e", "exc"))
     assert rename.run(root, renames) == 0
-    assert (root / path).read_text() == (
+    assert (root / path).read_text(encoding="utf-8") == (
         'SPACES = "  　"\n'
         'PAGE = "a\x0cb"\n'
         "def show(exc):\n"

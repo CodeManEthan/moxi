@@ -7717,7 +7717,7 @@ moxi-dev	packages/moxi-dev/src/moxi_dev/check.py	paths = set(_names(_git(root, *
 moxi-dev	packages/moxi-dev/src/moxi_dev/check.py	paths |= set(_names(_git(root, "ls-files", "--others", "--exclude-standard", "-z")))	keep	set	set
 moxi-dev	packages/moxi-dev/src/moxi_dev/check.py	paths |= set(_names(_git(root, *diff, "HEAD")))            # staged and unstaged	keep	set	set
 moxi-dev	packages/moxi-dev/src/moxi_dev/check.py	picked: set[str] = set()	keep	set	set
-moxi-dev	packages/moxi-dev/src/moxi_dev/check.py	return any(clean == one.removeprefix("./").rstrip("/")	keep	any	any
+moxi-dev	packages/moxi-dev/src/moxi_dev/check.py	return any(clean == one or clean.startswith(one + "/") for one in wanted)	keep	any	any
 moxi-dev	packages/moxi-dev/src/moxi_dev/check.py	work.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
 moxi-dev	packages/moxi-dev/src/moxi_dev/check.py	worker_args	name	environ	env
 moxi-dev	packages/moxi-dev/src/moxi_dev/cli.py	help="check that each web page's build stamp matches its sources")	keep	help	help

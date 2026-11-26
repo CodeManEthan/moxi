@@ -195,7 +195,7 @@ import threading
 import time
 import tomllib
 from dataclasses import dataclass, field
-from pathlib import Path
+from pathlib import Path, PurePath
 from typing import Callable, Iterator, Mapping, Protocol, Sequence
 
 from moxi import proc
@@ -1228,9 +1228,8 @@ def _shown(path: str, selected: Sequence[str]) -> bool:
     if not selected:
         return True
     clean = path.removeprefix("./")
-    return any(clean == one.removeprefix("./").rstrip("/")
-               or clean.startswith(one.removeprefix("./").rstrip("/") + "/")
-               for one in selected)
+    wanted = [PurePath(one).as_posix().removeprefix("./").rstrip("/") for one in selected]
+    return any(clean == one or clean.startswith(one + "/") for one in wanted)
 
 
 def only(root: Path, step: str, paths: Sequence[str] = ()) -> int:
