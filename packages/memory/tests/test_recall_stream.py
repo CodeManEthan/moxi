@@ -88,6 +88,22 @@ def test_a_stream_runs_rounds_until_end_of_recall():
     assert record["fork"] == "agent-1" and record["rounds"] == 2
 
 
+def test_a_first_answer_ending_its_recall_ends_the_stream():
+    recall = a_recall()
+    route = FakeRoute([ended("Recalled ...:\n- a\nEnd of recall."), ended("- b")])
+    assert run(recall, route) == "ended"
+    assert [a[0] for a in route.asked] == ["fork"]
+    line = recalls.find_line(SESSION, recall.recall_id)
+    assert [r["text"] for r in line["rounds"]] == ["Recalled ...:\n- a\nEnd of recall."]
+
+
+def test_an_end_line_ends_the_stream_in_any_round():
+    assert recall_stream.ends_stream("- a\nEnd of recall.") is True
+    assert recall_stream.ends_stream("- a") is False
+    assert recall_stream.ends_stream("NOTHING") is True
+    assert recall_stream.ends_stream("  ") is True
+
+
 @pytest.mark.parametrize("answer", ["NOTHING", "", None])
 def test_nothing_ends_the_stream_after_one_round(answer):
     recall = a_recall()

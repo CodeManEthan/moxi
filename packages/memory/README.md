@@ -499,7 +499,10 @@ moxi launcher run --subconscious on-demand
 ```
 
 The launch stamps the mode in the session's environment (`MOXI_MEMORY_SUBCONSCIOUS`). A
-session with no stamp, such as one started by hand, has it off.
+session with no stamp, such as one started by hand, has it off. The launcher's
+`subconscious_route` row picks where its recalls run, `subagent` (the default) or `slot`
+(`--subconscious-route slot`), and the launch stamps it beside the mode
+(`MOXI_MEMORY_SUBCONSCIOUS_ROUTE`).
 
 - `automatic`: each prompt `subconscious.trigger` counts starts a recall. By default that
   is the user's own prompts.
@@ -508,36 +511,108 @@ session with no stamp, such as one started by hand, has it off.
   gets one line at its start that names the command. The command returns at once; the
   points come back to the agent as the recall finds them. It exits 3 with the reason
   when it refuses: the subconscious off or automatic in this session, the count used up,
-  or memory's config file in error.
+  memory's config file in error, or the session itself a recall's slot fork.
 
-**Where it runs.** For now a recall runs on Claude Code only, as a subagent forked from
-the session through turns' `fork`, so it starts from the session's own conversation and
-reads its prompt cache. A session where that can't run has the subconscious off: a Codex
-session, and a Claude Code session whose turns offers no `fork`. memory checks this at
-every try, not once. When a try finds no route, it writes an `off` line to its log with
-the reason, at the first such try and again only when the reason changes, the on-demand
+**Where it runs.** A recall runs on one of two routes:
+
+- `subagent`, on Claude Code: a subagent forked from the session through turns' `fork`,
+  so it starts from the session's own conversation and reads its prompt cache. Each
+  answer reaches the main agent the way any subagent's answer does.
+- `slot`: the launcher forks the session into a tmux slot you can watch, with the
+  recall's id stamped on the fork (`MOXI_MEMORY_SUBCONSCIOUS_FORK`), and each answer
+  comes back by comms (below). It needs the launcher (its interface 3), slots that run
+  here, and comms with scoped senders and a comms name for the session. A session
+  launched with `slot` runs it, and so does a Claude Code session on `subagent` whose
+  turns offers no `fork`.
+
+On Codex only the slot route runs a recall, and only where its launch picks it: a Codex
+session on `subagent` has the subconscious off (`Codex: off unless the launch picks the
+slot route`). A Codex slot fork doesn't read the session's prompt cache, and it reads
+through the shell alone, since Codex has no read tools. memory's side of a Codex host
+fork (a forked thread of the Codex session, `host-fork` in the log, its answers sent by
+comms, a late answer sent too, nothing to exit) is in place, and no session is routed
+to it.
+
+A session where no route can run has the subconscious off. memory checks this at every
+try, not once. When a try finds no route, it writes an `off` line to its log with the
+reason, at the first such try and again only when the reason changes, the on-demand
 command's refusal says it, and memory's doctor names each live session it holds for.
+The reasons include no turns `fork` (with the slot route's own reason beside it, where
+that can't run either), no slots here, a launcher without interface 3, comms not
+installed or without scoped senders, no comms name for the session, and a recall sender
+in conflict, which names the sender.
 
 **One recall.** memory's prompt listener returns at once and starts a detached child,
 so a recall never holds the prompt. The child:
 
 1. reads the prompt's keywords (common words left out) and runs a first search in
    `subconscious.scope`, keeping the best `subconscious.prefetch_hits` hits, leaving out
-   this session, subagents and fork launches, plus up to three notes files that hold the
-   most of the keywords (with notes installed). A prompt with no keyword gets no first
-   search;
+   this session, subagents and fork launches, plus up to three Markdown notes files that
+   hold the most of the keywords (with notes installed), each shown line cut at 200
+   characters. Under `project-first` the search has two parts, both run every time: the
+   project's best hits and its notes directory's best files, then the whole index's best
+   hits and the notes root's best files that the project's part didn't already show,
+   each part under its own heading in the brief. The notes are read whole, however many
+   files there are, and a notes directory that doesn't exist counts as none. A prompt
+   with no keyword gets no first search;
 2. writes the fork's brief with those hits, the rules below and this session's id;
-3. asks turns to fork the session with the brief. The fork answers as soon as it has
-   something, at most `subconscious.max_points` points, or `NOTHING`;
+3. forks the session with the brief, by its route. The fork answers as soon as it has
+   one useful point (from the first search alone when that holds one), at most
+   `subconscious.max_points` points, or `NOTHING`;
 4. asks for further rounds, each a turn of the same fork, until an answer is `NOTHING`
    or ends `End of recall.`, `subconscious.max_rounds` rounds have run, the fork has made
    `subconscious.max_tools` tool calls over all its rounds, or `subconscious.limit_s` has
    passed. Each round is bounded at `limit_s` plus 30 seconds from its own send.
 
-Each answer reaches the main agent the way any subagent's answer does.
+**Answers by comms.** On the slot route the child sends each answer to the session alone,
+as an interrupt that doesn't expire, under the session's recall sender: comms' scoped
+sender `<comms name>-subconscious` (`builder-subconscious@acme` for `builder@acme`),
+which memory declares to comms with the word `subconscious`. The word is declared once
+memory is installed beside comms, whether or not anyone turns the subconscious on, and
+from then no session or program on the machine can take a name of the form `<comms
+name>-subconscious` (comms refuses the binding or the send-only name). Where one already
+held such a name, it stays its holder's, and that one parent's recall sender is in
+conflict: the slot route is off for its session with that reason, memory's doctor names
+the sender, and `moxi doctor` names the holder. The message is the fork's
+answer as it wrote it, cut on a line at 4,000 characters; `NOTHING` sends nothing. It
+goes to the comms name the session holds when it is sent, or, once the session has ended
+and holds none, to the name it held when the recall started, which comms keeps the
+message for until a session holds that name again. The line reads `sending` until comms
+takes the message, then `back`. A send comms refuses is
+tried again every 10 seconds for a minute, then every 5 minutes, with no last try, each
+refusal's reason on the line. On this route the child waits out each round's bound
+itself. A round past its bound is noted on the line (`past_bound`) with its loss, and
+the child waits up to 300 seconds more: an answer that comes in that time is still sent
+(`sending`, the round marked `late`), and the record stays as the bound set it. Past
+that the line is left for a taker, which settles it once the fork's round ends and never
+only acknowledges such a round.
 
-**What the fork may do.** Two turns guards hold every recall fork to reads, and run
-only in sessions with the subconscious on. A fork may call Read, Grep and Glob, and the
+On Codex the message arrives after the main agent's answer and before any later prompt,
+as one more request inside the same Codex turn, so a reader of that turn's final answer
+sees the reply to the recall, not the answer before it.
+
+Under `user-and-comms`, a comms delivery whose senders are all this session's recall
+senders doesn't count: it starts no recall and resets no on-demand count. When a
+delivery has other senders as well, the lines memory already sent this session are taken out of the
+query and given to the fork as already recalled.
+
+**The slot fork's end.** Once its recall's last round is settled and its answer sent,
+the child exits the fork through the launcher's exit-session, and notes how on the line
+(`fork_exit`: `exited`, `at-dialog`, `not-exited`, `held: <what holds it>`, or the
+refusal). When comms refuses the send of that last answer, the fork is exited at the
+refusal, its last turn having ended, so the slot isn't held while the send is tried
+again. An exit
+the launcher holds (a person in the slot's pane, a background shell) is asked again
+every 5 seconds for at most a minute, then left: the fork keeps its slot, memory's
+doctor lists it with its session, slot and age, and memory never ends it on its own;
+`moxi launcher exit-session SESSION_ID` ends it once it is quiet. A taker that settles a
+slot line ends its fork the same way, and a discard of a line whose owner is gone ends
+it too, asking once. A line left at the late wait's last limit keeps its fork, whose
+round is still open. The launcher's park leaves a recall's fork running and reserves no
+slot for it, and neither restore nor crash discovery brings one back.
+
+**What the fork may do.** turns guards hold every recall fork to reads, and run only in
+sessions with the subconscious on or in a recall's slot fork. A fork may call Read, Grep and Glob, and the
 shell only for a plain read: one command, or a pipeline of commands joined by `|`, each
 starting with an entry of `subconscious.fork_commands` word for word, in the foreground
 with no timeout of its own. Anything the guard can't see whole (`;`, `&`, redirection,
@@ -548,12 +623,35 @@ fork raises is refused rather than shown to you; a fault in that guard refuses t
 too. Once the recall's tool calls or time are used up, every further call is refused
 with a line telling the fork to answer from what it has.
 
+The guards run in a session launched on the subagent route (`MOXI_MEMORY_SUBCONSCIOUS_ROUTE`
+unset or `subagent`). A fork's calls are known by its agent id once the child has
+written it. Before that, a subagent call from an unknown agent id is judged as the fork
+of the newest recall still waiting for its fork (newest by the order the records were
+written). A recall waits only while the process that holds it, named on its record
+from its first write (the starter, then the child), still runs, and at most
+`subconscious.limit_s` plus 60 seconds from its start (120 seconds at the defaults); a
+record whose holder could not be named waits 30 seconds. On Linux these ages and the
+holder's liveness are read on clocks a wall-clock step doesn't move; elsewhere on the
+wall clock, a record's start later than now read as now.
+
+On the slot route two more guards hold the fork to the same reads, in the fork's own
+session (stamped `MOXI_MEMORY_SUBCONSCIOUS_FORK`): `memory.subconscious-slot` judges
+every call of a Claude Code or Codex slot fork against its recall, found by the stamped
+id (a fork whose record isn't found has every call refused, and a fault in the judge
+refuses the call), and `memory.subconscious-slot-ask` refuses every permission ask of a
+Claude Code slot fork. Codex names its shell `Bash` to the guard, so a Codex fork's shell
+calls meet the same plain-read rule; `apply_patch` and every other Codex tool are
+refused. Codex's hook doesn't tell the guard how long a command may run before it yields,
+so on Codex a plain read that doesn't end (`tail -f`) goes on running in the background
+until the slot fork exits with its recall.
+
 **The log.** `moxi memory subconscious list` prints one line per recall (its id, state,
 start, session, how it started, the head of its prompt or topic, its route, rounds and
 the reason of a `lost` state) and one per stretch a session's subconscious was `off`.
 `--session ID` keeps one session's lines and prints each round's answer. A line is
-`open` while its round runs, `back` once an answer came, `lost` when none did,
-`discarded` or `off`. A `lost` line shows its reason and its error. The reason is
+`open` while its round runs, `sending` while comms hasn't yet taken an answer (with
+how long it has waited and comms' last refusal), `back` once an answer came, `lost` when
+none did, `discarded` or `off`. A `lost` line shows its reason and its error. The reason is
 `config` (the child's read of memory's config was refused), `spawn` (the child could not
 be started), `hurried` (a newer recall of the session started before this one asked its
 fork), `gone` (the fork went away with no answer, or its child died and turns kept no
@@ -568,9 +666,12 @@ its index by the fork id the log holds, so a sweep added later must keep those i
 recall child and each read of a subagent transcript reads the whole log, so that work
 grows with every session that ever ran the subconscious.
 
-`moxi memory subconscious discard RECALL_ID` ends a line whose answer memory still holds
-to send. On Claude Code's subagent route the harness brings every answer back itself,
-so no line there ever waits and the command refuses every one.
+`moxi memory subconscious discard RECALL_ID` ends a line still `sending`, an answer comms
+will never take: the line reads `discarded` and memory sends no more of it. A late
+answer's discard leaves the record as the round's bound set it. With the line's owner
+gone, it also ends the line's slot fork, asking the launcher once and noting how on the
+line. On Claude Code's subagent route the harness brings every answer back itself, so no
+line there ever waits and the command refuses each one.
 
 ## Setup
 
@@ -623,12 +724,12 @@ effect at the next read.
 | `reminder.enabled` | `true` | send the reminder at each prompt |
 | `ingest.timer.enabled` | `false` | run a catch-up walk every hour, outside sessions |
 | `subconscious.trigger` | `user` | which prompts count as new work: `user`, the user's own; `user-and-comms`, those and comms deliveries. In automatic mode each starts a recall; in on-demand mode each resets the agent's count |
-| `subconscious.scope` | `project-first` | where a recall looks: `project`, `project-first` (everywhere only when the project finds nothing) or `everywhere`; a session with no project label (its folder unknown) searches everywhere under each |
+| `subconscious.scope` | `project-first` | where a recall looks: `project`; `project-first`, every search covering the project and everything beyond it, the project's results first; or `everywhere`; a session with no project label (its folder unknown) searches everywhere under each |
 | `subconscious.limit_s` | `60` | how long a recall may run, all its rounds, in seconds, 1 to 3600; each round is also bounded at this plus 30 |
 | `subconscious.max_tools` | `8` | the most tool calls a recall's fork may make over all its rounds; at least 1 |
 | `subconscious.max_rounds` | `4` | how many rounds a recall may run, each answer delivered; at least 1 |
 | `subconscious.max_points` | `5` | the most points the brief allows in one answer; at least 1 |
-| `subconscious.prefetch_hits` | `8` | how many hits the first search puts in the brief; 0 runs none |
+| `subconscious.prefetch_hits` | `8` | how many hits the first search puts in the brief from each of its parts (the project's, and under `project-first` the one beyond it); 0 runs none |
 | `subconscious.on_demand_per_prompt` | `2` | in on-demand mode, the most recalls between two counted prompts; 0 refuses every one |
 | `subconscious.fork_commands` | `moxi memory search`, `moxi sessions read`, `grep`, `cat`, `head`, `tail`, `ls`, `wc`, `cut` | the shell commands a recall's fork may run; a program you add must not run another from its arguments |
 
@@ -640,8 +741,11 @@ the last good settings (on the defaults when none read cleanly yet), the listene
 the error as a warning, once per error, and a recall child that must read the
 file itself and can't stops with its line `lost` (`config`).
 
-memory reads one environment variable of its own, `MOXI_MEMORY_SUBCONSCIOUS`, which the
-launcher stamps on a session launched with the subconscious on. Its folders move with the core's, like
+memory reads three environment variables of its own: `MOXI_MEMORY_SUBCONSCIOUS` and
+`MOXI_MEMORY_SUBCONSCIOUS_ROUTE`, which the launcher stamps on a session launched with
+the subconscious on (its mode, and its route; unset means `subagent`), and
+`MOXI_MEMORY_SUBCONSCIOUS_FORK`, which memory has the launcher stamp on a recall's slot
+fork (the recall's id). Its folders move with the core's, like
 every module's: the session table, the writer lock and the rebuild lock in its state
 folder (`~/.local/state/moxi/memory` by default), with the subconscious's log and
 records under `subconscious/` there, the index in the `index` folder of its
@@ -651,8 +755,8 @@ cache folder (`~/.cache/moxi/memory/index`). `moxi paths memory` prints both.
 
 | Link | Extra | With it | Without it |
 |---|---|---|---|
-| comms | `comms` (`moxi-comms`) | each session's comms identity (`name`, or `name@scope`), read from comms' local claim socket at start; the agent's own list; agents named in the project list | no identities: no agent list, and the project list names each session's harness |
-| launcher | `launcher` (`moxi-launcher`) | each session's launch kind; scratch sessions searched only with `--scratch` and fork launches only with `--forks`, and neither in a list; the `subconscious` row that turns the subconscious on | no kinds: every session is searched by default and may be listed; no session is launched with the subconscious on |
+| comms | `comms` (`moxi-comms`) | each session's comms identity (`name`, or `name@scope`), read from comms' local claim socket at start; the agent's own list; agents named in the project list; the recall sender the slot route answers by | no identities: no agent list, and the project list names each session's harness; no slot route |
+| launcher | `launcher` (`moxi-launcher`) | each session's launch kind; scratch sessions searched only with `--scratch` and fork launches only with `--forks`, and neither in a list; the `subconscious` and `subconscious_route` rows; the slot route's fork into a slot and its exit, where the launcher says tmux slots run | no kinds: every session is searched by default and may be listed; no session is launched with the subconscious on |
 | notes | `notes` (`moxi-notes`) | a recall's first search reads notes files too | a recall reads past sessions only |
 
 Two sessions share an identity only when comms' qualified names are the same, so
@@ -673,7 +777,7 @@ Two sessions share an identity only when comms' qualified names are the same, so
 | `sessions` | the session table's sessions, with an identity, settled, and by launch kind; or that no session has started or been read yet | `warn` when the table can't be opened or read |
 | `links` | whether comms, the launcher and notes load, and what memory does without each | `warn` when one is installed but fails to load |
 | `retention` | each harness's retention, from sessions | `warn` where sessions warns |
-| `subconscious` | how many live sessions have the subconscious on Claude Code's subagent route, and that a recall fork's permission asks are refused; or that none has it on | `warn` for a live session launched with it on where no route can run now, with the reason (fix: `moxi memory subconscious list`); while memory's config is in error, for the recalls it stopped since the config last read cleanly for a recall, with the newest error (fix: `moxi config memory`); for a recall line whose child and taker are gone, with its age, until the next recall child or session end takes it; for recalls in the last day whose child could not start (reason `spawn`), with the newest error; and for a recall `starting` or `hurried` 30 seconds on with no fork and no log line naming its child (the child gone before it wrote its line, or with no identity of its own to write), which the recall guards stop waiting on |
+| `subconscious` | how many live sessions have the subconscious on, and that a recall fork's permission asks are refused; or that none has it on | `warn` for a live session launched with it on where no route can run now, with the reason (fix: `moxi memory subconscious list`); while memory's config is in error, for the recalls it stopped since the config last read cleanly for a recall, with the newest error (fix: `moxi config memory`); for a recall line left at the late wait's last limit, with its fork and age, until the first taker after the fork's round ends settles it; for a recall line whose child and taker are gone, with its age, until the next recall child or session end takes it; for a recall still `sending`, with its wait and comms' last refusal (for one comms will never take: `moxi memory subconscious discard RECALL_ID`); for a slot fork memory did not exit that the launcher still runs (its exit held past the exit's wait or answered with anything but `exited`, or its owner gone before it asked for the exit), with its session, its slot where the launcher can say, how its exit came out and its age, which memory leaves running (`moxi launcher exit-session SESSION_ID` ends it once it is quiet); for recalls in the last day whose child could not start (reason `spawn`), with the newest error; for a recall on any route `starting` or `hurried` 30 seconds on with no fork and no log line naming its child (the child gone before it wrote its line, or with no identity of its own to write); and for one on the subagent route whose holder still runs past its wait for the fork's id, with its state and age |
 
 A `config` row fails when memory's config can't be read, and a `record ingest` row shows a
 failed ingest child.

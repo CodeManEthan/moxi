@@ -101,9 +101,22 @@ TEMPLATES = {"name.template", "name.templates"}
 
 
 def show_json(capsys) -> dict:
+    """The launcher's own keys in `moxi config launcher show --json`; the launch defaults'
+    rows, listed after them, are `test_defaults.py`'s."""
     capsys.readouterr()
     assert cli.main(["config", "launcher", "show", "--json"]) == 0
-    return {key["name"]: key for key in json.loads(capsys.readouterr().out)}
+    return {key["name"]: key for key in json.loads(capsys.readouterr().out)
+            if "table_title" not in key}
+
+
+def test_show_json_lists_the_launch_defaults_after_the_launchers_own_keys(capsys):
+    capsys.readouterr()
+    assert cli.main(["config", "launcher", "show", "--json"]) == 0
+    items = json.loads(capsys.readouterr().out)
+    tabled = [i for i, key in enumerate(items) if "table_title" in key]
+    assert tabled and tabled == list(range(tabled[0], len(items)))
+    assert {items[i]["table_title"] for i in tabled} == {"Launch defaults"}
+    assert "defaults.permission_mode" in {items[i]["name"] for i in tabled}
 
 
 def test_the_schema_passes_the_cores_check_with_its_page_fields():

@@ -35,7 +35,7 @@ def test_a_line_is_written_in_place_and_new_ones_after_it():
 
 def test_a_line_in_no_known_state_is_refused():
     with recalls.session_lock(SESSION), pytest.raises(ValueError):
-        recalls.put_line(SESSION, {"recall": "r1", "state": "sending"})
+        recalls.put_line(SESSION, {"recall": "r1", "state": "waiting"})
     assert recalls.read_lines(SESSION) == []
 
 

@@ -15,6 +15,22 @@
   session's handoff folder unless `--key` names its key.
 - The launch log moves to schema version 5: the `picks` table is rebuilt so a pick may be
   `taken`, keeping every row.
+- The launch defaults, `[defaults]` of `presets.toml`, are a table `moxi config` shows and
+  changes (`CONFIG_TABLES`, `moxi_launcher.defaults`): `moxi config launcher show` lists
+  them as `defaults.<row>`, and `moxi config set launcher defaults.<row> VALUE` and
+  `unset` write one key, keeping every other byte of the file. The Settings page shows
+  them as the `Launch defaults` block. The rows are those a launch on this machine takes;
+  keys launches refuse or leave out are listed first, under `needs a fix`, to be cleared.
+  A write is refused only by the row's own check (its type, the values offered here, a
+  refused, unknown or retired name or value) or a file that can't be read; a value that
+  fails only on some launches is written, and the row carries the launcher's words for
+  it. A key held for a row this machine doesn't offer is kept and not listed. `moxi
+  config unset` prints the lines the table still carries. Needs `moxi>=0.1.11` for `moxi
+  config` to reach the table; an older core ignores it.
+- `moxi launcher presets check` warns, at `defaults`, of what a launch of either harness
+  with no preset and nothing typed meets from `[defaults]`: a rule between rows that
+  refuses it, or a self-relaunch item that a `recycle_at_limit = "relaunch"` fails before
+  the launch has a folder (the harness, a slot target, slots running here, scratch).
 - On the Projects page, each running session's line in the opened project's `Sessions`
   row says it runs (`runs`) and its `last active` part that it holds only while the
   session is not in a turn (`idle_only`), so the page can join turns' `working` there.
@@ -81,9 +97,22 @@
 - The `subconscious` row (`off`, `automatic`, `on-demand`; needs turns and memory) turns
   memory's subconscious on for one launch, or for every launch of a preset that sets it:
   a launch with it on stamps the mode under memory's `SUBCONSCIOUS_ENV`, read from
-  memory's API. For now a recall runs on Claude Code only: a Codex launch with the row
-  on is accepted and has the subconscious off at run time, which memory's log and doctor
-  say. A fork drops it. memory joins the optional links, with a `memory` extra.
+  memory's API. A fork drops it. memory joins the optional links, with a `memory` extra.
+- The `subconscious_route` row (`subagent`, the default, or `slot`; needs turns and
+  memory, and for `slot` with the subconscious on, slots, comms and tmux slots that run
+  here) picks where a launch's recalls run, stamped beside the mode under memory's
+  `SUBCONSCIOUS_ROUTE_ENV`; nothing is stamped with the subconscious off. On Codex only
+  `slot` runs a recall: a Codex launch on `subagent` is accepted and has the
+  subconscious off at run time, which memory's log and doctor say. A fork drops it.
+- A value's `when` table in a catalog takes `applies_with`, another launcher row: the
+  value's needs hold only while that row is set off its default. `subconscious_route`'s
+  `slot` applies with `subconscious`, so a route set in `[defaults]` or a seat preset
+  doesn't refuse a launch with the subconscious off where slots or comms are missing.
+- A recall's slot fork, a launch whose recorded environment carries memory's
+  `SUBCONSCIOUS_FORK_ENV`, is memory's to end: park lists it `a recall's fork, which
+  memory ends; left alone` and neither exits nor reserves its slot, crash discovery
+  settles its slot rather than reserving it, and restore drops an entry made for one
+  before this, releasing its slot, without counting it against the exit status.
 - A headless launch with an identity keeps `keep_warm = "on"`, with no warning, as any
   other launch does. A nudge is a turn, which starts the exit rule's `idle=` count again,
   so the session ends by its rule once keep-warm stops nudging. `recycle_on_expiry` is
@@ -187,8 +216,9 @@
   kind `fork`, first in the order `launch_kind` decides by, and a resume of a fork keeps
   it. A fork is pointed to no handoff and marks none picked. An older launcher refuses
   the log once it is at version 4.
-- Interface 3 adds `fork(session_id, target=, slot=, stamps=)` and
-  `exit_session(session_id, dry_run=)` to the API. A fork's `stamps` are set on its
+- Interface 3 adds `fork(session_id, target=, slot=, stamps=)`,
+  `exit_session(session_id, dry_run=)` and `slots_here()`, whether tmux slots run here
+  as the launcher reads it, to the API. A fork's `stamps` are set on its
   environment after the scrub; each must be listed in the `SESSION_ENV` of the present
   module its own prefix names, and the launcher's and turns' are refused.
 - `exit-session` exits a quiet Codex session under turns' Codex host by stopping the

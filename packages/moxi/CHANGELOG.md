@@ -30,6 +30,21 @@
   Linux sandbox, or Claude Code's tool mark. Unlike the walk it climbs past a Moxi
   program, a unit and the start mark, so a session a Moxi launcher started is still an
   agent's. Where the walk can't go on, it names none. A module needs `moxi>=0.1.11`.
+- `moxi config` reaches a table a module keeps in a file of its own. A module names it in
+  its announcement's new `CONFIG_TABLES` (`{name: "package.module:NAME"}`; `moxi modules
+  --json` lists it as `config_tables`), and the hook it names lists the table's rows and
+  changes one. `moxi config <module> show` and `show --json` list the rows after the
+  module's own keys as `<table>.<row>`, with `table_title`, `table_line`, `table_file` and
+  `applies`, and `warning`, `refused` and `clear_only` where the module gives them. `moxi
+  config set` and `unset` of a row call the hook, with the same exit codes, `--json`
+  answer and history line as a config key, and print the module's warning lines after
+  their own (on stderr as `warning: <line>` with `--json`, so stdout stays one object).
+  `--add` and `--remove` on a row are refused. When the table's file can't be read,
+  `show --json` gives one item with `table_error` and `table_fix` in place of the rows
+  and exits 1; when the module's config file can't be read, its error object gains
+  `keys`, the tables' rows, which `set` still writes. A table named like a top-level key
+  of the module's own schema is refused when `moxi config` reads the tables. A module
+  with no `CONFIG_TABLES` shows exactly what it showed before.
 - New `moxi install <module> --setup-only`: runs an installed module's `SETUP` again in a
   fresh process under the core lock and records the version it ran at in `setup.json`,
   as an install's settle step does, and nothing else: no install, no index, no catalogue

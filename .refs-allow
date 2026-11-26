@@ -11,6 +11,7 @@ packages/connector/src/moxi_connector/oauth.py	AuthorizationHandler	the MCP Pyth
 packages/connector/src/moxi_connector/oauth.py	OAuthAuthorizationServerProvider	the MCP Python SDK's OAuth provider interface
 packages/connector/src/moxi_connector/oauth.py	TokenVerifier	the MCP Python SDK's bearer token verifier interface
 packages/connector/src/moxi_connector/oauth.py	create_auth_routes	the MCP Python SDK's function that builds its OAuth routes
+packages/memory/src/moxi_memory/recall_guard.py	yield_time_ms	the argument of Codex's exec_command tool that sets how long a command runs before it yields
 packages/moxi-dev/src/moxi_dev/testing.py	--markers	pytest's flag that lists the registered markers
 packages/moxi/src/moxi/_settle.py	nohup	the POSIX command that starts a program with hang-ups ignored
 packages/moxi/src/moxi/ipc/_pipe.py	INFINITE	the Windows API's constant for a wait with no timeout

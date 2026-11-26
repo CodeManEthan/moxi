@@ -76,6 +76,17 @@ commands:
   --json` print one object, `{changed, problem, fix, units}`, in place of their lines.
   Run inside an agent's session, a `set` or `unset` that would turn a module's timer on
   is refused (exit 3): turning a timer on is for the person at the keyboard.
+- A module may keep one TOML table of rows in a file of its own, which it reads, checks
+  and writes itself, and name it in its announcement's `CONFIG_TABLES`
+  (`{"defaults": "package.module:NAME"}`, listed by `moxi modules --json` as
+  `config_tables`). `moxi config <module> show` lists the table's rows after the module's
+  own keys, each named `<table>.<row>`, and `moxi config set` and `unset` of such a key go
+  to the module's hook, with a config key's exit codes, `--json` answer and history line;
+  the module's warning lines print after the `set` line (on stderr with `--json`).
+  `--add` and `--remove` are refused there: a row takes its whole value. A table file that
+  can't be read shows as one item with `table_error` and `table_fix`, and the module's
+  own keys still show; a config file that can't be read leaves the table's rows listed
+  and editable. `path`, `check` and `init` are the config file's alone.
 - `moxi paths <module>` prints where a module keeps its files: its data, state, cache,
   config and runtime directories, its config file and each store it declares.
 - `moxi doctor [<module>...]` checks the modules, their settings, daemons, timers and

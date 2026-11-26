@@ -45,6 +45,10 @@ is checked. A failed check makes the module `broken`, with the reason.
     CONFIG_CHECK    target, `fn(text: str) -> None`: the module's whole loader over its
                     config file's text alone, raising when it refuses; run by `moxi config
                     set`, `unset` and `check` (see `moxi.config`)
+    CONFIG_TABLES   {table: target}: tables the module keeps in files of its own, each a
+                    lower-case name and the "package.module:NAME" of its hook, which
+                    `moxi config` shows and changes as keys `<table>.<row>` (see
+                    `moxi.config`); imported only there
     QUESTIONS       {settings key: one line}: install questions
 
 A "target" is "package.module:function". An inner key of a `DAEMONS`, `TIMERS` or
@@ -130,6 +134,7 @@ KNOWN: Mapping[str, object] = MappingProxyType({
     "TEARDOWN": None,
     "SESSION_ENV": _EMPTY,
     "CONFIG_CHECK": None,
+    "CONFIG_TABLES": _EMPTY,
     "QUESTIONS": _EMPTY,
 })
 
@@ -146,6 +151,8 @@ _UNIT_NAME = re.compile(r"[a-z0-9]+(-[a-z0-9]+)*")
 _STORE_NAME = re.compile(r"[a-z0-9]+([-_][a-z0-9]+)*")
 #: A settings key, dotted for a key inside a table.
 _KEY = re.compile(r"[A-Za-z0-9_-]+(\.[A-Za-z0-9_-]+)*")
+#: A table's name in `CONFIG_TABLES`: a lower-case word, `_` joining more.
+_TABLE_NAME = re.compile(r"[a-z][a-z0-9]*(_[a-z0-9]+)*")
 _ENV_NAME = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
 _SIZE = re.compile(r"[0-9]+[KMG]?")
 _AGE = re.compile(r"[0-9]+d")
@@ -281,7 +288,8 @@ class Found(_Frozen):
         "announces", "interfaces", "api_name", "api", "cli", "summary", "optional", "gated",
         "internal_env", "settings", "setup", "segment", "daemons", "timers", "units_from",
         "health", "doctor", "stores", "budgets", "skills", "page", "components",
-        "reserved_names", "teardown", "session_env", "config_check", "questions")
+        "reserved_names", "teardown", "session_env", "config_check", "config_tables",
+        "questions")
     _defaults = MappingProxyType({
         "reason": "", "distribution": None, "version": None, "target": None,
         "package": None, "api": None,
@@ -326,6 +334,9 @@ class Found(_Frozen):
     session_env: Mapping[str, str]
     #: The `CONFIG_CHECK` target, `fn(text: str) -> None`; imported only by `moxi.config`.
     config_check: str | None
+    #: `CONFIG_TABLES`: each table's name and its hook's target; imported only by
+    #: `moxi.config`.
+    config_tables: Mapping[str, str]
     questions: Mapping[str, str]
 
     @property
@@ -1285,6 +1296,15 @@ def _stores(value, name):
     return _freeze(value)
 
 
+def _config_tables(value, name):
+    if not isinstance(value, Mapping) or not all(
+            isinstance(k, str) and _TABLE_NAME.fullmatch(k)
+            and isinstance(v, str) and _TARGET.fullmatch(v) for k, v in value.items()):
+        raise _Bad(f"has {name} = {value!r}; it must map lower-case table names to "
+                   '"package.module:NAME" targets')
+    return MappingProxyType(dict(value))
+
+
 _target = _pattern(_TARGET, '"package.module:function"')
 
 _CHECKS = {
@@ -1313,6 +1333,7 @@ _CHECKS = {
     "TEARDOWN": _target,
     "SESSION_ENV": _session_env,
     "CONFIG_CHECK": _target,
+    "CONFIG_TABLES": _config_tables,
     "QUESTIONS": _questions,
 }
 

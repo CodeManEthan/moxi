@@ -235,6 +235,24 @@ check` checks the whole file: types and values, rows whose module is missing, pr
 that an instructions file can be read, and that an agent role a preset names is found in
 the harness's agent folders.
 
+**Launch defaults on the Settings page.** `[defaults]` shows on the Settings page as the
+launcher's `Launch defaults` block, and at a terminal as `moxi config launcher show`'s
+`defaults.<row>` keys; `moxi config set launcher defaults.<row> VALUE` and `moxi config
+unset launcher defaults.<row>` change one key, as the page does. The block holds every row
+a launch on this machine takes (a row or value whose module is missing or whose condition
+fails here is left out), each under its catalog group, or `start` for a row with none
+(`cwd`, `project`, `brief`, `brief_file`, `target`, `slot`). A change is checked by the row's own check alone: its type, the values
+offered here, a refused, unknown or retired name or value. A value that fails only on
+some launches, such as `recycle_at_limit = "relaunch"` without `target = "slot"`, is
+written, and its row shows what a launch with no preset will meet. Keys launches refuse
+or leave out (an owned row, `takes_policy_directors`, a typo, a retired row) sit first,
+under `needs a fix`, and can only be cleared. A key set for a row this machine doesn't
+offer is kept as it is and not shown; a hand edit clears it. The write changes one key
+and keeps every other byte of the file, comments included: a new key goes straight after
+the table's last own key, above any `[defaults.<x>]` sub-table. A change reaches launches
+made after it; a relaunch or resume keeps what its session launched with. `moxi launcher presets check` warns, at `defaults`, of
+what a launch with no preset and nothing typed meets from `[defaults]`.
+
 ## The launch log
 
 Every launch writes one row to a SQLite file in the launcher's state directory before the
@@ -292,15 +310,18 @@ it asks no other module, starts no process, and writes nothing but an older log'
 update. With no launch log it gives none; a log held past `timeout_s` (1 second) raises
 `Busy`.
 
-Interface 3 adds two acts. `fork(session_id, target="terminal", slot=None, stamps=None)`
-forks a session as `moxi launcher fork` does (below) and returns the launch's
-`LaunchResult`, whose `session_id` is the fork's. `stamps` are variables set on the
+Interface 3 adds two acts and a read.
+`fork(session_id, target="terminal", slot=None, stamps=None)` forks a session as `moxi
+launcher fork` does (below) and returns the launch's `LaunchResult`, whose `session_id`
+is the fork's. `stamps` are variables set on the
 fork's environment after the scrub. Each must be one a present module lists in its
 `SESSION_ENV`, and its own prefix (`MOXI_<MODULE>_`) says which module that is; the
 launcher's and turns' are refused, since the launch stamps those itself. A stamp that
 fails is refused, `bad-value`, before anything is written.
 `exit_session(session_id, dry_run=False)` exits a quiet launched session as `moxi
-launcher exit-session` does and returns its verdict; a refusal is raised.
+launcher exit-session` does and returns its verdict; a refusal is raised. It also adds
+one read, `slots_here()`: whether tmux slots run here, as the launcher reads it for a
+slot launch (slots installed, and its `supported()` says so; false on native Windows).
 
 ## Handoffs
 
@@ -580,6 +601,9 @@ subagents, a draft and a read that failed. Each slot gets one line:
   first, if you want it ended before the reboot.
 - The session park itself runs in is recorded `not-exited: the session running park` and
   left for you to exit.
+- A recall's slot fork, launched by memory's subconscious for one recall, is listed `a
+  recall's fork, which memory ends; left alone`: it is neither exited nor reserved, and
+  no entry brings it back.
 - A live run the launcher did not launch is `left alone`; a session launched into a
   terminal is listed `not in a slot; left running`; a slot taken by something else since
   park found it is `changed; left alone`; a slot another holder holds is `held by H; left
@@ -605,6 +629,9 @@ launch's too. Sessions go one at a time, in slot order, each with one line:
   `comms is offline` when the comms daemon is not up yet. The entry and reservation stay;
   run restore again.
 - A session resumed some other way since is marked restored, and its slot let go.
+- An entry for a recall's slot fork, parked before park left them out, is `dropped` (`a
+  recall's fork, which nothing brings back`): its slot is let go, and it doesn't count
+  against the exit status.
 
 A launch that fails after it was placed takes the reservation again, so the entry stays
 open; if something took the slot in between, the entry is closed and the line names the
@@ -623,7 +650,8 @@ still going when its tmux server went down reads `crashed`. Before any launch in
 and at the start of park, restore and unpark, the launcher turns each crashed slot whose
 last launch was its own into a park entry with a reservation, so no fresh launch takes the
 slot and `restore` brings the session back; a resume of the session, or a relaunch
-repair, runs this before it chooses a slot. A launch that names such a slot is refused
+repair, runs this before it chooses a slot. A crashed slot whose last launch was a
+recall's slot fork is settled instead, since nothing brings one back. A launch that names such a slot is refused
 `held by park-<id>`, with the hint to restore or unpark it. A Codex session quit by hand
 in the two minutes before an unplanned shutdown, and a run whose window was killed by
 hand, read crashed too; unpark them.
@@ -1026,7 +1054,7 @@ A refusal prints one line ending in a short code, such as `[off-posture]`, and a
 | usage | the `warn_at` and `recycle_at_limit` rows | the rows are not offered |
 | ui | the launcher's page, and its state views on other pages | the command line only |
 | sessions | the latest thing said in each running session, on Home's Sessions row; `Open` and `All sessions` go to the sessions page | the row shows when each session was launched, and its links go to the launcher's page |
-| memory | the `subconscious` row: `--subconscious automatic` or `--subconscious on-demand` (needs turns too) stamps the mode under the variable memory names, `MOXI_MEMORY_SUBCONSCIOUS`, and memory's subconscious runs in that session; for now a recall runs on Claude Code only, so a Codex launch with the row on has it off at run time (memory's log and doctor say so); a fork drops the row | the row is not offered |
+| memory | the `subconscious` row: `--subconscious automatic` or `--subconscious on-demand` (needs turns too) stamps the mode under the variable memory names, `MOXI_MEMORY_SUBCONSCIOUS`, and memory's subconscious runs in that session; the `subconscious_route` row, `--subconscious-route subagent` (the default: a fork inside the session) or `slot` (a forked session in a slot you can watch; needs slots and comms, and refused where tmux slots don't run, but only with the subconscious on, so a route set in `[defaults]` or a preset doesn't refuse a launch with it off), stamped beside the mode as `MOXI_MEMORY_SUBCONSCIOUS_ROUTE`; on Codex only `slot` runs a recall, so a Codex launch on `subagent` has the subconscious off at run time (memory's log and doctor say so); a fork drops both rows; a recall's slot fork, which memory launches through `fork` and ends with its recall, is left alone by park, restore and crash discovery (above) | the rows are not offered |
 
 An agent role a preset names is looked for in the harness's own agent folders, the user's
 and the project's.

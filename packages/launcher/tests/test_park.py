@@ -23,6 +23,8 @@ from moxi_launcher.relaunch import Result
 TESTS = Path(__file__).resolve().parent
 SID3 = "5f0c3a1e-7f43-4c8e-9e0a-1d2b3c4d5e6f"
 SID5 = "6a1d4b2f-8a54-4d9f-8f1b-2e3c4d5e6f70"
+#: memory's fork stamp, which a recall's slot fork carries.
+FORK_ENV = "MOXI_MEMORY_SUBCONSCIOUS_FORK"
 SETTINGS = {"park.wait_s": 300, "relaunch.person_s": 120, "relaunch.dialog_s": 60}
 
 
@@ -57,9 +59,10 @@ def conn():
     conn.close()
 
 
-def launch_row(conn, rid, sid, *, slot="3", harness="claude", target="slot", **more):
+def launch_row(conn, rid, sid, *, slot="3", harness="claude", target="slot", env=None,
+               **more):
     store.insert(conn, request_id=rid, by="ann", harness=harness, target=target,
-                 cwd="/tmp", values={}, argv=[harness], env={}, posture="",
+                 cwd="/tmp", values={}, argv=[harness], env=env or {}, posture="",
                  session_id=sid, slot=slot if target == "slot" else None, **more)
     store.set_state(conn, rid, "ready")
     return store.get(conn, rid)
@@ -221,6 +224,18 @@ def test_runs_the_launcher_did_not_launch_and_sessions_outside_slots_are_listed(
     assert result.lines == ("slot 4: no session: not launched by the launcher; left alone",
                             f"not in a slot: {SID5}: not in a slot; left running",
                             "nothing to park")
+
+
+def test_a_recalls_slot_fork_is_neither_reserved_nor_exited(conn, rig):
+    launch_row(conn, "r3", SID3)
+    launch_row(conn, "f5", SID5, slot="5", env={FORK_ENV: "recall-1"})
+    rig.plan(slots={"3": running("r3"), "5": running("f5")})
+    exits = Exits(rig)
+    result = go(conn, exits)
+    assert result.exit_code == 0 and exits.calls == [SID3]
+    assert [c["slot"] for c in rig.calls("hold")] == [3]
+    assert [e.slot for e in store.open_entries(conn)] == [3]
+    assert f"slot 5: {SID5}: {park.RECALL_FORK}" in result.lines
 
 
 def test_nothing_in_any_slot_is_nothing_to_park(conn, rig):

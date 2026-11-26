@@ -6,7 +6,8 @@
 
 `list` prints the subconscious's log (`moxi_memory.recalls`), oldest first: one line per
 recall, with its id, state, when it started, its session, how it started, the head of its
-prompt or topic, its route, its rounds and the reason of a `lost` state; and one line
+prompt or topic, its route, its rounds and the reason of a `lost` state, and for a line
+still `sending` how long it has waited for comms and comms' last refusal; and one line
 per stretch a session's subconscious could not run (`off`), with the reason. `--session`
 keeps one session's lines, and prints each round's answer under its recall. `--json`
 prints the lines as stored, one JSON array.
@@ -124,8 +125,9 @@ def _discard(args, out, prog: str) -> int:
     return codes.OK
 
 
-def format_line(line: dict) -> str:
-    """One log line as one line of text; a `lost` line ends with its reason and error."""
+def format_line(line: dict, *, now: float | None = None) -> str:
+    """One log line as one line of text; a `lost` line ends with its reason and error,
+    a `sending` one with how long it has waited for comms and comms' last refusal."""
     when = show(line.get("at") if isinstance(line.get("at"), (int, float)) else None)
     session = line.get("session") or "-"
     state = line.get("state") or "-"
@@ -136,9 +138,11 @@ def format_line(line: dict) -> str:
              str(line.get("start") or "-"), json.dumps(line.get("head") or "",
                                                        ensure_ascii=False),
              str(line.get("route") or "-"), f"rounds {len(rounds)}"]
-    flags = [name for name in ("hurried", "past_limit") if line.get(name)]
+    flags = [name for name in ("hurried", "past_limit", "past_bound") if line.get(name)]
     if flags:
         parts.append(", ".join(f.replace("_", " ") for f in flags))
+    if state == recalls.SENDING:
+        parts.append(sending_text(line, now=now))
     reason = str(line.get("reason") or "")
     error = " ".join(str(line.get("error") or "").split())
     if error and state == recalls.LOST:
@@ -147,6 +151,21 @@ def format_line(line: dict) -> str:
     elif reason:
         parts.append(reason)
     return "  ".join(parts)
+
+
+def sending_text(line: dict, *, now: float | None = None) -> str:
+    """How long a `sending` line has waited for comms, and comms' last refusal."""
+    import time
+
+    now = time.time() if now is None else now
+    since = line.get("sending_at")
+    waited = (f"{max(0, int(now - since))}s" if isinstance(since, (int, float))
+              else "an unknown time")
+    tries = int(line.get("send_tries") or 0)
+    said = f"sending for {waited}"
+    if tries:
+        said += f", {tries} tries refused, the last: {line.get('send_reason') or 'no reason'}"
+    return said
 
 
 def round_lines(line: dict) -> list[str]:
@@ -171,4 +190,4 @@ def round_lines(line: dict) -> list[str]:
 
 _VERBS = {"list": _list, "recall": _recall, "discard": _discard}
 
-__all__ = ["ANSWER_CHARS", "add_parser", "run", "format_line", "round_lines"]
+__all__ = ["ANSWER_CHARS", "add_parser", "run", "format_line", "sending_text", "round_lines"]

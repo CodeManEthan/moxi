@@ -38,13 +38,23 @@
   warns.
 - subconscious: for each live session whose launch turned the subconscious on, whether a
   recall route can run in it now, checked as a recall's own try checks it (a Codex
-  session, or a Claude Code session whose turns offers no `fork`, has it off), naming the
+  session runs only the slot route, and only where its launch picks it; a Claude Code
+  session whose turns offers no `fork` falls back to the slot route; a route that
+  answers by comms is off while the session has no comms name or its recall sender
+  can't send, and the reason names that sender, in conflict among them), naming the
   reason only while it holds; while memory's config file is in error, each recall it
-  stopped (its line `lost` with the reason `config`) and the error; and each recall line
-  still open or kept whose child and taker are gone, with its age, until a taker settles
-  it. `warn` for each of those. With the subconscious on in a live session it also says
-  that a recall fork's permission asks are refused. Recall runs on Claude Code's subagent
-  route only.
+  stopped (its line `lost` with the reason `config`) and the error; each recall line
+  left at the late wait's last limit with its fork's round still open, with its fork
+  and age; each recall line still open, sending or kept whose child and taker are gone,
+  with its age, until a taker settles it; each recall line still `sending`, an answer
+  comms has not taken yet, with how long it has waited and comms' last refusal; each
+  slot fork memory did not exit that the launcher still runs (its exit given up, held
+  past the exit's wait or answered with anything but `exited`, or its owner gone with
+  no exit asked and nothing left for a taker), with its session, its slot where the
+  launcher can say, how its exit came out and its age, which memory leaves running; and
+  the recalls whose child never ran or whose fork's id never came. `warn` for each of
+  those. With the subconscious on in a live session it also says that a recall fork's
+  permission asks are refused.
 
 No row writes anything: the index is opened to read, and the state store only when it
 is there.
@@ -445,6 +455,8 @@ SUBCONSCIOUS_SHOWN = 5
 #: its identity yet.
 UNTAKEN_GRACE_S = 30.0
 SUBCONSCIOUS_LIST = "moxi memory subconscious list"
+SUBCONSCIOUS_DISCARD = "moxi memory subconscious discard RECALL_ID"
+EXIT_SESSION = "moxi launcher exit-session SESSION_ID"
 
 
 def _age(seconds: float) -> str:
@@ -474,30 +486,30 @@ def live_subconscious() -> list[tuple[str, str, str | None]]:
     for session in client.sessions():
         with session:
             try:
-                stamps = session.env([recall_start.SUBCONSCIOUS_ENV])
+                stamps = session.env(list(recall_start.STAMPS))
             except Exception:  # noqa: BLE001 - an endpoint that can't read it is passed by
                 continue
-            run_mode = recall_start.mode({k: v for k, v in stamps.items() if v is not None})
-            if run_mode is None or session.session_id is None:
+            env = {k: v for k, v in stamps.items() if v is not None}
+            run_mode = recall_start.mode(env)
+            if (run_mode is None or session.session_id is None
+                    or recall_start.is_fork(env)):
                 continue
-            harness = session.harness
-            if harness == "codex":
-                why = recall_start.CODEX
-            elif harness != "claude" or "fork" not in session.capabilities:
-                why = recall_start.NO_FORK
-            else:
-                why = None
+            _route, why = recall_start.route(session.harness, session.session_id, env)
             out.append((session.session_id, run_mode, why))
     return out
 
 
 def _never_ran(lines: list[dict], *, now: float) -> str | None:
-    """The recalls whose child never ran: lines lost with reason `spawn` in the last day
-    (the child could not be started), and records `starting` or `hurried` with no fork
-    and no line naming a child past `records.STARTING_GRACE_S` (the child ended before
-    it wrote its line, or found no identity of its own to write), which the recall
-    guards no longer wait on. None when there are none."""
-    from . import recall_guard, recall_start, recalls, records
+    """The recalls whose child never ran or whose fork's id never came: lines lost with
+    reason `spawn` in the last day (the child could not be started); records `starting`
+    or `hurried` with no fork, on any route, each with its state and age: those that
+    name no holder past `records.STARTING_GRACE_S` (an old record whose child ended
+    before it wrote its line or found no identity of its own, or one whose holder's
+    identity could not be read), and those whose holder is gone with no log line naming
+    a child (it ended before the child wrote one); and, on the subagent route, whose
+    fork the recall guards no longer wait on, those whose holder still runs past its
+    wait (`recall_guard.holder_wait_s`). None when there are none."""
+    from . import recall_guard, recall_holder, recall_start, recalls, records
 
     said = []
     spawn = [line for line in lines if line.get("state") == recalls.LOST
@@ -508,18 +520,83 @@ def _never_ran(lines: list[dict], *, now: float) -> str | None:
                     f"not start ({_shown([str(x.get('recall')) for x in spawn[::-1]])}): "
                     f"{spawn[-1].get('error') or 'no error recorded'}")
     named = {line.get("recall") for line in lines if recall_guard.line_child(line)}
-    silent = [record for session_id in records.session_ids()
-              for record in records.session_records(session_id)
-              if record.get("state") in (records.STARTING, records.HURRIED)
-              and not record.get("fork") and record.get("recall") not in named
-              and now - float(record.get("at") or now) >= records.STARTING_GRACE_S]
-    if silent:
-        ages = [f"{r.get('recall')} ({r.get('state')}, "
-                f"{_age(now - float(r.get('at') or now))} old)" for r in silent[::-1]]
-        said.append(f"{_plural(len(silent), 'recall')} with no log line naming its child "
-                    f"(gone before it wrote one, or with no identity to write): "
-                    f"{_shown(ages)}")
+    boot = recall_holder.boot_now()
+    silent, past = [], []
+    for session_id in records.session_ids():
+        for record in records.session_records(session_id):
+            _waits, why = recall_guard.waiting(session_id, record, now=now, boot=boot)
+            age = recall_holder.age(record, now=now, boot=boot)
+            if why == recall_guard.PAST_WAIT:
+                if record.get("route") in (None, recall_start.SUBAGENT):
+                    past.append((age, record))
+            elif why == recall_guard.NO_HOLDER or (
+                    why == recall_guard.HOLDER_GONE and record.get("recall") not in named):
+                silent.append((age, record))
+    for found, text in ((silent, "with no log line naming its child (gone before it "
+                                 "wrote one, or with no identity to write)"),
+                        (past, "whose holder still runs past its wait for the fork's id, "
+                               "so the recall guards take it as no fork")):
+        if found:
+            found.sort(key=lambda pair: pair[0])
+            ages = [f"{r.get('recall')} ({r.get('state')}, {_age(age)} old)"
+                    for age, r in found]
+            said.append(f"{_plural(len(found), 'recall')} {text}: {_shown(ages)}")
     return "; ".join(said) or None
+
+
+def running_slots() -> tuple[dict[str, str | None] | None, str | None]:
+    """The launcher's running launches as `{session id: slot}`, read through its
+    interface 3, and None with the reason when the launcher can't say."""
+    from . import links
+
+    link = links.launcher_forks()
+    if not link.ready:
+        return None, link.reason or "the launcher can't be asked"
+    try:
+        launches = link.api.running(live_only=True)
+    except Exception as exc:  # noqa: BLE001 - a launch log that can't be read says nothing
+        return None, f"the launcher's launch log can't be read ({exc})"
+    return {str(x.session_id): x.slot for x in launches if x.session_id}, None
+
+
+def _left_forks(lines: list[dict], *, now: float) -> str | None:
+    """The slot forks memory did not exit: each slot line with a fork whose `fork_exit`
+    is anything but `exited` (held past the exit's wait, `not-exited`, `unknown`, a
+    refusal), or that has none while its owner is gone and nothing is left for a taker
+    (`recall_take.needs_taking`), as when the child died between its last settle and its
+    exit. Each is named with its recall, session, slot, how its exit came out and its
+    age since its line was last written. A fork the launcher no longer runs is left
+    out; where the launcher can't say, every such fork is listed with no slot. memory
+    ends none of them. None when there are none."""
+    from . import recall_route, recall_start, recall_take
+
+    def left(line: dict) -> bool:
+        if line.get("route") != recall_start.SLOT or not line.get("fork"):
+            return False
+        outcome = line.get("fork_exit")
+        if outcome:
+            return outcome != recall_route.EXITED
+        return recall_take.owner_gone(line) and not recall_take.needs_taking(line)
+
+    found = [line for line in lines if left(line)]
+    if not found:
+        return None
+    slots, why = running_slots()
+    if slots is not None:
+        found = [line for line in found if str(line.get("fork")) in slots]
+        if not found:
+            return None
+    named = []
+    for line in found[::-1]:
+        fork = str(line.get("fork"))
+        where = f", slot {slots[fork]}" if slots is not None and slots[fork] else ""
+        how = line.get("fork_exit") or "owner gone before its exit"
+        age = _age(now - float(line.get("updated") or line.get("at") or now))
+        named.append(f"{line.get('recall')} (session {fork}{where}, {how}, {age} old)")
+    unsure = f" (the launcher can't say which are still running: {why})" if why else ""
+    return (f"{_plural(len(found), 'slot fork')} memory did not exit, holding its "
+            f"slot{unsure}: {_shown(named)}; memory leaves it running, and "
+            f"{EXIT_SESSION} ends it once it is quiet")
 
 
 def _config_losses(lines: list[dict]) -> list[dict]:
@@ -554,8 +631,8 @@ def _subconscious(*, config_in_error: bool, now: float | None = None) -> Row:
     on = [sid for sid, _mode, why in live if why is None]
     off = [f"{sid} ({why})" for sid, _mode, why in live if why is not None]
     if on:
-        parts.append(f"on in {_plural(len(on), 'live session')}, on Claude Code's "
-                     "subagent route; a recall fork's permission asks are refused")
+        parts.append(f"on in {_plural(len(on), 'live session')}; a recall fork's "
+                     "permission asks are refused")
     if off:
         warn = True
         parts.append(f"off for want of a route in {_shown(off)}")
@@ -571,6 +648,16 @@ def _subconscious(*, config_in_error: bool, now: float | None = None) -> Row:
     untaken = [line for line in lines
                if now - float(line.get("updated") or line.get("at") or 0) >= UNTAKEN_GRACE_S
                and recall_take.takeable(line)]
+    at_limit = [line for line in untaken if line.get("past_bound") and line.get("kept")]
+    untaken = [line for line in untaken if line not in at_limit]
+    if at_limit:
+        warn = True
+        named = [f"{line.get('recall')} ({line.get('state')}, fork {line.get('fork')}, "
+                 f"{_age(now - float(line.get('updated') or line.get('at') or now))} old)"
+                 for line in at_limit[::-1]]
+        parts.append(f"{_plural(len(at_limit), 'recall line')} left at the late wait's "
+                     f"last limit, its fork's round still open: {_shown(named)}; the "
+                     "first taker after that round ends settles it and ends the fork")
     if untaken:
         warn = True
         named = [f"{line.get('recall')} ({line.get('state')}, "
@@ -578,6 +665,20 @@ def _subconscious(*, config_in_error: bool, now: float | None = None) -> Row:
                  for line in untaken[::-1]]
         parts.append(f"{_plural(len(untaken), 'recall line')} not yet taken, child gone: "
                      f"{_shown(named)}; the next recall child or session end takes it")
+    sending = [line for line in lines if line.get("state") == recalls.SENDING]
+    if sending:
+        warn = True
+        from .recall_cli import sending_text
+
+        named = [f"{line.get('recall')} ({sending_text(line, now=now)})"
+                 for line in sending[::-1]]
+        parts.append(f"{_plural(len(sending), 'recall')} still sending, waiting for comms "
+                     f"to take its answer: {_shown(named)}; one comms will never take "
+                     f"ends with {SUBCONSCIOUS_DISCARD}")
+    left = _left_forks(lines, now=now)
+    if left:
+        warn = True
+        parts.append(left)
     never_ran = _never_ran(lines, now=now)
     if never_ran:
         warn = True
@@ -588,4 +689,4 @@ def _subconscious(*, config_in_error: bool, now: float | None = None) -> Row:
     return Row(MODULE, "subconscious", "warn" if warn else "ok", "; ".join(parts), fix)
 
 
-__all__ = ["rows", "live_subconscious"]
+__all__ = ["rows", "live_subconscious", "running_slots"]

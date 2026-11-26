@@ -248,6 +248,7 @@ def test_the_links_row_says_what_memory_does_without_each(monkeypatch):
     assert "comms not linked" in detail and "no agent list" in detail
     assert "launcher not linked" in detail and "may be listed" in detail
     assert "notes not linked" in detail and "no notes" in detail
+    assert "slots" not in detail
     monkeypatch.setattr(links, "comms", lambda: links.Link(links.READY, object()))
     monkeypatch.setattr(links, "launcher",
                         lambda: links.Link(links.FAILING, reason="it broke"))
@@ -353,7 +354,7 @@ def test_the_subconscious_row_names_a_live_session_with_no_route_while_it_holds(
         ("s-on", "on-demand", None)])
     row = by_name()["subconscious"]
     assert row.state == "warn" and row.fix == "moxi memory subconscious list"
-    assert "on in 1 live session, on Claude Code's subagent route" in row.detail
+    assert "on in 1 live session; a recall fork's" in row.detail
     assert "permission asks are refused" in row.detail
     assert "off for want of a route in s-off (no turns fork in this session)" in row.detail
     assert "s-on" not in row.detail
@@ -401,6 +402,21 @@ def test_only_the_recalls_stopped_since_the_config_last_read_cleanly_are_listed(
     assert ("1 recall stopped while memory's config is in error (r-now): "
             "limit_s is 0: give 1 to 3600") in row.detail
     assert "r-fixed" not in row.detail and "an error fixed since" not in row.detail
+
+
+def test_a_line_still_sending_is_listed_with_its_wait_and_last_refusal():
+    import time
+
+    from moxi_memory import recall_take, recalls
+
+    now = time.time()
+    recall_line("r-send", updated=now, state=recalls.SENDING, child=recall_take.me(),
+                sending_at=now - 120, send_tries=4, send_reason="unavailable: daemon down")
+    row = by_name()["subconscious"]
+    assert row.state == "warn"
+    assert ("1 recall still sending, waiting for comms to take its answer: r-send "
+            "(sending for 120s, 4 tries refused, the last: unavailable: daemon down)"
+            ) in row.detail
 
 
 def test_a_line_whose_child_is_gone_is_listed_with_its_age_until_taken():
@@ -456,6 +472,34 @@ def test_recalls_whose_child_never_ran_are_listed():
         assert other not in row.detail
 
 
+def test_a_comms_route_record_whose_child_died_before_its_line_is_listed():
+    import time
+
+    from moxi_memory import recall_guard, recall_start, recall_take, recalls, records
+
+    now = time.time()
+    live = recall_take.me()
+    with recalls.session_lock(SID):
+        for recall_id, route, holder, age in (
+                ("r-slot-gone", recall_start.SLOT, DEAD, 30),
+                ("r-host-nameless", recall_start.HOST_FORK, None, 600),
+                ("r-slot-live", recall_start.SLOT, live, 600)):
+            record = {"recall": recall_id, "session": SID, "state": "starting",
+                      "route": route, "settings": recall_start.default_settings()}
+            if holder is not None:
+                record["holder"] = holder
+            records.write(record, now=now - age)
+    for recall_id in ("r-slot-gone", "r-host-nameless", "r-slot-live"):
+        record = records.read(SID, recall_id)
+        assert recall_guard.awaits_fork(SID, record) is False
+    row = by_name()["subconscious"]
+    assert row.state == "warn"
+    assert ("2 recalls with no log line naming its child (gone before it wrote one, or "
+            "with no identity to write): r-slot-gone (starting, 30s old), r-host-nameless "
+            "(starting, 10m old)") in row.detail
+    assert "r-slot-live" not in row.detail
+
+
 class FakeSession:
     def __init__(self, sid, harness, stamps, capabilities=("fork",)):
         self.session_id, self.harness = sid, harness
@@ -474,14 +518,51 @@ class FakeSession:
 def test_live_sessions_are_checked_as_a_recalls_own_try_checks_them(monkeypatch):
     import moxi_turns as client
 
+    from moxi_memory import recall_start
+
     on = {"MOXI_MEMORY_SUBCONSCIOUS": "automatic"}
+    slot = {**on, "MOXI_MEMORY_SUBCONSCIOUS_ROUTE": "slot"}
+    monkeypatch.setattr(recall_start, "offers_fork", lambda sid: sid != "c-none")
+    monkeypatch.setattr(recall_start, "slot_why", lambda sid, env=None: (
+        None if sid == "x-slot" else recall_start.NO_SLOTS))
     monkeypatch.setattr(client, "sessions", lambda: [
         FakeSession("c-fork", "claude", on),
         FakeSession("c-none", "claude", on, capabilities=()),
+        FakeSession("c-slot", "claude", slot),
         FakeSession("x-codex", "codex", {"MOXI_MEMORY_SUBCONSCIOUS": "on-demand"}),
+        FakeSession("x-slot", "codex", slot),
+        FakeSession("c-forked", "claude", {**on, "MOXI_MEMORY_SUBCONSCIOUS_FORK": "r-1"}),
         FakeSession("c-off", "claude", {}),
         FakeSession("c-bad", "claude", {"MOXI_MEMORY_SUBCONSCIOUS": "sometimes"})])
     assert LIVE_SUBCONSCIOUS() == [
         ("c-fork", "automatic", None),
-        ("c-none", "automatic", "no turns fork in this session"),
-        ("x-codex", "on-demand", "Codex: no recall route runs on Codex")]
+        ("c-none", "automatic", "no turns fork in this session; the slot route: no slots "
+                                "here"),
+        ("c-slot", "automatic", "no slots here"),
+        ("x-codex", "on-demand", "Codex: off unless the launch picks the slot route"),
+        ("x-slot", "automatic", None)]
+
+
+def test_a_route_that_answers_by_comms_is_off_while_its_recall_sender_cant_send(
+        monkeypatch):
+    import moxi_turns as client
+
+    from moxi_memory import recall_start
+
+    on = {"MOXI_MEMORY_SUBCONSCIOUS": "automatic"}
+    monkeypatch.setattr(recall_start, "BY_COMMS", (recall_start.SUBAGENT,))
+    whys = {"c-free": None, "c-held": "recall sender in conflict: held-subconscious",
+            "c-nameless": "no comms name for this session"}
+    monkeypatch.setattr(recall_start, "comms_why", lambda sid, env=None: whys[sid])
+    monkeypatch.setattr(recall_start, "offers_fork", lambda sid: True)
+    monkeypatch.setattr(client, "sessions", lambda: [
+        FakeSession(sid, "claude", on) for sid in whys])
+    live = LIVE_SUBCONSCIOUS()
+    assert live == [("c-free", "automatic", None),
+                    ("c-held", "automatic", "recall sender in conflict: held-subconscious"),
+                    ("c-nameless", "automatic", "no comms name for this session")]
+    monkeypatch.setattr(doctor, "live_subconscious", lambda: live)
+    row = by_name()["subconscious"]
+    assert row.state == "warn"
+    assert ("off for want of a route in c-held (recall sender in conflict: "
+            "held-subconscious), c-nameless (no comms name for this session)") in row.detail

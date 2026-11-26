@@ -2,7 +2,10 @@
 resolved over the flag catalog.
 
 The file is `CONFIG/presets.toml` (`moxi.paths.Layout("launcher").config_dir()`), read in
-place by `moxi.config` and edited by the user. Moxi ships no presets.
+place by `moxi.config` and edited by the user. Moxi ships no presets. Its `[defaults]` is
+also written one key at a time, keeping every other byte, by `moxi config set launcher
+defaults.<row>` and `unset`, which the Settings page runs: the table hook in `defaults.py`
+checks each change by the rules here. Nothing else writes the file.
 
     [defaults]                 # the user's per-row defaults; posture rows live here
     permission_mode = "bypassPermissions"
@@ -368,12 +371,14 @@ def check(file: str | os.PathLike | None = None, *, env: Mapping[str, str] | Non
     be known to projects; an `instructions_file` must be readable; an `agent` role must be
     found among the harness's role files; a preset that sets `recycle_at_limit =
     relaunch` must not launch in a scratch folder. A `[defaults]` relaunch is not
-    flagged: a scratch launch holds `off` in its place, as `resolve` does. A
-    `moxi.config.ConfigError` (the file is not TOML, or holds a table it should not) is
-    raised, not returned."""
+    flagged on a scratch launch: that launch holds `off` in its place, as `resolve` does.
+    `[defaults]` is checked as `defaults_problems` checks it, so what a launch with no
+    preset meets from it is warned of there. A `moxi.config.ConfigError` (the file is not
+    TOML, or holds a table it should not) is raised, not returned."""
     avail = _avail(available)
     found = presets if presets is not None else read(file, env=env)
     defaults, problems = _check_defaults(found.defaults, avail)
+    problems += _bare_launch(defaults, avail)
     # An empty harness is unset, as `resolve` reads it: the shipped default.
     base_harness = defaults.get("harness") or catalog.launcher()["harness"].default
     for preset in found.all():
@@ -410,6 +415,56 @@ def _value_rules(preset: Preset, values: Mapping[str, object],
     except Refused as exc:
         return [Problem.of(preset.where, exc.row, exc)]
     return []
+
+
+def defaults_problems(table: Mapping[str, object], *,
+                      available: Callable[[str], bool] | None = None) -> list[Problem]:
+    """What `[defaults]` (`table`) meets, each at `where = "defaults"`: each key's own
+    check, as a launch reads the table (`layered`), then the rule between its place rows;
+    then, as warnings, what a launch of each harness with no preset and nothing typed meets
+    from the values that pass (`_bare_launch`)."""
+    avail = _avail(available)
+    values, problems = _check_defaults(table, avail)
+    return problems + _bare_launch(values, avail)
+
+
+def _bare_launch(defaults: Mapping[str, object], avail) -> list[Problem]:
+    """Warnings at `defaults` of what a launch of each harness with no preset and nothing
+    typed meets from `defaults` (checked values): the rules between rows, as
+    `_value_rules` lays them, each keyed by the row its rule names; and, for a relaunch
+    those rules let through, the first item of the self-relaunch test that needs no
+    launch folder (`selfrecycle.missing`), keyed `recycle_at_limit`. The handoff folder's
+    item needs the launch's folder, so the launch tells it. One met on every harness says
+    "a launch with no preset"; one met on some names the harness."""
+    from . import selfrecycle
+
+    met: dict[tuple, list[str]] = {}
+    for harness in catalog.HARNESSES:
+        bare = Preset("project", "", MappingProxyType({"harness": harness}))
+        refused = _value_rules(bare, {}, defaults, harness, avail)
+        if refused:
+            found = refused[0]
+            met.setdefault((found.key, True, found.problem, found.hint, found.code),
+                           []).append(harness)
+            continue
+        if defaults.get(RECYCLE_AT_LIMIT) != "relaunch" or defaults.get("scratch"):
+            continue
+        target = str(defaults.get("target") or catalog.launcher()["target"].default)
+        missing = selfrecycle.missing(
+            harness=harness, target=target, in_slot=target == "slot", cwd=None,
+            values=defaults, source=DEFAULTS, unplaced=True,
+            slots_here=lambda: avail(slots.MODULE) and catalog.slots_here())
+        if missing is not None:
+            met.setdefault((RECYCLE_AT_LIMIT, False, missing.problem, missing.hint,
+                            "relaunch-" + missing.item), []).append(harness)
+    out = []
+    for (key, is_refused, problem, hint, code), harnesses in met.items():
+        who = ("a launch with no preset" if len(harnesses) == len(catalog.HARNESSES)
+               else f"a {harnesses[0].capitalize()} launch with no preset")
+        words = (f"{who} is refused: {problem}" if is_refused else
+                 f"recycle_at_limit relaunch does nothing on {who}: it {problem}")
+        out.append(Problem("defaults", key, words, hint, code, WARNING))
+    return out
 
 
 def _check_defaults(table: Mapping[str, object], avail) -> tuple[dict, list[Problem]]:
@@ -1589,7 +1644,7 @@ __all__ = [
     "UnknownPreset", "UnknownProject", "WARNING", "check", "check_resume_brief", "comms_api",
     "comms_bind_wait",
     "comms_codex", "comms_codex_resume", "comms_ends_on_bind_timeout", "comms_has_policy",
-    "comms_headless", "harness_of",
+    "comms_headless", "defaults_problems", "harness_of",
     "layered", "mode_of", "needed", "off_posture_rows", "path", "project_agents",
     "projects_api", "read",
     "resolve", "roles", "schema",

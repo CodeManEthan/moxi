@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import subprocess
 import sys
 import sysconfig
@@ -251,14 +252,38 @@ def installs(monkeypatch) -> set:
     installed too, and comms' reads every module's declared send-only names through the
     scan. The workspace installs every module together, so it would find each one's
     `RESERVED_NAMES` (the launcher's `console`, say) and say so in the test's output.
-    Scoped here, the scan finds only what the test installed."""
+    Scoped here, the scan finds only what the test installed. comms also reads the words
+    modules declare for scoped senders from their entry-point group, and warns of one
+    whose distribution the scan doesn't find, so that group is scoped to the same
+    modules' distributions."""
+    import importlib.metadata
+
     import moxi.modules
 
     seen = {"repo"}
     scan = moxi.modules.scan
     monkeypatch.setattr(moxi.modules, "scan",
                         lambda: [found for found in scan() if found.name in seen])
+    entry_points = importlib.metadata.entry_points
+
+    def scoped_entry_points(**params):
+        found = entry_points(**params)
+        if params.get("group") != SCOPED_SENDERS_GROUP:
+            return found
+        dists = {_dist_key(f.distribution) for f in scan() if f.name in seen}
+        return importlib.metadata.EntryPoints(
+            ep for ep in found if ep.dist is not None and _dist_key(ep.dist.name) in dists)
+
+    monkeypatch.setattr(importlib.metadata, "entry_points", scoped_entry_points)
     return seen
+
+
+#: The entry-point group comms reads the words modules declare for scoped senders from.
+SCOPED_SENDERS_GROUP = "moxi.comms.scoped_senders"
+
+
+def _dist_key(name) -> str:
+    return re.sub(r"[-_.]+", "-", str(name or "")).lower()
 
 
 @pytest.fixture(scope="session")
