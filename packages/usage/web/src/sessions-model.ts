@@ -1,11 +1,13 @@
 // Sessions as the page names and reads them, with no DOM: a session's name, the paths
 // of `/api/sessions` for the closed row and the Sessions table, a list read a page at a
-// time, and the share a row takes of a whole. A session is named from its name, folder and start, never
-// from its id, the row's `cwd` or its first request in the range.
+// time, and the share a row takes of a whole. A session is named from its name, the
+// running launch that holds it, its folder and start, never from its id, the row's `cwd`
+// or its first request in the range.
 
 import { LOCAL, startWord } from "./days.ts";
 import type { Clock } from "./days.ts";
 import type { Report, SessionRef, SessionRow, Sums } from "./feed.ts";
+import type { Launch } from "./launched-model.ts";
 import { stateKeys } from "./filter-model.ts";
 import type { PageState } from "./filter-model.ts";
 import { harnessName, percentWords } from "./limits-model.ts";
@@ -30,7 +32,7 @@ export function lastSegment(folder: string): string {
 /** The first line's two words for a session: its name, and the dim `where` after it. */
 export interface SessionName {
   name: string;
-  /** The folder's last segment beside a typed name; null otherwise. */
+  /** The folder's last segment beside a typed name or a launch's; null otherwise. */
   where: string | null;
 }
 
@@ -43,27 +45,35 @@ const typedOf = (ref: Naming): string =>
 
 /**
  * A session's name, by the Sessions page's rule. With a typed name: the name, and the
- * folder's last segment as `where`. Without one: `<folder's last segment> · started
- * <day> <time>`; with no start, the folder's last segment alone; with no folder,
- * `<harness> session` in its place. A session whose record is gone is named the same
- * way from the folder and first request the index holds for it. The start is worded as
- * the Sessions page words it, against `today`: `today 11:00`, `yesterday 22:25`, else
- * the date, `Nov 3 08:52`.
+ * folder's last segment as `where`. Without one, for a session a running launch holds
+ * (`launch`): the launch's name as launcher gives it, and the folder as `where`. Else
+ * `<folder's last segment> · started <day> <time>`; with no start, the folder's last
+ * segment alone; with no folder, `<harness> session` in its place. A session whose
+ * record is gone is named the same way from the folder and first request the index
+ * holds for it. The start is worded as the Sessions page words it, against `today`:
+ * `today 11:00`, `yesterday 22:25`, else the date, `Nov 3 08:52`.
  */
-export function sessionName(ref: Naming, today: string | null, clock: Clock = LOCAL): SessionName {
+export function sessionName(ref: Naming, today: string | null, clock: Clock = LOCAL,
+                            launch: Launch | null = null): SessionName {
   const folder = folderOf(ref);
   const typed = typedOf(ref);
   if (typed !== "") return { name: typed, where: folder };
+  if (launch !== null) return { name: launch.name, where: folder };
   const what = folder ?? `${sessionHarness(ref.harness)} session`;
   if (typeof ref.started !== "number" || !Number.isFinite(ref.started)) return { name: what, where: null };
   return { name: `${what} · started ${startWord(ref.started, today, clock)}`, where: null };
 }
 
 /** A row's `where`: its project when projects is installed and the row has one, else
- * the folder's last segment under a typed name, else none. */
-export function sessionWhere(row: Naming & Pick<SessionRow, "project">, projects: boolean): string | null {
-  if (projects && typeof row.project === "string" && row.project !== "") return row.project;
-  return typedOf(row) !== "" ? folderOf(row) : null;
+ * the folder's last segment under a typed name or a launch's, else none; for a session
+ * a running launch holds, where the launch runs before it, `slot 4 · atlas-api` or
+ * `terminal` alone. */
+export function sessionWhere(row: Naming & Pick<SessionRow, "project">, projects: boolean,
+                             launch: Launch | null = null): string | null {
+  const place = projects && typeof row.project === "string" && row.project !== "" ? row.project
+    : typedOf(row) !== "" || launch !== null ? folderOf(row) : null;
+  if (launch === null) return place;
+  return place === null ? launch.runs : `${launch.runs} · ${place}`;
 }
 
 // --- the reads of /api/sessions ---------------------------------------------------------------
