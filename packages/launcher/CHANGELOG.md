@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- Opening the launch log only to read it (`store.connect(create=False)`) no longer
+  creates its tables in an empty file: a file that holds no launch log yet raises
+  `StoreError`, as a missing one does, and is left as it was. Every reader treats that as
+  no launch log. A log at an older schema version is still brought up to date.
+- `moxi config set` and the launch defaults writer no longer crash on a valid
+  `presets.toml` whose `[defaults.<name>]` table comes before `[defaults]`: the value is
+  written under `[defaults]`, and the file keeps its order and comments.
 - A handoff waits until its seat takes it. A seat's start no longer marks the handoff it
   points to as picked, so the pointer comes back at every start until the handoff is
   taken, given to a launch, or a newer one of the key is. The pointer now ends "then run:
