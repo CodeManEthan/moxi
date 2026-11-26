@@ -198,6 +198,24 @@ def test_with_launchers_read_failing_nothing_of_launchers_shows(page):
     expect(panel.locator("[data-part=lines]")).not_to_contain_text(re.compile("aunch"))
 
 
+def test_when_a_later_read_of_launchers_fails_the_launch_it_named_no_longer_shows(page):
+    panel = open_page(page, f"sessions/claude/{SLOT}")
+    row = placed_of(panel, SLOT)
+    expect(row).to_have_attribute("name", "builder-1")
+    expect(row).to_have_attribute("where", "slot 4 · atlas-api")
+    expect(session_line(panel)).to_have_text(re.compile(rf"^claude · {MODEL} · high · started {DAY} {TIME}$"))
+    page.route("**/m/launcher/api/running", lambda route: route.fulfill(status=500, json={"error": "down"}))
+    with page.expect_response(lambda answer: "/m/launcher/api/running" in answer.url and answer.status == 500):
+        page.evaluate("document.dispatchEvent(new Event('visibilitychange'))")
+    # The last answer is not kept in the failed read's place.
+    expect(row).to_have_attribute("name", by_hand("atlas-api"))
+    expect(row).to_have_attribute("where", "")
+    expect(session_line(panel)).to_have_text(re.compile(rf"^claude · {MODEL} · started {DAY} {TIME}$"))
+    expect(sessions_of(panel).locator("[data-part=closed]")).to_have_text(
+        re.compile(rf"^most to atlas-api · started {DAY} {TIME}, {MONEY}$"))
+    expect(panel.locator("[data-part=lines]")).not_to_contain_text(re.compile("aunch"))
+
+
 def test_without_launcher_nothing_of_launchers_shows_and_nothing_is_asked(small, ui_contexts):
     page = ui_contexts(small).pages[0]
     asked = []
