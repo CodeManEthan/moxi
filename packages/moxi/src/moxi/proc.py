@@ -37,6 +37,8 @@ from . import _mark
 
 _WINDOWS = sys.platform == "win32"
 
+#: Windows' `CREATE_SUSPENDED`: the child's first thread waits until it is resumed.
+_CREATE_SUSPENDED = 0x00000004
 #: The variable that names a child's lifeline: `0` for stdin (`lifeline="stdin"`), else
 #: the read end of the pipe `lifeline="fd"` passes, a file descriptor on POSIX and a
 #: handle on Windows. Only this module reads it; a child asks `lifeline_kind()`.
@@ -85,8 +87,9 @@ def run(argv: Argv, *, timeout_s: float, stdin_data: bytes | str | None = None,
     for any member still running, whether or not the first child has ended by then.
     `first_signal` names another signal to send first (`"SIGINT"`, which test runners
     stop cleanly on), and `grace_s` another wait than `KILL_GRACE` before the SIGKILL.
-    Windows: the child starts in a new process group and is put in a Job Object as soon
-    as it starts; on timeout the job is terminated, which ends the whole tree.
+    Windows: the child starts suspended in a new process group, is put in a Job Object
+    and only then runs, so everything it starts is in the job too; on timeout the job is
+    terminated, which ends the whole tree.
 
     With `end_tree`, whatever the child left running is ended once it exits too, so
     nothing it started outlives the run: POSIX: its process group gets SIGKILL; Windows:
@@ -98,7 +101,7 @@ def run(argv: Argv, *, timeout_s: float, stdin_data: bytes | str | None = None,
     pipe = subprocess.PIPE if capture else None
     options: dict = {}
     if _WINDOWS:
-        options["creationflags"] = subprocess.CREATE_NEW_PROCESS_GROUP
+        options["creationflags"] = subprocess.CREATE_NEW_PROCESS_GROUP | _CREATE_SUSPENDED
     else:
         options["start_new_session"] = True
     out_fd = None if output is None else _output_file(output)
@@ -117,7 +120,7 @@ def run(argv: Argv, *, timeout_s: float, stdin_data: bytes | str | None = None,
             from . import _win
 
             job = _win.Job()
-            job.assign(proc.pid)
+            _join_job(proc, job)
         try:
             out, err = proc.communicate(stdin_data, timeout=timeout_s)
         except subprocess.TimeoutExpired:
@@ -134,6 +137,29 @@ def run(argv: Argv, *, timeout_s: float, stdin_data: bytes | str | None = None,
         if job is not None:
             job.close()
     return subprocess.CompletedProcess(proc.args, proc.returncode, out, err)
+
+
+def _join_job(proc: subprocess.Popen, job) -> None:
+    """Put `proc`, started suspended (`_CREATE_SUSPENDED`), in `job`, then let it run.
+
+    A child that ran before it was in the job could start a process of its own outside
+    it (a launcher such as Git for Windows' `bash.exe` starts its real program at once),
+    and terminating the job would leave that one running. A failure to put it there is
+    raised with `proc` still suspended, for the caller to kill."""
+    job.assign(proc.pid)
+    _resume(proc)
+
+
+def _resume(proc: subprocess.Popen) -> None:
+    """Let `proc`, started suspended (`_CREATE_SUSPENDED`), run. One that can't be resumed
+    would never run, so it is killed and the failure raised."""
+    import psutil
+
+    try:
+        psutil.Process(proc.pid).resume()
+    except BaseException:
+        proc.kill()
+        raise
 
 
 def _output_file(output: str | os.PathLike) -> int:
@@ -267,8 +293,9 @@ def spawn(argv: Argv, *, lifeline: str | None = None,
       and start time; when the lifeline closes it sends SIGTERM to the child and that
       set and, two seconds later, SIGKILL to what is left (see `moxi._watch`). `spawn`
       returns once the watchdog says it is watching; one that fails to start has the
-      child and its descendants killed and `OSError` raised. Windows: the child is put
-      in a Job Object that kills it when this process closes it or dies.
+      child and its descendants killed and `OSError` raised. Windows: the child starts
+      suspended and runs once it is in a Job Object that kills it, and all it starts,
+      when this process closes it or dies.
 
     The returned `Popen` carries the lifeline as `lifeline`, an object with `close()`:
     closing it tells the child to stop, as this process's death would. It is closed when
@@ -366,10 +393,11 @@ def _spawn_watched(argv: Argv, *, env, cwd, stdout, stderr) -> subprocess.Popen:
         from . import _win
 
         proc = subprocess.Popen(_argv(argv), stdout=stdout, stderr=stderr,
-                                env=_lifeline_env(env, None), cwd=cwd)
+                                env=_lifeline_env(env, None), cwd=cwd,
+                                creationflags=_CREATE_SUSPENDED)
         job = _win.Job(kill_on_close=True)
         try:
-            job.assign(proc.pid)
+            _join_job(proc, job)
         except BaseException:
             job.close()
             proc.kill()

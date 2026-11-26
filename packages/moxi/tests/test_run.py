@@ -501,6 +501,36 @@ def test_ending_the_gate_ends_the_job_unless_a_child_broke_away(demo, tmp_path, 
             os.kill(grandchild.pid, signal.SIGTERM)
 
 
+@pytest.mark.skipif(sys.platform != "win32", reason="Job Objects are Windows's")
+def test_the_command_is_in_its_job_before_it_runs(demo, tmp_path, monkeypatch):
+    """Putting a process in its job takes a second here, longer than the command takes to
+    start a child: a command that ran before it was in its job would have started that
+    child outside it, and closing the job at the command's exit would leave it running."""
+    from moxi import _win
+    from moxi import proc as mproc
+
+    assign = _win.Job.assign
+
+    def slow(self, pid):
+        time.sleep(1.0)
+        assign(self, pid)
+    monkeypatch.setattr(_win.Job, "assign", slow)
+    pidfile = tmp_path / "grandchild"
+    assert run.main(["--record", "demo/daemon", "--stop", "group", "--", *py(f"""
+        import pathlib, subprocess, sys
+        child = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(60)"],
+                                 stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                                 stderr=subprocess.DEVNULL)
+        pathlib.Path({str(pidfile)!r}).write_text(str(child.pid))
+        """)]) == 0
+    grandchild = mproc.identity(int(pidfile.read_text()))
+    try:
+        _wait_for(lambda: grandchild is None or not mproc.alive(grandchild))
+    finally:
+        if grandchild is not None and mproc.alive(grandchild):
+            os.kill(grandchild.pid, signal.SIGTERM)
+
+
 # -- the wrap forms ----------------------------------------------------------------------
 
 COND = ["--if", "demo.rows.backup", "--record", "demo/backup", "--condition"]

@@ -18178,3 +18178,4 @@ moxi	packages/moxi/tests/test_proc.py	assert (msvcrt.opened, unread) == ([5, 5],
 usage	packages/usage/tests/test_bench.py	home.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
 moxi	packages/moxi/tests/test_install.py	strict=True):	keep	strict	strict
 ui	packages/ui/tests/test_push.py	return any(row["module"] == "pspage" and row["state"] == "running"	keep	any	any
+moxi	packages/moxi/tests/test_proc.py	child.wait(timeout=30)	keep	timeout	timeout

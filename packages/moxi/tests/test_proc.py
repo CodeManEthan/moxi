@@ -268,6 +268,59 @@ def test_a_run_ends_what_its_child_left_running_only_when_asked(tmp_path, end_tr
             os.kill(grandchild, signal.SIGTERM)
 
 
+ON_WINDOWS = pytest.mark.skipif(sys.platform != "win32", reason="Job Objects are Windows's")
+
+
+@pytest.fixture
+def slow_job(monkeypatch):
+    """Putting a process in a Job Object takes a second, longer than a child takes to
+    start a process of its own: a child that ran before it was in its job would have
+    started that one outside it."""
+    from moxi import _win
+
+    assign = _win.Job.assign
+
+    def slow(self, pid):
+        time.sleep(1.0)
+        assign(self, pid)
+    monkeypatch.setattr(_win.Job, "assign", slow)
+
+
+@ON_WINDOWS
+def test_a_run_child_is_in_its_job_before_it_runs(tmp_path, slow_job):
+    """The grandchild holds the child's stdout; one outside the job would keep it open
+    for its 60 s after the job was terminated."""
+    start = time.monotonic()
+    with pytest.raises(subprocess.TimeoutExpired) as caught:
+        proc.run([PY, script(tmp_path, "tree.py", TREE)], timeout_s=5)
+    took = time.monotonic() - start
+    word, pid = caught.value.output.split()
+    grandchild = proc.identity(int(pid))
+    try:
+        assert word == b"ready"
+        assert grandchild is None or gone(grandchild), "the grandchild outlived the run"
+        assert took < 30
+    finally:
+        if grandchild is not None and proc.alive(grandchild):
+            os.kill(grandchild.pid, signal.SIGTERM)
+
+
+@ON_WINDOWS
+def test_a_watched_child_is_in_its_job_before_it_runs(tmp_path, slow_job):
+    child = proc.spawn([PY, script(tmp_path, "tree.py", TREE)], lifeline="watch",
+                       stdout=subprocess.PIPE)
+    word, pid = child.stdout.readline().split()
+    grandchild = proc.identity(int(pid))
+    try:
+        child.lifeline.close()
+        child.wait(timeout=30)
+        assert grandchild is None or gone(grandchild), "the grandchild outlived the lifeline"
+    finally:
+        child.stdout.close()
+        if grandchild is not None and proc.alive(grandchild):
+            os.kill(grandchild.pid, signal.SIGTERM)
+
+
 def test_a_tree_that_ends_on_sigterm_does_not_wait_out_the_grace(tmp_path, monkeypatch):
     monkeypatch.setattr(proc, "KILL_GRACE", 5)
     start = time.monotonic()

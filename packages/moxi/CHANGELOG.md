@@ -2,6 +2,11 @@
 
 ## 0.1.11 (unreleased)
 
+- On Windows `proc.run`, a watched `proc.spawn` and `moxi run` start the child suspended
+  and let it run only once it is in its Job Object. It was put there just after it
+  started, so a child that started a process of its own at once (Git for Windows'
+  `bash.exe` starts its real program that way) could leave that one outside the job, and
+  a timeout, a closed lifeline or the gate's end left it running.
 - `moxi.paths.uname()`: `platform.uname()`, read on Windows without a WMI query, and the
   core's host name and its requirement markers read `platform` through it. CPython 3.12
   asks WMI on a thread of its own and gives the query up after a fraction of a second,

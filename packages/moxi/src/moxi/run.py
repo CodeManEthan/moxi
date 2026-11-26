@@ -415,7 +415,9 @@ def _once(args: Args, stopper: _Stopper) -> tuple[int, float]:
     if log is not None:
         options.update(stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
     if _WINDOWS:
-        options["creationflags"] = subprocess.CREATE_NO_WINDOW
+        from .proc import _CREATE_SUSPENDED
+
+        options["creationflags"] = subprocess.CREATE_NO_WINDOW | _CREATE_SUSPENDED
         if log is None:
             options.update(_given_stdio())
     try:
@@ -474,7 +476,18 @@ def _exit_code(returncode: int) -> int:
 def _job(child, stop: str):
     """Put the command in a kill-on-close Job Object (Windows), so ending the gate ends
     it and everything it started; `stop = "process"` lets a detached child break away.
-    A job that can't be made is said on stderr and the command runs without one."""
+    A job that can't be made is said on stderr and the command runs without one. The
+    command starts suspended and runs once this is done, so nothing it starts can start
+    outside the job."""
+    from .proc import _resume
+
+    try:
+        return _put_in_job(child, stop)
+    finally:
+        _resume(child)
+
+
+def _put_in_job(child, stop: str):
     from . import _win
 
     try:
