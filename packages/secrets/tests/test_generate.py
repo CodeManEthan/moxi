@@ -114,7 +114,7 @@ def test_the_sets_hold_the_expected_rules():
     data = gen.build(RULES)
     credentials, broad = data["sets"]["credentials"], data["sets"]["broad"]
     sources = [r["source"] for r in credentials["rules"]]
-    assert (sources.count("gitleaks"), sources.count("local")) == (221, 10)
+    assert (sources.count("gitleaks"), sources.count("local")) == (221, 11)
     assert rule_ids(data, "broad") == ["generic-api-key", "credential-assignment",
                                        "high-entropy-run", "high-entropy-slash-run"]
     assert "generic-api-key" not in rule_ids(data, "credentials")
