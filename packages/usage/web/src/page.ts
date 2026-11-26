@@ -73,6 +73,15 @@
 // Models and Kinds are the page itself and add no entry: opening or closing one, or
 // closing a piece the page closes itself, rewrites the entry it is on. A reload or a
 // new placement opens the piece the address names.
+//
+// `project/<key>`, the address the Projects page links to, opens nothing: it sets the
+// Project filter to that key and keeps the range. The page first asks `/api/projects` over
+// all time whether usage holds anything under the key; once it answers, the filter is set
+// and the address becomes the page's own. A key usage holds nothing under, and any key
+// where projects is not installed (the filter is by folder there), sets the filter to
+// `all` and is an address the page does not have: its line at the foot. A check that
+// fails sets the filter to the key all the same, since the key may be one usage could not
+// say.
 
 import { css, html, LitElement, nothing, svg } from "lit";
 import { Directive, directive, PartType } from "lit/directive.js";
@@ -83,7 +92,7 @@ import { api, gateway, installed, navigate, readLater, subscribe } from "/m/ui/c
 
 import {
   addressPath, addressWrite, addsHistoryEntry, limitAddress, NOTHING_OPEN, parseAddress, sameAddress, sessionAddress,
-  SESSIONS, settled,
+  SESSIONS, settled, UNKNOWN_ADDRESS,
 } from "./address-model.ts";
 import type { Address } from "./address-model.ts";
 import { CHART, chartDraw, chartGroup, TABLE } from "./chart-model.ts";
@@ -662,6 +671,8 @@ export class UsagePage extends LitElement {
     this.#placedRead?.close();
     this.#placedRead = null;
     this.#placedPath = null;
+    this.#projectCheck?.close();
+    this.#projectCheck = null;
     this.#closeWindow();
     this.#closeBelow();
     for (const stop of this.#stops) stop();
@@ -796,6 +807,43 @@ export class UsagePage extends LitElement {
     this.#chartRange = this.#heldChartRange = null;
   }
 
+  /** The read that says whether usage holds anything under the key of a `project/<key>`
+   * address, while it runs. */
+  #projectCheck: Feed<Report<ProjectRow>> | null = null;
+
+  /** What a `project/<key>` address opens while usage is asked about the key: nothing, or
+   * an address the page does not have where the filter is by folder. When the answer
+   * comes, a key usage holds sets the Project filter and the address becomes the page's
+   * own; one it doesn't sets the filter to `all` and is an address the page does not
+   * have. */
+  #takeProject(key: string): Address {
+    const toAll = (): void => {
+      const state = heldState();
+      if (state.projects.length || state.paths.length) holdState({ projects: [], paths: [] });
+    };
+    if (this.#folders()) {
+      queueMicrotask(toAll);
+      return UNKNOWN_ADDRESS;
+    }
+    const check = new Feed<Report<ProjectRow>>(() => api("usage", "api/projects"), parseReport, () => {
+      if (this.#projectCheck !== check || check.loading) return;
+      this.#projectCheck = null;
+      check.close();
+      const good = check.failure === null && !check.gone && check.refused === null ? check.value : null;
+      const held = good === null || good.rows.some((row) => row.project === key);
+      if (held) holdState({ projects: [key] });
+      else toAll();
+      if (this.#at.piece === "none") {
+        if (held) this.#setAt(NOTHING_OPEN);
+        else this.#at = UNKNOWN_ADDRESS;
+      }
+      this.requestUpdate();
+    });
+    this.#projectCheck = check;
+    void check.refresh();
+    return NOTHING_OPEN;
+  }
+
   /** Whether the project filter is by folder: projects is not installed. */
   #folders(): boolean {
     return !installed("projects");
@@ -804,10 +852,13 @@ export class UsagePage extends LitElement {
   protected willUpdate(changed: Map<PropertyKey, unknown>): void {
     if (changed.has("route")) {
       // A new placement opens the piece its route names. Projects and Folders are one
-      // section, and the address says the name this install shows.
+      // section, and the address says the name this install shows. A project's address
+      // opens nothing, and sets its filter once usage has said it holds the key.
       const named = parseAddress(this.route);
-      const at = settled(named, this.#folders());
-      if (sameAddress(at, named)) this.#at = at;
+      this.#projectCheck?.close();
+      this.#projectCheck = null;
+      const at = named.piece === "project" ? this.#takeProject(named.key) : settled(named, this.#folders());
+      if (sameAddress(at, named) || named.piece === "project") this.#at = at;
       else this.#setAt(at);
       if (at.piece !== "none") refusedWindow = null;
       this.agentsShown = 0;

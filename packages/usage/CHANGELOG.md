@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- A `project-facts` component for the Projects page: each project's cost today on its
+  row, the opened project's `Cost` row (today, 7 days, 30 days) linking to Usage, and
+  each folder in no project with its 7-day cost. Usage takes the address
+  `project/<key>`, which sets the Project filter to that project.
 - The stop. A launch with a stop mark stamps `MOXI_USAGE_STOP_AT` (a multiple `<k>x`) and
   `MOXI_USAGE_STOP_HANDOFFS` (its handoff folder). The warn-at listener's third purpose,
   `stop`, fires the first time the main session's context reaches the mark: it writes a

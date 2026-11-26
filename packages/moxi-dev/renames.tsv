@@ -2472,11 +2472,14 @@ comms	packages/comms/tests/test_owner.py	{q: (b.session_id, b.turned, set(b.deli
 comms	packages/comms/tests/test_page.py	@pytest.mark.parametrize("bad", [("coder", True, 1.0), ("coder", 1.5, 1.0),	keep	bad	bad
 comms	packages/comms/tests/test_page.py	@pytest.mark.parametrize("bad", [{"directors": (1,)}, {"directors": ({},)},	keep	bad	bad
 comms	packages/comms/tests/test_page.py	assert asked == [{"deadline": 2.0}] and pagehandlers.DEADLINE == 2.0	use	"deadline"	"timeout_s"
+comms	packages/comms/tests/test_page.py	assert facts["place"] == "inline" and set(facts["attributes"]) == {"projects", "open"}	keep	set	set
 comms	packages/comms/tests/test_page.py	assert out["refused"].startswith("comms' page needs the ui module")	keep	refused	refused
 comms	packages/comms/tests/test_page.py	assert set().union(*(_marks(shape) for shape in page.MAIL.values())) == set()	keep	set	set
 comms	packages/comms/tests/test_page.py	assert set(body) == {"now", "state", "detail", "rows"}	keep	set	set
+comms	packages/comms/tests/test_page.py	assert set(found.components) == {"page", "roster", "mail", "project-facts"}	keep	set	set
 comms	packages/comms/tests/test_page.py	assert set(found.components) == {"page", "roster", "mail"}	keep	set	set
 comms	packages/comms/tests/test_page.py	assert set(found.components) == {"page", "roster"}	keep	set	set
+comms	packages/comms/tests/test_page.py	assert set(module.COMPONENTS) == {"page", "roster", "mail", "project-facts"}	keep	set	set
 comms	packages/comms/tests/test_page.py	assert set(module.COMPONENTS) == {"page", "roster", "mail"}	keep	set	set
 comms	packages/comms/tests/test_page.py	assert set(module.COMPONENTS) == {"page", "roster"}	keep	set	set
 comms	packages/comms/tests/test_page.py	inner = lb.app(page.PAGE, module="comms", server_id=SERVER_ID, strict=True)	keep	strict	strict
@@ -3011,6 +3014,10 @@ comms	packages/comms/src/moxi_comms/cli.py	help="NAME is a word a module declare
 comms	packages/comms/src/moxi_comms/daemon.py	on_fatal=lambda why: stopping.set(), respawn_adapters=True)	keep	set	set
 comms	packages/comms/src/moxi_comms/daemon.py	named = {identity_of(t) for t in ml.recipients} if ml is not None else set()	keep	set	set
 comms	packages/comms/src/moxi_comms/scoped.py	if not any(r["word"] == word for r in found_rows):	keep	any	any
+comms	packages/comms/tests/test_browser_project_facts.py	assert set(comms_reads(page)) <= {"/m/comms/project-facts.js", "/m/comms/api/roster"}, page.asked	keep	set	set
+comms	packages/comms/tests/test_browser_project_facts.py	done = subprocess.run(list(argv), env=shell.env, cwd=shell.env["HOME"], stdin=subprocess.DEVNULL,	keep	HOME	HOME
+comms	packages/comms/tests/test_browser_project_facts.py	root = Path(shell.env["HOME"]) / "code" / "atlas-api"	keep	HOME	HOME
+comms	packages/comms/tests/test_browser_project_facts.py	rows = [address(name, held=True) for name in live] + [address("planner", held=False)]	keep	held	held
 comms	packages/comms/tests/test_claude_launch.py	assert wait_until(lambda: not any(t.name == "comms-respawn"	keep	any	any
 comms	packages/comms/tests/test_daemon_respawn.py	r.stopping.set()	keep	set	set
 comms	packages/comms/tests/test_daemon_respawn.py	rig.daemon = Daemon(rig.record, clock=rig.clock, start_trim_thread=False,	keep	record	record
@@ -9278,6 +9285,10 @@ repo	packages/repo/tests/test_api_reexports.py	assert set(moxi_repo.EXPORTS) <= 
 repo	packages/repo/tests/test_api_reexports.py	return set(json.loads(done.stdout.splitlines()[-1]))	keep	set	set
 repo	packages/repo/tests/test_browser_page.py	assert any(REPOS in url for url in check.requests), check.requests	keep	any	any
 repo	packages/repo/tests/test_browser_page.py	repo = Path(ui_shell.env["HOME"]) / "alpha-notes"	keep	HOME	HOME
+repo	packages/repo/tests/test_browser_project_facts.py	assert set(repo_reads(page)) <= {"/m/repo/project-facts.js", "/m/repo/api/repos"}, page.asked	keep	set	set
+repo	packages/repo/tests/test_browser_project_facts.py	done = subprocess.run(list(argv), env=shell.env, cwd=cwd or shell.env["HOME"],	keep	HOME	HOME
+repo	packages/repo/tests/test_browser_project_facts.py	expect(lines.first).to_contain_text("refused")	keep	refused	refused
+repo	packages/repo/tests/test_browser_project_facts.py	root = Path(shell.env["HOME"]) / "code" / key	keep	HOME	HOME
 repo	packages/repo/tests/test_browser_questions.py	for text in ("says no", "refused"):	keep	refused	refused
 repo	packages/repo/tests/test_browser_questions.py	(notes / "notes").mkdir(exist_ok=True)	keep	exist_ok	exist_ok
 repo	packages/repo/tests/test_browser_questions.py	assert "refused" in run_pass("c.md", {"DEMO_PREPARE": "refuse"})	keep	refused	refused
@@ -9413,8 +9424,10 @@ repo	packages/repo/tests/test_listing.py	assert len(set(api.PROBLEM_CODES)) == l
 repo	packages/repo/tests/test_listing.py	("fail", "closed"), ("order", "10"), ("enabled", "true")):	keep	closed	closed
 repo	packages/repo/tests/test_page.py	"pre-commit", "closed", 20, True)	keep	closed	closed
 repo	packages/repo/tests/test_page.py	api.index_path().parent.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
+repo	packages/repo/tests/test_page.py	assert facts["place"] == "inline" and set(facts["attributes"]) == {"projects", "open"}	keep	set	set
 repo	packages/repo/tests/test_page.py	assert set(body) == {"now", "state", "detail", "repos"}	keep	set	set
 repo	packages/repo/tests/test_page.py	assert set(listed) == {str(broken_repo), str(fine_repo)}	keep	set	set
+repo	packages/repo/tests/test_page.py	assert set(module.COMPONENTS) == {"page", "project-facts"}	keep	set	set
 repo	packages/repo/tests/test_page.py	assert set(module.OPTIONAL) == {"ui", "projects"}	keep	set	set
 repo	packages/repo/tests/test_page.py	inner = lb.app(page.PAGE, module="repo", server_id=SERVER_ID, strict=True)	keep	strict	strict
 repo	packages/repo/tests/test_page.py	monkeypatch.setattr(pagehandlers, "_logged", set())	keep	set	set
@@ -17854,6 +17867,7 @@ usage	packages/usage/tests/test_page.py	assert count("/api/requests", session="s
 usage	packages/usage/tests/test_page.py	assert count("/api/session", session="s1", folder="/w/app") == 1	keep	folder	folder
 usage	packages/usage/tests/test_page.py	assert count("/api/session", session="s1", folder="/w/tool") == 0	keep	folder	folder
 usage	packages/usage/tests/test_page.py	assert count("/api/terms", by="agent", session="s2", folder="/w/app-wt") == 2	keep	folder	folder
+usage	packages/usage/tests/test_page.py	assert facts["contract"] == 1 and set(facts["attributes"]) == {"projects", "open"}	keep	set	set
 usage	packages/usage/tests/test_page.py	assert get("/api/projects", by="folder")["home"] == "/home/alice"	keep	folder	folder
 usage	packages/usage/tests/test_page.py	assert get("/api/window", **asked)["used"] == {	keep	used	used
 usage	packages/usage/tests/test_page.py	assert get("/api/window", **asked)["used"] is None	keep	used	used
@@ -17883,7 +17897,7 @@ usage	packages/usage/tests/test_page.py	assert set(first) == {"rows", "pull", "n
 usage	packages/usage/tests/test_page.py	assert set(first) == {"today", "rows", "pull", "notes"}	keep	set	set
 usage	packages/usage/tests/test_page.py	assert set(five) == set(page.WINDOW.items)	keep	set	set
 usage	packages/usage/tests/test_page.py	assert set(found) == set(page.PROVENANCE.items)	keep	set	set
-usage	packages/usage/tests/test_page.py	assert set(found.components) == {"page", "limits", "cost", "row"}	keep	set	set
+usage	packages/usage/tests/test_page.py	assert set(found.components) == {"page", "limits", "cost", "row", "project-facts"}	keep	set	set
 usage	packages/usage/tests/test_page.py	assert set(found.components) == {"page", "limits", "cost"}	keep	set	set
 usage	packages/usage/tests/test_page.py	assert set(group) == set(page.GROUP.items)	keep	set	set
 usage	packages/usage/tests/test_page.py	assert set(m_a) == set(page.RATE.items)	keep	set	set
@@ -18378,6 +18392,10 @@ launcher	packages/launcher/tests/test_wake.py	loaded = guards.load(on=["launcher
 launcher	packages/launcher/tests/test_wake.py	loaded = guards.load(on=["launcher.wake"], sessions=lambda target: (False, None))	keep	sessions	sessions
 launcher	packages/launcher/tests/test_wake.py	record=lambda *a: None, clear=lambda key: None)	keep	record	record
 usage	packages/usage/src/moxi_usage/mark.py	if any(name == CROSSING and fired(name, mark) for name, mark in wanted):	keep	any	any
+usage	packages/usage/tests/test_browser_project_facts.py	assert set(usage_reads(page)) <= {"/m/usage/project-facts.js", "/m/usage/api/projects"}, page.asked	keep	set	set
+usage	packages/usage/tests/test_browser_project_facts.py	done = subprocess.run(list(argv), env=shell.env, cwd=shell.env["HOME"], stdin=subprocess.DEVNULL,	keep	HOME	HOME
+usage	packages/usage/tests/test_browser_project_facts.py	home = Path(shell.env["HOME"])	keep	HOME	HOME
+usage	packages/usage/tests/test_browser_project_facts.py	work_dir = str(Path(full.env["HOME"]) / "code" / "finch-scripts")	keep	HOME	HOME
 usage	packages/usage/src/moxi_usage/guards.py	on_error="allow", sessions="moxi_usage.stop:on_for",	keep	sessions	sessions
 usage	packages/usage/src/moxi_usage/stop.py	return text.format_map({"mark": mark, "folder": handoff_dir})	keep	folder	folder
 usage	packages/usage/src/moxi_usage/stop.py	home = session_env.get("HOME")	keep	HOME	HOME

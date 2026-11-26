@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- A `project-facts` component for the Projects page: the opened project's lead and
+  agents read `not running now` where no session holds the name, while comms' roster
+  can say so.
 - With launcher, an opened agent's `Session` line names the model and effort its launch
   was started with (`planner · claude · opus · high`). Without launcher, or while its read
   fails, neither shows.

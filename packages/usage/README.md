@@ -587,6 +587,7 @@ Its addresses, after `/m/usage/`:
 | `sessions/<harness>/<id>/<agent>` | the same, with that subagent's requests opened |
 | `projects`, `folders` | the Projects or the Folders section, whichever the install has |
 | `models`, `kinds`, `prices` | that section |
+| `project/<key>` | the page with the Project filter at that project, the range as it was, nothing opened |
 
 One piece is open at a time, and the address names it. A move to another view of the
 page adds a history entry at its address, so Back returns to the view that was open
@@ -599,7 +600,9 @@ again and opens the piece the address names, though not the scroll or how far it
 shown. The range, the filters and Cost / Tokens are not part of the
 address: they are kept until the shell's page is reloaded, which starts again on the last
 30 days with no filter. An address the page does not have opens it with nothing opened
-and a line at the foot.
+and a line at the foot. So does `project/<key>` for a key usage holds no cost under,
+with the Project filter at `all`; a key it knows sets the filter and is then written as
+`/m/usage/`, since the filter is not part of the address.
 
 What it leaves out: a heading of its own (the shell's top line names the page); colour
 for bad news (it draws in the theme's text, border and background colours, with no
@@ -613,6 +616,21 @@ for a phone, and fits a window 360 px wide.
 Two blocks go on the shell's modules view: the limits, one meter per window, and the cost
 of today and the last 7 days, with how old the index behind it is, flagged once its last
 pass is over 10 minutes old. Without the extra, nothing of usage changes.
+
+**On the Projects page.** With projects' page in the shell too, usage places a
+`project-facts` component on the Projects page. A project's closed row says what it cost
+today (`$8.49 today`), and nothing when it cost nothing today. An opened project gets a
+`Cost` row: today, the last 7 days and the last 30 days, each left out where usage holds
+no figure for it, then `an estimate`, with a `Usage` link to this page at
+`project/<key>`. A figure with a session usage couldn't price in it ends in `+`. Remove
+lists `what they cost, still listed under <key> on Usage` among what stays, since usage
+keeps the key a session's cost was stored under. Under the projects, each folder in no
+project gets what it cost in the last 7 days, where that is above zero or has a `+`. The
+figures are usage's own, read as its Home row reads them: the component reads only
+`/api/projects`, from today, from 7 days back and, only while a project is open, from 30
+days back. It reads when it is placed, every 60 seconds while the tab is visible, and
+once when the tab is shown again. A read that fails drops the figures it gave, and the
+next good one puts them back.
 
 ### The row on Home
 

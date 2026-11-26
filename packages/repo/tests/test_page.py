@@ -116,7 +116,7 @@ def test_the_page_declares_its_list_and_its_built_assets():
     exported = loopback().export(page.PAGE)
     route = exported["routes"][0]
     assert (route["path"], route["kind"], route["stream"]) == ("/api/repos", "read", False)
-    assert exported["assets"] == ["build-stamp.txt", "page.js"]
+    assert exported["assets"] == ["build-stamp.txt", "page.js", "project-facts.js"]
 
 
 def _marks(shape: dict, at: str = "") -> dict[str, str]:
@@ -155,6 +155,16 @@ def test_the_announcement_offers_the_page_and_nothing_imports_it():
     assert module.PAGE == "moxi_repo.page:PAGE"
     assert module.COMPONENTS["page"]["place"] == "page"
     assert set(module.OPTIONAL) == {"ui", "projects"}
+
+
+def test_the_project_facts_component_is_inline_with_its_two_attributes():
+    from moxi_repo import module
+
+    assert set(module.COMPONENTS) == {"page", "project-facts"}
+    facts = module.COMPONENTS["project-facts"]
+    assert facts["script"] == "project-facts.js" and facts["contract"] == 1
+    assert facts["place"] == "inline" and set(facts["attributes"]) == {"projects", "open"}
+    assert all(spec["type"] == "string" for spec in facts["attributes"].values())
 
 
 # --- /api/repos -----------------------------------------------------------------------------

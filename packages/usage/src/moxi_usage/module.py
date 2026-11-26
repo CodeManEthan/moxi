@@ -63,6 +63,13 @@ COMPONENTS = {
     "row": {"script": "row.js", "title": "Usage", "contract": 1, "place": "block",
             "home": True, "home_as": "row", "order": 300,
             "doc": "How full the plan windows are and today's cost, on one line"},
+    "project-facts": {"script": "project-facts.js", "title": "Usage",
+                      "doc": "Each project's cost, for the Projects page",
+                      "contract": 1, "place": "inline",
+                      "attributes": {"projects": {"type": "string",
+                                                  "doc": "the projects the page holds, JSON"},
+                                     "open": {"type": "string",
+                                              "doc": "the key of the opened project"}}},
 }
 # The announcement's version, and the optional names it declares.
 ANNOUNCES = 1
