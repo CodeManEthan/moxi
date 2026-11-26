@@ -10,10 +10,11 @@ page servers, on two installs:
   them back.
 - The same without comms: nothing after the lead, and nothing of comms' is read.
 
-This shell runs no comms daemon, so comms' page server answers its roster `offline`. A
-roster that is `up` is answered to the browser in place of the page server's, through the
-page's own request routing: the component's words are what is checked, from the shape
-comms' page server sends.
+This shell runs no comms daemon, so comms' page server answers its roster `offline`, on its
+route and on its topic `roster`. A roster that is `up` is answered to the browser in place
+of the route's, through the page's own request routing, and each event of the topic is
+dropped from the shell's push stream, so the page knows only what the route answers: the
+component's words are what is checked, from the shape comms' page server sends.
 """
 
 from __future__ import annotations
@@ -111,9 +112,38 @@ def answer(page, body: dict | None) -> None:
                                                        body=json.dumps(body)))
 
 
+#: Drops each event of comms' topic `roster` from the shell's push stream: the page server's
+#: topic says `offline` (no daemon here), and a page that hears it after a routed read
+#: draws that instead.
+_DROP_ROSTER = r"""(() => {
+  const fetched = window.fetch.bind(window);
+  window.fetch = async (input, init) => {
+    const answer = await fetched(input, init);
+    const url = typeof input === "string" ? input : input.url;
+    if (!url.includes("/m/ui/api/push") || answer.body === null) return answer;
+    const decoder = new TextDecoder();
+    const encoder = new TextEncoder();
+    let held = "";
+    const body = answer.body.pipeThrough(new TransformStream({
+      transform(chunk, out) {
+        held += decoder.decode(chunk, { stream: true });
+        const blocks = held.split("\n\n");
+        held = blocks.pop();
+        for (const block of blocks) {
+          if (!/^event: ?comms\.roster\s*$/m.test(block)) out.enqueue(encoder.encode(`${block}\n\n`));
+        }
+      },
+    }));
+    return new Response(body, { status: answer.status, statusText: answer.statusText, headers: answer.headers });
+  };
+})()"""
+
+
 def page_on(ui_contexts, shell):
-    """A fresh page on `shell`, keeping the path of every request it makes in `page.asked`."""
+    """A fresh page on `shell`, keeping the path of every request it makes in `page.asked`,
+    that hears comms' roster only from its route."""
     page = ui_contexts(shell).pages[0]
+    page.add_init_script(_DROP_ROSTER)
     asked: list[str] = []
     page.on("request", lambda request: asked.append(request.url.split("://", 1)[1].split("/", 1)[1]))
     page.asked = asked
