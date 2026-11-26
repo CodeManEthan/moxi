@@ -709,12 +709,47 @@ class _Sh(_Reader):
                 out.append(t[i:j + 1])
                 i = j + 1
                 continue
+            if c == '"':
+                i = self.value_double(i, subs, out)
+                continue
             out.append(c)
             i += 1
             if c == "}":
                 return i, "".join(out)
         self.mark("unclosed", open_position)
         return n, "".join(out)
+
+    def value_double(self, i: int, subs: list[str], out: list[str]) -> int:
+        """A `"..."` inside `${...}` at `i`, read as `double` reads one, so a `'` or `}`
+        in it is an ordinary character: where it ends, with its text as written on `out`
+        and each substitution's text on `subs`."""
+        t, n = self.t, self.n
+        out.append('"')
+        i += 1
+        while i < n:
+            c = t[i]
+            if c == '"':
+                out.append(c)
+                return i + 1
+            if c == "\\" and i + 1 < n:
+                out.append(t[i:i + 2])
+                i += 2
+                continue
+            if c == "`":
+                j, text, closed = self.backtick_text(i, in_double=True, end=n)
+                if not closed:
+                    self.mark("unclosed", i)
+                subs.append(text)
+                out.append("\0")
+                i = j
+                continue
+            j = self.inner_expansion(i, subs, out) if c == "$" else None
+            if j is not None:
+                i = j
+                continue
+            out.append(c)
+            i += 1
+        return n
 
     def inner_expansion(self, i: int, subs: list[str], out: list[str]) -> int | None:
         """An expansion inside arithmetic or `${...}` at `i`: where it ends, with its text
@@ -812,8 +847,9 @@ class _Sh(_Reader):
     def take_body(self, r: _Redir, start: int, end: int, *, quoted: bool) -> None:
         t = self.t
         r.body = t[start:end]
+        # For `<<-` the shell drops the leading tabs of each body line before it reads it.
         if quoted:
-            r.input = r.body
+            r.input = _untab(r.body) if r.strip else r.body
             return
         # An unquoted body as the shell expands it: only `$`, backticks and `\\` act. Its
         # substitutions are found by a reader of the body alone, which marks nothing.
@@ -821,6 +857,11 @@ class _Sh(_Reader):
         out: list[str] = []
         i = start
         while i < end:
+            if r.strip and (i == start or t[i - 1] == "\n"):
+                while i < end and t[i] == "\t":
+                    i += 1
+                if i == end:
+                    break
             c = t[i]
             if c == "\\" and i + 1 < end and t[i + 1] in "$`\\\n":
                 if t[i + 1] != "\n":
@@ -832,9 +873,14 @@ class _Sh(_Reader):
                 out.append(c)
                 i += 1
                 continue
-            out.append(t[i:j])
+            out.append(_untab(t[i:j]) if r.strip else t[i:j])
             i = j
         r.input = "".join(out)
+
+
+def _untab(text: str) -> str:
+    """`text` with the leading tabs of each line dropped, as `<<-` reads a body."""
+    return "\n".join(line.lstrip("\t") for line in text.split("\n"))
 
 
 def _past_reserved(words, plain) -> int:

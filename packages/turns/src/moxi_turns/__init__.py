@@ -95,13 +95,15 @@ out of the harness. This package is turns' whole public API, the announcement's
                               # ShellWord(text, position, subs, *, is_sub), each
                               # substitution a NUL in text and its text in subs;
                               # ShellRedirect(operator, fd, target, body, subs);
-                              # ShellMark(kind, position), what a strict guard may refuse
+                              # ShellMark(kind, position), what a strict guard may refuse,
+                              # its kind one of MARK_KINDS
     turns.command_word_index(command, *, dialect="sh")   # the index of the word naming
                               # what a command runs, past assignments, reserved words and
                               # wrappers; None when it runs nothing the reader can name
     turns.shell_scripts(t, *, dialect="sh")   # (ShellScript(text, dialect, command_index,
                               # source), ...): the text a command hands a shell to run,
                               # from its argument, a heredoc, a here-string or a pipe
+                              # (SCRIPT_SOURCES)
 
 A request the endpoint never got reads as refused (`Refused("gone")`); one it got and
 did not answer in time has an unknown outcome, never a refusal (the `Delivery` above,
@@ -136,9 +138,10 @@ _WHERE = {
                     "results"),
     **dict.fromkeys(("Guard", "ToolCall", "Prompt", "Allow", "Deny", "TouchedFile",
                      "touched_files"), "guards"),
-    **dict.fromkeys(("DIALECTS", "read_shell", "shell_scripts", "command_word_index",
-                     "ShellText", "ShellCommand", "ShellWord", "ShellRedirect",
-                     "ShellScript", "ShellMark"), "guards.shell"),
+    **dict.fromkeys(("DIALECTS", "MARK_KINDS", "SCRIPT_SOURCES", "read_shell",
+                     "shell_scripts", "command_word_index", "ShellText", "ShellCommand",
+                     "ShellWord", "ShellRedirect", "ShellScript", "ShellMark"),
+                    "guards.shell"),
     "COMMANDS_ENV": "config",
     "STALE_AFTER_S": "claude_stale",
 }
@@ -153,9 +156,9 @@ __all__ = [
     "DeliveryRef", "Gone", "StopFacts", "SessionEvent",
     "CAPABILITIES", "OUTCOMES", "DELIVERY_REFUSALS", "COMMAND_REFUSALS", "READY_SOURCES",
     "COMMANDS", "COMMANDS_ENV", "STALE_AFTER_S", "Guard", "ToolCall", "Prompt", "Allow",
-    "Deny", "TouchedFile", "touched_files", "DIALECTS", "read_shell", "shell_scripts",
-    "command_word_index", "ShellText", "ShellCommand", "ShellWord", "ShellRedirect",
-    "ShellScript", "ShellMark",
+    "Deny", "TouchedFile", "touched_files", "DIALECTS", "MARK_KINDS", "SCRIPT_SOURCES",
+    "read_shell", "shell_scripts", "command_word_index", "ShellText", "ShellCommand",
+    "ShellWord", "ShellRedirect", "ShellScript", "ShellMark",
 ]
 
 

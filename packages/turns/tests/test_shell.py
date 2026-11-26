@@ -59,6 +59,12 @@ def test_the_names_reach_the_package():
     assert SCRIPT_SOURCES == ("argument", "heredoc", "here-string", "pipe")
 
 
+def test_the_mark_kinds_and_script_sources_reach_the_package():
+    for name in ("MARK_KINDS", "SCRIPT_SOURCES"):
+        assert getattr(turns, name) is globals()[name]
+        assert name in turns.__all__
+
+
 def test_is_sub_is_refused_by_position():
     with pytest.raises(TypeError):
         ShellWord("x", 0, (), True)  # noqa: FBT003 -- the refusal under test
@@ -144,6 +150,15 @@ def test_sh_substitutions_nest_and_close_at_their_own_paren():
 def test_sh_a_substitution_inside_a_value_is_read():
     w = word("echo ${x:-$(kill 211)}", 1)
     assert w.text == "${x:-\0}" and w.subs == ("kill 211",)
+
+
+def test_sh_double_quotes_inside_a_value_are_read_as_double_quotes():
+    # A ' or } inside them is an ordinary character, so the value ends at its own brace.
+    assert words("${x:-\"it's\"}; next") == [["${x:-\"it's\"}"], ["next"]]
+    assert words('${HOME:-"}"}; next') == [['${HOME:-"}"}'], ["next"]]
+    assert words("echo \"${x:-\"it's\"}\"; next") == [["echo", "${x:-\"it's\"}"], ["next"]]
+    w = word('echo ${x:-"$(kill 2) `kill 3` \\" }"}', 1)
+    assert w.subs == ("kill 2", "kill 3")
 
 
 def test_sh_arithmetic():
@@ -516,6 +531,12 @@ def test_an_unquoted_heredoc_fed_to_a_shell_is_unescaped_first():
     assert read_shell(script[0]).commands[0].words[1].subs == ("kill 211",)
     (script,) = scripts("bash <<'EOF'\necho \"\\$(kill 211)\"\nEOF")
     assert script[0] == 'echo "\\$(kill 211)"\n'
+
+
+def test_a_tab_stripped_heredoc_fed_to_a_shell_loses_each_line_s_tabs():
+    (script,) = scripts("bash <<-EOF\n\tcat <<X\n\tX\n\tkill 211\n\tEOF")
+    assert script[0] == "cat <<X\nX\nkill 211\n"
+    assert words(script[0]) == [["cat"], ["kill", "211"], []]
 
 
 @pytest.mark.parametrize("text", [
