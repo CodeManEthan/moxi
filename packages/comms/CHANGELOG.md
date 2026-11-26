@@ -12,9 +12,16 @@
   now starts suspended, is written to the claim file as a `tree` root and is then
   resumed, so the root is still in place before the program runs and the process
   returned is the program itself.
-- On Windows the OpenCode adapter stops its server, and a model-list refresh that runs
-  past its bound, by ending the process itself. It signalled a process group with
-  `os.killpg`, which Windows lacks.
+- On Windows `moxi comms opencode` says it doesn't run there yet and exits 2. Its window
+  takes a POSIX terminal and stops on SIGHUP and SIGQUIT, so it died with a traceback
+  before the adapter started. The adapter's own stop of its server, and of a model-list
+  refresh that runs past its bound, no longer raises there (it signalled a process group
+  with `os.killpg`, which Windows lacks); it ends that process alone, not a child it
+  started.
+- On Windows the daemon stops cleanly on Ctrl+Break, as it does on SIGTERM elsewhere: it
+  closes its custody intervals and its pipe and exits 0. Windows has no SIGHUP, and a
+  SIGTERM sent there ends the process with no handler run, so only Ctrl+C in its own
+  console reached the stop.
 - On Windows comms reads cards again. The read opened a card with `O_NOFOLLOW`, which
   Windows lacks; there it now refuses a card that is a link or another reparse point by
   its own `lstat`, and reads only the file that `lstat` saw.

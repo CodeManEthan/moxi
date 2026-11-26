@@ -125,3 +125,15 @@ def test_doctor_lists_the_opencode_binary_with_its_version(tmp_path):
             for line in doctor(str(tmp_path / "empty")).splitlines()
             if line[:1] != " " and "  " in line}
     assert rows["opencode"] == "not on PATH"
+
+
+def test_the_wrapper_says_it_does_not_run_on_windows(monkeypatch, capsys):
+    """On Windows `moxi comms opencode` refuses with a line, before it reads anything,
+    rather than dying on the POSIX terminal calls its window makes."""
+    import sys
+
+    from moxi_comms.adapters import opencode
+
+    monkeypatch.setattr(sys, "platform", "win32")
+    assert cli.main(["opencode", "nobody@nowhere"]) == 2
+    assert capsys.readouterr().err == (f"moxi comms opencode: {opencode.WINDOWS_REFUSAL}.\n")

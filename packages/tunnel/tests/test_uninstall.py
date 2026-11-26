@@ -423,20 +423,48 @@ def test_teardown_with_nothing_recorded_turns_a_switch_left_on_off(alpha, cf, un
     assert_cloudflare_gone(units)
 
 
-@pytest.mark.skipif(sys.platform == "win32", reason="Windows: no POSIX mode bits, so a mode changed by hand is not seen there")
+def _mode_by_hand(path):
+    path.chmod(0o644)
+    return lambda: path.chmod(0o600)
+
+
+def _folder_in_its_place(path):
+    """A folder where the file was: not a regular file, a trigger on every system."""
+    aside = path.with_name(path.name + ".aside")
+    path.rename(aside)
+    path.mkdir()
+
+    def undo():
+        path.rmdir()
+        aside.rename(path)
+    return undo
+
+
+@pytest.mark.parametrize("unwritable", [
+    pytest.param(_mode_by_hand, id="mode", marks=pytest.mark.skipif(
+        sys.platform == "win32",
+        reason="Windows: no POSIX mode bits, so a mode changed by hand is not seen there")),
+    pytest.param(_folder_in_its_place, id="folder")])
 def test_another_modules_uninstall_keeps_its_cloudflare_entry_while_the_file_cant_be_written(
-        three, tailscale, units, yes, capsys):
+        three, tailscale, units, yes, capsys, unwritable):
     acts.add("alpha/gateway", provider_name="cloudflare", hostname="g.example.com", ask=yes)
-    cloudflare.config_path().chmod(0o644)
+    undo = unwritable(cloudflare.config_path())
     capsys.readouterr()
     on_uninstall("alpha")
     out = capsys.readouterr().out
     assert "tunnel: alpha/gateway stays in tunnel's record" in out
     assert "removed alpha/gateway" not in out
     assert "tunnel: removed alpha/connector" in out
-    assert entries()["alpha/gateway"].state == State.ON
-    assert "g.example.com" in cloudflare.read_file().rules()
     assert "alpha/connector" not in entries()
     assert ("rollback", "alpha/gateway") in [(e["event"], e.get("target")) for e in events()]
-    cloudflare.config_path().chmod(0o600)
+    if unwritable is _folder_in_its_place:
+        # The file's text can't be read back either, so the rollback can't put it back:
+        # the entry is kept as an act left part-done, for a repair once the file is back.
+        assert entries()["alpha/gateway"].state == State.APPLYING
+        undo()
+        assert acts.repair(ask=yes).code == 0
+    else:
+        undo()
+    assert entries()["alpha/gateway"].state == State.ON
+    assert "g.example.com" in cloudflare.read_file().rules()
     assert acts.remove("alpha/gateway", ask=yes).code == 0

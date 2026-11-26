@@ -52,8 +52,12 @@ as directives, and every other message as information from a peer.
 
 ## Install
 
-Linux, Python 3.12 or later, and [uv](https://docs.astral.sh/uv/). macOS and Windows are
-not supported yet.
+Linux, Python 3.12 or later, and [uv](https://docs.astral.sh/uv/). On Windows the daemon
+and the `moxi comms` commands run, and you start the daemon yourself (`moxi-comms-daemon`;
+no service is written, and Ctrl+Break in its console stops it cleanly). A Claude Code
+session there reads the roster at its start, but no mail is delivered into it yet:
+delivery goes through turns' Claude leg, which is POSIX only. The Codex and OpenCode
+wrappers need a POSIX terminal and don't run there. macOS is not supported yet.
 
 ```sh
 uv tool install moxi
@@ -154,7 +158,9 @@ meets.
 | Codex adapter (`moxi-comms-codex`) | experimental |
 | OpenCode adapter (`moxi-comms-opencode`) | experimental |
 | Cold-cache hold: a message to an agent whose prompt cache is cold waits for its next session start, /clear, compaction or turn, on any adapter and from any sender; a send comms cannot read the cache for is refused; checked on send and again by the daemon at delivery | experimental |
-| macOS, Windows through WSL2 | not yet |
+| Windows: the daemon (started by hand) and the `moxi comms` commands, sending from your own terminal | supported |
+| Windows: delivery into Claude Code sessions; the Codex and OpenCode wrappers | not yet |
+| macOS | not yet |
 
 ## Commands
 

@@ -1644,7 +1644,16 @@ def print_plan(agent, roster, *, binary, version, comms_path, tools_url=None,
     say(f"  log        {wrapper_log_file(agent.qualified)}")
 
 
+#: Why the wrapper doesn't run on Windows: the window it opens takes the terminal's
+#: foreground group and mode, and it stops on SIGHUP and SIGQUIT, none of which Windows has.
+WINDOWS_REFUSAL = ("the OpenCode window takes a POSIX terminal (its foreground group and "
+                   "mode), so it doesn't run on Windows yet")
+
+
 def main(argv=None, prog: str = PROG) -> int:  # pragma: no cover - the window tests run it
+    if sys.platform == "win32":
+        print(f"{prog}: {WINDOWS_REFUSAL}.", file=sys.stderr)
+        return 2
     import signal
 
     from .opencode_window import EXIT_GAVE_UP, GaveUp, OpenCodeWindow

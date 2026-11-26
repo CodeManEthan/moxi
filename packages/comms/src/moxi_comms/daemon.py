@@ -3927,10 +3927,12 @@ def main(argv=None) -> int:  # pragma: no cover - exercised by the CLI smoke run
     # `finally`, every restart left its custody intervals open for the next boot's
     # fence, and the fence's warning could not tell a crash from a restart. Installed
     # before `start()` binds the socket, so no stop can land in a window the handler
-    # does not cover.
+    # does not cover. Windows has no SIGHUP, and a SIGTERM sent there ends the process
+    # with no handler run; its stop that reaches one is Ctrl+Break (SIGBREAK), which
+    # `GenerateConsoleCtrlEvent` sends to a daemon started in a process group of its own.
     stopping = threading.Event()
-    # SIGHUP does not exist on Windows.
-    for sig in (signal.SIGTERM, getattr(signal, "SIGHUP", None)):
+    for sig in (signal.SIGTERM, getattr(signal, "SIGHUP", None),
+                getattr(signal, "SIGBREAK", None)):
         if sig is not None:
             signal.signal(sig, lambda *_: stopping.set())
     # A daemon on the local backend provisions an empty directory itself, so an install

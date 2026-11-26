@@ -4,12 +4,14 @@ Two failures this pins: the daemon dying on SIGTERM before `Daemon.stop()` ran, 
 shim queueing a replayed message it already held.
 """
 
+import contextlib
 import os
 import signal
 import subprocess
 import sys
 import time
 
+import psutil
 import pytest
 from conftest import wait_for_queue
 
@@ -39,6 +41,52 @@ def test_a_signal_runs_the_clean_shutdown(tmp_path, sig):
     out, _ = proc.communicate(timeout=20)
     assert proc.returncode == 0, out
     assert not sock.exists(), "stop() removes the socket it bound, so it ran"
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="Ctrl+Break is Windows' console stop")
+def test_ctrl_break_runs_the_clean_shutdown_on_windows(tmp_path):
+    """Windows' stop that a handler sees: Ctrl+Break, sent to the daemon's own process
+    group. Its handler stops the daemon as SIGTERM's does on POSIX, so it exits 0 and no
+    longer answers at its pipe."""
+    from moxi_comms.client import DaemonClient
+
+    proc = subprocess.Popen(
+        [sys.executable, "-c", "from moxi_comms.daemon import main; raise SystemExit(main())",
+         "--backend", "mock", "--backend-store", str(tmp_path / "store.json")],
+        env=os.environ.copy(), stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
+        creationflags=subprocess.CREATE_NEW_PROCESS_GROUP)
+    address = daemon_socket()
+
+    def answers() -> bool:
+        try:
+            client = DaemonClient(address, timeout=1).connect()
+        except Exception:                                             # noqa: BLE001
+            return False
+        try:
+            client.call("agents")
+            return True
+        except Exception:                                             # noqa: BLE001
+            return False
+        finally:
+            client.close()
+
+    try:
+        deadline = time.time() + 20
+        while not answers():
+            assert proc.poll() is None, proc.stdout.read()
+            assert time.time() < deadline, "the daemon never answered at its pipe"
+            time.sleep(0.05)
+        proc.send_signal(signal.CTRL_BREAK_EVENT)
+        out, _ = proc.communicate(timeout=20)
+    finally:
+        if proc.poll() is None:
+            for child in psutil.Process(proc.pid).children(recursive=True):
+                with contextlib.suppress(psutil.NoSuchProcess):
+                    child.kill()
+            proc.kill()
+            proc.communicate()
+    assert proc.returncode == 0, out
+    assert not answers(), "stop() closed the pipe it served"
 
 
 def _deliver(shim, message_id):
