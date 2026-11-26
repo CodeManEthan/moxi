@@ -2,6 +2,38 @@
 
 ## Unreleased
 
+- A digest whose turn had started when its Claude session's turns endpoint went away (a
+  plugin reload, a crash) is no longer settled `unhandled` at the loss, so it is not
+  handed to the session a second time. It stays open, a steered one too, and the new
+  endpoint's end of that turn settles it. When the first look after the loss finds no
+  turn open, or another one, it is settled `unhandled` there and goes again. A digest
+  handed in but not yet started is still settled `unhandled` at the loss.
+- The adapter's look after such a loss that finds the session idle sends a new activity
+  notification, `relook`: a release point for unflagged mail only, since a reload is not
+  a turn. The first look still sends `look`. A daemon older than `relook` drops it.
+- A warm send is pushed to its session at once even when a digest of that name was left
+  unhandled: it no longer waits behind the returned rows, which go at the next release
+  point. A newer message can now reach a session before an older one.
+- A new delivery, `unchecked`, for a recipient whose cache comms has no clock to read
+  (the cache module missing or not loading, an agent kind or harness with no clock, a
+  model with no lifetime row). Its mail goes at once as `live` mail does, and the send
+  says why its cache went unread, since it may wake a cold session. Before, these read
+  `live`. It is a new value of `sending.DELIVERIES` and of the `send`, `reply` and
+  connector tools' `delivery` enum, so a client that checks the enum strictly needs it.
+  The connector's `send_and_wait` waits on it as on `live`; `moxi comms help unchecked`
+  explains it. With `[cache] required = true` a send whose read finds the cache module
+  missing is refused `cache-unread` (exit 75) instead.
+- The `send` and `reply` tools' results, and the connector's, give each recipient a
+  `reason`: the text the verb prints for it, null where it prints none.
+- A `--held` send to a cold recipient prints its `held:` line too, and the recipient's
+  reason carries it after the `--held` NOTE.
+- A new extension group, `moxi.comms.hold_lines`: for each cold recipient comms calls
+  every entry as `hold_line(by, recipient, session, *, env)` (the sender's name, the cold
+  name, its session id) and prints any text answered under the `held:` line, in the
+  recipient's reason too. An entry that raises or answers anything but text or None is
+  logged and adds nothing. With launcher installed, a sender that directs the cold
+  session's launch reads how to relaunch it.
+- The `history` and `remove` tool descriptions are a little shorter.
 - A `project-facts` component for the Projects page: the opened project's lead and
   agents read `not running now` where no session holds the name, while comms' roster
   can say so.

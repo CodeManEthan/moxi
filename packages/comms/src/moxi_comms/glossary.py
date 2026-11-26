@@ -146,8 +146,12 @@ TERMS: tuple[Entry, ...] = (
         "turn that ends with an answer has just used the cache, so its held mail goes out "
         "as the turn ends; after any other turn comms reads the cache first and sends the "
         "mail once it reads warm. `--held` mail "
-        "to an agent whose cache is warm goes out after its next turn. A message that "
-        "waited arrives marked `[held]`, with when it was sent and how long it waited.",
+        "to an agent whose cache is warm goes out after its next turn. A send prints a "
+        "`held:` line for each recipient whose cache is cold, `--held` or not, and with "
+        "the launcher installed, when you direct that agent's launch, one more line: the "
+        "`moxi launcher relaunch` command that reaches it now from its handoff. A message "
+        "that waited arrives marked `[held]`, with when it was sent and how long it "
+        "waited.",
         aliases=("--held", "pending", "cold"),
     ),
     Entry(

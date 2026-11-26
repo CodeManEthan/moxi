@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- comms' send to a cold session now names the call that reaches it: the launcher answers
+  comms' new `moxi.comms.hold_lines` group (`notices.hold_line`) with "To reach it now,
+  relaunch it fresh from its handoff: moxi launcher relaunch <name>." when the sender is
+  one of the directors (the launch's own or the box's policy directors) of the live
+  launch holding the cold session, and with nothing otherwise. It reads the launch log
+  once per cold recipient and writes nothing.
 - Interface 4, for a caller that runs its own headless agents: a `LaunchRequest`'s
   `stamps` (a fork's rule), kept in the launch's values; `continue_headless`, a headless
   resume that replays the stored values and stamps, launched by `by` (the caller's
