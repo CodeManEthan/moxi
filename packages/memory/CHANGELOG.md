@@ -2,6 +2,32 @@
 
 ## Unreleased
 
+- A chat's subconscious: with the `connector` extra, memory's provider serves a second
+  tool, `recall`, listed whether the chat recall is on or off. A chat calls it at the
+  start of every turn with a conversation label, the user's words and a short context;
+  it returns at once, handing back the pieces earlier recalls of the conversation found
+  (each once, oldest first, a line handed in the last six hours cut from later pieces,
+  `stale` when a later call carried words first, dropped past
+  `subconscious.chat.drop_after_s`, each redacted through secrets' `chat_redact`, one
+  that comes back unscanned held back with a note) and starting a chat recall for the
+  words, or saying in `skipped` why none started. It runs under a limit of its own and a
+  5-second budget for its work, every lock wait inside it. A chat recall is a fresh
+  headless Claude Code agent launched, continued and ended through the launcher's
+  interface 4, stamped `MOXI_MEMORY_SUBCONSCIOUS_FORK`, with the chat's context before
+  the recall brief. Its fence: read tools only (`--tools Read,Grep,Glob`, the web tools
+  only where the brief allows the web), no MCP tool or server, `--safe-mode`,
+  `--restricted`, `dontAsk` with no permission prompts, and a budget and turn limit;
+  every launcher row is typed or left out. A probe checks the fence on the machine at
+  the first chat recall after each change of `claude` and keeps the outcome in
+  `subconscious/chat/fence.json`; a failed part stops chat recalls there. A chat
+  recall's transcript is left out of the index. At most `subconscious.chat.running_max`
+  run per conversation and 4 over every conversation. New settings:
+  `subconscious.chat.enabled` (off by default), `running_max`, `drop_after_s` and
+  `model`. The connector's `memory recall` status row and the doctor's `subconscious` row
+  say whether it is on and why none can start; the doctor also shows the fence's outcome.
+  `recall_start.begin` takes `keep_running` and `lock_s`, each defaulting to what it did
+  before.
+
 - With the secrets release whose credentials set finds `sk-` keys and real URL
   passwords, new rows are stored with those redacted. Rows indexed before it keep them
   until `moxi memory reindex` rebuilds the index.

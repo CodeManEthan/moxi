@@ -19,7 +19,8 @@ and tells every session at its start that the search is there.
    trigger saw.
 5. **It can recall for the agent.** In a session launched with the subconscious on, a
    second agent searches past sessions and notes for each prompt, or for a topic the
-   agent names, and its points come back to the main agent as it finds them (below).
+   agent names, and its points come back to the main agent as it finds them (below). A
+   chat in the Claude apps can have one too, through the connector's `recall` tool.
 
 It writes nothing to a transcript, and its index holds nothing the transcripts can't give
 back: it can be deleted and built again from them.
@@ -663,6 +664,67 @@ gone, it also ends the line's slot fork, asking the launcher once and noting how
 line. On Claude Code's subagent route the harness brings every answer back itself, so no
 line there ever waits and the command refuses each one.
 
+### In a chat
+
+A chat in the Claude apps gets a recall of its own through the connector's `recall` tool
+(see "In the Claude apps"). It is off until you turn it on, since each recall spends
+tokens:
+
+```sh
+moxi config set memory subconscious.chat.enabled true
+```
+
+A chat recall never blocks the chat. The chat calls `recall` at the start of every turn
+with the user's words and a short context; the call hands back the pieces earlier recalls
+of the conversation found, starts a recall for the new words, and returns. Each recall
+runs as a fresh headless Claude Code agent (`claude -p`, started, continued and ended
+through the launcher's interface 4), with its own brief: the chat's context, then the
+terminal recall's brief for the words, after a first search of every project. It is
+stamped `MOXI_MEMORY_SUBCONSCIOUS_FORK` with its recall id, as a slot fork is. Its
+records and lines are kept under the session key `chat-<conversation>`, so `moxi memory
+subconscious list --session chat-<conversation>` shows them.
+
+**The fence.** A chat recall's agent can read and nothing else, with nothing installed
+that could widen that and no person needed to keep it so. Every launch has `--tools
+Read,Grep,Glob` (plus `WebFetch` and `WebSearch`, with an allow rule for the two, only
+where the brief allows the web), `--disallowedTools mcp__*` and no MCP config,
+`--safe-mode` and `--restricted` (no CLAUDE.md, skills, plugins, hooks, MCP servers or
+settings files of yours or the project's), `--permission-mode dontAsk` and
+`--permission-prompts none`, and the limits `--max-budget-usd 0.50` and `--max-turns`
+(`subconscious.max_tools` plus 1). Every launcher row is typed or left out, so nothing
+in your `[defaults]`, a preset or the name template reaches it. Moxi's own launcher
+additions (turns' guards) still load; turns' hooks only deny or pass.
+
+**The probe.** What Claude Code's docs leave unconfirmed is checked on the machine: at
+the first chat recall after each change of the `claude` binary the launcher would start
+(its resolved path, size or modification time), the recall's child launches the same
+request with a one-word prompt and reads the session's first `system/init`: every flag
+must be taken (Claude Code 2.1.259 or later), the session's tools must be within Read,
+Grep, Glob, the web tools where allowed, and the harmless `EndConversation`, holding all
+three read tools, and no MCP server may be connected. The outcome is kept in
+`subconscious/chat/fence.json`. A failed part stops every chat recall on the machine
+(`skipped: fence`, naming the part) until `claude` changes; `moxi doctor memory` shows
+it. A probe that gets no `system/init` (no sign-in, no network) records nothing, and the
+next recall probes again. What no flag turns off: an organization's managed settings,
+their policy hooks and mods, and the mods Claude Code builds in, which can let through a
+read the session would deny, still only a read.
+
+**What it can't do** that the terminal recall can. It has no shell, so it can't search
+past sessions again with other words or read around a hit (`moxi memory search`, `moxi
+sessions read`): past sessions reach it only through the first search, at most
+`subconscious.prefetch_hits` hits. It reads the notes folders that search names with
+Read, Grep and Glob.
+
+**Its transcript stays out of the index.** Each recall's agent session id is minted and
+written on its line before the agent starts, and ingest leaves out every source whose
+main session is one of them, deleting any rows of it already stored.
+
+**Its bounds.** At most `subconscious.chat.running_max` recalls of one conversation run
+at once (a new one hurries the oldest past it), and at most 4 over every conversation,
+counted under one start lock; past that a call answers `skipped: busy`. A recall runs on
+the settings memory's config holds when it starts, the shared `subconscious.*` keys
+included; `subconscious.chat.model` picks its model.
+
 ## Setup
 
 `moxi install memory` brings turns, sessions and secrets, which memory requires, runs
@@ -721,6 +783,10 @@ effect at the next read.
 | `subconscious.max_points` | `5` | the most points the brief allows in one answer; at least 1 |
 | `subconscious.prefetch_hits` | `8` | how many hits the first search puts in the brief from each of its parts (the project's, and under `project-first` the one beyond it); 0 runs none |
 | `subconscious.on_demand_per_prompt` | `2` | in on-demand mode, the most recalls between two counted prompts; 0 refuses every one |
+| `subconscious.chat.enabled` | `false` | whether the connector's `recall` tool starts recalls for a chat in the Claude apps; each recall spends tokens |
+| `subconscious.chat.running_max` | `2` | the most chat recalls of one conversation running at once, 1 to 5; a new one hurries the oldest past it |
+| `subconscious.chat.drop_after_s` | `900` | how long a chat recall's piece waits to be handed over before it is dropped, in seconds, 60 to 86400 |
+| `subconscious.chat.model` | `""` | the model a chat recall's agent runs on; empty means Claude Code's default |
 | `subconscious.fork_commands` | `moxi memory search`, `moxi sessions read`, `grep`, `cat`, `head`, `tail`, `ls`, `wc`, `cut` | the shell commands a recall's fork may run; a program you add must not run another from its arguments |
 
 A change to `index.include_subagents`, `index.tail_chars` or `redact.sets` applies to what is read
@@ -735,7 +801,7 @@ memory reads three environment variables of its own: `MOXI_MEMORY_SUBCONSCIOUS` 
 `MOXI_MEMORY_SUBCONSCIOUS_ROUTE`, which the launcher stamps on a session launched with
 the subconscious on (its mode, and its route; unset means `subagent`), and
 `MOXI_MEMORY_SUBCONSCIOUS_FORK`, which memory has the launcher stamp on a recall's slot
-fork (the recall's id). Its folders move with the core's, like
+fork and on a chat recall's headless launch (the recall's id). Its folders move with the core's, like
 every module's: the session table, the writer lock and the rebuild lock in its state
 folder (`~/.local/state/moxi/memory` by default), with the subconscious's log and
 records under `subconscious/` there, the index in the `index` folder of its
@@ -767,7 +833,7 @@ Two sessions share an identity only when comms' qualified names are the same, so
 | `sessions` | the session table's sessions, with an identity, settled, and by launch kind; or that no session has started or been read yet | `warn` when the table can't be opened or read |
 | `links` | whether comms, the launcher and notes load, and what memory does without each | `warn` when one is installed but fails to load |
 | `retention` | each harness's retention, from sessions | `warn` where sessions warns |
-| `subconscious` | how many live sessions have the subconscious on, and that a recall fork's permission asks are refused; or that none has it on | `warn` for a live session launched with it on where no route can run now, with the reason (fix: `moxi memory subconscious list`); while memory's config is in error, for the recalls it stopped since the config last read cleanly for a recall, with the newest error (fix: `moxi config memory`); for a recall line left at the late wait's last limit, with its fork and age, until the first taker after the fork's round ends settles it; for a recall line whose child and taker are gone, with its age, until the next recall child or session end takes it; for a recall still `sending`, with its wait and comms' last refusal (for one comms will never take: `moxi memory subconscious discard RECALL_ID`); for a slot fork memory did not exit that the launcher still runs (its exit held past the exit's wait or answered with anything but `exited`, or its owner gone before it asked for the exit), with its session, its slot where the launcher can say, how its exit came out and its age, which memory leaves running (`moxi launcher exit-session SESSION_ID` ends it once it is quiet); for recalls in the last day whose child could not start (reason `spawn`), with the newest error; for a recall on any route `starting` or `hurried` 30 seconds on with no fork and no log line naming its child (the child gone before it wrote its line, or with no identity of its own to write); and for one on the subagent route whose holder still runs past its wait for the fork's id, with its state and age |
+| `subconscious` | how many live sessions have the subconscious on, and that a recall fork's permission asks are refused; or that none has it on | `warn` for a live session launched with it on where no route can run now, with the reason (fix: `moxi memory subconscious list`); while memory's config is in error, for the recalls it stopped since the config last read cleanly for a recall, with the newest error (fix: `moxi config memory`); for a recall line left at the late wait's last limit, with its fork and age, until the first taker after the fork's round ends settles it; for a recall line whose child and taker are gone, with its age, until the next recall child or session end takes it; for a recall still `sending`, with its wait and comms' last refusal (for one comms will never take: `moxi memory subconscious discard RECALL_ID`); for a slot fork memory did not exit that the launcher still runs (its exit held past the exit's wait or answered with anything but `exited`, or its owner gone before it asked for the exit), with its session, its slot where the launcher can say, how its exit came out and its age, which memory leaves running (`moxi launcher exit-session SESSION_ID` ends it once it is quiet); for recalls in the last day whose child could not start (reason `spawn`), with the newest error; for a recall on any route `starting` or `hurried` 30 seconds on with no fork and no log line naming its child (the child gone before it wrote its line, or with no identity of its own to write); and for one on the subagent route whose holder still runs past its wait for the fork's id, with its state and age. Last, the chat recall: off, or on with the fence's outcome for the `claude` the launcher would start (passed, or not probed yet); `warn` while it is on and none can start, with the reason (`no-launcher`, `no-harness`, or `fence` with the failed part, which stands until `claude` changes) |
 
 A `config` row fails when memory's config can't be read, and a `record ingest` row shows a
 failed ingest child.
@@ -800,8 +866,9 @@ switches the index under it leaves the old one for it to read to the end.
 
 ## In the Claude apps
 
-With its `connector` and `secrets` extras, memory serves one read-only tool,
-`search_memory`, to the Claude apps through the connector, Moxi's public MCP host:
+With its `connector` and `secrets` extras, memory serves two tools to the Claude apps
+through the connector, Moxi's public MCP host: `search_memory`, which only reads, and
+`recall`, a chat's subconscious:
 
 ```sh
 moxi install memory --with connector,secrets
@@ -921,10 +988,50 @@ and a `memory redaction` row (whether the chat sets load, and secrets' engine).
 matched only text the redaction hid or a path the cut shortened), `unscanned`, `redactions`, `cut` and `refusal`. It
 never holds the words searched for, text read or a session id.
 
-What a chat that reads this tool can do with what it read, and what redaction doesn't
+**`recall`** gives a chat the subconscious ("In a chat" under "The subconscious"). The
+chat calls it at the start of every turn. Inputs: `conversation` (required: a label the
+chat makes up once per conversation, from its topic and the time, 8 to 40 lowercase
+letters, digits and hyphens, such as `kiosk-approver-1530`), `words` (what the user just
+said, up to 4000 characters; left out or empty, the call only collects) and `context`
+(what the conversation is about now, up to 4000 characters). The server can't tell two
+chats apart, so two chats share pieces only when both make up the same label.
+
+It answers `pieces`, each piece not handed over before, oldest first: `id`
+(`<recall>:<round>`), `for_words` (the head of the words it answers), `age_s`, `stale`
+and `text`. A piece is `stale` when a later call of the conversation carried words
+before the call that hands it: it answers something said before the user's last words,
+and the text part says "earlier:" before it. Beside the pieces: `started` (the new
+recall's id, or null), `skipped` (why none started: `no-words`, `no-keyword`, `off`,
+`busy`, `no-launcher`, `no-harness` or `fence`), `running` (the conversation's recalls
+still running) and `notes`. A recall the call starts has no piece in that answer; its
+pieces come at later calls.
+
+A piece is handed once: when the answer is written, its pieces are marked handed; when
+it isn't, they wait for the next call. A line handed in the conversation in the last six
+hours is cut from later pieces and told to later recalls as already had. A piece not
+handed within `subconscious.chat.drop_after_s` is dropped. At most 20 pieces go in one
+answer; `notes` says how many more wait.
+
+Every piece goes through secrets' `chat_redact`, and the text part, which joins them,
+again whole. A piece that comes back unscanned is held back with a note and tried again
+at the next call. It refuses `bad-input`, `not-started`, `redaction-off` and `config`
+(memory's config can't be read), collecting and starting nothing; a recall that can't
+start is never a refusal. The tool is listed whether the chat recall is on or off, and
+each call reads `subconscious.chat.enabled` afresh, so turning it on needs no restart.
+
+It returns at once. Its calls run under a limit of their own, so a slow `search_memory`
+never delays one: two at once, a third waiting up to 5 seconds, each ended at 20
+seconds. Inside that, a call's own work has 5 seconds from its start, and every lock it
+waits for takes at most what is left: a conversation busy past it collects nothing and
+says so, and a start past it is `skipped: busy`. Its status row, `memory recall`, says
+whether it is on, why no recall can start, and how many opened today. The call log
+records `pieces`, `held_back`, `waiting`, `started`, `skipped`, `running`, `redactions`
+and `refusal`, never the words, the context or the label.
+
+What a chat that reads these tools can do with what it read, and what redaction doesn't
 catch, is in the connector's
 [docs/security.md](https://github.com/CodeManEthan/moxi/blob/moxi-memory-v0.1.0/packages/connector/docs/security.md).
-Read it before you turn the tool on.
+Read it before you turn the tools on.
 
 ## Install
 
