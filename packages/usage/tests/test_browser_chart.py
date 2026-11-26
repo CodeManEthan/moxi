@@ -852,8 +852,9 @@ def test_the_heat_map_follows_only_the_place_filter_and_its_table_lists_the_used
 # --- the contract and a phone's width ------------------------------------------------------
 
 def test_the_page_with_its_chart_keeps_the_contract_in_text_tokens(seeded, page, ui_component_check):
+    # The page reads launcher's running launches, with launcher installed.
     check = ui_component_check(page, "usage", "page", {"route": ""}, tokens=("text", "text-dim"),
-                               keep=True)
+                               keep=True, allow=("launcher",))
     expect(check.locator.locator("[data-group=chart] svg[data-part=chart]")).to_be_visible()
     for read in ("daily?by=day", "projects?", "models?"):
         assert any(f"/m/usage/api/{read}" in url for url in check.requests), check.requests

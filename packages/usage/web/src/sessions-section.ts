@@ -10,6 +10,8 @@ import { LOCAL, whenWord } from "./days.ts";
 import type { Clock } from "./days.ts";
 import { Feed, parseReport } from "./feed.ts";
 import type { Report, SessionRow } from "./feed.ts";
+import { launchOf } from "./launched-model.ts";
+import type { Launched } from "./launched-model.ts";
 import { percentWords } from "./limits-model.ts";
 import { tilde } from "./filter-model.ts";
 import {
@@ -32,15 +34,16 @@ export interface SessionsClosed {
 }
 
 /** The closed row from `/api/sessions` over the range at `top=1`; null until it has
- * answered and when the range holds no session. */
+ * answered and when the range holds no session. `launched` names a session a running
+ * launch holds. */
 export function sessionsClosed(answer: Report<SessionRow> | null, today: string | null,
-                               clock: Clock = LOCAL): SessionsClosed | null {
+                               clock: Clock = LOCAL, launched: Launched | null = null): SessionsClosed | null {
   if (answer === null) return null;
   const count = answer.count ?? answer.rows.length;
   if (count <= 0) return null;
   const top = answer.rows[0];
   const closed = top === undefined || top.cost === null ? null
-    : `most to ${sessionName(top, today, clock).name}, ${costWords(sumRows([top]))}`;
+    : `most to ${sessionName(top, today, clock, launchOf(launched, top)).name}, ${costWords(sumRows([top]))}`;
   return { closed, count: countWords(count, "session") };
 }
 
@@ -86,15 +89,17 @@ export function contextWords(context: SessionRow["context"]): string | null {
 }
 
 /** The two-line row of the session the address names. `projects` says whether projects
- * is installed, so a row's project is its `where`. */
+ * is installed, so a row's project is its `where`; `launched` names a session a running
+ * launch holds and says where it runs. */
 export function sessionLine(row: SessionRow, today: string | null, projects: boolean,
-                            clock: Clock = LOCAL): SessionLine {
+                            clock: Clock = LOCAL, launched: Launched | null = null): SessionLine {
   const sum = sumRows([row]);
   const models = row.models.join(", ");
+  const launch = launchOf(launched, row);
   return {
     key: rowKey(row),
-    name: sessionName(row, today, clock).name,
-    where: sessionWhere(row, projects),
+    name: sessionName(row, today, clock, launch).name,
+    where: sessionWhere(row, projects, launch),
     cost: costWords(sum),
     why: whyNotWhole(sum),
     requests: countWords(row.requests, "request"),
@@ -227,10 +232,11 @@ export function nextOrder(now: BoardOrder, sort: BoardSort): BoardOrder {
  * classes each with a bar against the column's most among the rows read, its subagent
  * share and its cost. A folder is written from `home` (`~/work/proj-a`), the account's
  * home folder that `/api/projects` answers; with no `home` read, as its last segment. A
- * row whose cost is not whole carries why, for the mark in its cost cell.
+ * row whose cost is not whole carries why, for the mark in its cost cell. `launched`
+ * names a session a running launch holds.
  */
 export function sessionsBoard(list: ListRead, by: BoardOrder, today: string | null, projects: boolean,
-                              home: string | null, clock: Clock = LOCAL): Board {
+                              home: string | null, clock: Clock = LOCAL, launched: Launched | null = null): Board {
   const when = (at: number | null): string => (at === null ? "" : whenWord(at, today, clock, true));
   const column = (label: string, num: boolean, sort: BoardSort | null, title: string | null = null): BoardColumn => ({
     label, num, sort, title,
@@ -255,7 +261,7 @@ export function sessionsBoard(list: ListRead, by: BoardOrder, today: string | nu
     why: whyNotWhole(sumRows([row])),
     ...unzip([
       [projects ? row.project ?? "" : folderCell(row.folder ?? row.cwd, home), null],
-      [sessionName(row, today, clock).name, null],
+      [sessionName(row, today, clock, launchOf(launched, row)).name, null],
       [when(row.first_ts), null],
       [row.first_ts === null || row.last_ts === null ? "" : fmtSpan(Math.max(0, row.last_ts - row.first_ts)), null],
       [(row.turns ?? 0).toLocaleString("en-US"), null],

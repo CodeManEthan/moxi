@@ -153,7 +153,9 @@ def show_subagents(opened):
 # --- the contract --------------------------------------------------------------------------
 
 def test_the_page_keeps_the_contract(indexed, ui_page, ui_component_check):
-    check = ui_component_check(ui_page, "usage", "page", {"route": ""}, tokens=("text",))
+    # The page reads launcher's running launches, with launcher installed.
+    check = ui_component_check(ui_page, "usage", "page", {"route": ""}, tokens=("text",),
+                               allow=("launcher",))
     assert check.element == "moxi-usage-page"
     assert any("/m/usage/api/status" in url for url in check.requests), check.requests
 
@@ -420,8 +422,9 @@ def bill(prices):
 
 def test_the_page_keeps_the_contract_on_the_prices_section(charted, charted_page,
                                                             ui_component_check):
+    # The page reads launcher's running launches, with launcher installed.
     check = ui_component_check(charted_page, "usage", "page", {"route": "prices"},
-                               tokens=("text",))
+                               tokens=("text",), allow=("launcher",))
     assert check.element == "moxi-usage-page"
     assert any("/m/usage/api/terms?" in url for url in check.requests), check.requests
 
