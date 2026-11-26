@@ -190,11 +190,11 @@ def test_kestrel_web_opened_has_its_7_day_figure_but_none_for_today(full, ui_con
         re.compile(rf"^{COST} in 7 days · {COST} in 30 days · an estimate$"))
 
 
-def test_the_loose_folder_carries_its_7_day_cost(full, ui_contexts):
+def test_a_work_dir_in_no_project_carries_its_7_day_cost(full, ui_contexts):
     page = page_on(ui_contexts, full)
     page.goto("/m/projects/")
-    folder = str(Path(full.env["HOME"]) / "code" / "finch-scripts")
-    loose = page.locator(f'#moxi-panel section[data-part="folders"] moxi-ui-row[data-folder="{folder}"]')
+    work_dir = str(Path(full.env["HOME"]) / "code" / "finch-scripts")
+    loose = page.locator(f'#moxi-panel section[data-part="folders"] moxi-ui-row[data-folder="{work_dir}"]')
     expect(loose).to_contain_text(re.compile(COST))
 
 

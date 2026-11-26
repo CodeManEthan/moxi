@@ -3013,6 +3013,10 @@ comms	packages/comms/src/moxi_comms/cli.py	help="NAME is a word a module declare
 comms	packages/comms/src/moxi_comms/daemon.py	on_fatal=lambda why: stopping.set(), respawn_adapters=True)	keep	set	set
 comms	packages/comms/src/moxi_comms/daemon.py	named = {identity_of(t) for t in ml.recipients} if ml is not None else set()	keep	set	set
 comms	packages/comms/src/moxi_comms/scoped.py	if not any(r["word"] == word for r in found_rows):	keep	any	any
+comms	packages/comms/tests/test_browser_project_facts.py	assert set(comms_reads(page)) <= {"/m/comms/project-facts.js", "/m/comms/api/roster"}, page.asked	keep	set	set
+comms	packages/comms/tests/test_browser_project_facts.py	done = subprocess.run(list(argv), env=shell.env, cwd=shell.env["HOME"], stdin=subprocess.DEVNULL,	keep	HOME	HOME
+comms	packages/comms/tests/test_browser_project_facts.py	root = Path(shell.env["HOME"]) / "code" / "atlas-api"	keep	HOME	HOME
+comms	packages/comms/tests/test_browser_project_facts.py	rows = [address(name, held=True) for name in live] + [address("planner", held=False)]	keep	held	held
 comms	packages/comms/tests/test_claude_launch.py	assert wait_until(lambda: not any(t.name == "comms-respawn"	keep	any	any
 comms	packages/comms/tests/test_daemon_respawn.py	r.stopping.set()	keep	set	set
 comms	packages/comms/tests/test_daemon_respawn.py	rig.daemon = Daemon(rig.record, clock=rig.clock, start_trim_thread=False,	keep	record	record
@@ -9218,6 +9222,10 @@ repo	packages/repo/tests/test_api_reexports.py	assert set(moxi_repo.EXPORTS) <= 
 repo	packages/repo/tests/test_api_reexports.py	return set(json.loads(done.stdout.splitlines()[-1]))	keep	set	set
 repo	packages/repo/tests/test_browser_page.py	assert any(REPOS in url for url in check.requests), check.requests	keep	any	any
 repo	packages/repo/tests/test_browser_page.py	repo = Path(ui_shell.env["HOME"]) / "alpha-notes"	keep	HOME	HOME
+repo	packages/repo/tests/test_browser_project_facts.py	assert set(repo_reads(page)) <= {"/m/repo/project-facts.js", "/m/repo/api/repos"}, page.asked	keep	set	set
+repo	packages/repo/tests/test_browser_project_facts.py	done = subprocess.run(list(argv), env=shell.env, cwd=cwd or shell.env["HOME"],	keep	HOME	HOME
+repo	packages/repo/tests/test_browser_project_facts.py	expect(lines.first).to_contain_text("refused")	keep	refused	refused
+repo	packages/repo/tests/test_browser_project_facts.py	root = Path(shell.env["HOME"]) / "code" / key	keep	HOME	HOME
 repo	packages/repo/tests/test_browser_questions.py	for text in ("says no", "refused"):	keep	refused	refused
 repo	packages/repo/tests/test_browser_questions.py	(notes / "notes").mkdir(exist_ok=True)	keep	exist_ok	exist_ok
 repo	packages/repo/tests/test_browser_questions.py	assert "refused" in run_pass("c.md", {"DEMO_PREPARE": "refuse"})	keep	refused	refused
@@ -18252,6 +18260,10 @@ launcher	packages/launcher/tests/test_target.py	assert session.closed == 0	keep	
 launcher	packages/launcher/tests/test_target.py	# `find` of the live id resolves the same way, asking turns for that id.	keep	find	find
 launcher	packages/launcher/tests/test_target.py	assert asked.closed == 1	keep	closed	closed
 usage	packages/usage/src/moxi_usage/mark.py	if any(name == CROSSING and fired(name, mark) for name, mark in wanted):	keep	any	any
+usage	packages/usage/tests/test_browser_project_facts.py	assert set(usage_reads(page)) <= {"/m/usage/project-facts.js", "/m/usage/api/projects"}, page.asked	keep	set	set
+usage	packages/usage/tests/test_browser_project_facts.py	done = subprocess.run(list(argv), env=shell.env, cwd=shell.env["HOME"], stdin=subprocess.DEVNULL,	keep	HOME	HOME
+usage	packages/usage/tests/test_browser_project_facts.py	home = Path(shell.env["HOME"])	keep	HOME	HOME
+usage	packages/usage/tests/test_browser_project_facts.py	work_dir = str(Path(full.env["HOME"]) / "code" / "finch-scripts")	keep	HOME	HOME
 rounds	packages/rounds/src/moxi_rounds/brake.py	was, now = (set(entry.get("checklist") or ()) for entry in (before, current))	keep	set	set
 rounds	packages/rounds/src/moxi_rounds/checklist.py	seen = set()	keep	set	set
 rounds	packages/rounds/src/moxi_rounds/checklist.py	return any(items(settings, one) for one in projects)	keep	any	any
