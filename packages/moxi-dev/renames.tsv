@@ -18175,3 +18175,4 @@ moxi	packages/moxi/tests/test_config.py	env = {"HOME": str(tmp_path), "USERPROFI
 moxi	packages/moxi/tests/test_install.py	({"name": "moxi-turns", "directory": "/src/turns"},	keep	directory	directory
 moxi	packages/moxi/tests/test_modules.py	assert set(out.stdout.split()) == {"moxi", "moxi._mark"}	keep	set	set
 moxi	packages/moxi/tests/test_proc.py	assert (msvcrt.opened, unread) == ([5, 5], [99, 99])	keep	opened	opened
+usage	packages/usage/tests/test_bench.py	home.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
