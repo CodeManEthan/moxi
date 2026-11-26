@@ -96,3 +96,27 @@ items = "str"
 default = ["moxi memory search", "moxi sessions read", "grep", "cat", "head", "tail", "ls", "wc", "cut"]
 doc = "The shell commands a recall fork may run, alone or joined by pipes, each matched word for word at the start of a command. A program added here is yours to vouch for: it must not run another program from its flags or arguments."
 read = "use"
+
+[subconscious.chat.enabled]
+type = "bool"
+default = false
+doc = "Whether the recall tool starts recalls for a chat in the Claude apps; each recall spends tokens. Off, the tool still hands back what earlier recalls found."
+read = "use"
+
+[subconscious.chat.running_max]
+type = "int"
+default = 2
+doc = "The most chat recalls of one conversation running at once, 1 to 5; a new one hurries the oldest past it."
+read = "use"
+
+[subconscious.chat.drop_after_s]
+type = "int"
+default = 900
+doc = "How long a chat recall's piece waits to be handed over before it is dropped, in seconds, 60 to 86400."
+read = "use"
+
+[subconscious.chat.model]
+type = "string"
+default = ""
+doc = "The model a chat recall's agent runs on; empty means the harness's default."
+read = "use"

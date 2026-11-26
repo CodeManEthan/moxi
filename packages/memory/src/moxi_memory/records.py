@@ -14,7 +14,7 @@ running until its record is `ended` or `lost`.
 
 A record holds (`RECORD_FIELDS`): its id (`recall`), the session and its harness, its
 state, the reason for a `lost` state and the error behind it, how it started (`start`:
-`prompt` or `asked`), the prompt's text or the topic (`text`), the prompt's
+`prompt`, `asked` or `chat`), the prompt's text or the topic (`text`), the prompt's
 `delivery_senders` (`senders`), the subconscious settings its child runs on (`settings`,
 every `subconscious.*` key by its last name), the session's launch directory (`cwd`) and
 notes directory override (`notes_dir`), the route, the session's comms name when the
@@ -25,7 +25,9 @@ process that holds the recall (`holder`, `moxi_memory.recall_holder`), when it w
 written first and last (`at`, `updated`), the clock that counts from boot at its first
 write where the system has one (`at_boot`), and its place among the session's records
 (`seq`, one more than the highest the session's records held when it was first
-written). Records are ordered by `seq`, never by `at`, which the clamp below moves;
+written). A chat recall's record also holds the context the chat passed (`context`), the
+number of the conversation's call that started it (`call`), and its agent's Claude Code
+session id once its child minted it (`headless_session`). Records are ordered by `seq`, never by `at`, which the clamp below moves;
 records written before `seq` come first, by `at`.
 
 **An `at` later than now (the clamp).** `at` is the wall clock of the process that
@@ -78,7 +80,7 @@ RECORD_FIELDS = ("recall", "session", "harness", "state", "reason", "error", "st
                  "text", "senders", "settings", "cwd", "notes_dir", "route", "comms_name",
                  "fork",
                  "delivery", "tools", "answered", "rounds", "brief", "holder", "seq",
-                 "at", "at_boot", "updated")
+                 "context", "call", "headless_session", "at", "at_boot", "updated")
 
 
 def records_dir(session_id: str) -> Path:
@@ -190,13 +192,14 @@ def clamp(session_id: str, recall_id: str, *, now: float | None = None) -> dict 
     return record
 
 
-def hurry_running(session_id: str, *, now: float | None = None) -> list[str]:
-    """Set every running recall of the session `hurried`, and return their ids. The
-    caller holds the session's lock."""
+def hurry_running(session_id: str, *, keep: int = 0,
+                  now: float | None = None) -> list[str]:
+    """Set every running recall of the session `hurried` but the newest `keep` not
+    hurried yet, and return their ids. The caller holds the session's lock."""
     hurried = []
-    for record in session_records(session_id):
-        if record.get("state") in DONE or record.get("state") == HURRIED:
-            continue
+    unhurried = [record for record in session_records(session_id)
+                 if record.get("state") not in DONE and record.get("state") != HURRIED]
+    for record in unhurried[:len(unhurried) - max(keep, 0)]:
         record["state"] = HURRIED
         write(record, now=now)
         hurried.append(str(record["recall"]))

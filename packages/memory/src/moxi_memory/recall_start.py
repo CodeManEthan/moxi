@@ -35,7 +35,8 @@ A session stamped `SUBCONSCIOUS_FORK_ENV` is a recall's slot fork: no recall sta
 it.
 
 **A new recall (`begin`).** Under the session's subconscious lock it sets every recall of
-the session still running `hurried`, starts the detached starter (`spawn_starter`) for
+the session still running `hurried` (but the newest `keep_running`, which a chat recall
+passes and the terminal recall leaves at 0), starts the detached starter (`spawn_starter`) for
 the child, `moxi-memory-subconscious`, with the session and the recall's id, and writes
 the new recall's record, state `starting`, naming the starter as the recall's holder
 (`moxi_memory.recall_holder`) and holding everything its child runs on: the prompt's
@@ -97,6 +98,9 @@ ROUTES = (SUBAGENT, SLOT)
 #: round a turn on the forked thread. No launch value names it; `route` picks it for no
 #: session while a Codex session's recall is off unless its launch picks the slot route.
 HOST_FORK = "host-fork"
+#: The route of a chat recall: a fresh headless launch per recall, through the launcher's
+#: interface 4. No launch value names it; only a chat's `recall` call starts it.
+HEADLESS = recalls.HEADLESS
 #: The routes whose answers come back to the session as a comms message.
 BY_COMMS: tuple[str, ...] = (SLOT, HOST_FORK)
 #: Why a session's subconscious can't run.
@@ -265,15 +269,20 @@ def new_id() -> str:
 def begin(session_id: str, harness: str | None, *, start: str, text: str,
           senders, settings: Mapping[str, object], cwd: str | None,
           notes_dir: str | None, route_name: str, recall_senders=(),
-          comms_name: str | None = None, now: float | None = None, spawn=None) -> dict:
-    """Write a new recall's record, hurrying the session's running one, start its child
-    and return the record. See the module's docstring."""
+          comms_name: str | None = None, keep_running: int = 0,
+          lock_s: float | None = None, chat: Mapping[str, object] | None = None,
+          now: float | None = None, spawn=None) -> dict:
+    """Write a new recall's record, hurrying the session's running ones but the newest
+    `keep_running`, start its child and return the record. `lock_s` bounds the wait for
+    the session's lock (`moxi.files.LockTimeout` past it, with nothing written; None
+    waits as long as it takes). `chat` holds a chat recall's own record fields
+    (`context`, `call`). See the module's docstring."""
     from . import recall_holder
 
     recall_id = new_id()
     failed = None
-    with recalls.session_lock(session_id):
-        records.hurry_running(session_id, now=now)
+    with recalls.session_lock(session_id, timeout_s=lock_s):
+        records.hurry_running(session_id, keep=keep_running, now=now)
         # the starter takes this lock before it names the child, so it is started first
         # and named in the record's first write
         try:
@@ -287,7 +296,8 @@ def begin(session_id: str, harness: str | None, *, start: str, text: str,
             "settings": dict(settings), "cwd": cwd,
             "notes_dir": notes_dir, "route": route_name, "tools": 0, "answered": False,
             "rounds": 0, "comms_name": comms_name,
-            "holder": None if failed else recall_holder.holder(pid)}, now=now)
+            "holder": None if failed else recall_holder.holder(pid),
+            **{k: v for k, v in (chat or {}).items() if k in CHAT_FIELDS}}, now=now)
     if failed is not None:
         record = lose_spawn(session_id, recall_id, failed) or record
     return record
@@ -306,6 +316,10 @@ def lose_spawn(session_id: str, recall_id: str, error: str) -> dict | None:
             "reason": SPAWN, "error": error, "start": known.get("start"),
             "head": recalls.head(known.get("text") or ""), "route": known.get("route")})
     return record
+
+
+#: The record fields only a chat recall's `begin` writes.
+CHAT_FIELDS = ("context", "call")
 
 
 #: The flag that runs `moxi-memory-subconscious` as the detached starter.
@@ -463,7 +477,7 @@ def reset_asked(session_id: str) -> None:
 
 __all__ = ["SUBCONSCIOUS_ENV", "SUBCONSCIOUS_ROUTE_ENV", "SUBCONSCIOUS_FORK_ENV",
            "STAMPS", "route_stamp", "AUTOMATIC", "ON_DEMAND", "MODES", "SUBAGENT", "SLOT",
-           "HOST_FORK", "ROUTES", "BY_COMMS", "NO_FORK", "UNKNOWN_ROUTE", "CODEX", "NO_SLOTS",
+           "HOST_FORK", "HEADLESS", "CHAT_FIELDS", "ROUTES", "BY_COMMS", "NO_FORK", "UNKNOWN_ROUTE", "CODEX", "NO_SLOTS",
            "NO_LAUNCHER", "IN_FORK",
            "is_fork", "offers_fork", "slot_why", "slots_here", "USER", "USER_AND_COMMS",
            "SCRIPT", "ASKED", "SPAWN", "mode",

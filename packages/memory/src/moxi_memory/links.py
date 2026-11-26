@@ -38,6 +38,10 @@ LAUNCHER_INTERFACE = 1
 #: The launcher interface the slot route speaks: `fork`, `exit_session`, `running` and
 #: `slots_here`.
 LAUNCHER_FORK_INTERFACE = 3
+#: The launcher interface the chat recall's headless route speaks: `launch`, `preview`,
+#: `prepare`, `child_env`, `settable_rows`, `continue_headless`, `run_log`,
+#: `end_headless`, `running` and a launch's `stamps`.
+LAUNCHER_HEADLESS_INTERFACE = 4
 #: The notes interface memory speaks: `notes_dir`, `root` and `NOTES_DIR_ENV`.
 NOTES = "notes"
 NOTES_INTERFACE = 1
@@ -99,6 +103,12 @@ def launcher_forks() -> Link:
     return load(LAUNCHER, LAUNCHER_FORK_INTERFACE)
 
 
+def launcher_headless() -> Link:
+    """The link to the launcher that runs, continues and ends a headless launch, for a
+    chat recall."""
+    return load(LAUNCHER, LAUNCHER_HEADLESS_INTERFACE)
+
+
 def notes() -> Link:
     """The link to notes, for the notes a recall reads."""
     return load(NOTES, NOTES_INTERFACE)
@@ -106,6 +116,6 @@ def notes() -> Link:
 
 __all__ = ["READY", "NONE", "FAILING", "NO_INTERFACE", "COMMS", "COMMS_INTERFACE",
            "COMMS_SCOPED_INTERFACE", "LAUNCHER", "LAUNCHER_INTERFACE",
-           "LAUNCHER_FORK_INTERFACE", "NOTES", "NOTES_INTERFACE", "Link", "load", "comms",
-           "comms_scoped", "launcher", "launcher_forks", 
+           "LAUNCHER_FORK_INTERFACE", "LAUNCHER_HEADLESS_INTERFACE", "NOTES", "NOTES_INTERFACE", "Link", "load", "comms",
+           "comms_scoped", "launcher", "launcher_forks", "launcher_headless",
            "notes"]

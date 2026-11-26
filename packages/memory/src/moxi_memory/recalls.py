@@ -12,8 +12,8 @@ Everything lives under `subconscious/` in memory's state directory:
   whole (`moxi.files.atomic_write`), so a read sees one version or the next.
 
 A recall's line holds (`LINE_FIELDS`): its id (`recall`), the session and its harness,
-its state, the reason for a `lost` or `off` state and the error behind it, how it started (`start`: `prompt` or
-`asked`), the first `HEAD_CHARS` characters of its prompt or topic (`head`), its route,
+its state, the reason for a `lost` or `off` state and the error behind it, how it started (`start`: `prompt`,
+`asked` or `chat`), the first `HEAD_CHARS` characters of its prompt or topic (`head`), its route,
 the comms name its answers go to once the session's binding has ended (`comms_name`, on
 a route that answers by comms), the fork's id, the child's process identity (`child`: pid and start time) and that of
 the process that took the line over when its owner was gone (`taker`), the current
@@ -25,7 +25,12 @@ search went past the project, and no counts per part), the child's start-up
 time, whether the recall was hurried or ran past its limit, each round's text and when
 it came back (`rounds`), and when the line was first and last written. On a route that
 answers by comms, the id comms gave the newest answer it took (`message_id`) is on the
-line, and each sent answer's id on its round's entry.
+line, and each sent answer's id on its round's entry. A chat recall's
+line (start `chat`, route `headless`) also holds its agent's Claude Code session id
+(`headless_session`, written before the agent starts), the number of the
+conversation's call that started it (`call`), and the launch request id of its current
+round (`request`, written before that round is launched); each of its rounds keeps the
+request id that ran it (`request`) and what it cost (`cost_usd`).
 
 A line's state says where the recall's answer is (`LINE_STATES`): `open` while its child
 runs a round and holds no answer for it yet, `back` once an answer came back, `lost`
@@ -65,9 +70,14 @@ OFF = "off"
 LINE_STATES = (OPEN, SENDING, BACK, LOST, DISCARDED, OFF)
 #: The states a person may discard a line in: an answer memory still holds to send.
 DISCARDABLE: tuple[str, ...] = (SENDING,)
-#: How a recall started: a prompt, or the agent's own request.
+#: How a recall started: a prompt, the agent's own request, or a chat's `recall` call.
 PROMPT = "prompt"
 ASKED = "asked"
+CHAT = "chat"
+#: The route of a chat recall: a fresh headless launch of its own agent.
+HEADLESS = "headless"
+#: The reason on a chat recall the fence stopped: its probe failed on this machine.
+FENCE = "fence"
 #: How many characters of a prompt or topic a line keeps as its head.
 HEAD_CHARS = 80
 #: The fields of a recall's line.
@@ -76,7 +86,8 @@ LINE_FIELDS = ("recall", "session", "harness", "state", "reason", "error", "star
                "project_hits", "beyond_hits", "widened", "startup_s", "hurried",
                "past_limit", "past_bound", "rounds", "sending_at",
                "send_tries", "send_reason", "sent_at", "message_id", "discarded_by",
-               "discarded_at", "at", "updated")
+               "discarded_at", "headless_session", "call", "request", "at",
+               "updated")
 #: A session id the log may name a file after.
 _SAFE = re.compile(r"[A-Za-z0-9_][A-Za-z0-9_.-]{0,199}")
 
@@ -173,6 +184,15 @@ def fork_ids() -> frozenset[tuple[str, str]]:
                      for line in all_lines() if line.get("fork"))
 
 
+def headless_sessions() -> frozenset[tuple[str, str]]:
+    """The `(harness, headless_session)` of every chat recall the log names: the main
+    sessions of the chat recalls' agents, whose transcripts memory's index leaves out.
+    Each id is on its line before the agent starts. The log is never swept, as
+    `fork_ids` says."""
+    return frozenset((str(line.get("harness") or ""), str(line["headless_session"]))
+                     for line in all_lines() if line.get("headless_session"))
+
+
 def message_ids() -> frozenset[str]:
     """The comms message id of every answer the log says was sent by comms: the
     line's `message_id` and each round's. memory's index leaves these messages out
@@ -263,7 +283,8 @@ def head(text: str) -> str:
 
 
 __all__ = ["DIR_NAME", "LOG", "LOCKS", "OPEN", "SENDING", "BACK", "LOST", "DISCARDED", "OFF",
-           "LINE_STATES", "DISCARDABLE", "PROMPT", "ASKED", "HEAD_CHARS", "LINE_FIELDS", "is_safe",
+           "LINE_STATES", "DISCARDABLE", "PROMPT", "ASKED", "CHAT", "HEADLESS", "FENCE", "HEAD_CHARS",
+           "LINE_FIELDS", "is_safe", "headless_sessions",
            "subconscious_dir", "log_path", "session_lock", "read_lines", "logged_sessions",
            "all_lines", "fork_ids", "message_ids", "find_line", "put_line", "note_off",
            "sent_lines", "head"]

@@ -1,6 +1,6 @@
 """The route a recall's rounds take to its fork: Claude Code's subagent route, through
-turns' `fork`, Codex's host fork, through the same requests, or the slot route, a fork of
-the session in a slot.
+turns' `fork`, Codex's host fork, through the same requests, the slot route, a fork of
+the session in a slot, or a chat recall's headless route.
 
 `Subagent` asks the session's turns endpoint for a `fork` with the brief as its first
 round and a `fork.continue` for each later one, each with its ref, `keep` and the
@@ -41,12 +41,27 @@ the line, and a discard of a line whose owner is gone (`end_fork`). A fork whose
 still open at the late wait's last limit is not exited: its turn has not ended, and the
 taker that settles the line ends it.
 
+`Headless` is a chat recall's route: each round a launcher headless launch of the
+recall's own agent through the launcher's interface 4, under the read-only fence
+(`moxi_memory.recall_fence.request`, stamped as the recall's fork), the first round a
+fresh launch with the session id memory minted, each later one a headless resume of that
+session (`continue_headless`). Each round's request id is minted and handed to the
+caller (`on_request`, which writes it on the line) before the round is launched. A
+round's end is read once its process has exited, from the last `result` object of its
+run log: its text is the answer and its `total_cost_usd` the round's cost
+(`round_fields`); no result, or an error result, is `Lost` (`gone`). Past the round's
+bound the route ends the launch's process tree (`end_headless`) and answers `Lost`
+(`gone`). No turns endpoint keeps a headless round's end, so `ack` does nothing, and a
+taker reads an unsettled round's end from the run log its line's `request` names
+(`read_end`), leaving the line while that launch still runs. `exit` ends the current
+round's launch through `end_headless`.
+
 Each route names the session its rounds are delivered to (`turns_session`), where a
 taker reads and acks a round's end by its ref.
 
 `for_recall(recall)` gives the route the recall's record names (or its log line, for a
-record already swept): `Slot` for `slot`, `HostFork` for `host-fork`, `Subagent`
-otherwise.
+record already swept): `Slot` for `slot`, `HostFork` for `host-fork`, `Headless` for
+`headless` (a taker's, built from the line), `Subagent` otherwise.
 
 Standard library at import; turns' client is imported at use.
 """
@@ -56,7 +71,7 @@ from __future__ import annotations
 import time
 from typing import Any
 
-from .recall_start import HOST_FORK, SLOT, SUBAGENT, SUBCONSCIOUS_FORK_ENV
+from .recall_start import HEADLESS, HOST_FORK, SLOT, SUBAGENT, SUBCONSCIOUS_FORK_ENV
 
 #: The module name memory asks turns as.
 BY = "memory"
@@ -73,6 +88,8 @@ EXIT_HELD_S = 60
 #: waits on or a late answer could still settle. A copy, since turns exports no
 #: maximum: turns' own tests pin the value this copies.
 HOST_FORK_TURNS_BOUND_S = (2**31 - 1) // 1000
+#: How often the headless route looks whether a round's process has exited, in seconds.
+HEADLESS_POLL_S = 0.2
 
 
 class _Known:
@@ -307,6 +324,225 @@ class Slot:
             sleep(EXIT_RETRY_S)
 
 
+class _Launched:
+    """A headless round the launcher started: its request id, its process (None when
+    it had exited before it was read) and its bound's deadline on the monotonic clock."""
+
+    def __init__(self, request_id: str, root: Any, deadline: float):
+        self.request_id = request_id
+        self.root = root
+        self.deadline = deadline
+
+
+class Headless:
+    """The headless route for one chat recall: each round a launcher headless launch of
+    its own agent (the launcher's interface 4), the first fresh and each later one a
+    headless resume of the same session, the answer read from the round's run log.
+
+    `spec` is the recall's `recall_fence.Spec` with its minted session id (its brief and
+    request id are each round's own); `on_request` is called with each round's minted
+    request id before that round is launched, so the line names it first. A taker builds
+    the route from the line alone (`session`, `request`), to read and end the round the
+    line names."""
+
+    name = HEADLESS
+
+    def __init__(self, session_id: str, recall_id: str, *, spec: Any = None,
+                 session: str | None = None, request: str | None = None,
+                 on_request=None, launcher: Any = None, clock=time.monotonic,
+                 sleep=time.sleep):
+        self.session_id = session_id
+        self.recall_id = recall_id
+        self.spec = spec
+        self.session = session or (spec.session_id if spec is not None else None)
+        self.request = request
+        self.on_request = on_request
+        self._launcher = launcher
+        self._clock = clock
+        self._sleep = sleep
+        self._fields: dict = {}
+
+    @property
+    def turns_session(self) -> str:
+        return self.session_id
+
+    def _api(self):
+        if self._launcher is None:
+            from . import links
+
+            link = links.launcher_headless()
+            if not link.ready:
+                raise RuntimeError(link.reason or "launcher without interface 4")
+            self._launcher = link.api
+        return self._launcher
+
+    def _mint(self) -> str:
+        import uuid
+
+        rid = str(uuid.uuid4())
+        if self.on_request is not None:
+            self.on_request(rid)
+        self.request = rid
+        self._fields = {"request": rid}
+        return rid
+
+    def _started(self, result, rid: str, round_timeout_s: float):
+        from moxi import proc
+        from moxi_turns import Lost
+
+        pid = getattr(result, "pid", None)
+        if pid is None:
+            why = getattr(result, "reason", None) or getattr(result, "state", None)
+            return _Known(Lost(f"gone: the launcher started no process ({why})"))
+        return _Launched(rid, proc.identity(int(pid)), self._clock() + round_timeout_s)
+
+    def first(self, text: str, *, ref: str, round_timeout_s: float):
+        """Launch the recall's agent fresh, with `text` as its brief."""
+        from dataclasses import replace
+
+        from moxi_turns import Refused
+
+        from . import recall_fence
+
+        try:
+            launcher = self._api()
+            rid = self._mint()
+            req = recall_fence.request(launcher, replace(self.spec, brief=text,
+                                                         request_id=rid))
+            result = launcher.launch(req)
+        except Exception as exc:  # noqa: BLE001 - a launch the launcher refused is lost
+            return _Known(Refused(f"denied: the launcher: {exc}"))
+        return self._started(result, rid, round_timeout_s)
+
+    def next(self, prior, text: str, *, ref: str, round_timeout_s: float):
+        """Resume the agent's session headless with `text` as its prompt."""
+        from moxi_turns import Refused
+
+        from . import recall_fence
+
+        if self.session is None:
+            return self._gone("the recall has no headless session")
+        try:
+            launcher = self._api()
+            rid = self._mint()
+            result = launcher.continue_headless(self.session, text, request_id=rid,
+                                                by=recall_fence.ACTOR)
+        except Exception as exc:  # noqa: BLE001 - a resume the launcher refused is lost
+            return _Known(Refused(f"denied: the launcher: {exc}"))
+        return self._started(result, rid, round_timeout_s)
+
+    def _gone(self, why: str) -> _Known:
+        from moxi_turns import Lost
+
+        return _Known(Lost(f"gone: {why}"))
+
+    def started(self, handle) -> str | None:
+        return None if isinstance(handle, _Known) else self.session
+
+    def ended(self, handle, timeout_s: float):
+        """The round's end: wait for its process to exit, at most its bound, and read
+        the run log. Past the bound, end the launch's process tree and answer `Lost`."""
+        from moxi import proc
+
+        if isinstance(handle, _Known):
+            return handle.value
+        while handle.root is not None and proc.alive(handle.root):
+            if self._clock() >= handle.deadline:
+                self._api().end_headless(handle.request_id)
+                return self._gone("the round's bound passed with no answer").value
+            self._sleep(HEADLESS_POLL_S)
+        return self._read(handle.request_id)
+
+    def _read(self, request_id: str):
+        """The end the run log of `request_id` holds: turns' `Ended` with the last
+        `result` object's text (its cost kept for the round), else `Lost`."""
+        from moxi_turns import Ended
+
+        self._fields = {"request": request_id}
+        try:
+            text = self._api().run_log(request_id).read_bytes().decode("utf-8", "replace")
+        except Exception as exc:  # noqa: BLE001 - a run log not read gives no answer
+            return self._gone(f"the run log can't be read: {exc}").value
+        found = last_result(text)
+        if found is None:
+            return self._gone("the agent exited with no result").value
+        cost = found.get("total_cost_usd")
+        if isinstance(cost, (int, float)):
+            self._fields = {**self._fields, "cost_usd": float(cost)}
+        if found.get("is_error") or not isinstance(found.get("result"), str):
+            why = found.get("subtype") or "an error"
+            return self._gone(f"the agent ended with {why}").value
+        return Ended(turn_id=None, outcome="completed", answer=found["result"])
+
+    def round_fields(self) -> dict:
+        """What the round just settled keeps on its entry: its request id and cost."""
+        return dict(self._fields)
+
+    def ack(self, ref: str) -> None:
+        """Nothing: no turns endpoint keeps a headless round's end."""
+
+    def read_end(self, ref: str):
+        """A taker's read of the round the line names, without waiting: its end from the
+        run log of the line's `request` once its launch no longer runs. Raises
+        `TimeoutError` while it runs."""
+        if self.request is None:
+            return self._gone("the round was never launched").value
+        try:
+            live = {r.request_id for r in self._api().running()}
+        except Exception:  # noqa: BLE001 - a launch log not read: left for the next taker
+            raise TimeoutError("the launcher can't say whether the round runs") from None
+        if self.request in live:
+            raise TimeoutError("the round's agent still runs")
+        return self._read(self.request)
+
+    def read_start(self, ref: str):
+        """A taker's read of the round's start: the agent's session, as turns' value."""
+        from moxi_turns import Started
+
+        if self.session is None:
+            raise LookupError("the line names no headless session")
+        return Started(turn_id=None, ref=ref, agent_id=self.session)
+
+    def exit(self, *, held_s: float = EXIT_HELD_S, sleep=time.sleep) -> str | None:
+        """End the current round's launch through the launcher's `end_headless`, and
+        return how it came out (`ended`, or `failed: <why>`); None when the recall
+        launched nothing or its launch has already ended. Never raises."""
+        if self.request is None:
+            return None
+        try:
+            done = self._api().end_headless(self.request)
+        except Exception as exc:  # noqa: BLE001 - a refusal is noted, never raised
+            return f"failed: {exc}"
+        outcome = str(getattr(done, "outcome", "") or "")
+        if outcome == "gone":
+            return None
+        error = getattr(done, "error", "")
+        return f"{outcome}: {error}" if error else outcome
+
+    def close(self) -> None:
+        pass
+
+
+def last_result(text: str) -> dict | None:
+    """The last JSON object of type `result` in a run log's text: one per line, or a
+    list of them on one line."""
+    import json
+
+    found = None
+    for raw in text.splitlines():
+        raw = raw.strip()
+        if not raw.startswith(("{", "[")):
+            continue
+        try:
+            item = json.loads(raw)
+        except ValueError:
+            continue
+        for one in item if isinstance(item, list) else [item]:
+            if isinstance(one, dict) and one.get("type") == "result":
+                found = one
+    return found
+
+
 def end_fork(recall, route, *, held_s: float = EXIT_HELD_S, sleep=time.sleep) -> str | None:
     """End `route`'s fork when it is a slot fork, and note how on recall `recall`'s line
     (`fork_exit`). None, writing nothing, on a route with no fork of its own to end.
@@ -341,11 +577,17 @@ class ForkEnder:
         end_fork(self.recall, self.route, sleep=self.sleep)
 
 
-def for_recall(recall) -> Subagent | HostFork | Slot:
-    """The route recall `recall`'s record names, else its log line."""
+def for_recall(recall) -> Subagent | HostFork | Slot | Headless:
+    """The route recall `recall`'s record names, else its log line. A headless route
+    built here is a taker's: it reads and ends the round the line names."""
     record = getattr(recall, "record", None) or {}
     line = getattr(recall, "line", None) or {}
     name = record.get("route") or line.get("route")
+    if name == HEADLESS:
+        return Headless(recall.session_id, recall.recall_id,
+                        session=line.get("headless_session")
+                        or record.get("headless_session"),
+                        request=line.get("request"))
     if name == SLOT:
         fork = record.get("fork") or line.get("fork")
         return Slot(recall.session_id, recall.recall_id, fork=fork)
@@ -355,4 +597,5 @@ def for_recall(recall) -> Subagent | HostFork | Slot:
 
 
 __all__ = ["BY", "EXITED", "HELD", "EXIT_RETRY_S", "EXIT_HELD_S", "HOST_FORK_TURNS_BOUND_S",
-           "Subagent", "HostFork", "Slot", "end_fork", "ForkEnder", "for_recall"]
+           "HEADLESS_POLL_S", "Subagent", "HostFork", "Slot", "Headless", "last_result",
+           "end_fork", "ForkEnder", "for_recall"]
