@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import concurrent.futures
 import contextlib
+import inspect
 import json
 import os
 import socket
@@ -250,7 +251,9 @@ def test_a_read_says_why_it_failed(scripted, monkeypatch):
 
 
 def test_an_answer_that_cannot_be_read_says_so_not_that_the_link_closed(scripted):
-    from moxi.ipc import _wire
+    # The client reads answers up to `ipc.connect`'s default cap, 4 MiB a line.
+    cap = 4 << 20
+    assert inspect.signature(ipc.connect).parameters["max_line"].default == cap
 
     def not_rpc(conn, params):
         # A line that isn't JSON-RPC, written ahead of the answer.
@@ -259,7 +262,7 @@ def test_an_answer_that_cannot_be_read_says_so_not_that_the_link_closed(scripted
         return {}
 
     server, s = scripted({"agents": not_rpc,
-                          "facts": lambda conn, params: {"pad": "x" * _wire.MAX_LINE}})
+                          "facts": lambda conn, params: {"pad": "x" * cap}})
     with pytest.raises(turns.TurnsError) as caught:
         s.agents()
     assert caught.value.why == "unreadable"
