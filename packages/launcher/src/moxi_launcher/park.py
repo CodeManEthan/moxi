@@ -11,7 +11,8 @@ Park holds the park lock for its whole run, and runs reconcile and crash discove
    launcher did not launch is listed `not launched by the launcher; left alone`; a launch
    with no session id to resume, `no session id to resume; left alone`. A live launch the
    launcher started outside a slot is listed `not in a slot; left running`: restore brings
-   back slot sessions only.
+   back slot sessions only. A recall's slot fork (`fork.recall_fork`) is listed `a
+   recall's fork, which memory ends; left alone`: it is neither reserved nor exited.
 2. **Reserve first.** A slot that already has an open entry for the same session (a park
    before this one left it `not-exited`) keeps it, and its exit is tried again. Any other
    is held `park-<park id>` with no end and `expect` set to the found launch, and then
@@ -45,7 +46,7 @@ from typing import Any
 
 from moxi import exit as codes
 
-from . import catalog, exits, first, live, parks, relaunch, slots, store, target
+from . import catalog, exits, first, fork, live, parks, relaunch, slots, store, target
 from .listeners import REQUEST_ENV
 
 LOOK = relaunch.LOOK
@@ -62,6 +63,8 @@ NO_EXIT = ("codex",)
 OUTCOMES = ("exited", "not-exited", "left-running", "left-alone", "failed")
 #: The reason recorded for the session park runs in.
 OWN = "the session running park"
+#: What park says of a recall's slot fork: memory ends it, and nothing brings it back.
+RECALL_FORK = "a recall's fork, which memory ends; left alone"
 #: The reason recorded for a session of a harness park leaves running (`NO_EXIT`).
 LEFT_RUNNING = ("park leaves Codex sessions running and the reboot ends them; "
                 "moxi launcher exit-session stops one under turns' Codex host")
@@ -200,6 +203,10 @@ def _find(conn: sqlite3.Connection, api: Any) -> tuple[list[_Found], list[Parked
             if not sid:
                 said.append(Parked(int(slot.number), "left-alone",
                                    "no session id to resume; left alone", None,
+                                   row.request_id, row.harness, row.identity))
+                continue
+            if fork.recall_fork(row):
+                said.append(Parked(int(slot.number), "left-alone", RECALL_FORK, sid,
                                    row.request_id, row.harness, row.identity))
                 continue
             found.append(_Found(slot, row, sid))
@@ -388,4 +395,4 @@ def _would(conn: sqlite3.Connection, api: Any, turns: Any, env: Mapping[str, str
     return one.parked("exited", "would exit now")
 
 
-__all__ = ["LEFT_RUNNING", "NO_EXIT", "OUTCOMES", "OWN", "Parked", "park"]
+__all__ = ["LEFT_RUNNING", "NO_EXIT", "OUTCOMES", "OWN", "RECALL_FORK", "Parked", "park"]

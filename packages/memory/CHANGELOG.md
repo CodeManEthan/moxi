@@ -2,16 +2,19 @@
 
 ## Unreleased
 
+- With the secrets release whose credentials set finds `sk-` keys and real URL
+  passwords, new rows are stored with those redacted. Rows indexed before it keep them
+  until `moxi memory reindex` rebuilds the index.
 - The subconscious, memory's second way to recall: in a session launched with it on (the
   launcher's `subconscious` row, which stamps `MOXI_MEMORY_SUBCONSCIOUS`, exported as
   `api.SUBCONSCIOUS_ENV`), a second agent searches past sessions and notes and sends the
   main agent what it finds, at each prompt `subconscious.trigger` counts (`automatic`)
   or when the agent runs `moxi memory subconscious recall TOPIC` (`on-demand`, with a
   start line naming it and at most `subconscious.on_demand_per_prompt` between two
-  counted prompts). For now a recall runs only on Claude Code, as a subagent forked
-  through turns' `fork`; a Codex session, or a Claude Code session whose turns offers no
-  `fork`, has the subconscious off, told by an `off` line in the log at the first try
-  and whenever the reason changes, by the on-demand command's refusal and by the doctor.
+  counted prompts). A recall runs on Claude Code as a subagent forked through turns'
+  `fork`, or in a slot on the slot route (next entry); a session where no route can run
+  has the subconscious off, told by an `off` line in the log at the first try and
+  whenever the reason changes, by the on-demand command's refusal and by the doctor.
   A recall's detached child runs a first search (none for a prompt with no keyword,
   never this session's own rows) and reads the notes with notes installed, writes the
   fork's brief, and streams rounds through `fork` and `fork.continue`, each kept by
@@ -20,9 +23,78 @@
   child died is taken over by the next recall child or by a taker started at session
   end. New settings under `subconscious.*` (`limit_s` held to 1 to 3600 by the config
   check), a log shown by `moxi memory subconscious list`, and `moxi memory subconscious
-  discard`, which refuses every line on the subagent route since the harness brings
-  every answer back itself. Recall records are swept after a day unless their line is
-  still kept.
+  discard`, which ends a line still sending and refuses every line on the subagent
+  route, since the harness brings every answer back itself. Recall records are swept
+  after a day unless their line is still kept.
+- The slot route: with the launcher's `subconscious_route = "slot"` (stamped as
+  `MOXI_MEMORY_SUBCONSCIOUS_ROUTE`), or on Claude Code when turns offers no `fork`, a
+  recall forks the session into a tmux slot through the launcher's interface 3, the
+  fork stamped `MOXI_MEMORY_SUBCONSCIOUS_FORK` with the recall's id
+  (`api.SUBCONSCIOUS_FORK_ENV`). It needs the launcher, tmux slots here (the launcher's
+  interface 3 `slots_here` says so; an older launcher reads as `no slots here`) and
+  comms with scoped senders. On Codex only the slot route runs a recall, and
+  only where the launch picks it; on `subagent` a Codex session has the subconscious off
+  (`Codex: off unless the launch picks the slot route`). A route stamp naming neither
+  route runs no recall, with an off reason that names it. No recall starts inside a slot
+  fork, and the on-demand command refuses there. Two turns guards hold a slot fork to
+  the same reads: `memory.subconscious-slot` (every call, Claude Code's and Codex's,
+  whose shell reaches the guard as `Bash`) and `memory.subconscious-slot-ask` (every
+  permission ask, Claude Code).
+- A recall on the slot route sends each answer by comms, to the session alone, under
+  the session's recall sender (`<comms name>-subconscious`, comms' scoped sender for the
+  word `subconscious`, which memory declares). The word is declared once memory is
+  installed beside comms, subconscious on or not, so from then no session or program on
+  the machine can take a name of the form `<comms name>-subconscious`; one held before
+  stays its holder's and puts that parent's recall sender in conflict (the slot route
+  off for its session, `moxi doctor` naming the holder). After the session has ended, an answer
+  still goes to the comms name the session held when the recall started. The line reads
+  `sending` until comms
+  takes it, tried again every 10 seconds for a minute and then every 5 minutes, each
+  refusal on the line; `list` and the doctor show the wait and the last refusal, and a
+  discard ends a line comms will never take. A round past its bound is noted
+  (`past_bound`) and its answer is still sent if it comes within 300 seconds; past that
+  the line is left for a taker, which settles it once the fork's round ends. On Codex
+  the message lands as one more request in the same turn, so that turn's final answer is
+  the reply to the recall. Under `user-and-comms` a delivery whose senders are all this
+  session's recall senders starts no recall; with other senders too, the lines memory
+  already sent leave the recall's query and reach its fork as already recalled. The off reasons name comms' trouble, the recall
+  sender in conflict among them. Every recall child and taker starts through a detached
+  starter, outside every session where the system takes an orphan as its own (Linux,
+  macOS); on native Windows, where no such route runs today, comms could not place it.
+- A slot fork is exited through the launcher once its recall's last round is settled,
+  by the child, a taker, or a discard of a line whose owner is gone, and the line notes
+  how (`fork_exit`). The last answer is sent first; when comms refuses it, the fork is
+  exited at that refusal, so the slot isn't held while the send is tried again. An exit still held after a minute is left: memory's doctor lists
+  the fork with its session, slot and age, and memory never ends it on its own.
+- memory's side of Codex's host fork (`host-fork` in the log): its rounds through turns'
+  Codex `fork` and `fork.continue`, its answers sent by comms, nothing to exit. No
+  session is routed to it.
+- A recall's record names the process that holds it from its first write: the
+  listener or the on-demand command starts the detached starter under the session's
+  lock and names it, the starter names the child, and the child names itself. The
+  recall guards wait for a fork's id only while that holder runs and at most
+  `subconscious.limit_s` plus 60 seconds from the recall's start; memory's doctor lists
+  a record past that wait. On Linux the holder's liveness and these ages are read on
+  clocks a wall-clock step doesn't move. Records are ordered by their write sequence
+  (`seq`), and a record's `at` later than now is clamped by whoever holds the session's
+  lock (each write, the guard's judge, the day sweep). The guards run only in a session
+  on the subagent route (`MOXI_MEMORY_SUBCONSCIOUS_ROUTE`, exported as
+  `api.SUBCONSCIOUS_ROUTE_ENV`; unset means `subagent`).
+- A recall's first search under `subconscious.scope = "project-first"` (the default)
+  now runs two parts every time: the project's best `prefetch_hits` hits and notes
+  files, then the whole index's best hits and the notes root's best files that the
+  project's part didn't already show, each part under its own heading in the brief. It
+  no longer waits for the project to find nothing before it widens. The fork's own
+  searches run without `--project`, and the brief names the project and its notes
+  directory. The notes search reads Markdown files only, reads the notes root whole (no
+  cap on how many files), cuts each shown line at 200 characters, takes a notes
+  directory that doesn't exist as none, and orders equal matches by path. The log line
+  records `project_hits` and `beyond_hits` in place of `widened`; older lines keep
+  `widened`.
+- A recall's fork gives its first answer as soon as it has one useful point, from the
+  first search alone when that holds one, and later answers with only what is new. The
+  brief says a backslash, `(`, `)`, `$` or `!` in a shell call is refused, even quoted,
+  and points to `grep -E "one|other"` or the Grep tool.
 - Two turns guards, run only in sessions with the subconscious on, hold a recall's fork
   to reads: `memory.subconscious-fork` allows Read, Grep, Glob and a foreground shell call
   that is a plain read of `subconscious.fork_commands` (alone or in a pipeline), counted

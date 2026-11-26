@@ -204,15 +204,33 @@ export function projectNamed(projects: readonly Project[], key: string): Project
   return projects.find((p) => p.key.toLowerCase() === lower) ?? null;
 }
 
-/** The project's section: the key section matching its key ignoring case, or the path
- * section whose root is the project's root exactly; null when it has none. `view` is
- * `/api/view`'s or `/api/list`'s: only its sections are read. */
+/** The project's section at its root: the key section matching its key ignoring case, or
+ * the path section whose root is the project's root exactly; null when it has none. Add
+ * reads it to offer a project with no section there. `view` is `/api/view`'s or
+ * `/api/list`'s: only its sections are read. */
 export function sectionFor(project: Project, view: { sections: readonly Section[] }): string | null {
   const lower = project.key.toLowerCase();
   const keyed = view.sections.find((s) => s.where === "key" && s.name.toLowerCase() === lower);
   if (keyed !== undefined) return keyed.name;
   const rooted = view.sections.find((s) => s.where === "path" && s.root === project.root);
   return rooted === undefined ? null : rooted.name;
+}
+
+/** Every section of the project, which loadout places into its folder: the key section
+ * matching its key ignoring case, then each path section at its root or under it, in the
+ * manifest's order. A path section is the project's when projects maps its root to the
+ * project's key (`project`), or, as without projects, when its root is the project's root
+ * exactly. The filtered view and the Projects page's `Loadout` row both read this join. */
+export function sectionsFor(project: Project, view: { sections: readonly Section[] }): string[] {
+  const lower = project.key.toLowerCase();
+  const names: string[] = [];
+  const keyed = view.sections.find((s) => s.where === "key" && s.name.toLowerCase() === lower);
+  if (keyed !== undefined) names.push(keyed.name);
+  for (const section of view.sections) {
+    if (section.where !== "path" || names.includes(section.name)) continue;
+    if (section.project === project.key || section.root === project.root) names.push(section.name);
+  }
+  return names;
 }
 
 /** The filter line's fixed words. */
@@ -222,13 +240,13 @@ export const ALL_OF_LOADOUT = "All of loadout";
 export const PROJECT_LINK = "Project";
 
 /** `view` cut to what sessions in a project load: Your items (the global file and the
- * skills modules took over among them) and the project's section `section`. Verdict, problems
- * and counts read from it count only those. */
-export function narrowed(view: View, section: string | null): View {
-  const keep = (scope: string | null): boolean => scope === "user" || (section !== null && scope === section);
+ * skills modules took over among them) and the project's sections `sections`. Verdict,
+ * problems and counts read from it count only those. */
+export function narrowed(view: View, sections: readonly string[]): View {
+  const keep = (scope: string | null): boolean => scope === "user" || (scope !== null && sections.includes(scope));
   return {
     ...view,
-    sections: view.sections.filter((s) => s.where === "user" || s.name === section),
+    sections: view.sections.filter((s) => s.where === "user" || sections.includes(s.name)),
     items: view.items.filter((item) => keep(item.scope)),
     rows: view.rows.filter((row) => keep(row.scope)),
   };
@@ -240,10 +258,12 @@ export interface FilteredView {
   key: string;
   /** `what sessions in <root> load`, the root in `~` form. */
   where: string;
-  /** Placed over the project's section and Your items only. */
+  /** Placed over the project's sections and Your items only. */
   placed: PlacedView;
-  /** The project's section as `<key>  <n> of its own`, or null when it has none. */
-  own: { label: string; count: string; group: GroupView } | null;
+  /** Each section of the project as `<label>  <n> of its own`, in `sectionsFor`'s order:
+   * the one at its root labelled by its key, a path section under its root by its `~`
+   * path. Empty when it has none. */
+  own: { label: string; count: string; group: GroupView }[];
   /** `Yours too`: Your items, the global file among them. */
   yours: { label: string; count: string; group: GroupView };
   /** The skills modules took over, which the project's sessions load too. */
@@ -255,12 +275,18 @@ export interface FilteredView {
 export function filteredView(key: string, projects: readonly Project[], view: View): FilteredView | null {
   const project = projectNamed(projects, key);
   if (project === null) return null;
-  const section = sectionFor(project, view);
-  const cut = narrowed(view, section);
+  const sections = sectionsFor(project, view);
+  const cut = narrowed(view, sections);
   const items = itemsView(cut);
   const mine = items.groups.find((g) => g.key === "user") as GroupView;
-  const group = section === null ? undefined : items.groups.find((g) => g.module === null && g.key === section);
-  const own = group === undefined ? null : { label: project.key, count: `${group.rows.length} of its own`, group };
+  const atRoot = sectionFor(project, view);
+  const own = sections.flatMap((name) => {
+    const group = items.groups.find((g) => g.module === null && g.key === name);
+    if (group === undefined) return [];
+    const section = view.sections.find((s) => s.name === name) as Section;
+    const label = name === atRoot ? project.key : sectionWord(section, view.home);
+    return [{ label, count: `${group.rows.length} of its own`, group }];
+  });
   return {
     project, key: project.key, where: `what sessions in ${homeForm(project.root, view.home)} load`,
     placed: placedView(cut, items), own, yours: { label: "Yours too", count: mine.count, group: mine },

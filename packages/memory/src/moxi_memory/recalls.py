@@ -14,10 +14,14 @@ Everything lives under `subconscious/` in memory's state directory:
 A recall's line holds (`LINE_FIELDS`): its id (`recall`), the session and its harness,
 its state, the reason for a `lost` or `off` state and the error behind it, how it started (`start`: `prompt` or
 `asked`), the first `HEAD_CHARS` characters of its prompt or topic (`head`), its route,
-the fork's id, the child's process identity (`child`: pid and start time) and that of
+the comms name its answers go to once the session's binding has ended (`comms_name`, on
+a route that answers by comms), the fork's id, the child's process identity (`child`: pid and start time) and that of
 the process that took the line over when its owner was gone (`taker`), the current
 round's ref and whether turns still keeps that round's end for memory (`kept`), the
-prefetch's hit count and whether it searched past the project, the child's start-up
+first search's hit count (`prefetch_hits`, sessions and notes files) and its count in
+each part, the project's (`project_hits`) and the one beyond it (`beyond_hits`), None
+for a part it had none of (a line written before the parts holds `widened`, whether that
+search went past the project, and no counts per part), the child's start-up
 time, whether the recall was hurried or ran past its limit, each round's text and when
 it came back (`rounds`), and when the line was first and last written.
 
@@ -51,13 +55,14 @@ LOCKS = "locks"
 
 #: A line's states.
 OPEN = "open"
+SENDING = "sending"
 BACK = "back"
 LOST = "lost"
 DISCARDED = "discarded"
 OFF = "off"
-LINE_STATES = (OPEN, BACK, LOST, DISCARDED, OFF)
+LINE_STATES = (OPEN, SENDING, BACK, LOST, DISCARDED, OFF)
 #: The states a person may discard a line in: an answer memory still holds to send.
-DISCARDABLE: tuple[str, ...] = ()
+DISCARDABLE: tuple[str, ...] = (SENDING,)
 #: How a recall started: a prompt, or the agent's own request.
 PROMPT = "prompt"
 ASKED = "asked"
@@ -65,8 +70,10 @@ ASKED = "asked"
 HEAD_CHARS = 80
 #: The fields of a recall's line.
 LINE_FIELDS = ("recall", "session", "harness", "state", "reason", "error", "start", "head",
-               "route", "fork", "child", "taker", "ref", "kept", "prefetch_hits", "widened",
-               "startup_s", "hurried", "past_limit", "rounds", "discarded_by",
+               "route", "comms_name", "fork", "child", "taker", "ref", "kept", "prefetch_hits",
+               "project_hits", "beyond_hits", "widened", "startup_s", "hurried",
+               "past_limit", "past_bound", "rounds", "sending_at",
+               "send_tries", "send_reason", "sent_at", "message_id", "discarded_by",
                "discarded_at", "at", "updated")
 #: A session id the log may name a file after.
 _SAFE = re.compile(r"[A-Za-z0-9_][A-Za-z0-9_.-]{0,199}")
@@ -222,12 +229,26 @@ def note_off(session_id: str, reason: str, *, harness: str | None = None,
         return True
 
 
+def sent_lines(session_id: str, *, skip: str | None = None) -> frozenset[str]:
+    """Every non-blank line, stripped, of every answer the session's log holds (each
+    round's text), leaving out recall `skip`'s: what memory sent to the session."""
+    out = set()
+    for line in read_lines(session_id):
+        if line.get("recall") is None or line.get("recall") == skip:
+            continue
+        for entry in line.get("rounds") or []:
+            text = entry.get("text") if isinstance(entry, dict) else None
+            if isinstance(text, str):
+                out.update(t.strip() for t in text.splitlines() if t.strip())
+    return frozenset(out)
+
+
 def head(text: str) -> str:
     """The first `HEAD_CHARS` characters of a prompt or topic, on one line."""
     return " ".join(str(text).split())[:HEAD_CHARS]
 
 
-__all__ = ["DIR_NAME", "LOG", "LOCKS", "OPEN", "BACK", "LOST", "DISCARDED", "OFF",
+__all__ = ["DIR_NAME", "LOG", "LOCKS", "OPEN", "SENDING", "BACK", "LOST", "DISCARDED", "OFF",
            "LINE_STATES", "DISCARDABLE", "PROMPT", "ASKED", "HEAD_CHARS", "LINE_FIELDS", "is_safe",
            "subconscious_dir", "log_path", "session_lock", "read_lines", "logged_sessions",
-           "all_lines", "fork_ids", "find_line", "put_line", "note_off", "head"]
+           "all_lines", "fork_ids", "find_line", "put_line", "note_off", "sent_lines", "head"]

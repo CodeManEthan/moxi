@@ -219,7 +219,7 @@ def test_every_value_that_can_hold_a_path_carries_a_mark():
                  "/api/job outcome.kept[].id", "/api/job outcome.kept[].back",
                  "/api/replace-preview problem", "/api/replace-preview diff"):
         assert marks[said] == "redact", said
-    plain = {"/api/view harnesses[]", "/api/view counts.ok", "/api/view sections[].where",
+    plain = {"/api/view harnesses[]", "/api/view present[]", "/api/view shown[]", "/api/view counts.ok", "/api/view sections[].where",
              "/api/view items[].kind", "/api/view items[].name", "/api/view items[].harnesses[]",
              "/api/view items[].disabled[]", "/api/view rows[].kind",
              "/api/view rows[].harness", "/api/view rows[].state",
@@ -231,6 +231,7 @@ def test_every_value_that_can_hold_a_path_carries_a_mark():
              "/api/view global.files[].changes", "/api/view global.files[].placed",
              "/api/view global.files[].state", "/api/view global.files[].form",
              "/api/view sections[].refused.cause", "/api/view items[].module",
+             "/api/view sections[].project", "/api/list sections[].project",
              "/api/view item_notes[].kind", "/api/view item_notes[].name",
              "/api/view item_notes[].harness", "/api/view item_notes[].code",
              "/api/projects cause", "/api/folder state", "/api/folder more",
@@ -324,8 +325,9 @@ def test_list_answers_the_items_list_json_prints_and_the_sections(lo, tmp_path):
     assert body["problem"] is None
     assert body["items"] == printed(["list", "--json"])
     assert body["manifest"] == str(lo / "loadout.toml")
-    assert body["sections"] == [{"name": "user", "where": "user", "root": None},
-                                {"name": str(proj), "where": "path", "root": str(proj)}]
+    assert body["sections"] == [
+        {"name": "user", "where": "user", "root": None, "project": None},
+        {"name": str(proj), "where": "path", "root": str(proj), "project": None}]
 
 
 def test_global_answers_what_global_show_json_prints_and_whether_the_mode_is_chosen(lo):
@@ -345,13 +347,18 @@ def test_global_answers_what_global_show_json_prints_and_whether_the_mode_is_cho
 
 def test_drift_counts_the_items_not_ok_and_notes_a_difference_without_counting_it(
         lo, monkeypatch, tmp_path, terminal_record):
+    from moxi_loadout import harness
+
     terminal_record()
+    for name in ("claude", "codex"):
+        harness.home(name).mkdir(parents=True, exist_ok=True)
     # review is missing for claude and for codex: one item, however many harnesses.
     assert read("/api/status")["counts"] == {"missing": 2}
     assert read("/api/drift")["count"] == 1
     assert install.install().code == 0
     assert read("/api/drift") == {"problem": None, "count": 0, "note": None}
     monkeypatch.setenv("CODEX_HOME", str(tmp_path / "elsewhere"))
+    (tmp_path / "elsewhere").mkdir()
     body = read("/api/drift")
     assert "Codex's home" in body["note"] and "CODEX_HOME" in body["note"]
     assert body["count"] == len({(r["scope"], r["kind"], r["name"])
@@ -778,12 +785,124 @@ def test_projects_lists_by_key_or_says_why_not(site, monkeypatch, error, reason,
                                                   {"key": "beta", "root": "/srv/beta"}])
 
 
+MAPPING_API = PROJECTS_API + '''
+
+def get(key):
+    if key != "alpha":
+        raise NotFound(key)
+    return Project("alpha", os.environ["FAKE_ALPHA_ROOT"])
+
+def for_paths(paths):
+    error = os.environ.get("FAKE_PROJECTS_ERROR")
+    if error == "busy":
+        raise Busy("the projects store stayed locked")
+    roots = {"alpha": os.environ["FAKE_ALPHA_ROOT"]}
+    out = {}
+    for path in paths:
+        out[path] = next((k for k, r in roots.items()
+                          if path == r or path.startswith(r + os.sep)), None)
+    return out
+'''
+
+
+def test_path_sections_name_the_project_their_root_is_in(site, lo, tmp_path, monkeypatch):
+    alpha = tmp_path / "alpha"
+    (alpha / "web").mkdir(parents=True)
+    other = tmp_path / "other"
+    other.mkdir()
+    monkeypatch.setenv("FAKE_ALPHA_ROOT", str(alpha))
+    site.module("projects", API="'moxi_projects.api'", INTERFACES="frozenset({1, 2})",
+                files={"api.py": MAPPING_API})
+    kit.manifest(lo, '[user]\nskills = ["review"]\n[project.alpha]\nskills = []\n'
+                     f'[project."{alpha}"]\nskills = []\n[project."{alpha / "web"}"]\n'
+                     f'skills = []\n[project."{other}"]\nskills = []\n')
+    want = [None, None, "alpha", "alpha", None]
+    assert [s["project"] for s in read("/api/list")["sections"]] == want
+    assert [s["project"] for s in read("/api/view")["sections"]] == want
+    monkeypatch.setenv("FAKE_PROJECTS_ERROR", "busy")
+    assert [s["project"] for s in read("/api/list")["sections"]] == [None] * 5
+
+
+def test_path_sections_map_to_no_project_with_an_older_projects(site, lo, tmp_path,
+                                                                 monkeypatch):
+    monkeypatch.setenv("FAKE_ALPHA_ROOT", str(tmp_path))
+    site.module("projects", API="'moxi_projects.api'", files={"api.py": MAPPING_API})
+    kit.manifest(lo, f'[user]\nskills = ["review"]\n[project."{tmp_path}"]\nskills = []\n')
+    assert [s["project"] for s in read("/api/list")["sections"]] == [None, None]
+
+
+def test_view_names_the_harnesses_on_this_machine_by_their_homes(lo, monkeypatch, tmp_path):
+    from moxi import paths, place
+
+    from moxi_loadout import harness
+
+    table = list(place.harnesses()[0])
+    for name in harness.HARNESSES:
+        home = harness.home(name)
+        if home.is_dir() and not any(home.iterdir()):
+            home.rmdir()
+    codex = tmp_path / "codex-home"
+    monkeypatch.setenv("CODEX_HOME", str(codex))
+    claude = paths.claude_home()
+    claude.mkdir(parents=True, exist_ok=True)
+    assert harness.present(table) == [h for h in table if h == "claude"]
+    codex.mkdir()
+    body = read("/api/view")
+    assert body["harnesses"] == table
+    assert body["present"] == [h for h in table if h in ("claude", "codex")]
+    assert harness.present(["kestrel", "codex"]) == ["kestrel", "codex"]
+
+
+@pytest.mark.parametrize("state", sorted(["ok", "stale", "modified", "blocked"]))
+def test_a_harness_not_present_is_drawn_while_something_stands_there(state, monkeypatch, tmp_path):
+    from moxi_loadout import harness
+
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(tmp_path / "claude-home"))
+    monkeypatch.setenv("CODEX_HOME", str(tmp_path / "codex-home"))
+    (tmp_path / "claude-home").mkdir()
+    names = ["claude", "codex"]
+    assert harness.shown(names, [("codex", "missing", "/t"), ("codex", "off", None),
+                                 (None, "ok", "/t")]) == ["claude"]
+    assert harness.shown(names, [("codex", "missing", "/t"), ("codex", state, "/t")]) == names
+    # A row that places nowhere (a section that can't be placed) stands nowhere.
+    assert harness.shown(names, [("codex", state, None)]) == ["claude"]
+    assert harness.shown(["kestrel"], []) == ["kestrel"]
+
+
+def test_view_and_drift_leave_out_a_harness_not_present_with_nothing_there(lo, monkeypatch, tmp_path):
+    from moxi import paths
+
+    paths.claude_home().mkdir(parents=True, exist_ok=True)
+    monkeypatch.setenv("CODEX_HOME", str(tmp_path / "no-codex"))
+    # review is missing for claude and for codex; codex isn't on this machine.
+    assert read("/api/status")["counts"] == {"missing": 2}
+    body = read("/api/view")
+    assert "codex" in body["harnesses"] and "codex" not in body["present"]
+    assert body["shown"] == [h for h in body["harnesses"] if h in body["present"]]
+    assert "codex" not in body["shown"]
+    assert {r["harness"] for r in body["rows"]} >= {"claude", "codex"}
+    assert read("/api/drift")["count"] == 1
+    # Placed for claude only, nothing stands for codex: the drift block counts nothing.
+    kit.manifest(lo, '[user]\nskills = ["review"]\n[skill.review]\nharnesses = ["claude"]\n')
+    assert install.install().code == 0
+    assert read("/api/drift")["count"] == 0
+    # Something of loadout's stands in codex's skills folder: codex is drawn and counted.
+    kit.manifest(lo, '[user]\nskills = ["review"]\n')
+    assert install.install().code == 0
+    body = read("/api/view")
+    assert "codex" not in body["present"]
+    assert "codex" in body["shown"]
+
+
 # -- acts -----------------------------------------------------------------------------------
 
 @pytest.mark.parametrize("path, body, verb", [
     ("/api/add", {"kind": "skill", "name": "lint"}, ["add", "skill", "lint"]),
     ("/api/add", {"kind": "agent", "name": "helper", "project": "/srv/alpha"},
      ["add", "agent", "helper", "--project=/srv/alpha"]),
+    ("/api/add", {"kind": "skill", "name": "lint", "harnesses": ["codex", "claude", "codex"]},
+     ["add", "skill", "lint", "--harness=codex", "--harness=claude"]),
+    ("/api/add", {"kind": "skill", "name": "lint", "harnesses": []}, ["add", "skill", "lint"]),
     ("/api/remove", {"kind": "skill", "name": "review"}, ["remove", "skill", "review"]),
     ("/api/enable", {"id": "skill:review@codex"}, ["enable", "skill:review@codex"]),
     ("/api/disable", {"id": "skill:review@*", "user": True},
@@ -974,7 +1093,7 @@ def test_a_job_read_through_to_its_end_does_what_the_verb_does(
     assert pagejob.run(job, verb_of(spawned[0])) == 0
     body = read("/api/job", f"job={job}")
     assert (body["state"], body["exit"], body["argv"]) == ("done", 0, ["add", "skill", "lint"])
-    assert "listed skill lint in user" in body["outcome"]["lines"]
+    assert "listed skill lint in user for every harness" in body["outcome"]["lines"]
     assert body["outcome"]["counts"] == {"ok": 2}     # lint for claude and codex
     if kit.DIR_FORM == "link":
         assert os.readlink(kit.claude() / "lint") == str(lo / "skills" / "lint")

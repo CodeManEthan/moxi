@@ -48,6 +48,13 @@ It is refused, with nothing written, when:
 
 The new session's id is printed once the launch knows it: at once for Claude Code, whose
 id is minted, and for a Codex fork into a slot once its host is ready.
+
+**A recall's slot fork** (`recall_fork`) is a launch whose recorded environment carries
+memory's fork stamp (`SUBCONSCIOUS_FORK_ENV`, read from memory's API): memory forked it
+to answer one recall and ends it when the recall ends. Park leaves it running, crash
+discovery settles its slot and restore drops its entry, so its slot is never reserved
+for it and it is never brought back. Where memory can't be loaded, no launch counts as
+one.
 """
 
 from __future__ import annotations
@@ -75,6 +82,22 @@ CODEX_FORK_TURNS = "0.2.6"
 #: The modules whose variables a fork's caller may not stamp: the launch stamps them
 #: itself.
 UNSTAMPED = ("launcher", "turns")
+
+
+def recall_fork(row: store.LaunchRow | None) -> bool:
+    """Whether `row` launched a recall's slot fork: its recorded environment carries
+    memory's fork stamp."""
+    if row is None:
+        return False
+    found = moxi_modules.load("memory", interface=1)
+    name = getattr(found.api, "SUBCONSCIOUS_FORK_ENV", None) if found.ok else None
+    if not name:
+        return False
+    try:
+        env = row.env
+    except ValueError:
+        return False
+    return isinstance(env, Mapping) and bool(env.get(name))
 
 
 def fork(session_id: str, *, target: str = "terminal", slot: int | str | None = None,
@@ -235,4 +258,4 @@ def _learned(result: Any, conn: sqlite3.Connection | None) -> Any:
 
 
 __all__ = ["CODEX_FORK_TURNS", "Refused", "Result", "TARGETS", "UNSTAMPED", "fork",
-           "host_refusal", "refusal", "stamp_refusal", "start"]
+           "host_refusal", "recall_fork", "refusal", "stamp_refusal", "start"]

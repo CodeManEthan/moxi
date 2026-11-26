@@ -270,6 +270,21 @@ def find(state: states.State, ruling_id: str) -> states.Ruling | None:
     return None
 
 
+def newest_replacing(state: states.State, ruling_id: str) -> states.Ruling | None:
+    """The newest ruling of `state` that replaces `ruling_id`: the one that replaced
+    it, or the one that replaced that, and so on along `replaced_by`, since a ruling
+    replaced already is corrected no further and the next correction replaces the one
+    in its place. None when nothing replaced it."""
+    newest = None
+    ruling = find(state, ruling_id)
+    passed = {ruling_id}
+    while ruling is not None and ruling.replaced_by not in (None, *passed):
+        passed.add(ruling.replaced_by)
+        ruling = find(state, ruling.replaced_by)
+        newest = ruling or newest
+    return newest
+
+
 def standing(state: states.State, item: str) -> states.Ruling | None:
     """The newest ruling of `state` that stands and rules the thing `item`, or None."""
     for ruling in reversed(state.rulings):
@@ -393,5 +408,6 @@ def _said(rules: str | None) -> str:
 __all__ = ["REVOKE", "MOVE", "PARK", "NARROW", "WITHDRAW", "READBACK", "SKIP",
            "SKIP_ACTION", "FLOW", "CREDIT", "UNSTAGE", "UNAFTER",
            "ALONE", "ID", "Kind",
-           "KINDS", "kind_of", "item_of", "stands", "live", "find", "standing", "put_by",
+           "KINDS", "kind_of", "item_of", "stands", "live", "find", "newest_replacing",
+           "standing", "put_by",
            "ended", "can_be_taken_back", "taking_back", "replaces"]

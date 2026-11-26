@@ -45,6 +45,14 @@
 // right end before the count, or alone at the right of a line of its own where no filter
 // line is drawn. turns' routes are not the gateway's, so the phone reads none of it and
 // draws no link.
+//
+// With cache installed, at the desk, the list also reads cache's `/api/clocks` when it
+// opens and when its tab is shown again, and follows cache's topic `clocks`. A row whose
+// session has a clock record then ends its first line in `warm until 19:12` or `cold`,
+// and, opened, has a `Cache` line linking cache's page (`clocks.ts`); on a running launch
+// launcher's cache fact wins. The list is drawn again when a warm record's time comes, so
+// the row turns cold then. A read that fails draws nothing of it. cache's routes are not
+// the gateway's, so the phone reads none of it.
 
 import { css, html, LitElement, nothing } from "lit";
 import { ifDefined } from "lit/directives/if-defined.js";
@@ -74,6 +82,8 @@ import {
 import type { Presses, RunningRead } from "./running.ts";
 import { LABELS as LIVE_LABELS, LIVE_PATH, LIVE_TOPIC, liveRead, parseLive } from "./live.ts";
 import type { LiveOpened, LiveRead } from "./live.ts";
+import { CLOCKS_PATH, CLOCKS_TOPIC, clocksRead, clocksTopic, nextCold, serverNow } from "./clocks.ts";
+import type { Clocks } from "./clocks.ts";
 
 import { COPIED, COPIED_MS, openedView, readAgain } from "./opened.ts";
 import type { SaidView } from "./opened.ts";
@@ -242,6 +252,13 @@ export class SessionsList extends LitElement {
   #turnsOut = false;
   #turnsAgain = false;
   #stopTurns: (() => void) | null = null;
+  /** cache's records as last read, one read at a time; the topic's stop; and the wait for
+   * the next warm record's cold time. */
+  #clocks: Clocks | null = null;
+  #clocksOut = false;
+  #clocksAgain = false;
+  #stopClocks: (() => void) | null = null;
+  #coldTimer: ReturnType<typeof setTimeout> | null = null;
   /** The presses of `Keep warm`, and each press's longest wait, by request id. */
   #presses: Presses = NO_PRESSES;
   #pressWaits = new Map<string, ReturnType<typeof setTimeout>>();
@@ -253,6 +270,12 @@ export class SessionsList extends LitElement {
 
   #shown = (): void => {
     if (document.visibilityState === "visible") this.#readList();
+  };
+  /** The tab is shown again: the list and cache's records are read. */
+  #shownAgain = (): void => {
+    if (document.visibilityState !== "visible") return;
+    this.#readList();
+    void this.#readClocks();
   };
   /** The filter line's filters, watched so a wrap is found when the width changes. */
   #watched: HTMLElement | null = null;
@@ -288,7 +311,7 @@ export class SessionsList extends LitElement {
     this.#scroll = new SavedScroll(memory.y);
     this.#landing = false;
     this.#reader = new ListReader({ read: (path) => api("sessions", path), onChange: (change) => this.#onChange(change) });
-    document.addEventListener("visibilitychange", this.#shown);
+    document.addEventListener("visibilitychange", this.#shownAgain);
     document.addEventListener("click", this.#pressed);
     for (const type of ACTS) document.addEventListener(type, this.#onAct, { capture: true, passive: true });
     addEventListener("scroll", this.#onScroll, { passive: true });
@@ -299,9 +322,11 @@ export class SessionsList extends LitElement {
       if (!gateway()) this.#stopRunning = subscribe("launcher", RUNNING_TOPIC, (data) => this.#takeRunning(data));
     }
     if (this.#readsTurns()) this.#stopTurns = subscribe("turns", LIVE_TOPIC, (data) => this.#takeTurns(data));
+    if (this.#readsCache()) this.#stopClocks = subscribe("cache", CLOCKS_TOPIC, (data) => this.#takeClocks(data));
     this.#reader.place(address, memory.opened);
     void this.#readRunning();
     void this.#readTurns();
+    void this.#readClocks();
   }
 
   disconnectedCallback(): void {
@@ -317,7 +342,7 @@ export class SessionsList extends LitElement {
     this.#sessionReads.clear();
     if (this.#copyTimer !== null) clearTimeout(this.#copyTimer);
     this.#copyTimer = null;
-    document.removeEventListener("visibilitychange", this.#shown);
+    document.removeEventListener("visibilitychange", this.#shownAgain);
     document.removeEventListener("click", this.#pressed);
     for (const type of ACTS) document.removeEventListener(type, this.#onAct, { capture: true });
     removeEventListener("scroll", this.#onScroll);
@@ -331,6 +356,11 @@ export class SessionsList extends LitElement {
     this.#stopTurns?.();
     this.#stopTurns = null;
     this.#turnsRead = null;
+    this.#stopClocks?.();
+    this.#stopClocks = null;
+    this.#clocks = null;
+    if (this.#coldTimer !== null) clearTimeout(this.#coldTimer);
+    this.#coldTimer = null;
     this.#ranOnce();
     for (const wait of this.#pressWaits.values()) clearTimeout(wait);
     this.#pressWaits.clear();
@@ -387,6 +417,61 @@ export class SessionsList extends LitElement {
     }
     this.#turnsRead = { value, failure: null };
     this.requestUpdate();
+  }
+
+  /** Whether the list reads cache: with cache installed, at the desk. */
+  #readsCache(): boolean {
+    return installed("cache") && !gateway();
+  }
+
+  /** Reads cache's records, where the list reads cache; one read at a time, and one more
+   * after it when another was asked for meanwhile. A failed read leaves nothing. */
+  async #readClocks(): Promise<void> {
+    if (!this.#readsCache()) {
+      this.#clocks = null;
+      return;
+    }
+    if (this.#clocksOut) {
+      this.#clocksAgain = true;
+      return;
+    }
+    this.#clocksOut = true;
+    try {
+      do {
+        this.#clocksAgain = false;
+        const answer = await api("cache", CLOCKS_PATH);
+        if (!this.isConnected) return;
+        this.#clocks = clocksRead(answer, Date.now() / 1000);
+        this.requestUpdate();
+      } while (this.#clocksAgain);
+    } finally {
+      this.#clocksOut = false;
+    }
+  }
+
+  /** A value of cache's topic `clocks`; one that can't be read, or one before the first
+   * read, reads the route again. */
+  #takeClocks(data: unknown): void {
+    if (!this.isConnected) return;
+    const next = clocksTopic(this.#clocks, data);
+    if (next === null) {
+      void this.#readClocks();
+      return;
+    }
+    this.#clocks = next;
+    this.requestUpdate();
+  }
+
+  /** Draws the list again at the next warm record's cold time, so its row turns cold then. */
+  #waitForCold(now: number | null): void {
+    if (this.#coldTimer !== null) clearTimeout(this.#coldTimer);
+    this.#coldTimer = null;
+    const at = now === null ? null : nextCold(this.#clocks, now);
+    if (at === null || now === null) return;
+    this.#coldTimer = setTimeout(() => {
+      this.#coldTimer = null;
+      this.requestUpdate();
+    }, Math.min(Math.max(0, at - now) * 1000 + 50, 2 ** 31 - 1));
   }
 
   /** Reads launcher's running launches, with launcher installed; one read at a time, and
@@ -636,7 +721,8 @@ export class SessionsList extends LitElement {
   protected opened(row: RowView): unknown {
     const state = this.#reader?.state ?? null;
     if (state === null) return nothing;
-    const view = openedView(row, this.#sessions.get(row.key) ?? null, { today: state.today, roots: state.roots });
+    const view = openedView(row, this.#sessions.get(row.key) ?? null,
+                            { today: state.today, roots: state.roots, cacheLink: this.#readsCache() });
     const said = (line: SaidView | null, name: string) => (line === null ? nothing
       : html`<div class="r" data-line=${name}><span class="k">${line.label}</span><span class="f">${
           line.time !== null ? html`<span class="tm">${line.time}</span>` : nothing}${line.text}</span><span></span></div>`);
@@ -645,7 +731,7 @@ export class SessionsList extends LitElement {
       return html`<button type="button" class=${tone} data-action=${`copy-${what}`}
         @click=${() => void this.#copy(key, text)}>${this.#copied === key ? COPIED : words}</button>`;
     };
-    const { status, subagents, session, resume, transcript } = view;
+    const { status, subagents, session, cache, resume, transcript } = view;
     return html`<div class="det" data-part="opened">
       ${status !== null ? html`<p class=${status.state === "waiting" ? "st dim" : "st"} data-line=${status.state}
         role="status">${status.line}</p>` : nothing}
@@ -660,6 +746,14 @@ export class SessionsList extends LitElement {
       ${session !== null ? html`<div class="r" data-line="session"><span class="k">${session.label}</span><span class="f">${
         session.lead}${session.rest !== null ? html` <span class="d">· ${session.rest}</span>` : nothing}</span><span></span></div>`
         : nothing}
+      ${cache !== null ? html`<div class="r" data-line="cache"><span class="k">${cache.label}</span><span class="f">${
+        cache.value}${cache.tail !== null ? html` <span class="d">· ${cache.tail}</span>` : nothing}</span>${cache.link !== null
+        ? html`<a class="x" href="/m/cache/" data-action="cache" @click=${(event: MouseEvent) => {
+            if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+            event.preventDefault();
+            this.#remember();
+            navigate("cache", "");
+          }}>${cache.link}</a>` : html`<span></span>`}</div>` : nothing}
       ${resume !== null ? html`<div class="r" data-line="resume"><span class="k">${resume.label}</span><span class="f"><code>${
         resume.command}</code>${resume.where !== null ? html`<br><span class="d" data-line="where">${resume.where}</span>` : nothing
         }</span>${copy("resume", resume.command, resume.copy, "x")}</div>` : nothing}
@@ -727,8 +821,12 @@ export class SessionsList extends LitElement {
     if (status?.state === "gone") return html`${address}${alone}${this.#status(status)}`;
     if (state === null) return html`${address}${alone}${status !== null ? this.#status(status) : nothing}`;
     const desk = !gateway();
+    const clocks = this.#readsCache() ? this.#clocks : null;
+    const now = clocks !== null ? serverNow(clocks, Date.now() / 1000) : null;
+    this.#waitForCold(now);
     const view = listView(state, { launcher: installed("launcher"), running: this.#running, presses: this.#presses, desk,
-                                   readsTurns: this.#readsTurns(), turnsRead: this.#turnsRead });
+                                   readsTurns: this.#readsTurns(), turnsRead: this.#turnsRead,
+                                   cache: clocks !== null && now !== null ? { clocks, now } : null });
     const filters = filterLine(state, this.#filters());
     return html`${address}
       ${filters !== null ? html`${this.#find()}${this.#filt(filters, view.count, turnsTitle)}` : alone}

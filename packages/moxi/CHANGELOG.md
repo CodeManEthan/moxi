@@ -52,6 +52,21 @@
   `address`, beside a Unix socket, and for a Windows pipe in the module's runtime folder.
 - The start mark names a module run as `python -X <option> -m <module>` (or with `-W`)
   `python -m <module>`, as it does without the option, where it named the script's file.
+- `moxi config` reaches a table a module keeps in a file of its own. A module names it in
+  its announcement's new `CONFIG_TABLES` (`{name: "package.module:NAME"}`; `moxi modules
+  --json` lists it as `config_tables`), and the hook it names lists the table's rows and
+  changes one. `moxi config <module> show` and `show --json` list the rows after the
+  module's own keys as `<table>.<row>`, with `table_title`, `table_line`, `table_file` and
+  `applies`, and `warning`, `refused` and `clear_only` where the module gives them. `moxi
+  config set` and `unset` of a row call the hook, with the same exit codes, `--json`
+  answer and history line as a config key, and print the module's warning lines after
+  their own (on stderr as `warning: <line>` with `--json`, so stdout stays one object).
+  `--add` and `--remove` on a row are refused. When the table's file can't be read,
+  `show --json` gives one item with `table_error` and `table_fix` in place of the rows
+  and exits 1; when the module's config file can't be read, its error object gains
+  `keys`, the tables' rows, which `set` still writes. A table named like a top-level key
+  of the module's own schema is refused when `moxi config` reads the tables. A module
+  with no `CONFIG_TABLES` shows exactly what it showed before.
 - New `moxi install <module> --setup-only`: runs an installed module's `SETUP` again in a
   fresh process under the core lock and records the version it ran at in `setup.json`,
   as an install's settle step does, and nothing else: no install, no index, no catalogue
@@ -127,6 +142,13 @@
   held back since the last line, in place of asyncio's traceback for each failure (up to
   101 per readiness event). `serve` puts a filter in front of the loop's exception handler
   to do it; every other context reaches that handler as before.
+- A retired key may carry `left_out = true`, for a key in a file every process of the
+  module reads, where one stale line would stop them all. A file that still sets such a
+  key reads as though it didn't: the `Settings` list it in `left_out`, by name with its
+  `retired` words, in place of a `ConfigError`. `moxi config check` passes and warns,
+  naming the key and its `retired` words; `moxi config set` still refuses the key, and
+  `moxi config unset` removes its line from the file. A module that marks a key `left_out` needs `moxi>=0.1.11`: an older core refuses its
+  schema for the unknown field.
 
 ## 0.1.10 (unreleased)
 

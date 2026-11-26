@@ -214,6 +214,89 @@ def test_a_relaunch_s_handoff_goes_under_the_relaunch_header(turns, conn, tmp_pa
                              "Done: the store.")
 
 
+OLD_ID = "0b1c2d3e-4f50-4617-8899-aabbccddeeff"
+
+
+def relaunched_by(conn, tmp_path, *, mode="director", kind="cold", repair=False,
+                  stamped=True):
+    """A launch `r-1` a relaunch run of launch `r-0` made, its handoff written, stamped
+    with that run's id (a repair's, when `repair`), and the run's cache event `kind`
+    (None: no event). Returns the handoff's path."""
+    path = tmp_path / "handoff.md"
+    path.write_text("Done: the store.\n")
+    store.insert(conn, request_id="r-0", by="ada", harness="claude", target="terminal",
+                 cwd="/work", values={"mode": "interactive"}, argv=["claude"], env={},
+                 posture="go", session_id=OLD_ID)
+    run = store.insert_run(conn, kind="relaunch", mode=mode, request_id="r-0",
+                           session_id=OLD_ID, by="boss" if mode == "director" else "ada",
+                           handoff_path=str(path), slot="3", job="slots:relaunch-x")
+    if kind is not None:
+        store.add_run_event(conn, run.run_id, first.CACHE_EVENT, {"kind": kind})
+    stamp = run.run_id
+    if repair:
+        store.end_run(conn, run.run_id, "relaunch-failed", word="spawn-failed")
+        fixing = store.insert_run(conn, kind="relaunch", mode="repair", request_id="r-0",
+                                  session_id=OLD_ID, by="ann", handoff_path=str(path),
+                                  slot="3", repair_of=run.run_id, job="slots:repair-y")
+        stamp = fixing.run_id
+    env = {"MOXI_LAUNCHER_RELAUNCH": stamp} if stamped else {}
+    store.insert(conn, request_id="r-1", by=run.actor, harness="claude", target="terminal",
+                 cwd="/work", values={"mode": "interactive"}, argv=["claude"], env=env,
+                 posture=f"relaunched (handoff: {path})", session_id=CLAUDE_ID,
+                 handoff_path=str(path), relaunch_of="r-0")
+    store.set_state(conn, "r-1", "started")
+    return path
+
+
+def sessions_installed(monkeypatch, *, installed):
+    real = modules.available
+    monkeypatch.setattr(modules, "available",
+                        lambda name: installed if name == "sessions" else real(name))
+
+
+@pytest.mark.parametrize("kind, words", [
+    ("cold", f"Your last session, {OLD_ID}, went cold and boss relaunched it."),
+    ("unknown", f"Your last session, {OLD_ID}, could not take a message and boss "
+                "relaunched it."),
+    ("no-cache", f"Your last session, {OLD_ID}, could not take a message and boss "
+                 "relaunched it."),
+    (None, f"Your last session, {OLD_ID}, could not take a message and boss relaunched "
+           "it."),
+])
+@pytest.mark.parametrize("installed", [True, False])
+def test_a_directors_relaunch_names_the_old_session_after_the_header(
+        turns, conn, tmp_path, monkeypatch, kind, words, installed):
+    sessions_installed(monkeypatch, installed=installed)
+    path = relaunched_by(conn, tmp_path, kind=kind)
+    assert send(conn).outcome == "sent"
+    [given] = turns.calls("deliver")
+    line = words + (f" `moxi sessions read {OLD_ID}` shows how it ended." if installed
+                    else "")
+    assert given["text"] == (f"Handoff from launcher, relaunched by boss: {path}\n"
+                             f"{line}\n\nDone: the store.")
+
+
+def test_a_repair_of_a_directors_relaunch_names_the_old_session_too(turns, conn, tmp_path,
+                                                                   monkeypatch):
+    sessions_installed(monkeypatch, installed=False)
+    relaunched_by(conn, tmp_path, kind="cold", repair=True)
+    assert send(conn).outcome == "sent"
+    [given] = turns.calls("deliver")
+    assert given["text"].splitlines()[1] == (f"Your last session, {OLD_ID}, went cold and "
+                                             "boss relaunched it.")
+
+
+@pytest.mark.parametrize("mode, stamped", [("self", True), ("director", False)])
+def test_a_self_relaunch_or_an_unstamped_one_adds_no_line(turns, conn, tmp_path, mode,
+                                                          stamped):
+    path = relaunched_by(conn, tmp_path, mode=mode, stamped=stamped)
+    assert send(conn).outcome == "sent"
+    [given] = turns.calls("deliver")
+    by = "boss" if mode == "director" else "ada"
+    assert given["text"] == (f"Handoff from launcher, relaunched by {by}: {path}\n\n"
+                             "Done: the store.")
+
+
 def test_a_session_already_ready_is_sent_to(turns, conn):
     launch(conn, state="ready")
     assert send(conn).outcome == "sent"

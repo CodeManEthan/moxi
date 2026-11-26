@@ -3270,7 +3270,7 @@ launcher	packages/launcher/src/moxi_launcher/api.py	launch_kinds	name	timeout	ti
 launcher	packages/launcher/src/moxi_launcher/api.py	preview	name	environ	env
 launcher	packages/launcher/src/moxi_launcher/cachetimers.py	- `launcher.keep-warm` (`KEEP_WARM`): from 900 s before the session's cache expires until	use	`KEEP_WARM`	`KEEP_WARM_ENV`
 launcher	packages/launcher/src/moxi_launcher/cachetimers.py	__all__ = ["JOB", "KEEP_WARM", "TIMERS"]	keep	KEEP_WARM	KEEP_WARM
-launcher	packages/launcher/src/moxi_launcher/catalog.py	WHEN_FIELDS = ("requires", "condition", "target", "refused", "hint")	keep	refused	refused
+launcher	packages/launcher/src/moxi_launcher/catalog.py	WHEN_FIELDS = ("requires", "condition", "target", "refused", "hint", "applies_with")	keep	refused	refused
 launcher	packages/launcher/src/moxi_launcher/catalog.py	`refused` and `hint`, the words a launch or preset that breaks it is refused	keep	refused	refused
 launcher	packages/launcher/src/moxi_launcher/catalog.py	code = "refused"	keep	refused	refused
 launcher	packages/launcher/src/moxi_launcher/catalog.py	elif values is not None and set(danger) - set(values):	keep	set	set
@@ -3334,6 +3334,7 @@ launcher	packages/launcher/src/moxi_launcher/catalog.py	raise bad(f"has since {s
 launcher	packages/launcher/src/moxi_launcher/catalog.py	raise bad(f"has type {kind!r}; use one of {', '.join(TYPES)}")	keep	bad	bad
 launcher	packages/launcher/src/moxi_launcher/catalog.py	raise bad(f"has typed_with {typed_with!r}, which is not a module name")	keep	bad	bad
 launcher	packages/launcher/src/moxi_launcher/catalog.py	raise bad(f"has unknown field(s) {', '.join(unknown)}")	keep	bad	bad
+launcher	packages/launcher/src/moxi_launcher/catalog.py	raise bad(f"has when.{value} applies_with {applies_with!r}, which is not a "	keep	bad	bad
 launcher	packages/launcher/src/moxi_launcher/catalog.py	raise bad(f"has when for {value!r}, which is not one of its values")	keep	bad	bad
 launcher	packages/launcher/src/moxi_launcher/catalog.py	raise bad(f"has when.{value} target {target!r}, which is not a target's name")	keep	bad	bad
 launcher	packages/launcher/src/moxi_launcher/catalog.py	raise bad(f"has when.{value} without the words it is refused with (refused "	keep	bad	bad
@@ -3402,7 +3403,7 @@ launcher	packages/launcher/src/moxi_launcher/cli.py	help="take the checks and wr
 launcher	packages/launcher/src/moxi_launcher/cli.py	help="the session to relaunch as its director: its session id or "	keep	help	help
 launcher	packages/launcher/src/moxi_launcher/cli.py	help="the session; this one when left out")	keep	help	help
 launcher	packages/launcher/src/moxi_launcher/cli.py	help="the table to list: launches (the default), runs, exits or holds")	keep	help	help
-launcher	packages/launcher/src/moxi_launcher/cli.py	help="with --self: the handoff the new session gets first")	keep	help	help
+launcher	packages/launcher/src/moxi_launcher/cli.py	help="the handoff the new session gets as its first turn: needed "	keep	help	help
 launcher	packages/launcher/src/moxi_launcher/cli.py	hint = hint.format(run=run.run_id)	keep	run=	run=
 launcher	packages/launcher/src/moxi_launcher/cli.py	if args.action == "show":	keep	show	show
 launcher	packages/launcher/src/moxi_launcher/cli.py	if args.dry_run and (args.status is not None or args.from_record is not None):	keep	dry_run	dry_run
@@ -3442,7 +3443,7 @@ launcher	packages/launcher/src/moxi_launcher/cli.py	resumed. `keep-warm` opens, 
 launcher	packages/launcher/src/moxi_launcher/cli.py	return _listed(args, resume.sessions(limit=args.limit, before=args.before), "sessions")	keep	sessions	sessions
 launcher	packages/launcher/src/moxi_launcher/cli.py	return _said(exits.exit_session(args.session_id, dry_run=args.dry_run), args)	keep	dry_run	dry_run
 launcher	packages/launcher/src/moxi_launcher/cli.py	return _said(relaunch.arm_self(args.handoff, dry_run=args.dry_run), args)	keep	dry_run	dry_run
-launcher	packages/launcher/src/moxi_launcher/cli.py	return _said(relaunch.call_director(args.target, dry_run=args.dry_run), args)	keep	dry_run	dry_run
+launcher	packages/launcher/src/moxi_launcher/cli.py	dry_run=args.dry_run), args)	keep	dry_run	dry_run
 launcher	packages/launcher/src/moxi_launcher/cli.py	run = verbs.add_parser("run", help="launch a session", allow_abbrev=False,	keep	help	help
 launcher	packages/launcher/src/moxi_launcher/cli.py	shown = {"key": key, "folder": str(folder)}	keep	folder	folder
 launcher	packages/launcher/src/moxi_launcher/cli.py	shown = {"key": key, "folder": str(handoff_dir)}	keep	folder	folder
@@ -3533,6 +3534,17 @@ launcher	packages/launcher/src/moxi_launcher/compose/common.py	short_env	name	wi
 launcher	packages/launcher/src/moxi_launcher/compose/common.py	switched = any((base.get(name) or "").strip().lower() not in ("", "0", "false")	keep	any	any
 launcher	packages/launcher/src/moxi_launcher/compose/common.py	these and `preview` shows them), which `environment` lays over the scrubbed caller's	keep	environment	environment
 launcher	packages/launcher/src/moxi_launcher/compose/common.py	value, which is never recorded. Each is kept under the name as `environ` spells it.	keep	environ	environ
+launcher	packages/launcher/src/moxi_launcher/defaults.py	Each row carries the launcher's words for what its value meets: `refused` for what	keep	refused	refused
+launcher	packages/launcher/src/moxi_launcher/defaults.py	A change. `set` reads the text as the row's type and checks it by the row's own check	keep	set	set
+launcher	packages/launcher/src/moxi_launcher/defaults.py	changed, and the launcher's lines: after a `set`, what the new value meets; after	keep	set	set
+launcher	packages/launcher/src/moxi_launcher/defaults.py	if op == "set":	keep	set	set
+launcher	packages/launcher/src/moxi_launcher/defaults.py	if op != "set":	keep	set	set
+launcher	packages/launcher/src/moxi_launcher/defaults.py	return need.refused, need.hint	keep	refused	refused
+launcher	packages/launcher/src/moxi_launcher/defaults.py	"clear_only": True, "refused": _said(refused),	keep	refused	refused
+launcher	packages/launcher/src/moxi_launcher/defaults.py	"refused": _said(refused), "warning": _said(warning)})	keep	refused	refused
+launcher	packages/launcher/src/moxi_launcher/defaults.py	"""Each key's `refused` and `warning` lines for what `held` meets: each	keep	refused	refused
+launcher	packages/launcher/src/moxi_launcher/defaults.py	"""Every listed key's `refused` and `warning` lines for what `held` meets, in the order	keep	refused	refused
+launcher	packages/launcher/src/moxi_launcher/defaults.py	row.check(new)	keep	ok	ok
 launcher	packages/launcher/src/moxi_launcher/doctor.py	if any("asks" not in record for record in fresh):	keep	any	any
 launcher	packages/launcher/src/moxi_launcher/doctor.py	keep_warm_row	name	error	exc
 launcher	packages/launcher/src/moxi_launcher/exits.py	"not-exited": codes.ERROR, "refused": codes.REFUSED}	keep	refused	refused
@@ -3556,7 +3568,7 @@ launcher	packages/launcher/src/moxi_launcher/first.py	actor	name	environ	caller_
 launcher	packages/launcher/src/moxi_launcher/first.py	actor	name	environ	env
 launcher	packages/launcher/src/moxi_launcher/first.py	deliver	name	error	exc
 launcher	packages/launcher/src/moxi_launcher/first.py	if kind == "refused":	keep	refused	refused
-launcher	packages/launcher/src/moxi_launcher/first.py	parts = [header.format(actor=by, path=path), handoff_text.strip("\n")]	keep	actor=	actor=
+launcher	packages/launcher/src/moxi_launcher/first.py	header = (RELAUNCH_HEADER if relaunched else HANDOFF_HEADER).format(actor=by, path=path)	keep	actor=	actor=
 launcher	packages/launcher/src/moxi_launcher/first.py	read_handoff	name	error	exc
 launcher	packages/launcher/src/moxi_launcher/first.py	reason = str(getattr(value, "reason", "") or "refused")	keep	refused	refused
 launcher	packages/launcher/src/moxi_launcher/first.py	return BRIEF_HEADER.format(actor=by) + "\n\n" + brief	keep	actor=	actor=
@@ -3565,6 +3577,7 @@ launcher	packages/launcher/src/moxi_launcher/first.py	return any(isinstance(word
 launcher	packages/launcher/src/moxi_launcher/first.py	return turns.wait_ready(**where, timeout=timeout)	use	timeout=	timeout_s=
 launcher	packages/launcher/src/moxi_launcher/first.py	send	name	error	exc
 launcher	packages/launcher/src/moxi_launcher/first.py	text	name	actor	by
+launcher	packages/launcher/src/moxi_launcher/first.py	seen: set[str] = set()	keep	set	set
 launcher	packages/launcher/src/moxi_launcher/handoffs.py	"current", "file_name", "folder", "folder_of_key", "folder_of_row", "handoffs",	keep	folder	folder
 launcher	packages/launcher/src/moxi_launcher/handoffs.py	-	name	COMMS_NAME	comms_name_env
 launcher	packages/launcher/src/moxi_launcher/handoffs.py	-	name	FOLDER	HANDOFFS_DIR
@@ -3586,7 +3599,6 @@ launcher	packages/launcher/src/moxi_launcher/job.py	"""`error`, a refusal from b
 launcher	packages/launcher/src/moxi_launcher/job.py	Choice.__init__	kwonly	chain	chain
 launcher	packages/launcher/src/moxi_launcher/job.py	Choice.__init__	kwonly	held	held
 launcher	packages/launcher/src/moxi_launcher/job.py	Choice.__init__	kwonly	respawn	respawn
-launcher	packages/launcher/src/moxi_launcher/job.py	CompactJob.steps	name	error	exc
 launcher	packages/launcher/src/moxi_launcher/job.py	DONE = ("relaunched", "cleared", "compacted", "nudged")	keep	compacted	compacted
 launcher	packages/launcher/src/moxi_launcher/job.py	RelaunchJob._find	name	error	exc
 launcher	packages/launcher/src/moxi_launcher/job.py	RelaunchJob._find	name	refused	refused_exc
@@ -3897,6 +3909,7 @@ launcher	packages/launcher/src/moxi_launcher/quiet.py	self._changed.notify_all()
 launcher	packages/launcher/src/moxi_launcher/quiet.py	self._changed.wait_for(lambda: self.events > seen or self.gone is not None,	keep	_changed	_changed
 launcher	packages/launcher/src/moxi_launcher/quiet.py	self._thread.join(timeout=2)	keep	timeout	timeout
 launcher	packages/launcher/src/moxi_launcher/quiet.py	with self._changed:	keep	_changed	_changed
+launcher	packages/launcher/src/moxi_launcher/quiet.py	if any(_last_write(a) is not None for a in live) else None)	keep	any	any
 launcher	packages/launcher/src/moxi_launcher/recycle.py	-	name	scratch_relaunch	is_scratch_relaunch
 launcher	packages/launcher/src/moxi_launcher/recycle.py	- `cleared` or `compacted`.	keep	compacted	compacted
 launcher	packages/launcher/src/moxi_launcher/recycle.py	RAN = {"clear": "cleared", "compact": "compacted"}	keep	compacted	compacted
@@ -3918,8 +3931,6 @@ launcher	packages/launcher/src/moxi_launcher/recycle.py	return Verdict(None, get
 launcher	packages/launcher/src/moxi_launcher/recycle.py	return str(root / "sessions")	keep	sessions	sessions
 launcher	packages/launcher/src/moxi_launcher/recycle.py	root = Path(home) if home else Path(env.get("HOME") or Path.home()) / ".codex"	keep	HOME	HOME
 launcher	packages/launcher/src/moxi_launcher/recycle.py	said = f"the session {'cleared' if command == 'clear' else 'compacted'}"	keep	compacted	compacted
-launcher	packages/launcher/src/moxi_launcher/recycle.py	start_compact	name	environ	caller_env
-launcher	packages/launcher/src/moxi_launcher/recycle.py	start_compact	name	error	exc
 launcher	packages/launcher/src/moxi_launcher/recycle.py	reads; a fault after its run was written ends the run `exc`. With `dry_run` the ask	keep	dry_run	dry_run
 launcher	packages/launcher/src/moxi_launcher/recycle.py	bad = any(a.verdict.outcome not in (None, *job.DONE) for a in asked)	keep	any	any
 launcher	packages/launcher/src/moxi_launcher/recycle.py	"outcome": "dry-run" if dry_run else "asked", "dry_run": dry_run,	keep	dry_run	dry_run
@@ -3938,6 +3949,7 @@ launcher	packages/launcher/src/moxi_launcher/relaunch.py	offered	name	error	exc
 launcher	packages/launcher/src/moxi_launcher/relaunch.py	start_job	name	error	exc
 launcher	packages/launcher/src/moxi_launcher/relaunch.py	started = api.run_job(name, argv, env=common.scrub(env, modules.session_env()),	keep	env	env
 launcher	packages/launcher/src/moxi_launcher/relaunch.py	text = ARMED.format(run=run.run_id, slot=row.slot,	keep	run=	run=
+launcher	packages/launcher/src/moxi_launcher/relaunch.py	if not live or any(a.kind != "subagent" or a.state != "waiting" for a in live):	keep	any	any
 launcher	packages/launcher/src/moxi_launcher/restore.py	#: `liveness-unread`, `refused` and `kept` (the entry left open), `dropped` (closed with no	keep	refused	refused
 launcher	packages/launcher/src/moxi_launcher/restore.py	OUTCOMES = ("restored", "still-running", "liveness-unread", "refused", "kept", "dropped",	keep	refused	refused
 launcher	packages/launcher/src/moxi_launcher/restore.py	LEFT_OPEN = ("still-running", "liveness-unread", "refused", "kept", "failed")	keep	refused	refused
@@ -3985,7 +3997,6 @@ launcher	packages/launcher/src/moxi_launcher/state.py	shown = "stale"	keep	stale
 launcher	packages/launcher/src/moxi_launcher/state.py	state	name	environ	caller_env
 launcher	packages/launcher/src/moxi_launcher/state.py	the open run's state, `stale`, or `ended`), its outcome, word and detail, and when it	keep	stale	stale
 launcher	packages/launcher/src/moxi_launcher/store.py	"""The row as a JSON object: every column, the JSON columns expanded, and `stale`	keep	stale	stale
-launcher	packages/launcher/src/moxi_launcher/store.py	FRESH_CONTEXT = ("relaunched", "first-turn-not-sent", "cleared", "compacted", "exited")	keep	compacted	compacted
 launcher	packages/launcher/src/moxi_launcher/store.py	VERDICTS = ("exited", "held", "at-dialog", "not-exited", "refused")	keep	refused	refused
 launcher	packages/launcher/src/moxi_launcher/store.py	_insert_run	name	actor	by
 launcher	packages/launcher/src/moxi_launcher/store.py	_writing	name	error	exc
@@ -4232,6 +4243,7 @@ launcher	packages/launcher/tests/test_browser_phone_running.py	return any(entry[
 launcher	packages/launcher/tests/test_browser_phone_running.py	return any(entry["request_id"] == request_id and entry["coverable"]	keep	any	any
 launcher	packages/launcher/tests/test_browser_phone_running.py	shell = gateway_shell(tmp_path_factory.mktemp("gw"), options["site"], env=options["env"])	keep	env	env
 launcher	packages/launcher/tests/test_browser_phone_running.py	turns.script(sessions=sessions)	keep	sessions	sessions
+launcher	packages/launcher/tests/test_browser_project_facts.py	"stale": False, "ready": None, "at": now},	keep	stale	stale
 launcher	packages/launcher/tests/test_browser_project_facts.py	Path(root(shell, project.key)).mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
 launcher	packages/launcher/tests/test_browser_project_facts.py	assert set(kestrel) == {"sections"}, kestrel	keep	set	set
 launcher	packages/launcher/tests/test_browser_project_facts.py	assert set(report["projects"]) == {"atlas-api", "harbor-infra", "kestrel-web"}	keep	set	set
@@ -4332,7 +4344,7 @@ launcher	packages/launcher/tests/test_cli_acts.py	assert acts <= set(cli.VERBS)	
 launcher	packages/launcher/tests/test_cli_acts.py	assert run(["sessions", "--json"], capsys) == (codes.OK, "", "")	keep	sessions	sessions
 launcher	packages/launcher/tests/test_cli_acts.py	assert run(["sessions"], capsys) == (codes.OK, "", "no sessions\n")	keep	sessions	sessions
 launcher	packages/launcher/tests/test_cli_acts.py	assert run(["show"], capsys)[:2] == (codes.OK, "session x: ok\n")	keep	show	show
-launcher	packages/launcher/tests/test_cli_acts.py	assert seen == [(("boss@work",), {"dry_run": False})]	keep	dry_run	dry_run
+launcher	packages/launcher/tests/test_cli_acts.py	assert seen == [(("boss@work",), {"handoff": None, "dry_run": False})]	keep	dry_run	dry_run
 launcher	packages/launcher/tests/test_cli_acts.py	assert seen == [(("h.md",), {"dry_run": False})]	keep	dry_run	dry_run
 launcher	packages/launcher/tests/test_cli_acts.py	assert seen == [(("h.md",), {"dry_run": True})]	keep	dry_run	dry_run
 launcher	packages/launcher/tests/test_cli_acts.py	assert seen[-1] == ((SID,), {"dry_run": True})	keep	dry_run	dry_run
@@ -4361,6 +4373,8 @@ launcher	packages/launcher/tests/test_cli_acts.py	assert seen == [((SID,), {"dry
 launcher	packages/launcher/tests/test_cli_acts.py	assert seen[-1] == ((SID,), {"dry_run": False})	keep	dry_run	dry_run
 launcher	packages/launcher/tests/test_cli_acts.py	assert any("Build it." in word for word in execs[-1])	keep	any	any
 launcher	packages/launcher/tests/test_cli_acts.py	assert not any("Build it." in word or word.startswith("Brief from launcher")	keep	any	any
+launcher	packages/launcher/tests/test_cli_acts.py	assert seen[-1] == ((SID,), {"handoff": None, "dry_run": True})	keep	dry_run	dry_run
+launcher	packages/launcher/tests/test_cli_acts.py	assert seen[-1] == ((SID,), {"handoff": "h.md", "dry_run": False})	keep	dry_run	dry_run
 launcher	packages/launcher/tests/test_codex_trust.py	"HOME": str(cwd), "PATH": "/usr/bin:/bin",	keep	HOME	HOME
 launcher	packages/launcher/tests/test_codex_trust.py	assert codex_trust.config_file({"HOME": str(tree)}) == tree / ".codex" / "config.toml"	keep	HOME	HOME
 launcher	packages/launcher/tests/test_codex_trust.py	return {"CODEX_HOME": str(tree / "codex-home"), "HOME": str(tree)}	keep	HOME	HOME
@@ -4963,6 +4977,10 @@ launcher	packages/launcher/tests/test_relaunch.py	assert refused("feedfacecafebe
 launcher	packages/launcher/tests/test_relaunch.py	assert refused(compact.run_id) == "not-relaunch"	keep	refused	refused
 launcher	packages/launcher/tests/test_relaunch.py	store.end_run(conn, compact.run_id, "compacted")	keep	compacted	compacted
 launcher	packages/launcher/tests/test_relaunch.py	assert refused(run.run_id) == "not-open"	keep	refused	refused
+launcher	packages/launcher/tests/test_relaunch.py	call(conn, handoff=str(make(tmp_path)), slots_api=slots_api)	keep	auto	auto
+launcher	packages/launcher/tests/test_relaunch.py	call(conn, handoff=str(make(tmp_path)), slots_api=slots_api)	keep	start	start
+launcher	packages/launcher/tests/test_relaunch.py	@pytest.mark.parametrize("written", ["none", "stale"])	keep	stale	stale
+launcher	packages/launcher/tests/test_relaunch.py	if written == "stale":	keep	stale	stale
 launcher	packages/launcher/tests/test_relaunch_flags.py	path.parent.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
 launcher	packages/launcher/tests/test_relaunch_job.py	FakeSession.__init__	kwonly	agents_complete	agents_complete
 launcher	packages/launcher/tests/test_relaunch_job.py	Result("failed", "timeout"), Result("refused", "gone"),	keep	refused	refused
@@ -5007,6 +5025,7 @@ launcher	packages/launcher/tests/test_relaunch_job.py	assert released == {"slot"
 launcher	packages/launcher/tests/test_relaunch_job.py	self.policy, self.never_bound = policy, set(never_bound)	keep	set	set
 launcher	packages/launcher/tests/test_relaunch_job.py	if self.never_bound & set(to):	keep	set	set
 launcher	packages/launcher/tests/test_relaunch_job.py	return SimpleNamespace(outcome="refused", message_id=None,	keep	refused	refused
+launcher	packages/launcher/tests/test_relaunch_job.py	launch=launched_result(outcome="refused"))	keep	refused	refused
 launcher	packages/launcher/tests/test_replay.py	"HOME": "/h", "PATH": "/bin", "TMPDIR": "/t", "LC_ALL": "C"}	keep	HOME	HOME
 launcher	packages/launcher/tests/test_replay.py	"SESSIONNAME"} & set(short)	keep	set	set
 launcher	packages/launcher/tests/test_replay.py	-	name	test_a_replay_writes_its_row_where_the_callers_environment_puts_the_store	test_a_replay_writes_its_row_where_the_callers_env_puts_the_store
@@ -5031,6 +5050,7 @@ launcher	packages/launcher/tests/test_replay.py	looks = (any(word in name for wo
 launcher	packages/launcher/tests/test_replay.py	path.parent.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
 launcher	packages/launcher/tests/test_replay.py	rig	name	directory	slots_dir
 launcher	packages/launcher/tests/test_replay.py	rig.plan(respawn="refused", refused={"reason": "live-pane", "words": "the pane is live"})	keep	refused	refused
+launcher	packages/launcher/tests/test_replay.py	file.parent.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
 launcher	packages/launcher/tests/test_restore.py	for entry, request in zip((three, five), launch.requests, strict=True):	keep	strict	strict
 launcher	packages/launcher/tests/test_restore.py	rig.plan(slots={"3": reserved("missing", "r3")}, placed=7, create="refused",	keep	refused	refused
 launcher	packages/launcher/tests/test_replay.py	assert not any("recycle_at_limit" in said for said in replayed.warnings)	keep	any	any
@@ -6046,6 +6066,7 @@ memory	packages/memory/tests/test_doctor.py	assert not any("moxi memory" in a fo
 memory	packages/memory/tests/test_doctor.py	NAMES = ["index", "ingest", "folders", "sets", "start", "sessions", "links", "retention"]	keep	folders	folders
 memory	packages/memory/tests/test_doctor.py	NAMES = ["index", "ingest", "folders", "sets", "start", "sessions", "links", "retention",	keep	folders	folders
 memory	packages/memory/tests/test_doctor.py	assert set(module.OPTIONAL) == {"comms", "launcher", "connector", "secrets", "notes"}	keep	set	set
+memory	packages/memory/tests/test_doctor.py	assert set(module.OPTIONAL) == {"comms", "launcher", "connector", "secrets", "notes",	keep	set	set
 memory	packages/memory/tests/test_index.py	return self.proc.wait(timeout=30)	keep	timeout	timeout
 memory	packages/memory/tests/test_index.py	with w.rebuilding(wait=0.1):	keep	wait	wait
 memory	packages/memory/tests/test_index.py	with w.rebuilding(wait=1.0) as started:	keep	wait	wait
@@ -6115,6 +6136,7 @@ memory	packages/memory/tests/test_settings.py	-	name	test_every_key_is_read_at_i
 memory	packages/memory/tests/test_settings.py	-	name	test_the_folders_are_the_cores_for_memory	test_the_dirs_are_the_cores_for_memory
 memory	packages/memory/tests/test_settings.py	assert set(module.INTERNAL_ENV) == set(module.SESSION_ENV) == {"MOXI_MEMORY_SUBCONSCIOUS"}	keep	set	set
 memory	packages/memory/tests/test_settings.py	assert set(module.OPTIONAL) == {"comms", "launcher", "connector", "secrets",	keep	set	set
+memory	packages/memory/tests/test_settings.py	assert set(module.INTERNAL_ENV) == set(module.SESSION_ENV) == {	keep	set	set
 memory	packages/memory/tests/test_setup.py	-	name	test_setup_and_teardown_on_a_fresh_environment_with_no_harness_roots	test_setup_and_teardown_on_a_fresh_env_with_no_harness_roots
 memory	packages/memory/tests/test_setup.py	-	name	test_auto_memory_is_offered_where_claude_codes_folder_exists_without_settings	test_auto_memory_is_offered_where_claude_codes_dir_exists_without_settings
 memory	packages/memory/tests/test_table.py	-	name	test_the_store_lives_in_memorys_state_directory	test_the_store_lives_in_memorys_state_dir
@@ -6132,6 +6154,7 @@ memory	packages/memory/src/moxi_memory/recall_cli.py	"discard", help="end a reca
 memory	packages/memory/src/moxi_memory/recall_cli.py	d.add_argument("recall_id", metavar="RECALL_ID", help="the recall's id, as list shows it")	keep	help	help
 memory	packages/memory/src/moxi_memory/recall_cli.py	out.append(f"round {r.get('round', '?')}  {when}  {said}")	keep	round	round
 memory	packages/memory/src/moxi_memory/recalls.py	if not gate.acquire(timeout=-1 if timeout_s is None else max(timeout_s, 0.0)):	keep	timeout	timeout
+memory	packages/memory/src/moxi_memory/recalls.py	out = set()	keep	set	set
 memory	packages/memory/tests/test_recalls.py	path.parent.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
 memory	packages/memory/tests/test_recalls.py	"rounds": [{"round": 1, "text": "Recalled from past sessions:\n- a point",	keep	round	round
 memory	packages/memory/tests/test_recalls.py	{"round": 2, "lost": "gone", "error": "gone: the bound passed"}],	keep	round	round
@@ -6142,6 +6165,7 @@ memory	packages/memory/src/moxi_memory/recall_brief.py	prompt=text,	keep	prompt	
 memory	packages/memory/src/moxi_memory/recall_brief.py	notes=notes_line,	keep	notes	notes
 memory	packages/memory/src/moxi_memory/recall_brief.py	first=FIRST if rounds > 1 else "",	keep	first	first
 memory	packages/memory/src/moxi_memory/recall_brief.py	stream=STREAM if rounds > 1 else "",	keep	stream	stream
+memory	packages/memory/src/moxi_memory/recall_brief.py	seen: set[str] = set(skip)	keep	set	set
 memory	packages/memory/src/moxi_memory/recall_child.py	self.record = record	keep	record	record
 memory	packages/memory/src/moxi_memory/recall_child.py	"""Write the line with `line`'s fields, and the record with `record`'s, under	keep	record	record
 memory	packages/memory/src/moxi_memory/recall_child.py	self.record = records.update(self.session_id, self.recall_id,	keep	record	record
@@ -6155,18 +6179,26 @@ memory	packages/memory/src/moxi_memory/recall_child.py	parser.add_argument("--se
 memory	packages/memory/src/moxi_memory/recall_child.py	parser.add_argument("--session", required=True, help="the main session's id")	keep	required	required
 memory	packages/memory/src/moxi_memory/recall_child.py	parser.add_argument("--recall", help="the recall's id")	keep	help	help
 memory	packages/memory/src/moxi_memory/recall_child.py	help="take over the session's lines whose owner is gone, and exit")	keep	help	help
+memory	packages/memory/src/moxi_memory/recall_child.py	recall.put(record={"holder": me} if me is not None else None, child=child,	keep	record	record
 memory	packages/memory/src/moxi_memory/recall_discard.py	__all__ = ["Refused", "find", "discard"]	keep	find	find
+memory	packages/memory/src/moxi_memory/recall_discard.py	__all__ = ["Refused", "find", "late", "discard"]	keep	find	find
+memory	packages/memory/src/moxi_memory/recall_discard.py	__all__ = ["Refused", "turns_session", "find", "late", "discard"]	keep	find	find
 memory	packages/memory/src/moxi_memory/recall_guard.py	if not command.isprintable() or any(c in REFUSED_CHARS for c in command):	keep	any	any
 memory	packages/memory/src/moxi_memory/recall_guard.py	if not any(argv[:len(entry)] == entry for entry in entries):	keep	any	any
 memory	packages/memory/src/moxi_memory/recall_guard.py	"""Whether the child of recall `record` is known to have ended: its log line names a	keep	record	record
 memory	packages/memory/src/moxi_memory/recall_guard.py	"""Whether `record` is a recall whose fork's id is not yet written while its child	keep	record	record
 memory	packages/memory/src/moxi_memory/recall_guard.py	"""Whether a round of `record`'s recall was asked, so its fork may have started."""	keep	record	record
+memory	packages/memory/src/moxi_memory/recall_guard.py	"""The holder `record` names, as a mapping, else the child its log line names (a	keep	record	record
+memory	packages/memory/src/moxi_memory/recall_guard.py	"""(whether `record`, on any route, still awaits its fork's id, why not when it might	keep	record	record
+memory	packages/memory/src/moxi_memory/recall_guard.py	"""Whether `record` is a subagent-route recall whose fork's id is not yet written	keep	record	record
+memory	packages/memory/src/moxi_memory/recall_guard.py	"""Judge a fork's `call` against `record`, of session `session_id`, under the	keep	record	record
 memory	packages/memory/src/moxi_memory/recall_stream.py	recall.record = records.read(recall.session_id, recall.recall_id) or recall.record	keep	record	record
 memory	packages/memory/src/moxi_memory/recall_stream.py	rounds.append({"round": round_number, "text": answer, "at": now})	keep	round	round
 memory	packages/memory/src/moxi_memory/recall_stream.py	state = recall.record.get("state")	keep	record	record
 memory	packages/memory/src/moxi_memory/recall_stream.py	recall.write(record=fields, state=recalls.BACK, rounds=rounds)	keep	record	record
 memory	packages/memory/src/moxi_memory/recall_stream.py	if round_number == 1 or not recall.record.get("answered"):	keep	record	record
 memory	packages/memory/src/moxi_memory/recall_stream.py	recall.write(record={"state": records.LOST, "reason": reason,	keep	record	record
+memory	packages/memory/src/moxi_memory/recall_stream.py	return recall.line.get("comms_name") or recall.record.get("comms_name") or None	keep	record	record
 memory	packages/memory/src/moxi_memory/recall_stream.py	rounds.append({"round": round_number, "lost": reason, "error": error,	keep	round	round
 memory	packages/memory/src/moxi_memory/recall_stream.py	recall.write(record={"rounds": round_number}, state=recalls.OPEN, ref=round_ref,	keep	record	record
 memory	packages/memory/src/moxi_memory/recall_stream.py	text = continue_text(recall.record, settings, now=clock())	keep	record	record
@@ -6179,21 +6211,67 @@ memory	packages/memory/src/moxi_memory/recall_stream.py	recall.put(record={"stat
 memory	packages/memory/src/moxi_memory/recall_stream.py	record = records.read(recall.session_id, recall.recall_id) or recall.record	keep	record	record
 memory	packages/memory/src/moxi_memory/recall_stream.py	recall.record = record	keep	record	record
 memory	packages/memory/src/moxi_memory/recall_stream.py	recall.put(record={"state": records.LOST, "reason": records.HURRIED, "error": error},	keep	record	record
+memory	packages/memory/src/moxi_memory/recall_stream.py	recall.write(record=record, state=recalls.SENDING, rounds=rounds, sending_at=now,	keep	record	record
+memory	packages/memory/src/moxi_memory/recall_stream.py	recall.write(record={"state": records.LOST, "reason": GONE, "error": PAST_BOUND},	keep	record	record
+memory	packages/memory/src/moxi_memory/recall_stream.py	rounds.append({"round": round_number, "lost": GONE, "error": PAST_BOUND,	keep	round	round
+memory	packages/memory/src/moxi_memory/recall_stream.py	recall.write(record={"state": records.ENDED}, state=recalls.BACK, rounds=rounds,	keep	record	record
+memory	packages/memory/src/moxi_memory/recall_stream.py	rounds.append({"round": round_number, "text": end.answer, "at": now,	keep	round	round
 memory	packages/memory/src/moxi_memory/recall_take.py	current = records.read(recall.session_id, recall.recall_id) or recall.record	keep	record	record
 memory	packages/memory/src/moxi_memory/recall_take.py	return recalls.is_safe(session_id) and any(	keep	any	any
 memory	packages/memory/src/moxi_memory/recall_take.py	recall.put(record={"state": records.LOST, "reason": recall.line.get("reason"),	keep	record	record
 memory	packages/memory/src/moxi_memory/recall_take.py	recall.put(record={"state": records.ENDED}, hurried=hurried)	keep	record	record
 memory	packages/memory/src/moxi_memory/records.py	"""Write `record` whole and return it as written. The caller holds the session's	keep	record	record
+memory	packages/memory/src/moxi_memory/records.py	default=0)	keep	default	default
+memory	packages/memory/src/moxi_memory/records.py	"""Write `record` whole and return it as written, its `at` clamped to now (see the	keep	record	record
+memory	packages/memory/src/moxi_memory/records.py	"STARTING_GRACE_S", "session_ids", "find", "sweep_old"]	keep	find	find
 memory	packages/memory/tests/test_recall_ends.py	records.write(dict(records.read(SESSION, recall.recall_id), at=1000.0))	keep	at	at
 memory	packages/memory/tests/test_recall_ends.py	records.write(dict(records.read(SESSION, young.recall_id), at=now - 10))	keep	at	at
+memory	packages/memory/tests/test_recall_ends.py	rounds=[{"round": 1, "text": "- a"}])	keep	round	round
+memory	packages/memory/tests/test_recall_ends.py	recall = a_recall(state="sending", rounds=[{"round": 1, "text": "- a"}])	keep	round	round
+memory	packages/memory/tests/test_recall_ends.py	rounds=[{"round": 1, "text": "- late", "late": True}],	keep	round	round
 memory	packages/memory/tests/test_recall_take.py	rounds=[{"round": 1, "text": "- a", "at": 1.0}])	keep	round	round
 memory	packages/memory/tests/test_recall_take.py	assert line["rounds"][-1]["round"] == 2 and line["rounds"][-1]["lost"] == "gone"	keep	round	round
 memory	packages/memory/tests/test_recall_take.py	assert line["rounds"] == [{"round": 1, "text": "- a", "at": 1.0}]	keep	round	round
 memory	packages/memory/tests/test_recall_guard.py	held.set()	keep	set	set
 memory	packages/memory/tests/test_recall_guard.py	done.set()	keep	set	set
+memory	packages/memory/tests/test_recall_guard.py	assert slot.who == slot_ask.who == "any"	keep	any	any
+memory	packages/memory/tests/test_recall_guard.py	assert set(slot.calls) == {"claude", "codex"}	keep	set	set
 memory	packages/memory/tests/test_recall_stream.py	self.held = set()	keep	set	set
 memory	packages/memory/tests/test_recall_stream.py	self.refuse = set(refuse)	keep	set	set
 memory	packages/memory/tests/test_recall_stream.py	assert route.held == set()	keep	set	set
+memory	packages/memory/src/moxi_memory/guards.py	Guard(name="subconscious-slot", calls=SLOT_CALLS, who="any",	keep	any	any
+memory	packages/memory/src/moxi_memory/guards.py	Guard(name="subconscious-slot-ask", calls=CALLS, who="any", deny=ASK_REFUSED,	keep	any	any
+memory	packages/memory/src/moxi_memory/recall_holder.py	"""How long ago `record`'s recall started, in seconds. See the module's docstring.	keep	record	record
+memory	packages/memory/src/moxi_memory/recall_route.py	record = getattr(recall, "record", None) or {}	keep	record	record
+memory	packages/memory/src/moxi_memory/recall_send.py	word=WORD, interrupt=True, expires="never",	keep	interrupt	interrupt
+memory	packages/memory/tests/test_recall_comms_send.py	recall.write(state=recalls.SENDING, rounds=[{"round": 1, "text": "- a"}])	keep	round	round
+memory	packages/memory/tests/test_recall_comms_send.py	rounds=[{"round": 1, "text": "- a"}])	keep	round	round
+memory	packages/memory/tests/test_recall_comms_send.py	recall.put(ref=f"{rid}:1", kept=True, record={"state": records.LOST})	keep	record	record
+memory	packages/memory/tests/test_recall_host_fork.py	self.ends, self.asked, self.deliveries, self.closed = list(ends), [], [], False	keep	closed	closed
+memory	packages/memory/tests/test_recall_host_fork.py	self.closed = True	keep	closed	closed
+memory	packages/memory/tests/test_recall_host_fork.py	monkeypatch.setattr(moxi_turns, "find", find)	keep	find	find
+memory	packages/memory/tests/test_recall_host_fork.py	assert session.closed	keep	closed	closed
+memory	packages/memory/tests/test_recall_host_fork.py	monkeypatch.setattr(moxi_turns, "find",	keep	find	find
+memory	packages/memory/tests/test_recall_send.py	self.sent.append(dict(module=module, parent=parent, to=to, text=text, word=word,	keep	text	text
+memory	packages/memory/tests/test_recall_send.py	interrupt=interrupt, expires=expires))	keep	interrupt	interrupt
+memory	packages/memory/tests/test_recall_send.py	return types.SimpleNamespace(outcome="refused", message_id=None,	keep	refused	refused
+memory	packages/memory/tests/test_recall_send.py	text="Recalled ...:\n- a point", word="subconscious",	keep	text	text
+memory	packages/memory/tests/test_recall_send.py	interrupt=True, expires="never")]	keep	interrupt	interrupt
+memory	packages/memory/tests/test_recall_slot.py	self.delivered, self.closed = [], False	keep	closed	closed
+memory	packages/memory/tests/test_recall_slot.py	self.delivered, self.closed = [], False	keep	delivered	delivered
+memory	packages/memory/tests/test_recall_slot.py	self.delivered.append((text, kw))	keep	delivered	delivered
+memory	packages/memory/tests/test_recall_slot.py	return types.SimpleNamespace(id=f"d{len(self.delivered)}", ref=kw.get("ref"))	keep	delivered	delivered
+memory	packages/memory/tests/test_recall_slot.py	self.closed = True	keep	closed	closed
+memory	packages/memory/tests/test_recall_slot.py	assert turns.endpoint.delivered == [("the brief", {"by": "memory", "ref": "r-1:1",	keep	delivered	delivered
+memory	packages/memory/tests/test_recall_slot.py	assert turns.endpoint.delivered[1] == ("go on", {"by": "memory", "ref": "r-1:2",	keep	delivered	delivered
+memory	packages/memory/tests/test_recall_slot.py	assert turns.endpoint.closed	keep	closed	closed
+memory	packages/memory/tests/test_recall_slot.py	assert route.started(None) is None and turns.endpoint.delivered == []	keep	delivered	delivered
+memory	packages/memory/tests/test_recall_slot.py	rounds=[{"round": 1, "text": "- a"}])	keep	round	round
+memory	packages/memory/tests/test_recall_slot.py	at_limit.put(ref=f"{at_limit.recall_id}:1", record={"state": records.LOST})	keep	record	record
+memory	packages/memory/tests/test_recall_slot.py	rounds=[{"round": 1, "text": "- a"},	keep	round	round
+memory	packages/memory/tests/test_recall_slot.py	{"round": 2, "lost": "gone", "error": "bound"}])	keep	round	round
+memory	packages/memory/tests/test_recall_slot.py	recall.put(ref=f"{rid}:2", record={"state": records.ENDED, "answered": True})	keep	record	record
+memory	packages/memory/tests/test_recall_start.py	{"round": 1, "text": "Recalled ...:\n- the lock is held by the writer"}]})	keep	round	round
 moxi	packages/moxi/src/moxi/_mark.py	-	name	NAME	STARTED_BY_ENV
 moxi	packages/moxi/src/moxi/_mark.py	for at, part in enumerate(orig[1:], start=1):	keep	start	start
 moxi	packages/moxi/src/moxi/_mark.py	if not any(name.upper() == STARTED_BY_ENV for name in child):	keep	any	any
@@ -6276,6 +6354,12 @@ moxi	packages/moxi/src/moxi/cli.py	help="print one JSON object, {changed, proble
 moxi	packages/moxi/src/moxi/cli.py	failed = op in ("set", "unset") and any(	keep	set	set
 moxi	packages/moxi/src/moxi/cli.py	failed = op in ("set", "unset") and any(	keep	any	any
 moxi	packages/moxi/src/moxi/cli.py	print(json.dumps({"changed": changed, "problem": problem, "fix": fix, "units": units}))	keep	changed	changed
+moxi	packages/moxi/src/moxi/cli.py	if schema is None and not (tabled and args.action == "show"):	keep	show	show
+moxi	packages/moxi/src/moxi/cli.py	the module's `warning` or `refused` words; or the error a table's file gives. 1 when	keep	refused	refused
+moxi	packages/moxi/src/moxi/cli.py	for word in ("refused", "warning"):	keep	refused	refused
+moxi	packages/moxi/src/moxi/cli.py	and `applies` from the hook, and the row's `warning` and `refused` (null when it	keep	refused	refused
+moxi	packages/moxi/src/moxi/cli.py	item["refused"] = row.get("refused")	keep	refused	refused
+moxi	packages/moxi/src/moxi/cli.py	parser.add_argument("key", help="the setting's dotted name, or <table>.<row>")	keep	help	help
 moxi	packages/moxi/src/moxi/config.py	-	name	set	set_value
 moxi	packages/moxi/src/moxi/config.py	Key.__init__	name	type	value_type
 moxi	packages/moxi/src/moxi/config.py	_change(module, key, "set", value, by=by)	keep	set	set
@@ -6336,6 +6420,11 @@ moxi	packages/moxi/src/moxi/config.py	and `CONFIG_CHECK`, and each change prepar
 moxi	packages/moxi/src/moxi/config.py	_record_changes(module, keys, "set", by)	keep	set	set
 moxi	packages/moxi/src/moxi/config.py	with files.edit_toml(path, timeout=LOCK_TIMEOUT) as doc:	use	timeout=	timeout_s=
 moxi	packages/moxi/src/moxi/config.py	_prepared	kwonly	text	text
+moxi	packages/moxi/src/moxi/config.py	`set` or `unset` of such a key goes to the table's hook in place of the module's config	keep	set	set
+moxi	packages/moxi/src/moxi/config.py	A table's name may not be a top-level name of the module's own schema. The hook, `NAME`	keep	NAME	NAME
+moxi	packages/moxi/src/moxi/config.py	shape and named by the row alone; a row may add `warning` and `refused`	keep	refused	refused
+moxi	packages/moxi/src/moxi/config.py	top = set() if schema is None else {name.split(".")[0] for name in schema.keys}	keep	set	set
+moxi	packages/moxi/src/moxi/config.py	changed, warnings = hook.change(row, op, value, by=by, env=env)	keep	env	env
 moxi	packages/moxi/src/moxi/doctor/__init__.py	__all__ = ["STATES", "RECORDS_FILE", "Row", "record", "clear", "health", "floor_ms"]	keep	record	record
 moxi	packages/moxi/src/moxi/doctor/__init__.py	__all__ = ["STATES", "RECORDS_FILE", "Row", "is_needs_value", "record", "clear", "health", "floor_ms"]	keep	record	record
 moxi	packages/moxi/src/moxi/doctor/__init__.py	can call `record`. The doctor's runner and checks live in `moxi.doctor._run`, which the	keep	record	record
@@ -6869,6 +6958,38 @@ moxi	packages/moxi/tests/test_config_set.py	for argv in (("set", "demo", "block"
 moxi	packages/moxi/tests/test_config_set.py	assert code == 2 and out["changed"] is False	keep	changed	changed
 moxi	packages/moxi/tests/test_config_set.py	"changed": False,	keep	changed	changed
 moxi	packages/moxi/tests/test_config_set.py	code, out = change_json(capsys, "set", "demo", "local.retain_days", "seven")	keep	set	set
+moxi	packages/moxi/tests/test_config_tables.py	its rows after the module's keys, and `set` and `unset` of `<table>.<row>` go to the	keep	set	set
+moxi	packages/moxi/tests/test_config_tables.py	#: `bad` is refused, `held` meets a held lock, `warn` is written with a warning line; an	keep	bad	bad
+moxi	packages/moxi/tests/test_config_tables.py	monkeypatch.setenv("HOME", str(tmp_path))	keep	HOME	HOME
+moxi	packages/moxi/tests/test_config_tables.py	code, out, _ = run(capsys, "config", module, "show", "--json")	keep	show	show
+moxi	packages/moxi/tests/test_config_tables.py	assert (row["warning"], row["refused"], row["clear_only"]) == (None, None, False)	keep	refused	refused
+moxi	packages/moxi/tests/test_config_tables.py	assert set(own) <= set(row)	keep	set	set
+moxi	packages/moxi/tests/test_config_tables.py	assert (typo["refused"], typo["clear_only"], typo["value"]) == (	keep	refused	refused
+moxi	packages/moxi/tests/test_config_tables.py	run(capsys, "config", "set", "demo", "rows.mode", "warn")	keep	set	set
+moxi	packages/moxi/tests/test_config_tables.py	assert not any(field.startswith("table_") or field in ("applies", "clear_only")	keep	any	any
+moxi	packages/moxi/tests/test_config_tables.py	assert code == 1 and set(error) == {"error", "fix"}	keep	set	set
+moxi	packages/moxi/tests/test_config_tables.py	code, out, _ = run(capsys, "config", "set", "demo", "block", "true")	keep	set	set
+moxi	packages/moxi/tests/test_config_tables.py	assert set(error) == {"error", "fix", "keys"}	keep	set	set
+moxi	packages/moxi/tests/test_config_tables.py	code, out, _ = change_json(capsys, "set", "demo", "rows.mode", "b")	keep	set	set
+moxi	packages/moxi/tests/test_config_tables.py	assert code == 0 and out["changed"] is True	keep	changed	changed
+moxi	packages/moxi/tests/test_config_tables.py	code, out, err = run(capsys, "config", "set", "demo", "rows.mode", "b", "--by", "ui")	keep	set	set
+moxi	packages/moxi/tests/test_config_tables.py	assert [(r["op"], r["by"]) for r in records] == [("set", "ui"), ("unset", "cli")]	keep	set	set
+moxi	packages/moxi/tests/test_config_tables.py	assert all(set(r) == {"module", "key", "op", "by", "at"} for r in records)	keep	set	set
+moxi	packages/moxi/tests/test_config_tables.py	code, out, _ = run(capsys, "config", "set", "demo", "rows.mode", "warn")	keep	set	set
+moxi	packages/moxi/tests/test_config_tables.py	code, answer, err = change_json(capsys, "set", "demo", "rows.mode", "warn")	keep	set	set
+moxi	packages/moxi/tests/test_config_tables.py	assert (code, answer) == (0, {"changed": True, "problem": None, "fix": None,	keep	changed	changed
+moxi	packages/moxi/tests/test_config_tables.py	code, _, _ = run(capsys, "config", "set", "demo", "rows.two.parts", "x")	keep	set	set
+moxi	packages/moxi/tests/test_config_tables.py	assert config.history("demo", "rows.two.parts")[0]["op"] == "set"	keep	set	set
+moxi	packages/moxi/tests/test_config_tables.py	(("set", "demo", "rows.mode", "bad"), 2, "cannot be 'bad'", "give a or b"),	keep	bad	bad
+moxi	packages/moxi/tests/test_config_tables.py	(("set", "demo", "rows.mode", "bad"), 2, "cannot be 'bad'", "give a or b"),	keep	set	set
+moxi	packages/moxi/tests/test_config_tables.py	(("set", "demo", "rows.mode", "--add", "x"), 2,	keep	set	set
+moxi	packages/moxi/tests/test_config_tables.py	(("set", "demo", "rows.mode", "--remove", "x"), 2,	keep	set	set
+moxi	packages/moxi/tests/test_config_tables.py	(("set", "demo", "rows.mode", "held"), 75, None, "try again once it is free"),	keep	set	set
+moxi	packages/moxi/tests/test_config_tables.py	assert answer["changed"] is False and answer["fix"] == fix	keep	changed	changed
+moxi	packages/moxi/tests/test_config_tables.py	code, answer, _ = change_json(capsys, "set", "demo", "rows.", "a")	keep	set	set
+moxi	packages/moxi/tests/test_config_tables.py	code, _, err = run(capsys, "config", "set", "nothere", "rows.mode", "a")	keep	set	set
+moxi	packages/moxi/tests/test_config_tables.py	code, answer, _ = change_json(capsys, "set", "lost", "rows.mode", "a")	keep	set	set
+moxi	packages/moxi/tests/test_config_tables.py	code, answer, _ = change_json(capsys, "set", "clash", "rows.mode", "a")	keep	set	set
 moxi	packages/moxi/tests/test_doctor.py	-	name	test_the_core_s_records_are_in_the_core_s_state_directory	test_the_core_s_records_are_in_the_core_s_state_dir
 moxi	packages/moxi/tests/test_doctor.py	assert set(got) == {"commit:abc", "other"}	keep	set	set
 moxi	packages/moxi/tests/test_doctor.py	assert set(records(home)) == {"a"}	keep	set	set
@@ -8538,6 +8659,7 @@ projects	packages/projects/tests/conftest.py	path.parent.mkdir(parents=True, exi
 projects	packages/projects/tests/conftest.py	self.packages: set[str] = set()	keep	set	set
 projects	packages/projects/tests/conftest.py	store_path.parent.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
 projects	packages/projects/tests/fixture/moxi_fixture/page.py	STATE.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
+projects	packages/projects/tests/projects_page_kit.py	if any(topic.startswith("turns.") and topic not in TURNS_TOPICS for topic in topics):	keep	any	any
 projects	packages/projects/tests/projects_page_kit.py	site.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
 projects	packages/projects/tests/projects_page_kit.py	info.mkdir(exist_ok=True)	keep	exist_ok	exist_ok
 projects	packages/projects/tests/projects_page_kit.py	(site / "sitecustomize.py").write_text(_HIDE.format(names=set(hidden)), encoding="utf-8")	keep	set	set
@@ -13460,6 +13582,9 @@ sessions	packages/sessions/tests/test_browser_running.py	pytest.mark.skipif(not 
 sessions	packages/sessions/tests/test_browser_running.py	"where": {"target": "slot", "slot": slot, "project_key": project, "folder": project},	keep	folder	folder
 sessions	packages/sessions/tests/test_browser_running.py	self.answer: dict = {"refused": None}	keep	refused	refused
 sessions	packages/sessions/tests/test_browser_running.py	expect(row).to_have_attribute("name", "from-topic", timeout=30_000)	keep	timeout	timeout
+sessions	packages/sessions/tests/test_browser_cache.py	pytest.mark.skipif(not any(found.name == "cache" for found in modules.scan()),	keep	any	any
+sessions	packages/sessions/tests/test_browser_cache.py	pytest.mark.skipif(not any(found.name == "launcher" for found in modules.scan()),	keep	any	any
+sessions	packages/sessions/tests/test_browser_cache.py	expect(first).to_have_attribute("fact", "cold", timeout=15_000)	keep	timeout	timeout
 sessions	packages/sessions/tests/test_browser_transcript.py	-	name	test_a_folder_under_the_home_folder_is_written_with_a_tilde_in_the_list	test_a_dir_under_the_home_dir_is_written_with_a_tilde_in_the_list
 sessions	packages/sessions/tests/test_browser_transcript.py	-	name	test_an_unnamed_session_is_named_by_its_folder_and_when_it_started	test_an_unnamed_session_is_named_by_its_dir_and_when_it_started
 sessions	packages/sessions/tests/test_browser_transcript.py	assert any(SESSION_API.search(url) and f"session={sid(1)}" in url for url in asked)	keep	any	any
@@ -15521,6 +15646,7 @@ turns	packages/turns/tests/test_page.py	assert reader.value()["sessions"] == []	
 turns	packages/turns/tests/test_page.py	assert routes["/api/events"]["topics"]["sessions"]["items"] == {	keep	sessions	sessions
 turns	packages/turns/tests/test_page.py	assert set(keys(data)) == {a.dir.name, b.dir.name}	keep	set	set
 turns	packages/turns/tests/test_page.py	assert set(keys(data)) == {key, "claude-hung"}	keep	set	set
+turns	packages/turns/tests/test_page.py	assert set(module.COMPONENTS) == {"page", "project-facts"}	keep	set	set
 turns	packages/turns/tests/test_page.py	assert set(module.OPTIONAL) == {"codex", "ui"}	keep	set	set
 turns	packages/turns/tests/test_page.py	assert {"deliver", "agents", "steer"} <= set(row["capabilities"])	keep	set	set
 turns	packages/turns/tests/test_page.py	await stream.until(lambda d: len(d["sessions"]) == 2, 5)	keep	sessions	sessions
@@ -16051,6 +16177,12 @@ ui	packages/ui/src/moxi_ui/settings.py	return _result(key, "refused", problem=pr
 ui	packages/ui/src/moxi_ui/settings.py	results = [_result(key, "refused", problem=f"is not a setting of {module}")	keep	refused	refused
 ui	packages/ui/src/moxi_ui/settings.py	for key, value, reset, before in zip(keys, values, resets, was, strict=True):	keep	strict	strict
 ui	packages/ui/src/moxi_ui/settings.py	done = run(argv, timeout_s=WRITE_TIMEOUT_S, cwd=cwd, env=env)	keep	env	env
+ui	packages/ui/src/moxi_ui/settings.py	may carry `warning` and `refused` (the module's words for a value some or all of its uses	keep	refused	refused
+ui	packages/ui/src/moxi_ui/settings.py	`failed` (a 422 on `set` and `unset`) with the error.	keep	set	set
+ui	packages/ui/src/moxi_ui/settings.py	"warning": _STRING, "refused": _STRING, "clear_only": Out("bool"),	keep	refused	refused
+ui	packages/ui/src/moxi_ui/settings.py	"mark": _mark(module, name, item.get("read"), set(switches), platform, logins,	keep	set	set
+ui	packages/ui/src/moxi_ui/settings.py	"warning": _text(item.get("warning")), "refused": _text(item.get("refused"))}	keep	refused	refused
+ui	packages/ui/src/moxi_ui/settings.py	**_page_fields({}), "json": "null", "default_json": "null", "changed": False,	keep	changed	changed
 ui	packages/ui/src/moxi_ui/snapshot.py	"mounted": export is not None,	keep	mounted	mounted
 ui	packages/ui/src/moxi_ui/snapshot.py	"refused": refused,	keep	refused	refused
 ui	packages/ui/src/moxi_ui/snapshot.py	_mtimes	name	directory	watched_dir
@@ -18068,6 +18200,19 @@ moxi-dev	packages/moxi-dev/tests/test_console_script.py	assert child.wait(timeou
 turns	packages/turns/tests/test_listeners.py	assert any(m.startswith(f"start list entry run:{plain} adds nothing: it cannot start")	keep	any	any
 rounds	packages/rounds/tests/test_finish_lock.py	assert said.startswith("refused") and f"coder pid={first.own_pid} " in said	keep	refused	refused
 ui	packages/ui/src/moxi_ui/testing/__init__.py	before = set(this.children())	keep	set	set
+ui	packages/ui/tests/fixture/moxi_fixture/table.py	"source": "file", "clear_only": True, "refused": f"{name} {NO_ROW}"}	keep	refused	refused
+ui	packages/ui/tests/fixture/moxi_fixture/table.py	path.parent.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
+ui	packages/ui/tests/test_browser_settings.py	shell = ui_shells(site=[tabled_site], env={"MOXI_UI_LOCKED_SETTINGS": "fixture.defaults"})	keep	env	env
+ui	packages/ui/tests/test_settings.py	return {"HOME": str(tmp_path), "XDG_CONFIG_HOME": str(tmp_path / ".config")}	keep	HOME	HOME
+ui	packages/ui/tests/test_settings.py	"table_file": str(file), "applies": APPLIES, "warning": None, "refused": None,	keep	refused	refused
+ui	packages/ui/tests/test_settings.py	assert (key["warning"], key["refused"], key["clear_only"]) == (	keep	refused	refused
+ui	packages/ui/tests/test_settings.py	assert key["table_error"] is None and key["changed"]	keep	changed	changed
+ui	packages/ui/tests/test_settings.py	assert (typo["clear_only"], typo["refused"], typo["changed"]) == (True, "typo is not a row.",	keep	changed	changed
+ui	packages/ui/tests/test_settings.py	assert (typo["clear_only"], typo["refused"], typo["changed"]) == (True, "typo is not a row.",	keep	refused	refused
+ui	packages/ui/tests/test_settings.py	assert [plain[f] for f in ("table_title", "table_file", "warning", "refused",	keep	refused	refused
+ui	packages/ui/tests/test_settings.py	assert item["table_file"].startswith("~") and not item["changed"]	keep	changed	changed
+ui	packages/ui/tests/test_settings.py	bare = Run(code=1, stdout=json.dumps({"error": "bad", "fix": None}).encode(), schema=None)	keep	bad	bad
+ui	packages/ui/tests/test_settings_save.py	assert run.writes[-1][0][5:] == ["set", "--by", "ui", "--json", "--", "demo",	keep	set	set
 launcher	packages/launcher/src/moxi_launcher/relaunch.py	found = sessions.find(row.harness, session_id,	keep	find	find
 launcher	packages/launcher/src/moxi_launcher/selfrecycle.py	"RECYCLE_AT_LIMIT", "RELAUNCH", "SCRATCH", "SLOT", "SLOTS", "WARN_AT", "missing",	keep	RELAUNCH	RELAUNCH
 launcher	packages/launcher/src/moxi_launcher/selfrecycle.py	"RECYCLE_AT_LIMIT", "RELAUNCH", "SCRATCH", "SLOT", "SLOTS", "WARN_AT", "missing",	keep	WARN_AT	WARN_AT
@@ -18078,6 +18223,57 @@ launcher	packages/launcher/src/moxi_launcher/target.py	and `find` does not wait.
 launcher	packages/launcher/src/moxi_launcher/target.py	For the callers that read a launch before `find`, so they find the launch `find`	keep	find	find
 launcher	packages/launcher/src/moxi_launcher/target.py	return turns.find(session_id=session_id)	keep	find	find
 launcher	packages/launcher/src/moxi_launcher/target.py	"Unclaimed", "by_process", "caller", "check_claim", "claims", "find", "replaces",	keep	find	find
+launcher	packages/launcher/tests/test_defaults.py	file.parent.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
+launcher	packages/launcher/tests/test_defaults.py	return Table(available=available).change(name, op, value, by="test", env=os.environ)	keep	env	env
+launcher	packages/launcher/tests/test_defaults.py	assert len(listed) == len(set(listed))	keep	set	set
+launcher	packages/launcher/tests/test_defaults.py	assert set(listed) == set(defaults.offered_rows(ALL))	keep	set	set
+launcher	packages/launcher/tests/test_defaults.py	assert change("effort", "set", "high", here) == (True, [])	keep	set	set
+launcher	packages/launcher/tests/test_defaults.py	change("keep_warm", "set", "off", here)	keep	set	set
+launcher	packages/launcher/tests/test_defaults.py	assert row["refused"] == ("relaunch at limit needs slots and a slot launch; launch it "	keep	refused	refused
+launcher	packages/launcher/tests/test_defaults.py	change("recycle_at_limit", "set", "relaunch", only("turns", "usage", "slots"))	keep	set	set
+launcher	packages/launcher/tests/test_defaults.py	assert item["source"] == "file" and item["refused"]	keep	refused	refused
+launcher	packages/launcher/tests/test_defaults.py	assert first[0]["refused"] == ("session_id is set by the launcher itself; leave "	keep	refused	refused
+launcher	packages/launcher/tests/test_defaults.py	assert first[1]["refused"].startswith("takes_policy_directors can't be set in "	keep	refused	refused
+launcher	packages/launcher/tests/test_defaults.py	assert first[2]["refused"] == ("typo_row is not a launcher row or a row of any "	keep	refused	refused
+launcher	packages/launcher/tests/test_defaults.py	True, [first[1]["refused"][:-1], first[2]["refused"][:-1]])	keep	refused	refused
+launcher	packages/launcher/tests/test_defaults.py	True, [first[2]["refused"][:-1]])	keep	refused	refused
+launcher	packages/launcher/tests/test_defaults.py	assert row["refused"] == ("effort is an int, not a string; set effort to a string "	keep	refused	refused
+launcher	packages/launcher/tests/test_defaults.py	assert change("effort", "set", "low") == (True, [])	keep	set	set
+launcher	packages/launcher/tests/test_defaults.py	assert rows()["effort"]["refused"] is None	keep	refused	refused
+launcher	packages/launcher/tests/test_defaults.py	assert change("permission_mode", "set", "plan") == (True, [])	keep	set	set
+launcher	packages/launcher/tests/test_defaults.py	change("effort", "set", "high")	keep	set	set
+launcher	packages/launcher/tests/test_defaults.py	change("model", "set", "opus")	keep	set	set
+launcher	packages/launcher/tests/test_defaults.py	change("effort", "set", "low")	keep	set	set
+launcher	packages/launcher/tests/test_defaults.py	change("add_dir", "set", f'["{extra_dir.replace(chr(92), chr(92) * 2)}"]')	keep	set	set
+launcher	packages/launcher/tests/test_defaults.py	change("remote_control", "set", "true")	keep	set	set
+launcher	packages/launcher/tests/test_defaults.py	change("remote_control", "set", "laptop")	keep	set	set
+launcher	packages/launcher/tests/test_defaults.py	assert change("remote_control", "set", "laptop") == (False, [])	keep	set	set
+launcher	packages/launcher/tests/test_defaults.py	change("instructions_file", "set", "~/agents/planner.md", ALL)	keep	set	set
+launcher	packages/launcher/tests/test_defaults.py	change(name, "set", value, ALL)	keep	set	set
+launcher	packages/launcher/tests/test_defaults.py	change("session_id", "set", "y")	keep	set	set
+launcher	packages/launcher/tests/test_defaults.py	assert (row["refused"], row["warning"]) == (None, LIMIT_AT_LEFT_OUT)	keep	refused	refused
+launcher	packages/launcher/tests/test_defaults.py	assert (row["refused"], row["warning"]) == (None, COMPACT_LEFT_OUT)	keep	refused	refused
+launcher	packages/launcher/tests/test_defaults.py	change("limit_at", "set", "1x", ALL)	keep	set	set
+launcher	packages/launcher/tests/test_defaults.py	change("recycle_at_limit", "set", "compact", ALL)	keep	set	set
+launcher	packages/launcher/tests/test_defaults.py	changed, warnings = change("recycle_at_limit", "set", "relaunch", RECYCLES)	keep	set	set
+launcher	packages/launcher/tests/test_defaults.py	assert row["warning"] == REFUSED_BARE + "." and row["refused"] is None	keep	refused	refused
+launcher	packages/launcher/tests/test_defaults.py	change(name, "set", values[name], RECYCLES)	keep	set	set
+launcher	packages/launcher/tests/test_defaults.py	assert row["refused"] is None	keep	refused	refused
+launcher	packages/launcher/tests/test_defaults.py	change("recycle_at_limit", "set", "relaunch", RECYCLES)	keep	set	set
+launcher	packages/launcher/tests/test_defaults.py	change("target", "set", "slot", RECYCLES)	keep	set	set
+launcher	packages/launcher/tests/test_defaults.py	change("project", "set", "moxi")	keep	set	set
+launcher	packages/launcher/tests/test_defaults.py	changed, warnings = change("cwd", "set", str(tmp_path))	keep	set	set
+launcher	packages/launcher/tests/test_defaults.py	assert listed[name]["refused"] == warnings[0] + "."	keep	refused	refused
+launcher	packages/launcher/tests/test_defaults.py	assert rows()["cwd"]["refused"] is None	keep	refused	refused
+launcher	packages/launcher/tests/test_defaults.py	assert change("effort", "set", "high") == (True, [])	keep	set	set
+launcher	packages/launcher/tests/test_defaults.py	config.change_table("launcher", "defaults.effort", "set", "high", by="test")	keep	set	set
+launcher	packages/launcher/tests/test_defaults.py	config_file.parent.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
+launcher	packages/launcher/tests/test_defaults.py	assert config.change_table("launcher", "defaults.effort", "set", "high",	keep	set	set
+launcher	packages/launcher/tests/test_defaults.py	code = cli.main(["config", "set", "launcher", "defaults.permission_mode", "plan",	keep	set	set
+launcher	packages/launcher/tests/test_defaults.py	assert (code, answer["changed"], answer["problem"]) == (0, True, None)	keep	changed	changed
+launcher	packages/launcher/tests/test_defaults.py	assert [(r["op"], r["by"]) for r in records] == [("set", "ui")]	keep	set	set
+launcher	packages/launcher/tests/test_defaults.py	assert change("model", "set", "opus") == (True, [])	keep	set	set
+launcher	packages/launcher/tests/test_defaults.py	assert change("model", "set", "opus") == (False, [])	keep	set	set
 launcher	packages/launcher/tests/test_recycle.py	store.end_run(conn, first.run_id, "compacted")	keep	compacted	compacted
 launcher	packages/launcher/tests/test_relaunch.py	"""sessions' `find` and `records`: the id's main transcript, whose first records have	keep	find	find
 launcher	packages/launcher/tests/test_relaunch.py	assert "stale" in caught.value.problem and later.asked == [CLEARED]	keep	stale	stale
@@ -18179,3 +18375,96 @@ usage	packages/usage/tests/test_bench.py	home.mkdir(parents=True, exist_ok=True)
 moxi	packages/moxi/tests/test_install.py	strict=True):	keep	strict	strict
 ui	packages/ui/tests/test_push.py	return any(row["module"] == "pspage" and row["state"] == "running"	keep	any	any
 moxi	packages/moxi/tests/test_proc.py	child.wait(timeout=30)	keep	timeout	timeout
+cache	packages/cache/tests/test_codex_clock.py	r.record("t1", t + 3)	keep	record	record
+cache	packages/cache/tests/test_codex_clock.py	r.record("t1", t + 30)	keep	record	record
+launcher	packages/launcher/src/moxi_launcher/cachetimers.py	__all__ = ["COMPACT_BEFORE_EXPIRY", "JOB", "KEEP_WARM", "TIMERS"]	keep	KEEP_WARM	KEEP_WARM
+launcher	packages/launcher/src/moxi_launcher/catalog.py	others = sorted(set(spec) - {"retired"})	keep	set	set
+launcher	packages/launcher/src/moxi_launcher/catalog.py	raise bad(f"is retired, so it takes no {', '.join(others)}")	keep	bad	bad
+launcher	packages/launcher/src/moxi_launcher/catalog.py	raise bad("has retired_values, which only an enum row takes")	keep	bad	bad
+launcher	packages/launcher/src/moxi_launcher/catalog.py	raise bad("has retired_values that are not a table of value to what to do instead")	keep	bad	bad
+launcher	packages/launcher/src/moxi_launcher/catalog.py	taken = sorted(set(raw) & set(values or ()))	keep	set	set
+launcher	packages/launcher/src/moxi_launcher/catalog.py	raise bad(f"retires {', '.join(taken)}, which its values still take")	keep	bad	bad
+launcher	packages/launcher/src/moxi_launcher/presets.py	row.check(value)  # raises `catalog.Retired`, with what to do instead	keep	ok	ok
+launcher	packages/launcher/src/moxi_launcher/presets.py	and any(p.key == name for p in retired)):	keep	any	any
+launcher	packages/launcher/src/moxi_launcher/recycle.py	newest compact run of any mode on the launch's chain that ended `compacted` (bound at	keep	compacted	compacted
+launcher	packages/launcher/src/moxi_launcher/recycle.py	its end), or `unconfirmed` or `error` after its `compact` event (bound at that event	keep	error	error
+launcher	packages/launcher/src/moxi_launcher/recycle.py	directed join. With `dry_run` the ask writes nothing and ends, where it would act, as	keep	dry_run	dry_run
+launcher	packages/launcher/src/moxi_launcher/recycle.py	`compacted`, bound at its end; or that ended in `COMPACT_UNKNOWN` after its `compact`	keep	compacted	compacted
+launcher	packages/launcher/src/moxi_launcher/recycle.py	"""End `run` `error` on the fault `exc`; raise it again unless it is an `Exception`."""	keep	error	error
+launcher	packages/launcher/src/moxi_launcher/store.py	`compact` event may have compacted, so it ends `error`, and that event bounds it as a	keep	error	error
+launcher	packages/launcher/tests/test_catalog.py	row.check("compact")	keep	ok	ok
+launcher	packages/launcher/tests/test_catalog.py	assert row.check("relaunch") == "relaunch"	keep	ok	ok
+launcher	packages/launcher/tests/test_page_launch.py	assert said["refused"] == [] and said["left_out"] == ["recycle_at_limit"]	keep	refused	refused
+launcher	packages/launcher/tests/test_presets.py	path.parent.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
+launcher	packages/launcher/tests/test_recycle.py	"compact", "expiry", "compacted", 4)	keep	compacted	compacted
+launcher	packages/launcher/tests/test_recycle.py	assert ask_compact(conn, session=moved, cache=cache).verdict.outcome == "compacted"	keep	compacted	compacted
+launcher	packages/launcher/tests/test_recycle.py	got = ask_compact(conn, session=FakeSession([Result("refused", "stale-turn")]))	keep	refused	refused
+launcher	packages/launcher/tests/test_recycle.py	done = compact_ended(conn, "compacted", sent=last + 2, ended=last + 10)	keep	compacted	compacted
+launcher	packages/launcher/tests/test_recycle.py	compact_ended(conn, "compacted", sent=last - 20, ended=last - 10)	keep	compacted	compacted
+launcher	packages/launcher/tests/test_recycle.py	assert stretch_ask(conn, last).verdict.outcome == "compacted"	keep	compacted	compacted
+launcher	packages/launcher/tests/test_recycle.py	compact_ended(conn, "compacted", sent=last - 5, ended=last + 0.001)	keep	compacted	compacted
+launcher	packages/launcher/tests/test_recycle.py	compact_ended(conn, "compacted", sent=last - 5, ended=last + 5, mode="limit")	keep	compacted	compacted
+launcher	packages/launcher/tests/test_recycle.py	compact_ended(conn, "compacted", sent=last - 5, ended=last + 5, request_id="r0")	keep	compacted	compacted
+launcher	packages/launcher/tests/test_recycle.py	compact_ended(conn, "compacted", sent=last - 5, ended=last + 5, request_id="r2")	keep	compacted	compacted
+launcher	packages/launcher/tests/test_recycle.py	compact_ended(conn, "compacted", sent=last - 5, ended=last + 5,	keep	compacted	compacted
+launcher	packages/launcher/tests/test_recycle.py	compact_ended(conn, "compacted", sent=last - 100, ended=last - 90)	keep	compacted	compacted
+launcher	packages/launcher/tests/test_recycle.py	self.end("compacted")	keep	compacted	compacted
+launcher	packages/launcher/tests/test_settings.py	assert set(settings.schema().keys) == set(DEFAULTS) | set(TEXTS) | LEFT_OUT	keep	set	set
+launcher	packages/launcher/tests/test_store_v2.py	store.end_run(conn, made.run_id, "compacted", at=at(-20))	keep	compacted	compacted
+launcher	packages/launcher/tests/test_store_v2.py	assert store.get_run(conn, made.run_id).outcome == "compacted"	keep	compacted	compacted
+moxi	packages/moxi/src/moxi/config.py	raise bad(f"has left_out {left_out!r}", "give left_out true or false")	keep	bad	bad
+moxi	packages/moxi/src/moxi/config.py	raise bad("has left_out but is not retired",	keep	bad	bad
+moxi	packages/moxi/tests/test_config_set.py	demo.parent.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
+loadout	packages/loadout/src/moxi_loadout/cli.py	p.add_argument("--harness", action="append", default=[], metavar="H",	keep	default	default
+loadout	packages/loadout/src/moxi_loadout/cli.py	help="list it for harness H only, a row of the core's harness "	keep	help	help
+loadout	packages/loadout/src/moxi_loadout/page.py	_ADD_BODY = {**_ITEM_BODY, "harnesses": lb.Field("list", required=False, max=LIST_MAX,	keep	required	required
+loadout	packages/loadout/tests/test_page.py	if home.is_dir() and not any(home.iterdir()):	keep	any	any
+loadout	packages/loadout/tests/test_page.py	claude.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
+loadout	packages/loadout/src/moxi_loadout/harness.py	STANDING = frozenset({"ok", "stale", "modified", "blocked"})	keep	stale	stale
+loadout	packages/loadout/src/moxi_loadout/harness.py	here = set(present(names, env))	keep	set	set
+loadout	packages/loadout/tests/test_page.py	harness.home(name).mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
+loadout	packages/loadout/tests/test_page.py	@pytest.mark.parametrize("state", sorted(["ok", "stale", "modified", "blocked"]))	keep	stale	stale
+loadout	packages/loadout/tests/test_page.py	paths.claude_home().mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
+loadout	packages/loadout/src/moxi_loadout/pagehandlers.py	drawn = set(harness.shown(names, [(r.harness, r.state, r.target)	keep	set	set
+loadout	packages/loadout/tests/test_browser_drift.py	harness.home(name, ui_shell.env).mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
+loadout	packages/loadout/tests/test_browser_harnesses.py	yield SimpleNamespace(shell=shell, page=page, dir=loadout_dir, home=Path(shell.env["HOME"]))	keep	HOME	HOME
+loadout	packages/loadout/tests/test_browser_harnesses.py	root.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
+loadout	packages/loadout/tests/test_browser_harnesses.py	web = with_web_section(Path(shell.env["HOME"]), loadout_dir)	keep	HOME	HOME
+launcher	packages/launcher/src/moxi_launcher/compose/common.py	BASE_NAMES = ("HOME", "USER", "LOGNAME", "SHELL", "PATH", "LANG", "TZ", "TMPDIR",	keep	HOME	HOME
+launcher	packages/launcher/src/moxi_launcher/compose/common.py	adds nothing), with each of `CALLER_FIRST_NAMES` that `environ`, the replaying	keep	environ	environ
+launcher	packages/launcher/src/moxi_launcher/compose/common.py	that `environ` holds; for a resume into the caller's own terminal (`terminal`), the	keep	environ	environ
+launcher	packages/launcher/src/moxi_launcher/compose/common.py	caller's terminal names it holds (`TERMINAL_NAMES`). Nothing else of `environ` comes	keep	environ	environ
+launcher	packages/launcher/src/moxi_launcher/job.py	A find that is not live, refused `changed` with the reclaim pending, or `unclaimed`	keep	changed	changed
+launcher	packages/launcher/src/moxi_launcher/job.py	if kind == "refused" and reason == GONE:	keep	refused	refused
+launcher	packages/launcher/src/moxi_launcher/job.py	"""The pid of the endpoint a `changed` refusal names as serving the session, or None."""	keep	changed	changed
+launcher	packages/launcher/tests/test_relaunch_job.py	@pytest.mark.parametrize("gone", [Result("refused", "gone"), RuntimeError("endpoint ending")])	keep	refused	refused
+launcher	packages/launcher/tests/test_relaunch_job.py	assert got.events.count("hold") == 2 and old.closed and new.closed	keep	closed	closed
+launcher	packages/launcher/tests/test_relaunch_job.py	old, new = FakeSession([Result("refused", "gone")]), moved_session()	keep	refused	refused
+launcher	packages/launcher/tests/test_relaunch_job.py	# finds are refused `changed`, the reclaim pending.	keep	changed	changed
+launcher	packages/launcher/tests/test_relaunch_job.py	old = FakeSession([Result("refused", "gone")])	keep	refused	refused
+launcher	packages/launcher/tests/test_relaunch_job.py	sessions = [FakeSession([Result("refused", "gone")], facts_seq=[facts(number=0)])	keep	refused	refused
+launcher	packages/launcher/tests/test_relaunch_job.py	new = moved_session(exits=(Result("refused", "not-allowed"),))	keep	refused	refused
+launcher	packages/launcher/tests/test_relaunch_job.py	old = FakeSession([Result("refused", "not-allowed")])	keep	refused	refused
+launcher	packages/launcher/tests/test_replay.py	assert common.base_env({"HOME": "/h", BUS: "unix:path=/run/user/7/bus"},	keep	HOME	HOME
+launcher	packages/launcher/tests/test_replay.py	is_windows=False) == {"HOME": "/h", BUS: "unix:path=/run/user/7/bus"}	keep	HOME	HOME
+launcher	packages/launcher/tests/test_replay.py	assert common.base_env({"HOME": "/h"}, is_windows=False) == {"HOME": "/h"}	keep	HOME	HOME
+launcher	packages/launcher/tests/test_replay.py	base = {"HOME": "/h", BUS: "unix:path=/run/user/7/then"}	keep	HOME	HOME
+launcher	packages/launcher/tests/test_replay.py	now = {"HOME": "/elsewhere", BUS: "unix:path=/run/user/7/now"}	keep	HOME	HOME
+launcher	packages/launcher/tests/test_replay.py	assert common.replay_env(base, now) == {"HOME": "/h", BUS: "unix:path=/run/user/7/now"}	keep	HOME	HOME
+launcher	packages/launcher/tests/test_replay.py	assert common.replay_env(base, {"HOME": "/elsewhere"}) == base	keep	HOME	HOME
+launcher	packages/launcher/tests/test_replay.py	assert common.replay_env({"HOME": "/h"}, {"HOME": "/elsewhere"}) == {"HOME": "/h"}	keep	HOME	HOME
+launcher	packages/launcher/tests/test_exits.py	old, new = FakeSession(exits=(Result("refused", "gone"),)), FakeSession()	keep	refused	refused
+launcher	packages/launcher/tests/test_exits.py	assert old.commands == [("exit", 4)] and new.commands == [] and old.closed == 1	keep	closed	closed
+rounds	packages/rounds/src/moxi_rounds/board.py	"""A ruling as a record gives it: its `id`, its sentence, its pointer (`record`),	keep	record	record
+rounds	packages/rounds/src/moxi_rounds/board.py	return {"id": ruling.id, "text": ruling.text or ruling.rules, "record": ruling.record,	keep	record	record
+rounds	packages/rounds/src/moxi_rounds/corrections.py	"KINDS", "kind_of", "item_of", "stands", "live", "find", "newest_replacing",	keep	find	find
+rounds	packages/rounds/src/moxi_rounds/page.py	RULING = lb.Out("table", nullable=True, items={	keep	nullable	nullable
+rounds	packages/rounds/tests/test_browser_page.py	"id": "7000001", "delivery": "delivered"}}}	keep	delivered	delivered
+rounds	packages/rounds/tests/test_page.py	calls += [{"what": what, "round": row["holder"], "id": row["id"]}	keep	round	round
+rounds	packages/rounds/tests/test_page.py	({"what": "ruling", "round": BUSY}, "id"),	keep	round	round
+rounds	packages/rounds/tests/test_page.py	*(("/api/record", {"what": "ruling", "round": holder, "id": one})	keep	round	round
+rounds	packages/rounds/tests/test_page.py	return [sent["record"] for _status, sent in answers]	keep	record	record
+rounds	packages/rounds/tests/test_page.py	return {"id": ruled.id, "text": ruled.text, "record": ruled.event["record"],	keep	record	record
+rounds	packages/rounds/tests/test_page.py	("/api/record", {"what": "ruling", "round": BUSY, "id": "C9"}),	keep	round	round
+rounds	packages/rounds/tests/test_page.py	("/api/record", {"what": "ruling", "round": "kestrel/nowhere", "id": "C1"}))	keep	round	round
+rounds	packages/rounds/tests/test_page.py	assert missing == nowhere == {"gone": True, "record": None}	keep	record	record

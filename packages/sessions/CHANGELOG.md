@@ -23,6 +23,13 @@
   slashes are dropped as they are for a POSIX folder, and `find` matches its last part.
 - `read --around` takes any time to the end of year 9999 on Windows too, whose `gmtime`
   stops at year 3000. The time a read prints is computed the same way.
+- With cache installed, a row of `Active recently` ends its first line in `warm until
+  <time>` or `cold`, from cache's clock record for the session, and turns cold at its
+  time; opened, it has a `Cache` line linking cache's page. A day's rows say nothing of
+  cache. On a running launch launcher's cache fact
+  wins, and cache's is used only where launcher gives none. The page reads cache's
+  `/api/clocks` and follows its topic `clocks` at the desk; without cache, and on the
+  phone, nothing of it is drawn and cache is not read.
 - The list's find reads the list again through moxi-ui's `readLater`, so the page root's
   `data-reading` mark counts that read from the keystroke until the list it brings is
   drawn, and a test's press waits for it. A user sees no change. The `ui` extra asks for

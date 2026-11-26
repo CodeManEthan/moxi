@@ -195,6 +195,53 @@ def test_the_30_minute_rows(tmp_path, model):
     assert codex_read(root).kind == "cold"
 
 
+# ------------------------------------------------------------------ response_s
+
+def test_response_s_runs_from_the_user_message_to_the_record(tmp_path):
+    root = sessions_root(tmp_path)
+    one_turn(100).write(root)            # user at +0.02, record at +5
+    clock = codex_read(root)
+    assert clock.response_s == pytest.approx(4.98, abs=0.01)
+    assert (clock.kind, clock.age_s, clock.ttl_s) == ("warm", pytest.approx(100), 1800)
+
+
+def test_response_s_runs_from_the_newest_tool_output(tmp_path):
+    root = sessions_root(tmp_path)
+    t = NOW - 300
+    r = Rollout().start("t1", t).context("t1", t + 0.01)
+    r.at(t + 0.02).user("hello")
+    r.at(t + 1).reasoning()
+    call = r.at(t + 2).tool_call()
+    r.record("t1", t + 3)
+    r.at(t + 4).tool_output(call)
+    r.at(t + 10).tool_output(call)
+    r.at(t + 20).reasoning()
+    r.at(t + 25).assistant()
+    r.record("t1", t + 30)
+    r.write(root)
+    clock = codex_read(root)
+    assert clock.response_s == pytest.approx(20, abs=0.01)
+    assert clock.age_s == pytest.approx(270)
+
+
+def test_no_input_since_the_threads_record_before_is_none(tmp_path):
+    """A second request with only the model's own lines since the first: the read finds
+    no input for it, and the clock reads as it does without one."""
+    root = sessions_root(tmp_path)
+    Rollout().turn("t1", NOW - 105, records=2).write(root)
+    clock = codex_read(root)
+    assert clock.response_s is None
+    assert clock.kind == "warm" and clock.age_s == pytest.approx(100)
+
+
+def test_a_measured_row_carries_response_s(tmp_path):
+    root = sessions_root(tmp_path)
+    one_turn(100, measured_models()[0]).write(root)
+    clock = codex_read(root)
+    assert clock.basis == "measured"
+    assert clock.response_s == pytest.approx(4.98, abs=0.01)
+
+
 def test_each_model_on_the_measured_row(tmp_path):
     seconds = measured_seconds()
     for model in measured_models():

@@ -46,10 +46,9 @@ def test_discard_refuses_every_line_the_subagent_route_writes(capsys, state):
     assert recalls.find_line(SESSION, recall.recall_id)["state"] == state
 
 
-def test_a_discard_sets_the_line_and_the_record_then_acks_and_clears_the_mark(
-        monkeypatch):
-    monkeypatch.setattr(recalls, "DISCARDABLE", ("back",))
-    recall = a_recall(state="back", ref="x:2", kept=True)
+def test_a_discard_sets_the_line_and_the_record_then_acks_and_clears_the_mark():
+    recall = a_recall(state="sending", ref="x:2", kept=True,
+                      rounds=[{"round": 1, "text": "- a"}])
     acked = []
 
     def ack(session_id, ref):
@@ -63,15 +62,30 @@ def test_a_discard_sets_the_line_and_the_record_then_acks_and_clears_the_mark(
     assert records.read(SESSION, recall.recall_id)["state"] == "ended"
 
 
-def test_a_discard_whose_ack_is_refused_leaves_the_mark(monkeypatch):
-    monkeypatch.setattr(recalls, "DISCARDABLE", ("back",))
-    recall = a_recall(state="back", ref="x:1", kept=True)
+def test_a_discard_whose_ack_is_refused_leaves_the_mark():
+    recall = a_recall(state="sending", ref="x:1", kept=True)
 
     def refuse(session_id, ref):
         raise RuntimeError("the endpoint did not answer")
 
     line = recall_discard.discard(recall.recall_id, ack=refuse)
     assert line["state"] == "discarded" and line["kept"] is True
+
+
+def test_a_discard_of_a_sending_line_from_the_command(capsys):
+    recall = a_recall(state="sending", rounds=[{"round": 1, "text": "- a"}])
+    code, out, _ = memory(capsys, "subconscious", "discard", recall.recall_id)
+    assert code == 0 and "discarded" in out
+    assert records.read(SESSION, recall.recall_id)["state"] == "ended"
+
+
+def test_a_late_texts_discard_leaves_the_record_as_its_bound_set_it():
+    recall = a_recall(state="sending", past_bound=True,
+                      rounds=[{"round": 1, "text": "- late", "late": True}],
+                      record={"state": records.LOST, "reason": "gone"})
+    line = recall_discard.discard(recall.recall_id, by="you")
+    assert line["state"] == "discarded"
+    assert records.read(SESSION, recall.recall_id)["state"] == "lost"
 
 
 def test_the_owner_asks_no_further_round_of_a_discarded_line():
@@ -137,7 +151,7 @@ def test_the_day_sweep_removes_old_records_but_not_one_whose_line_is_kept():
 def spawned(monkeypatch):
     started = []
     monkeypatch.setattr(recall_start, "route",
-                        lambda harness, session_id: (recall_start.SUBAGENT, None))
+                        lambda harness, session_id, env=None: (recall_start.SUBAGENT, None))
     monkeypatch.setattr(recall_start, "spawn_child",
                         lambda session_id, recall_id: started.append(recall_id))
     return started
@@ -189,7 +203,7 @@ def test_on_demand_refuses_outside_a_session(spawned, monkeypatch):
 
 def test_on_demand_with_no_route_logs_off_and_says_why(monkeypatch):
     monkeypatch.setattr(recall_start, "route",
-                        lambda harness, session_id: (None, recall_start.NO_FORK))
+                        lambda harness, session_id, env=None: (None, recall_start.NO_FORK))
     with pytest.raises(recall_start.Refused, match=recall_start.NO_FORK):
         recall_start.ask("topic", session=here())
     assert recalls.read_lines(SESSION)[-1]["state"] == "off"

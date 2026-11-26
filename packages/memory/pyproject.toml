@@ -75,6 +75,11 @@ memory = "moxi_memory.additions:additions"
 [project.entry-points."moxi.connector.providers"]
 memory = "moxi_memory.connector:PROVIDER"
 
+# The word memory's recall sender is formed from: comms forms each session's recall
+# sender from the session's comms name and this word (`moxi_memory.recall_send`).
+[project.entry-points."moxi.comms.scoped_senders"]
+subconscious = "moxi_memory.recall_send:SUBCONSCIOUS"
+
 # The ingest child, which every trigger starts detached (`moxi_memory.start`).
 # The recall child, which the subconscious starts detached (`moxi_memory.recall_start`).
 [project.scripts]

@@ -119,9 +119,14 @@ def test_the_page_keeps_the_contract_and_draws_no_heading_of_its_own(loadout_dir
 
 def test_the_count_is_the_items_not_ok_and_goes_once_the_user_installs(loadout_dir, ui_shell,
                                                                          ui_page):
+    from moxi_loadout import harness
+
     skill(loadout_dir, "fresh-skill")
     (loadout_dir / "loadout.toml").write_text(
         '[user]\nskills = ["tidy-notes", "review-diff", "fresh-skill"]\n', encoding="utf-8")
+    # Every harness is on this machine, so the block counts each of them.
+    for name in harness.HARNESSES:
+        harness.home(name, ui_shell.env).mkdir(parents=True, exist_ok=True)
     rows = not_ok(ui_shell)
     assert rows and {row["state"] for row in rows} == {"missing"}, rows
     # Three skills, each missing for every harness: the block counts each item once.

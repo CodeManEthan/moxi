@@ -46,7 +46,10 @@ order, and stops at the first that answers:
 6. The nudge: one delivery through turns, only if the session is idle, at the turn number
    step 3 read, refused over a draft. The run is written first (`acting`, this process
    its job), so a second ask, or any other act, loses at the insert; the facts are read
-   again, and then the nudge goes.
+   again, and cache's clock again (the final read), which must still lie in the window,
+   else the run is dropped and the ask ends quietly (`outside`); then the nudge goes. So
+   on one cache clock a nudge never comes after the compact's window has opened
+   (`recycle.COMPACT_OPEN_S` is `SHUT_S`).
 
 **A run of nudges is the nudges since the last turn no nudge opened.** Each `nudged` run
 keeps the session id and the number of the turn it opened; a later ask starts a new run
@@ -263,7 +266,8 @@ def _ask(conn: sqlite3.Connection, session_id: str, turns: Any, slots_api: Any, 
         if pick is None:
             return recycle.end(conn, run, _capped(signal, counts, caps, held))
         text = nudge_text(pick, counts[pick.case], current_settings)
-        return _nudge(conn, run, session, number, pick, text)
+        return _nudge(conn, run, session, number, pick, text,
+                      final_read=lambda: cache_read(cache, row, sid, env))
     finally:
         found.close()
 
@@ -579,9 +583,11 @@ def nudge_text(signal: Signal, count: int, current: Mapping[str, Any]) -> str:
 
 
 def _nudge(conn: sqlite3.Connection, run: store.Run, session: Any, number: int | None,
-           signal: Signal, text: str) -> Verdict:
-    """Read the facts again, then deliver the nudge right after the run is seen still
-    open; its verdict ends the run, or drops it when it ended quietly."""
+           signal: Signal, text: str, *, final_read: Callable[[], Any]) -> Verdict:
+    """Read the facts again and cache's clock again (`final_read`), then deliver the nudge
+    right after the run is seen still open; its verdict ends the run, or drops it when it
+    ended quietly. A final read outside the window (`window`) drops the run, so a nudge
+    never lands once the compact's window has opened on that clock."""
     from . import recycle
 
     try:
@@ -591,6 +597,9 @@ def _nudge(conn: sqlite3.Connection, run: store.Run, session: Any, number: int |
             return recycle.end(conn, run, Verdict(None, "unreadable", _words(exc)))
         if getattr(again, "turn_open", False) or getattr(again, "turn_number", None) != number:
             return recycle.end(conn, run, Verdict(None, "busy", "a turn started meanwhile"))
+        shut = window(final_read())
+        if shut is not None:
+            return recycle.end(conn, run, shut)
         if not store.advance_run(conn, run.run_id, "acting", leaving=("acting",)):
             ended = store.get_run(conn, run.run_id)
             return Verdict(None, "ended-under", f"run {run.run_id} was ended "

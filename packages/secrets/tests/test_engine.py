@@ -38,7 +38,7 @@ def test_every_pattern_compiles_verbatim_on_re2_and_translated_on_python_re():
     import re2
 
     patterns = every_pattern()
-    assert len(patterns) == 325
+    assert len(patterns) == 328
     with warnings.catch_warnings():
         warnings.simplefilter("error")
         for p in patterns:
@@ -52,7 +52,7 @@ def test_every_local_rule_is_in_the_shared_dialect():
     sets = scan_mod.load_sets()
     local = [r for name in scan_mod.GITLEAKS_SETS for r in sets.data["sets"][name]["rules"]
              if r["source"] == "local"]
-    assert len(local) == 13
+    assert len(local) == 14
     for r in local:
         re2.compile(r["regex"]["pattern"])
         re.compile(r["regex"]["fallback"])

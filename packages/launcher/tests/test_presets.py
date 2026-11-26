@@ -1520,16 +1520,14 @@ def test_leaving_out_the_harness_is_refused_since_a_launch_needs_one():
         assert caught.value.row == "harness" and "a launch needs one" in caught.value.problem
 
 
-def test_a_word_enum_left_out_ends_a_seats_recycling():
-    available = only("turns", "usage")
-    text = '[seat.s]\nrecycle_at_limit = "compact"\nlimit_at = "2x"\n'
-    assert resolve(text, available, seat="s").values["limit_at"] == "2x"
-    with pytest.raises(catalog.NeedsModule, match="limit_at needs recycle_at_limit"):
-        resolve(text, available, seat="s", typed={"recycle_at_limit": "off"})
-    got = resolve(text, available, seat="s", typed={"recycle_at_limit": "off"},
-                  left_out=("limit_at",))
-    assert got.values["recycle_at_limit"] == "off" and got.values["limit_at"] == ""
-    assert got.sources["limit_at"] == presets.LEFT_OUT and "limit_at" not in got.chosen
+def test_a_word_enum_left_out_ends_a_seats_recycling(recyclable):
+    available = SLOTTED
+    text = '[seat.s]\ntarget = "slot"\nrecycle_at_limit = "relaunch"\n'
+    assert resolve(text, available, seat="s").values["recycle_at_limit"] == "relaunch"
+    got = resolve(text, available, seat="s", left_out=("recycle_at_limit",))
+    assert got.values["recycle_at_limit"] == "off"
+    assert got.sources["recycle_at_limit"] == presets.LEFT_OUT
+    assert "recycle_at_limit" not in got.chosen
 
 
 # -- a scratch launch can't recycle itself --------------------------------------------------
@@ -1543,7 +1541,7 @@ def test_a_preset_that_sets_scratch_and_relaunch_is_flagged():
     assert [(p.where, p.key, p.code) for p in found] == [
         ("seat.scratchy", "recycle_at_limit", "scratch-recycle")]
     assert found[0].problem == "a scratch launch can't recycle itself"
-    assert found[0].hint == "recycle with compact, or launch in a directory"
+    assert found[0].hint == "set recycle_at_limit off, or launch in a directory"
 
 
 def test_a_defaults_relaunch_is_not_flagged_on_a_scratch():
@@ -1669,39 +1667,67 @@ def no_notes_dir(monkeypatch):
     monkeypatch.setattr(handoffs, "handoff_dir", homeless)
 
 
-@pytest.mark.parametrize("text, asked", [
-    ("", {"typed": {"recycle_at_limit": "relaunch", "limit_at": "1x", **IN_SLOT}}),
-    (RELAUNCH_SEAT + 'limit_at = "1x"\n', {"seat": "s"}),
+#: The hint of `recycle_at_limit = compact`, and of `limit_at`.
+COMPACT_HINT = catalog.launcher()["recycle_at_limit"].retired_values["compact"]
+LIMIT_AT_HINT = catalog.launcher()["limit_at"].retired
+
+
+@pytest.mark.parametrize("text, asked, row", [
+    ("", {"typed": {"recycle_at_limit": "compact"}}, "recycle_at_limit"),
+    ('[seat.s]\nrecycle_at_limit = "compact"\n', {"seat": "s"}, "recycle_at_limit"),
+    ("", {"typed": {"limit_at": "1x"}}, "limit_at"),
+    ('[seat.s]\nlimit_at = "1x"\n', {"seat": "s"}, "limit_at"),
 ])
-def test_a_limit_at_chosen_for_a_relaunch_launch_is_refused(recyclable, text, asked):
-    with pytest.raises(catalog.RelaunchMark) as caught:
+def test_a_retired_value_or_row_typed_or_in_a_preset_is_refused(recyclable, text, asked,
+                                                                 row):
+    with pytest.raises(catalog.Refused) as caught:
         resolve(text, SLOTTED, **asked)
-    assert caught.value.code == "relaunch-mark" and caught.value.exit_code == 3
-    assert caught.value.row == "limit_at"
-    assert caught.value.hint == "the relaunch line comes at warn_at; set warn_at"
+    refused = caught.value
+    code = refused.found.code if isinstance(refused, presets.BadPreset) else refused.code
+    assert code == "retired" and refused.row == row
+    assert refused.hint == (COMPACT_HINT if row == "recycle_at_limit"
+                                 else LIMIT_AT_HINT)
 
 
-@pytest.mark.parametrize("text, asked", [
-    ('[defaults]\nlimit_at = "1x"\n' + RELAUNCH_SEAT, {"seat": "s"}),
-    ('[defaults]\nlimit_at = "1x"\nrecycle_at_limit = "relaunch"\n', {"typed": IN_SLOT}),
-])
-def test_a_defaults_limit_at_is_left_out_of_a_relaunch_launch_with_a_warning(
-        recyclable, text, asked):
-    got = resolve(text, SLOTTED, **asked)
-    assert got.values["recycle_at_limit"] == "relaunch"
-    assert got.values["limit_at"] == "" and got.sources["limit_at"] == presets.LEFT_OUT
-    assert presets.LIMIT_AT_LEFT_OUT in got.warnings
+def test_a_defaults_compact_launches_holding_off_with_its_warning(recyclable):
+    from moxi_launcher import selfrecycle
+
+    got = resolve('[defaults]\nrecycle_at_limit = "compact"\n', SLOTTED, typed=IN_SLOT)
+    assert got.values["recycle_at_limit"] == "off"
+    assert got.sources["recycle_at_limit"] == presets.LEFT_OUT
+    assert got.warnings == (f"recycle_at_limit compact is left out: {COMPACT_HINT}",)
+    found = selfrecycle.missing(harness=got.harness, target=got.target, in_slot=True,
+                                cwd=got.cwd, values=got.values,
+                                source=got.sources["recycle_at_limit"])
+    assert found is not None and found.item == selfrecycle.OPTED_OUT
+    # A preset over it wins, and the stale [defaults] line is still named.
+    seat = resolve('[defaults]\nrecycle_at_limit = "compact"\n' + RELAUNCH_SEAT, SLOTTED,
+                   seat="s")
+    assert seat.values["recycle_at_limit"] == "relaunch"
+    assert seat.sources["recycle_at_limit"] == presets.PRESET
+    assert f"recycle_at_limit compact is left out: {COMPACT_HINT}" in seat.warnings
 
 
-def test_a_defaults_limit_at_still_acts_on_a_compact_launch(recyclable):
-    got = resolve('[defaults]\nlimit_at = "1x"\n[seat.s]\nrecycle_at_limit = "compact"\n',
-                  SLOTTED, seat="s")
-    assert got.values["limit_at"] == "1x" and presets.LIMIT_AT_LEFT_OUT not in got.warnings
+def test_a_defaults_limit_at_is_left_out_with_its_warning_and_the_launch_goes_ahead(
+        recyclable):
+    got = resolve('[defaults]\nlimit_at = "1x"\n' + RELAUNCH_SEAT, SLOTTED, seat="s")
+    assert got.values["recycle_at_limit"] == "relaunch" and "limit_at" not in got.values
+    assert got.warnings == (f"limit_at is left out: {LIMIT_AT_HINT}",)
+    assert common.option_stamps({**got.values, "harness": got.harness})[
+        "MOXI_USAGE_CROSSING_AT"] == "2x"
 
 
-def test_a_limit_at_with_recycle_at_limit_off_is_refused_for_its_companion(recyclable):
-    with pytest.raises(catalog.Refused, match="limit_at needs recycle_at_limit"):
-        resolve("", SLOTTED, typed={"limit_at": "1x", **IN_SLOT})
+def test_a_launch_carries_the_config_files_left_out_warning(recyclable, monkeypatch):
+    from moxi_launcher import settings
+
+    from moxi.paths import Layout
+
+    path = Layout(settings.MODULE).config_file()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("[recycle]\nlimit_wait_s = 600\n")
+    got = resolve("", SLOTTED, typed=IN_SLOT)
+    words = settings.schema().keys["recycle.limit_wait_s"].retired
+    assert got.warnings == (f"recycle.limit_wait_s is left out: {words}",)
 
 
 @pytest.mark.parametrize("text, asked, source", [
@@ -1738,11 +1764,20 @@ def test_a_relaunch_with_no_warn_at_mark_launches_armed_and_untold(recyclable, t
         {**got.values, "harness": got.harness})
 
 
-def test_the_presets_check_flags_a_limit_at_set_beside_relaunch(recyclable):
-    found = errors(RELAUNCH_SEAT + 'limit_at = "1x"\n', SLOTTED)
-    assert [(p.where, p.key, p.code) for p in found] == [("seat.s", "limit_at",
-                                                          "relaunch-mark")]
-    assert not errors('[defaults]\nlimit_at = "1x"\n' + RELAUNCH_SEAT, SLOTTED)
+def test_the_presets_check_flags_the_retired_values_and_rows(recyclable):
+    found = problems('[defaults]\nrecycle_at_limit = "compact"\nlimit_at = "1x"\n'
+                     '[seat.s]\nrecycle_at_limit = "compact"\n[seat.t]\nlimit_at = "2x"\n',
+                     SLOTTED)
+    assert [(p.where, p.key, p.code, p.level) for p in found] == [
+        ("defaults", "recycle_at_limit", "retired", presets.WARNING),
+        ("defaults", "limit_at", "retired", presets.WARNING),
+        ("seat.s", "recycle_at_limit", "retired", presets.ERROR),
+        ("seat.t", "limit_at", "retired", presets.ERROR)]
+    # A preset over a [defaults] compact meets no error from the rules between rows.
+    assert not errors('[defaults]\nrecycle_at_limit = "compact"\n' + RELAUNCH_SEAT,
+                      SLOTTED)
+    assert not errors('[defaults]\nrecycle_at_limit = "compact"\n[seat.u]\n'
+                      'target = "slot"\n', SLOTTED)
 
 
 def test_the_presets_check_passes_a_relaunch_with_no_warn_at(recyclable):
@@ -1786,3 +1821,41 @@ def test_a_typed_relaunch_with_no_handoff_dir_is_warned_of(recyclable, monkeypat
 def test_a_relaunch_that_can_act_says_nothing(recyclable):
     got = resolve("", SLOTTED, typed={"recycle_at_limit": "relaunch", **IN_SLOT})
     assert got.warnings == ()
+
+
+# -- what a launch with no preset meets from [defaults] -----------------------------------
+
+def _bare(text: str, available) -> list[tuple]:
+    return [(p.where, p.key, p.level, p.problem, p.hint) for p in problems(text, available)
+            if p.where == "defaults"]
+
+
+def test_check_warns_of_a_defaults_value_a_bare_launch_refuses(monkeypatch):
+    monkeypatch.setattr(catalog, "slots_here", lambda: True)
+    found = _bare('[defaults]\nrecycle_at_limit = "relaunch"\n',
+                  only("turns", "usage", "slots"))
+    assert found == [("defaults", "recycle_at_limit", presets.WARNING,
+                      "a launch with no preset is refused: relaunch at limit needs slots "
+                      "and a slot launch",
+                      "launch it in a slot (--target slot) where tmux slots run, or "
+                      "set recycle_at_limit off")]
+    # A seat that launches in a slot meets no refusal, so only the warning is said.
+    assert not errors('[defaults]\nrecycle_at_limit = "relaunch"\n'
+                      '[seat.s]\ntarget = "slot"\n', only("turns", "usage", "slots"))
+
+
+def test_check_warns_of_an_unplaced_item_a_bare_launch_fails(monkeypatch):
+    monkeypatch.setattr(catalog, "slots_here", lambda: True)
+    found = _bare('[defaults]\nrecycle_at_limit = "relaunch"\ntarget = "slot"\n',
+                  only("turns", "usage", "slots"))
+    assert found == [("defaults", "recycle_at_limit", presets.WARNING,
+                      "recycle_at_limit relaunch does nothing on a Codex launch with no "
+                      "preset: it is a codex launch, and only a Claude session can be "
+                      "exited and relaunched", "launch the seat on Claude")]
+
+
+def test_check_says_nothing_of_defaults_a_bare_launch_takes(monkeypatch):
+    monkeypatch.setattr(catalog, "slots_here", lambda: True)
+    for text in ('[defaults]\npermission_mode = "plan"\n',
+                 '[defaults]\nscratch = true\nrecycle_at_limit = "relaunch"\n'):
+        assert _bare(text, only("turns", "usage", "slots")) == []

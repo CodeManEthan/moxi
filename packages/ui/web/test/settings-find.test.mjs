@@ -28,7 +28,7 @@ const LAUNCHER = [
   key("startup.wait_s", "int", 20, 20, { label: "For startup screens, in a slot" }),
   key("page.launch_wait_s", "int", 600, 600, { label: "A launch from the page may take" }),
   key("relaunch.wait_s", "int", 900, 900, { label: "For the session to be quiet" }),
-  key("recycle.limit_wait_s", "int", 1800, 1800, { label: "For idle, to compact at the limit" }),
+  key("park.wait_s", "int", 300, 300, { label: "Park waits for each session to be quiet" }),
   key("name.template", "string", "", "", { elsewhere: "The session name is edited in Home's Options, with the launch it names." }),
   key("runs.keep_days", "int", 14, 30, { label: "Keep run files for", doc: "A launch's prompt file and wait log." }),
 ];
@@ -172,4 +172,16 @@ test("within a module, label matches come ahead of key matches, ahead of line an
                 key("c", "int", 1, 1, { label: "Trust third" })];
   const found = find("trust", ["moxi", "demo"], new Map([["moxi", section("moxi", [])], ["demo", section("demo", keys)]]), true);
   assert.deepEqual(found.groups[0].keys.map((k) => k.name), ["c", "trust.b", "a"]);
+});
+
+test("a module whose own file can't be read is found and counted by its tables' keys alone", () => {
+  const table = { table_title: "Launch defaults", table_line: null, table_file: null };
+  const rows = [key("defaults.permission_mode", "enum", "plan", "default", { label: "Permission mode", ...table })];
+  const broken = section("launcher", [...LAUNCHER, ...rows], { error: "not TOML", fix: "fix it", readonly: true });
+  const sections = new Map([["launcher", broken]]);
+  assert.deepEqual(find("permission", ["launcher"], sections, false).groups.map((g) => g.keys.map((k) => k.name)),
+                   [["defaults.permission_mode"]]);
+  assert.equal(find("keep run", ["launcher"], sections, false).groups.length, 0);
+  assert.deepEqual(changedView(["launcher"], sections, false, "launcher").groups.map((g) => g.keys.map((k) => k.name)),
+                   [["defaults.permission_mode"]]);
 });

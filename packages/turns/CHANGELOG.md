@@ -10,6 +10,11 @@
 - On Windows a start list's run entry stopped at the bound is logged at once. Turns closed
   the program's output after the stop while the reader thread still read it, which waited
   for any process the program started that still held the output.
+- A `project-facts` component for the Projects page. It reads turns' own `/api/sessions`
+  and `sessions` topic, and reports, by session claim, whether each session turns can read
+  is in a turn (`live`, `{in_turn, state}`), so the page can mark a running line
+  `working`. It names no project. A session turns can't read now, or one whose claim two
+  sessions share, is left out; a failed read reports nothing.
 - A new capability, `stale-agents`, which Claude Code sessions offer: the endpoint judges
   each `waiting` subagent Claude Code lists, and one whose transcript's last timestamped
   line is at least an hour old, whose last turn record is an assistant `end_turn`, and
@@ -25,6 +30,9 @@
   runner 0.3.2, so `moxi install turns` updates an install at user scope.
 - `agents` entries gain `is_fork` (a fork of the main loop, which Claude Code lists as a
   subagent) and `last_write_at` (the newest write the judgment read).
+- `STALE_AFTER_S` is exported from `moxi_turns`: the seconds a `waiting` subagent must be
+  silent to read stale, so a caller can say when an entry's `last_write_at` would make
+  it stale.
 - The guard API gains `touched_files(call)`, exported from `moxi_turns`: the files a
   write call touches, in the call's order, each a `TouchedFile(path, kind, text)`.
   Claude Code's `Write` and `Edit` and OpenCode's `write` and `edit` give one `write`

@@ -208,7 +208,7 @@ default = "off"
 values = ["off", "clear", "compact"]
 requires = ["turns", "cache"]
 condition = "cache-timer"
-doc = "Clear or compact the session, once idle, when its prompt cache has expired."
+doc = "Clear the session once idle after its prompt cache has expired, or compact it shortly before, once per idle stretch, while it is idle and its cache still warm."
 fork = "drop"
 group = "lifecycle"
 sub = "Cache"
@@ -217,9 +217,10 @@ label = "Recycle on cache expiry"
 [recycle_at_limit]
 type = "enum"
 default = "off"
-values = ["off", "relaunch", "compact"]
+values = ["off", "relaunch"]
+retired_values = { compact = "compact at the context limit is gone; set recycle_at_limit off or relaunch, and recycle_on_expiry = compact to compact before the cache expires" }
 requires = ["turns", "usage"]
-doc = "Let the session relaunch itself with its handoff once its context passes warn_at, or compact it once it passes limit_at; off, the default, leaves it out."
+doc = "Let the session relaunch itself with its handoff once its context passes warn_at; off, the default, leaves it out."
 fork = "drop"
 group = "lifecycle"
 sub = "Context"
@@ -230,19 +231,10 @@ requires = ["slots"]
 condition = "slots-here"
 target = "slot"
 refused = "relaunch at limit needs slots and a slot launch"
-hint = "launch it in a slot (--target slot) where tmux slots run, or recycle with compact"
+hint = "launch it in a slot (--target slot) where tmux slots run, or set recycle_at_limit off"
 
 [limit_at]
-type = "enum"
-default = ""
-values = ["1x", "1.5x", "2x"]
-requires = "usage"
-offered_with = "recycle_at_limit"
-doc = "The context mark at which recycle_at_limit compact acts; when unset, the mark usage warns this launch at, or 1x when it warns at none. A launch that relaunches itself is told at warn_at and takes no limit_at."
-fork = "drop"
-group = "lifecycle"
-sub = "Context"
-label = "Limit mark"
+retired = "the launcher no longer compacts at a context mark; remove limit_at (the relaunch line comes at warn_at)"
 
 [headless_exit]
 type = "list"
@@ -266,3 +258,21 @@ fork = "drop"
 group = "lifecycle"
 sub = "Memory"
 label = "Subconscious"
+
+[subconscious_route]
+type = "enum"
+default = "subagent"
+values = ["subagent", "slot"]
+requires = ["turns", "memory"]
+doc = "How the subconscious runs: a fork inside the session (subagent), or a forked session in a slot you can watch (slot). The slot route needs comms and a comms name for the session. On Codex only slot runs a recall, and that fork does not read the session's prompt cache; with subagent the subconscious is off there. Where no route can run, memory's log and doctor say why."
+fork = "drop"
+group = "lifecycle"
+sub = "Memory"
+label = "Subconscious route"
+
+[subconscious_route.when.slot]
+requires = ["slots", "comms"]
+condition = "slots-here"
+applies_with = "subconscious"
+refused = "the subconscious in a slot needs slots and comms"
+hint = "use --subconscious-route subagent, or launch where tmux slots run"

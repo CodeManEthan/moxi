@@ -89,7 +89,7 @@ def test_a_job_runs_the_verb_and_writes_its_outcome(lo, page, recorded):
     assert pagejob.run("j1", ["add", "skill", "review"]) == 0
     record = end("j1")
     assert record["exit"] == 0 and record["outcome"]["exit"] == 0
-    assert "listed skill review in user" in record["outcome"]["lines"]
+    assert "listed skill review in user for every harness" in record["outcome"]["lines"]
     assert kit.placed(kit.claude() / "review", lo / "skills" / "review")
     assert os.environ[homes.CALLER_ENV] == pagejob.CALLER
     assert not {"homes", "git"} & set(ledger.read())

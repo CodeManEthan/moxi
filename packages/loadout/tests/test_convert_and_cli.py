@@ -11,7 +11,7 @@ import tomllib
 import loadout_kit as kit
 import pytest
 
-from moxi_loadout import convert
+from moxi_loadout import convert, manifest
 from moxi_loadout.cli import main
 
 
@@ -81,10 +81,40 @@ def lo(loadout_dir):
 def test_add_writes_the_manifest_then_installs_only_that_item(lo, capsys):
     assert main(["add", "skill", "review"]) == 0
     out = capsys.readouterr().out
-    assert "listed skill review in user" in out
+    assert "listed skill review in user for every harness" in out
     assert kit.placed(kit.claude() / "review")
     assert not os.path.lexists(kit.claude() / "other")
     assert "# my loadout" in (lo / "loadout.toml").read_text()
+
+
+def test_add_for_a_harness_lists_and_places_it_for_that_harness_only(lo, capsys):
+    assert main(["add", "skill", "review", "--harness", "claude"]) == 0
+    assert "listed skill review in user for claude\n" in capsys.readouterr().out
+    assert kit.placed(kit.claude() / "review")
+    assert not os.path.lexists(kit.codex_skills() / "review")
+    found = manifest.load()
+    assert found.harnesses("skill", "review") is None
+    assert "skill:review@codex" in [str(i) for i in found.user.disabled]
+    assert main(["add", "skill", "review"]) == 0
+    assert ("user lists skill review already, for claude; enable and disable change its "
+            "harnesses") in capsys.readouterr().out
+
+
+def test_remove_then_add_for_every_harness_places_it_for_every_harness(lo, capsys):
+    main(["add", "skill", "review", "--harness", "claude"])
+    assert main(["remove", "skill", "review"]) == 0
+    assert main(["add", "skill", "review"]) == 0
+    assert "listed skill review in user for every harness" in capsys.readouterr().out
+    assert kit.placed(kit.claude() / "review")
+    assert kit.placed(kit.codex_skills() / "review")
+    assert manifest.load().user.disabled == ()
+
+
+def test_add_for_a_harness_with_no_row_is_a_usage_error(lo, capsys):
+    before = (lo / "loadout.toml").read_bytes()
+    assert main(["add", "skill", "review", "--harness", "kestrel"]) == 2
+    assert "has no row kestrel" in capsys.readouterr().err
+    assert (lo / "loadout.toml").read_bytes() == before
 
 
 def test_disable_and_remove_install_their_item_and_leave_no_lock_file(lo, capsys):

@@ -236,7 +236,7 @@ def test_an_enum_value_this_install_does_not_offer_is_left_out_with_a_note(monke
     assert claude["director"]["needs_absent"] is False and claude["director"]["note"] is None
     limit = claude["recycle_at_limit"]
     assert limit["needs_absent"] is False
-    assert limit["values"] == ["off", "compact"]
+    assert limit["values"] == ["off"]
     assert limit["note"] == ("relaunch is not offered here: relaunch at limit needs slots "
                              "and a slot launch")
 

@@ -23,13 +23,21 @@ from typing import Any, NamedTuple
 READY = "ready"
 NONE = "none"
 FAILING = "failing"
+#: How a `NONE` link's reason says the module is installed without the interface.
+NO_INTERFACE = "doesn't offer interface"
 
 #: The comms interface memory speaks: `caller_identity`.
 COMMS = "comms"
 COMMS_INTERFACE = 2
+#: The comms interface memory's recall sender speaks: scoped senders (`send_scoped`,
+#: `scoped_state`, `scoped_sender`) and `owner`.
+COMMS_SCOPED_INTERFACE = 3
 #: The launcher interface memory speaks: `launch_kind` and `launch_kinds`.
 LAUNCHER = "launcher"
 LAUNCHER_INTERFACE = 1
+#: The launcher interface the slot route speaks: `fork`, `exit_session`, `running` and
+#: `slots_here`.
+LAUNCHER_FORK_INTERFACE = 3
 #: The notes interface memory speaks: `notes_dir`, `root` and `NOTES_DIR_ENV`.
 NOTES = "notes"
 NOTES_INTERFACE = 1
@@ -60,7 +68,7 @@ def load(name: str, interface: int) -> Link:
         if found.state != modules.PRESENT:
             return Link(FAILING, reason=found.reason)
         if interface not in found.interfaces:
-            return Link(NONE, reason=f"{name} {found.version} doesn't offer interface "
+            return Link(NONE, reason=f"{name} {found.version} {NO_INTERFACE} "
                                      f"{interface}")
         found = modules.load(name, interface=interface)
         if not found.ok or found.api is None:
@@ -75,9 +83,20 @@ def comms() -> Link:
     return load(COMMS, COMMS_INTERFACE)
 
 
+def comms_scoped() -> Link:
+    """The link to comms with scoped senders, for a recall's way back by comms."""
+    return load(COMMS, COMMS_SCOPED_INTERFACE)
+
+
 def launcher() -> Link:
     """The link to the launcher, for a session's launch kind."""
     return load(LAUNCHER, LAUNCHER_INTERFACE)
+
+
+def launcher_forks() -> Link:
+    """The link to the launcher that forks a session and exits one, for the slot route
+    and a slot fork's discard."""
+    return load(LAUNCHER, LAUNCHER_FORK_INTERFACE)
 
 
 def notes() -> Link:
@@ -85,6 +104,8 @@ def notes() -> Link:
     return load(NOTES, NOTES_INTERFACE)
 
 
-__all__ = ["READY", "NONE", "FAILING", "COMMS", "COMMS_INTERFACE", "LAUNCHER",
-           "LAUNCHER_INTERFACE", "NOTES", "NOTES_INTERFACE", "Link", "load", "comms",
-           "launcher", "notes"]
+__all__ = ["READY", "NONE", "FAILING", "NO_INTERFACE", "COMMS", "COMMS_INTERFACE",
+           "COMMS_SCOPED_INTERFACE", "LAUNCHER", "LAUNCHER_INTERFACE",
+           "LAUNCHER_FORK_INTERFACE", "NOTES", "NOTES_INTERFACE", "Link", "load", "comms",
+           "comms_scoped", "launcher", "launcher_forks", 
+           "notes"]

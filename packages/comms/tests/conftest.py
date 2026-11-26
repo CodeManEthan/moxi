@@ -39,6 +39,7 @@ from pathlib import Path
 import pytest
 
 from moxi_comms import cli, config, machine_line, reserved, tokens as tokens_mod
+from moxi_comms import scoped as scoped_mod
 from moxi_comms.adapters.claude_shim import ACTIVITY_METHODS, ClaudeShim
 from moxi_comms.claimfile import HOLDS
 from moxi_comms.claimhold import CLAIM_SOCKET_ENV, ClaimServer
@@ -191,6 +192,9 @@ def files_under(root_dir: Path) -> dict:
 
 #: The reserve step's own read of the modules installed, before `installs` scopes it.
 _DECLARED_NAMES = reserved.declared_names
+#: comms' own read of the words modules declare for scoped senders, kept before any
+#: test scopes it.
+_SCOPED_LOAD = scoped_mod.load
 
 
 @pytest.fixture(autouse=True)
@@ -224,13 +228,25 @@ def installs(monkeypatch) -> set:
     meet it. A test that installs a module says so by adding its name to the set; a test
     that fakes the core's scan adds the fakes' names. The `whole_workspace` fixture lets
     the reserve step see every module installed. A daemon run in a child process takes
-    the same view from `RESERVED_NONE_PATCH`."""
+    the same view from `RESERVED_NONE_PATCH`. The words modules declare for scoped
+    senders are scoped the same way: memory's `subconscious`, say, is seen only where the
+    test adds memory."""
     seen: set = set()
 
     def scoped(gone=None):
         return {m: n for m, n in _DECLARED_NAMES(gone).items() if m in seen}
 
+    def words(gone=None, **kwargs):
+        found = _SCOPED_LOAD(gone, **kwargs)
+        if kwargs.get("entries") is not None or kwargs.get("found") is not None:
+            return found
+        found.words = {m: w for m, w in found.words.items() if m in seen}
+        found.broken = [b for b in found.broken if b.module in seen]
+        found.kept &= {b.word for b in found.broken}
+        return found
+
     monkeypatch.setattr(reserved, "declared_names", scoped)
+    monkeypatch.setattr(scoped_mod, "load", words)
     return seen
 
 
@@ -239,6 +255,7 @@ def whole_workspace(installs, monkeypatch) -> None:
     """The reserve step sees every module this environment installs, as a real install
     has it."""
     monkeypatch.setattr(reserved, "declared_names", _DECLARED_NAMES)
+    monkeypatch.setattr(scoped_mod, "load", _SCOPED_LOAD)
 
 
 #: The entry-point group turns reads launch additions from.
@@ -276,7 +293,9 @@ ADDITIONS_COMMS_ONLY_PATCH = (
 #: Python a child process runs first, so the reserve step in it sees no module's names,
 #: as `installs` gives a test that adds none.
 RESERVED_NONE_PATCH = ("import moxi_comms.reserved as _rs; "
-                       "_rs.declared_names = lambda gone=None: {}; ")
+                       "_rs.declared_names = lambda gone=None: {}; "
+                       "import moxi_comms.scoped as _sc; "
+                       "_sc.load = lambda gone=None, **k: _sc.Declared(); ")
 
 
 #: Suites that run on both backends. A module here has every one of its rig-using tests

@@ -152,11 +152,10 @@ default, there is no line.
   named. A director is a session that hands this one its work and hears back through
   comms; a launch lists its directors with `--director`. The director sends the first
   message, so a brief under this posture is refused (`posture-brief`). A typed
-  `--handoff` is sent as the first turn, and the director's message comes after it. A
-  director's relaunch starts the new session with this posture.
+  `--handoff` is sent as the first turn, and the director's message comes after it.
 - `relaunched (handoff: <file>)`: the launcher's own, never set by a preset. A session
-  that relaunched itself with a handoff starts with it, and reads that file before
-  anything else; the `moxi-handoff` skill the launcher ships says so.
+  relaunched with a handoff, by itself or by a director, starts with it, and reads that
+  file before anything else; the `moxi-handoff` skill the launcher ships says so.
 
 `moxi launcher preview` takes the same words as `run` and prints the command and the
 environment variables the launch would set, starting nothing.
@@ -236,6 +235,24 @@ check` checks the whole file: types and values, rows whose module is missing, pr
 that an instructions file can be read, and that an agent role a preset names is found in
 the harness's agent folders.
 
+**Launch defaults on the Settings page.** `[defaults]` shows on the Settings page as the
+launcher's `Launch defaults` block, and at a terminal as `moxi config launcher show`'s
+`defaults.<row>` keys; `moxi config set launcher defaults.<row> VALUE` and `moxi config
+unset launcher defaults.<row>` change one key, as the page does. The block holds every row
+a launch on this machine takes (a row or value whose module is missing or whose condition
+fails here is left out), each under its catalog group, or `start` for a row with none
+(`cwd`, `project`, `brief`, `brief_file`, `target`, `slot`). A change is checked by the row's own check alone: its type, the values
+offered here, a refused, unknown or retired name or value. A value that fails only on
+some launches, such as `recycle_at_limit = "relaunch"` without `target = "slot"`, is
+written, and its row shows what a launch with no preset will meet. Keys launches refuse
+or leave out (an owned row, `takes_policy_directors`, a typo, a retired row) sit first,
+under `needs a fix`, and can only be cleared. A key set for a row this machine doesn't
+offer is kept as it is and not shown; a hand edit clears it. The write changes one key
+and keeps every other byte of the file, comments included: a new key goes straight after
+the table's last own key, above any `[defaults.<x>]` sub-table. A change reaches launches
+made after it; a relaunch or resume keeps what its session launched with. `moxi launcher presets check` warns, at `defaults`, of
+what a launch with no preset and nothing typed meets from `[defaults]`.
+
 ## The launch log
 
 Every launch writes one row to a SQLite file in the launcher's state directory before the
@@ -293,15 +310,18 @@ it asks no other module, starts no process, and writes nothing but an older log'
 update. With no launch log it gives none; a log held past `timeout_s` (1 second) raises
 `Busy`.
 
-Interface 3 adds two acts. `fork(session_id, target="terminal", slot=None, stamps=None)`
-forks a session as `moxi launcher fork` does (below) and returns the launch's
-`LaunchResult`, whose `session_id` is the fork's. `stamps` are variables set on the
+Interface 3 adds two acts and a read.
+`fork(session_id, target="terminal", slot=None, stamps=None)` forks a session as `moxi
+launcher fork` does (below) and returns the launch's `LaunchResult`, whose `session_id`
+is the fork's. `stamps` are variables set on the
 fork's environment after the scrub. Each must be one a present module lists in its
 `SESSION_ENV`, and its own prefix (`MOXI_<MODULE>_`) says which module that is; the
 launcher's and turns' are refused, since the launch stamps those itself. A stamp that
 fails is refused, `bad-value`, before anything is written.
 `exit_session(session_id, dry_run=False)` exits a quiet launched session as `moxi
-launcher exit-session` does and returns its verdict; a refusal is raised.
+launcher exit-session` does and returns its verdict; a refusal is raised. It also adds
+one read, `slots_here()`: whether tmux slots run here, as the launcher reads it for a
+slot launch (slots installed, and its `supported()` says so; false on native Windows).
 
 ## Handoffs
 
@@ -410,14 +430,30 @@ the exit and the respawn lasts 510 s. A hold left by a dead run of the same laun
 go and taken again. The handoff must be UTF-8 text and not blank; when the session's
 start was never seen, it must be written since the launch was made.
 
-    moxi launcher relaunch SESSION_ID
-    moxi launcher relaunch IDENTITY
+    moxi launcher relaunch SESSION_ID [--handoff FILE]
+    moxi launcher relaunch IDENTITY [--handoff FILE]
 
 A director relaunches a session it directs, named by its session id or its comms name.
 The caller's comms identity must be one of the directors the session was launched with;
-a session whose cache is still warm is refused (`warm`: send it a message instead), and a
-session that isn't quiet now is held (exit 75). The new session starts with the `with:`
-posture of its director and no first turn. The call follows the run for
+a session whose cache is still warm is refused (`warm`: send it a message instead). A
+director's relaunch always carries a handoff, since the old session can't write one
+without a turn: `--handoff FILE` (a relative path is read from the director's directory),
+else the seat's newest waiting handoff written since the old session began. It is checked
+as a self relaunch's is, against the relaunched session's launch: a readable UTF-8 file
+of at most 64 KiB, not blank, written since that session began, and with notes installed
+in that launch's `handoffs/` folder (`moxi launcher handoffs --key KEY` lists it). With
+neither, the call is refused (`handoff`), and with sessions installed it names `moxi
+sessions read SESSION_ID`, which shows how the session ended. A session that isn't
+quiet now is held (exit 75); a subagent at work is named with how long ago it last wrote
+and when it would read stale, and the words say that a message or ending its shells
+would wake the session, and whether keep-warm was on for it. A session whose turns
+endpoint started before turns could judge stale subagents, held only by subagents
+waiting, is refused (`old-endpoint`, exit 3) instead, since trying again won't help:
+wait for it to relaunch itself, or wake it with a message. A background shell never holds
+the call; the exit dialog stops it. The new session starts with the posture `relaunched`
+and the handoff as its first turn, as a self relaunch's does; the line after the header
+names the old session and whether it went cold or could not take a message, and, with
+sessions installed, the `moxi sessions read` command for it. The call follows the run for
 `relaunch.follow_s` and prints how it ended; past that it exits 75 and names the run.
 An agent making the call gives Bash a timeout of at least `relaunch.follow_s` plus 30 s,
 since Bash's own default is shorter. The job reads the session's cache again just before
@@ -549,6 +585,9 @@ subagents, a draft and a read that failed. Each slot gets one line:
   first, if you want it ended before the reboot.
 - The session park itself runs in is recorded `not-exited: the session running park` and
   left for you to exit.
+- A recall's slot fork, launched by memory's subconscious for one recall, is listed `a
+  recall's fork, which memory ends; left alone`: it is neither exited nor reserved, and
+  no entry brings it back.
 - A live run the launcher did not launch is `left alone`; a session launched into a
   terminal is listed `not in a slot; left running`; a slot taken by something else since
   park found it is `changed; left alone`; a slot another holder holds is `held by H; left
@@ -574,6 +613,9 @@ launch's too. Sessions go one at a time, in slot order, each with one line:
   `comms is offline` when the comms daemon is not up yet. The entry and reservation stay;
   run restore again.
 - A session resumed some other way since is marked restored, and its slot let go.
+- An entry for a recall's slot fork, parked before park left them out, is `dropped` (`a
+  recall's fork, which nothing brings back`): its slot is let go, and it doesn't count
+  against the exit status.
 
 A launch that fails after it was placed takes the reservation again, so the entry stays
 open; if something took the slot in between, the entry is closed and the line names the
@@ -592,7 +634,8 @@ still going when its tmux server went down reads `crashed`. Before any launch in
 and at the start of park, restore and unpark, the launcher turns each crashed slot whose
 last launch was its own into a park entry with a reservation, so no fresh launch takes the
 slot and `restore` brings the session back; a resume of the session, or a relaunch
-repair, runs this before it chooses a slot. A launch that names such a slot is refused
+repair, runs this before it chooses a slot. A crashed slot whose last launch was a
+recall's slot fork is settled instead, since nothing brings one back. A launch that names such a slot is refused
 `held by park-<id>`, with the hint to restore or unpark it. A Codex session quit by hand
 in the two minutes before an unplanned shutdown, and a run whose window was killed by
 hand, read crashed too; unpark them.
@@ -603,14 +646,29 @@ session, and `moxi launcher unpark --all` every one. The session stays resumable
 session park left running that the reboot ended) is settled, so it is not reserved
 again.
 
-**Recycle.** Two launch options let a session be cleared or compacted on the launcher's
-own reads:
+**Recycle.** Two launch options recycle a session on the launcher's own reads. The
+launcher never clears or compacts a session at a context limit.
 
-- `--recycle-on-expiry clear|compact` (needs turns and cache): once the session's prompt
-  cache has gone cold and the session is quiet, clear or compact it. A clear waits while
-  a named hold is open (below). A session idle for an hour has its background shells
-  stopped by the clear.
-- `--recycle-at-limit off|relaunch|compact` (needs turns and usage), `off` unless set: a
+- `--recycle-on-expiry clear|compact` (needs turns and cache): clear the session once
+  idle after its prompt cache has expired, or compact it shortly before, once per idle
+  stretch, while it is idle and its cache still warm.
+  - `clear`: once the cache reads cold and the session is quiet. A clear waits while a
+    named hold is open (below). A session idle for an hour has its background shells
+    stopped by the clear.
+  - `compact`: inside a window that opens where keep-warm's shuts, 360 s before the
+    cache expires, and shuts 60 s before it, counted on cache's age of the last request
+    plus the length of the last response (cache's age runs from a response's end, the
+    lifetime from its request's start). cache's timer asks every 60 s through the
+    window. The compact acts only while cache reads the session warm, the session is
+    quiet, and nothing is at work by keep-warm's reading (no live subagent, no open hold
+    of the launch chain, no directed agent at work), whether or not keep-warm is on for
+    the launch. It reads cache again right before it acts. It compacts at most once in
+    an idle stretch: after a compaction, the launcher doesn't compact the session again
+    until a request the compaction didn't make, so an idle session is compacted once
+    and then expires. A lifetime of 360 s or less (Claude's five-minute cache) has no
+    window, and a window missed (busy, held or at work through every ask) is not made up
+    after the expiry.
+- `--recycle-at-limit off|relaunch` (needs turns and usage), `off` unless set: a
   flag, a preset, `[defaults]` or the launch page turns it on. With `relaunch`, once the
   context passes the launch's `warn_at` mark, the agent is told it may relaunch itself
   with a handoff. The line opens "This launch lets you recycle yourself", rides on
@@ -618,12 +676,13 @@ own reads:
   the next rise past it is told again. A launch's self relaunch is accepted only where
   it is set to `relaunch` and its session can recycle itself: a Claude launch in a slot,
   where slots run, not in a scratch folder, with a handoff folder (with notes installed,
-  a notes directory for its folder). It is told only where it is also warned at a mark.
+  a notes directory for its folder). It is told only where it is also warned at a mark,
+  and `moxi launcher show` and Home name that mark (`at limit relaunch (2x)`).
   A `relaunch` launch with no warn-at mark (`warn_at = off`, or a seat that sets no
   `warn_at`, since a seat holds none unless set) launches with no refusal and no
   warning: it is never told, and its agent may still relaunch itself; `moxi launcher
-  show` and Home say `at limit relaunch (armed, no warning)`. `off` or `compact` from
-  any layer, the shipped `off` included, leaves it out.
+  show` and Home say `at limit relaunch (armed, no warning)`. `off` from any layer, the
+  shipped `off` included, leaves it out.
   - A `relaunch` typed or set by the preset needs slots and a slot launch. A scratch
     launch has no notes directory to keep a handoff in, so it can't take `relaunch`
     (`scratch-recycle`, exit 3): the launch and its preview, on the command line and the
@@ -631,16 +690,14 @@ own reads:
     launches in a scratch. A `relaunch` from `[defaults]` holds `off`, with a warning, on
     a scratch launch. Where else a `relaunch` set for the launch can't act (a Codex
     launch, no handoff folder), it is kept and the launch warns, naming what it fails.
-  - `relaunch` takes no `--limit-at`: its line comes at `warn_at`. A `limit_at` typed or
-    set by the preset of a `relaunch` launch is refused (`relaunch-mark`, exit 3, hint
-    "set warn_at"); one from `[defaults]` is left out, with a warning.
 
-  `compact` compacts the session once it is idle, waiting up to `recycle.limit_wait_s`,
-  each time the context climbs past `--limit-at 1x|1.5x|2x`, and it is open to a scratch
-  launch. With `--limit-at` unset, the mark is the one usage warns this launch at, its
-  `warn_at`, when that is a mark; otherwise (`warn_at` is `off` or unset, so usage warns
-  it at none) `1x`. The mark is fixed when the launch is composed, and a relaunch
-  composes its mark again from the values then.
+  **Retired.** `recycle_at_limit = compact` and the `limit_at` row are retired. Typed
+  or set by a preset, each is refused (`retired`, exit 2) with what to do instead; from
+  `[defaults]`, each is left out of the launch with a warning naming the fix
+  (`recycle_at_limit` holds `off`). `recycle.limit_wait_s` in the launcher's config file
+  is left out with a warning too, and `moxi config launcher check` warns of it. A launch
+  recorded with `compact` shows `compact (no longer acts)`, and its relaunch, resume or
+  fork runs `off`, with a warning; a recorded `limit_at` is dropped.
 
 **Keep-warm.** `--keep-warm on` (needs turns and cache) nudges a session shortly before
 its prompt cache would expire while it waits on work it handed out. It is off unless a
@@ -902,7 +959,11 @@ shows:
   template on Home.
 - `Sessions`: each launched session running there, newest first, with where it runs
   (`slot 3`, `headless`, `terminal`) and, with sessions installed, when it was last
-  active. Remove's step says they keep running.
+  active. Remove's step says they keep running. Each of these lines says, as a typed
+  field, that its session runs now (`runs`), and its `last active` part that it holds
+  only while the session is not in a turn (`idle_only`). The launcher reads no turn
+  state: with turns installed, the page joins turns' word in place of that part (see
+  projects' README, "Facts on the Projects page").
 
 The component reads only the launcher's own routes: `/api/running` when it is placed, on
 the launcher's `running` topic and every 30 seconds; `/api/presets` and `/api/catalog`
@@ -935,7 +996,7 @@ nothing has used it for a while.
 | `moxi launcher handoffs [--key KEY] [--json]` | a key's handoffs, newest first, and which still wait; a `--key` in the folder of its newest launch |
 | `moxi launcher deliver REQUEST_ID --pid PID` | internal: the detached process that sends a launch's first turn |
 | `moxi launcher relaunch --self --handoff FILE [--dry-run] [--json]` | arm a relaunch of this session, with its handoff |
-| `moxi launcher relaunch SESSION_ID \| IDENTITY [--dry-run] [--json]` | relaunch a session you direct |
+| `moxi launcher relaunch SESSION_ID \| IDENTITY [--handoff FILE] [--dry-run] [--json]` | relaunch a session you direct, with a handoff for its new session |
 | `moxi launcher relaunch --status RUN [--json]` | a run and its events |
 | `moxi launcher relaunch --stop RUN [--json]` | stop an armed relaunch run |
 | `moxi launcher relaunch --from-record RUN [--json]` | start again the session a failed relaunch exited |
@@ -974,10 +1035,10 @@ A refusal prints one line ending in a short code, such as `[off-posture]`, and a
 | cache | the `keep_warm` and `recycle_on_expiry` rows, and a director's relaunch refused while the session's cache is warm; each running session's cache and `Keep warm` on Home's Sessions row; the doctor row `keep-warm.timer` | neither row is offered; no session reads as kept warm, and no `Keep warm` |
 | projects | `project` keys, a project's agent listing, a directory's project key; with ui, the launcher's facts on the Projects page | `cwd` paths and scratch launches only |
 | notes | the `notes_dir` row, and notes' handoff folder; a launch notes gives no notes directory has none | the launcher's own handoff folder |
-| usage | the `warn_at`, `recycle_at_limit` and `limit_at` rows | the rows are not offered |
+| usage | the `warn_at` and `recycle_at_limit` rows | the rows are not offered |
 | ui | the launcher's page, and its state views on other pages | the command line only |
 | sessions | the latest thing said in each running session, on Home's Sessions row; `Open` and `All sessions` go to the sessions page | the row shows when each session was launched, and its links go to the launcher's page |
-| memory | the `subconscious` row: `--subconscious automatic` or `--subconscious on-demand` (needs turns too) stamps the mode under the variable memory names, `MOXI_MEMORY_SUBCONSCIOUS`, and memory's subconscious runs in that session; for now a recall runs on Claude Code only, so a Codex launch with the row on has it off at run time (memory's log and doctor say so); a fork drops the row | the row is not offered |
+| memory | the `subconscious` row: `--subconscious automatic` or `--subconscious on-demand` (needs turns too) stamps the mode under the variable memory names, `MOXI_MEMORY_SUBCONSCIOUS`, and memory's subconscious runs in that session; the `subconscious_route` row, `--subconscious-route subagent` (the default: a fork inside the session) or `slot` (a forked session in a slot you can watch; needs slots and comms, and refused where tmux slots don't run, but only with the subconscious on, so a route set in `[defaults]` or a preset doesn't refuse a launch with it off), stamped beside the mode as `MOXI_MEMORY_SUBCONSCIOUS_ROUTE`; on Codex only `slot` runs a recall, so a Codex launch on `subagent` has the subconscious off at run time (memory's log and doctor say so); a fork drops both rows; a recall's slot fork, which memory launches through `fork` and ends with its recall, is left alone by park, restore and crash discovery (above) | the rows are not offered |
 
 An agent role a preset names is looked for in the harness's own agent folders, the user's
 and the project's.
@@ -1083,8 +1144,6 @@ Set with `moxi config set launcher <key> <value>`:
 - `relaunch.director_pass_env` (empty): the same for a director's relaunch, read from
   the director's environment. Empty, nothing of the director's reaches the session.
 - `relaunch.notice_retry_s` (30): how long a refused notice is tried again.
-- `recycle.limit_wait_s` (1800): how long a compact at the limit waits for the session to
-  be idle.
 - `keep_warm.subagent_cap` (3) and `keep_warm.director_cap` (10): how many nudges in a row
   each case gets; `keep_warm.subagent_texts` and `keep_warm.director_texts` are their
   words. `keep_warm.director_cap` also caps the nudges for the agents a director

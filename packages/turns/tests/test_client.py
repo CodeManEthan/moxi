@@ -740,3 +740,12 @@ def test_a_probe_that_raises_raises_the_first_in_order_and_closes_what_was_found
         with pytest.raises(turns.TurnsError):
             session.facts()                             # closed
     assert _probe_threads() == []
+
+
+def test_the_largest_round_bound_is_the_one_memory_copies():
+    # memory's host fork gives turns this bound in whole seconds
+    # (HOST_FORK_TURNS_BOUND_S), copied since turns exports no maximum: a lower one
+    # here refuses every host-fork round until memory's copy follows it.
+    assert rpc.ROUND_TIMEOUT_MAX_MS == 2**31 - 1
+    assert client._round_params((2**31 - 1) // 1000) == {
+        "round_timeout_ms": (2**31 - 1) // 1000 * 1000}

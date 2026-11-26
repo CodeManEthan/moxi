@@ -36,7 +36,7 @@ LAUNCHER_ROWS = {"harness", "cwd", "project", "scratch", "identity", "scope", "d
                  "instructions", "instructions_file", "brief", "brief_file", "handoff",
                  "posture", "target", "slot", "extra_flags", "name", "notes_dir", "warn_at",
                  "keep_warm", "recycle_on_expiry", "recycle_at_limit", "limit_at",
-                 "headless_exit", "subconscious"}
+                 "headless_exit", "subconscious", "subconscious_route"}
 
 
 def test_each_shipped_catalog_holds_exactly_its_rows():
@@ -52,7 +52,7 @@ FORK_DROPPED = {"identity", "scope", "director", "takes_policy_directors", "post
                 "instructions", "instructions_file", "brief", "brief_file", "handoff",
                 "keep_warm", "recycle_on_expiry", "recycle_at_limit", "limit_at", "warn_at",
                 "headless_exit", "name", "native_name", "remote_control", "notes_dir",
-                "subconscious"}
+                "subconscious", "subconscious_route"}
 FORK_OWN = {("launcher", "target"), ("launcher", "slot"), ("claude", "session_id"),
             ("claude", "resume"), ("claude", "plugin_dir"),
             ("claude", "append_system_prompt_file")}
@@ -699,12 +699,53 @@ def test_the_launcher_rows_take_no_flags_and_no_catalog_table():
 
 
 def test_a_retired_row_is_refused_when_typed_and_when_checked():
-    text = ('[old]\ntype = "string"\ndefault = ""\ndoc = "d"\nflag = "-o"\n'
-            'modes = ["exec"]\nretired = "use --model"\nfork = "drop"\n')
-    old = parse_codex(text)["old"]
+    old = parse_codex('[old]\nretired = "use --model"\n')["old"]
     assert not old.offered(everything) and not old.settable
-    with pytest.raises(BadValue, match="retired"):
+    with pytest.raises(catalog.Retired, match="retired") as caught:
         old.check("x")
+    assert caught.value.code == "retired" and caught.value.hint == "use --model"
+
+
+def test_a_retired_row_takes_no_other_field():
+    with pytest.raises(CatalogError, match="is retired, so it takes no doc, type"):
+        parse_codex('[old]\ntype = "string"\ndoc = "d"\nretired = "use --model"\n')
+
+
+def test_limit_at_is_retired_and_typing_it_is_refused_with_its_fix():
+    row = catalog.launcher()["limit_at"]
+    assert row.retired and "warn_at" in row.retired and not row.settable
+    with pytest.raises(catalog.Retired) as caught:
+        catalog.parse(["--limit-at", "1x"], "claude", available=everything)
+    assert caught.value.code == "retired" and caught.value.hint == row.retired
+
+
+def test_recycle_at_limit_offers_off_and_relaunch_and_retires_compact():
+    row = catalog.launcher()["recycle_at_limit"]
+    assert row.values == ("off", "relaunch") and list(row.retired_values) == ["compact"]
+    with pytest.raises(catalog.Retired) as caught:
+        catalog.parse(["--recycle-at-limit", "compact"], "claude", available=everything)
+    assert caught.value.code == "retired"
+    assert caught.value.hint == row.retired_values["compact"]
+    assert "recycle_on_expiry = compact" in caught.value.hint
+    with pytest.raises(catalog.Retired):
+        row.check("compact")
+    assert row.check("relaunch") == "relaunch"
+
+
+@pytest.mark.parametrize("extra, words", [
+    ('retired_values = { b = "use a" }\n', "retires b, which its values still take"),
+    ('retired_values = { c = "" }\n', "not a table of value to what to do instead"),
+])
+def test_retired_values_name_values_the_row_no_longer_takes(extra, words):
+    text = ('[r]\ntype = "enum"\ndefault = "a"\nvalues = ["a", "b"]\ndoc = "d"\n'
+            'fork = "drop"\n' + extra)
+    with pytest.raises(CatalogError, match=words):
+        catalog.parse_text(text, harness="launcher", source="t")
+
+
+def test_the_scratch_and_relaunch_hints_name_no_compact():
+    assert "compact" not in catalog.SCRATCH_RECYCLE[1]
+    assert "compact" not in catalog.launcher()["recycle_at_limit"].when["relaunch"].hint
 
 
 def test_a_templated_spelling_matches_only_its_own_key():

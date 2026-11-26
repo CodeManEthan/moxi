@@ -10,6 +10,7 @@
     running() -> tuple[Running, ...]        # interface 2: the launches running now
     fork(session_id) -> LaunchResult        # interface 3: fork a session, live or not
     exit_session(session_id) -> Result      # interface 3: exit a quiet launched session
+    slots_here() -> bool                    # interface 3: whether tmux slots run here
 
 A request is a `LaunchRequest` (presets and flags, resolved here) or a `ReplayRequest`
 (a stored launch made again: a relaunch, a resume or a fork, its values the stored
@@ -64,12 +65,16 @@ preset read, and its own request id (and, but for a resume, its own Claude sessi
 keeps the row's directory, a scratch one too. An option row (keep-warm, recycling) the
 install no longer offers, or whose value's needs it no longer meets, goes back to its
 default with a warning, as a comms name does without comms; so does a scratch row's
-`recycle_at_limit = relaunch`, recorded before a scratch launch was refused it. A
+`recycle_at_limit = relaunch`, recorded before a scratch launch was refused it. A replay
+or a fork drops a stored value of a retired catalog row (`limit_at`), and replays a value
+a live row has retired (`recycle_at_limit = compact`) as the row's unset value, with one
+warning (`catalog.drop_retired`). A
 relaunch's model pin (`pin.choose`) is its model only when the stored values name none;
 the new row records the stored model and a `model-pin` event, never the pin as a value.
 It never sends the row's
-brief: a self relaunch's first turn is its handoff alone, under the header `Handoff from
-launcher, relaunched by <actor>: <path>`, a director's relaunch sends none, and a resume
+brief: a relaunch's first turn is its handoff alone, under the header `Handoff from
+launcher, relaunched by <actor>: <path>` (a director's run recorded with no handoff sends
+none), and a resume
 sends the brief it was given, if any, as a launch sends its own. **A replay's environment is built from the row and the settings only**: the row's recorded
 base (`base_env_json`: the short list slots' server keeps, the core's locators, the
 keep-lists' and provider names classed recorded, on Windows the names a process needs
@@ -216,11 +221,12 @@ class ReplayRequest:
     with `--resume`, never minted. `request_id` and `actor` are as `LaunchRequest`'s.
 
     `posture` is the start posture the identity block shows in place of the row's
-    (`common.RELAUNCHED` for a self relaunch, `with:<director>` for a director's); it goes
+    (`common.RELAUNCHED` for a relaunch with a handoff, `with:<director>` for a director's
+    run recorded with none); it goes
     in the new row's `posture` and never in its `values_json`. A resume, which gives none,
     shows the posture the launch was configured with, from the row's values, so a resume of
     a relaunch's row shows that one, not the relaunch's. `handoff` is the handoff a
-    self relaunch carries as its first turn, `run` the relaunch's run id, stamped as
+    relaunch carries as its first turn, `run` the relaunch's run id, stamped as
     `MOXI_LAUNCHER_RELAUNCH` when there is a handoff. `director` marks a director's
     relaunch, whose credentials come from `relaunch.director_pass_env`. `brief` and
     `brief_file` are the brief a resume was given (at most one of them), sent as its first
@@ -406,7 +412,7 @@ def check(request, *, env: Mapping[str, str] | None = None) -> list[Refusal]:
     """The refusals `launch` would meet in the live state, without composing or writing
     anything: the resolver's own (an unknown preset or project, projects unreadable or
     busy, a posture off its default, a scratch launch set to recycle itself:
-    `recycle_at_limit = relaunch`, `compact` being open to one), a directory that does
+    `recycle_at_limit = relaunch`), a directory that does
     not exist, a scratch folder's parent this user can't trust (a link, another user's,
     or open to others), a slot
     named for a launch whose target is not `slot` (exit 2, like a flag misused), a comms
@@ -640,7 +646,8 @@ def _replayed(request: ReplayRequest) -> Replayed:
                                          ", and only a slot launch is respawned",
                                "replay it without respawn")
     stored = row.values
-    values = {k: v for k, v in stored.items() if k not in _NOT_REPLAYED}
+    values, warnings = catalog.drop_retired(
+        row.harness, {k: v for k, v in stored.items() if k not in _NOT_REPLAYED})
     values.update(brief=request.brief or "", brief_file=request.brief_file or "",
                   handoff=request.handoff or "")
     model_pin = request.model_pin if request.model_pin and not values.get("model") else None
@@ -651,7 +658,6 @@ def _replayed(request: ReplayRequest) -> Replayed:
     if slot is not None:
         values["slot"] = str(slot)
     harness, target = row.harness, row.target
-    warnings: list[str] = []
     identity, scope = row.identity or None, row.scope or None
     if identity and not slots.links("comms"):
         warnings.append(f"identity {identity} is ignored: comms is not installed")
@@ -959,6 +965,16 @@ def exit_session(session_id: str, *, dry_run: bool = False,
     return exit_one(session_id, dry_run=dry_run, caller_env=env)
 
 
+def slots_here() -> bool:
+    """Interface 3: whether tmux slots run here, as the launcher reads it for a slot
+    launch and for a launch row's `when.slot` condition: slots is installed and its
+    `supported()` says so. False on native Windows, where slots refuse to run. Never
+    raises."""
+    from .catalog import slots_here as here
+
+    return here()
+
+
 @dataclass(frozen=True)
 class Running:
     """A launch that may be running, as `running` gives it: plain values only.
@@ -1040,4 +1056,4 @@ __all__ = ["KINDS", "LAST", "MODEL_PIN", "TAKEN", "KEEP_WARM_ENV", "RECYCLE_ON_E
            "LaunchResult", "NoDirectory", "Refusal", "ReplayRequest", "Replayed", "Running",
            "ScratchRecycle", "ScratchRoot", "check", "exit_code", "exit_session", "fork",
            "launch", "launch_kind", "launch_kinds", "open_hold", "prepare", "preview",
-           "release_hold", "running"]
+           "release_hold", "running", "slots_here"]

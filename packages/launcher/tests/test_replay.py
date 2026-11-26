@@ -1,8 +1,8 @@
 """A stored launch made again (`api.ReplayRequest`): the replay's argv against a fresh
 launch of the same values, the environment built from the row and the settings only, a
-scratch launch's directory kept, the brief left out, a self relaunch's handoff header and
-stamp, a director's posture, a resume's argv and session id, and a respawn into the slot
-the relaunch holds."""
+scratch launch's directory kept, the brief left out, a relaunch's handoff header and stamp
+(a self relaunch's and a director's), a director's posture with no handoff, a resume's argv
+and session id, and a respawn into the slot the relaunch holds."""
 
 from __future__ import annotations
 
@@ -328,6 +328,46 @@ def test_a_replay_env_is_the_base_then_the_pass_list_and_nothing_else():
     assert got == {"PATH": "/then/bin", "HOME": "/home/then", "TOKEN": "t"}
 
 
+BUS = "DBUS_SESSION_BUS_ADDRESS"
+
+
+def test_a_launch_records_the_session_bus_when_its_caller_has_one():
+    assert common.base_env({"HOME": "/h", BUS: "unix:path=/run/user/7/bus"},
+                           is_windows=False) == {"HOME": "/h", BUS: "unix:path=/run/user/7/bus"}
+    assert common.base_env({"HOME": "/h"}, is_windows=False) == {"HOME": "/h"}
+    assert common.short_env({BUS: "unix:path=/b"}, is_windows=False) == {BUS: "unix:path=/b"}
+
+
+def test_a_replay_takes_the_session_bus_from_its_caller_and_else_from_the_record():
+    base = {"HOME": "/h", BUS: "unix:path=/run/user/7/then"}
+    now = {"HOME": "/elsewhere", BUS: "unix:path=/run/user/7/now"}
+    assert common.replay_env(base, now) == {"HOME": "/h", BUS: "unix:path=/run/user/7/now"}
+    assert common.replay_env(base, {"HOME": "/elsewhere"}) == base
+    assert common.replay_env(base, {BUS: ""}) == base
+    assert common.replay_env({"HOME": "/h"}, {"HOME": "/elsewhere"}) == {"HOME": "/h"}
+
+
+def test_a_replay_restores_the_session_bus_the_launch_recorded(work, harness, no_exec,
+                                                               monkeypatch):
+    monkeypatch.setenv(BUS, "unix:path=/run/user/7/bus")
+    api.launch(request(work))
+    assert row("r1").base_env[BUS] == "unix:path=/run/user/7/bus"
+    # Replayed from a process with no bus: the recorded one comes back.
+    monkeypatch.delenv(BUS)
+    api.launch(ReplayRequest(row("r1"), relaunch_of="r1", request_id="r2", actor="ann"))
+    assert no_exec[-1]["env"][BUS] == "unix:path=/run/user/7/bus"
+    assert row("r2").base_env[BUS] == "unix:path=/run/user/7/bus"
+
+
+def test_a_launch_with_no_session_bus_adds_none_to_its_replay(work, harness, no_exec,
+                                                              monkeypatch):
+    monkeypatch.delenv(BUS, raising=False)
+    api.launch(request(work))
+    assert BUS not in row("r1").base_env
+    api.launch(ReplayRequest(row("r1"), relaunch_of="r1", request_id="r2", actor="ann"))
+    assert BUS not in no_exec[-1]["env"]
+
+
 def test_no_credentials_when_the_base_shows_a_sign_in_and_nothing_is_passed():
     assert common.no_credentials({"CLAUDE_CODE_OAUTH_TOKEN": None}, [])
     assert common.no_credentials({"CLAUDE_CODE_USE_VERTEX": "1"}, [])
@@ -457,6 +497,35 @@ def test_a_director_relaunch_takes_only_the_directors_listed_names(work, harness
     assert "SELF_ONLY" not in env and "CLAUDE_CODE_OAUTH_TOKEN" not in env
     # A name was passed on purpose: the replay doesn't second-guess it.
     assert got.base == "row"
+
+
+def test_a_director_relaunch_with_a_handoff_is_relaunched_stamped_and_gives_it(
+        work, harness, no_exec, tmp_path):
+    from moxi_launcher import job, presets
+
+    file = presets.path()
+    file.parent.mkdir(parents=True, exist_ok=True)
+    file.write_text("[seat.lead]\n")
+    api.launch(LaunchRequest(seat="lead", cwd=str(work), request_id="r1", session_id=SID,
+                             actor="ann"))
+    handoff = tmp_path / "lead-handoff.md"
+    handoff.write_text("where it stands\n")
+    request = dataclasses.replace(
+        job.replay_request(row("r1"), "run9", mode="director", handoff=str(handoff),
+                           by="boss", slot=None, hold=None, respawn=False, director=True),
+        request_id="r2")
+    api.launch(request)
+    new = row("r2")
+    assert new.relaunch_of == "r1" and new.actor == "boss"
+    assert new.posture == f"relaunched (handoff: {handoff})"
+    assert new.handoff_path == str(handoff)
+    assert new.env[common.RELAUNCH_ENV] == "run9"
+    assert no_exec[-1]["env"][common.RELAUNCH_ENV] == "run9"
+    conn = store.connect(create=False)
+    try:
+        assert store.picked(conn, "lead") == [str(handoff)]
+    finally:
+        conn.close()
 
 
 def test_a_token_seats_director_relaunch_with_none_passed_says_no_credentials(
@@ -784,13 +853,30 @@ def test_a_replay_of_an_older_scratch_row_set_to_relaunch_recycles_off(
                 "itself") in replayed.warnings
         # So the launch check does not refuse the replay.
         assert "scratch-recycle" not in {r.code for r in api._check(replayed, {})}
-    # compact is replayed as it was.
-    stored = {**old.values, "recycle_at_limit": "compact"}
-    replayed = api._replayed(ReplayRequest(
-        dataclasses.replace(old, values_json=json.dumps(stored)), relaunch_of="r1",
-        request_id="r2", actor="ann"))
-    assert replayed.values["recycle_at_limit"] == "compact"
-    assert not any("recycle_at_limit" in said for said in replayed.warnings)
+
+
+#: The warning a replay of a row recorded with `recycle_at_limit = compact` carries.
+COMPACT_NOT_APPLIED = ("recycle_at_limit compact is not applied: "
+                       + catalog.launcher()["recycle_at_limit"].retired_values["compact"])
+
+
+def test_a_replay_drops_a_stored_limit_at_and_replays_compact_as_off(
+        harness, tmp_path, no_exec):
+    api.launch(LaunchRequest(cwd=str(tmp_path), request_id="r1", session_id=SID,
+                             actor="ann"))
+    old = row("r1")
+    stored = {**old.values, "recycle_at_limit": "compact", "limit_at": "1.5x",
+              "sources": {"recycle_at_limit": "preset"}}
+    old = dataclasses.replace(old, values_json=json.dumps(stored))
+    for replay in (dict(relaunch_of="r1"), dict(resume_of="r1")):
+        replay = ReplayRequest(old, request_id="r2", actor="ann", **replay)
+        replayed = api._replayed(replay)
+        assert replayed.values["recycle_at_limit"] == "off"
+        assert "limit_at" not in replayed.values
+        assert [w for w in replayed.warnings if "recycle_at_limit" in w or "limit_at" in w
+                ] == [COMPACT_NOT_APPLIED]
+        # The launch check does not refuse it.
+        assert not [r for r in api._check(replayed, {}) if r.code == "retired"]
 
 
 # -- whether a replay can recycle itself ---------------------------------------------------
@@ -853,7 +939,9 @@ def test_a_replay_never_changes_whether_the_launch_can_recycle_itself(
     assert can(old) is holds
     replayed, new = replayed_row(old)
     assert can(new) is holds
-    assert replayed.values["recycle_at_limit"] == recycle
+    # A row recorded with the retired compact replays off, opted out as it was.
+    assert replayed.values["recycle_at_limit"] == (
+        "off" if recycle == "compact" else recycle)
     # And again, from the replay's own row.
     _, newer = replayed_row(new)
     assert can(newer) is holds

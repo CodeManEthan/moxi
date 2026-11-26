@@ -399,3 +399,55 @@ def test_the_save_answer_holds_its_declared_shape():
     result, _ = _save_one("count", "5", was="3", keys=keys)
     project({"saved_at": 1.5, "results": [result]},
             settings.ROUTES[-1].shape, strict=True)
+
+
+# --- a table's keys ---------------------------------------------------------------------------
+
+from test_settings import APPLIES, _row  # noqa: E402
+
+
+def test_a_table_key_saves_by_its_name_with_its_tables_mark_and_a_reset_unsets_it():
+    keys = [_row("mode", "enum", "a", "b", values=["a", "b"]),
+            _row("typo", "int", 3, clear_only=True, refused="typo is not a row.")]
+    result, run = _save_one("defaults.mode", '"b"', was='"a"', keys=keys)
+    assert result["outcome"] == "saved" and result["mark"] == APPLIES
+    assert run.writes[-1][0][5:] == ["set", "--by", "ui", "--json", "--", "demo",
+                                     "defaults.mode", "b"]
+    result, run = _save_one("defaults.typo", reset=True, was="3", keys=keys)
+    assert result["outcome"] == "saved"
+    assert run.writes[-1][0][5:] == ["unset", "--by", "ui", "--json", "--", "demo",
+                                     "defaults.typo"]
+
+
+def test_a_stale_was_for_a_table_key_is_moved_and_not_written():
+    keys = [_row("mode", "enum", "a", "b", values=["a", "b"])]
+    result, run = _save_one("defaults.mode", '"b"', was='"b"', keys=keys)
+    assert (result["outcome"], result["problem"]) == ("moved", '"a"')
+    assert run.writes == []
+
+
+def test_a_locked_table_refuses_every_row_and_a_locked_row_only_itself():
+    keys = [_row("mode", "enum", "a", "b", values=["a", "b"]), _row("n", "int", 1, 2)]
+    for name, value, was in (("defaults.mode", '"b"', '"a"'), ("defaults.n", "3", "1")):
+        result, run = _save_one(name, value, was=was, keys=keys, locked={"demo.defaults"})
+        assert result["outcome"] == "refused" and "locked" in result["problem"]
+        assert run.writes == []
+    result, _ = _save_one("defaults.n", "3", was="1", keys=keys, locked={"demo.defaults.mode"})
+    assert result["outcome"] == "saved"
+    assert settings.descriptor("demo", keys[0], locked={"demo.defaults"})["locked"]
+
+
+def test_with_its_config_file_unreadable_a_save_writes_table_keys_and_fails_the_rest(
+        shell, monkeypatch):
+    rows = [_row("mode", "enum", "a", "b", values=["a", "b"])]
+    monkeypatch.setattr(settings, "read_schema", lambda *a, **k: settings.SchemaRead(
+        rows, "bad TOML", "mend it"))
+    ran = []
+    monkeypatch.setattr(settings, "save_one", lambda module, key, **k: ran.append(key) or
+                        settings._result(key, "saved"))
+    status, data = _save(shell, "fixture", [("limit", "1", False, "10"),
+                                            ("defaults.mode", '"b"', False, '"a"')])
+    assert status == 200
+    assert _outcomes(data) == [("limit", "failed"), ("defaults.mode", "saved")]
+    assert (data["results"][0]["problem"], data["results"][0]["fix"]) == ("bad TOML", "mend it")
+    assert ran == ["defaults.mode"] and _file() == {}

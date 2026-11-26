@@ -677,33 +677,34 @@ def director_words(values: Mapping[str, object], ctx: Context) -> list[str]:
 
 def commands(values: Mapping[str, object]) -> tuple[str, ...]:
     """The session commands a launch grants through turns: `exit`, then `clear` or
-    `compact` for `recycle_on_expiry`, and `compact` for `recycle_at_limit`."""
+    `compact` exactly when `recycle_on_expiry` is that value. `recycle_at_limit` grants
+    nothing: a relaunch exits through `exit`."""
     granted = list(COMMANDS)
     expiry = values.get("recycle_on_expiry")
     if expiry in ("clear", "compact"):
         granted.append(str(expiry))
-    if values.get("recycle_at_limit") in ("relaunch", "compact") and "compact" not in granted:
-        granted.append("compact")
     return tuple(granted)
 
 
 def option_stamps(values: Mapping[str, object]) -> dict[str, str]:
     """The stamps a launch's option rows set: keep-warm on, recycle on expiry's value,
-    and the crossing mark (`limit_mark`) when it recycles at its limit: a `compact`
-    launch always, a `relaunch` launch only where it is told it may recycle itself
-    (`selfrecycle.missing` with `told`): its arm would be accepted and it warns at a mark.
-    The subconscious row stamps its mode under memory's variable. A row at `off` stamps
-    nothing."""
+    and the crossing mark (`limit_mark`) for a `relaunch` launch only where it is told it
+    may recycle itself (`selfrecycle.missing` with `told`): its arm would be accepted and
+    it warns at a mark.
+    The subconscious row stamps its mode under memory's variable, and with it the route
+    row its route (`subagent` when the row is unset). A subconscious at `off` stamps
+    neither."""
     env: dict[str, str] = {}
     if values.get("keep_warm") == "on":
         env[KEEP_WARM_ENV] = "on"
     if values.get("recycle_on_expiry") in ("clear", "compact"):
         env[RECYCLE_ON_EXPIRY_ENV] = str(values["recycle_on_expiry"])
-    at_limit = values.get("recycle_at_limit")
-    if at_limit == "compact" or relaunch_holds(values):
+    if relaunch_holds(values):
         _stamp(env, "usage", 1, "CROSSING_AT_ENV", limit_mark(values))
     if values.get("subconscious") in ("automatic", "on-demand"):
         _stamp(env, "memory", 1, "SUBCONSCIOUS_ENV", str(values["subconscious"]))
+        _stamp(env, "memory", 1, "SUBCONSCIOUS_ROUTE_ENV",
+               str(values.get("subconscious_route") or "subagent"))
     return env
 
 
@@ -723,24 +724,11 @@ def relaunch_holds(values: Mapping[str, object]) -> bool:
         values=values, source=None, told=True) is None
 
 
-#: The mark a limit crossing falls back to when no other mark applies.
-LIMIT_FALLBACK = "1x"
-
-
 def limit_mark(values: Mapping[str, object]) -> str:
-    """The mark a launch that recycles at its limit is stamped to cross at, read when the
-    launch is composed. A `relaunch` launch crosses at its `warn_at`, the mark usage warns
-    it at, so the relaunch line rides on that warning; `relaunch_holds` has made sure it
-    is a mark. A `compact` launch crosses at `limit_at` when it is a mark; else `warn_at`
-    when it is one; else `LIMIT_FALLBACK` (`warn_at` is `off` or unset, and usage warns
-    the launch at no mark)."""
-    marks = catalog.launcher()["limit_at"].values
-    if values.get("recycle_at_limit") == "relaunch" and values.get("warn_at") in marks:
-        return str(values["warn_at"])
-    for name in ("limit_at", "warn_at"):
-        if values.get(name) in marks:
-            return str(values[name])
-    return LIMIT_FALLBACK
+    """The mark a launch that relaunches itself is stamped to cross at, read when the
+    launch is composed: its `warn_at`, the mark usage warns it at, so the relaunch line
+    rides on that warning. `relaunch_holds` has made sure it is a mark."""
+    return str(values.get("warn_at") or "")
 
 
 def stamps(request_id: str, *, turns: bool = False, additions: Additions | None = None,
@@ -776,11 +764,18 @@ def child_env(caller_env: Mapping[str, str], composition: Composition,
 
 
 #: The short list of names a launch records from its child's environment
-#: (`launches.base_env_json`): the ones slots' server keeps, and `TMPDIR`, the private
-#: temporary directory the harness and its tools write to. Besides these names, every
-#: name starting with one of `BASE_PREFIXES`. A row made before the base was recorded
-#: takes these alone from the replaying process (and on Windows `WINDOWS_BASE_NAMES`).
-BASE_NAMES = ("HOME", "USER", "LOGNAME", "SHELL", "PATH", "LANG", "TZ", "TMPDIR")
+#: (`launches.base_env_json`): the ones slots' server keeps, `TMPDIR`, the private
+#: temporary directory the harness and its tools write to, and `CALLER_FIRST_NAMES`.
+#: Besides these names, every name starting with one of `BASE_PREFIXES`. A row made
+#: before the base was recorded takes these alone from the replaying process (and on
+#: Windows `WINDOWS_BASE_NAMES`).
+BASE_NAMES = ("HOME", "USER", "LOGNAME", "SHELL", "PATH", "LANG", "TZ", "TMPDIR",
+              "DBUS_SESSION_BUS_ADDRESS")
+#: The recorded names a replay takes from the replaying process when it holds them, and
+#: from the record only when it doesn't: the user's session bus, which can move at each
+#: login. On Linux the system keychain is reached over it, so a session without it can't
+#: read a secret kept there. Elsewhere the name is absent and adds nothing.
+CALLER_FIRST_NAMES = ("DBUS_SESSION_BUS_ADDRESS",)
 BASE_PREFIXES = ("LC_", "XDG_")
 #: The names a launch on Windows records besides those: the system's own locations and
 #: names, which a process there needs to start (`SYSTEMROOT` above all), and the user's
@@ -855,11 +850,14 @@ def replay_env(base: Mapping[str, str | None], caller_env: Mapping[str, str],
                terminal: bool = False) -> dict[str, str]:
     """The environment a replay's child is built from, before the scrub and the stamps:
     `base` (the row's recorded values; a credential recorded as set has no value and
-    adds nothing), then each name `pass_env` lists that `environ`, the replaying
-    process's environment, holds; for a resume into the caller's own terminal
-    (`terminal`), the caller's terminal names it holds (`TERMINAL_NAMES`). Nothing else of
-    `environ` comes in."""
+    adds nothing), with each of `CALLER_FIRST_NAMES` that `environ`, the replaying
+    process's environment, holds taken from it instead; then each name `pass_env` lists
+    that `environ` holds; for a resume into the caller's own terminal (`terminal`), the
+    caller's terminal names it holds (`TERMINAL_NAMES`). Nothing else of `environ` comes
+    in."""
     env = {name: value for name, value in base.items() if value is not None}
+    env.update({name: caller_env[name] for name in CALLER_FIRST_NAMES
+                if caller_env.get(name)})
     if terminal:
         env.update({name: caller_env[name] for name in TERMINAL_NAMES if name in caller_env})
     env.update({name: caller_env[name] for name in pass_env if name in caller_env})
@@ -916,8 +914,8 @@ def check_sizes(argv: Sequence[str], *, values: Mapping[str, object],
             raise TooLong(what, size, WORD, "bytes")
 
 
-__all__ = ["BASE_NAMES", "BASE_PREFIXES", "CODEX_KEEP", "COMMANDS", "CREDENTIAL",
-           "ENV_CLASS", "HEADER", "KEEP_WARM_ENV", "KEEP_WARM_LINE",
+__all__ = ["BASE_NAMES", "BASE_PREFIXES", "CALLER_FIRST_NAMES", "CODEX_KEEP", "COMMANDS",
+           "CREDENTIAL", "ENV_CLASS", "HEADER", "KEEP_WARM_ENV", "KEEP_WARM_LINE",
            "PROVIDER_SWITCHES", "RECORDED", "RECORDED_PREFIXES", "RECYCLE_ON_EXPIRY_ENV",
            "RELAUNCH_ENV", "RELAUNCHED", "REQUEST_ENV", "SCRUB_NAMES", "SCRUB_PREFIXES",
            "TERMINAL_NAMES",
@@ -927,7 +925,7 @@ __all__ = ["BASE_NAMES", "BASE_PREFIXES", "CODEX_KEEP", "COMMANDS", "CREDENTIAL"
            "Unreadable", "agent_role", "base_env", "check_sizes", "commands",
            "director_words", "encode",
            "env_class", "child_env", "first_turn", "headless_words", "identity_block",
-           "LIMIT_FALLBACK", "limit_mark", "locator", "no_credentials", "option_stamps",
+           "limit_mark", "locator", "no_credentials", "option_stamps",
            "prompt_path", "read_settings", "relaunch_holds",
            "replay_env", "scratch_dir", "scratch_name", "scratch_root",
            "scratch_root_problem", "scrub", "seat_text", "settings_file", "settings_path",
