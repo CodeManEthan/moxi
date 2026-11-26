@@ -253,7 +253,7 @@ def _strip_end(text: str) -> str:
     return "\n".join(lines).strip()
 
 
-def collect(conversation: str, *, words: bool, drop_after_s: float,
+def collect(conversation: str, *, has_words: bool, drop_after_s: float,
             deadline: float | None = None, now: float | None = None) -> Collected:
     """Collect the conversation's pieces, and number the call's words when it has any.
     See the module's docstring. A hold of the key's lock not got by `deadline` collects
@@ -306,7 +306,7 @@ def collect(conversation: str, *, words: bool, drop_after_s: float,
             found.sort(key=lambda item: item[0])
             pieces = [piece for _, piece in found[:PIECES_MAX]]
             number = None
-            if words:
+            if has_words:
                 number = last + 1
                 state["last_call"] = number
                 state["calls"][str(number)] = now
@@ -515,10 +515,10 @@ def start(conversation: str, words: str, context: str, *, call: int,
 
 # -- the child's chat branch --------------------------------------------------------------
 
-def preamble(context: str, *, web: bool = False) -> str:
+def preamble(context: str, *, allows_web: bool = False) -> str:
     """`CHAT_PREAMBLE` for `context`."""
     return CHAT_PREAMBLE.format(context=(context or "").strip() or NO_CONTEXT,
-                                web=WEB_WORDS if web else "")
+                                web=WEB_WORDS if allows_web else "")
 
 
 def chat_brief(recall, *, search=None, places=None) -> tuple[str, list[str]]:

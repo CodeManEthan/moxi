@@ -269,7 +269,7 @@ class Recaller:
         context = str(args.get("context") or "")
         has_words = bool(words.strip())
         collected = recall_chat.collect(
-            conversation, words=has_words,
+            conversation, has_words=has_words,
             drop_after_s=float(settings["subconscious.chat.drop_after_s"]),
             deadline=deadline)
         try:

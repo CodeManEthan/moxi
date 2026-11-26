@@ -175,14 +175,14 @@ def test_no_allow_rule_or_plugin_comes_from_the_users_install_or_the_project():
 
 
 def test_the_web_adds_its_two_tools_with_an_allow_rule_for_them():
-    words = argv(spec(web=True))
+    words = argv(spec(allows_web=True))
     assert flag_values(words, "--tools") == ["Read,Grep,Glob,WebFetch,WebSearch"]
     assert "WebFetch" in words and "WebSearch" in words
-    assert fence.fence_tools(web=True) == {"Read", "Grep", "Glob", "EndConversation",
+    assert fence.fence_tools(allows_web=True) == {"Read", "Grep", "Glob", "EndConversation",
                                            "WebFetch", "WebSearch"}
 
 
-@pytest.mark.parametrize("tools,web,part", [
+@pytest.mark.parametrize("tools,allows_web,part", [
     (["Read", "Grep", "Glob"], False, None),
     (["Read", "Grep", "Glob", "EndConversation"], False, None),
     (["Read", "Grep", "Glob", "WebFetch"], True, None),
@@ -190,9 +190,9 @@ def test_the_web_adds_its_two_tools_with_an_allow_rule_for_them():
     (["Read", "Grep"], False, "tools"),
     (["Read", "Grep", "Glob", "Bash"], False, "tools"),
 ])
-def test_the_tools_part_checks_a_bound_not_an_exact_set(tools, web, part):
+def test_the_tools_part_checks_a_bound_not_an_exact_set(tools, allows_web, part):
     got, detail = fence.judge({"tools": tools, "mcp_servers": []}, "", exited=False,
-                              web=web)
+                              allows_web=allows_web)
     assert got == part
     if part:
         assert ("missing Glob" in detail) or ("extra " in detail)

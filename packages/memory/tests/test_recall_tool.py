@@ -312,8 +312,8 @@ def test_with_the_conversations_lock_held_the_call_answers_busy_within_its_budge
 # -- pieces: the text part, the settle -------------------------------------------------------
 
 def test_a_piece_reads_aloud_and_a_stale_one_says_earlier(spawned):
-    recall_chat.collect(CONV, words=True, drop_after_s=900)     # call 1's words
-    recall_chat.collect(CONV, words=True, drop_after_s=900)     # call 2's: a later call
+    recall_chat.collect(CONV, has_words=True, drop_after_s=900)     # call 1's words
+    recall_chat.collect(CONV, has_words=True, drop_after_s=900)     # call 2's: a later call
     a_piece("a", "the approver is Dana", call=1)                # answers call 1
     _memory, prov = build(spawned)
     result, _ = call(prov, {"conversation": CONV})

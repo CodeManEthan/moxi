@@ -111,10 +111,10 @@ def chat_dir(env: Mapping[str, str] | None = None) -> Path:
     return recalls.subconscious_dir(env) / CHAT_DIR
 
 
-def fence_tools(*, web: bool = False) -> frozenset[str]:
+def fence_tools(*, allows_web: bool = False) -> frozenset[str]:
     """The bound on a chat recall's session's tools: a session passes with any of these
     and no other, as long as it has every one of `READ_TOOLS`."""
-    return frozenset((*READ_TOOLS, *HARMLESS_TOOLS, *(WEB_TOOLS if web else ())))
+    return frozenset((*READ_TOOLS, *HARMLESS_TOOLS, *(WEB_TOOLS if allows_web else ())))
 
 
 def fence_flags(*, max_tools: int) -> tuple[str, ...]:
@@ -139,7 +139,7 @@ class Spec:
     max_tools: int
     add_dirs: Sequence[str] = ()
     model: str = ""
-    web: bool = False
+    allows_web: bool = False
     recall_id: str = ""
 
 
@@ -149,12 +149,12 @@ def request(launcher: Any, spec: Spec, *, output: Sequence[str] = JSON_OUTPUT) -
     the catalogs now, so each holds its shipped default whatever `[defaults]` says, and
     the launch stamped as recall `spec.recall_id`'s fork. `output` is the output flags,
     the probe's in its place."""
-    tools = [*READ_TOOLS, *(WEB_TOOLS if spec.web else ())]
+    tools = [*READ_TOOLS, *(WEB_TOOLS if spec.allows_web else ())]
     typed: dict[str, object] = {
         "harness": HARNESS, "target": TARGET, "cwd": spec.cwd, "name": spec.name,
         "brief": spec.brief, "tools": tools, "disallowed_tools": [NO_MCP],
         "permission_mode": PERMISSION_MODE}
-    if spec.web:
+    if spec.allows_web:
         typed["allowed_tools"] = list(WEB_TOOLS)
     if spec.model:
         typed["model"] = spec.model
@@ -358,7 +358,7 @@ def probe(launcher: Any, spec: Spec, found: Binary, *,
     if isinstance(ran_to, str):
         return None, ran_to
     init, text, exited = ran_to
-    part, detail = judge(init, text, exited=exited, web=spec.web)
+    part, detail = judge(init, text, exited=exited, allows_web=spec.allows_web)
     if part is None and init is None:
         return None, detail
     return Outcome(found, version, passed=part is None, part=part, detail=detail,
@@ -446,7 +446,7 @@ _UNKNOWN_OPTION = re.compile(r"unknown option '?(--?[A-Za-z][\w-]*)")
 
 
 def judge(init: dict | None, text: str, *, exited: bool,
-          web: bool = False) -> tuple[str | None, str]:
+          allows_web: bool = False) -> tuple[str | None, str]:
     """The failed part and its detail for a probe that read `init` (None when it read
     none) and `text`; `(None, "")` for a pass, and `(None, why)` for no outcome."""
     if init is None:
@@ -457,7 +457,7 @@ def judge(init: dict | None, text: str, *, exited: bool,
         why = "it exited" if exited else f"none came within {PROBE_S:.0f} s"
         return None, f"no system/init: {why}" + (f" ({last.strip()[:200]})" if last else "")
     tools = {str(t) for t in init.get("tools") or ()}
-    bound = fence_tools(web=web)
+    bound = fence_tools(allows_web=allows_web)
     extra, missing = sorted(tools - bound), sorted(set(READ_TOOLS) - tools)
     if extra or missing:
         words = [f"extra {', '.join(extra)}"] if extra else []

@@ -121,8 +121,8 @@ def a_recall(recall_id, call, *texts, at=None, head="the kiosk approver"):
             "rounds": [{"round": i + 1, "text": t, "at": at} for i, t in enumerate(texts)]})
 
 
-def collect(*, words=False, **kw):
-    return recall_chat.collect(CONV, words=words, drop_after_s=kw.pop("drop", DROP_S), **kw)
+def collect(*, has_words=False, **kw):
+    return recall_chat.collect(CONV, has_words=has_words, drop_after_s=kw.pop("drop", DROP_S), **kw)
 
 
 def ids(got):
@@ -162,22 +162,22 @@ def stale_of(got):
 
 
 def test_stale_by_calls_with_a_call_that_starts_no_recall():
-    call1 = collect(words=True)                       # call 1 starts recall A
+    call1 = collect(has_words=True)                       # call 1 starts recall A
     assert call1.call == 1
     a_recall("a", 1, "A's point")
     call2 = collect()                                 # no words
     assert stale_of(call2) == {"a:1": False}
     recall_chat.settle(CONV, call2.pieces, written=False)
-    call3 = collect(words=True)                       # no-keyword or busy: no recall
+    call3 = collect(has_words=True)                       # no-keyword or busy: no recall
     assert call3.call == 2 and stale_of(call3) == {"a:1": False}   # its own words don't
     recall_chat.settle(CONV, call3.pieces, written=False)
     assert stale_of(collect()) == {"a:1": True}       # call 4
 
 
 def test_stale_by_calls_with_a_later_recall():
-    collect(words=True)
+    collect(has_words=True)
     a_recall("a", 1, "A's point")
-    call2 = collect(words=True)                      # call 2 starts recall B
+    call2 = collect(has_words=True)                      # call 2 starts recall B
     recall_chat.release(CONV, ids(call2))
     a_recall("b", 2, "B's point")
     assert stale_of(collect()) == {"a:1": True, "b:1": False}
@@ -237,7 +237,7 @@ def test_with_the_conversations_lock_held_elsewhere_a_call_answers_within_its_bu
                                      / f"{KEY}.lock")
     try:
         began = time.monotonic()
-        got = collect(words=True, deadline=time.monotonic() + 0.5)
+        got = collect(has_words=True, deadline=time.monotonic() + 0.5)
         assert time.monotonic() - began < 2
         assert got.pieces == [] and not got.held and got.call is None and got.notes
     finally:
