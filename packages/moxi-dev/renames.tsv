@@ -18176,3 +18176,5 @@ moxi	packages/moxi/tests/test_install.py	({"name": "moxi-turns", "directory": "/
 moxi	packages/moxi/tests/test_modules.py	assert set(out.stdout.split()) == {"moxi", "moxi._mark"}	keep	set	set
 moxi	packages/moxi/tests/test_proc.py	assert (msvcrt.opened, unread) == ([5, 5], [99, 99])	keep	opened	opened
 usage	packages/usage/tests/test_bench.py	home.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
+moxi	packages/moxi/tests/test_install.py	strict=True):	keep	strict	strict
+ui	packages/ui/tests/test_push.py	return any(row["module"] == "pspage" and row["state"] == "running"	keep	any	any
