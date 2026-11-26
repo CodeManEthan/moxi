@@ -397,6 +397,8 @@ def _take(args) -> int:
 
 
 def _move_aside(args) -> int:
+    from moxi import place
+
     from moxi_loadout import strays
 
     try:
@@ -404,6 +406,9 @@ def _move_aside(args) -> int:
     except strays.Refused as exc:
         print(f"moxi loadout move-aside: {exc}", file=sys.stderr)
         return codes.REFUSED
+    except place.PartlyMoved as exc:
+        print(f"moxi loadout move-aside: {exc}", file=sys.stderr)
+        return codes.ERROR
     except OSError as exc:
         print(f"moxi loadout move-aside: {exc}; it is where it was", file=sys.stderr)
         return codes.ERROR

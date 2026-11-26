@@ -243,7 +243,9 @@ def take(path: str | os.PathLike, *, project: str | None = None, user: bool = Fa
 def move_aside(path: str | os.PathLike, *, loadout_dir=None, resolver=None) -> dict:
     """Move the stray at `path` under the core's `displaced/` folder; returns `{target,
     copy, how, id, back}` as a run's `kept` names a copy (`how` `moved`). Raises `Refused`
-    for a path that is no stray, `OSError` when the move fails (the stray where it was)."""
+    for a path that is no stray, `moxi.place.PartlyMoved` when a move across volumes
+    copied it whole but removed it only partly, and `OSError` when the move fails
+    otherwise (the stray where it was)."""
     from moxi import place
 
     from moxi_loadout import displaced, install, planner

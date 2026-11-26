@@ -162,9 +162,15 @@ def _branch(link, root: str) -> str | None:
     return name if done.returncode == 0 and name else None
 
 
+#: The names a repo's main branch is looked for under, in order, when nothing names it.
+MAIN_NAMES = ("main", "master")
+
+
 def main_branch(link, root: str) -> str:
     """The repo's main branch: the one `refs/remotes/origin/HEAD` points to when the repo
-    has it, else git's `init.defaultBranch`, else `main`."""
+    has it; else git's `init.defaultBranch` when it is set and the repo has that branch;
+    else the first of `main` and `master` the repo has; else `main`. A repo made by `git
+    init` with no `init.defaultBranch`, and never cloned, sits on `master`."""
     done = link.git(root, "symbolic-ref", "-q", "--short", "refs/remotes/origin/HEAD",
                     timeout_s=GIT_SECONDS)
     name = done.stdout.strip()
@@ -172,7 +178,17 @@ def main_branch(link, root: str) -> str:
         return name[len("origin/"):]
     done = link.git(root, "config", "--get", "init.defaultBranch", timeout_s=GIT_SECONDS)
     name = done.stdout.strip()
-    return name if done.returncode == 0 and name else "main"
+    named = [name] if done.returncode == 0 and name else []
+    for candidate in (*named, *MAIN_NAMES):
+        if _has_branch(link, root, candidate):
+            return candidate
+    return MAIN_NAMES[0]
+
+
+def _has_branch(link, root: str, name: str) -> bool:
+    done = link.git(root, "rev-parse", "-q", "--verify", f"refs/heads/{name}",
+                    timeout_s=GIT_SECONDS)
+    return done.returncode == 0 and bool(done.stdout.strip())
 
 
 def _head(link, root: str) -> str | None:

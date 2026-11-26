@@ -1471,6 +1471,37 @@ def test_move_aside_moves_a_path_no_placement_holds_and_names_where(home, monkey
         place.move_aside(again, harness="claude")
 
 
+def test_a_cross_device_move_whose_removal_fails_partway_names_both_places(home,
+                                                                             monkeypatch):
+    import errno
+
+    target = home / ".claude" / "skills" / "mine"
+    target.mkdir(parents=True)
+    (target / "SKILL.md").write_text("mine\n")
+    real_rename, real_remove = os.rename, place._remove_path
+
+    def rename(a, b):
+        if Path(a) == target:
+            raise OSError(errno.EXDEV, "cross-device")
+        real_rename(a, b)
+
+    def remove_part(path):
+        if Path(path) == target:
+            (target / "SKILL.md").unlink()
+            raise PermissionError(13, "in use")
+        real_remove(path)
+    monkeypatch.setattr(place.os, "rename", rename)
+    monkeypatch.setattr(place, "_remove_path", remove_part)
+    with pytest.raises(place.PartlyMoved) as caught:
+        place.move_aside(target, harness="claude")
+    copy = Path(caught.value.copy)
+    assert (copy / "SKILL.md").read_text() == "mine\n"
+    assert caught.value.path == os.fspath(target)
+    text = str(caught.value)
+    assert f"what is left at {target} may be only part of it" in text
+    assert f"the whole of it is at {copy}" in text and "in use" in text
+
+
 def test_a_move_that_fails_otherwise_places_nothing(home, skill, monkeypatch):
     # As a file Windows holds locked fails the rename: no copy is tried.
     src = skill()

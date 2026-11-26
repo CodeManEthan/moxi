@@ -122,16 +122,16 @@ def place_seeded(module: str, item, *, replace: bool = False, accept_diff: bool 
 
     The module's plan for the item is applied for its own step only, never the `remove`
     steps the plan yields for the module's other placements. With `replace`, a step
-    refused for a path in the way (cause `occupant` or `tracked`) is applied with
+    refused for an untracked path in the way (cause `occupant`) is applied with
     `replace=True`, which moves the path aside once it is equal to the module's, or
-    `accept_diff` is True, or `ask` answers yes. Any other refused step is returned and
-    nothing is adopted. When the placement is made but the hand-over fails, the
+    `accept_diff` is True, or `ask` answers yes. A path git tracks (cause `tracked`) is
+    never replaced. Any other refused step is returned and nothing is adopted. When the placement is made but the hand-over fails, the
     placement is undone: the `remove` step for that target out of `plan(module, [])`,
     applied alone. If that fails too, the line names the target."""
     from moxi import place
 
     step = place.plan(module, [item])[0]
-    forced = replace and step.action == "refuse" and step.cause in ("occupant", "tracked")
+    forced = replace and step.action == "refuse" and step.cause == "occupant"
     if step.action != "add" and not forced:
         return Seeded(step=step)
     target = str(step.target)

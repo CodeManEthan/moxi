@@ -62,8 +62,9 @@ and `moxi loadout status` says what has drifted.
 9. With repo installed (`moxi install loadout --with repo`) and the folder in a git work
    tree, install registers two git hook pieces there, so a commit or a merge that
    changes the folder runs `moxi loadout install` in that work tree, while it is on the
-   repo's main branch (the one `origin/HEAD` names, else git's `init.defaultBranch`,
-   else `main`). On another branch it prints one line and installs nothing; the change
+   repo's main branch (the one `origin/HEAD` names, else git's `init.defaultBranch`
+   where the repo has that branch, else whichever of `main` and `master` it has, `main`
+   first). On another branch it prints one line and installs nothing; the change
    is placed when it reaches the main branch.
    The install runs with git's own variables taken out of its environment; one that
    fails prints the command to run and leaves a doctor record, which the next clean
@@ -95,7 +96,8 @@ and `moxi loadout status` says what has drifted.
     [--user | --project P]` copies one into the folder as a source (`skills/<name>/`, or
     `agents/<name>.md`), lists it in its own section unless you name one, and installs
     it, keeping the original under `displaced/` first. `moxi loadout move-aside PATH`
-    moves one under `displaced/` and prints the command that puts it back.
+    moves one under `displaced/` and prints the command that puts it back; a move across
+    volumes that copies it whole but removes it only partly says so, naming the copy.
 
 ## Install
 

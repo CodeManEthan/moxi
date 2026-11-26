@@ -1300,7 +1300,9 @@ def move_aside(path: str | os.PathLike, *, harness: str) -> Path:
     `DATA/moxi/displaced/<UTC stamp>/<harness>/<its name>` (a free name), as a replace
     moves an occupant aside: one rename, or across volumes a whole copy checked by hash
     and then the original removed. Returns where it went. It reads and writes no ledger,
-    so it is for a path no placement holds. Raises `OSError` with `path` where it was."""
+    so it is for a path no placement holds. Raises `PartlyMoved` when the copy is whole
+    but the original was only partly removed, else `OSError` with `path` where it
+    was."""
     import time
 
     key = os.path.normpath(os.path.abspath(os.fspath(path)))
@@ -1320,10 +1322,22 @@ def _cross_device(exc: OSError) -> bool:
     return exc.errno == errno.EXDEV or getattr(exc, "winerror", None) == _NOT_SAME_DEVICE
 
 
+class PartlyMoved(OSError):
+    """A move across volumes copied `path` whole to `copy`, then failed partway through
+    removing `path`: what is left at `path` may be part of it, and `copy` is all of it."""
+
+    def __init__(self, path: str, copy: str, why: OSError):
+        super().__init__(f"{path} was copied whole to {copy}, then removing it failed "
+                         f"partway ({why}): what is left at {path} may be only part of "
+                         f"it; the whole of it is at {copy}")
+        self.path, self.copy = path, copy
+
+
 def _move(path: str, dest: str) -> None:
     """Move `path` to `dest`, which must not exist: one rename, or, where a rename can't
     cross volumes or filesystems, a whole copy checked by hash and then the original
-    removed. Any other failure raises with `path` where it was."""
+    removed. A removal that fails raises `PartlyMoved`; any other failure raises with
+    `path` where it was."""
     try:
         os.rename(path, dest)
         return
@@ -1331,7 +1345,10 @@ def _move(path: str, dest: str) -> None:
         if not _cross_device(exc):
             raise
     _copy_whole(path, dest)
-    _remove_path(path)
+    try:
+        _remove_path(path)
+    except OSError as exc:
+        raise PartlyMoved(path, dest, exc) from exc
 
 
 def _copy_whole(path: str, dest: str) -> None:
@@ -1361,6 +1378,8 @@ def _put_back(key: str, occupant: str, moved: Path, say) -> None:
         if os.path.lexists(key):
             _remove_path(key)
         _move(str(moved), occupant)
+    except PartlyMoved as exc:
+        say(f"could not move {occupant} back whole after the place failed: {exc}")
     except OSError as exc:
         say(f"could not move {occupant} back after the place failed: {exc}; "
             f"it is kept at {moved}")
@@ -1551,4 +1570,4 @@ def adopt(from_owner: str, to_owner: str, placements: Iterable[Placed], *,
 __all__ = ["FORMS", "SETTINGS", "KINDS", "ACTIONS", "CAUSES", "STATES", "MARK", "LEDGER",
            "IN_PLACE", "HELD_IN_PLACE", "FILE_NOTE", "DIR_NOTE", "Item", "Step", "Placed", "Harness",
            "harnesses", "chosen", "target_key", "from_package", "plan", "apply", "status",
-           "remove", "adopt", "placed_targets", "move_aside"]
+           "remove", "adopt", "placed_targets", "move_aside", "PartlyMoved"]

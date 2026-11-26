@@ -23,7 +23,10 @@
   it whole, checks the copy by hash, then removes the original; any other failure (a
   file Windows holds locked) fails the move and places nothing. When placing after the
   move fails, the placer removes what it wrote and moves the occupant back, and a move
-  back that fails names where the occupant is kept.
+  back that fails names where the occupant is kept. A copy across volumes whose removal
+  of the original fails partway raises `moxi.place.PartlyMoved` (an `OSError` with
+  `path` and `copy`), whose words say what is left at the path may be only part of it
+  and where the whole copy is; the placer's line says so too.
 - New `moxi.terminal.agent(view=None, run=None)`: the agent test. It names the harness
   (`claude`, `codex` or `opencode`) whose session started the run, or None, by the
   terminal walk's agent signs: a harness's program above the run, Claude Code's or Codex's

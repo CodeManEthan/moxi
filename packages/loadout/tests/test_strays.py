@@ -145,3 +145,18 @@ def test_the_cli_verbs(lo, capsys):
     target = hand_skill(kit.claude(), "other")
     assert cli.main(["take", str(target), "--json"]) == 0
     assert kit.owner_of(target) == "loadout"
+
+
+def test_move_aside_says_a_partly_removed_stray_is_not_where_it_was(lo, capsys,
+                                                                     monkeypatch):
+    from moxi import place
+
+    target = hand_skill(kit.claude())
+
+    def partly(path, *, harness):
+        raise place.PartlyMoved(os.fspath(path), "/kept/copy", PermissionError(13, "in use"))
+    monkeypatch.setattr(place, "move_aside", partly)
+    assert cli.main(["move-aside", str(target)]) == 1
+    err = capsys.readouterr().err
+    assert "may be only part of it" in err and "the whole of it is at /kept/copy" in err
+    assert "it is where it was" not in err
