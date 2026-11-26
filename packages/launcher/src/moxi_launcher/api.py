@@ -3,6 +3,9 @@
     launch(request) -> LaunchResult     # resolve, check, compose, log, start
     check(request) -> list[Refusal]     # the live-state checks; writes nothing
     preview(request) -> Composition     # resolve and compose; starts nothing
+    prepare(request, composition) -> str        # the command its target would run
+    child_env(request, composition) -> dict     # the environment its harness would get
+    settable_rows(harness) -> tuple[str, ...]   # every row a request may type or leave out
     open_hold(request_id, name)         # a keep-warm hold on a launch (`keepwarm`)
     release_hold(request_id, name)
     launch_kind(session_id) -> str | None   # interface 1: how a session was launched
@@ -463,6 +466,27 @@ def prepare(request, composition: Composition,
     child, _ = _child_base(request, caller)
     launch_env = common.child_env(child, composition, moxi_modules.session_env())
     return targets.get(composition.target).prepare(composition, launch_env)
+
+
+def child_env(request, composition: Composition,
+              env: Mapping[str, str] | None = None) -> dict[str, str]:
+    """The whole environment `request`'s launch would give its harness (`preview`'s
+    `composition`): the caller's environment (`env`, else this process's) scrubbed of
+    every session's stamps, then the launch's own, as `launch` builds it. Starts and
+    writes nothing."""
+    caller = dict(os.environ if env is None else env)
+    child, _ = _child_base(request, caller)
+    return common.child_env(child, composition, moxi_modules.session_env())
+
+
+def settable_rows(harness: str) -> tuple[str, ...]:
+    """The name of every row a `harness` launch request may type or leave out: the
+    launcher's own settable rows, then the harness's, from the shipped catalogs. A
+    caller that leaves out each row it doesn't type holds every other row at its shipped
+    default, a row added to a catalog later included."""
+    names_ = [row.name for row in catalog.launcher() if row.settable]
+    return tuple(dict.fromkeys(
+        names_ + [row.name for row in catalog.load(harness) if row.settable]))
 
 
 def exit_code(error: BaseException) -> int:
@@ -1064,6 +1088,6 @@ __all__ = ["KINDS", "LAST", "MODEL_PIN", "TAKEN", "KEEP_WARM_ENV", "RECYCLE_ON_E
            "RELAUNCH_ENV", "REQUEST_ENV", "SLOTS_ENV", "TURNS_ENV", "Busy", "CommsOffline",
            "CommsUnanswered", "IdentityRefused", "IdentityTaken", "LaunchRequest",
            "LaunchResult", "NoDirectory", "Refusal", "ReplayRequest", "Replayed", "Running",
-           "ScratchRecycle", "ScratchRoot", "check", "exit_code", "exit_session", "fork",
+           "ScratchRecycle", "ScratchRoot", "check", "child_env", "exit_code", "exit_session", "fork",
            "launch", "launch_kind", "launch_kinds", "open_hold", "prepare", "preview",
-           "release_hold", "running", "slots_here"]
+           "release_hold", "running", "settable_rows", "slots_here"]
