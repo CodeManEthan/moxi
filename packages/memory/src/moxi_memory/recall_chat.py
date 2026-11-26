@@ -391,8 +391,13 @@ def check_launcher(ctx: Context) -> Skip | None:
 
 
 def check_harness(ctx: Context) -> Skip | None:
+    """The launcher can start claude in the chat recall's folder, made first: before the
+    first call nothing has, and the launcher refuses a working folder that isn't there."""
+    from moxi import files
+
     from . import recall_fence
 
+    files.private_dir(chat_dir())
     ctx.spec = check_spec(ctx.settings)
     try:
         refusals = ctx.launcher.check(recall_fence.request(ctx.launcher, ctx.spec),

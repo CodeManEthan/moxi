@@ -353,6 +353,26 @@ def test_each_check_gives_its_reason_in_order(monkeypatch):
     assert recall_chat.why_not(on) is None
 
 
+class CwdLauncher(CheckLauncher):
+    """Refuses a working folder that isn't there, as the launcher's check does."""
+
+    def check(self, req, env=None):
+        import os
+
+        return [] if os.path.isdir(req.cwd) else [f"the directory {req.cwd} does not exist"]
+
+
+def test_the_checks_make_the_chat_folder_before_the_first_call(monkeypatch):
+    import shutil
+
+    shutil.rmtree(recall_chat.chat_dir(), ignore_errors=True)
+    with_launcher(monkeypatch, CwdLauncher())
+    monkeypatch.setattr(recall_fence, "verdict", lambda launcher, spec, env=None:
+                        recall_fence.Verdict(None))
+    assert recall_chat.why_not(chat_settings(**{"subconscious.chat.enabled": True})) is None
+    assert recall_chat.chat_dir().is_dir()
+
+
 def test_a_new_check_joins_the_list_as_one_entry():
     def closed(ctx):
         return recall_chat.Skip("closed")
