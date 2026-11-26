@@ -264,8 +264,14 @@ class ClaudeHarness(Harness):
 
     def _table(self) -> list[dict[str, Any]]:
         """Load the table again and record it (`guards.seen`). Returns it in the leg's
-        form. Never raises for the record."""
+        form. A table made while turns' config didn't read is not recorded: its emptiness
+        says nothing of what the list holds, and the record before it stands. Never raises
+        for the record."""
         table = self.guards.reload()
+        if not self.guards.config_ok:
+            log.warning("the record of the guard table was not written: turns' config "
+                        "does not read")
+            return table
         try:
             guards_seen.write_record(table, path=self.seen_path)
         except OSError as exc:

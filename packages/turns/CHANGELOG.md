@@ -13,7 +13,8 @@
 - The Claude endpoint records the guard table it hands the runner, at its first line and
   at each ready, in `STATE/turns/guards-seen.json`: the time, and whether the table held
   the removal guard, the no-nested-agents guard and any ask-step guard (all false for an
-  empty table). A launch names the path in `MOXI_TURNS_GUARDS_SEEN` (in `INTERNAL_ENV`
+  empty table). A table made while turns' config doesn't read is not recorded, so the
+  record before it stands. A launch names the path in `MOXI_TURNS_GUARDS_SEEN` (in `INTERNAL_ENV`
   and `SESSION_ENV`), setup writes it as `guards_seen` in `endpoint.json`, and the store
   is declared as `guards-seen`. `moxi_turns.guards.seen` reads and writes it.
 - Setup still replaces its own placed Claude plugin copy whatever it holds, moving the

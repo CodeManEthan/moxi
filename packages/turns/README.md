@@ -129,7 +129,8 @@ Each time a Claude Code session's endpoint hands its runner the guard table, it 
 which guards the table held in `guards-seen.json` under turns' state directory: whether
 the removal guard was in it, whether the no-nested-agents guard was, and whether any guard
 runs at the ask step. The record holds no guard's text, and the last session to load a
-table writes it. A launch names its path to the runner in `MOXI_TURNS_GUARDS_SEEN`; a
+table writes it, except while turns' config doesn't read: that table is empty for want of
+the list, so the record before it stands. A launch names its path to the runner in `MOXI_TURNS_GUARDS_SEEN`; a
 user-scope install finds it through `guards_seen` in the plugin's `endpoint.json`, which
 `moxi install turns` writes.
 

@@ -846,6 +846,35 @@ def test_a_record_that_cant_be_written_costs_no_line(turns_env, rig, tmp_path, c
         w.close()
 
 
+def test_a_config_that_wont_read_leaves_the_last_record_standing(turns_env, tmp_path,
+                                                                   caplog):
+    from moxi_turns.guards import seen
+
+    path = tmp_path / "guards-seen.json"
+    seen.write_record([{"id": "turns.removal", "step": "call"}], path=path, now=5.0)
+
+    def unreadable():
+        raise ValueError("turns.toml does not parse")
+    runner = GuardRunner("claude", settings=unreadable,
+                         load=lambda on: Loaded(problems=()))
+    rd, w = pipe_pair()
+    harness = ClaudeHarness(w, pid=os.getpid(), cwd="/work", guards=runner, seen_path=path)
+    ep = Endpoint(harness, registry=Registry())
+    try:
+        ep.prepare()
+        harness.serve(str(ep.dir / protocol.MOD_SOCK))
+        fake = FakeRunner(rd)
+        assert harness.first_line()
+        fake.wait_first()
+        assert fake.first["guards"] == [] and runner.config_ok is False
+        assert seen.read_record(path)["removal"] is True
+        assert "turns' config does not read" in caplog.text
+    finally:
+        ep.stop("the test ended")
+        w.close()
+        runner.close()
+
+
 def test_facts_of_reads_ids_and_steps_alone():
     from moxi_turns.guards import seen
 
