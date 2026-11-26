@@ -204,9 +204,16 @@ def figures(env: Mapping[str, str], workers: int) -> Figures | None:
         high_from = f"set by {MEMORY_HIGH_ENV}" if found.high_set \
             else found.default_source()
         max_from = f"set by {MEMORY_MAX_ENV}" if found.max_set else found.default_source()
+        if not found.high_set:
+            how = (f"a {MEMORY_MAX_ENV} at or below the default MemoryHigh needs "
+                   f"{MEMORY_HIGH_ENV} set below it too")
+        elif not found.max_set:
+            how = f"set {MEMORY_HIGH_ENV} lower, or {MEMORY_MAX_ENV} above it"
+        else:
+            how = f"set {MEMORY_HIGH_ENV} below {MEMORY_MAX_ENV}"
         raise ScopeError(f"MemoryHigh {found.high_mib} MiB ({high_from}) is not below "
-                         f"MemoryMax {found.max_mib} MiB ({max_from}); set "
-                         f"{MEMORY_HIGH_ENV} below {MEMORY_MAX_ENV}")
+                         f"MemoryMax {found.max_mib} MiB ({max_from}), and the high "
+                         f"must sit below the max: {how}")
     return found
 
 

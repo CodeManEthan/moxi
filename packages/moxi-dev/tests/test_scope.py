@@ -103,7 +103,31 @@ def test_the_refusal_names_where_each_figure_came_from(env, high_from, max_from)
     high, top = int(env.get(scope.MEMORY_HIGH_ENV, 6592)), int(env.get(scope.MEMORY_MAX_ENV,
                                                                          8128))
     assert str(caught.value).startswith(f"MemoryHigh {high} MiB ({high_from}) is not below "
-                                        f"MemoryMax {top} MiB ({max_from});")
+                                        f"MemoryMax {top} MiB ({max_from}), and the high "
+                                        f"must sit below the max: ")
+
+
+@pytest.mark.parametrize("env, how", [
+    ({scope.MEMORY_MAX_ENV: "6000"},
+     f"a {scope.MEMORY_MAX_ENV} at or below the default MemoryHigh needs "
+     f"{scope.MEMORY_HIGH_ENV} set below it too"),
+    ({scope.MEMORY_HIGH_ENV: "8128"},
+     f"set {scope.MEMORY_HIGH_ENV} lower, or {scope.MEMORY_MAX_ENV} above it"),
+    ({scope.MEMORY_HIGH_ENV: "900", scope.MEMORY_MAX_ENV: "800"},
+     f"set {scope.MEMORY_HIGH_ENV} below {scope.MEMORY_MAX_ENV}")])
+def test_the_refusal_says_how_to_go_lower(env, how):
+    with pytest.raises(ScopeError) as caught:
+        scope.figures(env, 8)
+    assert str(caught.value).endswith(f"must sit below the max: {how}")
+
+
+def test_a_max_below_the_default_max_but_above_the_default_high_runs():
+    found = scope.figures({scope.MEMORY_MAX_ENV: "6593"}, 8)
+    assert (found.high_mib, found.max_mib) == (6592, 6593)
+    with pytest.raises(ScopeError):
+        scope.figures({scope.MEMORY_MAX_ENV: "6592"}, 8)
+    found = scope.figures({scope.MEMORY_MAX_ENV: "6000", scope.MEMORY_HIGH_ENV: "5000"}, 8)
+    assert (found.high_mib, found.max_mib) == (5000, 6000)
 
 
 def test_a_max_below_the_default_warns_with_the_default_figure():

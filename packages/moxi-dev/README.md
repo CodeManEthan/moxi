@@ -565,8 +565,12 @@ started stays outside the scope and watches it once a second.
   MemoryMax is 1536 MiB above it: 6592 and 8128 MiB at 8 workers, 10688 and 12224 at 16.
   Lowering `MOXI_TEST_WORKERS` lowers both. `MOXI_TEST_MEMORY_HIGH_MIB` and
   `MOXI_TEST_MEMORY_MAX_MIB` (whole MiB, 64 or more, the high below the max) replace
-  them; `MOXI_TEST_MEMORY_MAX_MIB=none` runs the check with no scope. A max below the
-  default for the worker count prints a warning and runs anyway.
+  them; `MOXI_TEST_MEMORY_MAX_MIB=none` runs the check with no scope. A max set below
+  the default max but above the default high (8128 and 6592 MiB at 8 workers) prints a
+  warning and runs anyway. A max set at or below the default high, with no
+  `MOXI_TEST_MEMORY_HIGH_MIB`, exits 2 before anything runs: MemoryHigh must sit below
+  MemoryMax, and the default high would not. To go that low, set both, the high below
+  the max (`MOXI_TEST_MEMORY_HIGH_MIB=5000 MOXI_TEST_MEMORY_MAX_MIB=6000`).
 - **What counts.** The memory a check can't give back: anonymous, shared and kernel
   memory, less the slab the kernel can reclaim. Page cache doesn't count.
 - **The end.** The line is 95 % of MemoryHigh. A check that holds at or above its line
