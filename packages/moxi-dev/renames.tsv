@@ -9353,8 +9353,10 @@ repo	packages/repo/tests/test_listing.py	assert len(set(api.PROBLEM_CODES)) == l
 repo	packages/repo/tests/test_listing.py	("fail", "closed"), ("order", "10"), ("enabled", "true")):	keep	closed	closed
 repo	packages/repo/tests/test_page.py	"pre-commit", "closed", 20, True)	keep	closed	closed
 repo	packages/repo/tests/test_page.py	api.index_path().parent.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
+repo	packages/repo/tests/test_page.py	assert facts["place"] == "inline" and set(facts["attributes"]) == {"projects", "open"}	keep	set	set
 repo	packages/repo/tests/test_page.py	assert set(body) == {"now", "state", "detail", "repos"}	keep	set	set
 repo	packages/repo/tests/test_page.py	assert set(listed) == {str(broken_repo), str(fine_repo)}	keep	set	set
+repo	packages/repo/tests/test_page.py	assert set(module.COMPONENTS) == {"page", "project-facts"}	keep	set	set
 repo	packages/repo/tests/test_page.py	assert set(module.OPTIONAL) == {"ui", "projects"}	keep	set	set
 repo	packages/repo/tests/test_page.py	inner = lb.app(page.PAGE, module="repo", server_id=SERVER_ID, strict=True)	keep	strict	strict
 repo	packages/repo/tests/test_page.py	monkeypatch.setattr(pagehandlers, "_logged", set())	keep	set	set
