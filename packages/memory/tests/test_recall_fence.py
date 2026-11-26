@@ -258,22 +258,39 @@ def test_a_changed_binary_is_probed_again(claude):
 
 
 @POSIX
-def test_the_probe_runs_the_recalls_own_argv_but_its_output_flags(claude):
+def test_the_probe_runs_the_recalls_own_argv_but_its_output_flags_and_ids(claude):
     s = spec()
     fence.ensure(api, s)
     [run] = claude.runs()
     own = argv(s)[1:]
-    probe = argv(dataclasses.replace(s, brief=fence.PROBE_PROMPT),
-                 output=fence.PROBE_OUTPUT_FLAGS)[1:]
-    assert run["argv"] == probe
-    def without_output(words):
+
+    def without_own(words):
         out = list(words)
         for i in reversed(range(len(out))):
-            if out[i] == "--output-format":
+            if out[i] in ("--output-format", "-n", "--session-id",
+                          "--append-system-prompt-file"):
                 del out[i:i + 2]
         return [w for w in out if w not in ("--verbose", "--no-session-persistence")]
-    assert without_output(probe)[2:] == without_output(own)[2:]   # past the brief
-    assert "--no-session-persistence" in run["argv"]
+
+    probe_name = flag_values(run["argv"], "-n")
+    assert probe_name == ["recall-r1-probe"]
+    assert flag_values(run["argv"], "--session-id") != [SID]
+    assert flag_values(run["argv"], "--output-format") == ["stream-json"]
+    assert "--verbose" in run["argv"] and "--no-session-persistence" in run["argv"]
+    assert run["argv"][0] == own[0] == "-p"
+    assert run["argv"][1].endswith(fence.PROBE_PROMPT) and own[1].endswith(s.brief)
+    assert without_own(run["argv"][2:]) == without_own(own[2:])   # past the brief
+
+
+@POSIX
+def test_the_probe_is_a_launcher_launch_ended_through_the_launcher(claude, monkeypatch):
+    ended = []
+    real = api.end_headless
+    monkeypatch.setattr(api, "end_headless",
+                        lambda rid, **kw: ended.append(rid) or real(rid, **kw))
+    assert fence.ensure(api, spec()).ok
+    assert len(ended) == 1 and ended[0] != "chat-r1"   # the recall's own id stays free
+    assert "system" in api.run_log(ended[0]).read_text()
 
 
 @POSIX

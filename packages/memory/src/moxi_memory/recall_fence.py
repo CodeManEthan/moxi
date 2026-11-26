@@ -23,9 +23,10 @@ first chat recall after each change of the `claude` binary the launcher would st
 `flags`, that this Claude Code takes every flag above together (`FENCE_MIN_VERSION` at
 least); `tools`, that the session's tools are within `fence_tools` and include the read
 tools; and `mcp`, that no MCP server is connected. The probe composes the recall's own request with the brief
-`PROBE_PROMPT` and stream output that keeps no transcript, runs it detached in a session
-of its own, reads its output to the first `system/init` object, at most `PROBE_S`
-seconds, ends its process tree, and judges that object.
+`PROBE_PROMPT`, stream output that keeps no transcript, and ids of its own, launches it
+headless through the launcher, reads its run log to the first `system/init` object, at
+most `PROBE_S` seconds, ends its process tree through the launcher (`end_headless`), and
+judges that object.
 
 The outcome is kept in `subconscious/chat/fence.json` for the binary, named by its
 resolved path, size and modification time, so an update, a reinstall or another `claude`
@@ -43,8 +44,6 @@ from __future__ import annotations
 import json
 import os
 import re
-import signal
-import sys
 import time
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, replace
@@ -52,11 +51,10 @@ from pathlib import Path
 from typing import Any
 
 #: The name of the chat recall's folder under the subconscious's directory: the agent's
-#: working folder, the fence record and its lock, and the probe's output.
+#: working folder, and the fence record and its lock.
 CHAT_DIR = "chat"
 FENCE_RECORD = "fence.json"
 FENCE_LOCK = "fence.lock"
-PROBE_OUTPUT = "probe.log"
 
 #: The harness and target every chat recall launches.
 HARNESS = "claude"
@@ -85,8 +83,6 @@ PROBE_S = 30.0
 VERSION_S = 10.0
 #: The probe's brief.
 PROBE_PROMPT = "Reply with the single word OK."
-#: How long the probe's process tree has between SIGTERM and SIGKILL, in seconds.
-KILL_GRACE_S = 2.0
 
 #: The output flags of a chat recall's launch, and the probe's in their place.
 JSON_OUTPUT = ("--output-format", "json")
@@ -323,10 +319,10 @@ NO_OUTCOME = "no-outcome"
 def probe(launcher: Any, spec: Spec, found: Binary, *,
           env: Mapping[str, str] | None = None) -> tuple[Outcome | None, str]:
     """Probe `found` with `spec`'s own request: its outcome, or None and why there is
-    none. Records nothing."""
+    none. Records nothing on the fence record."""
     from moxi import proc
 
-    req = request(launcher, replace(spec, brief=PROBE_PROMPT), output=PROBE_OUTPUT_FLAGS)
+    req = probe_request(launcher, spec)
     composition = launcher.preview(req, env=env)
     child_env = launcher.child_env(req, composition, env=env)
     now = time.time()
@@ -342,16 +338,15 @@ def probe(launcher: Any, spec: Spec, found: Binary, *,
         return Outcome(found, version, passed=False, part=FLAGS,
                        detail=f"Claude Code {version} is older than {FENCE_MIN_VERSION}, "
                               "the first that takes every fence flag", at=now), ""
-    output = chat_dir() / PROBE_OUTPUT
     prompt = getattr(composition, "prompt_file", None)
     try:
-        output.unlink(missing_ok=True)
-        if prompt is not None:
-            _write_prompt(prompt)
-        init, text, exited = _run_to_init(found, composition, child_env, spec.cwd, output)
+        ran_to = _run_to_init(launcher, req, env)
     finally:
         if prompt is not None:
             Path(prompt.path).unlink(missing_ok=True)
+    if isinstance(ran_to, str):
+        return None, ran_to
+    init, text, exited = ran_to
     part, detail = judge(init, text, exited=exited, web=spec.web)
     if part is None and init is None:
         return None, detail
@@ -359,24 +354,30 @@ def probe(launcher: Any, spec: Spec, found: Binary, *,
                    at=now), ""
 
 
-def _write_prompt(prompt: Any) -> None:
-    """Write the system prompt file the composition's argv names, as a launch would."""
-    from moxi import files
+def probe_request(launcher: Any, spec: Spec) -> Any:
+    """The probe's launch request: `spec`'s own, with the brief `PROBE_PROMPT`, the
+    probe's output flags, and a request id, session id and name of its own, so the
+    recall's own ids stay free for its first round."""
+    import uuid
 
-    files.private_dir(Path(prompt.path).parent)
-    files.atomic_write(prompt.path, prompt.text)
+    own = replace(spec, brief=PROBE_PROMPT, name=f"{spec.name}-probe",
+                  request_id=str(uuid.uuid4()), session_id=str(uuid.uuid4()))
+    return request(launcher, own, output=PROBE_OUTPUT_FLAGS)
 
 
-def _run_to_init(found: Binary, composition: Any, child_env: Mapping[str, str],
-                 cwd: str, output: Path) -> tuple[dict | None, str, bool]:
-    """Run the composition's argv detached, read its output until the first
-    `system/init`, at most `PROBE_S`, and end its process tree: the init (None when
-    none came), the output read, and whether the process exited before its end."""
-    from moxi import proc
-
-    argv = [found.path, *composition.argv[1:]]
-    pid = proc.spawn(argv, detached=True, output=output, env=dict(child_env), cwd=cwd)
-    me = proc.identity(pid)
+def _run_to_init(launcher: Any, req: Any, env: Mapping[str, str] | None
+                 ) -> tuple[dict | None, str, bool] | str:
+    """Launch `req` headless through the launcher, read its run log until the first
+    `system/init`, at most `PROBE_S`, and end its process tree through the launcher
+    (`end_headless`): the init (None when none came), the output read, and whether the
+    process exited before its end; or why it could not start."""
+    try:
+        result = launcher.launch(req, env=env)
+    except Exception as exc:  # noqa: BLE001 - a refusal or a launch log that can't be written
+        return f"the probe could not be launched: {exc}"
+    if result.pid is None:
+        return f"the probe could not be launched: {result.reason or result.state}"
+    output = launcher.run_log(req.request_id, env)
     deadline = time.monotonic() + PROBE_S
     init, text, exited = None, "", False
     try:
@@ -385,7 +386,7 @@ def _run_to_init(found: Binary, composition: Any, child_env: Mapping[str, str],
             init = _first_init(text)
             if init is not None:
                 break
-            if _ended(pid):
+            if _ended(result.pid):
                 text, exited = _read(output), True
                 init = _first_init(text)
                 break
@@ -393,9 +394,9 @@ def _run_to_init(found: Binary, composition: Any, child_env: Mapping[str, str],
                 break
             time.sleep(0.05)
     finally:
-        if not exited and me is not None:
-            end_tree(me)
-        _ended(pid)
+        if not exited:
+            launcher.end_headless(req.request_id, env=env)
+        _ended(result.pid)
     return init, text, exited
 
 
@@ -470,58 +471,10 @@ def _older(version: str, floor: str) -> bool:
     return parts(version) < parts(floor)
 
 
-def end_tree(root: Any) -> None:
-    """End the process `root` names (a `moxi.proc.ProcId`) and every descendant, TERM
-    first and KILL to what is left after `KILL_GRACE_S`; nothing when its pid no longer
-    names that process. POSIX: the probe runs in a session of its own, so its process
-    group is signalled, then each descendant found that left it. Windows: each
-    descendant is ended, the root first so it starts no more."""
-    import psutil
-    from moxi import proc
-
-    if not proc.alive(root):
-        return
-    try:
-        below = psutil.Process(root.pid).children(recursive=True)
-    except psutil.Error:
-        below = []
-    if sys.platform != "win32":
-        _signal_group(root.pid, signal.SIGTERM)
-    for item in [psutil.Process(root.pid)] if proc.alive(root) else []:
-        _quiet(item.terminate)
-    for item in below:
-        _quiet(item.terminate)
-    deadline = time.monotonic() + KILL_GRACE_S
-    while time.monotonic() < deadline and (
-            proc.alive(root) or any(_quiet(item.is_running) for item in below)):
-        time.sleep(0.05)
-    if sys.platform != "win32":
-        _signal_group(root.pid, signal.SIGKILL)
-    if proc.alive(root):
-        _quiet(psutil.Process(root.pid).kill)
-    for item in below:
-        _quiet(item.kill)
-
-
-def _signal_group(pgid: int, signum: int) -> None:
-    try:
-        os.killpg(pgid, signum)
-    except OSError:
-        pass
-
-
-def _quiet(call):
-    import psutil
-
-    try:
-        return call()
-    except psutil.Error:
-        return None
-
-
 __all__ = ["BUDGET_USD", "CHAT_DIR", "END_TOOL", "FENCE", "FENCE_LOCK", "FENCE_MIN_VERSION",
            "FENCE_RECORD", "FLAGS", "HARMLESS_TOOLS", "HARNESS", "JSON_OUTPUT", "MCP", "NO_HARNESS", "NO_MCP",
            "NO_OUTCOME", "PARTS", "PERMISSION_MODE", "PROBE_OUTPUT_FLAGS", "PROBE_PROMPT",
            "PROBE_S", "READ_TOOLS", "TARGET", "TOOLS", "WEB_TOOLS", "Binary", "Outcome",
-           "Spec", "Verdict", "binary", "chat_dir", "end_tree", "ensure", "fence_flags",
-           "fence_tools", "judge", "probe", "recorded", "request", "verdict"]
+           "Spec", "Verdict", "binary", "chat_dir", "ensure", "fence_flags",
+           "fence_tools", "judge", "probe", "probe_request", "recorded", "request",
+           "verdict"]
