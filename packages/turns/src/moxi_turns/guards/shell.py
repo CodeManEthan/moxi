@@ -49,7 +49,11 @@ redirect's `subs`.
 **Words.** A word's `text` has its quotes taken off; each substitution in it stands as
 one NUL, and its text is kept in `subs`, in order. `is_sub` is true when the word is
 exactly one substitution, bare or alone in double quotes. A value (`$name`, `${...}`,
-`$env:NAME`, `%NAME%`, a glob, a brace, a tilde) and arithmetic are kept as written. A
+`$env:NAME`, `%NAME%`, a glob, a brace, a tilde) and arithmetic are kept as written. In
+`sh`, a word holding a `${...}` outside double quotes whose operator is `-`, `:-`, `+`,
+`:+`, `=` or `:=` also has `fields`, the words bash makes of it when that default or
+alternate is used, since bash splits it at its blanks; an assignment bash makes without
+splitting has none. A
 redirect is kept with its operator, the fd written against it and the word it redirects
 to; a process substitution's operator is `<(` or `>(` and its target the substitution's
 word.
@@ -72,6 +76,7 @@ Standard library only, like the rest of `moxi_turns.guards`.
 
 from __future__ import annotations
 
+import re
 from dataclasses import KW_ONLY, dataclass, field
 
 #: The dialects the reader reads.
@@ -81,18 +86,32 @@ MARK_KINDS = ("operator", "redirect", "heredoc", "dollar", "backtick", "backslas
               "brace", "tilde", "comment", "ansi-c", "arithmetic", "control", "unclosed")
 #: Where a `ShellScript`'s text comes from.
 SCRIPT_SOURCES = ("argument", "heredoc", "here-string", "pipe")
+#: How a `${...}` starts whose default or alternate bash splits into words where it is
+#: used: a name and one of `-`, `:-`, `+`, `:+`, `=` and `:=`.
+_SPLIT_VALUE = re.compile(r"!?(?:[A-Za-z_][A-Za-z0-9_]*(?:\[[^]\n]*\])?|[0-9]+|[@*#?$!])"
+                          r":?[-+=]")
+#: The blanks bash splits a value's words at.
+_BLANKS = " \t\n"
+_BLANK_RUN = re.compile(r"[ \t\n]+")
 
 
 @dataclass(frozen=True)
 class ShellWord:
     """One word: its text with quotes taken off and each substitution a NUL, its position
-    in the text read, and each substitution's text in order."""
+    in the text read, and each substitution's text in order. `fields` are the words bash
+    makes of it when each `${...}` outside double quotes whose operator is `-`, `:-`, `+`,
+    `:+`, `=` or `:=` gives its default or alternate: split at that text's unquoted blanks
+    (any blank with `=` and `:=`) and joined to the word's text around it, quotes taken
+    off and each substitution a NUL. None when the word holds no such `${...}`, or is an
+    assignment bash makes without splitting (before the command word, or given to
+    `export`, `local`, `declare`, `readonly` or `typeset`)."""
 
     text: str
     position: int
     subs: tuple[str, ...]
     _: KW_ONLY
     is_sub: bool
+    fields: tuple[str, ...] = ()
     #: Whether the word holds an escape the reader keeps as written.
     _kept_escape: bool = field(default=False, init=False, repr=False, compare=False)
 
@@ -176,7 +195,7 @@ def read_shell(text: object, *, dialect: str = "sh") -> ShellText:
 class _Word:
     """A word being read."""
 
-    __slots__ = ("chars", "subs", "position", "plain", "kept")
+    __slots__ = ("chars", "subs", "position", "plain", "kept", "splits")
 
     def __init__(self, position: int):
         self.chars: list[str] = []
@@ -185,6 +204,22 @@ class _Word:
         #: No quote, escape or substitution in it: it can be a reserved word or an fd.
         self.plain = True
         self.kept = False
+        #: For each piece of `chars` that is a `${...}` bash splits, its default's words.
+        self.splits: dict[int, list[str]] = {}
+
+    def fields(self) -> tuple[str, ...]:
+        """The words bash makes of this word with each split `${...}` used."""
+        if not self.splits:
+            return ()
+        out = [""]
+        for k, piece in enumerate(self.chars):
+            words = self.splits.get(k)
+            if words is None:
+                out[-1] += piece
+            else:
+                out[-1] += words[0]
+                out.extend(words[1:])
+        return tuple(f for f in out if f)
 
     def sub(self, text: str) -> None:
         self.chars.append("\0")
@@ -219,8 +254,8 @@ class _Command:
 
 
 def _shell_word(text: str, position: int, subs, *, is_sub: bool,
-                kept: bool = False) -> ShellWord:
-    w = ShellWord(text, position, tuple(subs), is_sub=is_sub)
+                kept: bool = False, fields: tuple[str, ...] = ()) -> ShellWord:
+    w = ShellWord(text, position, tuple(subs), is_sub=is_sub, fields=fields)
     if kept:
         object.__setattr__(w, "_kept_escape", True)
     return w
@@ -258,7 +293,7 @@ class _Reader:
         if w is None:
             return None
         sw = _shell_word("".join(w.chars), w.position, w.subs,
-                         is_sub=self.is_sub_word(w, end), kept=w.kept)
+                         is_sub=self.is_sub_word(w, end), kept=w.kept, fields=w.fields())
         if self.target_for is not None:
             r, self.target_for = self.target_for, None
             r.target = sw
@@ -326,6 +361,8 @@ class _Reader:
 #: Reserved words after which the next word is in command position.
 _STARTERS = frozenset({"!", "{", "if", "then", "elif", "else", "while", "until", "do",
                        "time"})
+#: The builtins whose `NAME=value` arguments bash assigns without splitting the value.
+_DECLARES = frozenset({"export", "local", "declare", "readonly", "typeset"})
 #: Words that start a command which runs nothing itself.
 _RUNS_NOTHING = frozenset({"}", "fi", "done", "esac", "for", "select", "case", "[["})
 
@@ -360,8 +397,20 @@ class _Sh(_Reader):
                 and (not self.cases or self.cases[-1] == "body")
                 and _past_reserved(ws[:-1], self.cur.plain[:-1]) == len(ws) - 1)
 
+    def keeps_value(self, text: str) -> bool:
+        """Whether bash assigns the next word's value without splitting it: an assignment
+        before the command word, or one a declaration builtin is given."""
+        if not _is_assignment(text):
+            return False
+        k = _past_reserved(self.cur.words, self.cur.plain)
+        named = next((w.text for w in self.cur.words[k:] if not _is_assignment(w.text)),
+                     None)
+        return named is None or named in _DECLARES
+
     def add_word(self, sw: ShellWord, *, plain: bool) -> None:
         text = sw.text
+        if sw.fields and self.keeps_value(text):
+            object.__setattr__(sw, "fields", ())
         state = self.cases[-1] if self.cases else None
         if state == "subject":
             self.cases[-1] = "in"
@@ -587,7 +636,10 @@ class _Sh(_Reader):
             w.plain = False
             return end
         if nxt == "{":
-            end, written = self.value(i, i + 2, w.subs)
+            split: list[list[str]] | None = None if in_double else []
+            end, written = self.value(i, i + 2, w.subs, split)
+            if split:
+                w.splits[len(w.chars)] = split[0]
             w.chars.append("${" + written)
             w.plain = False
             return end
@@ -689,35 +741,76 @@ class _Sh(_Reader):
         self.mark("unclosed", open_position)
         return n, "".join(out)
 
-    def value(self, open_position: int, i: int, subs: list[str]) -> tuple[int, str]:
+    def value(self, open_position: int, i: int, subs: list[str],
+              split: list[list[str]] | None = None) -> tuple[int, str]:
         """A `${...}` opened at `open_position`, from just inside its brace: where it ends
         and its text from `i` as written, each substitution in it a NUL (its text joins
-        `subs`)."""
+        `subs`). Given a `split` list, a closed `${...}` whose operator bash splits its
+        default or alternate for (`_SPLIT_VALUE`) adds that text's words to it, split at
+        its unquoted blanks, quotes taken off and each substitution a NUL; a word that
+        starts or ends with a blank comes with an empty one there, so the word around it
+        is joined only where bash joins it. With `=` or `:=` bash splits the value it
+        assigned, so a quoted blank splits too. A `${...}` inside it is kept as written."""
         t, n = self.t, self.n
         out: list[str] = []
+        found = _SPLIT_VALUE.match(t, i, n) if split is not None else None
+        words_from = found.end() if found else n
+        words = [""]
+        apart = False
+        assigned: list[str] = []
+
+        def put(text: str) -> None:
+            nonlocal apart
+            if apart:
+                words.append("")
+                apart = False
+            words[-1] += text
+            assigned.append(text)
+
         while i < n:
             c = t[i]
+            reading = i >= words_from
+            start = len(out)
             j = self.inner_expansion(i, subs, out)
             if j is not None:
+                if reading:
+                    put("".join(out[start:]))
                 i = j
                 continue
             if c == "\\" and i + 1 < n:
                 out.append(t[i:i + 2])
+                if reading and t[i + 1] != "\n":
+                    put(t[i + 1])
                 i += 2
                 continue
             if c == "'":
                 j = t.find("'", i + 1, n)
                 j = n - 1 if j < 0 else j
                 out.append(t[i:j + 1])
+                if reading:
+                    put(t[i + 1:j])
                 i = j + 1
                 continue
             if c == '"':
                 i = self.value_double(i, subs, out)
+                if reading:
+                    put("".join(_unescaped(out[start + 1:-1])))
                 continue
             out.append(c)
             i += 1
             if c == "}":
+                if found and split is not None:
+                    if found.group().endswith("="):
+                        split.append(_BLANK_RUN.split("".join(assigned)))
+                    else:
+                        split.append(words + [""] if apart else words)
                 return i, "".join(out)
+            if reading:
+                if c in _BLANKS:
+                    apart = True
+                    assigned.append(c)
+                else:
+                    put(c)
         self.mark("unclosed", open_position)
         return n, "".join(out)
 
@@ -878,6 +971,17 @@ class _Sh(_Reader):
             out.append(_untab(t[i:j]) if r.strip else t[i:j])
             i = j
         r.input = "".join(out)
+
+
+def _unescaped(pieces: list[str]) -> list[str]:
+    """The pieces `value_double` wrote of a `"..."`, each `\\` escape it takes off taken
+    off, as bash reads them."""
+    out = []
+    for piece in pieces:
+        if len(piece) == 2 and piece[0] == "\\" and piece[1] in '$`"\\\n':
+            piece = "" if piece[1] == "\n" else piece[1]
+        out.append(piece)
+    return out
 
 
 def _untab(text: str) -> str:

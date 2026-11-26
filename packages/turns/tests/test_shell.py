@@ -161,6 +161,44 @@ def test_sh_double_quotes_inside_a_value_are_read_as_double_quotes():
     assert w.subs == ("kill 2", "kill 3")
 
 
+@pytest.mark.parametrize("operator", ["-", ":-", "+", ":+", "=", ":="])
+def test_sh_a_default_or_alternate_outside_quotes_gives_the_words_bash_splits_it_into(
+        operator):
+    v = "${x" + operator + " /p q }"
+    assert word(f"cat {v}", 1).fields == ("/p", "q")
+    assert word(f"cat a{v}b", 1).fields == ("a", "/p", "q", "b")
+    assert word(f"cat {v}cmd", 1) == ShellWord(v + "cmd", 4, (), is_sub=False,
+                                               fields=("/p", "q", "cmd"))
+    assert word("cat ${x" + operator + "/p}/x", 1).fields == ("/p/x",)
+
+
+def test_sh_a_default_s_quotes_keep_its_words_together_unless_it_is_assigned():
+    assert word("cat ${x:- \"/p q\" 'r s'\\ t}", 1).fields == ("/p q", "r s t")
+    assert word("cat ${x:= \"/p q\" r}", 1).fields == ("/p", "q", "r")
+
+
+def test_sh_a_default_in_double_quotes_or_a_check_gives_no_words():
+    for text in ('cat "${x:- /p q }"', 'cat a"${x:- /p }"b', "cat ${x:? /p q }",
+                 "cat ${x? /p q }", "cat ${x#a b}", "cat ${x/a/ b c}", "cat ${x:- /p",
+                 "cat $x"):
+        assert word(text, 1).fields == (), text
+    assert word('cat "${x:- /p }"${y:+ /q r }', 1).fields == ("${x:- /p }", "/q", "r")
+
+
+def test_sh_a_substitution_in_a_default_stays_a_nul_in_its_words():
+    w = word("cat ${x:- $(kill 211)/p q }", 1)
+    assert w.fields == ("\0/p", "q") and w.subs == ("kill 211",)
+
+
+def test_sh_an_assignment_bash_makes_without_splitting_gives_no_words():
+    assert [w.fields for w in read_shell("X=${x:- /p q } cat Y=${x:- /r }").commands[0]
+            .words] == [(), (), ("Y=", "/r")]
+    for text in ("export E=${x:- /p q }", "local L=${x:- /p q }"):
+        assert word(text, 1).fields == (), text
+    assert word("command export E=${x:- /p q }", 2).fields == ("E=", "/p", "q")
+    assert read_shell("cat < ${x:- /p }").commands[0].redirects[0].target.fields == ("/p",)
+
+
 def test_sh_arithmetic():
     assert words("echo $((1<<2)); kill 211") == [["echo", "$((1<<2))"], ["kill", "211"]]
     assert words("echo $[1<<2]") == [["echo", "$[1<<2]"]]

@@ -92,8 +92,9 @@ out of the harness. This package is turns' whole public API, the announcement's
     t = turns.read_shell(text, *, dialect="sh")   # ShellText(commands, marks): shell,
                               # PowerShell or cmd text (DIALECTS) read without running it;
                               # never raises. ShellCommand(words, redirects, ended_by);
-                              # ShellWord(text, position, subs, *, is_sub), each
-                              # substitution a NUL in text and its text in subs;
+                              # ShellWord(text, position, subs, *, is_sub, fields),
+                              # each substitution a NUL in text and its text in subs,
+                              # fields the words bash splits a ${x:-default} into;
                               # ShellRedirect(operator, fd, target, body, subs);
                               # ShellMark(kind, position), what a strict guard may refuse,
                               # its kind one of MARK_KINDS

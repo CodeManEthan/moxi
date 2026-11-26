@@ -7,7 +7,9 @@
   running it, as a `ShellText` of `ShellCommand`s (words, redirects, and the operator
   that ended each, `ended_by`) and `ShellMark`s, everything a strict guard may refuse, in
   text order, each of a kind in `MARK_KINDS`. A `ShellWord` keeps each substitution's text in `subs`, with a NUL in its
-  `text`; a `ShellRedirect` keeps its operator, fd and target, and a heredoc's `body` and,
+  `text`, and in `fields` the words bash makes of it when a `${...}` default or alternate
+  outside double quotes (`-`, `:-`, `+`, `:+`, `=`, `:=`) is used and split at its
+  blanks; a `ShellRedirect` keeps its operator, fd and target, and a heredoc's `body` and,
   when its delimiter is unquoted, the substitutions in it. `command_word_index` finds the
   word that names what a command runs, past assignments, reserved words and the wrappers
   `sudo`, `doas`, `env`, `nohup`, `builtin`, `exec`, `command`, `nice`, `timeout`,
