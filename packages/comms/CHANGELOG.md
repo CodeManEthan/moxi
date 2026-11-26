@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- A `project-facts` component for the Projects page: the opened project's lead and
+  agents read `not running now` where no session holds the name, while comms' roster
+  can say so.
 - The launched sessions on the page read launcher's `holds` wait as launcher's Home row
   does: a session whose open holds alone keep it waiting reads `waiting on 1 open hold`,
   or `kept warm while 1 hold is open`, and gets `Keep warm` where a press would cover it.

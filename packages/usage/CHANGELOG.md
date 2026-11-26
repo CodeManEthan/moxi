@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- A `project-facts` component for the Projects page: each project's cost today on its
+  row, the opened project's `Cost` row (today, 7 days, 30 days) linking to Usage, and
+  each folder in no project with its 7-day cost. Usage takes the address
+  `project/<key>`, which sets the Project filter to that project.
 - Where the launcher module is installed, the page reads its `/api/running` (and follows
   its `running` topic) and matches each session to a running launch by harness and
   session id. A matched session with no typed name is named by the launch, its where

@@ -471,6 +471,15 @@ reads adds to it when installed:
 - **projects**: which project each standing name in `Other names` leads, read from
   projects' list of projects while one is there. Without projects, nothing of it shows.
 
+**On the Projects page.** With projects' page in the shell too, comms places a
+`project-facts` component on the Projects page. An opened project's `Agents` row says
+`not running now` after its lead's or an agent's name when no session holds that name in
+comms. comms never says an agent runs: a held name may be a session started by hand, and
+only Moxi's launches count as running. The component reads `/api/roster` when it is
+placed and follows the `roster` topic while the tab is visible. While comms' daemon is
+down the roster can't say who holds a name, so nothing is said, as when the read fails;
+the next good read puts the words back.
+
 Not on the page yet: launching an agent from a name with mail (`Launch`), and whether a
 session's turn is open.
 
