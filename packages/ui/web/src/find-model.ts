@@ -7,7 +7,9 @@
 // the list's counts use. A module whose section has not arrived is searched once it does;
 // until every one has, the words say how many are still being read.
 
-import { CORE, PHONE_MODULE, changedCount, countOf, drawnKeys, labelOf, linesOf, moduleOrder, valueOf, valueWords } from "./settings-model.ts";
+import {
+  CORE, PHONE_MODULE, changedCount, countOf, drawnKeys, labelOf, linesOf, moduleOrder, readKeys, valueOf, valueWords,
+} from "./settings-model.ts";
 import type { Section, Setting } from "./settings-model.ts";
 
 /** How many rows a module shows in Find's results before `Show them`. */
@@ -95,12 +97,13 @@ export function find(query: string, listed: readonly string[], sections: Readonl
   let n = 0;
   for (const module of moduleOrder(listed)) {
     const section = sections.get(module);
-    if (!section || section.error !== null) continue;
-    for (const key of section.keys) {
+    if (!section) continue;
+    const keys = readKeys(section);
+    for (const key of keys) {
       const sentence = typeof key.elsewhere === "string" ? key.elsewhere : "";
       if (sentence !== "" && rankOf(key, text) !== null && !elsewhere.includes(sentence)) elsewhere.push(sentence);
     }
-    const matches = drawnKeys(module, section.keys, phone)
+    const matches = drawnKeys(module, keys, phone)
       .map((key, i) => ({ key, i, rank: rankOf(key, text) }))
       .filter((match): match is { key: Setting; i: number; rank: Rank } => match.rank !== null)
       .sort((a, b) => a.rank - b.rank || a.i - b.i)
@@ -142,8 +145,8 @@ export function changedView(listed: readonly string[], sections: ReadonlyMap<str
   let n = 0;
   for (const module of moduleOrder(listed)) {
     const section = sections.get(module);
-    if (!section || section.error !== null) continue;
-    const keys = drawnKeys(module, section.keys, phone).filter((key) => key.changed === true);
+    if (!section) continue;
+    const keys = drawnKeys(module, readKeys(section), phone).filter((key) => key.changed === true);
     if (keys.length === 0) continue;
     n += keys.length;
     groups.push({ module, tally: `${changedCount(section, phone)} of ${countOf(section, phone)}`, keys, more: null });

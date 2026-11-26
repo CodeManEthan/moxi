@@ -9,7 +9,9 @@ Every value a user may set lives in its module's one config file,
 `<config root>/<module>/config.toml` (see `moxi.paths`), and every key in that file is
 declared in the module's schema: a `settings.toml` shipped in the module's package and
 named by its announcement's `SETTINGS`. The core's own settings are declared the same
-way, in `moxi/settings.toml`, and read and set as module `moxi`.
+way, in `moxi/settings.toml`, and read and set as module `moxi`. The one exception is a
+table a module keeps in a file of its own and reads and checks itself (Tables, below):
+`moxi config` shows and changes it through the module's hook.
 
 The schema
 ----------
@@ -132,6 +134,41 @@ with no lock and no write: it returns the text `set_many` would write and the st
 file it was built over, so a preview shows what a save would write, byte for byte. Given
 that stamp back as `base`, either one refuses with `ConfigChanged` when the file has
 changed since.
+
+Tables
+------
+
+A module may also keep settings in a file of its own, as one TOML table whose rows the
+module alone reads and checks, and declare it in its announcement's `CONFIG_TABLES`:
+`{name: "package.module:NAME"}`. `moxi config` shows the table's rows after the module's
+own keys, each named `<table>.<row>`, the row being everything after the first dot. A
+`set` or `unset` of such a key goes to the table's hook in place of the module's config
+file, with the same exit codes, `--json` answer and history line as a config key; `--add`
+and `--remove` are refused there, since a page and a terminal send a row's whole value.
+A table's name may not be a top-level name of the module's own schema. The hook, `NAME`
+in that module, is imported only by `moxi config`, and is an object with:
+
+    title    one line naming the table
+    line     one line said once above its rows
+    applies  one line: when a change of a row reaches what reads it
+    file(env) -> Path
+             the file that holds the table
+    keys(env) -> list[dict]
+             one dict per row the hook offers, in `moxi config <module> show --json`'s
+             shape and named by the row alone; a row may add `warning` and `refused`
+             (one line each: the module's words for a value some or all of its uses
+             refuse) and `clear_only` (true on a row that can only be removed). Raises
+             `ConfigError` when the file can't be read.
+    change(row, op, value, *, by, env) -> (changed, warnings)
+             `op` is "set" (`value` as the command line spells it) or "unset"; returns
+             whether the file changed and the module's warning lines for what it holds
+             now. Raises `ConfigError` for a refusal, keyed by the row; a held lock
+             (`moxi.files.LockTimeout`) and a file that is not TOML (a `ValueError` from
+             `moxi.files.edit_toml`) pass through, and `change_table` answers them as a
+             config file's.
+
+`table_hooks(found)` imports a module's hooks, `table_of(module, key)` names the table a
+key is a row of, and `change_table(module, key, op, value, by=)` makes one change.
 
 This module imports only what is already loaded when Python starts; everything else it
 needs is imported inside the function that needs it, so a hook may read config through it.
@@ -1619,8 +1656,106 @@ def _check_config(module: str, schema: Schema, check) -> Settings:
     return _check_file(module, schema, check, text, path, None)
 
 
+# -- tables a module keeps in files of its own -----------------------------------------
+
+def table_hooks(found) -> dict:
+    """The hook of each table module `found` declares in `CONFIG_TABLES`, by name, in the
+    order it declares them, each imported. `found` is a `moxi.modules.Found` in the
+    `present` state. Raises `SchemaError` (exit 3) when a table's name is also a
+    top-level name of the module's own schema, or a hook can't be imported."""
+    if not found.config_tables:
+        return {}
+    schema = schema_for(found)
+    top = set() if schema is None else {name.split(".")[0] for name in schema.keys}
+    hooks = {}
+    for table, target in found.config_tables.items():
+        if table in top:
+            exc = SchemaError(found.target, table, f"declares the table {table!r} in "
+                              "CONFIG_TABLES, and its settings schema also uses that name",
+                              "rename the table or the settings key")
+            exc.exit_code = 3
+            raise exc
+        hooks[table] = _imported_hook(found.name, target, table)
+    return hooks
+
+
+def _imported_hook(module, target, table):
+    import importlib
+
+    where, _, name = target.partition(":")
+    try:
+        return getattr(importlib.import_module(where), name)
+    except Exception as exc:
+        raise _refused(module, f"cannot run {module}'s CONFIG_TABLES {target} "
+                       f"({_first_line(exc)})", "reinstall or repair the module", 3,
+                       table) from None
+
+
+def table_of(module: str, key: str) -> str | None:
+    """The table of module `module` that `key` names: its part before the first dot,
+    when the module is present and declares that table in `CONFIG_TABLES`; else None.
+    Reads the announcement alone."""
+    from . import modules, names
+
+    if not names.is_module_name(module) or module == names.HARNESS:
+        return None
+    found = modules.announced(module)
+    table = key.partition(".")[0]
+    if found.state != modules.PRESENT or table not in found.config_tables:
+        return None
+    return table
+
+
+def change_table(module: str, key: str, op: str, value=None, *, by: str,
+                 env=None) -> tuple[bool, list[str]]:
+    """Make one change of the row `key` names, `<table>.<row>`, through its table's hook:
+    `op` "set" with `value`, or "unset". Returns whether the file changed and the
+    hook's warning lines. A change appends the same history line as a config key's, key
+    `<table>.<row>`, and reads no config file. Raises `ConfigError` with the exit code a
+    config key's change would take: 2 for a refusal (an `add` or `remove`, a key that
+    names no row), 3 for a module that is absent or a hook that can't run, 75 for a held
+    lock."""
+    _need_by(by, key)
+    from . import files, modules
+
+    env = os.environ if env is None else env
+    table, _, row = key.partition(".")
+    found = modules.load(module)
+    if found.state != modules.PRESENT or table not in found.config_tables:
+        raise _refused(module, found.reason or f"declares no table {table!r}",
+                       f"install it: moxi install {module}"
+                       if found.state == modules.ABSENT else
+                       f"`moxi config {module}` lists its settings", 3, key)
+    hook = table_hooks(found)[table]
+    path = hook.file(env)
+    if op in ("add", "remove"):
+        raise ConfigError(path, key, f"is a row of {module}'s {table} table, which takes "
+                          "a whole value", "change the whole value")
+    if not row:
+        raise ConfigError(path, key, f"names {module}'s {table} table, not one of its "
+                          "rows", f"name one row: {table}.<row>")
+    try:
+        changed, warnings = hook.change(row, op, value, by=by, env=env)
+    except ConfigError as exc:
+        raise _keyed(exc, row, key) from None
+    except (files.LockTimeout, ValueError) as exc:
+        raise _edit_refused(exc, path, key) from None
+    if changed:
+        _record_changes(module, [key], op, by)
+    return bool(changed), list(warnings)
+
+
+def _keyed(exc: ConfigError, row: str, key: str) -> ConfigError:
+    """`exc`, raised by a table's hook for `row`, naming the whole key `key` instead."""
+    if exc.key == row:
+        exc.key = key
+        where = (exc.file or "config") + f": key {key!r}"
+        exc.args = (f"{where}: {exc.problem}; fix: {exc.fix}",)
+    return exc
+
+
 __all__ = ["TYPES", "READS", "FIELDS", "PAGE_FIELDS", "COMMON_MAX", "ITEMS", "DEFAULT",
            "FILE", "ENV", "HISTORY", "ConfigError", "SchemaError", "Key", "Schema", "Settings",
            "is_switch_table", "is_entry_name", "schema_for", "check_text", "load", "Config",
            "set_value", "unset", "add_item", "remove_item", "history", "set_many", "draft_text",
-           "ConfigChanged"]
+           "ConfigChanged", "table_hooks", "table_of", "change_table"]

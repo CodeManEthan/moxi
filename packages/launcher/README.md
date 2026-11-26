@@ -235,6 +235,24 @@ check` checks the whole file: types and values, rows whose module is missing, pr
 that an instructions file can be read, and that an agent role a preset names is found in
 the harness's agent folders.
 
+**Launch defaults on the Settings page.** `[defaults]` shows on the Settings page as the
+launcher's `Launch defaults` block, and at a terminal as `moxi config launcher show`'s
+`defaults.<row>` keys; `moxi config set launcher defaults.<row> VALUE` and `moxi config
+unset launcher defaults.<row>` change one key, as the page does. The block holds every row
+a launch on this machine takes (a row or value whose module is missing or whose condition
+fails here is left out), each under its catalog group, or `start` for a row with none
+(`cwd`, `project`, `brief`, `brief_file`, `target`, `slot`). A change is checked by the row's own check alone: its type, the values
+offered here, a refused, unknown or retired name or value. A value that fails only on
+some launches, such as `recycle_at_limit = "relaunch"` without `target = "slot"`, is
+written, and its row shows what a launch with no preset will meet. Keys launches refuse
+or leave out (an owned row, `takes_policy_directors`, a typo, a retired row) sit first,
+under `needs a fix`, and can only be cleared. A key set for a row this machine doesn't
+offer is kept as it is and not shown; a hand edit clears it. The write changes one key
+and keeps every other byte of the file, comments included: a new key goes straight after
+the table's last own key, above any `[defaults.<x>]` sub-table. A change reaches launches
+made after it; a relaunch or resume keeps what its session launched with. `moxi launcher presets check` warns, at `defaults`, of
+what a launch with no preset and nothing typed meets from `[defaults]`.
+
 ## The launch log
 
 Every launch writes one row to a SQLite file in the launcher's state directory before the

@@ -1,5 +1,23 @@
 # Changelog
 
+## Unreleased
+
+- The Settings page draws a table a module keeps in a file of its own (the core's
+  `CONFIG_TABLES`; the launcher's launch defaults) as one open block after the module's
+  other settings and their `More` line: its title (`table_title`), its line
+  (`table_line`), its rows under their sub-heads, each marked with the table's `applies`
+  words, with a `refused` or `warning` line under a row that carries one. A
+  `clear_only` row shows its value as a word with `Reset` alone. The foot adds `<title>
+  are kept in <file>` (`table_file`). A table whose file can't be read shows its error and
+  fix and no row; it is not counted. Find and the changed view reach the rows like any
+  key, and `MOXI_UI_LOCKED_SETTINGS=<module>.<table>` locks the block.
+- A failure reading one file never locks another's keys: when a module's config file
+  can't be read, its own keys are read-only with the error, and its tables' rows, which
+  `show --json` still gives in the error's `keys`, stay editable and save.
+- An enum key whose value is not among its `values` keeps that value as the chosen one,
+  so choosing it again is no change. A text key holding a bool shows `true` or `false`.
+  An empty `path` value reads as unset, as an empty default does.
+
 ## 0.2.8 (2026-11-23)
 
 - On the modules view, each block's card says `Reading…` until its block first takes up

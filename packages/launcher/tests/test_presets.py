@@ -2032,3 +2032,41 @@ def test_the_presets_check_does_not_warn_of_a_defaults_stop(recyclable):
     # A [defaults] stop_at is left out, with a warning, at a launch that can't take it.
     text = '[defaults]\nstop_at = "2.5x"\nwarn_at = "2x"\n[seat.s]\ntarget = "slot"\n'
     assert not [w for w in stop_warnings(text) if w[1] == "stop_at"]
+
+
+# -- what a launch with no preset meets from [defaults] -----------------------------------
+
+def _bare(text: str, available) -> list[tuple]:
+    return [(p.where, p.key, p.level, p.problem, p.hint) for p in problems(text, available)
+            if p.where == "defaults"]
+
+
+def test_check_warns_of_a_defaults_value_a_bare_launch_refuses(monkeypatch):
+    monkeypatch.setattr(catalog, "slots_here", lambda: True)
+    found = _bare('[defaults]\nrecycle_at_limit = "relaunch"\n',
+                  only("turns", "usage", "slots"))
+    assert found == [("defaults", "recycle_at_limit", presets.WARNING,
+                      "a launch with no preset is refused: relaunch at limit needs slots "
+                      "and a slot launch",
+                      "launch it in a slot (--target slot) where tmux slots run, or "
+                      "set recycle_at_limit off")]
+    # A seat that launches in a slot meets no refusal, so only the warning is said.
+    assert not errors('[defaults]\nrecycle_at_limit = "relaunch"\n'
+                      '[seat.s]\ntarget = "slot"\n', only("turns", "usage", "slots"))
+
+
+def test_check_warns_of_an_unplaced_item_a_bare_launch_fails(monkeypatch):
+    monkeypatch.setattr(catalog, "slots_here", lambda: True)
+    found = _bare('[defaults]\nrecycle_at_limit = "relaunch"\ntarget = "slot"\n',
+                  only("turns", "usage", "slots"))
+    assert found == [("defaults", "recycle_at_limit", presets.WARNING,
+                      "recycle_at_limit relaunch does nothing on a Codex launch with no "
+                      "preset: it is a codex launch, and only a Claude session can be "
+                      "exited and relaunched", "launch the seat on Claude")]
+
+
+def test_check_says_nothing_of_defaults_a_bare_launch_takes(monkeypatch):
+    monkeypatch.setattr(catalog, "slots_here", lambda: True)
+    for text in ('[defaults]\npermission_mode = "plan"\n',
+                 '[defaults]\nscratch = true\nrecycle_at_limit = "relaunch"\n'):
+        assert _bare(text, only("turns", "usage", "slots")) == []

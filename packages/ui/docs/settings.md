@@ -43,6 +43,35 @@ shell.` when `MOXI_UI_LOCKED_SETTINGS` locks it, with the control off. A key who
 not its default shows `default <value>`, and `· Reset` after it when a write would change
 the value read: the file holds it, it is not locked and it is not changed at the terminal.
 
+## A module's table
+
+A module may keep a table of rows in a file of its own (its announcement's
+`CONFIG_TABLES`; the core's README has the hook). `show --json` lists its rows after the
+module's own keys, each named `<table>.<row>`, and each carries these fields besides a
+key's:
+
+| field | on the page |
+|---|---|
+| `table_title` | the block's title. The block is drawn open after the module's other keys and their `More` line, never behind it, its rows under their `group` sub-heads |
+| `table_line` | one dim line under the title |
+| `table_file` | the foot adds `<title> are kept in <file>`, the home folder written `~` |
+| `applies` | the row's mark, as a sentence |
+| `refused` | a dim line under the row: the module's words for a value every use refuses |
+| `warning` | a dim line under the row: the module's words for a value some uses refuse or leave out |
+| `clear_only` | the value shows as a word, with `Reset` as the row's only control |
+
+An enum row whose value is not among its `values` keeps that value as the chosen one, so
+choosing it again is no change; its `refused` or `warning` line says why. A row saves,
+locks, shows in Find and the changed view and counts as any key does:
+`MOXI_UI_LOCKED_SETTINGS=<module>.<table>` locks the whole block.
+
+**A file that can't be read** locks only its own rows. A table whose file can't be read is
+one item, named for the table, holding `table_error` and `table_fix`: the block shows its
+title, line, the error and the fix with `Copy`, and no row, and the item is not counted.
+When the module's own config file can't be read, `show --json` prints its error object
+with `keys`, the tables' rows: the pane says what is wrong, the module's own keys are
+read-only, and the block stays editable.
+
 ## Changing and saving
 
 Nothing is written until Save. A changed row says `not saved · was <value> · Undo`, and the
@@ -101,6 +130,10 @@ fields as `show --json` prints them, and:
 - `json` and `default_json`: its value and its default as JSON text, so a page never reads
   TOML;
 - `changed`: true when the value is not the default (a switch table: when any entry is on).
+
+When the module's config file can't be read, the section holds `error`, `fix` and
+`readonly` true, and its `keys` are the tables' rows alone; a save or write of one of them
+runs, and of any other key is `failed` (a 422 on `set` and `unset`) with the error.
 
 **`POST /api/settings/save`** writes one module's changes. Its body is `module` and four
 lists of equal length, at most 64 items each: `keys`; `values`, each new value as JSON text
