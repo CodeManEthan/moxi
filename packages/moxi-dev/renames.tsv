@@ -2471,11 +2471,14 @@ comms	packages/comms/tests/test_owner.py	{q: (b.session_id, b.turned, set(b.deli
 comms	packages/comms/tests/test_page.py	@pytest.mark.parametrize("bad", [("coder", True, 1.0), ("coder", 1.5, 1.0),	keep	bad	bad
 comms	packages/comms/tests/test_page.py	@pytest.mark.parametrize("bad", [{"directors": (1,)}, {"directors": ({},)},	keep	bad	bad
 comms	packages/comms/tests/test_page.py	assert asked == [{"deadline": 2.0}] and pagehandlers.DEADLINE == 2.0	use	"deadline"	"timeout_s"
+comms	packages/comms/tests/test_page.py	assert facts["place"] == "inline" and set(facts["attributes"]) == {"projects", "open"}	keep	set	set
 comms	packages/comms/tests/test_page.py	assert out["refused"].startswith("comms' page needs the ui module")	keep	refused	refused
 comms	packages/comms/tests/test_page.py	assert set().union(*(_marks(shape) for shape in page.MAIL.values())) == set()	keep	set	set
 comms	packages/comms/tests/test_page.py	assert set(body) == {"now", "state", "detail", "rows"}	keep	set	set
+comms	packages/comms/tests/test_page.py	assert set(found.components) == {"page", "roster", "mail", "project-facts"}	keep	set	set
 comms	packages/comms/tests/test_page.py	assert set(found.components) == {"page", "roster", "mail"}	keep	set	set
 comms	packages/comms/tests/test_page.py	assert set(found.components) == {"page", "roster"}	keep	set	set
+comms	packages/comms/tests/test_page.py	assert set(module.COMPONENTS) == {"page", "roster", "mail", "project-facts"}	keep	set	set
 comms	packages/comms/tests/test_page.py	assert set(module.COMPONENTS) == {"page", "roster", "mail"}	keep	set	set
 comms	packages/comms/tests/test_page.py	assert set(module.COMPONENTS) == {"page", "roster"}	keep	set	set
 comms	packages/comms/tests/test_page.py	inner = lb.app(page.PAGE, module="comms", server_id=SERVER_ID, strict=True)	keep	strict	strict
