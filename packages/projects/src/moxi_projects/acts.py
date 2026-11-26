@@ -62,9 +62,9 @@ GIT_TIMEOUT = 30
 
 
 class Added:
-    """What `add` did: `project`, the row as written; `notes`, sentences worth showing
-    that refuse nothing (a root that doesn't exist yet, what a mint made, what an answer
-    did); `warnings`, sentences about what the add went ahead without (a contribution
+    """What `add` did: `project`, the row as written; `notes`, the sentences worth
+    showing that refuse nothing (a root that doesn't exist yet, what a mint made, what an
+    answer did); `warnings`, sentences about what the add went ahead without (a contribution
     skipped since it won't load, an answer that failed, each naming the fix);
     `asked`, a line per question not asked, naming the command that sets it later; and
     `answered`, `{module, key, value}` for each answer acted on."""
