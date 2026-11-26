@@ -73,6 +73,23 @@ def test_an_edited_codex_block_is_modified(lo):
     assert "Be brief." in path.read_text()
 
 
+def test_a_block_saved_with_crlf_line_endings_is_not_edited(lo):
+    """Windows editors and git's autocrlf save LF as CRLF; the text is the same."""
+    mode(lo, "managed")
+    assert install.install().code == 0
+    path = harness.global_file("codex")
+    path.write_bytes(path.read_bytes().replace(b"\r\n", b"\n").replace(b"\n", b"\r\n"))
+    out = install.install()
+    assert out.code == 0, out.text()
+    assert not any(r.state == "modified" for r in out.rows)
+    (lo / "global.md").write_bytes(b"Be briefer.\n")
+    out = install.install()
+    assert out.code == 0, out.text()
+    assert b"Be briefer." in path.read_bytes()
+    assert cli.main(["global", "remove"]) == 0
+    assert not path.exists()
+
+
 def test_if_absent_places_where_there_is_none_and_leaves_an_existing_file(lo):
     codex = harness.global_file("codex")
     codex.parent.mkdir(parents=True)
@@ -418,7 +435,7 @@ def test_a_built_block_of_an_empty_shared_text_is_updated_once(lo):
     codex.parent.mkdir(parents=True)
     built = (f"<!-- moxi loadout: from {lo / 'global.md'}; edit there -->\n\n"
              "<!-- moxi loadout end -->")
-    codex.write_text(built + "\n")
+    codex.write_bytes((built + "\n").encode())
     from moxi_loadout import ledger
 
     data = ledger.read()
@@ -429,7 +446,7 @@ def test_a_built_block_of_an_empty_shared_text_is_updated_once(lo):
     out = install.install()
     assert out.code == 0, out.text()
     assert any("updated global global for codex" in line for line in out.lines)
-    assert codex.read_text() == built.replace("-->\n\n", "-->\n") + "\n"
+    assert codex.read_bytes() == (built.replace("-->\n\n", "-->\n") + "\n").encode()
     assert not any("codex" in line for line in install.install().lines)
 
 

@@ -16,8 +16,9 @@ Every run plans every entry the manifest lists, whatever the scope; a scope appl
 A refused harness file, a missing CLI or a global text that can't be read leaves its
 entries as they stand, and only a dropped or disabled item plans a remove. Per entry:
 
-- **Recorded**: found equal to what was written: `ok`, or updated in place when the
-  manifest now wants something else; removed when the item is dropped or disabled.
+- **Recorded**: found equal to what was written (a global block in CRLF line endings
+  too): `ok`, or updated in place when the manifest now wants something else; removed
+  when the item is dropped or disabled.
   Found different: `modified`, left and reported; `--replace` rewrites it (or removes it
   when the item is gone). Not found: handled as unrecorded.
 - **Unrecorded**: absent: added. Equal to what loadout would write: `ok`, recorded as
@@ -465,6 +466,15 @@ def _get(doc, kind: str, key: list):
     return node
 
 
+def _holds(kind: str, found, written) -> bool:
+    """Whether what a file holds is what loadout wrote. A global block that differs only
+    in line endings is the same: Windows editors and git's autocrlf turn LF into CRLF
+    without the user changing the text."""
+    if kind == "global-block" and isinstance(found, str) and isinstance(written, str):
+        return found.replace("\r\n", "\n") == written.replace("\r\n", "\n")
+    return found == written
+
+
 def _set(doc, kind: str, key: list, value) -> None:
     if kind == "global-block":
         found = _block(doc.data)
@@ -771,7 +781,7 @@ def _one(e: Entry, rec, doc, records, *, claimed: bool) -> Action:
         return Action(e, rec, "add")
     found = _get(doc, e.kind, e.key)
     if rec is not None and found is not _MISSING:
-        if found == rec.get("written"):
+        if _holds(e.kind, found, rec.get("written")):
             old = rec.get("sent") if e.kind == "mcp" else rec.get("written")
             return Action(e, rec, "ok" if old == value else "update",
                           prior=rec.get("prior", False),
@@ -783,7 +793,7 @@ def _one(e: Entry, rec, doc, records, *, claimed: bool) -> Action:
                       "rewrites it")
     if found is _MISSING:
         return Action(e, rec, "add")
-    equal = _plain(found) == _plain(value) if e.kind == "mcp" else found == value
+    equal = _plain(found) == _plain(value) if e.kind == "mcp" else _holds(e.kind, found, value)
     if equal:
         return Action(e, rec, "ok", prior=_shared_prior(records, e))
     if claimed:
@@ -824,8 +834,9 @@ def _gone(r: dict, doc, records: list, used: set, *, claimed: bool, want=()) -> 
     found = _get(doc, kind, key)
     if found is _MISSING:
         return Action(None, r, "end")
-    if found == written or claimed:
-        return Action(None, r, "remove", over=found != written)
+    same = _holds(kind, found, written)
+    if same or claimed:
+        return Action(None, r, "remove", over=not same)
     how = " permissions:NAME@codex, NAME any permissions item," if kind == "rules" else ""
     return Action(None, r, "modified", f"edited since loadout wrote it; --replace{how} "
                   "removes it")

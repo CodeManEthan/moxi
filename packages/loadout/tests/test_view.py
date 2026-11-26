@@ -136,6 +136,22 @@ def test_a_link_pointing_elsewhere_and_a_strangers_skill_are_not_edited(lo, tmp_
     assert not any(r["edited"] for r in rows().values() if r["state"] != "blocked")
 
 
+
+def test_a_strangers_link_over_loadouts_copy_is_not_edited(lo, tmp_path):
+    """A copy is what Windows places a skill folder as; a link put in its place points
+    elsewhere and is someone else's, not an edit of the copy."""
+    from moxi import config
+
+    config.set_value("moxi", "skills.form", "copy", by="test")
+    kit.manifest(lo, '[user]\nskills = ["review"]\n')
+    assert install.install().code == 0
+    elsewhere = kit.skill(tmp_path / "elsewhere", "review")
+    target = kit.claude() / "review"
+    kit.unplace(target)
+    target.symlink_to(elsewhere, target_is_directory=True)
+    row = rows()[("skill", "review", "claude", "user")]
+    assert (row["state"], row["form"], row["edited"]) == ("blocked", "copy", False)
+
 # -- covers and prior -----------------------------------------------------------------------
 
 def test_the_codex_rules_file_row_names_the_items_it_holds(lo):

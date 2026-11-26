@@ -9,7 +9,8 @@ Each fact is read from what the row came from (`install.Status.sources`), on the
   (loadout's ignore file);
 - `edited`: a `blocked` row whose placement of loadout's was edited where it stands, as
   the placer reads it (`modified`): its own copy edited, or a file or folder saved over
-  its link. A link that points elsewhere, or anything else in the way, is not;
+  its link. A link that points elsewhere (over its link or its copy), or anything else
+  in the way, is not;
 - `covers`: the permission items the Codex rules file holds, on its row;
 - `prior`: an entry the user had before loadout, which loadout keeps as the user's;
 - `applies`: the sections under which `install` applies the row, by the verb's own
@@ -58,19 +59,21 @@ def row_facts(done) -> list[dict]:
                      "ignores": False, "placement": None}
         placement = facts.pop("placement")
         facts["edited"] = row.state == "blocked" and placement in FORMS \
-            and edited_at(row.target, placement)
+            and edited_at(row.target)
         out.append(facts)
     return out
 
 
 class _Edited:
     """Whether a target's placement of loadout's was edited where it stands, reading the
-    placer's status once, when first asked."""
+    placer's status once, when first asked. A link or junction standing there now points
+    elsewhere and is someone else's, whatever form loadout placed (a link over its copy
+    too); a file or folder there is an edit."""
 
     def __init__(self) -> None:
         self.states: dict[str, str] | None = None
 
-    def __call__(self, target: str | None, placement: str) -> bool:
+    def __call__(self, target: str | None) -> bool:
         if target is None:
             return False
         if self.states is None:
@@ -79,8 +82,6 @@ class _Edited:
             self.states = {str(p.path): p.state for p in place.status(planner.OWNER)}
         if self.states.get(target) != "modified":
             return False
-        if placement == "copy":
-            return True
         return not (os.path.islink(target) or os.path.isjunction(target))
 
 

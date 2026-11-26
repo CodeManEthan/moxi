@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- A global block saved with CRLF line endings is loadout's still, as written. A Windows
+  editor or git's autocrlf turns LF into CRLF without the text changing, and loadout read
+  the block as "edited since loadout wrote it", so every later install left it and the
+  run ended refused.
+- The page no longer reads a link someone put over loadout's copy of a folder as an
+  edit of the copy. On Windows a skill folder is placed as a copy, so a link to another
+  skill there showed as loadout's copy edited; it is in the way, as a link over
+  loadout's link already was.
 - On Windows, where the account can make symbolic links, loadout reads its own links again:
   a link's target is read through `moxi.paths.link_target`, without the `\\?\` prefix
   Windows reads one back with. A global file's link loadout made read as a user's, and a
