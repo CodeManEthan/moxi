@@ -12,6 +12,9 @@ records it needs, and the shell's push stream is kept from bringing the real cac
 topic `clocks`. The real cache publishes its topic only when its records change, which
 they don't here, so the topic's path is proved by the page's unit tests. Launcher's routes are answered as `test_browser_running.py` does.
 Every other route is the page servers' own.
+
+Each time a test expects is worded by the page's own rule (`words_at`): a time of another
+day than today carries its day, so the tests hold at any hour, near midnight too.
 """
 
 from __future__ import annotations
@@ -20,6 +23,7 @@ import json
 import re
 import sys
 import time
+from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -42,7 +46,29 @@ pytestmark = [pytest.mark.browser, pytest.mark.timeout(180, method="thread"),
 
 #: A time as the page words one today: the hour and minute in the browser's locale.
 T = r"\d{1,2}:\d\d(?: [AP]M)?"
-WARM = re.compile(rf"^warm until {T}$")
+
+
+def words_at(at: float) -> str:
+    """A pattern for the moment `at` as a cache fact words it beside today: its time alone
+    on today, else after its day (`yesterday 11:58 PM`, `Nov 27 12:04 AM`, with the year
+    when it is not this one's)."""
+    day, today = date.fromtimestamp(at), date.today()
+    if day == today:
+        return T
+    if day == today - timedelta(days=1):
+        return rf"yesterday {T}"
+    words = f"{day.strftime('%b')} {day.day}"
+    return rf"{re.escape(words if day.year == today.year else f'{words}, {day.year}')} {T}"
+
+
+def cold_at(one: dict) -> float:
+    """When a clock record goes cold."""
+    return one["last_request"] + one["ttl"]
+
+
+def warm_until(at: float) -> re.Pattern:
+    """A row's fact for a session warm until `at`."""
+    return re.compile(rf"^warm until {words_at(at)}$")
 
 #: Rewrites each event of cache's topic `clocks` in the shell's push stream, whose value is
 #: the real cache's: it drops each event, so the page knows only what the stubbed route
@@ -134,10 +160,11 @@ def cache_reads(page) -> list[str]:
 
 
 def test_a_session_started_by_hand_says_how_long_its_cache_stays_warm(full_shell, ui_contexts):
+    warm_one = record(sid(1))
     _, view, stub = open_with(full_shell, ui_contexts, [
-        record(sid(1)), record(sid(2), cold_in=-300), record(tid(1), harness="claude")])
+        warm_one, record(sid(2), cold_in=-300), record(tid(1), harness="claude")])
     first, second, codex = row(view, "claude", sid(1)), row(view, "claude", sid(2)), row(view, "codex", tid(1))
-    expect(first).to_have_attribute("fact", WARM)
+    expect(first).to_have_attribute("fact", warm_until(cold_at(warm_one)))
     expect(second).to_have_attribute("fact", "cold")
     # A Codex session is not the Claude record of the same id: it says nothing.
     expect(codex).not_to_have_attribute("fact", re.compile(""))
@@ -148,16 +175,18 @@ def test_a_session_started_by_hand_says_how_long_its_cache_stays_warm(full_shell
 
 
 def test_the_opened_row_has_the_cache_line_and_links_caches_page(full_shell, ui_contexts):
-    page, view, _ = open_with(full_shell, ui_contexts, [record(sid(1)), record(sid(2), cold_in=-300)])
+    warm_one, cold_one = record(sid(1)), record(sid(2), cold_in=-300)
+    page, view, _ = open_with(full_shell, ui_contexts, [warm_one, cold_one])
     first = row(view, "claude", sid(1))
     first.get_by_role("button", name="Open").click()
     line = first.locator('[data-line="cache"]')
-    expect(line).to_have_text(re.compile(rf"^Cache\s*warm until {T}\s*Cache$"))
+    expect(line).to_have_text(re.compile(rf"^Cache\s*warm until {words_at(cold_at(warm_one))}\s*Cache$"))
     # The line stands after the Session line.
     expect(first.locator('[data-line="session"] ~ [data-line="cache"]')).to_have_count(1)
     second = row(view, "claude", sid(2))
     second.get_by_role("button", name="Open").click()
-    expect(second.locator('[data-line="cache"]')).to_have_text(re.compile(rf"^Cache\s*cold since {T}\s*Cache$"))
+    expect(second.locator('[data-line="cache"]')).to_have_text(
+        re.compile(rf"^Cache\s*cold since {words_at(cold_at(cold_one))}\s*Cache$"))
     # A row with no record has no line.
     codex = row(view, "codex", tid(1))
     # It has one line, and opens by it.
@@ -176,10 +205,11 @@ def test_a_row_turns_cold_at_its_time_with_no_read(full_shell, ui_contexts):
     page = ui_contexts(full_shell).pages[0]
     page.clock.install()
     LauncherStub(page, [])
-    stub = CacheStub(page, [record(sid(1), cold_in=10 * 60)])
+    warm_one = record(sid(1), cold_in=10 * 60)
+    stub = CacheStub(page, [warm_one])
     view = open_list(page)
     first = row(view, "claude", sid(1))
-    expect(first).to_have_attribute("fact", WARM)
+    expect(first).to_have_attribute("fact", warm_until(cold_at(warm_one)))
     reads = stub.reads
     page.clock.fast_forward("10:30")
     expect(first).to_have_attribute("fact", "cold")
@@ -198,8 +228,10 @@ def days_shell(ui_shells, tmp_path_factory):
 
 
 def test_a_days_rows_say_nothing_of_cache(days_shell, ui_contexts):
-    _, view, stub = open_with(days_shell, ui_contexts, [record(sid(1)), record(sid(10)), record(sid(11), cold_in=-300)])
-    expect(group(view, "recent").locator(f'moxi-ui-row[data-key="claude/{sid(1)}"]')).to_have_attribute("fact", WARM)
+    warm_one = record(sid(1))
+    _, view, stub = open_with(days_shell, ui_contexts, [warm_one, record(sid(10)), record(sid(11), cold_in=-300)])
+    expect(group(view, "recent").locator(f'moxi-ui-row[data-key="claude/{sid(1)}"]')).to_have_attribute(
+        "fact", warm_until(cold_at(warm_one)))
     day = group(view, day_key(2))
     warm, cold = (day.locator(f'moxi-ui-row[data-key="claude/{sid(n)}"]') for n in (10, 11))
     for past in (warm, cold):
@@ -216,17 +248,20 @@ def test_on_a_running_launch_launchers_fact_wins(full_shell, ui_contexts):
     held = launch("r-1", sid(1), "builder-1")
     bare = launch("r-2", sid(2), "planner")
     bare["cache"] = None
-    _, view, _ = open_with(full_shell, ui_contexts, [record(sid(1), cold_in=-300), record(sid(2), cold_in=600)],
-                           [held, bare])
+    warm_two = record(sid(2), cold_in=600)
+    _, view, _ = open_with(full_shell, ui_contexts, [record(sid(1), cold_in=-300), warm_two], [held, bare])
     expect(labels(view)).to_have_text(["2 running", "Active recently"])
-    # Launcher says warm for 20 minutes; cache's cold record is not drawn.
+    # Launcher says warm for 20 minutes; cache's cold record is not drawn. A launch's own
+    # fact gives the time alone, its Cache line the day too when it is not today.
+    until = datetime.fromisoformat(held["cache"]["until"]).timestamp()
     first = launched_row(view, "r-1")
-    expect(first).to_have_attribute("fact", WARM)
+    expect(first).to_have_attribute("fact", re.compile(rf"^warm until {T}$"))
     first.get_by_role("button", name="Open").click()
-    expect(first.locator('[data-line="cache"]')).to_have_text(re.compile(rf"^Cache\s*warm until {T}\s*Cache$"))
+    expect(first.locator('[data-line="cache"]')).to_have_text(
+        re.compile(rf"^Cache\s*warm until {words_at(until)}\s*Cache$"))
     # Launcher gives the other no cache: cache's record speaks.
     second = launched_row(view, "r-2")
-    expect(second).to_have_attribute("fact", WARM)
+    expect(second).to_have_attribute("fact", warm_until(cold_at(warm_two)))
     assert first.get_attribute("fact") != second.get_attribute("fact")
 
 
