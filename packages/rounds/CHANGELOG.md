@@ -2,6 +2,13 @@
 
 ## 0.1.5 (unreleased)
 
+- A finish lock whose holder's process this account can't read (another user's, where
+  the system hides other users' processes) is no longer cleared as dead on Linux and
+  macOS: signal 0 tells such a process from none, as before the lock read its holder
+  through `moxi.proc.identity`.
+- A worktree a finish or drop keeps because git did not remove it says so when the
+  command runs inside it: the system keeps a folder in use (Windows does), and a later
+  sweep removes it once no process works there.
 - On Windows a sweep or drop removes a build's folders again. The removal's walk read each
   entry's device from its folder listing, which on Windows holds none, so every folder
   read as holding another device and was kept. A scratch folder's trash entry, which the
