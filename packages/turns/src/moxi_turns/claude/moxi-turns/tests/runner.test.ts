@@ -419,7 +419,7 @@ describe('the report queue', () => {
     expect(w.got).toEqual([])
     await w.hello()
     expect(w.kinds()).toEqual(['session', 'turn.start', 'turn.complete'])
-    expect(w.reports()[0]).toEqual({ seq: 1, kind: 'session', session_id: 'S-1', mod_version: '0.3.2' })
+    expect(w.reports()[0]).toEqual({ seq: 1, kind: 'session', session_id: 'S-1', mod_version: '0.3.3' })
     expect(w.reports().map(r => r.seq)).toEqual([1, 2, 3])
     expect(w.reports()[2]).toEqual({ seq: 3, kind: 'turn.complete', turn_id: 't1', reason: 'answer', is_aborted: false, answer: 'done.' })
   })
@@ -744,7 +744,15 @@ describe('the other lines', () => {
       { id: 'a', type: 'Explore', status: 'running' },
       { id: 'b', type: 'fork', status: 'waiting', parentId: 'a' },
       { id: 'c', type: 'teammate', status: 'idle', teammateId: 'ann@crew' },
-    ], draft: true })
+    ], draft: true, box: 'draft' })
+  })
+
+  test('live: an unreadable box is sent as a draft with box null, told apart from a draft', async ($: E, on) => {
+    const w = world(on)
+    await attached($, w)
+    w.promptFail = true
+    await w.line({ op: 'live', ask: 9 })
+    expect(w.got.find(g => g.path === '/live')?.body).toEqual({ ask: 9, agents: [], draft: true, box: null })
   })
 
   test('live: an unreadable subagent list is sent as null, never 0', async ($: E, on) => {
@@ -752,7 +760,7 @@ describe('the other lines', () => {
     w.agentsFail = true
     await attached($, w)
     await w.line({ op: 'live', ask: 8 })
-    expect(w.got.find(g => g.path === '/live')?.body).toEqual({ ask: 8, agents: null, draft: false })
+    expect(w.got.find(g => g.path === '/live')?.body).toEqual({ ask: 8, agents: null, draft: false, box: 'empty' })
   })
 
   test('agents: the list as the engine gives it, answered on /agents', async ($: E, on) => {

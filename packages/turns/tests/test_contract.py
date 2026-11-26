@@ -59,7 +59,7 @@ def test_every_public_name_loads_on_first_use():
 #: alone; a delivery's writes all three.
 VALUES = {
     "facts": ("session_id", "turn_number", "turn_open", "turn", "agents", "draft", "at",
-              "stale", "ready"),
+              "stale", "ready", "ended_at", "box", "live_error"),
     "agents": ("entries", "complete", "at"),
     "started": ("delivery", "ref", "turn_id", "agent_id"),
     "refused": ("delivery", "ref", "reason"),
