@@ -101,13 +101,24 @@ export interface Problem {
 
 export const TROUBLE_LEAD = "Its link to Moxi has trouble";
 export const UNREAD_LEAD = "Moxi can't read its live state";
-/** The reason when the live part did not read. It names the agent list alone, which is
- * true whether or not the box was read. */
+/** The reason when the live part answered but its agent list was not whole. */
 export const LIST_NOT_WHOLE = "its agent list could not be read whole";
+/** The reason when the session did not answer the live read in time. */
+export const NO_ANSWER_IN_TIME = "the session did not answer in time";
+/** The reason when the session's live read failed. */
+export const LIVE_READ_FAILED = "the session could not be asked";
 
-/** The session's problems, in order: the endpoint's trouble, a failed read, the live
- * part that did not read (`facts.agents` null). A watch that is down while the reads
- * answer is not one. */
+/** Why the live part did not read, by the facts' `live_error`: the session did not answer
+ * in time, its live read failed, or, when it answered, its agent list was not whole. */
+export function liveReason(liveError: string | null): string {
+  if (liveError === "timeout") return NO_ANSWER_IN_TIME;
+  if (liveError === "failed") return LIVE_READ_FAILED;
+  return LIST_NOT_WHOLE;
+}
+
+/** The session's problems, in order: the endpoint's trouble, a failed read with why it
+ * failed, the live part that did not read (`facts.agents` null) with why. A watch that is
+ * down while the reads answer is not one. */
 export function problemsOf(session: Session): Problem[] {
   const found: Problem[] = [];
   if (session.trouble !== null) found.push({ lead: TROUBLE_LEAD, reason: session.trouble });
@@ -115,7 +126,7 @@ export function problemsOf(session: Session): Problem[] {
     found.push({ lead: UNREAD_LEAD, reason: session.read_error });
   }
   if (session.facts !== null && session.facts.agents === null) {
-    found.push({ lead: UNREAD_LEAD, reason: LIST_NOT_WHOLE });
+    found.push({ lead: UNREAD_LEAD, reason: liveReason(session.facts.live_error ?? null) });
   }
   return found;
 }
@@ -239,7 +250,8 @@ export interface News {
   description: string | null;
 }
 
-export const MAY_HOLD_DRAFT = "may hold a draft";
+/** The news, and the `Prompt box` line, for a draft in the box. */
+export const DRAFT_NOT_SENT = "draft not sent";
 
 const KINDS: readonly { kind: string; one: string; many: string }[] = [
   { kind: "subagent", one: "subagent busy", many: "subagents busy" },
@@ -248,8 +260,9 @@ const KINDS: readonly { kind: string; one: string; many: string }[] = [
 ];
 
 /** The session's news, each only when true, in the panel's order: busy subagents,
- * teammates, running shells, the busy count when there is no list, and `may hold a draft`
- * when turns reads its box and `draft` is set (a draft, or a box that could not be read). */
+ * teammates, running shells, the busy count when there is no list, and `draft not sent`
+ * when turns reads its box and read a draft in it. A box that was not read (`draft` null)
+ * is no news here; the opened row says it. */
 export function newsOf(session: Session): News[] {
   const news: News[] = [];
   const facts = session.facts;
@@ -262,7 +275,7 @@ export function newsOf(session: Session): News[] {
   } else if (facts !== null && facts.agents !== null && facts.agents > 0) {
     news.push({ text: `${facts.agents} agents busy`, description: null });
   }
-  if (session.has_box && facts?.draft === true) news.push({ text: MAY_HOLD_DRAFT, description: null });
+  if (session.has_box && facts?.draft === true) news.push({ text: DRAFT_NOT_SENT, description: null });
   return news;
 }
 
@@ -292,6 +305,13 @@ export interface Launch {
   where: string | null;
 }
 
+/** The row's name: the name typed in the harness, else the launch's, else the folder and
+ * start time. */
+export function nameOf(session: Session, today: string, launch: Launch | null = null,
+                       clock: Clock = LOCAL): string {
+  return session.typed_name || launch?.name || folderName(session, today, clock);
+}
+
 /**
  * The row's lines. A problem row: line two is the first problem's lead (heavy) and its
  * reason in the text colour; line three is a second problem's lead and reason, then the
@@ -302,7 +322,7 @@ export interface Launch {
 export function rowLines(session: Session, group: Group, today: string, launch: Launch | null = null,
                          clock: Clock = LOCAL): RowLines {
   const lines: RowLines = {
-    name: launch?.name || folderName(session, today, clock),
+    name: nameOf(session, today, launch, clock),
     where: launch?.where || null,
     fact: factOf(session, group, today, clock),
     lead: null, leadHeavy: false, rest: null, restStrong: false, tail: null, note: null,

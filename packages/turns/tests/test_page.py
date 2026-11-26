@@ -49,7 +49,7 @@ LIVE_S = 30.0
 
 SESSION_KEYS = ["key", "harness", "pid", "session_id", "cwd", "started", "capabilities",
                 "endpoint_version", "mod_version", "trouble", "facts", "agents",
-                "read_error", "ended_at", "has_box", "unread_since"]
+                "read_error", "ended_at", "has_box", "unread_since", "typed_name"]
 
 
 #: The reader's own reach, before `fresh_reader` puts a stand-in in its place.
@@ -65,8 +65,10 @@ def loopback():
 @pytest.fixture(autouse=True)
 def fresh_reader(monkeypatch, turns_env):
     """Each test starts its own reader in its own runtime directory, and stops it. Its
-    reach is a stand-in: only the reach's own tests read it through `claude_setup`."""
+    reach is a stand-in: only the reach's own tests read it through `claude_setup`. So is
+    its typed name: only the name's own tests read a Claude Code record."""
     monkeypatch.setattr(pagereader, "_claude_reach", lambda: "start")
+    monkeypatch.setattr(pagereader, "_typed_name", lambda pid, session_id: None)
     monkeypatch.setattr(pagehandlers, "_reader_now", None)
     monkeypatch.setattr(pagehandlers, "_feed_now", None)
     yield
@@ -376,11 +378,13 @@ def test_each_session_carries_the_declared_fields_and_cwd_is_a_path():
     assert list(page.SESSION.items) == SESSION_KEYS
     assert page.SESSION.items["cwd"].mark == "path"
     marked = {key for key, out in page.SESSION.items.items() if out.mark is not None}
-    assert marked == {"cwd", "trouble"}
+    assert marked == {"cwd", "trouble", "typed_name"}
+    assert page.SESSION.items["typed_name"].mark == "redact"
     assert page.LIST["home"].mark == "path"
     assert list(page.FACTS.items) == ["session_id", "turn_number", "turn_open",
                                       "turn_started_at", "agents", "draft", "stale",
-                                      "ready", "at"]
+                                      "ready", "at", "ended_at", "live_error"]
+    assert page.FACTS.items["draft"].nullable
     assert list(page.READY.items) == ["source", "session_id", "at"]
     assert list(page.AGENTS.items) == ["entries", "complete"]
     assert list(page.AGENT.items) == ["id", "kind", "state", "final", "description",
@@ -647,17 +651,28 @@ def test_ended_at_is_sent_while_the_reading_is_at_the_turn_that_ended(make_endpo
     run(go())
 
 
-def test_a_session_first_seen_idle_has_no_ended_at(make_endpoint):
+def test_a_session_first_seen_idle_has_the_end_its_endpoint_kept(make_endpoint):
     ep, fake = make_endpoint(session_id="s-1")
     fake.start_turn()
+    before = time.time()
     fake.end_turn()
+    after = time.time()
     _, data = run(get(served()))
     assert turn(data, ep.dir.name) == (1, False)
+    assert before <= row_of(data, ep.dir.name)["ended_at"] <= after
+    assert facts_of(data, ep.dir.name)["ended_at"] == row_of(data, ep.dir.name)["ended_at"]
+
+
+def test_a_session_that_never_ran_a_turn_has_no_ended_at(make_endpoint):
+    ep, _ = make_endpoint(session_id="s-1")
+    _, data = run(get(served()))
+    assert turn(data, ep.dir.name) == (0, False)
     assert row_of(data, ep.dir.name)["ended_at"] is None
+    assert facts_of(data, ep.dir.name)["ended_at"] is None
 
 
-def test_a_turn_that_ended_while_no_watch_was_held_has_no_ended_at(make_endpoint,
-                                                                    monkeypatch):
+def test_a_turn_that_ended_while_no_watch_was_held_has_the_endpoints_end(make_endpoint,
+                                                                          monkeypatch):
     def no_watch(self):
         raise turns.TurnsError("the watch cannot start")
 
@@ -674,11 +689,23 @@ def test_a_turn_that_ended_while_no_watch_was_held_has_no_ended_at(make_endpoint
         stream = Stream(served())
         try:
             data = await stream.until(lambda d: turn(d, key) == (1, False), LIVE_S)
-            assert row_of(data, key)["ended_at"] is None
+            assert row_of(data, key)["ended_at"] == ep.ledger.ended_at
+            assert pagehandlers._reader_now._held[key].ended is None
         finally:
             await stream.close()
 
     run(go())
+
+
+def test_an_endpoint_that_keeps_no_end_falls_back_to_the_watchs_stamp(odd):
+    """An endpoint of an older turns sends no `ended_at`: the reader's own stamp stands in,
+    and a session it found idle has none."""
+    odd("claude-old", info(),
+        answers={"watch": lambda p: {"facts": facts_wire(turn_number=2)},
+                 "facts": lambda p: facts_wire(turn_number=2)})
+    _, data = run(get(served()))
+    [row] = data["sessions"]
+    assert row["facts"]["ended_at"] is None and row["ended_at"] is None
 
 
 def test_ended_at_waits_for_a_reading_that_answers(make_endpoint, monkeypatch):
@@ -732,6 +759,74 @@ def test_ended_at_needs_the_same_session_id_and_turn():
     assert pagereader.ended_at((5.0, "s-2", 3), facts) is None
     # A null id never matches another null.
     assert pagereader.ended_at((5.0, None, 3), {**facts, "session_id": None}) is None
+    # The endpoint's own end, when the reading carries one, needs no stamp; an open turn
+    # still sends none.
+    kept = {**facts, "ended_at": 7.0}
+    assert pagereader.ended_at(None, kept) == 7.0
+    assert pagereader.ended_at((5.0, "s-1", 3), kept) == 7.0
+    assert pagereader.ended_at(None, {**kept, "turn_open": True}) is None
+
+
+# --- the typed name ----------------------------------------------------------------------
+
+def test_a_claude_session_carries_the_name_typed_for_it(odd, monkeypatch):
+    asked = []
+    names = {"s-odd": "orders-skeleton"}
+
+    def typed(pid, session_id):
+        asked.append((pid, session_id))
+        return names.get(session_id)
+
+    monkeypatch.setattr(pagereader, "_typed_name", typed)
+    odd("claude-named", info(),
+        answers={"watch": lambda p: {"facts": facts_wire()}, "facts": lambda p: facts_wire()})
+
+    async def go():
+        stream = Stream(served())
+        try:
+            data = await stream.until(
+                lambda d: (row_of(d, "claude-named") or {}).get("typed_name") is not None,
+                LIVE_S)
+            assert row_of(data, "claude-named")["typed_name"] == "orders-skeleton"
+            assert (os.getpid(), "s-odd") in asked
+            # A rename shows at the next read.
+            names["s-odd"] = "orders"
+            pagehandlers._reader_now._held["claude-named"].dirty.set()
+            await stream.until(
+                lambda d: (row_of(d, "claude-named") or {}).get("typed_name") == "orders", LIVE_S)
+            # A record that no longer gives one: the name goes.
+            names.clear()
+            pagehandlers._reader_now._held["claude-named"].dirty.set()
+            await stream.until(
+                lambda d: (row_of(d, "claude-named") or {}).get("typed_name", 1) is None, LIVE_S)
+        finally:
+            await stream.close()
+
+    run(go())
+
+
+@pytest.mark.parametrize("harness", ["codex", "opencode", ""])
+def test_only_a_claude_session_is_asked_for_its_typed_name(odd, monkeypatch, harness):
+    asked = []
+    monkeypatch.setattr(pagereader, "_typed_name",
+                        lambda pid, session_id: asked.append(pid) or "named")
+    odd("odd-unnamed", info(harness=harness),
+        answers={"watch": lambda p: {"facts": facts_wire()}, "facts": lambda p: facts_wire()})
+    _, data = run(get(served()))
+    [row] = data["sessions"]
+    assert row["typed_name"] is None and asked == []
+
+
+def test_a_typed_name_that_cannot_be_read_is_none(odd, monkeypatch):
+    def broken(pid, session_id):
+        raise PermissionError(13, "Permission denied")
+
+    monkeypatch.setattr(pagereader, "_typed_name", broken)
+    odd("claude-broken", info(),
+        answers={"watch": lambda p: {"facts": facts_wire()}, "facts": lambda p: facts_wire()})
+    _, data = run(get(served()))
+    [row] = data["sessions"]
+    assert row["typed_name"] is None and row["read_error"] is None
 
 
 # --- the prompt box ----------------------------------------------------------------------
@@ -765,21 +860,53 @@ def test_the_codex_and_opencode_adapters_never_say_draft():
         assert opencode.live().draft is False
 
 
-@pytest.mark.parametrize(("setup", "draft", "agents"), [
-    ({"draft": True}, True, 0),                             # a draft, the list read
-    ({"box_fails": True}, True, 0),                         # the box read throws
-    ({"agents_fail": True}, False, None),                   # the box empty, no list
-    ({"agents_fail": True, "draft": True}, True, None),     # a draft, no list
-    ({"live_fails": True}, True, None),                     # the live read failed
+@pytest.mark.parametrize(("setup", "draft", "agents", "live_error"), [
+    ({}, False, 0, None),                                         # the box read empty
+    ({"draft": True}, True, 0, None),                             # a draft, the list read
+    ({"box_fails": True}, None, 0, None),                         # the box read throws
+    ({"agents_fail": True}, False, None, None),                   # the box empty, no list
+    ({"agents_fail": True, "draft": True}, True, None, None),     # a draft, no list
+    ({"live_fails": True}, None, None, "failed"),                 # the live read failed
+    ({"live_delay_s": 1.0, "live_wait_s": 0.2}, None, None, "timeout"),   # it was late
 ])
-def test_the_draft_cases_on_the_wire(make_endpoint, setup, draft, agents):
+def test_the_draft_cases_on_the_wire(make_endpoint, setup, draft, agents, live_error):
     fake = FakeHarness()
     for name, value in setup.items():
         setattr(fake, name, value)
     ep, _ = make_endpoint(fake, session_id="s-1")
     _, data = run(get(served()))
     facts = facts_of(data, ep.dir.name)
-    assert (facts["draft"], facts["agents"]) == (draft, agents)
+    assert (facts["draft"], facts["agents"], facts["live_error"]) == (draft, agents, live_error)
+
+
+@pytest.mark.parametrize(("wire", "draft"), [
+    ({"draft": True, "box": "draft"}, True),
+    ({"draft": False, "box": "empty"}, False),
+    ({"draft": True, "box": None}, None),
+    # An endpoint that sends no box: false is a box read empty, true may be one not read.
+    ({"draft": False}, False),
+    ({"draft": True}, None),
+    ({"draft": True, "box": "something else"}, None),
+])
+def test_draft_is_null_when_the_box_was_not_read(odd, wire, draft):
+    odd("claude-box", info(),
+        answers={"watch": lambda p: {"facts": facts_wire(**wire)},
+                 "facts": lambda p: facts_wire(**wire)})
+    _, data = run(get(served()))
+    [row] = data["sessions"]
+    assert row["facts"]["draft"] is draft
+
+
+@pytest.mark.parametrize(("wire", "live_error"), [
+    ({"live_error": "timeout"}, "timeout"), ({"live_error": "failed"}, "failed"),
+    ({"live_error": None}, None), ({}, None), ({"live_error": "melted"}, None)])
+def test_live_error_is_sent_as_the_endpoint_says_it(odd, wire, live_error):
+    odd("claude-live", info(),
+        answers={"watch": lambda p: {"facts": facts_wire(agents=None, **wire)},
+                 "facts": lambda p: facts_wire(agents=None, **wire)})
+    _, data = run(get(served()))
+    [row] = data["sessions"]
+    assert row["facts"]["live_error"] == live_error
 
 
 # --- the reach --------------------------------------------------------------------------------
@@ -937,7 +1064,7 @@ def test_an_endpoint_that_hangs_stalls_neither_the_topic_nor_the_read(make_endpo
                 LIVE_S)
             hung_row = row_of(data, "claude-hung")
             assert hung_row["facts"] is None and hung_row["agents"] is None
-            assert "watch" in hung_row["read_error"]
+            assert hung_row["read_error"] == "the session did not answer in time"
             fake.start_turn()
             # The short bound is the claim that the topic is not stalled: a topic held up
             # by the hung reads would come free when their client timeouts end.
@@ -992,7 +1119,7 @@ def test_values_of_the_wrong_type_never_reach_the_page(odd):
     assert row["endpoint_version"] is None and row["session_id"] is None
     assert row["trouble"] == "the endpoint reports trouble turns cannot read"
     assert row["facts"] is None
-    assert row["read_error"] == "its turn could not be read, so what shows may be old"
+    assert row["read_error"] == "its answer could not be read"
     assert isinstance(row["unread_since"], float)
 
 
@@ -1004,7 +1131,7 @@ def test_a_failed_read_keeps_the_last_agents_and_says_so(make_endpoint, monkeypa
 
     def agents(self):
         if failing.is_set():
-            raise turns.TurnsError("the endpoint did not answer agents")
+            raise turns.TurnsError("the endpoint did not answer agents", why="closed")
         return real(self)
 
     monkeypatch.setattr(client.Session, "agents", agents)
@@ -1024,8 +1151,7 @@ def test_a_failed_read_keeps_the_last_agents_and_says_so(make_endpoint, monkeypa
             # the turn is still open. So each wait is for the error and the turn together.
             data = await stream.until(lambda d: row_of(d, key)["read_error"] is not None
                                       and turn(d, key) == (1, True), LIVE_S)
-            assert row_of(data, key)["read_error"] == (
-                "its agents could not be read, so what shows may be old")
+            assert row_of(data, key)["read_error"] == "its link closed during the read"
             assert row_of(data, key)["agents"] == {"entries": [], "complete": True}
             failing.clear()
             fake.end_turn()
@@ -1066,23 +1192,47 @@ def test_the_reader_starts_on_the_first_ask_and_stop_closes_every_watch(make_end
 
 
 def test_the_read_error_sentences():
+    assert pagereader.read_error({}) is None
     assert pagereader.read_error(set()) is None
-    assert pagereader.read_error({"watch"}) == (
+    assert pagereader.read_error({"watch": "timeout"}) == (
         "Moxi can't watch it, so what shows is read every 30 s and may be up to 30 s old")
-    assert pagereader.read_error({"watch"}, reread_s=2.5) == (
+    assert pagereader.read_error({"watch": None}, reread_s=2.5) == (
         "Moxi can't watch it, so what shows is read every 2.5 s and may be up to 2.5 s old")
-    assert pagereader.read_error({"watch", "facts"}) == (
-        "Moxi can't watch it or read its turn, and tries again")
-    assert pagereader.read_error({"agents", "watch"}) == (
-        "Moxi can't watch it or read its agents, and tries again")
-    assert pagereader.read_error({"facts", "agents", "watch"}) == (
-        "Moxi can't watch it or read its turn and agents, and tries again")
-    assert pagereader.read_error({"facts"}) == (
-        "its turn could not be read, so what shows may be old")
-    assert pagereader.read_error({"agents"}) == (
-        "its agents could not be read, so what shows may be old")
-    assert pagereader.read_error({"agents", "facts"}) == (
-        "its turn and agents could not be read, so what shows may be old")
+    # With a read failed, the reason the first failed read gives: the facts', then the
+    # agents'; the watch's own reason stands back.
+    assert pagereader.read_error({"watch": "unreachable", "facts": "timeout"}) == (
+        "the session did not answer in time")
+    assert pagereader.read_error({"agents": "gone", "facts": "refused"}) == (
+        "it refused the read")
+    assert pagereader.read_error({"agents": "unreadable", "watch": "closed"}) == (
+        "its answer could not be read")
+    assert pagereader.read_error({"facts": None}) == "the read failed"
+    assert pagereader.read_error({"facts"}) == "the read failed"
+
+
+@pytest.mark.parametrize(("why", "reason"), [
+    ("timeout", "the session did not answer in time"),
+    ("unreachable", "Moxi can't reach it"),
+    ("closed", "its link closed during the read"),
+    ("gone", "the session is ending"),
+    ("version", "it speaks another version of turns"),
+    ("refused", "it refused the read"),
+    ("unreadable", "its answer could not be read"),
+])
+def test_each_kind_of_failure_has_its_own_reason(why, reason):
+    assert pagereader.read_error({"facts": why}) == reason
+
+
+def test_every_kind_the_library_names_has_a_reason():
+    assert set(pagereader.REASONS) == set(client.WHYS)
+    assert len(set(pagereader.REASONS.values())) == len(client.WHYS)
+
+
+def test_why_a_read_failed():
+    assert pagereader.why_failed(turns.TurnsError("x", why="gone")) == "gone"
+    assert pagereader.why_failed(turns.TurnsError("x")) is None
+    assert pagereader.why_failed(ValueError("facts.at is not of its type")) == "unreadable"
+    assert pagereader.why_failed(RuntimeError("x")) is None
 
 
 # --- the timer -----------------------------------------------------------------------------

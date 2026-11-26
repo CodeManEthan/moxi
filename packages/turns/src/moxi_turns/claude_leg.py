@@ -220,10 +220,12 @@ was lost: the endpoint fails the open submit window (its delivery reads `Lost`, 
 `untied: …`) rather than tie a delivery from a partial record, then applies it. Answer:
 `{"ok": true}`.
 
-`/live` — `{ask, agents, draft}` (or `{ask, error}`), the answer to a `live` line.
+`/live` — `{ask, agents, draft, box}` (or `{ask, error}`), the answer to a `live` line.
 `agents` is `$.agent.list()` unmapped, each `{id, type, status, parentId?, teammateId?}`:
 the endpoint maps it, judges the `waiting` subagents (`claude_stale`) and counts the busy
-entries. An integer is an older runner's own count of busy entries, read unjudged.
+entries. An integer is an older runner's own count of busy entries, read unjudged. `box`
+is the prompt box as read, `draft` or `empty`, null when it could not be read (then
+`draft` is true); an older runner sends none, read as null.
 `agents` is null when `$.agent.list()` could not be read: unknown, which counts as busy
 and never as 0. An unreadable box is sent as `draft: true`. Answer `{"ok": true}`.
 

@@ -23,13 +23,20 @@ export interface Facts {
   turn_started_at: number | null;
   /** Busy subagents; null when they could not be listed. */
   agents: number | null;
-  /** On a session with `has_box`: a draft, or a box that could not be read. */
-  draft: boolean;
+  /** On a session with `has_box`: true for a draft, false for an empty box, null when the
+   * box was not read. */
+  draft: boolean | null;
   /** The reading is not one moment: the turn ledger moved while it was read. */
   stale: boolean;
   ready: Ready | null;
   /** When the read was made, epoch seconds on the server's clock. */
   at: number;
+  /** When the session's last turn ended, as its endpoint keeps it; null before the first
+   * end at this session id. */
+  ended_at: number | null;
+  /** Why the live part did not read: `timeout` (the session did not answer in time) or
+   * `failed`; null when it answered. */
+  live_error: string | null;
 }
 
 /** One subagent, teammate or background shell. */
@@ -62,16 +69,19 @@ export interface Session {
   trouble: string | null;
   facts: Facts | null;
   agents: Agents | null;
-  /** What could not be watched or read, as one sentence; null when every read answered. */
+  /** Why a read failed, as one sentence (with a read failed, the reason it failed); null
+   * when every read answered. */
   read_error: string | null;
-  /** When the page server's watch saw the turn end, sent only while the latest facts show
-   * no turn open at that turn; else null. */
+  /** When the last turn ended, sent only while the latest facts show no turn open: the
+   * endpoint's own, else the time the page server's watch saw it; else null. */
   ended_at: number | null;
   /** Whether turns reads this harness's prompt box, so `facts.draft` can be true. */
   has_box: boolean;
   /** When a run of unread readings began: a facts or agents read failed, or the facts
    * reading has `agents` null. The watch alone being down doesn't count. */
   unread_since: number | null;
+  /** The name the person typed for the session in the harness; null when there is none. */
+  typed_name: string | null;
 }
 
 /** Whether Claude Code sessions started by hand run with turns: `start` (they do), `setup`

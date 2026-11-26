@@ -1,3 +1,5 @@
+import time
+
 from moxi_turns.ledger import TurnLedger
 
 
@@ -34,3 +36,27 @@ def test_an_ending_turn_stays_open_and_takes_no_steer():
     assert led.ending() is None
     _, second = led.started("t2", None)
     assert not second.ending and led.steered_into("d4") is second
+
+
+def test_the_ledger_keeps_when_the_last_turn_ended():
+    led = TurnLedger("s-1")
+    assert led.read().ended_at is None
+    led.started("t1", None)
+    assert led.read().ended_at is None
+    before = time.time()
+    led.ended("answer")
+    first = led.read().ended_at
+    assert before <= first <= time.time()
+    # A turn open keeps the last end; an end missed and closed at the next start leaves it.
+    led.started("t2", None)
+    assert led.read().ended_at == first
+    led.started("t3", None)
+    assert led.read().ended_at == first
+    led.ended("answer")
+    assert led.read().ended_at >= first
+    # A new session id clears it; the first id learned does not.
+    first_id = TurnLedger(None)
+    first_id.started("t1", None)
+    first_id.ended("answer")
+    assert first_id.new_session("s-1") and first_id.read().ended_at is not None
+    assert led.new_session("s-2") and led.read().ended_at is None

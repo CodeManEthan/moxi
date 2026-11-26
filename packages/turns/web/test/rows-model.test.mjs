@@ -2,9 +2,9 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
-  dayTime, dayWord, factOf, folderName, groupOf, groupsOf, harnessName, isBusy, isWaiting,
-  isWatchAlone, LIST_NOT_WHOLE, MAY_HOLD_DRAFT, newsOf, ordered, problemsOf, READ_ON_TIMER, rowLines,
-  sinceOf, timeWord, TROUBLE_LEAD, UNREAD_LEAD,
+  dayTime, dayWord, DRAFT_NOT_SENT, factOf, folderName, groupOf, groupsOf, harnessName, isBusy, isWaiting,
+  isWatchAlone, LIST_NOT_WHOLE, LIVE_READ_FAILED, liveReason, nameOf, newsOf, NO_ANSWER_IN_TIME, ordered,
+  problemsOf, READ_ON_TIMER, rowLines, sinceOf, timeWord, TROUBLE_LEAD, UNREAD_LEAD,
 } from "../src/rows-model.ts";
 
 const UTC = {
@@ -20,12 +20,12 @@ const ID = "aaaaaaaa-1111-4111-8111-111111111111";
 const facts = (extra) => ({ session_id: ID, turn_number: 4, turn_open: false, turn_started_at: null,
                             agents: 0, draft: false, stale: false,
                             ready: { source: "startup", session_id: ID, at: at("08:20") },
-                            at: at("19:00"), ...extra });
+                            at: at("19:00"), ended_at: null, live_error: null, ...extra });
 const session = (extra) => ({ key: "claude-n1", harness: "claude", pid: 4321, session_id: ID,
   cwd: "/work/kestrel-web", started: at("08:20"), capabilities: ["agents", "deliver"],
   endpoint_version: "0.2.4", mod_version: "0.1.0", trouble: null, facts: facts(),
   agents: { entries: [], complete: true }, read_error: null, ended_at: null, has_box: true,
-  unread_since: null, ...extra });
+  unread_since: null, typed_name: null, ...extra });
 const agent = (extra) => ({ id: "a1", kind: "subagent", state: "running", final: false,
                             description: null, parent_id: null, ...extra });
 
@@ -102,6 +102,34 @@ test("each problem case, and a row with two", () => {
                    [{ lead: UNREAD_LEAD, reason: LIST_NOT_WHOLE }]);
   assert.deepEqual(problemsOf(session({ trouble: "t", facts: facts({ agents: null }), unread_since: 1 })),
                    [{ lead: TROUBLE_LEAD, reason: "t" }, { lead: UNREAD_LEAD, reason: LIST_NOT_WHOLE }]);
+  // A failed read gives the reason the page server sends for it.
+  assert.deepEqual(problemsOf(session({ read_error: "the session did not answer in time", unread_since: 1 })),
+                   [{ lead: UNREAD_LEAD, reason: "the session did not answer in time" }]);
+});
+
+test("the live part that did not read says why: no answer in time, a read that failed, a list not whole", () => {
+  assert.equal(NO_ANSWER_IN_TIME, "the session did not answer in time");
+  assert.equal(liveReason("timeout"), NO_ANSWER_IN_TIME);
+  assert.equal(liveReason("failed"), LIVE_READ_FAILED);
+  assert.equal(liveReason(null), LIST_NOT_WHOLE);
+  assert.equal(liveReason("something new"), LIST_NOT_WHOLE);
+  const late = session({ facts: facts({ agents: null, draft: null, live_error: "timeout" }), unread_since: 1 });
+  assert.deepEqual(problemsOf(late), [{ lead: UNREAD_LEAD, reason: NO_ANSWER_IN_TIME }]);
+  const lines = rowLines(late, "problem", TODAY, null, UTC);
+  assert.deepEqual([lines.lead, lines.rest], [UNREAD_LEAD, "the session did not answer in time"]);
+  const failed = session({ facts: facts({ agents: null, draft: null, live_error: "failed" }), unread_since: 1 });
+  assert.deepEqual(problemsOf(failed), [{ lead: UNREAD_LEAD, reason: LIVE_READ_FAILED }]);
+});
+
+test("the name: typed in the harness first, then the launch's, then the folder and start", () => {
+  const launch = { name: "planner-Nov-08-2026 12:45", where: "slot 3 · atlas-api" };
+  assert.equal(nameOf(session({ typed_name: "orders-skeleton" }), TODAY, launch, UTC), "orders-skeleton");
+  assert.equal(nameOf(session({ typed_name: "orders-skeleton" }), TODAY, null, UTC), "orders-skeleton");
+  assert.equal(nameOf(session(), TODAY, launch, UTC), "planner-Nov-08-2026 12:45");
+  assert.equal(nameOf(session(), TODAY, null, UTC), "kestrel-web · started today 08:20");
+  assert.equal(nameOf(session({ typed_name: "" }), TODAY, null, UTC), "kestrel-web · started today 08:20");
+  const lines = rowLines(session({ typed_name: "orders-skeleton" }), "idle", TODAY, launch, UTC);
+  assert.deepEqual([lines.name, lines.where], ["orders-skeleton", "slot 3 · atlas-api"]);
 });
 
 test("since for working, idle with ended_at, turn 0 with a ready of this id or another, and neither", () => {
@@ -196,20 +224,22 @@ test("each news phrase, one entry's description, and the busy count without a li
   assert.deepEqual(newsOf(session({ agents: null, facts: facts({ agents: null }) })), []);
 });
 
-test("the draft cases on the wire each read `may hold a draft` or nothing on the closed row", () => {
+test("the draft cases on the wire: `draft not sent` for a draft read, nothing for an empty box or one not read", () => {
   const cases = [
     ["a draft", facts({ draft: true }), true],
-    ["a box that throws", facts({ draft: true }), true],
+    ["a box that throws", facts({ draft: null }), false],
     ["agents_fail with the box empty", facts({ draft: false, agents: null }), false],
     ["agents_fail with a draft", facts({ draft: true, agents: null }), true],
-    ["live_fails", facts({ draft: true, agents: null }), true],
+    ["live_fails", facts({ draft: null, agents: null, live_error: "failed" }), false],
+    ["late", facts({ draft: null, agents: null, live_error: "timeout" }), false],
   ];
   for (const [name, read, shown] of cases) {
     const words = newsOf(session({ facts: read })).map((n) => n.text);
-    assert.deepEqual(words, shown ? [MAY_HOLD_DRAFT] : [], name);
+    assert.deepEqual(words, shown ? [DRAFT_NOT_SENT] : [], name);
     const all = JSON.stringify(rowLines(session({ facts: read }), groupOf(session({ facts: read })), TODAY, null, UTC));
-    assert.doesNotMatch(all, /box|not known|draft not sent/, name);
+    assert.doesNotMatch(all, /box|not known|may hold/, name);
   }
+  assert.equal(DRAFT_NOT_SENT, "draft not sent");
   // A harness whose box turns doesn't read says nothing of a draft.
   assert.deepEqual(newsOf(session({ has_box: false, facts: facts({ draft: true }) })), []);
 });
@@ -242,7 +272,7 @@ test("line two on another row: the first phrase leads, its description is the re
   assert.equal(lines.leadHeavy, false);
   assert.equal(lines.rest, "Check the plan");
   assert.equal(lines.restStrong, false);
-  assert.equal(lines.tail, `1 shell running · npm test · ${MAY_HOLD_DRAFT}`);
+  assert.equal(lines.tail, "1 shell running · npm test · draft not sent");
   assert.equal(lines.note, null);
   const quiet = rowLines(session(), "idle", TODAY, null, UTC);
   assert.deepEqual([quiet.lead, quiet.rest, quiet.tail, quiet.note], [null, null, null, null]);

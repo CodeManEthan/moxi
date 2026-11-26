@@ -23,11 +23,18 @@ failed: the timer still reads the session, and `read_error` says what shows may 
 `REREAD_S` seconds old. A reading that differs from the one held only in its `at` replaces
 it without telling the listeners, so the topic publishes nothing for it.
 
-When the watch sees a `turn.ended`, the reader stamps the session with its own wall clock
-and the event's session id and turn number. The row sends that time as `ended_at` only
-while the latest facts reading shows no turn open at that same session id and turn number:
-a turn opened since, a new session id, or a turn that ended while no watch was held each
-leave it null until the watch sees the next end. Nothing guesses an end it did not see.
+A session's `ended_at` is when its last turn ended, while the latest facts reading shows
+no turn open. The endpoint keeps it (`facts.ended_at`), so a session the page server found
+already idle has it too. From an endpoint that does not send it, the reader's own stamp
+stands in: when the watch sees a `turn.ended`, the reader stamps the session with its own
+wall clock and the event's session id and turn number, and the row sends that time only
+while the latest facts reading shows no turn open at that same session id and turn number.
+Nothing guesses an end turns did not see.
+
+`read_error` says why a read failed, one fixed reason per kind of failure the library
+reports (`client.WHYS`; `read_error`). On Claude Code each reads pass also reads the name
+the person typed for the session from Claude Code's own record of the process
+(`claude_record`), sent as `typed_name`.
 
 The library is blocking, and each of its calls is bounded by the library's own timeouts.
 Each session's calls run on that session's own threads, so a slow or dead endpoint holds up
@@ -65,8 +72,10 @@ import os
 import shutil
 import threading
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from typing import Any
+
+from .results import LIVE_ERRORS
 
 log = logging.getLogger("moxi.turns.page")
 
@@ -93,6 +102,10 @@ _READS = ("watch", "facts", "agents")
 #: The harnesses whose prompt box turns reads. Only Claude Code's runner reads the box;
 #: the Codex and OpenCode hosts have none, and their `draft` is always false.
 BOX_HARNESSES = frozenset({"claude"})
+
+#: The harnesses whose typed names turns reads: Claude Code keeps one per process.
+NAMED_HARNESSES = frozenset({"claude"})
+
 
 
 def _text(value: Any) -> str | None:
@@ -124,6 +137,18 @@ def _flag(value: Any) -> bool | None:
     return value if isinstance(value, bool) else None
 
 
+def draft_of(draft: Any, box: Any) -> bool | None:
+    """The prompt box as the page sends it: True for a draft, False for an empty box, None
+    when the box was not read. A reading with no `box` (an older endpoint or runner) is
+    read from `draft` alone, where false is a box read empty and true may be a box that
+    was not read."""
+    if box == "draft":
+        return True
+    if box == "empty" or draft is False:
+        return False
+    return None
+
+
 def facts_row(facts: Any) -> dict[str, Any]:
     """A `Facts` as the page sends it. Raises `ValueError` for a value of the wrong type."""
     ready = facts.ready
@@ -137,16 +162,19 @@ def facts_row(facts: Any) -> dict[str, Any]:
     started_at = None
     if facts.turn is not None:
         started_at = _need(facts.turn.started_at, _number, "facts.turn.started_at")
+    live_error = getattr(facts, "live_error", None)
     return {
         "session_id": _text(facts.session_id),
         "turn_number": _need(facts.turn_number, _int, "facts.turn_number"),
         "turn_open": _need(facts.turn_open, _flag, "facts.turn_open"),
         "turn_started_at": started_at,
         "agents": agents,
-        "draft": _need(facts.draft, _flag, "facts.draft"),
+        "draft": draft_of(_need(facts.draft, _flag, "facts.draft"), getattr(facts, "box", None)),
         "stale": _need(facts.stale, _flag, "facts.stale"),
         "ready": ready_row,
         "at": _need(facts.at, _number, "facts.at"),
+        "ended_at": _number(getattr(facts, "ended_at", None)),
+        "live_error": live_error if live_error in LIVE_ERRORS else None,
     }
 
 
@@ -191,10 +219,15 @@ def info_row(key: str, info: dict[str, Any], capabilities: frozenset[str]) -> di
 
 def ended_at(ended: tuple[float, str | None, int | None] | None,
              facts: dict[str, Any] | None) -> float | None:
-    """The time of the turn end `ended` names, while the reading `facts` is still at that
-    turn: no turn open, the same session id (never a null one) and the same turn number.
-    None otherwise."""
-    if ended is None or facts is None or facts["turn_open"]:
+    """When the session's last turn ended, while the reading `facts` shows no turn open:
+    the endpoint's own `ended_at` when the reading carries one; else the time of the turn
+    end the watch saw, `ended`, while the reading is still at that turn (the same session
+    id, never a null one, and the same turn number). None otherwise."""
+    if facts is None or facts["turn_open"]:
+        return None
+    if facts.get("ended_at") is not None:
+        return facts["ended_at"]
+    if ended is None:
         return None
     at, session_id, turn_number = ended
     if session_id is None or facts["session_id"] != session_id:
@@ -202,23 +235,46 @@ def ended_at(ended: tuple[float, str | None, int | None] | None,
     return at if facts["turn_number"] == turn_number else None
 
 
-#: What `read_error` calls each read.
-_WHAT = {"facts": "turn", "agents": "agents"}
+#: The reason the page shows for a read that failed, by why it failed (`client.WHYS`).
+REASONS = {
+    "timeout": "the session did not answer in time",
+    "unreachable": "Moxi can't reach it",
+    "closed": "its link closed during the read",
+    "gone": "the session is ending",
+    "version": "it speaks another version of turns",
+    "refused": "it refused the read",
+    "unreadable": "its answer could not be read",
+}
+#: The reason for a failure whose kind turns can't say.
+REASON_UNKNOWN = "the read failed"
 
 
-def read_error(failed: set[str], *, reread_s: float = REREAD_S) -> str | None:
-    """The sentence the page shows for the reads that failed, or None when none did. With
-    the watch alone down the timer still reads the session every `reread_s` seconds."""
-    names = [name for name in _READS if name in failed]
+def why_failed(exc: BaseException) -> str | None:
+    """Why a read failed with `exc`, as `client.WHYS` names it, or None when it can't be
+    told. A value of the wrong type in an answer is `unreadable`."""
+    why = getattr(exc, "why", None)
+    if isinstance(why, str):
+        return why
+    if isinstance(exc, ValueError):
+        return "unreadable"
+    return None
+
+
+def read_error(failed: Mapping[str, str | None] | set[str], *,
+               reread_s: float = REREAD_S) -> str | None:
+    """The sentence the page shows for the reads that failed, by read name and why each
+    failed, or None when none did: the reason of the first failed read of the facts, then
+    the agents. With the watch alone down the timer still reads the session every
+    `reread_s` seconds, and the sentence says so."""
+    whys = dict(failed) if isinstance(failed, Mapping) else dict.fromkeys(failed)
+    names = [name for name in _READS if name in whys]
     if not names:
         return None
     if names == ["watch"]:
         return (f"Moxi can't watch it, so what shows is read every {reread_s:g} s and may "
                 f"be up to {reread_s:g} s old")
-    what = " and ".join(_WHAT[name] for name in names if name != "watch")
-    if "watch" in names:
-        return f"Moxi can't watch it or read its {what}, and tries again"
-    return f"its {what} could not be read, so what shows may be old"
+    first = next(name for name in names if name != "watch")
+    return REASONS.get(whys[first] or "", REASON_UNKNOWN)
 
 
 class _Held:
@@ -233,7 +289,10 @@ class _Held:
         self.capabilities = _capabilities(session)
         self.facts: dict[str, Any] | None = None
         self.agents: dict[str, Any] | None = None
-        self.failed: set[str] = set()
+        #: Each read that failed, by name, and why it failed (`client.WHYS`, or None).
+        self.failed: dict[str, str | None] = {}
+        #: The name the person typed for the session, or None.
+        self.typed_name: str | None = None
         #: The last turn end the watch saw: `(at, session_id, turn_number)`, or None.
         self.ended: tuple[float, str | None, int | None] | None = None
         #: When the run of unread readings began, or None.
@@ -272,6 +331,7 @@ class _Held:
         out["facts"] = self.facts
         out["agents"] = self.agents
         out["read_error"] = read_error(self.failed, reread_s=self.reader.reread_s)
+        out["typed_name"] = self.typed_name
         out["ended_at"] = ended_at(self.ended, self.facts)
         out["has_box"] = out["harness"] in BOX_HARNESSES
         out["unread_since"] = self.unread_since
@@ -280,7 +340,7 @@ class _Held:
     def is_unread(self) -> bool:
         """Under the reader's lock: whether the last facts or agents read failed, or the
         last facts reading has `agents` null."""
-        return (bool(self.failed & {"facts", "agents"})
+        return ("facts" in self.failed or "agents" in self.failed
                 or (self.facts is not None and self.facts["agents"] is None))
 
     # -- the watch thread ----------------------------------------------------------------
@@ -338,7 +398,22 @@ class _Held:
             self._read("facts", self.read_facts, facts_row)
             if "agents" in self.capabilities:
                 self._read("agents", self.session.agents, agents_row)
+            self._read_name()
             self.first.set()
+
+    def _read_name(self) -> None:
+        """Read the name the person typed for the session, on Claude Code only."""
+        with self.reader._lock:
+            harness, pid = self.info.get("harness"), _int(self.info.get("pid"))
+            session_id = _text(self.info.get("session_id"))
+        if harness not in NAMED_HARNESSES:
+            return
+        try:
+            name = self.reader.read_typed_name(pid, session_id)
+        except Exception as exc:  # noqa: BLE001 - a name that can't be read is none
+            log.info("reading the typed name of %s failed: %s", self.key, exc)
+            name = None
+        self.reader._named(self, name if isinstance(name, str) and name else None)
 
     def read_facts(self) -> Any:
         """The session's facts, read again at once while the reading is stale, at most
@@ -364,6 +439,12 @@ def _claude_reach() -> str | None:
     from . import claude_setup
 
     return claude_setup.reach(claude_setup.REACH_TIMEOUT_S)
+
+
+def _typed_name(pid: int | None, session_id: str | None) -> str | None:
+    from . import claude_record
+
+    return claude_record.typed_name(pid, session_id)
 
 
 def _cheap_facts() -> tuple[Any, ...]:
@@ -419,7 +500,8 @@ class Reader:
                  hold_s: float | None = None, reread_s: float | None = None,
                  unread_s: float | None = None,
                  reach: Callable[[], str | None] | None = None,
-                 reach_soon_s: float | None = None, reach_later_s: float | None = None):
+                 reach_soon_s: float | None = None, reach_later_s: float | None = None,
+                 typed_name: Callable[[int | None, str | None], str | None] | None = None):
         self.rescan_s = RESCAN_S if rescan_s is None else rescan_s
         self.retry_s = RETRY_S if retry_s is None else retry_s
         self.hold_s = HOLD_S if hold_s is None else hold_s
@@ -428,6 +510,7 @@ class Reader:
         self.reach_soon_s = REACH_SOON_S if reach_soon_s is None else reach_soon_s
         self.reach_later_s = REACH_LATER_S if reach_later_s is None else reach_later_s
         self._read_reach = _claude_reach if reach is None else reach
+        self.read_typed_name = _typed_name if typed_name is None else typed_name
         self._reach: dict[str, Any] | None = None
         self._lock = threading.Lock()
         self._held: dict[str, _Held] = {}
@@ -608,8 +691,9 @@ class Reader:
         with self._lock:
             if self._held.get(held.key) is not held:
                 return
-            first = name not in held.failed
-            held.failed.add(name)
+            why = why_failed(err)
+            first = held.failed.get(name, "") != why
+            held.failed[name] = why
             _mark_unread(held)
         if first:
             log.info("turns' page could not read the %s of %s: %s", name, held.key, err)
@@ -627,7 +711,7 @@ class Reader:
             if self._held.get(held.key) is not held:
                 return
             changed = name in held.failed
-            held.failed.discard(name)
+            held.failed.pop(name, None)
             if name != "watch":
                 held_now = getattr(held, name)
                 if held_now != value:
@@ -636,6 +720,13 @@ class Reader:
             changed = _mark_unread(held) or changed
         if changed:
             self._notify()
+
+    def _named(self, held: _Held, name: str | None) -> None:
+        with self._lock:
+            if self._held.get(held.key) is not held or held.typed_name == name:
+                return
+            held.typed_name = name
+        self._notify()
 
     def _gone(self, held: _Held, *, said: bool) -> None:
         with self._lock:
@@ -658,6 +749,7 @@ class Reader:
                 log.warning("a listener of turns' page failed: %s", exc, exc_info=exc)
 
 
-__all__ = ["BOX_HARNESSES", "HOLD_S", "REACH_LATER_S", "REACH_SOON_S", "REREAD_S", "RESCAN_S",
-           "RETRY_S", "STALE_REREADS", "UNREAD_S", "Reader", "agents_row", "ended_at", "facts_row",
-           "info_row", "read_error"]
+__all__ = ["BOX_HARNESSES", "HOLD_S", "NAMED_HARNESSES", "REACH_LATER_S",
+           "REACH_SOON_S", "REASONS", "REASON_UNKNOWN", "REREAD_S", "RESCAN_S", "RETRY_S",
+           "STALE_REREADS", "UNREAD_S", "Reader", "agents_row", "draft_of", "ended_at",
+           "facts_row", "info_row", "read_error", "why_failed"]

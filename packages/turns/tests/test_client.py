@@ -130,8 +130,9 @@ def test_nothing_serving_reads_refused_on_hand_ins_and_raises_on_reads(turns_env
     assert s.steer("x").wait_started(1) == Refused("gone")
     assert s.command("clear") == Refused("gone")
     for read in (s.facts, s.agents, s.refresh, s.watch):
-        with pytest.raises(turns.TurnsError):
+        with pytest.raises(turns.TurnsError) as caught:
             read()
+        assert caught.value.why == "unreachable"
 
 
 def test_a_server_that_closes_during_the_hello_reads_as_never_written(scripted):
@@ -217,9 +218,40 @@ def test_the_gone_error_reads_refused_and_lost(scripted):
     assert s.command("clear") == Refused("gone")
     with pytest.raises(turns.TurnsError) as caught:
         s.facts()
-    assert caught.value.code == 1001
+    assert caught.value.code == 1001 and caught.value.why == "gone"
     d = client.Delivery(s, "d-1")
     assert isinstance(d.wait_started(1), Lost)
+
+
+def test_a_read_says_why_it_failed(scripted, monkeypatch):
+    monkeypatch.setattr(client, "LIVE_READ_S", 0.2)
+
+    def refused(conn, params):
+        raise ipc.RpcError(-32000, "no")
+
+    server, s = scripted({"facts": lambda conn, params: time.sleep(1) or {},
+                          "agents": refused})
+    with pytest.raises(turns.TurnsError) as caught:
+        s.facts()
+    assert caught.value.why == "timeout"
+    with pytest.raises(turns.TurnsError) as caught:
+        s.agents()
+    assert caught.value.why == "refused"
+    server.script["facts"] = lambda conn, params: {"kind": "agents", "entries": [],
+                                                   "complete": True, "at": 1.0}
+    with pytest.raises(turns.TurnsError) as caught:
+        s.facts()
+    assert caught.value.why == "unreadable"
+    server.script["facts"] = lambda conn, params: {"kind": "facts", "turn_number": 1}
+    with pytest.raises(turns.TurnsError) as caught:
+        s.facts()
+    assert caught.value.why == "unreadable"
+
+
+def test_every_why_is_one_the_library_names():
+    assert client.WHYS == ("unreachable", "timeout", "closed", "gone", "version", "refused",
+                           "unreadable")
+    assert turns.TurnsError("x").why is None
 
 
 # -- written, not answered ---------------------------------------------------------------
@@ -339,8 +371,9 @@ def test_a_shared_connection_that_closed_is_replaced_before_the_next_write(scrip
     server, s = scripted({"deliver": lambda conn, params: {"delivery": "d-1", "ref": None},
                           "facts": facts})
     assert s.deliver("x").id == "d-1"
-    with pytest.raises(turns.TurnsError):
+    with pytest.raises(turns.TurnsError) as caught:
         s.facts()
+    assert caught.value.why == "closed"
     time.sleep(0.1)
     s._short._client.close()                          # the first connection closes too
     assert s.deliver("y").id == "d-1"                 # written on a new one, not lost
@@ -458,6 +491,7 @@ def test_an_endpoint_of_another_version_names_both_ranges(turns_env):
         with pytest.raises(turns.VersionError) as caught:
             turns.find(session_id="s-3")
         assert caught.value.server == (3, 3) and caught.value.client == (2, 2)
+        assert caught.value.why == "version"
         assert "upgrade moxi-turns" in str(caught.value)
     finally:
         loop.call_soon_threadsafe(server.close)

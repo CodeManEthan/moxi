@@ -108,15 +108,31 @@ _PROBE_WORKERS = 8
 _HELLO_REFUSED = -32001
 
 
+#: Why a request failed (`TurnsError.why`): no connection could be made, none came in
+#: its time, the connection closed before the answer, the endpoint is ending, it speaks
+#: another protocol version, it refused the request with an error, or it answered
+#: something turns cannot read.
+WHYS = ("unreachable", "timeout", "closed", "gone", "version", "refused", "unreadable")
+
+
+def _why_lost(exc: BaseException) -> str:
+    """Why a connection failed with `exc`: `timeout` when its time ran out, else
+    `closed`."""
+    return "timeout" if isinstance(exc, TimeoutError) else "closed"
+
+
 class TurnsError(Exception):
     """An endpoint that cannot be reached, refused a request with an error, or answered
     something turns cannot read. `code` and `data` are the JSON-RPC error's, when the
-    endpoint answered with one."""
+    endpoint answered with one. `why` is which of `WHYS` it was, or None where turns
+    cannot say."""
 
-    def __init__(self, message: str, *, code: int | None = None, data: Any = None):
+    def __init__(self, message: str, *, code: int | None = None, data: Any = None,
+                 why: str | None = None):
         super().__init__(message)
         self.code = code
         self.data = data
+        self.why = why
 
 
 class VersionError(TurnsError):
@@ -128,7 +144,8 @@ class VersionError(TurnsError):
                  server: tuple[int, int] | None):
         super().__init__(message, code=_HELLO_REFUSED,
                          data={"client": list(client),
-                               "server": None if server is None else list(server)})
+                               "server": None if server is None else list(server)},
+                         why="version")
         self.client = client
         self.server = server
 
@@ -167,9 +184,9 @@ def _rpc_error(exc: ipc.RpcError, address: str, method: str) -> TurnsError:
         return _version_error(address, exc.data)
     if exc.code == ERROR_GONE:
         return TurnsError(f"the endpoint at {address} is ending: {exc.message}",
-                          code=exc.code, data=exc.data)
+                          code=exc.code, data=exc.data, why="gone")
     return TurnsError(f"the endpoint at {address} refused {method}: {exc}",
-                      code=exc.code, data=exc.data)
+                      code=exc.code, data=exc.data, why="refused")
 
 
 class _NotWritten(Exception):
@@ -216,7 +233,8 @@ def _connect(address: str) -> tuple[ipc.Client, ipc.Agreed, dict[str, Any]]:
         client = ipc.connect(address, timeout_s=CONNECT_S)
     except (ipc.IpcError, OSError) as exc:
         raise _NotWritten(TurnsError(f"the endpoint at {address} cannot be reached: "
-                                     f"{exc}"), exc, connect=True) from None
+                                     f"{exc}", why="timeout" if isinstance(exc, TimeoutError)
+                                     else "unreachable"), exc, connect=True) from None
     try:
         agreed = client.hello(protocol.VERSIONS)
         info = client.call("session", timeout_s=READ_S)
@@ -226,14 +244,17 @@ def _connect(address: str) -> tuple[ipc.Client, ipc.Agreed, dict[str, Any]]:
     except ipc.NotRpc as exc:
         client.close()
         raise _NotWritten(TurnsError(f"the endpoint at {address} does not speak "
-                                     f"JSON-RPC: {exc}"), exc, connect=False) from None
+                                     f"JSON-RPC: {exc}", why="unreadable"), exc,
+                          connect=False) from None
     except (ipc.IpcError, OSError) as exc:
         client.close()
         raise _NotWritten(TurnsError(f"the endpoint at {address} did not finish its "
-                                     f"hello: {exc}"), exc, connect=False) from None
+                                     f"hello: {exc}", why=_why_lost(exc)), exc,
+                          connect=False) from None
     if not isinstance(info, dict):
         client.close()
-        error = TurnsError(f"the endpoint at {address} answered session with {info!r}")
+        error = TurnsError(f"the endpoint at {address} answered session with {info!r}",
+                           why="unreadable")
         raise _NotWritten(error, error, connect=False)
     return client, agreed, info
 
@@ -252,7 +273,7 @@ class _Link:
         """The connection, open. Raises `_NotWritten` when none can be made."""
         with self._lock:
             if self._closed:
-                error = TurnsError("this Session is closed")
+                error = TurnsError("this Session is closed", why="closed")
                 raise _NotWritten(error, error, connect=False)
             client = self._client
             if client is not None and _is_open(client):
@@ -262,7 +283,7 @@ class _Link:
                 client.close()
             session = self._session()
             if session is None:
-                error = TurnsError("this Session is closed")
+                error = TurnsError("this Session is closed", why="closed")
                 raise _NotWritten(error, error, connect=False)
             self._client = session._open()
             return self._client
@@ -385,7 +406,7 @@ class Session:
             raise exc.error from None
         except _Unanswered as exc:
             raise TurnsError(f"the endpoint at {self.address} did not answer {method}: "
-                             f"{exc.cause}") from None
+                             f"{exc.cause}", why=_why_lost(exc.cause)) from None
         except ipc.RpcError as exc:
             raise _rpc_error(exc, self.address, method) from None
 
@@ -394,10 +415,11 @@ class Session:
             value = from_wire(raw)
         except ValueError as exc:
             raise TurnsError(f"the endpoint at {self.address} answered {method} with "
-                             f"something turns cannot read: {exc}") from None
+                             f"something turns cannot read: {exc}",
+                             why="unreadable") from None
         if not isinstance(value, kind):
             raise TurnsError(f"the endpoint at {self.address} answered {method} with a "
-                             f"{type(value).__name__}")
+                             f"{type(value).__name__}", why="unreadable")
         return value
 
     def refresh(self) -> dict[str, Any]:
@@ -705,12 +727,12 @@ class Session:
             answer = _call(client, "watch", None, LIVE_READ_S)
             if not isinstance(answer, dict):
                 raise TurnsError(f"the endpoint at {self.address} answered watch with "
-                                 f"{answer!r}")
+                                 f"{answer!r}", why="unreadable")
             facts = self._value(answer.get("facts"), "watch", Facts)
         except _Unanswered as exc:
             client.close()
             raise TurnsError(f"the endpoint at {self.address} did not answer watch: "
-                             f"{exc.cause}") from None
+                             f"{exc.cause}", why=_why_lost(exc.cause)) from None
         except ipc.RpcError as exc:
             client.close()
             raise _rpc_error(exc, self.address, "watch") from None
@@ -1299,5 +1321,5 @@ def ack(ref: str, *, session_id: str) -> bool:
 
 
 __all__ = ["CONNECT_S", "READ_S", "LIVE_READ_S", "MCP_RELOAD_S", "EXIT_BOUND_S",
-           "NOT_EXITED", "TurnsError", "VersionError", "Session", "Delivery", "Watch", "StopHandler",
+           "NOT_EXITED", "WHYS", "TurnsError", "VersionError", "Session", "Delivery", "Watch", "StopHandler",
            "runtime_dir", "sessions", "find", "wait_ready", "wait_ref", "ack"]

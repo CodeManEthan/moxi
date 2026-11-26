@@ -205,6 +205,9 @@ class Live:
 
     agents: int | None = 0
     draft: bool = False
+    #: The prompt box as read: `draft` or `empty` (`BOX_STATES`), None when it was not
+    #: read (it could not be, or the harness has no box to read).
+    box: str | None = None
     #: Of `agents`, the background shells (Codex's terminals), which a command with
     #: `stop_shells` leaves out of its agent check. Claude's list holds none.
     shells: int = 0
