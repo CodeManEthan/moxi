@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- With the secrets release whose credentials set finds `sk-` keys and real URL
+  passwords, every judge (the snapshot, the pre-commit and push gates, the clean filter)
+  refuses a note holding one. A note already committed with one is refused when it is
+  next committed with a change.
 - notes' tools in the Claude apps need the secrets release with `chat_redact` and the
   connector release with `Limit`. Neither is released yet; notes' floors on them rise
   when they are.
