@@ -59,8 +59,11 @@ when something keeps it warm; when it waits on other agents with nothing keeping
 `goes cold at <time>` and `waiting on 2 agents`, the row first among the warm ones and,
 at the desk, `Keep warm`, which posts the launch to launcher's `/api/keep-warm`. Opened, its
 `Session` line gives the effort it was launched with, and a `Keep warm` line says whether
-keep-warm is on and what it holds for. The times of launcher's next keep-alive are not
-drawn, as launcher serves none.
+keep-warm is on and what it holds for. Where launcher gives a warm row's next keep-alive
+(`next_keep_alive_at`, set while keep-warm covers the session), line two ends in it, in
+place of the cost: `next keep-alive 19:49`, or `next keep-alive due` once that time has
+come, since keep-warm then nudges at its next ask, within about two minutes. Where it gives
+none, nothing is drawn for it.
 
 Where the usage module is installed, the page reads usage's `/api/session` for each
 session with a clock time (again when its last request moves, when the tab is shown and
