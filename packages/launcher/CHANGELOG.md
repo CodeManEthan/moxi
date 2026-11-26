@@ -18,6 +18,10 @@
   command quotes a path that needs it.
 - The launch log moves to schema version 5: the `picks` table is rebuilt so a pick may be
   `taken`, keeping every row.
+- Each entry of `/api/running` and of the `running` topic carries `model` and `effort`:
+  the values the launch's row records, spelled as the command line spells them, null
+  where the launch set none. Both are plain strings with no mark, so the phone's gateway
+  sends them as they are. `running()`'s `Running` carries them too, None by default.
 - The launch defaults, `[defaults]` of `presets.toml`, are a table `moxi config` shows and
   changes (`CONFIG_TABLES`, `moxi_launcher.defaults`): `moxi config launcher show` lists
   them as `defaults.<row>`, and `moxi config set launcher defaults.<row> VALUE` and

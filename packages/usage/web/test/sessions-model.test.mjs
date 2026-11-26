@@ -137,3 +137,24 @@ test("a session without a typed name is named as the Sessions page names it, day
     }
   }
 });
+
+const LAUNCH = { name: "builder-1", runs: "slot 4", effort: "high" };
+
+test("a session a running launch holds is named by the launch where no name was typed", () => {
+  assert.deepEqual(sessionName(ref(), TODAY, UTC, LAUNCH), { name: "builder-1", where: "proj-a" });
+  assert.deepEqual(sessionName(ref({ folder: null }), TODAY, UTC, LAUNCH), { name: "builder-1", where: null });
+  // A typed name comes first.
+  assert.deepEqual(sessionName(ref({ name: "fix the tests" }), TODAY, UTC, LAUNCH),
+                   { name: "fix the tests", where: "proj-a" });
+  // With no launch the name is as before.
+  assert.deepEqual(sessionName(ref(), TODAY, UTC, null), { name: "proj-a · started today 18:45", where: null });
+});
+
+test("a running session's where says where it runs before its project or folder", () => {
+  assert.equal(sessionWhere(row("s1", 1, { project: "atlas-api" }), true, LAUNCH), "slot 4 · atlas-api");
+  assert.equal(sessionWhere(row("s1", 1), true, LAUNCH), "slot 4 · proj-a");
+  assert.equal(sessionWhere(row("s1", 1, { name: "fix" }), false, { ...LAUNCH, runs: "terminal" }),
+               "terminal · proj-a");
+  assert.equal(sessionWhere(row("s1", 1, { folder: null }), false, { ...LAUNCH, runs: "terminal" }), "terminal");
+  assert.equal(sessionWhere(row("s1", 1), true, null), null);
+});

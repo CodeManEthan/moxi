@@ -983,7 +983,9 @@ class Running:
     `/clear` or a compact), else the one it was started with, and None when it never
     learned one. `name` is what the launch is called wherever it is listed
     (`names.shown`), `identity` its comms name or None, `created_at` when its row was
-    written, and `live` whether its process runs now."""
+    written, and `live` whether its process runs now. `model` and `effort` are the values
+    its row records for those rows, as the command line spells them, None where the
+    launch set none."""
 
     request_id: str
     harness: str
@@ -996,6 +998,13 @@ class Running:
     identity: str | None
     created_at: str
     live: bool
+    model: str | None = None
+    effort: str | None = None
+
+
+def _spelled(value: object) -> str | None:
+    """A recorded value as the command line spells it; None for one that sets nothing."""
+    return None if value is None or value == "" else str(value)
 
 
 def running(*, live_only: bool = True, limit: int = 200,
@@ -1023,7 +1032,8 @@ def running(*, live_only: bool = True, limit: int = 200,
                 session_id=known[-1][0] if known else row.session_id, target=row.target,
                 slot=row.slot, project_key=row.project_key, cwd=row.cwd,
                 name=names.shown(row), identity=row.identity, created_at=row.created_at,
-                live=is_live))
+                live=is_live, model=_spelled(row.values.get("model")),
+                effort=_spelled(row.values.get("effort"))))
     return tuple(found)
 
 

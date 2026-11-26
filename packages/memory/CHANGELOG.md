@@ -17,6 +17,9 @@
   would return them, so a task's notice that opens with `<task-notification>` is found.
   `harness` and `summary` rows stay out. A delivered hit's line in the text part reads
   `delivered by <writer>`, and the tool's description lists the writers it returns.
+- With the secrets release whose credentials set finds `sk-` keys and real URL
+  passwords, new rows are stored with those redacted. Rows indexed before it keep them
+  until `moxi memory reindex` rebuilds the index.
 - The subconscious, memory's second way to recall: in a session launched with it on (the
   launcher's `subconscious` row, which stamps `MOXI_MEMORY_SUBCONSCIOUS`, exported as
   `api.SUBCONSCIOUS_ENV`), a second agent searches past sessions and notes and sends the

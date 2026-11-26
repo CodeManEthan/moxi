@@ -31,6 +31,12 @@ def google_key(seed: int = 2) -> str:
     return "".join(["AI", "za", "".join(r.choice(ALNUM + "-_") for _ in range(35))])
 
 
+def sk_key(seed: int = 3) -> str:
+    """An `sk-` key: 32 random hex characters after the prefix."""
+    r = random.Random(seed)
+    return "".join(["s", "k-", "".join(r.choice("0123456789abcdef") for _ in range(32))])
+
+
 def private_names(*words: str) -> None:
     moxi.config.set_value("secrets", "private_names.words", list(words), by="test")
 

@@ -18,7 +18,7 @@ SID = "5f6e7d8c-9b0a-4c1d-8e2f-3a4b5c6d7e8f"
 CWD = "/srv/work/proj-a"
 #: The keys of every entry, in the order they are declared.
 ENTRY = ["request_id", "harness", "session_id", "name", "identity", "where", "started_at",
-         "cache", "waits", "covered", "coverable", "activity"]
+         "model", "effort", "cache", "waits", "covered", "coverable", "activity"]
 
 
 @pytest.fixture(autouse=True)
@@ -40,12 +40,14 @@ def conn():
 
 
 def launched(conn, request_id: str, *, live: bool = True, target: str = "slot",
-             cwd: str = CWD, at: str | None = None, **more) -> None:
+             cwd: str = CWD, at: str | None = None, values: dict | None = None,
+             **more) -> None:
     """A Claude launch's row with a session id of its own, its process this test's own
-    when `live`."""
+    when `live`; its values `{"model": "opus"}` unless `values` are given."""
     me = proc.identity(os.getpid())
     store.insert(conn, request_id=request_id, by="alice", harness="claude", target=target,
-                 cwd=cwd, values={"model": "opus"}, argv=["claude"], env={},
+                 cwd=cwd, values={"model": "opus"} if values is None else values,
+                 argv=["claude"], env={},
                  posture="operator",
                  session_id=more.pop("session_id", f"session-{request_id}"),
                  slot="3" if target == "slot" else None, at=at or store.now(), **more)
@@ -73,8 +75,28 @@ def test_a_live_launch_is_sent_with_its_dir_and_nothing_joined(conn):
     assert entry["where"] == {"target": "slot", "slot": "3", "project_key": "proj-a",
                               "folder": "proj-a"}
     assert entry["started_at"] == "2026-03-01T10:00:00.000000Z"
+    assert (entry["model"], entry["effort"]) == ("opus", None)
     assert (entry["cache"], entry["waits"], entry["covered"], entry["activity"]) == (
         None, None, False, None)
+
+
+def test_the_model_and_effort_are_the_launchs_own_and_null_where_it_set_none(conn):
+    launched(conn, "both", values={"model": "sonnet", "effort": "high"},
+             at="2026-03-01T10:00:00.000000Z")
+    launched(conn, "unset", values={}, at="2026-03-01T09:00:00.000000Z")
+    launched(conn, "empty", values={"model": "", "effort": ""},
+             at="2026-03-01T08:00:00.000000Z")
+    by_id = {entry["request_id"]: entry for entry in pagehandlers.gather_running()["sessions"]}
+    assert (by_id["both"]["model"], by_id["both"]["effort"]) == ("sonnet", "high")
+    assert (by_id["unset"]["model"], by_id["unset"]["effort"]) == (None, None)
+    assert (by_id["empty"]["model"], by_id["empty"]["effort"]) == (None, None)
+
+
+def test_kept_facts_never_cover_the_model_or_effort(conn):
+    launched(conn, "r1", values={"model": "sonnet", "effort": "low"})
+    [entry] = pagehandlers.gather_running(
+        {"r1": {"model": "joined", "effort": "joined"}})["sessions"]
+    assert (entry["model"], entry["effort"]) == ("sonnet", "low")
 
 
 def test_the_dir_is_the_dirs_last_segment_and_no_path_is_sent(conn):
@@ -143,6 +165,18 @@ def test_the_route_is_the_gateways_and_marks_the_activity_text():
     assert "cwd" not in entry and set(entry["where"].items) == {
         "target", "slot", "project_key", "folder"}
     assert all(out.mark is None for out in entry["where"].items.values())
+
+
+def test_the_model_and_effort_go_to_the_gateway_as_plain_nullable_names():
+    entry = page.RUNNING["sessions"].items.items
+    for key in ("model", "effort"):
+        assert entry[key].type == "string" and entry[key].nullable and entry[key].mark is None
+    [route] = [r for r in loopback().export(page.PAGE)["routes"]
+               if r["path"] == "/api/running"]
+    exported = route["returns"]["sessions"]["items"]["items"]
+    for key in ("model", "effort"):
+        assert exported[key] == {"type": "string", "mark": None, "nullable": True,
+                                 "items": None}
 
 
 def test_coverable_is_a_nullable_cap_the_gateway_sends_the_phone_as_it_is():
