@@ -222,3 +222,94 @@ def test_a_fork_id_the_log_gains_after_the_runs_read_is_still_found():
     old = ing._forks_at - 2 * ingest.FORK_LOG_SLACK_S
     assert not ing.recall_notice("claude", "a0000000000000old", old)
     assert not ing.recall_notice("codex", FORK, time.time())
+
+
+# -- recall answers sent by comms ------------------------------------------------------
+
+PREFACE = "The moxi-turns plugin sent a message:\n"
+
+
+def framed(message_id, sender, body):
+    """One message as comms frames it in a delivered digest."""
+    lines = "\n".join(f"  {line}" for line in body.splitlines())
+    return (f"[comms] from {sender} · msg {message_id} · [no reply]\n{lines}\n"
+            f"[comms] end · msg {message_id}")
+
+
+def mail(*messages):
+    count = f"{len(messages)} message{'s' if len(messages) > 1 else ''}"
+    return PREFACE + f"== comms: {count} ==\n\n" + "\n\n".join(messages)
+
+
+ANSWER_1 = framed("4611686018427390101", "lead-subconscious", "- the echidna lock, recalled")
+ANSWER_2 = framed("4611686018427390102", "lead-subconscious", "- the echidna port, recalled")
+OTHER = framed("4611686018427390103", "reviewer", "the echidna review is done")
+
+
+def log_sent(session_id, recall="r-slot", ids=("4611686018427390101",
+                                               "4611686018427390102")):
+    from moxi_memory import recalls
+
+    rounds = [{"text": f"- answer {n}", "message_id": mid} for n, mid in enumerate(ids, 1)]
+    with recalls.session_lock(session_id):
+        recalls.put_line(session_id, {"recall": recall, "state": recalls.BACK,
+                                      "harness": "claude", "route": "slot",
+                                      "rounds": rounds, "message_id": ids[-1]})
+
+
+def test_a_recall_answer_sent_by_comms_gives_no_row_and_other_mail_does(capsys):
+    t = transcript()
+    log_sent(t.session_id)
+    for text in (mail(ANSWER_1), mail(ANSWER_2), mail(OTHER)):
+        t.user(text, origin="plugin", isMeta=True)
+    t.write()
+    run()
+    assert writers().keys() == {mail(OTHER)}
+    code, out, _ = memory(capsys, "search", "echidna", "--json")
+    assert code == 0
+    snippets = [h["snippet"] for h in json.loads(out)["hits"]]
+    assert len(snippets) == 1 and "recalled" not in snippets[0]
+    run("rebuild")
+    assert writers().keys() == {mail(OTHER)}
+
+
+def test_a_digest_of_several_messages_loses_only_the_recall_answers():
+    t = transcript()
+    log_sent(t.session_id)
+    t.user(mail(ANSWER_1, OTHER, ANSWER_2), origin="plugin", isMeta=True)
+    t.write()
+    run()
+    (kept,) = writers().keys()
+    assert "echidna review" in kept and "recalled" not in kept
+
+
+def test_a_sender_named_like_a_recall_is_kept_when_the_log_names_no_id():
+    t = transcript()
+    log_sent(t.session_id, ids=("4611686018427390999",))
+    t.user(mail(ANSWER_1), origin="plugin", isMeta=True)
+    t.write()
+    run()
+    assert writers().keys() == {mail(ANSWER_1)}
+
+
+def test_without_comms_every_delivery_stays(monkeypatch):
+    monkeypatch.setattr(links, "comms_scoped", lambda: links.Link(links.NONE))
+    t = transcript()
+    log_sent(t.session_id)
+    t.user(mail(ANSWER_1), origin="plugin", isMeta=True)
+    t.write()
+    run()
+    assert writers().keys() == {mail(ANSWER_1)}
+
+
+def test_a_message_id_the_log_gains_after_the_runs_read_is_still_found():
+    import time
+
+    ing = ingest.Ingest(None, None, config())
+    assert not ing.recall_message("4611686018427390101", time.time())
+    log_sent("0190b000-0000-7000-8000-000000000001")
+    assert ing.recall_message("4611686018427390101", time.time())
+    assert ing.recall_message("4611686018427390102", None)
+    log_sent("0190b000-0000-7000-8000-000000000001", "r-late", ("4611686018427390200",))
+    old = ing._forks_at - 2 * ingest.FORK_LOG_SLACK_S
+    assert not ing.recall_message("4611686018427390200", old)

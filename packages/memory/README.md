@@ -364,6 +364,12 @@ before; a message that holds several notices keeps all but the recall's. A notic
 comes in before its fork's id reaches the log is still left out when memory reads the
 log again within a minute of the notice.
 
+On a route that answers by comms, each answer comes back as comms mail, and the recall
+log keeps the id comms gave each one it took. memory leaves out every delivered comms
+message whose id the log names, as comms reads the delivered text back (memory doesn't
+read comms' delivery text itself); other mail in the same delivery is kept, and mail is
+never left out for its sender's name alone. Without comms there is no such mail.
+
 ### Project labels
 
 A session's project label is the name of the nearest folder at or above its working

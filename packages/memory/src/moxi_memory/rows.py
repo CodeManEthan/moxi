@@ -58,6 +58,15 @@ fork is left out, so no search finds an earlier recall's answer, which restates 
 sessions' text. A message of several notices keeps the others, and one left with none
 gives no row. Every other notice, a subagent's or a background command's, stays.
 
+On a route that answers by comms the answer comes back as comms mail, which a plugin
+delivers (writer `hook`). memory knows it by the id comms gave it, which the recall log
+keeps, never by its wording: `convert`'s `read_delivered` is comms' reader of a
+delivered text (`delivered_messages`), which gives each message comms framed in it, its
+id and where it runs, and a message whose id `recall_message` names as a recall's answer
+is left out. A delivery of several messages keeps the others, and one left with none
+gives no row.
+Without comms, `read_delivered` is None and every delivery stays.
+
 **The key.** A row's key names one record: the harness, then the line's own id where the
 harness writes one (Claude Code's `uuid`, OpenCode's row id) or else the source and the
 line's place in it, then the record's place among the records sessions gives for that
@@ -400,6 +409,25 @@ def without_recall_answers(text: str, recall_fork: Callable[[str], bool]) -> str
     return "".join(out) if len(out) > 1 else None
 
 
+def without_recall_mail(text: str, read_delivered: Callable[[str], Iterable[Any]],
+                        recall_message: Callable[[str], bool]) -> str | None:
+    """`text` less each message `read_delivered` finds in it whose id `recall_message`
+    names a recall's answer, frame line to closing line; None when it held messages and
+    every one was a recall's. A text with no recall's message comes back as it was."""
+    found = list(read_delivered(text))
+    drop = [m for m in found if recall_message(str(m.message_id))]
+    if not drop:
+        return text
+    if len(drop) == len(found):
+        return None
+    out, at = [], 0
+    for message in sorted(drop, key=lambda m: m.start):
+        out.append(text[at:message.start])
+        at = max(at, message.end)
+    out.append(text[at:])
+    return "".join(out)
+
+
 def model_answer(record: Any) -> bool:
     """Whether a record is the model's own answer: a tool call, or an assistant message
     that is not a thought and that the harness didn't make up."""
@@ -425,7 +453,10 @@ def convert(records: Iterable[Any], *, source_key: str, main_id: str,
             agent_id: str | None, label: str | None, policy: Policy,
             writer: Callable[[Any], str | None],
             secret_calls: set[str] | frozenset[str] = frozenset(),
-            recall_fork: Callable[[str, float | None], bool] | None = None) -> Converted:
+            recall_fork: Callable[[str, float | None], bool] | None = None,
+            read_delivered: Callable[[str], Iterable[Any]] | None = None,
+            recall_message: Callable[[str, float | None], bool] | None = None
+            ) -> Converted:
     """The rows and tails one batch of records gives.
 
     `main_id` is the main session's id, which every row carries; `agent_id` is the
@@ -434,8 +465,11 @@ def convert(records: Iterable[Any], *, source_key: str, main_id: str,
     ids already known to be secret-path calls of this source, whose results give no
     tail. `recall_fork(task_id, time)` says whether a task id is a recall's fork, for a
     notice of that time (the record's, None when unknown); a `task` message's recall
-    notices are left out (the module's "Recall answers"). A subagent's records give tier 1
-    rows only."""
+    notices are left out (the module's "Recall answers"). `read_delivered` reads a
+    delivered message's text into the comms messages in it, and `recall_message(
+    message_id, time)` says whether one is a recall's answer; a delivered message's
+    recall answers are left out the same way. A subagent's records give tier 1 rows
+    only."""
     from moxi_secrets import secret_path
 
     records = list(records)
@@ -454,9 +488,15 @@ def convert(records: Iterable[Any], *, source_key: str, main_id: str,
             if not tier_one_message(record, wrote):
                 continue
             body = record.text
+            at = common["time"]
             if wrote == TASK_WRITER and recall_fork is not None:
-                at = common["time"]
                 body = without_recall_answers(body, lambda tid, at=at: recall_fork(tid, at))
+                if body is None or not body.strip():
+                    continue
+            if wrote in DELIVERED_WRITERS and read_delivered is not None \
+                    and recall_message is not None:
+                body = without_recall_mail(body, read_delivered,
+                                           lambda mid, at=at: recall_message(mid, at))
                 if body is None or not body.strip():
                     continue
             text = keep_head(body, MESSAGE_CHARS, policy.sets)
@@ -496,4 +536,4 @@ __all__ = ["KINDS", "MESSAGE_CHARS", "TOOL_CHARS", "MARGIN", "EDGE_CHARS", "TOOL
            "UNSCANNED", "Policy", "Row", "Tail", "Converted", "redact_version", "redact",
            "keep_head", "keep_tail", "recut_head", "recut_tail", "hide_cut_edges",
            "line_id", "keys", "DELIVERED_WRITERS", "TASK_WRITER", "tier_one_message",
-           "without_recall_answers", "model_answer", "convert"]
+           "without_recall_answers", "without_recall_mail", "model_answer", "convert"]

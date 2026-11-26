@@ -16,8 +16,13 @@
   whose `<task-id>` is a recall fork's id in memory's recall log gives no row, so search,
   a recall's first search and `search_memory` never return an earlier recall's answer.
   A subagent's or a background command's notice is indexed as before, and a message of
-  several notices keeps all but the recall's. No released index holds recall answers, so
-  no reindex is needed for them.
+  several notices keeps all but the recall's. On a route that answers by comms, a
+  delivered comms message whose id the recall log names as a sent answer gives no row
+  either: comms reads the delivered text back into its messages
+  (`api.delivered_messages`), and a digest of several keeps the others. The log now keeps
+  each sent answer's comms id on its round as well as the newest on the line. Without
+  comms, mail is indexed as before. No released index holds recall answers, so no
+  reindex is needed for them.
 - The chat's `search_memory` returns delivered messages too: rows written by `hook`,
   `channel`, `peer`, `coordinator` and `task` are hits exactly when `moxi memory search`
   would return them, so a task's notice that opens with `<task-notification>` is found.
