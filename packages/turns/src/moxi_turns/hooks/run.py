@@ -211,6 +211,12 @@ def emit(line: str, out: TextIO | None = None) -> None:
     own `sys.stdout` before the interpreter does.
     """
     stream = sys.stdout if out is None else out
+    if out is None:
+        # A text stream on Windows writes "\n" as "\r\n"; the line ends in "\n" alone.
+        try:
+            stream.reconfigure(newline="\n")
+        except (AttributeError, ValueError, OSError):
+            pass
     stream.write(line + "\n")
     stream.flush()
 

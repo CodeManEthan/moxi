@@ -4,10 +4,12 @@ tool-permission rendering, the doctor's rows, and the hosts' one call."""
 from __future__ import annotations
 
 import json
+import os
 from collections.abc import Mapping
 from pathlib import Path
 
 import pytest
+from moxi_dev.testing import toml_string
 
 import moxi_turns as turns
 from conftest import write_config
@@ -118,8 +120,9 @@ def test_claude_launches_in_parallel_all_succeed(group, claude_root):
 
 
 def test_claude_endpoint_names_the_configured_command(group, turns_env):
-    write_config(turns_env, '[claude]\nendpoint = "/opt/elsewhere/moxi-turns-endpoint"\n')
-    assert adds("claude").env["MOXI_TURNS_ENDPOINT"] == "/opt/elsewhere/moxi-turns-endpoint"
+    elsewhere = os.path.abspath("/opt/elsewhere/moxi-turns-endpoint")
+    write_config(turns_env, f'[claude]\nendpoint = {toml_string(elsewhere)}\n')
+    assert adds("claude").env["MOXI_TURNS_ENDPOINT"] == elsewhere
     write_config(turns_env, '[claude]\nendpoint = "relative/endpoint"\n')
     with pytest.raises(turns.TurnsError, match="absolute"):
         adds("claude")

@@ -64,6 +64,7 @@ import signal
 import subprocess
 import sys
 import tempfile
+import time
 from pathlib import Path
 
 log = logging.getLogger("moxi.turns.claude")
@@ -200,7 +201,7 @@ def write_endpoint_file(root: Path | None = None, env: dict[str, str] | None = N
         with os.fdopen(fd, "w", encoding="utf-8") as fh:
             fh.write(data)
         os.chmod(tmp, 0o644)
-        os.replace(tmp, target)
+        _replace(tmp, target)
     except OSError as exc:
         try:
             os.unlink(tmp)
@@ -208,6 +209,23 @@ def write_endpoint_file(root: Path | None = None, env: dict[str, str] | None = N
             pass
         raise SetupError(f"cannot write {target}: {exc}") from None
     return target
+
+
+#: How long a replace Windows refuses is tried again: another write of the same file at
+#: once, or a reader without delete sharing, holds the target for a moment.
+_REPLACE_RETRY_S = 1.0
+
+
+def _replace(src: str, dst: Path) -> None:
+    deadline = time.monotonic() + _REPLACE_RETRY_S
+    while True:
+        try:
+            os.replace(src, dst)
+            return
+        except PermissionError:
+            if os.name != "nt" or time.monotonic() >= deadline:
+                raise
+            time.sleep(0.01)
 
 
 def read_endpoint_file(root: Path | None = None) -> dict | None:

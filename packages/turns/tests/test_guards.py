@@ -529,7 +529,7 @@ def test_an_own_judge_needs_its_own_file():
 
 @pytest.mark.parametrize("entry, why", [
     ("rel/guards.toml", "not an absolute path"),
-    ("/x/guards.yaml", "a .toml or a .py file"),
+    (os.path.abspath("/x/guards.yaml"), "a .toml or a .py file"),
 ])
 def test_a_file_entry_of_the_wrong_form_is_a_problem(entry, why):
     loaded = load([entry])
@@ -547,6 +547,7 @@ def test_a_missing_or_raising_py_file_fails_as_a_whole(tmp_path):
 
 def test_a_tilde_entry_is_a_file(tmp_path, monkeypatch):
     monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setenv("USERPROFILE", str(tmp_path))
     (tmp_path / "g.toml").write_text('[[guard]]\nname = "g"\ncalls = {}\ndeny = "n"\n')
     assert [o.id for o in load(["~/g.toml"]).on] == ["file:g.g"]
     assert guards.is_file_entry("~/g.toml") and not guards.is_file_entry("turns.removal")

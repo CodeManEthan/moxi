@@ -2,6 +2,11 @@
 
 ## 0.2.8 (unreleased)
 
+- On Windows a hook's one line ended `\r\n`: `hooks.emit` wrote through the text
+  stream, which turns `\n` into `\r\n` there. The process's stdout writes `\n` as it is
+  now, so the wire is the same bytes on every system.
+- On Windows two `endpoint.json` writes at once could fail one of them ("Access is
+  denied" from the replace). A replace Windows refuses is tried again for up to a second.
 - On Windows a start list's run entry stopped at the bound is logged at once. Turns closed
   the program's output after the stop while the reader thread still read it, which waited
   for any process the program started that still held the output.

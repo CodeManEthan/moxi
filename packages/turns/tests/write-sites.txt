@@ -4,7 +4,7 @@
 # helpers. One line per site: <path> <enclosing scope> <call>.
 src/moxi_turns/claude_endpoint.py main os.fdopen
 src/moxi_turns/claude_setup.py write_endpoint_file os.fdopen
-src/moxi_turns/claude_setup.py write_endpoint_file os.replace
+src/moxi_turns/claude_setup.py _replace os.replace
 src/moxi_turns/codex_appserver.py AppServer.start .open
 src/moxi_turns/codex_window.py terminal_fd os.open
 src/moxi_turns/endpoint.py Endpoint._write_hello os.fdopen

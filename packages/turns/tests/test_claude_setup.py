@@ -17,7 +17,7 @@ import pytest
 import moxi_turns as turns
 from conftest import write_config
 from moxi import paths
-from moxi_dev.testing import PROC_WAIT_S
+from moxi_dev.testing import PROC_WAIT_S, toml_string
 from moxi_turns import claude_setup
 
 @pytest.fixture
@@ -97,9 +97,10 @@ def test_endpoint_json_names_this_env_script(placed):
 
 
 def test_the_config_key_wins_and_must_be_absolute(turns_env, placed):
-    write_config(turns_env, '[claude]\nendpoint = "/opt/elsewhere/moxi-turns-endpoint"\n')
+    elsewhere = os.path.abspath("/opt/elsewhere/moxi-turns-endpoint")
+    write_config(turns_env, f'[claude]\nendpoint = {toml_string(elsewhere)}\n')
     claude_setup.write_endpoint_file()
-    assert claude_setup.read_endpoint_file()["command"] == "/opt/elsewhere/moxi-turns-endpoint"
+    assert claude_setup.read_endpoint_file()["command"] == elsewhere
     write_config(turns_env, '[claude]\nendpoint = "relative/endpoint"\n')
     with pytest.raises(claude_setup.SetupError):
         claude_setup.write_endpoint_file()
@@ -127,7 +128,8 @@ def test_two_setups_at_once_both_write_and_leave_no_temp_file(placed):
     assert set(written) == {runner / "endpoint.json"}
     assert claude_setup.read_endpoint_file()["command"] == str(paths.script("moxi-turns-endpoint"))
     assert [p.name for p in runner.iterdir() if "endpoint" in p.name] == ["endpoint.json"]
-    assert (runner / "endpoint.json").stat().st_mode & 0o777 == 0o644
+    if os.name != "nt":                 # mode bits are POSIX's
+        assert (runner / "endpoint.json").stat().st_mode & 0o777 == 0o644
     assert _temps(placed) == []
     assert _status() == [(placed, "ok")]
 
@@ -143,6 +145,8 @@ def test_a_failed_write_leaves_no_temp_file(placed, monkeypatch):
     assert _temps(placed) == []
 
 
+@pytest.mark.skipif(os.name == "nt", reason="a read-only folder is made by mode bits, "
+                    "which Windows doesn't read")
 def test_a_read_only_runner_dir_is_a_setup_error(placed):
     runner = placed / "moxi-turns"
     runner.chmod(0o555)
@@ -457,7 +461,8 @@ def test_rows_name_the_plugins_endpoint_json_and_the_version(turns_env, placed,
     assert rows["claude code"].state == "ok"
     claude_setup.write_endpoint_file()
     assert _rows()["claude endpoint.json"].state == "ok"
-    write_config(turns_env, '[claude]\nendpoint = "/opt/moved/moxi-turns-endpoint"\n')
+    moved = os.path.abspath("/opt/moved/moxi-turns-endpoint")
+    write_config(turns_env, f'[claude]\nendpoint = {toml_string(moved)}\n')
     assert _rows()["claude endpoint.json"].state == "warn"      # names a command no longer given
     os.environ["FAKE_CLAUDE_VERSION"] = "9.9.9"
     row = _rows()["claude code"]
