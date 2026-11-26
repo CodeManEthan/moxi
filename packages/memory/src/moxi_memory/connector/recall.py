@@ -16,9 +16,13 @@ at most what is left of it. In order:
    keyword (`no-keyword`), a start check fails (`recall_chat.why_not`'s reason), or the
    conversation's lock or the start lock wasn't got in time, or `CHATS_RUNNING_MAX`
    recalls run (`busy`); the reason is `skipped`, never a refusal;
-4. redacts each piece through secrets' `chat_redact`; a piece that comes back unscanned
-   is freed for the next call and counted in `notes`. The text part, which joins pieces
-   redacted apart, is redacted again whole;
+4. redacts each piece, its words, each note and the text part as `search_memory` does:
+   through secrets' `chat_redact` with sessions' local-path cut between its two passes
+   (`walk.path_cut`), so no local path or loopback origin leaves the machine. A piece
+   that comes back unscanned is freed for the next call and counted in `notes`; so is
+   every piece when the sessions installed doesn't offer the cut, whose notes then leave
+   out the start check's detail. The text part, which joins pieces redacted apart, is
+   redacted again whole;
 5. answers, and registers the settle with the connector's `after_answer`: an answer
    written marks its pieces handed (`recall_chat.settle`); one not written, or a call
    abandoned, frees them for the next call.
@@ -37,6 +41,8 @@ from datetime import datetime
 from typing import Any
 
 from .. import recall_chat
+from . import tool as search_tool
+from . import walk
 from .redaction import OFF_TEXT, UNSCANNED, Gate, Off
 
 #: How long a call's own work may take, from its start, in seconds.
@@ -124,6 +130,9 @@ SKIPPED_TEXT = {
                       "memory subconscious.chat.enabled true turns it on."),
     recall_chat.BUSY: "No recall started: too many are running; the next call tries again.",
 }
+#: Why pieces wait when the sessions installed can't cut their local paths.
+NO_CUT = ("the sessions installed here doesn't offer the interface memory reads it at, so "
+          "their local paths can't be cut; moxi doctor connector says why.")
 #: The reasons whose detail goes in `notes`: what the chat itself can't see.
 NOTED = (recall_chat.BUSY, recall_chat.NO_LAUNCHER, recall_chat.NO_HARNESS,
          recall_chat.FENCE)
@@ -215,17 +224,20 @@ def _settings(env: Mapping[str, str]):
 class Recaller:
     """`recall`'s work, called as `(args, started, handing)` with the call's start on
     `time.monotonic`'s scale. Gives `(Result, log fields)`. `env` is read at each call,
-    and is None until the provider has started. `budget_s` is `CALL_BUDGET_S` (a test
+    and is None until the provider has started. `budget_s` is `CALL_BUDGET_S`, and
+    `sessions` gives sessions' API at the interface `search_memory` reads it at (a test
     hands in its own)."""
 
     def __init__(self, result: Any, gate: Gate,
                  env: Callable[[], Mapping[str, str] | None], *,
-                 budget_s: float = CALL_BUDGET_S, spawn=None):
+                 budget_s: float = CALL_BUDGET_S, spawn=None,
+                 sessions: Callable[[], Any] = search_tool._sessions):
         self.result = result
         self.gate = gate
         self.env = env
         self.budget_s = budget_s
         self.spawn = spawn
+        self.sessions = sessions
 
     def __call__(self, args: Mapping[str, Any], started: float, handing: Handing):
         logged: dict[str, Any] = {"pieces": 0, "held_back": 0, "waiting": 0,
@@ -247,6 +259,10 @@ class Recaller:
         settings = _settings(env)
         if settings is None:
             return refuse("config", CONFIG)
+        try:
+            path_cut = walk.path_cut(self.sessions(), env)
+        except RuntimeError:
+            path_cut = None
         deadline = started + self.budget_s
         conversation = str(args["conversation"])
         words = str(args.get("words") or "")
@@ -259,13 +275,14 @@ class Recaller:
         try:
             return self._answer(conversation, words, context, collected, has_words=has_words,
                                 settings=settings, env=env, deadline=deadline,
-                                redact=redact, handing=handing, logged=logged)
+                                redact=redact, path_cut=path_cut, handing=handing,
+                                logged=logged)
         except BaseException:
             recall_chat.release(conversation, [p.id for p in collected.pieces])
             raise
 
     def _answer(self, conversation, words, context, collected, *, has_words, settings, env,
-                deadline, redact, handing, logged):
+                deadline, redact, path_cut, handing, logged):
         from ..recall_brief import keywords
 
         record, skip = None, None
@@ -284,9 +301,12 @@ class Recaller:
                                                  deadline=deadline, spawn=self.spawn)
         running = recall_chat.running(recall_chat.key(conversation))
         pieces, kept, unscanned = [], [], 0
-        for piece in collected.pieces:
-            text = redact(piece.text)
-            for_words = redact(piece.for_words)
+        uncut = len(collected.pieces) if path_cut is None else 0
+        if uncut:
+            recall_chat.release(conversation, [p.id for p in collected.pieces])
+        for piece in collected.pieces if path_cut is not None else ():
+            text = redact(piece.text, between=path_cut)
+            for_words = redact(piece.for_words, between=path_cut)
             if UNSCANNED in (text, for_words):
                 unscanned += 1
                 recall_chat.release(conversation, [piece.id])
@@ -297,16 +317,18 @@ class Recaller:
         if unscanned:
             notes.append(f"{_plural(unscanned, 'piece')} couldn't be checked for secrets, "
                          "so they wait for the next call")
-        if skip is not None and skip.reason in NOTED and skip.detail:
+        if uncut:
+            notes.append(f"{_plural(uncut, 'piece')} wait for the next call: {NO_CUT}")
+        if skip is not None and skip.reason in NOTED and skip.detail and path_cut:
             notes.append(skip.detail)
-        notes = [redact(note) for note in notes]
+        notes = [redact(note, between=path_cut) for note in notes]
         handing.hold(conversation, kept)
         started_id = str(record["recall"]) if record else None
         skipped = skip.reason if skip is not None else None
-        logged.update(pieces=len(pieces), held_back=unscanned, waiting=collected.waiting,
+        logged.update(pieces=len(pieces), held_back=unscanned + uncut, waiting=collected.waiting,
                       started=started_id is not None, skipped=skipped, running=running,
                       redactions=redact.redactions)
-        text = redact(self._text(pieces, started_id, skip, running, notes))
+        text = redact(self._text(pieces, started_id, skip, running, notes), between=path_cut)
         if text == UNSCANNED:
             text = f"{SOURCE_LINE}\n{UNSCANNED_TEXT}"
         return self.result(text=text, structured={

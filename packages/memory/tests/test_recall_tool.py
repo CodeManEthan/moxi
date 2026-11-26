@@ -367,6 +367,54 @@ def test_a_piece_the_redaction_cant_scan_is_held_back_with_a_note(spawned):
     assert "a:1" not in recall_chat.read_state(CONV)["pieces"]
 
 
+def test_a_piece_its_words_and_notes_go_out_with_local_paths_cut(spawned, can_start,
+                                                                  monkeypatch):
+    write_config(ON)
+    home = os.environ["HOME"].rstrip("/")
+    a_piece("a", f"the plan is in {home}/notes/kiosk/plan.md, served on "
+                 "http://127.0.0.1:8765/approve, and ~/work/approver.txt",
+            head="what ~/kiosk/plan.md says")
+    refusal = f"{home}/bin/claude isn't there"
+    monkeypatch.setattr(links, "launcher_headless",
+                        lambda: links.Link(links.READY, Launcher([refusal])))
+    _memory, prov = build(spawned)
+    result, _ = call(prov, {"conversation": CONV, "words": "the kiosk approver"},
+                     written=True)
+    (piece,) = result.structured["pieces"]
+    assert piece["text"] == ("the plan is in plan.md, served on local, and "
+                             "approver.txt")
+    assert piece["for_words"] == "what plan.md says"
+    assert result.structured["skipped"] == recall_chat.NO_HARNESS
+    assert any("claude isn't there" in n for n in result.structured["notes"])
+    sent = result.text + repr(result.structured)
+    for leak in (home, "127.0.0.1", "8765", "~/", "/notes/", "/bin/"):
+        assert leak not in sent
+
+
+def test_without_the_sessions_cut_pieces_wait_with_a_note(spawned, can_start,
+                                                          monkeypatch):
+    write_config(ON)
+    home = os.environ["HOME"].rstrip("/")
+    a_piece("a", f"the plan is in {home}/notes/plan.md")
+    monkeypatch.setattr(links, "launcher_headless",
+                        lambda: links.Link(links.READY, Launcher([f"{home}/bin/claude"])))
+
+    def no_sessions():
+        raise RuntimeError("sessions offers no interface 7")
+
+    memory, prov = connector.build(
+        gate=Gate(load=Secrets),
+        recaller={"spawn": lambda session_id, recall_id: 4242, "sessions": no_sessions})
+    asyncio.run(memory.start(dict(os.environ)))
+    result, logged = call(prov, {"conversation": CONV, "words": "the kiosk approver"},
+                          written=True)
+    assert piece_ids(result) == []
+    assert any(recall_tool.NO_CUT in n for n in result.structured["notes"])
+    assert home not in result.text + repr(result.structured)
+    assert logged["held_back"] == 1
+    assert "a:1" not in recall_chat.read_state(CONV)["pieces"]
+
+
 # -- the status row and the doctor ------------------------------------------------------------
 
 def rows(memory):
