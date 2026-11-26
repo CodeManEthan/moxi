@@ -310,7 +310,8 @@ export function keepWarmLine(launch: Launch, state: KeepWarmState | null): KeepW
  * One of another module's routes, read one request at a time, and its topic. `value` is
  * the last answer's, or null when it gave none: a failed read, a refusal, a 404 or a body
  * that is not the route's all leave nothing, so no piece of an older answer stays. A topic
- * value replaces it. `onChange` is called after every answer or event.
+ * value of the route's shape replaces it, and one whose `state` is not `up` leaves nothing,
+ * as a failed read does. `onChange` is called after every answer and every event it takes.
  */
 export class OtherRead<V> {
   value: V | null = null;
@@ -351,11 +352,13 @@ export class OtherRead<V> {
     return this.#running;
   }
 
-  /** One topic event: a value of the route's shape replaces the one held. */
+  /** One topic event: a value of the route's shape replaces the one held, and a table
+   * whose `state` is not `up` (the module could not say) leaves nothing. Any other value
+   * is dropped. */
   topic(data: unknown): void {
     if (this.#closed) return;
     const value = this.#parse(data);
-    if (value === null) return;
+    if (value === null && !(isTable(data) && "state" in data && data.state !== "up")) return;
     this.value = value;
     this.#onChange();
   }

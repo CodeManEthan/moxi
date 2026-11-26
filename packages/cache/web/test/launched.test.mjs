@@ -214,6 +214,12 @@ test("another module's read: one at a time, and a failed read leaves nothing of 
   assert.deepEqual([...read.value.keys()], ["claude/s-2"]);
   assert.equal(calls, 5);
   assert.equal(changes, 6);
+  // launcher could not say: a topic value whose state is not `up` leaves nothing, as a failed read does
+  read.topic(running([], { state: "error", detail: "x" }));
+  assert.equal(read.value, null);
+  read.topic(running([entry("r-2", "s-2")]));
+  assert.equal(read.value.size, 1);
+  assert.equal(changes, 8);
 
   let release;
   const slow = new OtherRead(() => new Promise((done) => { release = done; }), parseLaunched, () => {});

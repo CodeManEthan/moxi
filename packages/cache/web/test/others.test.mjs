@@ -5,7 +5,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { parseRates } from "../src/cost.ts";
-import { KEEP_WARM_HOLDS_TAIL, KEEP_WARM_OFF_TAIL, keepWarmTitle, NO_PRESSES, parseKeepWarms, parseLaunched,
+import { KEEP_WARM_HOLDS_TAIL, KEEP_WARM_OFF_TAIL, keepWarmTitle, NO_PRESSES, OtherRead, parseKeepWarms, parseLaunched,
          UNLESS_KEPT } from "../src/launched.ts";
 import { Arrivals, isLoud, keep, NO_OTHERS, openedModel, pageModel, rowModel } from "../src/model.ts";
 
@@ -133,4 +133,33 @@ test("an opened launched row: Keep warm, If cold with its Usage link, and the ef
   const byHand = open("s1", 600, others({ usage: usageOf({ "claude/s1": 412_000 }) }));
   assert.deepEqual(byHand.lines.slice(2), [ifCold]);
   assert.deepEqual(NO_OTHERS.presses, NO_PRESSES);
+});
+
+test("a topic value of launcher's whose state is not up leaves no piece of its last good answer", async () => {
+  // launcher publishes its gather's failure on both topics as `state: "error"` and no sessions
+  let changes = 0;
+  const changed = () => { changes += 1; };
+  const loud = entry("r-1", "s1", 600, { waits: { kind: "agents", count: 2 }, coverable: { cap: 3 } });
+  const runningRead = new OtherRead(async () => ({ status: 200, data: { state: "up", detail: null, count: 1, sessions: [loud] } }),
+                                    parseLaunched, changed);
+  const stateRead = new OtherRead(async () => ({ status: 200, data: { state: "up", detail: null, refused: null,
+    sessions: [{ session_id: "s1", request_id: "r-1", keep_warm: { on: false, holds: [], nudges: 0 } }] } }), parseKeepWarms, changed);
+  await Promise.all([runningRead.refresh(), stateRead.refresh()]);
+  const facts = () => others({ desk: true, launched: runningRead.value, keepWarms: stateRead.value });
+  const drawn = () => rowModel(row("s1", 600), NOW, new Map(), TODAY, false, UTC, facts());
+  const opened = () => openedModel(row("s1", 600), NOW, new Map(), null, { state: "read", model: SONNET }, TODAY, UTC, facts());
+  const withoutLauncher = [rowModel(row("s1", 600), NOW, new Map(), TODAY, false, UTC, others({ desk: true })),
+                           openedModel(row("s1", 600), NOW, new Map(), null, { state: "read", model: SONNET }, TODAY, UTC,
+                                       others({ desk: true }))];
+  const good = drawn();
+  assert.deepEqual([good.name, good.where, good.lead, good.factHeavy, good.request, good.keepWarm],
+                   ["r-1-name", "slot 4 · atlas-api", "waiting on 2 agents", true, "r-1", keepWarmTitle(3)]);
+  assert.ok(opened().lines.some((one) => one.label === "Keep warm"));
+  assert.notDeepEqual([drawn(), opened()], withoutLauncher);
+
+  runningRead.topic({ state: "error", detail: "the gather failed: OSError", count: 0, sessions: [] });
+  stateRead.topic({ state: "error", detail: "the gather failed: OSError", sessions: [] });
+  assert.deepEqual([runningRead.value, stateRead.value], [null, null]);
+  assert.equal(changes, 4);
+  assert.deepEqual([drawn(), opened()], withoutLauncher);
 });

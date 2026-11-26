@@ -104,8 +104,8 @@ function parseRate(value: unknown): Rate | null {
 export function parseRates(data: unknown, asked: readonly string[]): Rates | null {
   if (!isTable(data) || !Array.isArray(data.models) || data.models.length !== asked.length) return null;
   const found = new Map<string, Rate>();
-  asked.forEach((model, at) => {
-    const rate = parseRate((data.models as unknown[])[at]);
+  asked.forEach((model, position) => {
+    const rate = parseRate((data.models as unknown[])[position]);
     if (rate !== null) found.set(model, rate);
   });
   return found;
