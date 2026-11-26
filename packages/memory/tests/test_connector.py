@@ -333,8 +333,18 @@ def test_a_row_with_no_writer_is_never_a_hit_and_takes_no_place(db):
     ("<b>deploy</b> typed with a tag", "person", True),
     ("[REDACTED:fake] deploy", "unknown", False),
     ("deploy summary", "summary", False),
-    ("deploy hook", "hook", False),
+    ("deploy hook", "hook", True),
+    ("deploy channel", "channel", True),
+    ("deploy peer", "peer", True),
+    ("deploy coordinator", "coordinator", True),
+    ("deploy task", "task", True),
+    ("<task-notification>deploy</task-notification>", "task", True),
+    ("\x00<task-notification>deploy", "task", True),
+    ("<local-command-stdout>deploy</local-command-stdout>", "hook", True),
+    ("<b>deploy</b> from a peer", "peer", True),
+    ("[REDACTED:fake] deploy from a channel", "channel", True),
     ("deploy harness", "harness", False),
+    ("<task-notification>deploy</task-notification>", "harness", False),
     ("\n<task-notification>deploy", "person", False),
     ("\t<task-notification>deploy", "person", False),
     (" <task-notification>deploy", "person", False),
@@ -353,7 +363,8 @@ def test_a_row_with_no_writer_is_never_a_hit_and_takes_no_place(db):
     ("< deploy after a no-break space", "unknown", True),
     ("<½ deploy after a fraction", "unknown", True),
 ])
-def test_only_a_person_model_or_untagged_unknown_row_is_a_hit(db, text, writer, shown):
+def test_only_a_person_model_untagged_unknown_or_delivered_row_is_a_hit(db, text, writer,
+                                                                        shown):
     put(db, text, writer=writer)
     result, _ = search({"words": "deploy"})
     assert bool(result.structured["hits"]) is shown
@@ -374,6 +385,51 @@ def test_each_hit_carries_its_fields_and_no_marks(db):
     assert lines[1].startswith("1. ") and lines[1].endswith(
         "widgets user: deploy the widgets now")
     assert lines[-1] == "read_session opens a hit's session around its time."
+
+
+def test_a_delivered_hit_s_line_says_who_delivered_it(db):
+    put(db, "deploy word from the reviewer", writer="hook", at=2000.0)
+    put(db, "deploy typed here", writer="person", at=1000.0)
+    result, _ = search({"words": "deploy"})
+    assert sorted((h["kind"], h["writer"]) for h in result.structured["hits"]) == [
+        ("user", "hook"), ("user", "person")]
+    lines = result.text.splitlines()
+    assert any(line.endswith("proj delivered by hook: deploy word from the reviewer")
+               for line in lines)
+    assert any(line.endswith("proj user: deploy typed here") for line in lines)
+
+
+def test_the_description_lists_every_writer_the_tool_returns():
+    for writer in walk.SHOWN_WRITERS:
+        assert writer in tool.DESCRIPTION
+    assert set(rows.DELIVERED_WRITERS) <= set(walk.SHOWN_WRITERS)
+    assert "harness" not in walk.SHOWN_WRITERS and "summary" not in walk.SHOWN_WRITERS
+
+
+def test_deliveries_ingested_from_a_transcript_are_found_with_their_writer():
+    from moxi_memory import links
+
+    t = sessions_api.testing.ClaudeTranscript(
+        sessions_api.root("claude"), session_id="0190b000-0000-7000-8000-00000000d1a0")
+    t.user("comms mail about the platypus build", origin="plugin", isMeta=True)
+    t.user("<task-notification>\n<status>completed</status>\nthe platypus probe ended"
+           "</task-notification>", origin="task-notification", isMeta=True)
+    t.user("<task-notification>platypus composed by the harness</task-notification>",
+           isMeta=True)
+    t.write()
+    ingest.run("walk", None, None, launcher=links.Link(links.NONE),
+               config={"harnesses": ["claude"], "index.include_subagents": False,
+                       "index.tail_chars": 1000, "redact.sets": ["credentials", "broad"]},
+               then=lambda args: None)
+    with index.writer() as w:
+        conn = w.connect()
+        with conn:
+            index.meta_set(conn, "first_read", "1")
+        conn.close()
+    result, _ = search({"words": "platypus"})
+    got = {h["writer"]: h["snippet"] for h in result.structured["hits"]}
+    assert set(got) == {"hook", "task"}
+    assert "comms mail" in got["hook"] and "probe ended" in got["task"]
 
 
 # --- the switches ------------------------------------------------------------------------

@@ -1021,3 +1021,80 @@ def test_check_text_refuses_as_the_reader_does_naming_no_file(text, key, words):
         config.check_text("demo", Schema.parse(SCHEMA), text)
     assert (caught.value.file, caught.value.key) == (None, key)
     assert words in caught.value.problem
+
+
+# -- the timer fence -----------------------------------------------------------------------
+
+@pytest.fixture
+def timed(site, tmp_path, monkeypatch):
+    """`demo` with two timers, one behind `block`, one behind the switch-table entry
+    `rows.nightly`; and a fake agent test that names no harness until told."""
+    from moxi import terminal
+
+    site.write("moxi_demo/settings.toml", SCHEMA)
+    site.module("demo", SETTINGS="'settings.toml'", TIMERS=(
+        "{'sweep': {'command': 'moxi-demo-sweep', 'switch': 'block', 'every': '5m'}, "
+        "'nightly': {'command': 'moxi-demo-nightly', 'switch': 'rows.nightly', "
+        "'at': ['03:00']}}"))
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setenv("MOXI_DEMO_CONFIG_HOME", str(tmp_path / "config"))
+    monkeypatch.setenv("MOXI_HOME", str(tmp_path / "core"))
+    agent = {"harness": None}
+    monkeypatch.setattr(terminal, "agent", lambda *a, **k: agent["harness"])
+    monkeypatch.setattr(config, "apply_units", lambda *a, **k: [])
+    return agent, tmp_path / "config" / "demo" / "config.toml"
+
+
+REFUSAL = ("Turning a timer on is for the person at the keyboard, and this command runs "
+           "inside an agent session (claude). Ask them to run it, or to turn it on from "
+           "the services page.")
+
+
+@pytest.mark.parametrize("argv", [("block", "true"), ("rows.nightly", "yes"),
+                                  ("rows", '{nightly = true}')],
+                         ids=["switch", "entry", "table"])
+def test_an_agent_turning_a_timer_on_is_refused_and_writes_nothing(timed, capsys, argv):
+    agent, path = timed
+    agent["harness"] = "claude"
+    code, out, err = run(capsys, "config", "set", "demo", *argv)
+    assert code == 3 and not path.exists()
+    assert err.strip() == f"moxi: config set demo {argv[0]}: {REFUSAL}"
+    code, out, err = run(capsys, "config", "set", "demo", *argv, "--json")
+    assert code == 3 and json.loads(out) == {"changed": False, "problem": REFUSAL,
+                                             "fix": None, "units": []}
+    assert not path.exists()
+
+
+def test_turning_a_timer_off_or_a_key_no_timer_reads_is_never_refused(timed, capsys):
+    agent, path = timed
+    agent["harness"] = "codex"
+    for argv in (("block", "false"), ("rows.nightly", "false"), ("name", "x"),
+                 ("local.retain_days", "3")):
+        code, out, err = run(capsys, "config", "set", "demo", *argv)
+        assert code == 0, err
+    # Setting an on switch on again turns nothing on.
+    agent["harness"] = None
+    assert run(capsys, "config", "set", "demo", "block", "true")[0] == 0
+    agent["harness"] = "codex"
+    assert run(capsys, "config", "set", "demo", "block", "true")[0] == 0
+    # Unset of a switch whose default is off turns nothing on.
+    assert run(capsys, "config", "unset", "demo", "block")[0] == 0
+
+
+def test_with_no_agent_a_timer_is_turned_on_as_before(timed, capsys):
+    agent, path = timed
+    code, out, err = run(capsys, "config", "set", "demo", "block", "true")
+    assert code == 0, err
+    assert read(path)["block"] is True
+
+
+def test_timer_turned_on_reads_set_and_unset(timed):
+    from moxi import units
+
+    assert units.switched_timers("demo", "block") == ["sweep"]
+    assert units.switched_timers("demo", "rows") == ["nightly"]
+    assert units.switched_timers("demo", "name") == []
+    assert units.timer_turned_on("demo", "block", "set", "true")
+    assert not units.timer_turned_on("demo", "block", "set", "false")
+    assert not units.timer_turned_on("demo", "block", "unset")
+    assert not units.timer_turned_on("demo", "name", "set", "x")

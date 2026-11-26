@@ -74,7 +74,8 @@ query keeps at most 64 tokens of at most 100 characters each.
 Each hit is two lines: its number, harness, session id, time (local, to the minute),
 project label and what the row is (`user`, `assistant`, `tool`, or `result` for the end
 of a tool result, with `failed` when the tool failed and `subagent <id>` on a subagent's
-row), then the matching part of the text with each match marked `«...»`. Under the hits
+row; a delivered message shows who delivered it in place of `user`: `hook` for a plugin's,
+comms mail among them, or `channel`, `peer`, `coordinator` or `task`), then the matching part of the text with each match marked `«...»`. Under the hits
 is one command that opens the first hit's session around its time:
 
 ```text
@@ -110,8 +111,9 @@ which holds the session table) doesn't, search exits 1 the same way and names th
 a rebuild doesn't repair it.
 
 `--json` prints one object: `tokens`, `rows`, `hits` (each with `harness`, `session_id`,
-`agent_id`, `time` in epoch seconds, `at` in UTC ISO 8601, `project`, `kind`, `tier` (`1`,
-`2` or `"subagent"`), `failed`, `snippet`, `score` and `read_command`, the command that
+`agent_id`, `time` in epoch seconds, `at` in UTC ISO 8601, `project`, `kind`, `writer`
+(the row's writer, `person`, `model`, `hook` and so on, or null for a result's end),
+`tier` (`1`, `2` or `"subagent"`), `failed`, `snippet`, `score` and `read_command`, the command that
 opens its session), `filling` (`{"sources_read", "listed"}` or null), `rebuild_started_at`
 (the rebuild's start in epoch seconds, or null), `top_read_command` (the first hit's
 `read_command`) and `notes` (the incomplete-answer lines). With no
@@ -198,7 +200,9 @@ archive folder not listed whole yet, one the last rebuild didn't read, and one s
 config no longer names); and the session table's
 count by launch kind and by whether a session has an identity, or that memory's state
 store, which holds the session table, can't be read (the index line is apart from it).
-With no index, or one that can't be read, it says so, still prints the rebuild and session lines, names `moxi memory
+For an index made before memory kept delivered messages (below), a `delivered messages:`
+line says it holds none for the sessions it had read and names `moxi memory reindex`;
+`--json` gives `keeps_delivered` false. With no index, or one that can't be read, it says so, still prints the rebuild and session lines, names `moxi memory
 reindex` unless a rebuild is running, and exits 1. `--json` prints the same as one object.
 
 ## What each session gets
@@ -320,19 +324,27 @@ A failed child (a setting memory can't use, a redaction set that won't run) leav
 
 | Tier | What | Kept per row | Searched |
 |---|---|---|---|
-| 1 | each `user` or `assistant` message of a main session, and each tool call, as its summary line and its input | a message's first 16,384 characters, a tool call's first 2,048 | always |
+| 1 | each `user` or `assistant` message of a main session, delivered messages included, and each tool call, as its summary line and its input | a message's first 16,384 characters, a tool call's first 2,048 | always |
 | 2 | the end of each main-session tool result, with whether the tool failed | the last `index.tail_chars` characters, 1,000 by default | with `--results` |
 | subagents | tier 1 rows of subagent sessions, under their main session's id | as tier 1 | with `--subagents`, and only while `index.include_subagents` is on |
 
 A cut text says how much went: `[... N more characters cut]` after a message, `[... N
 earlier characters cut]` before a tail.
 
-Not indexed: system and developer messages; messages the harness says it added itself,
-or that a plugin, a channel, another session or a background task submitted, whatever
-their role (sessions' `injected`); messages Claude Code flags as meta, and compaction
-summaries; reasoning; this module's own start line and reminder; markers, requests and
-rate-limit readings; whole tool results; subagent tool results; and Codex threads that
-Codex imported from another harness, whose original is that harness's transcript.
+Delivered messages are indexed: what a plugin (comms mail among them), a channel,
+another session (a peer or a coordinator) or a background task put into the session,
+each row naming who delivered it (sessions' `writer`: `hook`, `channel`, `peer`,
+`coordinator`, `task`), also when Claude Code flags the line as meta. An index made
+before memory kept them holds none for the sessions it had read; `moxi memory status`
+and `moxi doctor memory` say so, and one `moxi memory reindex` reads them in. Nothing
+reindexes by itself.
+
+Not indexed: system and developer messages; other messages the harness says it added
+itself, or flags as meta (sessions' writer `harness`), and compaction summaries; the
+subconscious's recall answers (below); reasoning; this module's own start line and
+reminder; markers, requests and rate-limit readings; whole tool results; subagent tool
+results; and Codex threads that Codex imported from another harness, whose original is
+that harness's transcript.
 
 A message whose harness doesn't say who submitted it is kept. So a prompt sent through
 Claude Code's SDK or `codex exec`, a command line typed at the prompt (`/clear`), and most
@@ -344,6 +356,21 @@ OpenCode's child sessions. A subagent that ran as a subconscious recall's fork i
 indexed, even with `index.include_subagents` on: it holds a copy of its parent's
 conversation. memory knows it by the fork id in its recall log, and takes out any rows
 of it read before that id was written.
+
+A recall's answers are not indexed either. On Claude Code each answer reaches the main
+session as a background task's notice (`<task-notification>`) whose `<task-id>` is the
+fork's id; memory leaves out every notice whose task id its recall log names, so search,
+a later recall's first search and the chat's `search_memory` never return an earlier
+recall's answer. Other notices, a subagent's or a background command's, are indexed as
+before; a message that holds several notices keeps all but the recall's. A notice that
+comes in before its fork's id reaches the log is still left out when memory reads the
+log again within a minute of the notice.
+
+On a route that answers by comms, each answer comes back as comms mail, and the recall
+log keeps the id comms gave each one it took. memory leaves out every delivered comms
+message whose id the log names, as comms reads the delivered text back (memory doesn't
+read comms' delivery text itself); other mail in the same delivery is kept, and mail is
+never left out for its sender's name alone. Without comms there is no such mail.
 
 ### Project labels
 
@@ -653,7 +680,8 @@ until memory's line holds it. If a recall's child dies, the next recall child of
 session, or a taker memory starts when that session ends, finishes its line from what
 turns kept. A recall's working record is removed after a day unless its line still
 waits on turns. The log itself is never swept: memory leaves each recall's fork out of
-its index by the fork id the log holds, so a sweep added later must keep those ids. Each
+its index by the fork id the log holds, and the answers it hands back too, so a sweep
+added later must keep those ids. Each
 recall child and each read of a subagent transcript reads the whole log, so that work
 grows with every session that ever ran the subconscious.
 
@@ -848,7 +876,8 @@ failed ingest child.
   seconds or a
   `datetime` (no zone is local time). A `Result` holds `hits` (each a `Hit`: `harness`,
   `session_id`, always the main session's, `agent_id` on a subagent's hit, `time`,
-  `project`, `kind`, `tier`, `snippet`, `key`, `score` and `failed`), `rows` (how many rows
+  `project`, `kind`, `tier`, `snippet`, `key`, `score`, `failed` and `writer`), `rows` (how
+  many rows
   were searched), `tokens`, `filling` (a `Filling(read, listed)` while the first full read
   hasn't finished, else None), `rebuilding` (a running rebuild's start time, else None),
   `unread` (the archive folders no walk they answered has listed whole) and
@@ -915,16 +944,24 @@ An index from before the writer column is migrated the next time memory writes t
 and the tool refuses `index-unreadable` until then.
 
 **What it returns.** Only what `read_session` would show as text: a row whose writer is
-the person or the model, or `unknown` with a text that opens neither with `<` and a
-letter nor with a redaction placeholder. A text that opens with one of sessions' output
-wrappers (`<task-notification>`, `<local-command-stdout>`, `<system-reminder>` and the
-rest) is never a hit, nor is any other writer's row. These are clauses of the search
-itself, so a hidden row takes no place and changes no count. Leading spaces, no-break
-spaces and invisible characters don't hide a wrapper. Mail from other sessions (`peer`
-and `coordinator` messages) is never a hit, nor are channel, plugin and task-notification
-messages, since memory stores none of them; `read_session` shows that mail, named, in its
-session. With `results`, the ends of tool results are searched too, each a `result` hit
-with no writer.
+the person or the model, `unknown` with a text that opens neither with `<` and a letter
+nor with a redaction placeholder, or a delivered message. A text that opens with one of
+sessions' output wrappers (`<task-notification>`, `<local-command-stdout>`,
+`<system-reminder>` and the rest) is never a hit unless the row is a delivered one, and
+a `harness` or `summary` row never is. These are clauses of the search itself, so a
+hidden row takes no place and changes no count. Leading spaces, no-break spaces and
+invisible characters don't hide a wrapper.
+
+A delivered message is what a plugin (comms mail among them), a channel, another
+session or a background task put into the session: writer `hook`, `channel`, `peer`,
+`coordinator` or `task`. It is a hit exactly when `moxi memory search` would return it.
+Its writer comes from its line's own origin, so the wrapper and tag tests, which judge a
+row whose writer is unsure, don't apply: a background task's notice opens with
+`<task-notification>` and is still found. Its text is redacted, windowed and ranked
+like every row's, the hit's `writer` names who delivered it, and its line in the text
+part reads `delivered by hook` (or the other writer) where a typed row's reads `user`.
+With `results`, the ends of tool results are searched too, each a `result` hit with no
+writer.
 
 **How it picks and ranks.** The tool doesn't take `moxi memory search`'s ranking, which
 is computed over the stored text and so over what the chat redaction hides. It reads the

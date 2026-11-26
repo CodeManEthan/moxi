@@ -2,11 +2,20 @@
 page sends, and the lines `moxi sessions read` prints from the same rows.
 
 **The view row** (`view_row`) is a record as a row whose keys are those its kind carries,
-never the record's JSON: no `extra`, no `raw`, no tool call's input and no tool output. A
-tool call is its one-line summary (`ToolCall.summary`), a tool result its size and whether
-it failed, a message its text cut at `TEXT_MAX` UTF-8 bytes with `truncated` set. A value
-the harness did not say is left out of the row and named in its `unknown` list, and so is a
-value of a type the row does not carry.
+never the record's JSON: no `extra`, no `raw` and no tool call's input. A tool call is its
+one-line summary (`ToolCall.summary`), a tool result its size and whether it failed, a
+message its text cut at `TEXT_MAX` UTF-8 bytes with `truncated` set. A value the harness
+did not say is left out of the row and named in its `unknown` list, and so is a value of a
+type the row does not carry.
+
+**Tool output.** Only given `outputs` (an `Outputs`, which `moxi sessions read --results`
+passes) does a tool result's row carry its output: `output`, the text redacted and then
+cut to its first and last `OUTPUT_KEEP_CHARS` characters (put end to end),
+`output_cut_chars`, how many characters were cut from between them (0 for a whole output),
+and `withheld_why`, null, or why the output is not shown: its call's input names a secret
+path (`moxi_secrets.secret_path`), or its call is not among the records read, so the read
+can't tell. A withheld output's `output` is null. Without `outputs` no row carries output,
+which is how sessions' page and every other read have it.
 
 **Redaction.** Given `redact`, a function from text to text, `view_row` passes each
 message's whole text, each tool call's name and whole argument, and each title through it
@@ -33,7 +42,8 @@ they fall in.
 
 `lines(row)` is the text a row prints as, the way sessions' page draws it: a message as
 its label and its text, a tool call as its summary line, a tool result as `Result:` with
-its size, a marker as a labelled rule, a request as its model and token counts.
+its size (and, when the row carries it, its output below, or why it is withheld), a marker
+as a labelled rule, a request as its model and token counts.
 """
 
 from __future__ import annotations
@@ -41,7 +51,7 @@ from __future__ import annotations
 import time
 from collections import deque
 from collections.abc import Callable, Iterator, Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 from .shape import CODEX, UNKNOWN, Record, squeezed_first, tool_summary
@@ -55,6 +65,15 @@ SECRETS_INTERFACE = 1
 
 #: A function from text to its redacted text.
 Redact = Callable[[str], str]
+#: secrets' test of a tool call's input: the secret path it names, or None.
+SecretPath = Callable[[Any], "str | None"]
+
+#: A long tool output keeps this many characters at each end.
+OUTPUT_KEEP_CHARS = 4000
+#: Why an output is withheld: its call's input names a secret path.
+WITHHELD_SECRET = "output withheld: the call read a secret path"
+#: Why an output is withheld: its call is not among the records read.
+WITHHELD_UNSEEN = "output withheld: its call is not in this read, so it may read a secret path"
 
 STRING = "string"
 INT = "int"
@@ -181,8 +200,50 @@ def _redacted(value: Any, redact: Redact | None) -> Any:
     return redact(value) if redact is not None and isinstance(value, str) else value
 
 
-def view_row(record: Record, *, redact: Redact | None = None) -> dict[str, Any]:
-    """One record as its view row, with its text redacted first when `redact` is given."""
+def cut_output(text: str) -> tuple[str, int]:
+    """A tool output cut to its first and last `OUTPUT_KEEP_CHARS` characters, put end to
+    end, and how many characters were cut from between them."""
+    if len(text) <= 2 * OUTPUT_KEEP_CHARS:
+        return text, 0
+    return (text[:OUTPUT_KEEP_CHARS] + text[-OUTPUT_KEEP_CHARS:],
+            len(text) - 2 * OUTPUT_KEEP_CHARS)
+
+
+@dataclass
+class Outputs:
+    """The tool output a read shows, for rows made in the session's order. `secret_path`
+    is secrets' test of a call's input; `calls` holds, by call id, whether each tool call
+    seen so far names a secret path."""
+
+    secret_path: SecretPath
+    calls: dict[str, bool] = field(default_factory=dict)
+
+    def note(self, record: Record) -> None:
+        """Remember a tool call's id and whether its input names a secret path."""
+        call_id = record.call_id
+        if isinstance(call_id, str) and call_id:
+            secret = self.secret_path(record.input) is not None
+            self.calls[call_id] = self.calls.get(call_id, False) or secret
+
+    def put(self, row: dict[str, Any], record: Record, redact: Redact | None) -> None:
+        """Set a tool result row's `output`, `output_cut_chars` and `withheld_why`."""
+        call_id = record.call_id
+        secret = self.calls.get(call_id) if isinstance(call_id, str) else None
+        if secret is None or secret:
+            row["output"], row["output_cut_chars"] = None, 0
+            row["withheld_why"] = WITHHELD_UNSEEN if secret is None else WITHHELD_SECRET
+            return
+        text = record.output if isinstance(record.output, str) else ""
+        row["output"], row["output_cut_chars"] = cut_output(_redacted(text, redact))
+        row["withheld_why"] = None
+
+
+def view_row(record: Record, *, redact: Redact | None = None,
+             outputs: Outputs | None = None) -> dict[str, Any]:
+    """One record as its view row, with its text redacted first when `redact` is given.
+    With `outputs`, a tool call is noted there and a tool result's row carries its
+    output, as the module docstring says; rows must then be made in the session's
+    order."""
     kind = record.kind
     row: dict[str, Any] = {"kind": kind, "raw_kind": record.raw_kind or "",
                            "at": _at(record.at)}
@@ -211,6 +272,10 @@ def view_row(record: Record, *, redact: Redact | None = None) -> dict[str, Any]:
             put(row, unknown, key, value, typed)
     elif kind == "limits":
         row["windows"] = _windows(record.windows)
+    elif outputs is not None and kind == "tool_call":
+        outputs.note(record)
+    elif outputs is not None and kind == "tool_result":
+        outputs.put(row, record, redact)
     row["unknown"] = unknown
     return row
 
@@ -243,15 +308,17 @@ def header_row(found: Any, rows: list[dict[str, Any]], *,
 @dataclass(frozen=True)
 class Redactor:
     """The read's redaction: `redact`, or None with `reason`, why the text goes as
-    written."""
+    written. `secret_path` is secrets' test of a tool call's input, None when secrets
+    offers none (or there is no redaction)."""
 
     redact: Redact | None
     reason: str | None = None
+    secret_path: SecretPath | None = None
 
 
 def redactor() -> Redactor:
-    """secrets' `redact` over `SETS`, or why there is none: secrets is not installed, does
-    not load, or cannot load the sets."""
+    """secrets' `redact` over `SETS` and its `secret_path`, or why there is no redaction:
+    secrets is not installed, does not load, or cannot load the sets."""
     from moxi import modules
 
     found = modules.load("secrets", interface=SECRETS_INTERFACE)
@@ -269,7 +336,8 @@ def redactor() -> Redactor:
     def redact(text: str) -> str:
         return scan_redact(text, SETS)
 
-    return Redactor(redact)
+    secret_path = getattr(found.api, "secret_path", None)
+    return Redactor(redact, secret_path=secret_path if callable(secret_path) else None)
 
 
 # --- the reads ------------------------------------------------------------------------------
@@ -296,12 +364,13 @@ class Shown:
     ended: str | None = None
 
 
-def last(source: Any, turns: int, redact: Redact | None = None) -> Shown:
+def last(source: Any, turns: int, redact: Redact | None = None, *,
+         outputs: Outputs | None = None) -> Shown:
     """The last `turns` turns, through sessions' `window`."""
     from .read import window
 
     read = window(source, turns=turns)
-    rows = [view_row(record, redact=redact) for record in read.records]
+    rows = [view_row(record, redact=redact, outputs=outputs) for record in read.records]
     return Shown("last", rows, lambda: read.header, turns=turns,
                  earlier=read.has_earlier, ended=read.ended)
 
@@ -395,16 +464,19 @@ def turns_around(source: Any, at: float, turns: int) -> Turns:
                  earlier=dropped or first > 0, later=later)
 
 
-def around(source: Any, at: float, turns: int, redact: Redact | None = None) -> Shown:
+def around(source: Any, at: float, turns: int, redact: Redact | None = None, *,
+           outputs: Outputs | None = None) -> Shown:
     """`turns` turns around the time `at` (epoch seconds), read forward. Only the turns
     chosen are made rows, so the turns passed over on the way cost no redaction."""
     read = turns_around(source, at, turns)
-    rows = [view_row(record, redact=redact) for group in read.groups for record in group]
+    rows = [view_row(record, redact=redact, outputs=outputs)
+            for group in read.groups for record in group]
     return Shown("around", rows, read.header_of, turns=turns, around=at,
                  earlier=read.earlier, later=read.later)
 
 
-def whole(source: Any, redact: Redact | None = None) -> Shown:
+def whole(source: Any, redact: Redact | None = None, *,
+          outputs: Outputs | None = None) -> Shown:
     """Every record of the session, as rows read one at a time. The source stays open
     until the rows run out."""
     from .read import records
@@ -414,7 +486,7 @@ def whole(source: Any, redact: Redact | None = None) -> Shown:
     def rows() -> Iterator[dict[str, Any]]:
         with read:
             for record in read:
-                yield view_row(record, redact=redact)
+                yield view_row(record, redact=redact, outputs=outputs)
 
     return Shown("all", rows(), lambda: read.header)
 
@@ -514,6 +586,26 @@ def _first_line_cut(text: str, n: int) -> str:
     return first if len(first) <= n else first[:n]
 
 
+def _output_lines(row: Mapping[str, Any]) -> list[str]:
+    """A tool result's output below its `Result:` line, each line indented two spaces,
+    with the cut named where it falls; nothing when the row carries no output."""
+    if "output" not in row:
+        return []
+    if row.get("withheld_why"):
+        return [f"  {row['withheld_why']}"]
+    text = row.get("output") or ""
+    if not text:
+        return ["  (no output)"]
+    cut = row.get("output_cut_chars") or 0
+    if not cut:
+        return [f"  {line}" for line in text.split("\n")]
+    head, tail = text[:OUTPUT_KEEP_CHARS], text[OUTPUT_KEEP_CHARS:]
+    return ([f"  {line}" for line in head.split("\n")]
+            + [f"  [cut: {_count(cut)} characters between the first and last "
+               f"{_count(OUTPUT_KEEP_CHARS)}]"]
+            + [f"  {line}" for line in tail.split("\n")])
+
+
 def lines(row: Mapping[str, Any]) -> list[str]:
     """The lines one row prints as: its time, then what it is, and for a message its text
     below, each line indented two spaces."""
@@ -542,7 +634,7 @@ def lines(row: Mapping[str, Any]) -> list[str]:
         size = (_bytes(row["size_bytes"]) if isinstance(row.get("size_bytes"), int)
                 else "size unknown")
         return [f"{when}  Result: error, {size}" if row.get("is_error") is True
-                else f"{when}  Result: {size}"]
+                else f"{when}  Result: {size}"] + _output_lines(row)
     if kind == "marker":
         return [f"{when}  -- {marker_line(row)} --"]
     if kind == "request":
@@ -558,8 +650,9 @@ def lines(row: Mapping[str, Any]) -> list[str]:
     return [f"{when}  {said} {row.get('raw_kind', '')}"]
 
 
-__all__ = ["TEXT_MAX", "SETS", "Redact", "Redactor", "Shown", "Turns", "around",
-           "cut_message",
+__all__ = ["TEXT_MAX", "SETS", "OUTPUT_KEEP_CHARS", "WITHHELD_SECRET", "WITHHELD_UNSEEN",
+           "Outputs", "Redact", "Redactor", "SecretPath", "Shown", "Turns", "around",
+           "cut_message", "cut_output",
            "cut_text",
            "header_row", "last", "lines", "redactor", "stamp", "summary", "turns_around",
            "turns_last", "view_row", "whole"]

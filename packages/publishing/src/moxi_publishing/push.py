@@ -4,7 +4,9 @@ It runs on pre-push, fail closed, order 50. Its settings, in each repo's git con
 
 - `main`, one value: the repo's main branch;
 - `protected`, any number: branches beside `main` a push may never delete;
-- `word-required`, one value: `true` when a push needs `MOXI_PUBLISHING_PUSH_WORD`;
+- `word-required`, retired: the word is the approval piece's now. While it holds `true`
+  every push is refused, naming the commands that move it (`approval enable`) and remove
+  it (`enable --set word-required=`), so no repo loses its approval silently;
 - `free-ref`, any number: ref patterns outside branches and release tags that a push may
   create, move or delete. A pattern never applies to a branch (`refs/heads/*`) or to a
   release tag, and `moxi publishing enable` refuses one that could match either;
@@ -48,7 +50,7 @@ by `github_repo` to the OWNER/REPO in `moxi-publishing.github`) that creates or 
 (`tags.default_web`), each read bounded at ten seconds, and the jobs are GitHub's latest
 attempt of the run (the jobs list's default), so a re-run that passed counts and one that
 failed after a pass does not. A read that fails or a setting missing at C refuses, naming
-which. This adds to the word and to the rule that `main` only moves forward. A push of
+which. This adds to the rule that `main` only moves forward. A push of
 `main` from a repo with no `standing-branch`, or to any other URL, reads no CI here.
 
 STANDING BRANCHES. A `standing-branch` value is a fixed prefix of one or more path parts,
@@ -61,19 +63,15 @@ while any value breaks that, every push is refused (`Standing`). A branch under 
   nothing but a local branch's tip goes out under the prefix;
 - it is deleted whatever its tip, with no merge check and no fetch first;
 - what it sends is judged as any push's, with no setting that narrows it;
-- a push whose every ref line is a standing branch, sent to a URL that reduces
-  (`github_repo`) to the OWNER/REPO in `moxi-publishing.github`, needs no
-  `MOXI_PUBLISHING_PUSH_WORD` where `word-required` is set; a word given on it is judged as
-  on any push, so a malformed one still refuses it. Any other push needs the word as
-  before, and its standing lines are judged by the rules above;
 - its entry in the log's `refs` names the pattern that allowed it (`standing`).
 
 Another pre-push guard that reads this setting must reduce URLs by `github_repo` and judge
 patterns by `Standing` exactly, or the two disagree on one push.
 
 A push that passes is logged first: one JSON line in the module's state directory,
-`pushes.jsonl`. A log that can't be written refuses the push. Its `word` is null when no
-word, or a blank one, was given.
+`pushes.jsonl`. A log that can't be written refuses the push. Its `word` is
+`MOXI_PUBLISHING_PUSH_WORD` as the push carried it, or null when none, or a blank one, was
+given; the approval piece judges it.
 
 Standard library only at import.
 """
@@ -101,10 +99,11 @@ PROTECTED = "protected"
 WORD_REQUIRED = "word-required"
 FREE_REF = "free-ref"
 STANDING_BRANCH = "standing-branch"
-#: The repo's OWNER/REPO on GitHub, in its git config: the one place a standing push goes
-#: with no word, and where `main_ci` reads CI.
+#: The repo's OWNER/REPO on GitHub, in its git config: where a push of `main` waits for
+#: `main_ci`, which reads CI there.
 GITHUB_KEY = "moxi-publishing.github"
-#: Where the push names the place it was approved, when the repo wants that.
+#: Where the push names the place it was approved; the approval piece reads it, and the
+#: log keeps it.
 WORD_ENV = "MOXI_PUBLISHING_PUSH_WORD"
 #: The most tags one push may create: one, of any kind.
 MAX_TAGS = 1
@@ -327,6 +326,12 @@ def judge_history(git, rev: str, from_rev: str | None, *, sets=None) -> list[str
     return reader.reasons
 
 
+def given_word() -> str | None:
+    """The push word in this process's environment, `WORD_ENV`; a blank one is none."""
+    word = os.environ.get(WORD_ENV) or None
+    return None if word is None or not word.strip() else word
+
+
 class _Push(_Reader):
     """One push being judged: the context, its settings, and what it found."""
 
@@ -336,17 +341,14 @@ class _Push(_Reader):
         settings = ctx.settings
         self.main = _one(settings, MAIN) or "main"
         self.protected = {v.strip() for v in settings.get(PROTECTED, ()) if v.strip()}
-        self.word_required = _true(_one(settings, WORD_REQUIRED))
+        self.word_required = _true(_one(settings, WORD_REQUIRED))  # retired; refused
         self.free = [v.strip() for v in settings.get(FREE_REF, ()) if v.strip()]
         self.remote = ctx.args[0] if ctx.args else ""
         self.url = ctx.args[1] if len(ctx.args) > 1 else self.remote
         # What is printed and logged; a push to a bare URL gives git the URL as the remote.
         self.shown_remote, self.shown_url = _shown_url(self.remote), _shown_url(self.url)
         self.updates = ctx.updates
-        # A blank word is no word.
-        self.word = os.environ.get(WORD_ENV) or None
-        if self.word is not None and not self.word.strip():
-            self.word = None
+        self.word = given_word()
         self.standing = Standing(settings)
         self.commits: list[str] = []
 
@@ -374,7 +376,7 @@ class _Push(_Reader):
             raise ScanError(f"git {args[0]} failed: {_first_line(done.stderr)}")
         return done.stdout
 
-    # -- the word -------------------------------------------------------------------------
+    # -- the publishing remote ---------------------------------------------------------
 
     def github(self) -> str | None:
         """`GITHUB_KEY`'s value, or None when it is unset or blank; read once."""
@@ -390,50 +392,19 @@ class _Push(_Reader):
         github = self.github() if self.standing.patterns else None
         return bool(github and github_repo(self.url) == github)
 
-    def standing_free(self) -> bool:
-        """Whether the push needs no word: it carries ref lines, every one a standing
-        branch, to the publishing remote (`to_publishing`)."""
-        return bool(self.updates and self.to_publishing()
-                    and all(self.standing.match(u.remote_ref) for u in self.updates))
-
-    def why_not_free(self) -> str:
-        """One line on why the push is not a standing push, for a refusal that asks for
-        the word."""
-        names = " ".join(self.standing.patterns)
-        github = self.github()
-        if not self.updates:
-            return "this push carries no ref line"
-        if not github:
-            return f"{GITHUB_KEY} is not set, so even a push of only {names} needs it"
-        others = [u.remote_ref for u in self.updates
-                  if not self.standing.match(u.remote_ref)]
-        if others:
-            return (f"only a push whose every ref is under {names} goes with no word, and "
-                    f"this one carries {others[0]}")
-        return (f"only a push of {names} to {github} ({GITHUB_KEY}) goes with no word, "
-                f"and this one goes to {self.shown_url}")
-
-    def judge_word(self) -> None:
-        """The word, where `word-required` is set: none is needed on a standing push to
-        the publishing remote; one given is judged on every push."""
+    def judge_leftover(self) -> None:
+        """Refuse every push while the retired `word-required` holds true."""
         if not self.word_required:
             return
-        import re
+        from moxi_repo.api import quote_arg
 
-        from moxi_publishing import settings
-
-        if self.word is None:
-            if self.standing_free():
-                return
-            self.reasons.append(f"this repo wants the word: set {WORD_ENV} to where the "
-                                "push was approved")
-            if self.standing.patterns:
-                self.reasons.append(self.why_not_free())
-            return
-        pattern = settings.load()[settings.WORD_PATTERN]
-        if re.fullmatch(pattern, self.word) is None:
-            self.reasons.append(f"{WORD_ENV} does not match push.word_pattern "
-                                f"({pattern})")
+        root = quote_arg(self.ctx.root or ".")
+        self.reasons += [
+            f"this repo's push piece still holds {WORD_REQUIRED} = true, which is retired: "
+            "the word is push approval's now, so no push goes out until it moves there",
+            f"turn approval on with moxi publishing approval enable {root} --branch PATTERN "
+            f"(a pattern per branch to guard; '*' is every branch), then remove the "
+            f"setting with moxi publishing enable {root} --set {WORD_REQUIRED}="]
 
     # -- each ref line --------------------------------------------------------------------
 
@@ -766,7 +737,9 @@ class _Push(_Reader):
                 f"{root} --set '{STANDING_BRANCH}=ci/*', or remove it with --set "
                 f"{STANDING_BRANCH}="]
             return
-        self.judge_word()
+        self.judge_leftover()
+        if self.reasons:
+            return
         self.judge_names()
         chains = self.chains()
         self.judge_refs(chains)
@@ -916,5 +889,6 @@ def pre_push(ctx):
 
 __all__ = ["PUSH", "PIECE_ID", "MAIN", "PROTECTED", "WORD_REQUIRED", "FREE_REF",
            "STANDING_BRANCH", "GITHUB_KEY", "WORD_ENV", "MAX_TAGS", "LOG_FILE", "Standing",
+           "given_word",
            "github_repo", "standing_problem", "main_ci", "log_path", "judge_history",
            "pre_push"]

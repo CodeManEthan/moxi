@@ -69,7 +69,7 @@ def test_a_generated_file_not_loadouts_keeps_and_its_diff_is_what_replace_writes
     assert (shown["case"], shown["label"], shown["target"]) == ("keeps", "file",
                                                                 str(generated()))
     assert shown["kept_in"] == str(displaced.root())
-    assert (shown["tracked"], shown["others"], shown["skipped"]) == (False, 0, [])
+    assert (shown["others"], shown["skipped"]) == (0, [])
     assert install.install(Scope(user=True), replace=["agent:helper@codex"]).code == 0
     assert shown["diff"] == unified(before, generated().read_bytes(), generated())
     assert shown["lines"] == len(shown["diff"].splitlines()) > 0
@@ -183,7 +183,7 @@ def test_an_occupant_moves_and_its_diff_is_each_file_against_its_source(lo):
     kit.skill(kit.claude(), "review", "mine\n")
     (target / "notes.md").write_text("only mine\n")
     shown = preview.replace_preview("skill:review@claude", "user")
-    assert (shown["case"], shown["target"], shown["tracked"]) == ("moves", str(target), False)
+    assert (shown["case"], shown["target"]) == ("moves", str(target))
     source = lo / "skills" / "review"
     assert shown["diff"] == (
         unified((target / "SKILL.md").read_text(), (source / "SKILL.md").read_text(),
@@ -216,7 +216,7 @@ def test_an_edited_copy_moves(lo):
 
 
 @pytest.mark.slow
-def test_a_tracked_occupant_in_a_project_moves_under_its_section(lo, tmp_path):
+def test_a_tracked_occupant_has_no_replace_to_preview(lo, tmp_path):
     root = work_tree(tmp_path / "app")
     write(lo, f'[user]\nskills = ["other"]\n[project."{root}"]\nskills = ["review", "more"]\n'
               f'[skill.review]\nharnesses = ["codex"]\n[skill.more]\nharnesses = ["codex"]\n'
@@ -229,9 +229,7 @@ def test_a_tracked_occupant_in_a_project_moves_under_its_section(lo, tmp_path):
     git(root, "add", ".")
     git(root, "commit", "-q", "-m", "a skill")
     shown = preview.replace_preview("skill:review@codex", str(root))
-    assert (shown["case"], shown["tracked"]) == ("moves", True)
-    # The run is the project section's: its `more` is made too, the user's `other` isn't.
-    assert shown["others"] == 1
+    assert (shown["case"], shown["target"]) == (None, None)
 
 
 # -- the scope and the other changes ------------------------------------------------------

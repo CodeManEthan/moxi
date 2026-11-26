@@ -1,7 +1,21 @@
 # Changelog
 
-## Unreleased
+## 0.1.5 (unreleased)
 
+- `moxi projects add` asks the questions other modules offer about the new project.
+  With a terminal on stdin and stdout and without `--json`, it asks each one, its
+  suggestion the default. Without a terminal, or with `--json`, it asks nothing, turns
+  nothing on, and prints a `not asked:` line per question naming the command that sets
+  it later (`asked` in `--json`; the answers acted on are `answered`). A failing answer
+  leaves the project added, with a warning naming the command to run. Modules ask through
+  contribution interface 3, `questions(fields)` and `answer(project, key, value)`;
+  projects reads interfaces 1 to 3, and `api.Question` is the question as read.
+- The Projects page's Add panel shows those questions as fields under `Name`, each set to
+  its suggestion, and sends the answers with the add. The page serves
+  `/api/questions?path=`, the questions an add at a path would put; `/api/add` takes
+  `answers` (`module.key=value`) and answers `asked`, the questions it didn't put. The
+  `Add a project` block puts no questions and lists them as not asked. A question's key
+  is a lower-case letter, then lower-case letters, digits and `_`.
 - The facts contract has a second joined phrase. A report may give a line `runs` (its
   session runs now), a part `idle_only` (it holds only while that session is not in a
   turn) and `live`, by claim, `{in_turn, state}`, at most 100. On the opened project, a

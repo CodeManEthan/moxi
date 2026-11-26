@@ -2,6 +2,32 @@
 
 ## Unreleased
 
+- Delivered messages are indexed again: what a plugin (every comms message), a channel,
+  a peer, a coordinator or a background task put into a session enters tier 1 with its
+  writer (`hook`, `channel`, `peer`, `coordinator`, `task`), also when Claude Code
+  flags the line as meta. A message the harness composed, a compaction summary and a
+  thought stay out. `moxi memory search` finds them with no new flag, and a hit on one
+  prints who delivered it where a typed row prints `user`; `--json` hits gain `writer`.
+  A new generation records the rule in its `meta` (`keeps_delivered`); for one without
+  it, `moxi memory status` (`keeps_delivered` in `--json`) and `moxi doctor memory` say
+  it holds no delivered messages for the sessions it had read and name `moxi memory
+  reindex`. Nothing reindexes by itself.
+- The subconscious's recall answers stay out of the index: a background task's notice
+  whose `<task-id>` is a recall fork's id in memory's recall log gives no row, so search,
+  a recall's first search and `search_memory` never return an earlier recall's answer.
+  A subagent's or a background command's notice is indexed as before, and a message of
+  several notices keeps all but the recall's. On a route that answers by comms, a
+  delivered comms message whose id the recall log names as a sent answer gives no row
+  either: comms reads the delivered text back into its messages
+  (`api.delivered_messages`), and a digest of several keeps the others. The log now keeps
+  each sent answer's comms id on its round as well as the newest on the line. Without
+  comms, mail is indexed as before. No released index holds recall answers, so no
+  reindex is needed for them.
+- The chat's `search_memory` returns delivered messages too: rows written by `hook`,
+  `channel`, `peer`, `coordinator` and `task` are hits exactly when `moxi memory search`
+  would return them, so a task's notice that opens with `<task-notification>` is found.
+  `harness` and `summary` rows stay out. A delivered hit's line in the text part reads
+  `delivered by <writer>`, and the tool's description lists the writers it returns.
 - A chat's subconscious: with the `connector` extra, memory's provider serves a second
   tool, `recall`, listed whether the chat recall is on or off. A chat calls it at the
   start of every turn with a conversation label, the user's words and a short context;

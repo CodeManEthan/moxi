@@ -109,6 +109,21 @@ def test_an_answer_goes_on_the_line_sending_then_is_acked_then_sent():
     assert records.read(SESSION, rid)["state"] == "ended"
 
 
+def test_each_sent_answer_keeps_its_message_id_on_its_round():
+    class Numbered(Sender):
+        def __call__(self, session_id, text, *, comms_name=None):
+            self.sent.append(text)
+            return recall_send.Sent(taken=True, message_id=f"m-{len(self.sent)}")
+
+    recall = a_recall({"max_rounds": 2})
+    route, sender = Route([ended("- a"), ended("- b\nEnd of recall.")]), Numbered()
+    assert run(recall, route, sender) == "ended"
+    line = recalls.find_line(SESSION, recall.recall_id)
+    assert [e.get("message_id") for e in line["rounds"]] == ["m-1", "m-2"]
+    assert line["message_id"] == "m-2"
+    assert recalls.message_ids() == {"m-1", "m-2"}
+
+
 def test_the_round_is_waited_for_its_bound_only_on_a_comms_route():
     recall = a_recall({"max_rounds": 1})
     route = Route([ended("- a\nEnd of recall.")])

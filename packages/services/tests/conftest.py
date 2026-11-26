@@ -19,6 +19,17 @@ import pytest
 from moxi_services import store
 
 
+@pytest.fixture(autouse=True)
+def agent(monkeypatch):
+    """The core's agent test, faked: it names no harness unless a test sets
+    `agent["harness"]`, so tests run the same inside an agent's session and outside."""
+    import moxi.terminal
+
+    named = {"harness": None}
+    monkeypatch.setattr(moxi.terminal, "agent", lambda *a, **k: named["harness"])
+    return named
+
+
 @pytest.fixture
 def store_path() -> Path:
     """The test's own store file (not yet created)."""

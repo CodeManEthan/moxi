@@ -1195,7 +1195,7 @@ dev = [
 
 [[package]]
 name = "moxi-projects"
-version = "0.1.4"
+version = "0.1.5"
 source = { editable = "packages/projects" }
 dependencies = [
     { name = "moxi" },
@@ -1244,6 +1244,11 @@ dependencies = [
     { name = "packaging" },
 ]
 
+[package.optional-dependencies]
+projects = [
+    { name = "moxi-projects" },
+]
+
 [package.dev-dependencies]
 dev = [
     { name = "moxi-dev" },
@@ -1253,10 +1258,12 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "moxi", editable = "packages/moxi" },
+    { name = "moxi-projects", marker = "extra == 'projects'", editable = "packages/projects" },
     { name = "moxi-repo", editable = "packages/repo" },
     { name = "moxi-secrets", editable = "packages/secrets" },
     { name = "packaging" },
 ]
+provides-extras = ["projects"]
 
 [package.metadata.requires-dev]
 dev = [

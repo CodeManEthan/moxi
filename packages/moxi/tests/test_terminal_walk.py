@@ -987,3 +987,81 @@ def test_live_the_walk_skips_exactly_the_real_console_scripts_entry_chain(tmp_pa
     # Found on the process that started with the mark, above the run's entry chain.
     assert found_["pid"] != got["me"]
     assert found_["pid"] in [step[0] for step in got["chain"][1:] if isinstance(step, list)]
+
+
+# -- the agent test ------------------------------------------------------------------------
+
+def agent_found(*procs, view_kw=None, **run_kw):
+    return _walk.agent(Table(chain(*procs), **(view_kw or {})), run(**run_kw))
+
+
+def test_the_agent_test_is_the_cores_public_function():
+    from moxi import terminal
+
+    assert terminal.agent is _walk.agent
+
+
+def test_a_persons_terminal_names_no_harness():
+    assert agent_found(ME, *PERSON) is None
+
+
+@pytest.mark.parametrize("harness", _walk.HARNESSES)
+def test_a_harness_above_the_run_is_named(harness):
+    assert agent_found(ME, SHELL, p([f"/home/ada/.local/bin/{harness}", "x"]),
+                       *PERSON[1:]) == harness
+    assert agent_found(ME, SHELL, p([f"{harness} --resume x"]), *PERSON[1:]) == harness
+
+
+def test_the_agent_test_climbs_past_what_stops_the_walk():
+    # A session a Moxi launcher started carries the start mark, and a Moxi program or unit
+    # may sit between the run and the harness: none of them hides the harness.
+    launcher = p([f"{VENV}/python", f"{VENV}/moxi", "launcher", "run"])
+    marked_shell = p(["-bash"], env={_mark.STARTED_BY_ENV: "moxi"})
+    tmux = p(["tmux"], unit="moxi-slots-server.service")
+    claude = p(["claude"], env={_mark.STARTED_BY_ENV: "moxi"})
+    assert agent_found(ME, marked_shell, claude, launcher, tmux, *PERSON[1:],
+                       started_by="moxi") == "claude"
+    assert walk(Table(chain(ME, marked_shell, claude, *PERSON[1:])),
+                run(started_by="moxi")).kind == "E4"
+
+
+def test_a_tool_mark_names_its_harness_before_any_read():
+    view = Table(chain(ME, *PERSON))
+    assert _walk.agent(view, run(started_by="moxi", tool_marks=("CLAUDECODE",))) == "claude"
+    assert view.reads == []
+
+
+def test_a_shielded_harness_is_known_by_its_command_line():
+    assert agent_found(ME, SHELL, p(["codex"], shielded=True), *PERSON[1:]) == "codex"
+
+
+@pytest.mark.parametrize("top_parent", [0, HIDDEN], ids=["pid-0", "hidden-parent"])
+def test_sandbox_tops_name_their_harness(top_parent):
+    for top, harness in ((p(["codex-linux-sandbox", "--", "bash"]), "codex"),
+                         (FD_TOP, "claude")):
+        procs = chain(ME, SANDBOX_TOOL, top, top_parent=top_parent)
+        assert _walk.agent(Table(procs), run()) == harness
+
+
+@pytest.mark.parametrize("argv0, harness", [(r"C:\Users\ada\bin\Claude.exe", "claude"),
+                                            (r"C:\x\Codex-Command-Runner.EXE", "codex"),
+                                            (r"C:\x\codexx.exe", None)])
+def test_on_windows_the_agent_test_matches_without_exe_and_case(argv0, harness):
+    launcher = p([WIN_MOXI, "services"], image=WIN_MOXI)
+    got = _walk.agent(Table(chain(p([WIN_EXE, WIN_MOXI], image=WIN_EXE), launcher, p([argv0]),
+                                  p([r"C:\WINDOWS\explorer.exe"])), is_windows=True),
+                      run(executable=WIN_EXE, argv0=WIN_MOXI))
+    assert got == harness
+
+
+def test_on_macos_a_launchd_job_does_not_hide_the_harness():
+    procs = chain(ME, p(["-zsh"]), p(["/Applications/Codex.app/Contents/MacOS/codex"]),
+                  p(["tmux"], unit="moxi.slots.server"),
+                  p(["/sbin/launchd"], shielded=True))
+    assert _walk.agent(Table(procs), run()) == "codex"
+
+
+@pytest.mark.parametrize("error", [Unread(102, "denied"), Gone(102)])
+def test_where_the_walk_cant_go_on_no_harness_is_named(error):
+    procs = chain(ME, SHELL, p(["claude"]), *PERSON[1:])
+    assert _walk.agent(Table(procs, errors={102: error}), run()) is None

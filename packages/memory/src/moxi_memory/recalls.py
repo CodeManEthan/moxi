@@ -23,7 +23,9 @@ each part, the project's (`project_hits`) and the one beyond it (`beyond_hits`),
 for a part it had none of (a line written before the parts holds `widened`, whether that
 search went past the project, and no counts per part), the child's start-up
 time, whether the recall was hurried or ran past its limit, each round's text and when
-it came back (`rounds`), and when the line was first and last written. A chat recall's
+it came back (`rounds`), and when the line was first and last written. On a route that
+answers by comms, the id comms gave the newest answer it took (`message_id`) is on the
+line, and each sent answer's id on its round's entry. A chat recall's
 line (start `chat`, route `headless`) also holds its agent's Claude Code session id
 (`headless_session`, written before the agent starts), the number of the
 conversation's call that started it (`call`), and the launch request id of its current
@@ -191,6 +193,18 @@ def headless_sessions() -> frozenset[tuple[str, str]]:
                      for line in all_lines() if line.get("headless_session"))
 
 
+def message_ids() -> frozenset[str]:
+    """The comms message id of every answer the log says was sent by comms: the
+    line's `message_id` and each round's. memory's index leaves these messages out
+    where comms delivered them; like `fork_ids`, this read is why the log is never
+    swept."""
+    out = set()
+    for line in all_lines():
+        entries = [line, *(e for e in line.get("rounds") or [] if isinstance(e, dict))]
+        out.update(str(e["message_id"]) for e in entries if e.get("message_id"))
+    return frozenset(out)
+
+
 def _write(session_id: str, lines: list[dict]) -> None:
     from moxi import files
 
@@ -272,4 +286,5 @@ __all__ = ["DIR_NAME", "LOG", "LOCKS", "OPEN", "SENDING", "BACK", "LOST", "DISCA
            "LINE_STATES", "DISCARDABLE", "PROMPT", "ASKED", "CHAT", "HEADLESS", "FENCE", "HEAD_CHARS",
            "LINE_FIELDS", "is_safe", "headless_sessions",
            "subconscious_dir", "log_path", "session_lock", "read_lines", "logged_sessions",
-           "all_lines", "fork_ids", "find_line", "put_line", "note_off", "sent_lines", "head"]
+           "all_lines", "fork_ids", "message_ids", "find_line", "put_line", "note_off",
+           "sent_lines", "head"]

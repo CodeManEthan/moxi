@@ -325,6 +325,8 @@ class GuardRunner:
         self._said: set[tuple[str, str]] = set()
         self._notes: list[str] = []
         self._loaded: Loaded | None = None
+        #: Whether the last `reload` read turns' config; False before the first.
+        self.config_ok = False
         self._jobs = itertools.count(1)
         self._warm: threading.Thread | None = None
         self._closed = False
@@ -356,13 +358,16 @@ class GuardRunner:
     def reload(self) -> list[dict[str, Any]]:
         """Read `guards.run`, the switches and `guards.max_wait_ms` again, load what they
         name, and make the table; each `sessions` function keeps its first answer.
-        Returns the table in the leg's form. Never raises."""
+        Returns the table in the leg's form, and sets `config_ok` to whether the config
+        read. Never raises."""
         try:
             on, max_wait = self._settings()
+            self.config_ok = True
         except Exception as exc:  # noqa: BLE001 - a bad config costs the list, not the endpoint
             log.warning("guards: turns' config does not read (%s); no guard is on by the list",
                         exc)
             on, max_wait = [], MAX_WAIT_MS
+            self.config_ok = False
         try:
             loaded = self._load(list(on))
         except Exception as exc:  # noqa: BLE001 - the loader never raises; be sure

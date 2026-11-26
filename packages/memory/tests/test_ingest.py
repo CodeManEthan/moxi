@@ -113,7 +113,7 @@ def test_each_harness_main_session_lands_in_tier_one_and_tier_two():
         assert index.meta_get(rd.conn, "first_read") == "1"
 
 
-def test_injected_meta_reasoning_and_compaction_are_in_no_tier_and_unknown_is_kept():
+def test_composed_meta_reasoning_and_compaction_are_in_no_tier_and_unknown_and_delivered_kept():
     t = claude()
     t.user("typed by the person", origin="human")
     t.user("/clear")                                        # a typed command: no origin
@@ -140,7 +140,9 @@ def test_injected_meta_reasoning_and_compaction_are_in_no_tier_and_unknown_is_ke
     run()
     got = texts()
     assert "typed by the person" in got and "/clear" in got and "codex typed text" in got
-    for gone in ("a plugin sent this", "done", "output", "meta line",
+    assert "a plugin sent this" in got
+    assert "<task-notification>done</task-notification>" in got
+    for gone in ("output", "meta line",
                  "the summary of the earlier session", "a private thought",
                  "plugq1", "plugq2", "synthetic only"):
         assert not any(gone in text for text in got), gone

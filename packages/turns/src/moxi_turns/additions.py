@@ -23,7 +23,9 @@ What turns itself adds, per harness:
   in its data dir when that copy is current and this version of turns placed it, else
   the package's own. The command is the one turns' config and this Python environment
   give, read from this process's own environment as turns' setup reads it, not from
-  `env`. A launch writes nothing: launches in parallel share no write, and a read-only
+  `env`. `MOXI_TURNS_GUARDS_SEEN` names the record of the last guard table
+  (`moxi_turns.guards.seen`), under turns' state directory as this process's environment
+  gives it. A launch writes nothing: launches in parallel share no write, and a read-only
   install with no setup run launches.
 - every harness: `MOXI_TURNS_COMMANDS`, the session commands the launch grants, when
   `commands` is not empty. With a `session_id` it is bound to that id,
@@ -279,7 +281,8 @@ def launch_additions(harness: str, *, cwd, env: Mapping[str, str],
     goes to the contributors only; turns' own additions read no variable from it.
 
     For Claude, `env` of the result always holds `MOXI_TURNS_ENDPOINT`, the endpoint
-    command the runner spawns. Nothing is written for it. The contributions' MCP servers
+    command the runner spawns, and `MOXI_TURNS_GUARDS_SEEN`, the path of the record of
+    the last guard table. Nothing is written for either. The contributions' MCP servers
     go last: one `--mcp-config=` word on Claude, `options` on Codex and OpenCode. Of
     `env`, the renderer asks only whether it holds each server's token variable.
 
@@ -314,10 +317,12 @@ def launch_additions(harness: str, *, cwd, env: Mapping[str, str],
     notes: list[str] = []
     if harness == "claude":
         from .claude_setup import ENDPOINT_ENV, claude_plugin_dirs, launch_endpoint
+        from .guards import seen as guards_seen
 
         runner, gate = claude_plugin_dirs()
         argv += ["--plugin-dir", str(runner), "--plugin-dir", str(gate)]
         out_env[ENDPOINT_ENV] = launch_endpoint()
+        out_env[guards_seen.GUARDS_SEEN_ENV] = str(guards_seen.record_path())
     if granted:
         from .config import COMMANDS_ENV, grant
 

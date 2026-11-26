@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- `moxi sessions read --results` prints each tool result's output under its `Result:`
+  line, and `--json` gives each tool result row `output`, `output_cut_chars` and
+  `withheld_why`. The output is redacted with the read's redaction before it is cut to its
+  first and last 4,000 characters, and a line names how many characters were cut between
+  them. A result whose call names a secret path, or whose call is not in the turns read,
+  says its output is withheld. Without the secrets module `--results` refuses (exit 3).
+  Without the flag the read prints what it did before; the page and the connector's
+  `read_session` are unchanged.
 - The transcript-read guard reads shell text through turns' shell reader (`read_shell`)
   in place of a splitter of its own, and finds the scripts a command hands a shell with
   turns' `shell_scripts` in place of its own `-c` finder. It now reads a `$(...)` inside

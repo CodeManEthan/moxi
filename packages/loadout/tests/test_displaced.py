@@ -351,7 +351,7 @@ def test_an_occupant_moved_aside_is_named_replaced_with_its_way_back(lo):
     write(lo, '[user]\nskills = ["review"]\n')
     kit.claude().mkdir(parents=True)
     kit.skill(kit.claude(), "review", "mine\n")
-    out = install.install(replace=["skill:review@claude"])
+    out = install.install(replace=["skill:review@claude"], accept_diff=True)
     assert out.code == 0, out.text()
     target = kit.claude() / "review"
     [kept] = out.kept
@@ -370,7 +370,7 @@ def test_a_file_saved_over_loadouts_link_is_moved_aside_on_replace(lo):
     target = kit.claude() / "review"
     target.unlink()
     kit.skill(kit.claude(), "review", "saved over\n")
-    out = install.install(replace=["skill:review@claude"])
+    out = install.install(replace=["skill:review@claude"], accept_diff=True)
     assert out.code == 0, out.text()
     [kept] = out.kept
     assert kept["how"] == "replaced" and kept["target"] == str(target)
@@ -386,7 +386,7 @@ def test_an_edited_copy_is_moved_aside_on_replace_and_on_removal(lo):
     assert install.install().code == 0
     target = kit.claude() / "review"
     (target / "SKILL.md").write_text("mine\n")
-    out = install.install(replace=["skill:review@claude"])
+    out = install.install(replace=["skill:review@claude"], accept_diff=True)
     assert out.code == 0, out.text()
     [kept] = [k for k in out.kept if k["target"] == str(target)]
     assert kept["how"] == "replaced"
@@ -415,7 +415,7 @@ def test_moves_of_one_name_pair_with_their_own_targets(lo, tmp_path):
     # In the project a skill folder would be the project's own; a link is in the way.
     proj_target.parent.mkdir(parents=True)
     proj_target.symlink_to(kit.skill(tmp_path / "elsewhere", "review", "project's\n"))
-    out = install.install(replace=["skill:review@*"])
+    out = install.install(replace=["skill:review@*"], accept_diff=True)
     assert out.code == 0, out.text()
     by_target = {k["target"]: k for k in out.kept}
     for target, words, section in ((user_target, "user's\n", "--user"),

@@ -52,11 +52,11 @@ def count(conn, table):
 # -- schema ------------------------------------------------------------------------------
 
 
-def test_a_new_store_is_version_four_in_wal_and_private(tmp_path):
+def test_a_new_store_is_version_five_in_wal_and_private(tmp_path):
     db = tmp_path / "state" / "launcher.db"
     conn = store.connect(db)
     try:
-        assert conn.execute("PRAGMA user_version").fetchone()[0] == 4
+        assert conn.execute("PRAGMA user_version").fetchone()[0] == 5
         assert conn.execute("PRAGMA journal_mode").fetchone()[0] == "wal"
         tables = {name for (name,) in conn.execute(
             "SELECT name FROM sqlite_master WHERE type = 'table'")}
@@ -82,7 +82,7 @@ def test_opening_again_runs_no_step(tmp_path):
     store.connect(db).close()
     conn = store.connect(db)
     try:
-        assert conn.execute("PRAGMA user_version").fetchone()[0] == 4
+        assert conn.execute("PRAGMA user_version").fetchone()[0] == 5
     finally:
         conn.close()
 

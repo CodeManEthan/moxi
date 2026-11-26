@@ -3490,6 +3490,11 @@ launcher	packages/launcher/src/moxi_launcher/cli.py	help="a file holding the bri
 launcher	packages/launcher/src/moxi_launcher/cli.py	help="stop the run RUN: before the exit it ends stopped; from the exit "	keep	help	help
 launcher	packages/launcher/src/moxi_launcher/cli.py	if args.dry_run and (args.status is not None or args.stop is not None	keep	dry_run	dry_run
 launcher	packages/launcher/src/moxi_launcher/cli.py	and list this session's named holds. `show` shows a launched session's relaunch, recycle	keep	show	show
+launcher	packages/launcher/src/moxi_launcher/cli.py	"folder": str(taken.handoff_dir), "request_id": taken.request_id}))	keep	folder	folder
+launcher	packages/launcher/src/moxi_launcher/cli.py	handoff = verbs.add_parser("handoff", help="print this session's handoff folder, or take "	keep	help	help
+launcher	packages/launcher/src/moxi_launcher/cli.py	handoff.add_argument("what", choices=("dir", "take"), help="dir or take")	keep	help	help
+launcher	packages/launcher/src/moxi_launcher/cli.py	help="take: the handoff to take; this session's waiting one when "	keep	help	help
+launcher	packages/launcher/src/moxi_launcher/cli.py	help="take: the key the handoff is filed under, when it is not "	keep	help	help
 launcher	packages/launcher/src/moxi_launcher/codex_trust.py	home = env.get("HOME") or os.path.expanduser("~")	keep	HOME	HOME
 launcher	packages/launcher/src/moxi_launcher/codex_trust.py	return path.resolve(strict=True)	keep	strict	strict
 launcher	packages/launcher/src/moxi_launcher/compose/__init__.py	"build", "compose", "context", "environment", "first_turn", "host_script",	keep	environment	environment
@@ -3596,6 +3601,7 @@ launcher	packages/launcher/src/moxi_launcher/handoffs.py	own_folder	name	folder	
 launcher	packages/launcher/src/moxi_launcher/handoffs.py	request_id = env.get(listeners.REQUEST)	use	listeners.REQUEST	listeners.REQUEST_ENV
 launcher	packages/launcher/src/moxi_launcher/handoffs.py	return handoffs_dir(str(cwd), create=create, override=notes_dir)	keep	create	create
 launcher	packages/launcher/src/moxi_launcher/handoffs.py	got = handoffs_dir(str(cwd), create=create, override=notes_dir)	keep	create	create
+launcher	packages/launcher/src/moxi_launcher/handoffs.py	session = turns.find(pid=os.getpid())	keep	find	find
 launcher	packages/launcher/src/moxi_launcher/identity.py	check	name	error	exc
 launcher	packages/launcher/src/moxi_launcher/job.py	"""`error`, a refusal from before a launch's row, as a `launch-refused` event's detail	keep	error	error
 launcher	packages/launcher/src/moxi_launcher/job.py	Choice.__init__	kwonly	chain	chain
@@ -4324,6 +4330,7 @@ launcher	packages/launcher/tests/test_cli.py	assert any(line.endswith("[posture-
 launcher	packages/launcher/tests/test_cli.py	assert any(line.startswith("  MOXI_LAUNCHER_REQUEST=") for line in env_lines)	keep	any	any
 launcher	packages/launcher/tests/test_cli.py	assert set(shown["env"]) == {common.REQUEST_ENV, "MOXI_USAGE_WARN_AT"}	keep	set	set
 launcher	packages/launcher/tests/test_cli.py	"clear-expired", "keep-warm", "show"}	keep	show	show
+launcher	packages/launcher/tests/test_cli.py	"folder": str(handoffs_dir), "request_id": None}	keep	folder	folder
 launcher	packages/launcher/tests/test_cli_acts.py	"""Through the real verb: the launch is found, so its refusal is logged `refused`."""	keep	refused	refused
 launcher	packages/launcher/tests/test_cli_acts.py	"from_record": None, "dry_run": False, "json": False}),	keep	dry_run	dry_run
 launcher	packages/launcher/tests/test_cli_acts.py	(["exit-session", SID, "--dry-run", "--json"], {"dry_run": True, "json": True}),	keep	dry_run	dry_run
@@ -4470,6 +4477,9 @@ launcher	packages/launcher/tests/test_handoffs.py	notes.answer["folder"] = None	
 launcher	packages/launcher/tests/test_handoffs.py	return answer["folder"]	keep	folder	folder
 launcher	packages/launcher/tests/test_handoffs.py	test_the_folder_is_not_made_when_create_is_off	name	folder	handoff_dir
 launcher	packages/launcher/tests/test_handoffs.py	test_without_notes_the_folder_is_the_launchers_own_and_private	name	folder	handoff_dir
+launcher	packages/launcher/tests/test_handoffs.py	fake.find = lambda *, pid: Found() if pid == os.getpid() else None	keep	find	find
+launcher	packages/launcher/tests/test_handoffs.py	fake.find = lambda *, pid: None	keep	find	find
+launcher	packages/launcher/tests/test_handoffs.py	fake.find = broken	keep	find	find
 launcher	packages/launcher/tests/test_keep_warm_chain.py	[(text, _)] = director.delivered	keep	delivered	delivered
 launcher	packages/launcher/tests/test_keep_warm_chain.py	assert director.delivered == []	keep	delivered	delivered
 launcher	packages/launcher/tests/test_keep_warm_chain.py	assert len(director.delivered) == 1	keep	delivered	delivered
@@ -5478,11 +5488,14 @@ loadout	packages/loadout/src/moxi_loadout/planner.py	return "stale", step.reason
 loadout	packages/loadout/src/moxi_loadout/planner.py	return ("stale", "its generated file is out of date", ERROR) if pending \	keep	stale	stale
 loadout	packages/loadout/src/moxi_loadout/planner.py	return ({USER} if self.user else set()) | set(self.projects)	keep	set	set
 loadout	packages/loadout/src/moxi_loadout/planner.py	user_skills = set(manifest.user.names("skill"))	keep	set	set
+loadout	packages/loadout/src/moxi_loadout/planner.py	#: The `project_folders` setting as `settings` reads it: per harness, `{skills,	keep	project_folders	project_folders
+loadout	packages/loadout/src/moxi_loadout/planner.py	harnesses=list(rows), project_dirs=dict(machine.project_dirs))	keep	project_dirs	project_dirs
 loadout	packages/loadout/src/moxi_loadout/preview.py	changes (rows in its scope reading `missing` or `stale`). `kept_in`: the folder the copy	keep	stale	stale
 loadout	packages/loadout/src/moxi_loadout/preview.py	and r.state in ("missing", "stale") and _in(scope, r))	keep	stale	stale
 loadout	packages/loadout/src/moxi_loadout/preview.py	files = list(dict.fromkeys(a.entry.file if a.entry else a.record.get("file")	keep	record	record
 loadout	packages/loadout/src/moxi_loadout/preview.py	shown = entries.preview(run, scope, files=set(files))	keep	set	set
 loadout	packages/loadout/src/moxi_loadout/preview.py	for rel in sorted(set(ours) | set(theirs)):	keep	set	set
+loadout	packages/loadout/src/moxi_loadout/preview.py	- `others`: how many other rows the run changes (rows in its scope reading `missing` or `stale`). `kept_in`: the folder the copy	keep	stale	stale
 loadout	packages/loadout/src/moxi_loadout/repo_link.py	"""Register the pieces in the work tree holding `folder` while `on`, or remove them	use	folder	loadout_dir
 loadout	packages/loadout/src/moxi_loadout/repo_link.py	"""Whether `folder` is an existing folder inside a git work tree: it, or a folder	use	`folder`	`loadout_dir`
 loadout	packages/loadout/src/moxi_loadout/repo_link.py	"""loadout's pieces registered in the repo holding `folder`, by id, each as repo's	use	folder	loadout_dir
@@ -5738,6 +5751,7 @@ loadout	packages/loadout/tests/test_install.py	assert states(install.status())[(
 loadout	packages/loadout/tests/test_install.py	lo	name	folder	loadout_dir
 loadout	packages/loadout/tests/test_install.py	test_a_dropped_agents_generated_file_is_deleted_unless_edited	name	f	fh
 loadout	packages/loadout/tests/test_install.py	test_a_hand_edited_generated_agent_is_left_until_replaced_then_kept	name	f	fh
+loadout	packages/loadout/tests/test_install.py	assert any("pass --accept-diff to replace it" in line for line in refused.lines)	keep	any	any
 loadout	packages/loadout/tests/test_listener.py	assert any(r.target == str(target) and	keep	any	any
 loadout	packages/loadout/tests/test_listener.py	assert any(r.target == str(target) and r.state == "stale" for r in before.rows)	keep	any	any
 loadout	packages/loadout/tests/test_listener.py	assert any(r.target == str(target) and r.state == "stale" for r in before.rows)	keep	stale	stale
@@ -5862,6 +5876,7 @@ loadout	packages/loadout/tests/test_repo_piece.py	test_the_setting_off_removes_e
 loadout	packages/loadout/tests/test_repo_piece.py	test_the_setting_off_skips_before_any_git	name	folder	loadout_dir
 loadout	packages/loadout/tests/test_repo_piece.py	test_without_repo_nothing_is_registered_and_install_goes_on	name	folder	loadout_dir
 loadout	packages/loadout/tests/test_repo_piece.py	tree	name	folder	loadout_dir
+loadout	packages/loadout/tests/test_repo_piece.py	assert not any(line.startswith("The last automatic reinstall") for line in shown.text())	keep	any	any
 loadout	packages/loadout/tests/test_settings.py	"project_folders": "Project folders"}	keep	project_folders	project_folders
 loadout	packages/loadout/tests/test_settings.py	assert cli.main(["config", "loadout", "show", "--json"]) == 0	keep	show	show
 loadout	packages/loadout/tests/test_settings_and_stores.py	-	name	test_a_configured_folder_is_read_with_its_home_expanded	test_a_configured_loadout_dir_is_read_with_its_home_expanded
@@ -6037,6 +6052,8 @@ memory	packages/memory/src/moxi_memory/rows.py	is not a compaction summary. A me
 memory	packages/memory/src/moxi_memory/rows.py	if record.injected is True:	keep	injected	injected
 memory	packages/memory/src/moxi_memory/rows.py	and not record.reasoning and record.injected is not True)	keep	injected	injected
 memory	packages/memory/src/moxi_memory/rows.py	known_secret = set(secret_calls)	keep	set	set
+memory	packages/memory/src/moxi_memory/rows.py	- each other such message that sessions doesn't mark `injected`, that the harness	keep	injected	injected
+memory	packages/memory/src/moxi_memory/rows.py	`injected` as unknown is kept;	keep	injected	injected
 memory	packages/memory/src/moxi_memory/search.py	seen: set[str] = set()	keep	set	set
 memory	packages/memory/src/moxi_memory/settings.py	if not sets or any(not s.strip() for s in sets):	keep	any	any
 memory	packages/memory/src/moxi_memory/settings.py	if any(not c.split() for c in commands):	keep	any	any
@@ -6063,6 +6080,10 @@ memory	packages/memory/tests/test_connector.py	assert not any(name.lstrip(".").s
 memory	packages/memory/tests/test_connector.py	assert set(fields) == {"refusal", "words", "hits", "hits_dropped", "unscanned",	keep	set	set
 memory	packages/memory/tests/test_connector.py	index.index_dir().mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
 memory	packages/memory/tests/test_connector.py	path.parent.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
+memory	packages/memory/tests/test_connector.py	assert any(line.endswith("proj delivered by hook: deploy word from the reviewer")	keep	any	any
+memory	packages/memory/tests/test_connector.py	assert any(line.endswith("proj user: deploy typed here") for line in lines)	keep	any	any
+memory	packages/memory/tests/test_connector.py	assert set(rows.DELIVERED_WRITERS) <= set(walk.SHOWN_WRITERS)	keep	set	set
+memory	packages/memory/tests/test_connector.py	assert set(got) == {"hook", "task"}	keep	set	set
 memory	packages/memory/tests/test_doctor.py	assert set(module.OPTIONAL) == {"comms", "launcher", "connector", "secrets"}	keep	set	set
 memory	packages/memory/tests/test_doctor.py	path.parent.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
 memory	packages/memory/tests/test_doctor.py	assert set(module.OPTIONAL) == {"comms", "launcher"}	keep	set	set
@@ -6429,6 +6450,8 @@ moxi	packages/moxi/src/moxi/cli.py	help="print one JSON object, {changed, proble
 moxi	packages/moxi/src/moxi/cli.py	failed = op in ("set", "unset") and any(	keep	set	set
 moxi	packages/moxi/src/moxi/cli.py	failed = op in ("set", "unset") and any(	keep	any	any
 moxi	packages/moxi/src/moxi/cli.py	print(json.dumps({"changed": changed, "problem": problem, "fix": fix, "units": units}))	keep	changed	changed
+moxi	packages/moxi/src/moxi/cli.py	"""The refusal of a `set` or `unset` that would turn one of the module's timers on	keep	set	set
+moxi	packages/moxi/src/moxi/cli.py	if module == names.HARNESS or op not in ("set", "unset"):	keep	set	set
 moxi	packages/moxi/src/moxi/cli.py	if schema is None and not (tabled and args.action == "show"):	keep	show	show
 moxi	packages/moxi/src/moxi/cli.py	the module's `warning` or `refused` words; or the error a table's file gives. 1 when	keep	refused	refused
 moxi	packages/moxi/src/moxi/cli.py	for word in ("refused", "warning"):	keep	refused	refused
@@ -6587,6 +6610,7 @@ moxi	packages/moxi/src/moxi/install.py	sourced = any(normalize(req.name) == own 
 moxi	packages/moxi/src/moxi/install.py	sources = [k for k in ("specifier", "path", "directory", "url", "git", "editable")	keep	directory	directory
 moxi	packages/moxi/src/moxi/install.py	unknown = sorted(set(entry) - _ENTRY_KEYS)	keep	set	set
 moxi	packages/moxi/src/moxi/install.py	unknown = sorted(set(tool) - _TOOL_KEYS)	keep	set	set
+moxi	packages/moxi/src/moxi/install.py	help="with --replace, move a placed skill's occupant aside though "	keep	help	help
 moxi	packages/moxi/src/moxi/ipc/__init__.py	"Client": "_client",	keep	_client	_client
 moxi	packages/moxi/src/moxi/ipc/__init__.py	"connect": "_client",	keep	_client	_client
 moxi	packages/moxi/src/moxi/ipc/__init__.py	if not name or name in (".", "..") or any(c in name for c in "/\\\0"):	keep	any	any
@@ -6725,6 +6749,12 @@ moxi	packages/moxi/src/moxi/place.py	seconds, or, with `plan`'s `git_seconds=`, 
 moxi	packages/moxi/src/moxi/place.py	self.named: set[str] = set()	keep	set	set
 moxi	packages/moxi/src/moxi/place.py	self.unrouted: set[tuple] = set()	keep	set	set
 moxi	packages/moxi/src/moxi/place.py	target_dir = row.folder(item.kind)	use	row.folder	row.harness_dir
+moxi	packages/moxi/src/moxi/place.py	return [f"it is a {'folder' if is_dir else 'file'}, and what would be placed "	keep	folder	folder
+moxi	packages/moxi/src/moxi/place.py	f"is a {'folder' if wants_dir else 'file'}"]	keep	folder	folder
+moxi	packages/moxi/src/moxi/place.py	if kind != "D" and rel != MARK and not any(rel == v or rel.startswith(v + "/")	keep	any	any
+moxi	packages/moxi/src/moxi/place.py	for rel in sorted(set(theirs) & set(ours)):	keep	set	set
+moxi	packages/moxi/src/moxi/place.py	for label, names in (("only there", sorted(set(theirs) - set(ours))),	keep	set	set
+moxi	packages/moxi/src/moxi/place.py	("only in what would be placed", sorted(set(ours) - set(theirs))),	keep	set	set
 moxi	packages/moxi/src/moxi/proc.py	-	name	_environ	_env
 moxi	packages/moxi/src/moxi/proc.py	-	name	_linux_environ	_linux_env
 moxi	packages/moxi/src/moxi/proc.py	-	name	_linux_read_environ	_linux_read_env
@@ -6815,6 +6845,10 @@ moxi	packages/moxi/src/moxi/units/__init__.py	environment(module)            the
 moxi	packages/moxi/src/moxi/units/__init__.py	if any(not a.ok for a in applied):	keep	any	any
 moxi	packages/moxi/src/moxi/units/__init__.py	if any(switch and is_switch_of(key, switch)	keep	any	any
 moxi	packages/moxi/src/moxi/units/__init__.py	stop(module, names, record=[]) and resume(record)	use	record=[]	stopped=[]
+moxi	packages/moxi/src/moxi/units/__init__.py	switches = set(_timer_switches(module, key).values())	keep	set	set
+moxi	packages/moxi/src/moxi/units/__init__.py	if not switches or op not in ("set", "unset"):	keep	set	set
+moxi	packages/moxi/src/moxi/units/__init__.py	if op == "set":	keep	set	set
+moxi	packages/moxi/src/moxi/units/__init__.py	return any(bool(after[switch]) and not bool(now[switch]) for switch in switches)	keep	any	any
 moxi	packages/moxi/src/moxi/units/_act.py	"""Start again exactly the units `stop(..., record=...)` stopped, in the order	use	record=...	stopped=...
 moxi	packages/moxi/src/moxi/units/_act.py	The stop record. `stop(module, names, record=[])` first reads, in one supervisor call,	use	record=[]	stopped=[]
 moxi	packages/moxi/src/moxi/units/_act.py	_act	kwonly	foreign	foreign
@@ -7429,6 +7463,9 @@ moxi	packages/moxi/tests/test_place.py	-	name	test_claudes_built_in_folders_keep
 moxi	packages/moxi/tests/test_place.py	test_claudes_built_in_dirs_are_where_they_always_were	name	folder	expected_dir
 moxi	packages/moxi/tests/test_place.py	test_claudes_built_in_dirs_keep_a_tilde_when_nothing_places_a_home	name	folder	expected_dir
 moxi	packages/moxi/tests/test_place.py	@pytest.mark.parametrize(("value", "folder"), [	use	"folder"	"expected_dir"
+moxi	packages/moxi/tests/test_place.py	target.parent.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
+moxi	packages/moxi/tests/test_place.py	assert any(line.endswith(f"back to {target}: the place failed") for line in said)	keep	any	any
+moxi	packages/moxi/tests/test_place.py	assert any(f"it is kept at {kept}" in line and "no way back" in line for line in said)	keep	any	any
 moxi	packages/moxi/tests/test_place_windows.py	-	name	test_a_held_folder_is_copied_with_its_note_when_symlinks_are_not_allowed	test_a_held_dir_is_copied_with_its_note_when_symlinks_are_not_allowed
 moxi	packages/moxi/tests/test_place_windows.py	-	name	test_a_held_folder_links_relative_when_symlinks_are_allowed	test_a_held_dir_links_relative_when_symlinks_are_allowed
 moxi	packages/moxi/tests/test_place_windows.py	-	name	test_link_places_a_folder_as_a_junction_and_removes_only_the_junction	test_link_places_a_dir_as_a_junction_and_removes_only_the_junction
@@ -8645,6 +8682,9 @@ projects	packages/projects/src/moxi_projects/acts.py	record(conn, {"state": "rem
 projects	packages/projects/src/moxi_projects/acts.py	set_fields	name	notes	notes_installed
 projects	packages/projects/src/moxi_projects/acts.py	store.write(lambda conn: record(conn, outcome))	keep	record	record
 projects	packages/projects/src/moxi_projects/acts.py	"""A `record` for `remove` that keeps its outcome under `job`, the page's key for	keep	record	record
+projects	packages/projects/src/moxi_projects/acts.py	"""What `add` did: `project`, the row as written; `notes`, the sentences worth	keep	notes	notes
+projects	packages/projects/src/moxi_projects/acts.py	settled = found.settle(questions, project, given=answers, ask=ask)	keep	handled	handled
+projects	packages/projects/src/moxi_projects/acts.py	settled = found.settle(questions, project, given=answers, ask=ask)	keep	ok	ok
 projects	packages/projects/src/moxi_projects/cli.py	"show": _show, "find": _find, "kinds": _kinds, "agents": _agents}	keep	find	find
 projects	packages/projects/src/moxi_projects/cli.py	"show": _show, "find": _find, "kinds": _kinds, "agents": _agents}	keep	show	show
 projects	packages/projects/src/moxi_projects/cli.py	-	name	_directory	_dir_text
@@ -8694,6 +8734,7 @@ projects	packages/projects/src/moxi_projects/cli.py	p.add_argument("name", metav
 projects	packages/projects/src/moxi_projects/cli.py	p.add_argument("slug", metavar="SLUG", help="the one-off (`moxi notes inbox list`)")	keep	help	help
 projects	packages/projects/src/moxi_projects/cli.py	project's notes folder; it needs notes installed. `find` prints the key of the project	keep	find	find
 projects	packages/projects/src/moxi_projects/cli.py	width = max((len(k.name) for k in found.found), default=0)	keep	default	default
+projects	packages/projects/src/moxi_projects/cli.py	elif not q.choices or any(c.casefold() == text.casefold() for c in q.choices):	keep	any	any
 projects	packages/projects/src/moxi_projects/contributions.py	"""Check a `set` of `changes` on project `key` before it is written; return the kind	keep	set	set
 projects	packages/projects/src/moxi_projects/contributions.py	"""The kind `name` for `act` (`add` or `set`), or why it can't be used.	keep	set	set
 projects	packages/projects/src/moxi_projects/contributions.py	Contributions.defaults	name	notes	notes_installed
@@ -8710,6 +8751,8 @@ projects	packages/projects/src/moxi_projects/contributions.py	plan_set	name	note
 projects	packages/projects/src/moxi_projects/contributions.py	said = self.check(dict(row))	keep	ok	ok
 projects	packages/projects/src/moxi_projects/contributions.py	supplied = contributions.defaults(fields, notes=notes_installed)	use	notes=	notes_installed=
 projects	packages/projects/src/moxi_projects/contributions.py	unknown = set(changes) - {"root", "kind", "lead", "notes_root"}	keep	set	set
+projects	packages/projects/src/moxi_projects/contributions.py	sets it later), `notes` (what each answer said it did) and `warnings` (an answer	keep	notes	notes
+projects	packages/projects/src/moxi_projects/contributions.py	extra = set(item) - _QUESTION_FIELDS	keep	set	set
 projects	packages/projects/src/moxi_projects/doctor.py	-	name	_same_directory	_same_dir
 projects	packages/projects/src/moxi_projects/page.py	"exit_code": lb.Out("int", nullable=True),	keep	nullable=	nullable=
 projects	packages/projects/src/moxi_projects/page.py	#: A remove request: `state` is `removed` or `refused`; `key` the project's key as	keep	refused	refused
@@ -8721,6 +8764,8 @@ projects	packages/projects/src/moxi_projects/page.py	_MAYBE_PATH = lb.Out("strin
 projects	packages/projects/src/moxi_projects/page.py	_MAYBE_SAYS = lb.Out("string", mark="redact", nullable=True)	keep	nullable=	nullable=
 projects	packages/projects/src/moxi_projects/page.py	#: press it was kept under; `state` is `removed` or `refused`; `key` the project's key as	keep	refused	refused
 projects	packages/projects/src/moxi_projects/page.py	_MAYBE_BOOL = lb.Out("bool", nullable=True)	keep	nullable=	nullable=
+projects	packages/projects/src/moxi_projects/page.py	"preset": _MAYBE, "after": lb.Out("list", items=_TEXT, nullable=True), "later": _SAYS})	keep	nullable	nullable
+projects	packages/projects/src/moxi_projects/page.py	"answers": lb.Field("list", required=False, max=ANSWERS_MAX,	keep	required	required
 projects	packages/projects/src/moxi_projects/pagecheck.py	__all__ = ["STORE", "HOME", "UI_INTERFACE", "places", "line", "unchecked"]	keep	HOME	HOME
 projects	packages/projects/src/moxi_projects/pagecheck.py	return found.api.check(lambda env: places(env, consulted))	keep	ok	ok
 projects	packages/projects/src/moxi_projects/pagecheck.py	user's terminal: another `MOXI_HOME`, `MOXI_PROJECTS_*`, `XDG_DATA_HOME` or `HOME` puts	keep	HOME	HOME
@@ -8937,6 +8982,20 @@ publishing	packages/publishing/src/moxi_publishing/cli.py	s = steps.add_parser(s
 publishing	packages/publishing/src/moxi_publishing/cli.py	s.add_argument("--artifact", metavar="DIR", help="the directory of the build's files")	keep	help	help
 publishing	packages/publishing/src/moxi_publishing/cli.py	s.add_argument("--artifact", metavar="DIR", required=True,	keep	required	required
 publishing	packages/publishing/src/moxi_publishing/cli.py	s.add_argument("path", metavar="PATH", nargs="?", default=".",	keep	default	default
+publishing	packages/publishing/src/moxi_publishing/cli.py	"disable", help="remove the push guard, then the public flag",	keep	help	help
+publishing	packages/publishing/src/moxi_publishing/cli.py	"clean-history", help="keep a repo's history publishable, public or not",	keep	help	help
+publishing	packages/publishing/src/moxi_publishing/cli.py	"enable", help="turn clean history on",	keep	help	help
+publishing	packages/publishing/src/moxi_publishing/cli.py	"disable", help="turn clean history off",	keep	help	help
+publishing	packages/publishing/src/moxi_publishing/cli.py	"approval", help="ask for the word before an agent pushes some branches",	keep	help	help
+publishing	packages/publishing/src/moxi_publishing/cli.py	"enable", help="guard the branches named",	keep	help	help
+publishing	packages/publishing/src/moxi_publishing/cli.py	s.add_argument("--branch", dest="branches", action="append", default=[],	keep	default	default
+publishing	packages/publishing/src/moxi_publishing/cli.py	metavar="PATTERN", required=True,	keep	required	required
+publishing	packages/publishing/src/moxi_publishing/cli.py	help="a branch name in which *, ? and [...] are wildcards; '*' alone "	keep	help	help
+publishing	packages/publishing/src/moxi_publishing/cli.py	s = steps.add_parser("disable", help="remove push approval",	keep	help	help
+publishing	packages/publishing/src/moxi_publishing/cli.py	"list", help="every repo with clean history, push approval or the public flag",	keep	help	help
+publishing	packages/publishing/src/moxi_publishing/cli.py	"project-add", help="let a project add turn a repo's choices on, or not",	keep	help	help
+publishing	packages/publishing/src/moxi_publishing/cli.py	s = steps.add_parser("disable", help="leave the repo out of project add",	keep	help	help
+publishing	packages/publishing/src/moxi_publishing/cli.py	s = steps.add_parser("enable", help="let project add act in the repo again",	keep	help	help
 publishing	packages/publishing/src/moxi_publishing/content.py	"fail": "closed",	keep	closed	closed
 publishing	packages/publishing/src/moxi_publishing/content.py	FileChange.__init__	kwonly	new	new
 publishing	packages/publishing/src/moxi_publishing/content.py	f"{hit.path}:{hit.line}: {hit.hit.set}/{hit.hit.rule}"))	keep	set	set
@@ -8948,6 +9007,7 @@ publishing	packages/publishing/src/moxi_publishing/doctor.py	if not any(row.stat
 publishing	packages/publishing/src/moxi_publishing/doctor.py	if not any(v.casefold() == CHECKED_TRAILER.casefold() for v in passing):	keep	any	any
 publishing	packages/publishing/src/moxi_publishing/doctor.py	return not named or any(v.casefold() == CHECKED_TRAILER.casefold() for v in named)	keep	any	any
 publishing	packages/publishing/src/moxi_publishing/doctor.py	if not any(push.github_repo(url) == github for url in urls):	keep	any	any
+publishing	packages/publishing/src/moxi_publishing/doctor.py	if not any(row.state == "fail" for row in problems) and flag.PUSH not in have:	keep	any	any
 publishing	packages/publishing/src/moxi_publishing/flag.py	if not any(key in planned for key in keys):	keep	any	any
 publishing	packages/publishing/src/moxi_publishing/github.py	"""Every field of `state` unlike what a public repo expects, in `show`'s order."""	keep	show	show
 publishing	packages/publishing/src/moxi_publishing/github.py	"""Everything `show` compares, read from GitHub."""	keep	show	show
@@ -12794,6 +12854,7 @@ services	packages/services/src/moxi_services/acts.py	return _outcome("disable")(
 services	packages/services/src/moxi_services/acts.py	return _outcome("disable")(_switch_body)(ident, on=False, by=by)	use	on=	enabled=
 services	packages/services/src/moxi_services/acts.py	return _outcome("enable")(_switch_body)(ident, True, by=by)	use	)(ident, True,	)(ident, on=True,
 services	packages/services/src/moxi_services/acts.py	return _outcome("enable")(_switch_body)(ident, on=True, by=by)	use	on=	enabled=
+services	packages/services/src/moxi_services/acts.py	"""The kind, `daemon` or `timer`, a row adopting foreign unit `ref` takes on this	keep	timer	timer
 services	packages/services/src/moxi_services/cli.py	"rss_bytes": int(rss), "cpu_s": round(cpu.user + cpu.system, 2)}	keep	round	round
 services	packages/services/src/moxi_services/cli.py	#: What `show` says of an adopted Windows timer: how it is judged, and what to do when it	keep	show	show
 services	packages/services/src/moxi_services/cli.py	_VERBS = {"list": _list, "show": _show, "add": _add, "remove": _remove, "start": _act,	keep	show	show
@@ -12826,6 +12887,7 @@ services	packages/services/src/moxi_services/cli.py	return {"pid": pid, "uptime_
 services	packages/services/src/moxi_services/cli.py	schedule.add_argument("--at", metavar="HH:MM[,HH:MM...]", help="run at these times")	keep	help	help
 services	packages/services/src/moxi_services/cli.py	schedule.add_argument("--every", metavar="N", help="run every N minutes (5m) or hours (2h)")	keep	help	help
 services	packages/services/src/moxi_services/cli.py	split_command	name	windows	is_windows
+services	packages/services/src/moxi_services/cli.py	if args.verb == "enable" and any(_is_timer(ident) for ident in args.ids):	keep	any	any
 services	packages/services/src/moxi_services/jobs.py	"""A job's end state from its act's exit code: 0 `done`; 2, 3 and 75 `refused`, since	keep	refused	refused
 services	packages/services/src/moxi_services/jobs.py	Jobs._ended	name	err	exc
 services	packages/services/src/moxi_services/jobs.py	STATES = ("running", "done", "failed", "refused")	keep	refused	refused
@@ -13188,6 +13250,7 @@ sessions	packages/sessions/src/moxi_sessions/cli.py	Without it, every harness's 
 sessions	packages/sessions/src/moxi_sessions/cli.py	offline = _offline([found], set(archive_dirs(harness)))	keep	set	set
 sessions	packages/sessions/src/moxi_sessions/cli.py	offline = _offline([found for found in asked if not found.found], set(asked_dirs))	keep	set	set
 sessions	packages/sessions/src/moxi_sessions/cli.py	offline = _offline(asked, set(asked_dirs))	keep	set	set
+sessions	packages/sessions/src/moxi_sessions/cli.py	help="also print each tool result's output, redacted, its first "	keep	help	help
 sessions	packages/sessions/src/moxi_sessions/codex.py	"compacted", "event_msg", "response_item",	keep	compacted	compacted
 sessions	packages/sessions/src/moxi_sessions/codex.py	# | `compacted`, `context_compacted`, and the    | marker `compaction`                    |	keep	compacted	compacted
 sessions	packages/sessions/src/moxi_sessions/codex.py	COMPACTION_KINDS = frozenset({"compacted", "event_msg/context_compacted",	keep	compacted	compacted
@@ -14154,6 +14217,9 @@ sessions	packages/sessions/tests/test_session_facts.py	{key: row[key] for key in
 sessions	packages/sessions/tests/test_sessions_read.py	(home / ".codex" / "sessions").mkdir(parents=True)	keep	sessions	sessions
 sessions	packages/sessions/tests/test_sessions_read.py	monkeypatch.setenv("HOME", str(home))	keep	HOME	HOME
 sessions	packages/sessions/tests/test_sessions_read.py	r = CodexRollout(home / ".codex" / "sessions")	keep	sessions	sessions
+sessions	packages/sessions/tests/test_sessions_read.py	assert any("output" in row for row in rows)	keep	any	any
+sessions	packages/sessions/tests/test_sessions_read.py	assert any(piece in cut_first for piece in pieces)   # the order the read must not use	keep	any	any
+sessions	packages/sessions/tests/test_sessions_read.py	assert not any(piece in out for piece in pieces)	keep	any	any
 sessions	packages/sessions/tests/test_settings.py	assert cli.main(["config", "sessions", "show", "--json"]) == 0	keep	show	show
 sessions	packages/sessions/tests/test_shape.py	@pytest.mark.parametrize("record", [	keep	record	record
 sessions	packages/sessions/tests/test_shape.py	assert set(KINDS) == {"request", "message", "tool_call", "tool_result", "marker",	keep	set	set
@@ -15773,6 +15839,8 @@ turns	packages/turns/tests/test_shipped_guards.py	env = dict(os.environ, HOME="/
 turns	packages/turns/tests/test_shipped_guards.py	env = {} if home is rc.UNSET else {"HOME": home}	keep	HOME	HOME
 turns	packages/turns/tests/test_shipped_guards.py	return set(module.QUESTIONS)	keep	set	set
 turns	packages/turns/tests/test_shipped_guards.py	{"claude": ("AskUserQuestion",)}, "any", ("prompts",), "deny", "guards.question_mode")	keep	any	any
+turns	packages/turns/tests/test_shipped_guards.py	assert set(record) == {"at", *seen.FACTS}       # no entry's text	keep	set	set
+turns	packages/turns/tests/test_shipped_guards.py	assert [e["id"] for e in fake.tables.get(timeout=2)] == ["turns.no-nested-agents"]	keep	timeout	timeout
 turns	packages/turns/tests/test_steer_hosts.py	"timeout_ms": 5000}, timeout=10)	use	timeout=	timeout_s=
 turns	packages/turns/tests/test_steer_hosts.py	-	name	R	results
 turns	packages/turns/tests/test_steer_hosts.py	answer, took = timed(lambda: client.call("steer", {"text": "too late"}, timeout=5))	use	timeout=	timeout_s=
@@ -18436,9 +18504,21 @@ launcher	packages/launcher/tests/test_store_v2.py	assert store.get_run(conn, mad
 moxi	packages/moxi/src/moxi/config.py	raise bad(f"has left_out {left_out!r}", "give left_out true or false")	keep	bad	bad
 moxi	packages/moxi/src/moxi/config.py	raise bad("has left_out but is not retired",	keep	bad	bad
 moxi	packages/moxi/tests/test_config_set.py	demo.parent.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
+moxi	packages/moxi/tests/test_config_set.py	code, out, err = run(capsys, "config", "set", "demo", *argv)	keep	set	set
+moxi	packages/moxi/tests/test_config_set.py	code, out, err = run(capsys, "config", "set", "demo", *argv, "--json")	keep	set	set
+moxi	packages/moxi/tests/test_config_set.py	assert code == 3 and json.loads(out) == {"changed": False, "problem": REFUSAL,	keep	changed	changed
+moxi	packages/moxi/tests/test_config_set.py	assert run(capsys, "config", "set", "demo", "block", "true")[0] == 0	keep	set	set
+moxi	packages/moxi/tests/test_config_set.py	code, out, err = run(capsys, "config", "set", "demo", "block", "true")	keep	set	set
+moxi	packages/moxi/tests/test_config_set.py	assert units.timer_turned_on("demo", "block", "set", "true")	keep	set	set
+moxi	packages/moxi/tests/test_config_set.py	assert not units.timer_turned_on("demo", "block", "set", "false")	keep	set	set
+moxi	packages/moxi/tests/test_config_set.py	assert not units.timer_turned_on("demo", "name", "set", "x")	keep	set	set
 loadout	packages/loadout/src/moxi_loadout/cli.py	p.add_argument("--harness", action="append", default=[], metavar="H",	keep	default	default
 loadout	packages/loadout/src/moxi_loadout/cli.py	help="list it for harness H only, a row of the core's harness "	keep	help	help
+loadout	packages/loadout/src/moxi_loadout/cli.py	help="with --replace, place over a skill or agent whose contents differ "	keep	help	help
+loadout	packages/loadout/src/moxi_loadout/cli.py	p.add_argument("path", metavar="PATH", help="a stray, as status lists it")	keep	help	help
+loadout	packages/loadout/src/moxi_loadout/cli.py	return _run_install(args, _scope(args), replace=args.replace, dry_run=args.dry_run,	keep	dry_run	dry_run
 loadout	packages/loadout/src/moxi_loadout/page.py	_ADD_BODY = {**_ITEM_BODY, "harnesses": lb.Field("list", required=False, max=LIST_MAX,	keep	required	required
+loadout	packages/loadout/src/moxi_loadout/page.py	"reinstall_failed": lb.Out("table", items={"at": _TEXT, "text": _SAYS}, nullable=True),	keep	nullable	nullable
 loadout	packages/loadout/tests/test_page.py	if home.is_dir() and not any(home.iterdir()):	keep	any	any
 loadout	packages/loadout/tests/test_page.py	claude.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
 loadout	packages/loadout/src/moxi_loadout/harness.py	STANDING = frozenset({"ok", "stale", "modified", "blocked"})	keep	stale	stale
@@ -18480,6 +18560,29 @@ launcher	packages/launcher/src/moxi_launcher/headless.py	return (launch or api.l
 launcher	packages/launcher/src/moxi_launcher/headless.py	proc.alive(root) or any(_quiet(item.is_running) for item in below)):	keep	any	any
 launcher	packages/launcher/src/moxi_launcher/headless.py	if posix and (proc.alive(root) or any(_quiet(item.is_running) for item in below)):	keep	any	any
 launcher	packages/launcher/tests/test_headless.py	assert any("go on" in w for w in words) and not any("first brief" in w for w in words)	keep	any	any
+loadout	packages/loadout/src/moxi_loadout/strays.py	harness's `project_folders` entry. A folder that isn't there has nothing in it.	keep	project_folders	project_folders
+loadout	packages/loadout/src/moxi_loadout/strays.py	rel = plan.project_dirs.get(name, {}).get(dir_key)	keep	project_dirs	project_dirs
+loadout	packages/loadout/src/moxi_loadout/strays.py	held = set(place.placed_targets())	keep	set	set
+loadout	packages/loadout/src/moxi_loadout/strays.py	seen: set[str] = set()	keep	set	set
+loadout	packages/loadout/src/moxi_loadout/strays.py	tracked = _tracked(key, git) if names else set()	keep	set	set
+loadout	packages/loadout/src/moxi_loadout/strays.py	return set()	keep	set	set
+loadout	packages/loadout/src/moxi_loadout/strays.py	kind_dir.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
+loadout	packages/loadout/src/moxi_loadout/strays.py	__all__ = ["KIND_DIRS", "AGENT_SUFFIX", "Stray", "Refused", "place_dirs", "find", "stray_at",	keep	find	find
+memory	packages/memory/tests/test_delivered.py	session_id=f"0190b000-0000-7000-8000-{n:012d}", start=START)	keep	start	start
+memory	packages/memory/tests/test_delivered.py	assert set(writers()) == {"typed by the person"}	keep	set	set
+projects	packages/projects/tests/test_questions.py	return site.contribution("fake", ASKS.format(preset=preset or {}, fail=fail))	keep	fail	fail
+projects	packages/projects/tests/test_questions.py	assert set(json.loads(out)) == set(api.get("web").as_dict())	keep	set	set
+projects	packages/projects/tests/test_questions.py	site.contribution("bad", source)	keep	bad	bad
+projects	packages/projects/tests/test_questions.py	assert [m for m, _r in found.unloadable] == ["bad"]	keep	bad	bad
+publishing	packages/publishing/src/moxi_publishing/approval.py	"fail": "closed",	keep	closed	closed
+publishing	packages/publishing/src/moxi_publishing/approval.py	return any(fnmatchcase(name, pattern) for pattern in patterns)	keep	any	any
+publishing	packages/publishing/tests/test_clean.py	assert set(flag.registered(str(repo))) == {flag.MESSAGE, flag.CONTENT}	keep	set	set
+publishing	packages/publishing/tests/test_clean.py	assert rules_of(repo)["refused-trailer"] == ["Fixes", "round", "Reconciles"]	keep	round	round
+publishing	packages/publishing/tests/test_clean.py	assert not any(line.startswith("kept") for line in lines)	keep	any	any
+publishing	packages/publishing/tests/test_clean.py	assert not any("refuses" in line for line in lines)	keep	any	any
+publishing	packages/publishing/tests/test_clean.py	assert set(flag.registered(str(repo))) == set(flag.PIECES)	keep	set	set
+publishing	packages/publishing/tests/test_disable.py	assert any(line.endswith("is no longer marked public") for line in lines)	keep	any	any
+publishing	packages/publishing/tests/test_list.py	assert set(mine["pieces"]) == {"publishing/message", "publishing/content",	keep	set	set
 rounds	packages/rounds/src/moxi_rounds/board.py	"""A ruling as a record gives it: its `id`, its sentence, its pointer (`record`),	keep	record	record
 rounds	packages/rounds/src/moxi_rounds/board.py	return {"id": ruling.id, "text": ruling.text or ruling.rules, "record": ruling.record,	keep	record	record
 rounds	packages/rounds/src/moxi_rounds/corrections.py	"KINDS", "kind_of", "item_of", "stands", "live", "find", "newest_replacing",	keep	find	find
@@ -18493,6 +18596,7 @@ rounds	packages/rounds/tests/test_page.py	return {"id": ruled.id, "text": ruled.
 rounds	packages/rounds/tests/test_page.py	("/api/record", {"what": "ruling", "round": BUSY, "id": "C9"}),	keep	round	round
 rounds	packages/rounds/tests/test_page.py	("/api/record", {"what": "ruling", "round": "kestrel/nowhere", "id": "C1"}))	keep	round	round
 rounds	packages/rounds/tests/test_page.py	assert missing == nowhere == {"gone": True, "record": None}	keep	record	record
+turns	packages/turns/src/moxi_turns/guards/seen.py	"ask_step": any(e.get("step") == "ask" for e in entries)}	keep	any	any
 cache	packages/cache/tests/test_browser_others.py	LAUNCHES = [{"request_id": "r-slot", "session": SLOT, "target": "slot", "slot": "4", "folder": "atlas-api",	keep	folder	folder
 cache	packages/cache/tests/test_browser_others.py	"folder": "kestrel-web", "values": {"name": "planner", "model": "sonnet"}}]	keep	folder	folder
 cache	packages/cache/tests/test_browser_others.py	shell = ui_shells(leave_out=leave_out, env={"CLAUDE_CONFIG_DIR": str(base / "claude-home")})	keep	env	env

@@ -185,7 +185,8 @@ def parent(argv: list[str]) -> int:
 
     subprocess.Popen.send_signal = send_signal
 
-    def run_settle(python, module, *, replace=False, teardown=False, install_skills=None):
+    def run_settle(python, module, *, replace=False, teardown=False, install_skills=None,
+                   accept_diff=False):
         child = [sys.executable, str(HERE), "child"]
         child += ["--teardown", module] if teardown else [module]
         child += ["--replace"] if replace else []

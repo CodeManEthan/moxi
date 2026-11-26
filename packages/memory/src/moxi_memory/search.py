@@ -73,7 +73,9 @@ class Hit:
     `failed` says whether the tool failed, on a tier 2 hit (else None). `time` is
     seconds since the epoch, or None when the record had none. `snippet` is the matched
     part of the text, redacted as stored, with each match marked. `score` is BM25's
-    (lower is better).
+    (lower is better). `writer` is the row's writer as stored (`person`, `model`, a
+    delivered message's `hook`, `channel`, `peer`, `coordinator` or `task`, and so on),
+    or None for a tier 2 hit and a row stored with none.
     """
 
     harness: str
@@ -87,6 +89,7 @@ class Hit:
     key: str
     score: float
     failed: bool | None = None
+    writer: str | None = None
 
 
 @dataclass(frozen=True)
@@ -214,9 +217,10 @@ class _Filters:
 def _hits(conn, table: str, expr: str, filters: _Filters, limit: int) -> list[Hit]:
     fts = f"{table}_fts"
     if table == "rows":
-        extra = "r.agent_id, r.kind, NULL"
+        wrote = "r.writer" if index.has_writer(conn) else "NULL"
+        extra = f"r.agent_id, r.kind, NULL, {wrote}"
     else:
-        extra = f"NULL, '{RESULT}', r.failed"
+        extra = f"NULL, '{RESULT}', r.failed, NULL"
     sql = (f"SELECT r.id, r.harness, r.session_id, r.label, r.time, r.key, {extra}, "
            f"snippet({fts}, 0, ?, ?, ?, ?), bm25({fts}) AS score "
            f"FROM {fts} JOIN {table} AS r ON r.id = {fts}.rowid "
@@ -225,7 +229,7 @@ def _hits(conn, table: str, expr: str, filters: _Filters, limit: int) -> list[Hi
     params = [SNIPPET_OPEN, SNIPPET_CLOSE, SNIPPET_CUT, SNIPPET_TOKENS, expr,
               *filters.params, limit]
     found = []
-    for (rid, harness, sid, label, at, key, agent, kind, failed, snippet,
+    for (rid, harness, sid, label, at, key, agent, kind, failed, wrote, snippet,
          score) in conn.execute(sql, params):
         tier: int | str = 2 if table == "tails" else ("subagent" if agent else 1)
         found.append((score, -(at if at is not None else float("-inf")),
@@ -234,7 +238,8 @@ def _hits(conn, table: str, expr: str, filters: _Filters, limit: int) -> list[Hi
                           project=label, kind=kind, tier=tier,
                           snippet=" ".join(str(snippet or "").split()), key=key,
                           score=float(score),
-                          failed=None if failed is None else bool(failed))))
+                          failed=None if failed is None else bool(failed),
+                          writer=wrote)))
     return found
 
 

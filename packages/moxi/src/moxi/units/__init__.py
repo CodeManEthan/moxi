@@ -21,6 +21,9 @@ file it did not mark unless told to move it aside (`replace=True`).
     status(modules, foreign=(), kinds=None)
                                    what the supervisor says (`UnitState` per unit)
     starts(found)                  what starts each socket daemon now: login or connection
+    switched_timers(module, key)   the timers a setting is the switch of
+    timer_turned_on(module, key, op, value)
+                                   whether `moxi config set`/`unset` would turn one on
     last_runs(module, timer, n=1)  the gate's newest run lines of a timer
     wrap(ref, module=, key=, name=) and unwrap(ref, module=)
                                    a foreign systemd timer's runs behind a switch
@@ -164,6 +167,57 @@ def starts(found, *, env=None) -> dict[str, str | None]:
     return out
 
 
+#: The refusal of an act that would turn a timer on from inside an agent's session
+#: (`moxi.terminal.agent()` names the harness). Timers are for the person to turn on.
+TIMER_ON_REFUSED = ("Turning a timer on is for the person at the keyboard, and this "
+                    "command runs inside an agent session ({harness}). Ask them to run it, "
+                    "or to turn it on from the services page.")
+
+
+def switched_timers(module: str, key: str) -> list[str]:
+    """The timers of `module` whose switch setting `key` sets (the key itself, or the
+    switch table it is an entry of), read through `declarations`; when `UNITS_FROM`
+    fails, the `TIMERS` entries alone."""
+    return list(_timer_switches(module, key))
+
+
+def _timer_switches(module: str, key: str) -> dict[str, str]:
+    """`switched_timers`, each with its switch."""
+    from .. import modules
+    from ._declare import is_switch_of, merge
+
+    found = modules.load(module)
+    if found.state != modules.PRESENT:
+        return {}
+    try:
+        timers = merge(found).timers
+    except DeclarationError:
+        timers = found.timers
+    return {name: entry["switch"] for name, entry in timers.items()
+            if entry.get("switch") and is_switch_of(key, entry["switch"])}
+
+
+def timer_turned_on(module: str, key: str, op: str, value=None, *, text: bool = True) -> bool:
+    """Whether `moxi config set MODULE KEY VALUE` (`op` "set", `value` as typed when
+    `text`) or `unset` (`op` "unset") would turn on a timer `switched_timers` names: one
+    whose switch reads off now and on after. Reads only; raises `moxi.config.ConfigError`
+    for a value the key refuses."""
+    from .. import config
+
+    switches = set(_timer_switches(module, key).values())
+    if not switches or op not in ("set", "unset"):
+        return False
+    schema, _ = config._schema_of(module)
+    if op == "set":
+        _, _, new = config._prepared(schema, module, key, value, config._config_file(module),
+                                     text=text)
+        after = config.check_text(module, schema, config.draft_text(module, [(key, new)])[0])
+    else:
+        after = config.check_text(module, schema, "")
+    now = config.load(module, schema)
+    return any(bool(after[switch]) and not bool(now[switch]) for switch in switches)
+
+
 def apply_switch(module: str, key: str, *, runner=None,
                  say: Callable[[str], object] = print) -> list[Applied]:
     """After `moxi config set` or `unset` of `key`: plan and apply the daemons whose switch
@@ -186,8 +240,8 @@ def apply_switch(module: str, key: str, *, runner=None,
 
 __all__ = [
     "Acted", "Applied", "Backend", "DeclarationError", "Declarations", "Stopped",
-    "TASK_REFS_ENV", "TASK_STATUS_CODES", "UNITS_FROM_SECONDS", "UnitChange", "UnitState", "Wrapped",
+    "TASK_REFS_ENV", "TASK_STATUS_CODES", "TIMER_ON_REFUSED", "UNITS_FROM_SECONDS", "UnitChange", "UnitState", "Wrapped",
     "apply", "apply_switch", "backend", "core_lock", "declarations", "digest", "disable",
     "enable", "unit_env", "home_tag", "ids", "last_runs", "plan", "remove", "restart",
     "resume", "start", "starts", "status", "stop", "switch_problem", "switched_daemons",
-    "unwrap", "wrap", "wraps"]
+    "switched_timers", "timer_turned_on", "unwrap", "wrap", "wraps"]

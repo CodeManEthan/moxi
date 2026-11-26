@@ -198,6 +198,37 @@ class Kind(_Record):
     mint: str
 
 
+class Question(_Record):
+    """A question a contribution puts to an add, about the project just added.
+
+    `module` asks it and acts on its answer; `key` names it within that module; `text` is
+    one plain sentence. `choices` are the answers it takes, or empty for any text.
+    `suggested` is the answer offered as the default, or None. `preset` is an answer
+    already settled (by a setting of the module's): the add asks nothing and acts on it.
+    `after` is `(key, value)` when the question is put only once the module's question
+    `key` is answered `value`, else None. `later` is the command that sets it later, named
+    when the add doesn't ask."""
+
+    __slots__ = _fields = ("module", "key", "text", "choices", "suggested", "preset",
+                           "after", "later")
+
+    module: str
+    key: str
+    text: str
+    choices: tuple[str, ...]
+    suggested: str | None
+    preset: str | None
+    after: tuple[str, str] | None
+    later: str
+
+    def as_dict(self) -> dict:
+        """The fields by their names, as plain values (for JSON)."""
+        out = {name: getattr(self, name) for name in self._fields}
+        out["choices"] = list(self.choices)
+        out["after"] = None if self.after is None else list(self.after)
+        return out
+
+
 class Kinds(_Record):
     """What `kinds()` found: `found`, the kinds that may be used, and `broken`, one
     `(module, reason)` pair for each contribution that won't load and each kind that is
@@ -537,4 +568,5 @@ def _main_work_tree(top: str) -> str | None:
 
 
 __all__ = ["ProjectsError", "NotFound", "Unreadable", "TooNew", "Busy", "Project", "Kind",
-           "Kinds", "DEFAULT_KIND", "list_projects", "get", "for_path", "for_paths", "kinds"]
+           "Question", "Kinds", "DEFAULT_KIND", "list_projects", "get", "for_path",
+           "for_paths", "kinds"]
