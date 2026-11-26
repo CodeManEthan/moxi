@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- On Windows `moxi notes home-paths` finds a link whose target is under the home folder
+  again (rule L): it read the target in the `\\?\` long form Windows reads a link back
+  with, so no link matched and each was left as it was with no word. A link's target is
+  now read through `moxi.paths.link_target` and matched with the system's separator, and
+  the relative link written in its place is spelled with `\` there.
 - `moxi notes home-paths` takes a session path under the home folder on Windows. Rule SI's
   root had to start with `~` or `/`, so a session path spelled from a home with a drive
   (`C:\Users\...`) was left whole and only Rule HP wrote its home as `~`, which a second

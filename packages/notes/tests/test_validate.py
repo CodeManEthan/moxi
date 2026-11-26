@@ -9,6 +9,7 @@ import sys
 from pathlib import Path
 
 import pytest
+from moxi_dev.testing import need_symlinks
 
 from moxi_notes import api, doctypes
 from moxi_notes import validate as v
@@ -316,8 +317,8 @@ def test_vendored_dirs_and_git_are_pruned_before_the_walk_descends(tree, monkeyp
     assert all(report.excluded[m] == 1 for m in v.VENDORED + (".git",))
 
 
-@pytest.mark.skipif(sys.platform == "win32", reason="symlinks need privileges on Windows")
 def test_a_symlinked_dir_or_file_is_never_followed(tree, tmp_path):
+    need_symlinks()
     outside = tmp_path / "outside"
     (outside / "plans").mkdir(parents=True)
     (outside / "plans" / "secret.md").write_text(FULL)

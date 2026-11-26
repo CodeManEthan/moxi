@@ -9,6 +9,7 @@ the user added.
 """
 
 import os
+import re
 
 from moxi_usage.allowlist import allowed, patch_files
 
@@ -67,6 +68,14 @@ def build_tree(t):
     return p
 
 
+def _slashed(command: str, root: str) -> str:
+    """`command` with each path under the tree's `root` spelled with `/`, as a Bash command
+    on Windows writes one: the reader refuses a backslash outside quotes by design, and on
+    Linux and macOS this changes nothing."""
+    return re.sub(re.escape(root) + r"[^\s'\"]*",
+                  lambda m: m.group(0).replace("\\", "/"), command)
+
+
 def table(p):
     """Every case as (label, passed, reason)."""
     current_dir, repo, work, notes = p["CWD"], p["REPO"], p["WORK"], p["NOTES"]
@@ -76,6 +85,8 @@ def table(p):
     results = []
 
     def ask(name, inp, cwd, work_roots, handoff_roots, commands=COMMANDS):
+        if name == "Bash" and isinstance(inp, dict) and isinstance(inp.get("command"), str):
+            inp = {**inp, "command": _slashed(inp["command"], p["T"])}
         return allowed(name, inp, cwd, handoff_roots=handoff_roots, work_roots=work_roots,
                        commands=commands, home=p["HOME"])
 
@@ -525,6 +536,7 @@ def test_the_allowlist_table(tmp_path):
 def test_the_process_home_expands_a_leading_tilde_when_none_is_given(tmp_path, monkeypatch):
     p = build_tree(tmp_path)
     monkeypatch.setenv("HOME", p["HOME"])
+    monkeypatch.setenv("USERPROFILE", p["HOME"])    # Windows' home
     command = {"command": "git -C ~/tmp/builds/branch status --short"}
     assert allowed("Bash", command, p["CWD"], work_roots=[p["WORK"]]) == (True, "")
 

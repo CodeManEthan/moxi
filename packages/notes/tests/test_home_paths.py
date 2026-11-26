@@ -9,6 +9,7 @@ from pathlib import Path
 
 import pytest
 
+from moxi.paths import link_target
 from moxi_notes import home_paths as hp
 
 from notes_kit import configure, git, git_env, home, moxi_cmd, repo
@@ -160,15 +161,16 @@ def test_a_link_inside_the_root_is_made_relative_and_one_outside_is_listed(tmp_p
     git("commit", "-q", "-m", "links", cwd=path)
     code, found = as_json()
     links = {f["path"]: f["changes"][0] for f in found["files"]}
-    assert links["in.md"]["kind"] == "link" and links["in.md"]["after"] == "target/a.md"
-    assert links["sub/deep.md"]["after"] == "../target/a.md"
+    assert links["in.md"]["kind"] == "link"
+    assert links["in.md"]["after"] == os.path.join("target", "a.md")
+    assert links["sub/deep.md"]["after"] == os.path.join("..", "target", "a.md")
     assert ("out.md", "link-outside") in left(found)
     code, out, err = run("--apply")
     assert code == 0, out + err
-    assert os.readlink(path / "in.md") == "target/a.md"
-    assert os.readlink(path / "sub" / "deep.md") == "../target/a.md"
+    assert link_target(path / "in.md") == os.path.join("target", "a.md")
+    assert link_target(path / "sub" / "deep.md") == os.path.join("..", "target", "a.md")
     assert (path / "sub" / "deep.md").read_text() == "a\n"
-    assert os.readlink(path / "out.md") == str(home() / "outside.md")
+    assert link_target(path / "out.md") == str(home() / "outside.md")
 
 
 def test_a_binary_file_and_one_over_max_mib_are_listed_not_read():

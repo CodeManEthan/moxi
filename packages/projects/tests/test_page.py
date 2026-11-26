@@ -30,7 +30,7 @@ import pytest
 
 import moxi.modules
 from moxi import modules, paths
-from moxi_dev.testing import PROC_WAIT_S, console_script, wait_for
+from moxi_dev.testing import PROC_WAIT_S, console_script, need_symlinks, wait_for
 from moxi_projects import (acts, api, cli, page, pagecheck, pagehandlers, pagestat, rules,
                            store)
 
@@ -468,22 +468,22 @@ def test_how_the_path_stands_to_the_project_it_is_in(tmp_path, own_pool):
     assert at_path(sibling)["project"] is None
 
 
-@pytest.mark.skipif(sys.platform == "win32", reason="POSIX symlinks")
 def test_a_symlinked_spelling_of_a_root_is_that_root(tmp_path, own_pool):
+    need_symlinks()
     root = tmp_path / "real"
     root.mkdir()
     link = tmp_path / "link"
-    link.symlink_to(root)
+    link.symlink_to(root, target_is_directory=True)
     _register(("real", root))
     assert at_path(link)["how"] == "root"
 
 
-@pytest.mark.skipif(sys.platform == "win32", reason="POSIX symlinks")
 def test_a_symlink_into_a_root_is_inside(tmp_path, own_pool):
+    need_symlinks()
     root = tmp_path / "real"
     (root / "src").mkdir(parents=True)
     link = tmp_path / "into"
-    link.symlink_to(root / "src")
+    link.symlink_to(root / "src", target_is_directory=True)
     _register(("real", root))
     assert pagehandlers._how(str(link), str(root)) == "inside"
     assert pagehandlers._how(str(link / "deeper"), str(root)) == "inside"

@@ -10,6 +10,7 @@ import stat
 import sys
 
 import pytest
+from moxi.paths import link_target
 from moxi_sessions import api
 
 from moxi_memory import setup, start
@@ -210,9 +211,10 @@ def test_a_settings_file_that_is_a_link_stays_a_link_and_its_target_is_written(
     os.symlink(target, settings_file)
     code, said = run(Asker("y", "n"))
     assert os.path.islink(settings_file)
-    assert os.readlink(settings_file) == str(target)
+    assert link_target(settings_file) == str(target)
     assert json.load(open(target)) == {"theme": "dark", "autoMemoryEnabled": False}
-    assert stat.S_IMODE(os.stat(target).st_mode) == 0o640
+    if sys.platform != "win32":  # Windows keeps no POSIX mode bits
+        assert stat.S_IMODE(os.stat(target).st_mode) == 0o640
 
 
 def test_teardown_leaves_the_settings_file(spawned, settings_file):

@@ -212,12 +212,14 @@ def test_a_symlinked_home_gives_one_answer_for_either_spelling(tmp_path, monkeyp
     linked_home = tmp_path / "home-link"
     linked_home.symlink_to(real_home)
     monkeypatch.setenv("HOME", str(linked_home))
+    monkeypatch.setenv("USERPROFILE", str(linked_home))    # Windows' home
     alpha = repo(real_home / "code" / "alpha")
     (alpha / "src").mkdir()
     answers = {notes_dir(where).dir for where in (
         alpha, alpha / "src", linked_home / "code" / "alpha" / "src")}
     assert answers == {linked_home / "notes" / "code" / "alpha"}
     monkeypatch.setenv("HOME", str(real_home))
+    monkeypatch.setenv("USERPROFILE", str(real_home))
     assert notes_dir(linked_home / "code" / "alpha").dir == real_home / "notes" / "code" / "alpha"
 
 

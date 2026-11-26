@@ -8,6 +8,7 @@ import sys
 
 import moxi.modules
 import pytest
+from moxi_dev.testing import need_symlinks
 from moxi.doctor import Row
 
 from moxi_projects import api, doctor, module, store
@@ -112,17 +113,17 @@ def test_a_missing_root_warns(golden_copy):
     assert row.state == "warn" and "alpha" in row.detail and "moxi projects set" in row.fix
 
 
-@pytest.mark.skipif(sys.platform == "win32", reason="symlinks need privileges on Windows")
 def test_a_stale_resolved_root_is_refreshed_through_the_write_sequence(tmp_path,
                                                                        monkeypatch):
+    need_symlinks()
     first, second = tmp_path / "first", tmp_path / "second"
     first.mkdir()
     second.mkdir()
     link = tmp_path / "link"
-    link.symlink_to(first)
+    link.symlink_to(first, target_is_directory=True)
     store.write(lambda conn: store.insert(conn, key="p", root=str(link)))
     link.unlink()
-    link.symlink_to(second)
+    link.symlink_to(second, target_is_directory=True)
 
     import moxi.store
 
@@ -141,7 +142,6 @@ def test_a_stale_resolved_root_is_refreshed_through_the_write_sequence(tmp_path,
     assert "refreshed" not in one(by_name(), "root spelling").detail
 
 
-@pytest.mark.skipif(sys.platform == "win32", reason="symlinks need privileges on Windows")
 def test_a_stale_resolved_root_in_an_older_store_warns_and_writes_nothing(
         tmp_path, store_path, monkeypatch):
     target = tmp_path / "t"
@@ -157,11 +157,11 @@ def test_a_stale_resolved_root_in_an_older_store_warns_and_writes_nothing(
     assert store_path.read_bytes() == before
 
 
-@pytest.mark.skipif(sys.platform == "win32", reason="symlinks need privileges on Windows")
 def test_two_roots_naming_one_dir_warn(tmp_path):
+    need_symlinks()
     real = tmp_path / "real"
     real.mkdir()
-    (tmp_path / "alias").symlink_to(real)
+    (tmp_path / "alias").symlink_to(real, target_is_directory=True)
 
     def two(conn):
         store.insert(conn, key="zeta", root=str(real))

@@ -10,6 +10,7 @@ from pathlib import Path
 import sys
 
 import pytest
+from moxi_dev.testing import need_symlinks
 
 from moxi_notes import backfill
 from moxi_notes import validate as v
@@ -166,8 +167,8 @@ def test_apply_leaves_frozen_exempt_and_unfiled_notes_alone(tree):
     assert [p.read_bytes() for p in paths] == before
 
 
-@pytest.mark.skipif(sys.platform == "win32", reason="symlinks need privileges on Windows")
 def test_apply_never_writes_through_a_symlink(tree, tmp_path):
+    need_symlinks()
     outside = tmp_path / "outside.md"
     outside.write_text("# outside\n")
     found = backfill.plan()
@@ -181,8 +182,8 @@ def test_apply_never_writes_through_a_symlink(tree, tmp_path):
     assert outside.read_text() == "# outside\n"
 
 
-@pytest.mark.skipif(sys.platform == "win32", reason="symlinks need privileges on Windows")
 def test_apply_never_writes_outside_the_root_through_a_linked_dir(tree, tmp_path):
+    need_symlinks()
     outside = tmp_path / "elsewhere"
     outside.mkdir()
     (outside / "one.md").write_text("# outside\n")

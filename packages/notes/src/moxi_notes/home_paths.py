@@ -450,11 +450,13 @@ def _under(path: str, root: str) -> bool:
 
 
 def _link(found: Pass, rules: Rules, root: str, path: str, full: str) -> None:
+    from moxi.paths import link_target
+
     try:
-        target = os.readlink(full)
+        target = link_target(full)
     except OSError:
         return
-    if not (target == rules.home or target.startswith(rules.home.rstrip("/") + "/")):
+    if not (target == rules.home or target.startswith(rules.home.rstrip(os.sep) + os.sep)):
         return
     absolute = os.path.normpath(target)
     if not _under(absolute, root):
@@ -633,9 +635,11 @@ def _write(found: Pass, one: FilePlan, real_root: str) -> None:
 
 
 def _write_link(found: Pass, one: FilePlan) -> None:
+    from moxi.paths import link_target
+
     full = os.path.join(found.root, one.path)
     try:
-        if not os.path.islink(full) or os.readlink(full) != one.target:
+        if not os.path.islink(full) or link_target(full) != one.target:
             found.leave(one.path, "changed")
             return
         temp = os.path.join(os.path.dirname(full),
