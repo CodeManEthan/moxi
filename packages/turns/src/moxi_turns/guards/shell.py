@@ -1396,8 +1396,8 @@ def shell_scripts(shell_text: ShellText, *, dialect: str = "sh") -> tuple[ShellS
     run: a shell's script argument (`-c`, `-Command`, `/c`), or, for a shell that runs its
     input, a heredoc or here-string on its own command or the literal text piped into it.
     A command runs a shell when its command word's last part across `/` and `\\`, with
-    `.exe` dropped in any case, is one: `sh`, `bash`, `zsh`, `dash`, `ksh`, `mksh` or
-    `ash` as written, and `pwsh`, `powershell` or `cmd` in any case. One level: a caller
+    `.exe` dropped, is one in any case: `sh`, `bash`, `zsh`, `dash`, `ksh`, `mksh`, `ash`,
+    `pwsh`, `powershell` or `cmd`. One level: a caller
     reads each script with `read_shell` and asks again for deeper ones."""
     if dialect not in DIALECTS:
         raise ValueError(f"unknown dialect {dialect!r}; the dialects are {DIALECTS}")
@@ -1433,13 +1433,13 @@ def shell_scripts(shell_text: ShellText, *, dialect: str = "sh") -> tuple[ShellS
 
 
 def _shell_name(word: str) -> str | None:
-    base = _base(word)
-    if base.lower().endswith(".exe"):
-        base = base[:-4]
-    if base in _SH_SHELLS:
-        return base
-    lower = base.lower()
-    return lower if lower in ("pwsh", "powershell", "cmd") else None
+    """The shell a command word names, in lower case, or None: its last part across `/`
+    and `\\`, with `.exe` dropped, compared in any case on every system, since the text
+    doesn't say which system runs it."""
+    name = _base(word).lower()
+    if name.endswith(".exe"):
+        name = name[:-4]
+    return name if name in _SH_SHELLS or name in ("pwsh", "powershell", "cmd") else None
 
 
 def _joined(words) -> str | None:

@@ -610,6 +610,11 @@ def test_a_script_names_the_command_words_it_was_made_from():
     ("C:/Windows/System32/Cmd.Exe /C taskkill /PID 211", "cmd",
      ("taskkill /PID 211", "cmd", 0, "argument")),
     ("PWSH -c 'Stop-Process 211'", "sh", ("Stop-Process 211", "powershell", 0, "argument")),
+    ("BASH.EXE -c 'kill 211'", "sh", ("kill 211", "sh", 0, "argument")),
+    ("& 'C:\\Git\\bin\\Bash.exe' -c 'kill 211'", "powershell",
+     ("kill 211", "sh", 0, "argument")),
+    ("C:\\Git\\bin\\Bash.exe -c \"kill 211\"", "cmd", ("kill 211", "sh", 0, "argument")),
+    ("ZSH -c 'kill 211'", "sh", ("kill 211", "sh", 0, "argument")),
 ])
 def test_a_shell_is_named_by_its_last_part_across_either_slash_without_exe(
         text, dialect, script):

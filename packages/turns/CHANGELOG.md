@@ -17,7 +17,7 @@
   a heredoc or here-string on it, or literal text piped into it from `echo` or `cat` (its
   `source`, one of `SCRIPT_SOURCES`), with the indexes of the command's words it was made
   from (`word_indexes`). A shell is named by its command word's last part across `/` and
-  `\`, with `.exe` dropped, and `pwsh`, `powershell` and `cmd` in any case. A POSIX
+  `\`, with `.exe` dropped, in any case. A POSIX
   shell's option cluster is all flags, except that each `o` or `O` in it takes the next
   word (`bash -co pipefail 'cmd'`). What needs
   evaluating to know what runs is not read. The reader never raises.
