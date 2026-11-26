@@ -27,7 +27,10 @@ stays in the shim's queue and the daemon is told the session has no endpoint
 handler, then the watch, whose facts are read at the subscription: no turn event falls
 between what the look read and the first event the watch gives. The first look is a
 release point when the session is idle (a `look` frame: no turn, nothing settled), so mail
-the daemon held for a `ready` raised before the look is not left waiting. A look also
+the daemon held for a `ready` raised before the look is not left waiting. A later look,
+after the endpoint went away, that reads the session idle sends `relook`: it releases the
+rows of unflagged mail, and goes only after the look has settled the digests the loss
+carried and the daemon has put their ids back as rows. A look also
 learns the session id and reads `turned` from the turn number: a session that has had a
 turn has `turned` set.
 
@@ -116,6 +119,9 @@ LOOK_INTERVAL = 1.0
 WAIT_RETRY = 0.5
 #: The `activity` kind of a first look at an idle session (the daemon's `ACTIVITY_LOOK`).
 LOOK = "look"
+#: The `activity` kind of a later look, after the endpoint's loss, that read the session
+#: idle (the daemon's `ACTIVITY_RELOOK`).
+RELOOK = "relook"
 #: The outcome that settles a digest `handled`.
 ANSWER = "answer"
 #: The steer refusals that fall back to `deliver`: no turn runs to take the text, or the
@@ -310,13 +316,17 @@ class ClaudeAdapter:
         log.info("found the session's endpoint at %s (session %s, %s)", s.dir,
                  facts.session_id or s.session_id, "a turn runs" if facts.turn_open
                  else "idle")
-        if first and not facts.turn_open:
+        if not facts.turn_open:
             # The first look is a release point when the session is idle: a `ready` the
             # session raised before this adapter was watching loses nothing. It is not a
             # turn, so it is no evidence for `turned` and settles nothing. A later look
-            # (after a plugin reload or an endpoint crash) follows no `ready`, so it
-            # releases nothing: `--held` mail waits for a real release point.
-            self.shim.notify_activity(LOOK)
+            # (after a plugin reload or an endpoint crash) follows no `ready`: its
+            # `relook` releases unflagged rows only, and `--held` mail waits for a real
+            # release point. It goes after the look settled every carried digest and
+            # its `turn_ended` was answered, so those digests' rows are rows by then and
+            # go with it. A look that reads a turn open sends neither: the rows wait for
+            # that turn's end.
+            self.shim.notify_activity(LOOK if first else RELOOK)
         return True
 
     def _judge_carried(self, open_turn: str | None) -> None:

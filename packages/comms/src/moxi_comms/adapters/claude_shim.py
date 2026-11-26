@@ -105,7 +105,7 @@ log = logging.getLogger("comms.shim")
 #: `turn_ended` request (`_send_turn`).
 ACTIVITY_READY, ACTIVITY_TURN = "ready", "turn"
 #: The daemon method each kind is sent as; no kind is a plain `activity`.
-ACTIVITY_METHODS = {ACTIVITY_READY: "ready", "look": "look"}
+ACTIVITY_METHODS = {ACTIVITY_READY: "ready", "look": "look", "relook": "relook"}
 
 #: The module name comms gives turns as `by` on every digest it hands in, by `deliver`
 #: or `steer`. A session's `prompt` listeners read it as the prompt's `delivery_by`.
@@ -1098,9 +1098,9 @@ class ClaudeShim:
     def notify_activity(self, kind: str | None, *, source: str | None = None,
                         ref=None) -> bool:
         """Tell the daemon the harness is alive, which session it is, and what kind of
-        moment this is: `ready` (a SessionStart, with its `source`) or `look`. None
-        sends no `kind`, which releases nothing. Every notify carries the session id, `projects_root` and
-        `turned`, read together under the lock. `ref` names the digests a turn took
+        moment this is: `ready` (a SessionStart, with its `source`), `look` or
+        `relook`. None sends no `kind`, which releases nothing. Every notify carries the
+        session id, `projects_root` and `turned`, read together under the lock. `ref` names the digests a turn took
         (one, or a list): the daemon marks them started, which is not an ack. True when
         the frame went out on a connection that is still open."""
         with self._lock:

@@ -456,9 +456,19 @@ def test_a_steered_digest_is_started_and_carried_too(rig, adapter, endpoints, fr
     assert again.texts == []
 
 
+def _index(frames, match) -> int:
+    """The position of the first frame `match` accepts, or -1."""
+    return next((i for i, f in enumerate(list(frames)) if match(f)), -1)
+
+
 @pytest.mark.parametrize("next_turn", [None, "t-other"], ids=["no-turn", "another-turn"])
 def test_a_carried_digest_settles_unhandled_at_a_look_that_reads_its_turn_gone(
         rig, adapter, endpoints, frames, next_turn):
+    """The look settles a carried digest whose turn it does not read open, and its
+    `turn_ended` reaches the daemon before the look's `relook`, so the digest's rows are
+    rows when the `relook` releases them: they go again within the idle settle, before
+    any turn ends. A look that reads another turn open sends no `relook`: the rows wait
+    for that turn's end."""
     ep = endpoints()
     a = adapter()
     assert found(a, ep)
@@ -470,16 +480,52 @@ def test_a_carried_digest_settles_unhandled_at_a_look_that_reads_its_turn_gone(
     assert wait_until(lambda: a.session is None)
     time.sleep(0.3)
     assert mid not in turn_frames(frames, "unhandled_ids")
-    endpoints(open_turn=next_turn)
+    again = endpoints(open_turn=next_turn)
     assert wait_until(lambda: a.session is not None and a.looks == 2)
     assert wait_until(lambda: mid in turn_frames(frames, "unhandled_ids"))
-    assert a.boundary is None and not a.hands
+    assert not a.hands
+    if next_turn is None:
+        assert wait_until(lambda: frame_kinds(frames, "relook"))
+        settled = _index(frames, lambda f: mid in f.get("unhandled_ids", ()))
+        relook = _index(frames, lambda f: f.get("kind") == "relook")
+        assert 0 <= settled < relook, "the turn_ended went before the relook"
+        assert wait_until(lambda: len(again.texts) == 1), "handed again at the relook"
+        assert "carried, then not" in again.texts[0]
+    else:
+        time.sleep(0.5)
+        assert not frame_kinds(frames, "relook"), "a look that reads a turn open"
+        assert again.texts == [], "the rows wait for the running turn's end"
+        again.end_turn("answer")
+        assert wait_until(lambda: len(again.texts) == 1)
+
+
+def test_a_relook_follows_a_loss_with_nothing_started_and_only_an_idle_look(
+        rig, adapter, endpoints, frames):
+    """The first look sends `look`; a later one that reads the session idle sends
+    `relook`; a later one that reads a turn open sends neither."""
+    ep = endpoints()
+    a = adapter()
+    assert found(a, ep)
+    assert wait_until(lambda: len(frame_kinds(frames, "look")) == 1)
+    ep.go_away("a plugin reload")
+    assert wait_until(lambda: a.session is None)
+    second = endpoints()
+    assert wait_until(lambda: a.session is not None and a.looks == 2)
+    assert wait_until(lambda: len(frame_kinds(frames, "relook")) == 1)
+    assert len(frame_kinds(frames, "look")) == 1
+    second.go_away("another reload")
+    assert wait_until(lambda: a.session is None)
+    endpoints(open_turn="t-running")
+    assert wait_until(lambda: a.session is not None and a.looks == 3)
+    time.sleep(0.3)
+    assert len(frame_kinds(frames, "relook")) == 1, "no relook while a turn runs"
+    assert len(frame_kinds(frames, "look")) == 1
 
 
 def test_a_look_after_a_reload_releases_no_held_mail(rig, adapter, endpoints, frames):
     """Only the first look stands in for a `ready`. A plugin reload raises no
-    SessionStart, so the re-look after it is no release point: `--held` mail waits for
-    the session's own next turn, a clear, a compaction or a restart."""
+    SessionStart, so the re-look after it releases unflagged mail only: `--held` mail
+    waits for the session's own next turn, a clear, a compaction or a restart."""
     ep = endpoints()
     a = adapter()
     assert found(a, ep)

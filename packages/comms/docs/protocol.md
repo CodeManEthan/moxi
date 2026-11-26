@@ -332,6 +332,7 @@ already handed, oldest first, with `held: true` on the payload:
 | `turn_ended` with `answered: true` | no at the frame; its settle window reads | every row at once; then the report settles |
 | any other `turn_ended` | yes, and again for a settle window if it does not pass | every row at the first read that passes; then the report settles |
 | `look` | yes | every row if it passes; settles nothing |
+| `relook` | yes | rows of unflagged messages if it passes; flagged rows wait; settles nothing |
 | `bind` | yes | rows of unflagged messages if it passes; flagged rows wait |
 | a live message to the name, an `activity` | - | nothing |
 
@@ -485,8 +486,8 @@ sender only to a daemon whose hello lists `scoped-senders`.
 An adapter's methods, on the connection that holds its binding: `bind` (answers the
 identity, a fresh binding token and `high`, the catch-up boundary), `open_digest`,
 `turn_ended` (answers the name's cursor), and the notifications `injected` (the digest's
-id and its text, capped at 64 kB), `ready` (with `source`), `look`, `activity` and
-`unanswered`, and `mcp_token` (below). One from a connection that holds no binding is
+id and its text, capped at 64 kB), `ready` (with `source`), `look`, `relook`,
+`activity` and `unanswered`, and `mcp_token` (below). One from a connection that holds no binding is
 refused `not-bound`. The
 daemon pushes `deliver` (a payload), `replay_complete` (after a bind's catch-up) and
 `notice`. It keeps at most 64 rows per binding pushed and not yet in a digest, so a long
@@ -505,9 +506,14 @@ adapter sends `activity` with that digest's id as `ref`; `explain` reads it for
 not an ack. `ready` is sent at every session start, clear, compaction and resume, with
 `source` `startup`, `resume`, `clear` or `compact` (any other value reads as `resume`).
 The adapter's first look at an idle session sends `look`: a release point on a passing
-read that settles nothing and is no evidence of a turn. "Held mail" has what each one
-releases. The daemon takes all of them, and the session reports below, only from the
-binding's own connection. `injected`, `ready`, `look` and `activity` carry a `seq` that
+read that settles nothing and is no evidence of a turn. A later look, after the
+session's endpoint went away (a plugin reload, a crash), that reads the session idle
+sends `relook`, after the `turn_ended` that settles what the loss left open has been
+answered: a release point for unflagged rows only, since a reload is not a turn. A daemon
+that predates `relook` answers it method-not-found, which a notification drops. "Held
+mail" has what each one releases. The daemon takes all of them, and the session reports
+below, only from the binding's own connection. `injected`, `ready`, `look`, `relook` and
+`activity` carry a `seq` that
 increases per connection, and the daemon drops one that doesn't; that orders them, it
 doesn't authenticate them.
 

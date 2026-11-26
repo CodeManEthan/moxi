@@ -181,6 +181,10 @@ ACTIVITY_READY = "ready"
 #: turns endpoint while the session is idle: a release point, on a passing read, that
 #: settles nothing and is no evidence of a turn (`turned` is left as the frame says).
 ACTIVITY_LOOK = "look"
+#: The `kind` of an `activity` notify for a Claude adapter's later look, after its
+#: session's endpoint went away, that read the session idle: a release point, on a
+#: passing read, for the rows of unflagged messages only. It settles nothing.
+ACTIVITY_RELOOK = "relook"
 #: A `ready` source that starts a context with nothing cached to lose: it releases every
 #: row without reading the cache. Any other source (`resume`, Claude Code's `fork`, a
 #: value this daemon does not know) reads the cache first.
@@ -582,6 +586,7 @@ class Daemon:
             "injected": self._injected,
             "ready": self._ready,
             "look": self._look,
+            "relook": self._relook,
             "activity": self._activity,
             "unanswered": self._note_unanswered,
             "mcp_token": self._mcp_token,
@@ -1062,6 +1067,9 @@ class Daemon:
     def _look(self, conn, params: dict) -> None:
         return self._activity(conn, params, kind=ACTIVITY_LOOK)
 
+    def _relook(self, conn, params: dict) -> None:
+        return self._activity(conn, params, kind=ACTIVITY_RELOOK)
+
     def _turn_ended(self, conn, params: dict) -> dict:
         """`turn_ended`, the ack: a turn of the binding's session ended, answering the
         digests `handled` names and not the ones `unhandled` names (both digest ids;
@@ -1091,7 +1099,8 @@ class Daemon:
 
     def _activity(self, conn, params: dict, kind: str | None = None) -> None:
         """`activity` and its kinds: the session reports, from the binding's own
-        connection, and the release points (`ready`, `look`, a turn's end)."""
+        connection, and the release points (`ready`, `look`, `relook`, a turn's
+        end)."""
         b = self._own_binding(conn, params)
         identity = b.qualified if b is not None else str(params.get("identity") or "")
         method = kind or "activity"
@@ -1118,6 +1127,8 @@ class Daemon:
             self._on_ready(b, params.get("source"))
         elif kind == ACTIVITY_LOOK:
             self._on_look(b)
+        elif kind == ACTIVITY_RELOOK:
+            self._on_relook(b)
         return None
 
     # ------------------------------------------------------------------ register
@@ -3258,6 +3269,16 @@ class Daemon:
         window short."""
         if self._passing(b):
             self._release(b, flagged=True)
+
+    def _on_relook(self, b: Binding) -> None:
+        """`activity kind=relook` from the binding's own connection: its adapter found the
+        session's endpoint again after losing it, read the session idle, and first sent
+        the `turn_ended` that put the unhandled digests' ids back as rows. It releases
+        the rows of unflagged messages on a passing read, as a bind does, and settles
+        nothing. A reload raises no SessionStart, so `[held]` rows wait for a real
+        boundary."""
+        if self._passing(b):
+            self._release(b, flagged=False)
 
     def _on_register(self, b: Binding) -> None:
         """After a register's replay: the rows of unflagged messages, on a passing read.

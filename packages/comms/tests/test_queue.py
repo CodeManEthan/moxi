@@ -431,6 +431,8 @@ RELEASE_TABLE = [
     ("turn none", cache.WARM, "none"),
     ("register", cache.WARM, "unflagged"),
     ("register", cache.COLD, "none"),
+    ("relook", cache.WARM, "unflagged"),
+    ("relook", cache.COLD, "none"),
     ("no kind", cache.WARM, "none"),
 ]
 
@@ -441,8 +443,9 @@ RELEASE_TABLE = [
 def test_the_release_table(rig, reads, peers, kind, event, read, releases):
     """One test per row of the release table, on the Claude shim and a harness double.
     Each name has a flagged row and an unflagged one (queued while cold, or while
-    unbound for the register rows). `fork` and any other source read as resume; a `ready` with no source, a `turn` with no `handled` and an `activity` with
-    no kind release nothing."""
+    unbound for the register rows). `fork` and any other source read as resume; a
+    `ready` with no source, a `turn` with no `handled` and an `activity` with no kind
+    release nothing. A `relook` releases what a register does."""
     q = REVIEWER_Q if kind == "shim" else CODER_Q
     if event == "register":
         plain = post(rig, [q], "while away")
@@ -467,6 +470,8 @@ def test_the_release_table(rig, reads, peers, kind, event, read, releases):
             peer.turn()
         elif event == "turn none":
             peer.activity(kind="turn", turned=True)
+        elif event == "relook":
+            peer.activity(kind="relook")
         else:
             peer.activity()
     peer.sync()
