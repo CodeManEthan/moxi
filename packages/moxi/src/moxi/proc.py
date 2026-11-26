@@ -3,7 +3,8 @@
 - `run` runs a command to its end with a deadline. Its stdin is closed or fed (secrets
   travel on stdin, never in argv or the environment), its output is captured, left alone
   or written to a file, and on timeout the whole tree it started is killed, not only the
-  first process.
+  first process. A caller may tag the run, hear its first process once it starts, and
+  have everything the run started ended on every end, not only a timeout.
 - `spawn` starts a long-lived child that cannot outlive its parent: it holds a lifeline,
   a pipe the parent keeps open, and the child ends when the parent goes. With
   `detached=True` it starts a child that is meant to outlive it, logging to a file.
@@ -41,6 +42,9 @@ _WINDOWS = sys.platform == "win32"
 #: the read end of the pipe `lifeline="fd"` passes, a file descriptor on POSIX and a
 #: handle on Windows. Only this module reads it; a child asks `lifeline_kind()`.
 LIFELINE_ENV = "MOXI_LIFELINE_FD"
+#: The variable `run(..., tag=...)` puts in the command's environment, holding the tag, so
+#: every process that inherits the environment carries it.
+RUN_TAG_ENV = "MOXI_RUN_TAG"
 #: How long a timed-out `run` waits between its first signal and SIGKILL (POSIX) unless
 #: told otherwise, and the watchdog between the two when a lifeline closes.
 KILL_GRACE = 2.0
@@ -63,8 +67,9 @@ Argv = Sequence[str | os.PathLike]
 def run(argv: Argv, *, timeout_s: float, stdin_data: bytes | str | None = None,
         env: Mapping[str, str] | None = None, cwd: str | os.PathLike | None = None,
         capture: bool = True, output: str | os.PathLike | None = None,
-        first_signal: str = "SIGTERM",
-        grace_s: float | None = None) -> subprocess.CompletedProcess:
+        first_signal: str = "SIGTERM", grace_s: float | None = None,
+        tag: str | None = None, on_start: Callable[[ProcId], None] | None = None,
+        end_leftovers: bool = False) -> subprocess.CompletedProcess:
     """Run `argv` to its end, or kill everything it started once `timeout_s` seconds pass.
 
     stdin is closed (`/dev/null`), or a pipe fed `stdin_data` and then closed. With `capture`
@@ -88,7 +93,26 @@ def run(argv: Argv, *, timeout_s: float, stdin_data: bytes | str | None = None,
     Windows: the child starts in a new process group and is put in a Job Object as soon
     as it starts; on timeout the job is terminated, which ends the whole tree.
 
-    On timeout `subprocess.TimeoutExpired` is raised, carrying what was captured.
+    On timeout `subprocess.TimeoutExpired` is raised, carrying what was captured. Any
+    other exception while it runs (an interrupt) kills the tree at once and is raised.
+
+    Three options, each off unless given, name and end the run as a whole:
+
+    - `tag`: put in the child's environment as `MOXI_RUN_TAG` (`RUN_TAG_ENV`), replacing
+      any value there, so every process that inherits the environment carries it, one
+      that left the process group included. A process started with an environment built
+      from scratch doesn't.
+    - `on_start`: called with the first process as a `ProcId` once it has started (on
+      Windows, once it is in its job), before the wait. One that raises ends the run as
+      an interrupt does, and its exception is raised.
+    - `end_leftovers=True`: before `run` returns or raises, everything the run started
+      is ended. POSIX: once the first process has ended, every member of its process
+      group and every process carrying `tag` that still runs gets `first_signal`, then up
+      to `grace_s`, then SIGKILL (`moxi._watch.end`); `run` returns once none is left,
+      and when none is, as is usual, this costs one look. A timeout does the same, and so
+      does an interrupt, in place of the SIGKILL at once; a second interrupt during the
+      grace sends SIGKILL at once. Windows: the job is made kill-on-close, so the tree
+      also ends when this process dies, and it is terminated on every end.
     """
     text = isinstance(stdin_data, str)
     pipe = subprocess.PIPE if capture else None
@@ -97,37 +121,137 @@ def run(argv: Argv, *, timeout_s: float, stdin_data: bytes | str | None = None,
         options["creationflags"] = subprocess.CREATE_NEW_PROCESS_GROUP
     else:
         options["start_new_session"] = True
+    child_env = _lifeline_env(env, None)
+    if tag is not None:
+        _set_var(child_env, RUN_TAG_ENV, tag)
     out_fd = None if output is None else _output_file(output)
     try:
         proc = subprocess.Popen(
             _argv(argv), stdin=subprocess.DEVNULL if stdin_data is None else subprocess.PIPE,
             stdout=pipe if out_fd is None else out_fd,
-            stderr=pipe if out_fd is None else out_fd, env=_lifeline_env(env, None),
+            stderr=pipe if out_fd is None else out_fd, env=child_env,
             cwd=cwd, text=text, encoding="utf-8" if text else None, **options)
     finally:
         if out_fd is not None:
             os.close(out_fd)  # the child holds its own copy
     job = None
+    ended = False
     try:
         if _WINDOWS:
             from . import _win
 
-            job = _win.Job()
+            job = _win.Job(kill_on_close=end_leftovers)
             job.assign(proc.pid)
+        if on_start is not None:
+            # A child that has ended is not reaped before the wait, so its start time
+            # still reads; a start time no process has stands in when it doesn't.
+            on_start(identity(proc.pid) or ProcId(proc.pid, 0.0))
         try:
             out, err = proc.communicate(stdin_data, timeout=timeout_s)
         except subprocess.TimeoutExpired:
-            out, err = _end_tree(proc, job, first_signal=first_signal, grace_s=grace_s)
+            ended = True
+            if end_leftovers:
+                out, err = _end_run(proc, job, tag, first_signal=first_signal,
+                                    grace_s=grace_s)
+            else:
+                out, err = _end_tree(proc, job, first_signal=first_signal,
+                                     grace_s=grace_s)
             raise subprocess.TimeoutExpired(proc.args, timeout_s, output=out,
                                             stderr=err) from None
+        if end_leftovers:
+            ended = True
+            _end_run(proc, job, tag, first_signal=first_signal, grace_s=grace_s)
     except BaseException:
-        if proc.returncode is None:
+        if end_leftovers and not ended:
+            _end_run(proc, job, tag, first_signal=first_signal, grace_s=grace_s)
+        elif proc.returncode is None:
             _kill_now(proc, job)
         raise
     finally:
         if job is not None:
             job.close()
     return subprocess.CompletedProcess(proc.args, proc.returncode, out, err)
+
+
+def _set_var(env: dict[str, str], name: str, value: str) -> None:
+    """Set `name` in `env`; on Windows, where names are the same whatever their case,
+    every other spelling of it is taken out first."""
+    if _WINDOWS:
+        for other in [one for one in env if one.upper() == name]:
+            del env[other]
+    env[name] = value
+
+
+def _end_run(proc: subprocess.Popen, job, tag: str | None, *, first_signal: str,
+             grace_s: float | None) -> tuple:
+    """End everything a run started, its first process included, and collect what it
+    wrote: what `run`'s `end_leftovers` promises. A second interrupt while it waits
+    sends SIGKILL to all of it at once, and is raised."""
+    if job is not None:
+        job.terminate()
+        return _drain(proc) if proc.returncode is None else (None, None)
+    import time
+
+    from . import _watch
+
+    grace_s = KILL_GRACE if grace_s is None else grace_s
+    members = _run_members(proc.pid, tag)
+    if proc.returncode is not None and not members():
+        return None, None  # the usual end: nothing was left
+    said: list = [None, None]
+
+    def wait(deadline: float) -> None:
+        # The first process's pipes are read while the grace runs, so a child that
+        # writes as it stops is not held on a full pipe.
+        if proc.returncode is None:
+            try:
+                said[:] = proc.communicate(timeout=max(deadline - time.monotonic(), 0))
+            except subprocess.TimeoutExpired:
+                pass
+
+    try:
+        _watch.end(members, first_signal=_sig(first_signal), grace_s=grace_s, wait=wait)
+    except BaseException:
+        _watch._send(members(), _sig("SIGKILL"))
+        _signal_group(proc.pid, _sig("SIGKILL"))
+        if proc.returncode is None:
+            _drain(proc)
+        raise
+    if proc.returncode is None:
+        return _drain(proc)
+    return tuple(said)
+
+
+def _run_members(pgid: int, tag: str | None) -> Callable[[], list]:
+    """What `_end_run` ends, as `moxi._watch.end` reads a set: every live process in the
+    group `pgid` and, with a `tag`, every one whose environment carries it, this process
+    left out. A process whose environment can't be read is in the set only by its
+    group."""
+    import psutil
+
+    me = os.getpid()
+
+    def members() -> list:
+        found = []
+        for process in psutil.process_iter():
+            if process.pid == me:
+                continue
+            try:
+                in_group = os.getpgid(process.pid) == pgid
+            except OSError:
+                continue  # gone
+            if not in_group and (tag is None or (process_env(process.pid) or {}).get(
+                    RUN_TAG_ENV) != tag):
+                continue
+            try:
+                if process.status() == psutil.STATUS_ZOMBIE:
+                    continue
+            except psutil.Error:
+                continue
+            found.append(process)
+        return found
+
+    return members
 
 
 def _output_file(output: str | os.PathLike) -> int:
@@ -1177,5 +1301,5 @@ def _pairs(entries) -> dict[str, str]:
     return env
 
 
-__all__ = ["LIFELINE_ENV", "CODES_KEPT", "ProcId", "run", "spawn", "exec_env", "lifeline",
+__all__ = ["LIFELINE_ENV", "RUN_TAG_ENV", "CODES_KEPT", "ProcId", "run", "spawn", "exec_env", "lifeline",
            "lifeline_kind", "identity", "alive", "process_env", "cmdline", "status", "parent"]

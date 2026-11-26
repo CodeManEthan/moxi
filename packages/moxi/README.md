@@ -128,6 +128,13 @@ behalf, and `moxi uninstall` removes what it wrote:
   holds into the same `displaced/` folder the same way, for a module that clears one.
 - Whatever the module's own setup does, which its README describes.
 
+A module that runs a command with `moxi.proc.run(..., end_leftovers=True)` has every
+process that command started ended when it ends, however it ends: the command's process
+group, and every process carrying its `tag` in `MOXI_RUN_TAG`, one that started a session
+of its own included. On Windows the command's Job Object ends its tree, also when the
+module's process dies. A process started with an environment built from scratch that also
+left the group is not reached.
+
 A shortcut (`moxi shortcut`) is a small script written beside the `moxi` on PATH.
 
 ## Install
