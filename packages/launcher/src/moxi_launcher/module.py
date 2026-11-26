@@ -14,7 +14,12 @@ is an optional link, asked through `moxi.modules.load` where the feature needs i
 #: Interface 3 adds `fork`, a new session from a copy of another's conversation, with the
 #: caller's own `SESSION_ENV` stamps set on it; `exit_session`, which exits a quiet
 #: launched session; and `slots_here`, whether tmux slots run on this machine.
-INTERFACES = frozenset({1, 2, 3})
+#: Interface 4 adds a launch request's `stamps`, under the same rule as a fork's;
+#: `continue_headless`, a headless resume with the stored values and stamps; `run_log`, a
+#: launch's run log; `end_headless`, which ends a headless launch's whole process tree;
+#: and two reads that start nothing, `child_env` (the environment a launch's harness would
+#: get) and `settable_rows` (every row a request may type or leave out).
+INTERFACES = frozenset({1, 2, 3, 4})
 API = "moxi_launcher.api"
 #: What `moxi launcher` runs, in process, as `main(argv, prog="moxi launcher")`.
 CLI = "moxi_launcher.cli:main"

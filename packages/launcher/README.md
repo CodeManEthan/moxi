@@ -324,6 +324,21 @@ launcher exit-session` does and returns its verdict; a refusal is raised. It als
 one read, `slots_here()`: whether tmux slots run here, as the launcher reads it for a
 slot launch (slots installed, and its `supported()` says so; false on native Windows).
 
+Interface 4 is for a caller that runs its own headless agents. A `LaunchRequest` takes
+`stamps`, under the same rule as a fork's; the launch's values keep them.
+`continue_headless(session_id, text, request_id=None)` resumes a headless session with
+`text` as its prompt: a replay of its stored row, so it keeps that launch's values and
+stamps and reads no preset or `[defaults]`, under a request id of its own, which is the
+resume's idempotency key. It is refused `not-headless` for a launch that didn't run
+headless, and `live` while the session still runs. `run_log(request_id)` is the path of a
+launch's run log, where a headless launch's output goes. `end_headless(request_id)` ends a
+running headless launch's whole process tree on every system, TERM first and KILL to what
+is left 2 seconds later, and answers `ended`, `gone` (no process of it runs, or its pid now
+names another process, which is left alone) or `failed`. Two reads that start nothing
+come with it: `child_env(request, composition)`, the whole environment the launch's
+harness would get, and `settable_rows(harness)`, every row a request may type or leave
+out, from the shipped catalogs.
+
 ## Handoffs
 
 A handoff is a short file a session writes for the next session of its seat. Its key is
