@@ -2,6 +2,20 @@
 
 ## 0.2.8 (unreleased)
 
+- The guard API gains a shell reader, exported from `moxi_turns`: `read_shell(text,
+  dialect="sh")` reads `sh`, `powershell` or `cmd` command text (`DIALECTS`) without
+  running it, as a `ShellText` of `ShellCommand`s (words, redirects, and the operator
+  that ended each, `ended_by`) and `ShellMark`s, everything a strict guard may refuse, in
+  text order. A `ShellWord` keeps each substitution's text in `subs`, with a NUL in its
+  `text`; a `ShellRedirect` keeps its operator, fd and target, and a heredoc's `body` and,
+  when its delimiter is unquoted, the substitutions in it. `command_word_index` finds the
+  word that names what a command runs, past assignments, reserved words and the wrappers
+  `sudo`, `doas`, `env`, `nohup`, `builtin`, `exec`, `command`, `nice`, `timeout`,
+  `setsid` and `stdbuf` with the options each takes. `shell_scripts` gives the text a
+  command hands a shell (`sh`, `bash`, `zsh`, `dash`, `ksh`, `pwsh`, `powershell`, `cmd`)
+  to run, as a `ShellScript`: its `-c`, `-Command` or `/c` argument, a heredoc or
+  here-string on it, or literal text piped into it from `echo` or `cat`. What needs
+  evaluating to know what runs is not read. The reader never raises.
 - A `project-facts` component for the Projects page. It reads turns' own `/api/sessions`
   and `sessions` topic, and reports, by session claim, whether each session turns can read
   is in a turn (`live`, `{in_turn, state}`), so the page can mark a running line

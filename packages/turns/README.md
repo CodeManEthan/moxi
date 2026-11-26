@@ -120,6 +120,13 @@ its order. Claude Code's `Write` and `Edit` and OpenCode's `write` and `edit` gi
 and an update with `*** Move to:` gives `moved-from` and `moved-to`. The path is as the
 call names it, not joined with its working directory, and any other call gives none.
 
+A judge that reads a shell command reads it with `read_shell(text, dialect="sh")`
+(`"powershell"` and `"cmd"` too), which gives its commands, words, redirects and
+substitutions as the shell would read them and runs nothing, with `command_word_index`
+for the word that names what a command runs and `shell_scripts` for the text it hands
+another shell. What needs evaluating to know what runs (a variable, `eval`, `printf`'s
+escapes, a script file) is not read; each guard decides that itself.
+
 A guard runs at the call step, before a tool call runs, unless it says `step = "ask"`:
 then it runs when Claude Code is about to ask you to approve a call, and it can refuse
 that ask (Claude Code denies the call and the agent reads why) but never approve one.

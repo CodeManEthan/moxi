@@ -58,6 +58,9 @@ runs.
 
 `touched_files(call)` reads which files a write call touches, each a `TouchedFile`, so
 a judge that asks where a call writes need not parse a Codex patch itself.
+`moxi_turns.guards.shell` reads a shell call's command text the same way for every
+judge (`read_shell`, `command_word_index`, `shell_scripts`), so a judge that asks what a
+command runs need not split shell text itself.
 
 It also holds turns' own `GUARDS`, the three it ships (removal, no-nested-agents and
 question mode, each off by default), and `LISTENERS`, question mode's prompt reminder and
