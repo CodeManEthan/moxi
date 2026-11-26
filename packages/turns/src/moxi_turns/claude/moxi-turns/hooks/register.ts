@@ -72,9 +72,10 @@
 //                main-loop turn is open as the hook runs (false: it joins the running turn)
 //   /ask/stop    {turn_id, session_id, stop_hook_active, task_types, crons}
 //                                                          -> {reason: string | null}
-//   /live        {ask, agents, draft}                      -> {}  `agents` the list's
+//   /live        {ask, agents, draft, box}                 -> {}  `agents` the list's
 //                entries, {id, type, status, parentId?, teammateId?}, which the endpoint
-//                judges and counts (agents null: unreadable)
+//                judges and counts (agents null: unreadable); `box` the prompt box as
+//                read, 'draft' or 'empty' (null: unreadable, and `draft` true)
 //   /agents      {ask, entries}                            -> {}  each entry as the engine
 //                gives it, {id, type, description, status, parentId?, teammateId?}; the
 //                endpoint maps the states (entries null: unreadable)
@@ -356,7 +357,7 @@ import type { EngineInterface, Register } from 'claude-code'
 
 type Dollar = EngineInterface
 
-const MOD_VERSION = '0.3.2'
+const MOD_VERSION = '0.3.3'
 const GATE = 'moxi-turns-gate'
 const MARGIN_MS = 1000
 const REPORT_WAIT_MS = 1000
@@ -761,9 +762,11 @@ const num = (v: unknown, d: number): number => (typeof v === 'number' && Number.
 async function live($: Dollar, askId: unknown): Promise<void> {
   // The list's entries go unjudged and uncounted: the endpoint judges the waiting ones
   // and counts the busy. An unreadable subagent list is unknown, sent as null, which the
-  // endpoint counts as busy: never as 0. An unreadable box counts as a draft.
+  // endpoint counts as busy: never as 0. An unreadable box counts as a draft, and its
+  // `box` is null, so a reader can tell a draft from a box that was not read.
   let agents: Record<string, unknown>[] | null = null
   let draft = true
+  let box: 'draft' | 'empty' | null = null
   try {
     agents = (await $.agent.list()).map(a => ({
       id: a.id,
@@ -777,10 +780,12 @@ async function live($: Dollar, askId: unknown): Promise<void> {
   }
   try {
     draft = (await $.prompt.read()).text !== ''
+    box = draft ? 'draft' : 'empty'
   } catch {
     draft = true // an unreadable box counts as a draft
+    box = null
   }
-  await ask($, '/live', { ask: askId, agents, draft }, REPORT_WAIT_MS)
+  await ask($, '/live', { ask: askId, agents, draft, box }, REPORT_WAIT_MS)
 }
 
 async function agentList($: Dollar, askId: unknown): Promise<void> {

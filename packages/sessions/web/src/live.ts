@@ -34,9 +34,13 @@ export interface Facts {
   turn_started_at: number | null;
   /** Busy agents; null when they could not be listed. */
   agents: number | null;
-  /** On a session with `has_box`: a draft, or a box that could not be read. */
-  draft: boolean;
+  /** On a session with `has_box`: true for a draft, false for an empty box, null when the
+   * box was not read. */
+  draft: boolean | null;
   ready: Ready | null;
+  /** Why the live part did not read: `timeout` (the session did not answer in time) or
+   * `failed`; null when it answered. */
+  live_error: string | null;
 }
 
 /** One subagent, teammate or background shell. */
@@ -86,9 +90,12 @@ export const WORKING = "working";
 export const TROUBLE_LEAD = "Its link to Moxi has trouble";
 export const UNREAD_LEAD = "Moxi can't read its live state";
 export const LIST_NOT_WHOLE = "its agent list could not be read whole";
-export const MAY_HOLD_DRAFT = "may hold a draft";
+export const NO_ANSWER_IN_TIME = "the session did not answer in time";
+export const LIVE_READ_FAILED = "the session gave no answer Moxi could use";
+export const DRAFT_NOT_SENT = "draft not sent";
 export const NOT_KNOWN = "not known · the list could not be read whole, so some may still run";
 export const EMPTY_BOX = "empty";
+export const BOX_NOT_KNOWN = "not known · it could not be read, so it may hold a draft";
 /** The opened row's labels for turns' lines. */
 export const LABELS = { now: "Now", agents: "Agents", promptBox: "Prompt box" } as const;
 
@@ -115,8 +122,9 @@ function parseFacts(value: unknown): Facts | null {
     turn_open: value.turn_open,
     turn_started_at: finite(value.turn_started_at),
     agents: agents !== null && Number.isInteger(agents) ? agents : null,
-    draft: value.draft === true,
+    draft: typeof value.draft === "boolean" ? value.draft : null,
     ready: parseReady(value.ready),
+    live_error: text(value.live_error),
   };
 }
 
@@ -203,8 +211,16 @@ export interface Problem {
   reason: string;
 }
 
+/** Why the live part did not read, by the facts' `live_error`: the session did not answer
+ * in time, its live read failed, or, when it answered, its agent list was not whole. */
+export function liveReason(liveError: string | null): string {
+  if (liveError === "timeout") return NO_ANSWER_IN_TIME;
+  if (liveError === "failed") return LIVE_READ_FAILED;
+  return LIST_NOT_WHOLE;
+}
+
 /** The session's problems, in turns' order: the endpoint's trouble, a failed read, the
- * agent list that did not read. */
+ * live part that did not read, with why. */
 export function problemsOf(session: LiveSession): Problem[] {
   const found: Problem[] = [];
   if (session.trouble !== null) found.push({ lead: TROUBLE_LEAD, reason: session.trouble });
@@ -212,7 +228,7 @@ export function problemsOf(session: LiveSession): Problem[] {
     found.push({ lead: UNREAD_LEAD, reason: session.read_error });
   }
   if (session.facts !== null && session.facts.agents === null) {
-    found.push({ lead: UNREAD_LEAD, reason: LIST_NOT_WHOLE });
+    found.push({ lead: UNREAD_LEAD, reason: liveReason(session.facts.live_error) });
   }
   return found;
 }
@@ -342,10 +358,12 @@ export function agentsLines(session: LiveSession): LiveOpened["agents"] {
   return { entries, notKnown: session.agents.complete ? null : NOT_KNOWN };
 }
 
-/** `Prompt box`, only where turns reads the box: `empty`, or `may hold a draft`. */
+/** `Prompt box`, only where turns reads the box: `draft not sent` when it read a draft,
+ * `empty` when it read none, and `not known` when the box was not read (`draft` null). */
 export function promptBoxLine(session: LiveSession): string | null {
   if (!session.has_box || session.facts === null) return null;
-  return session.facts.draft ? MAY_HOLD_DRAFT : EMPTY_BOX;
+  const draft = session.facts.draft;
+  return draft === true ? DRAFT_NOT_SENT : draft === false ? EMPTY_BOX : BOX_NOT_KNOWN;
 }
 
 /** turns' lines for an opened running row. */

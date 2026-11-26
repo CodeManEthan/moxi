@@ -41,10 +41,10 @@
 // With launcher installed it reads launcher's `/api/running` when it opens, when the roster
 // changes, when its tab is shown again and every 30 s while the tab is visible, and joins
 // each running launch to its bound address (`launched-model.ts`): where it runs, its cache
-// fact, the `Session` line, and `Keep warm` on a row launcher would let a press cover. A
-// press posts to launcher's `/api/keep-warm` and disables the button until the answer and
-// the next value of `running` have come, or for 20 s; a refusal's note leads line three
-// until the next value.
+// fact, the `Session` line with the model and effort the launch was started with, and
+// `Keep warm` on a row launcher would let a press cover. A press posts to launcher's
+// `/api/keep-warm` and disables the button until the answer and the next value of `running`
+// have come, or for 20 s; a refusal's note leads line three until the next value.
 //
 // With sessions installed it reads sessions' `/api/session` for each live address with a
 // session id and a harness that launcher gives no where (`session-model.ts`), once
