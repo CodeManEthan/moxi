@@ -11,8 +11,10 @@ the call run) or turns' `Deny(reason)`, whose reason names `moxi sessions read <
   directory when it names none; `Glob` by its `pattern` joined to its `path` (or the
   working directory), up to the pattern's first wildcard.
 - A shell command (Claude Code's `Bash`, and Codex's shell tool, which Codex's hooks also
-  name `Bash`): each simple command is judged on its own, and one is refused when one of
-  its words is such a path. A word is read as a path when it starts with `/`, `~`, `$HOME`
+  name `Bash`): each simple command, as turns' shell reader (`read_shell`) reads it, is
+  judged on its own, and so are the commands of each substitution in it, a `$(...)` in
+  double quotes included; one is refused when one of its words, or the file one of its
+  redirects names, is such a path. A word is read as a path when it starts with `/`, `~`, `$HOME`
   or `${HOME}`, or holds a `/` (then it is joined to the working directory); a word
   `--name=value` or `NAME=value` is read by its value too.
 
@@ -32,7 +34,8 @@ command after it on the same line is judged on its own, so `moxi sessions root; 
 process, which is no tool call, so the guard never sees them.
 
 **A nudge, not a boundary.** A relative path after `cd`, a variable, a path built at run
-time, or a script the command runs gets past it.
+time (the text after a substitution in a word is not read), a heredoc's body, or a script
+the command runs gets past it.
 
 **Fail open.** Every error is logged once per kind and the call is allowed; the guard's
 `on_error` is `allow` as well, so one fault never refuses every read everywhere. sessions'
@@ -296,9 +299,11 @@ def _absolute(p: object) -> str | None:
 def _path(value: object, base: str | None, home: str | None) -> str | None:
     """`value` as an absolute path: `~`, `$HOME` and `${HOME}` taken from `home`, a
     relative one joined to `base`, cut at its first wildcard to the directory before it.
-    None when it can't be placed."""
+    A word's substitution, which turns' shell reader gives as a NUL, cuts it there: the
+    text before it is the path's start. None when it can't be placed."""
     if not isinstance(value, str) or not value:
         return None
+    value = value.partition("\0")[0]
     for prefix in _HOME_PREFIXES:
         if value == prefix or value.startswith(prefix + "/"):
             if home is None:
@@ -368,81 +373,27 @@ def _script(words: list[str]) -> int | None:
 
 
 def split(text: str) -> list[list[str]]:
-    """`text` split into simple commands of words, quotes taken off.
+    """`text` split into simple commands of words, quotes taken off, as turns' shell
+    reader (`read_shell`) reads it.
 
-    A simple command ends at `;`, `&`, `|`, `(`, `)`, a newline, a backtick and `$(`
-    outside quotes, so a substitution's commands are commands of their own. A word ends at
-    a space, a tab, `<` or `>` (a redirection's file is a word of its command). Single
-    quotes keep everything; double quotes keep everything but a backslash's escape; a
-    backslash outside quotes keeps the next character, and before a newline joins the
-    lines. A `#` that starts a word comments out the rest of its line."""
+    Each command gives its words, then the word each of its redirects names (so
+    `wc -l < f` names `f`), and after it the commands of each substitution in it, a
+    word's, a redirect's or an unquoted heredoc's body's, read the same way. A
+    substitution stands in its word as a NUL. A heredoc's body is not read as commands.
+    Text the reader can't read (nested too deep) gives no commands."""
     out: list[list[str]] = []
-    words: list[str] = []
-    word: list[str] = []
-    started = False
-    i, n = 0, len(text)
-
-    def end_word():
-        nonlocal started
-        if started:
-            words.append("".join(word))
-        word.clear()
-        started = False
-
-    def end_command():
-        end_word()
+    for command in _turns().read_shell(text).commands:
+        words = [w.text for w in command.words]
+        words += [r.target.text for r in command.redirects if r.target is not None]
         if words:
-            out.append(list(words))
-        words.clear()
-
-    while i < n:
-        c = text[i]
-        if c == "'":
-            j = text.find("'", i + 1)
-            j = n if j < 0 else j
-            word.append(text[i + 1:j])
-            started = True
-            i = j + 1
-            continue
-        if c == '"':
-            i += 1
-            while i < n and text[i] != '"':
-                if text[i] == "\\" and i + 1 < n and text[i + 1] in '"\\$`\n':
-                    if text[i + 1] != "\n":
-                        word.append(text[i + 1])
-                    i += 2
-                    continue
-                word.append(text[i])
-                i += 1
-            started = True
-            i += 1
-            continue
-        if c == "\\":
-            if i + 1 < n and text[i + 1] != "\n":
-                word.append(text[i + 1])
-                started = True
-            i += 2
-            continue
-        if c == "#" and not started:
-            j = text.find("\n", i)
-            i = n if j < 0 else j
-            continue
-        if c == "$" and text[i + 1:i + 2] == "(":
-            end_command()
-            i += 2
-            continue
-        if c in ";&|()\n`":
-            end_command()
-            i += 1
-            continue
-        if c in " \t\r<>":
-            end_word()
-            i += 1
-            continue
-        word.append(c)
-        started = True
-        i += 1
-    end_command()
+            out.append(words)
+        subs = [sub for w in command.words for sub in w.subs]
+        for r in command.redirects:
+            subs += r.subs
+            if r.target is not None:
+                subs += r.target.subs
+        for sub in subs:
+            out.extend(split(sub))
     return out
 
 
@@ -473,7 +424,7 @@ def escaped(words: list[str], home: str | None = None,
         return True
     if first.startswith("~/") and home is not None:
         first = home + first[1:]
-    if not first.startswith("/"):
+    if not first.startswith("/") or "\0" in first:
         return False
     own = own_moxi()
     if own is None:

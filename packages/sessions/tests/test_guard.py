@@ -149,6 +149,12 @@ def test_claude_bash_words_naming_a_root_path_are_refused(home):
         assert not refused("Bash", {"command": command}, home), command
 
 
+def test_a_substitution_in_double_quotes_is_read_as_commands(home):
+    t = transcript(home)
+    for command in (f'echo "$(cat {t})"', f'x="$(cat {t})"'):
+        assert refused("Bash", {"command": command}, home), command
+
+
 def test_codex_shell_calls_under_its_root_are_refused(home):
     rollout = str(home / ".codex/sessions/2026/11/07/rollout.jsonl")
     assert refused("Bash", {"command": f"cat {rollout}"}, home, harness="codex")
