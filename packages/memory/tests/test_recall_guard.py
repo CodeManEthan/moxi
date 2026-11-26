@@ -144,7 +144,8 @@ def test_a_lock_held_past_the_budget_still_gets_a_decision_in_time(tool, given, 
 
 def test_the_budget_fits_inside_the_guards_deadline():
     for guard in guards.GUARDS:
-        assert recall_guard.BUDGET_S < guard.deadline_ms / 1000
+        if guard.judge is not None:
+            assert recall_guard.BUDGET_S < guard.deadline_ms / 1000
     assert recall_guard.STARTING_WAIT_S < recall_guard.BUDGET_S
 
 
@@ -214,7 +215,8 @@ def test_a_record_with_no_line_awaits_its_fork_only_for_the_grace(state):
     found = recall_guard.fork_record(SESSION, "agent-9", wait_s=0.1)
     assert found is not None and found["recall"] == record["recall"]
     with recalls.session_lock(SESSION):
-        records.update(SESSION, record["recall"], at=time.time() - grace - 1)
+        records.update(SESSION, record["recall"], at=time.time() - grace - 1,
+                       at_boot=None)
     assert recall_guard.fork_record(SESSION, "agent-9", wait_s=0.1) is None
     assert recall_guard.judge_call(call("Write", agent="agent-9")) is None
     assert recall_guard.judge_ask(call("Write", agent="agent-9")) is None
@@ -233,7 +235,8 @@ def test_a_record_whose_line_names_no_child_awaits_its_fork_only_for_the_grace(s
     found = recall_guard.fork_record(SESSION, "agent-9", wait_s=0.1)
     assert found is not None and found["recall"] == record["recall"]
     with recalls.session_lock(SESSION):
-        records.update(SESSION, record["recall"], at=time.time() - grace - 1)
+        records.update(SESSION, record["recall"], at=time.time() - grace - 1,
+                       at_boot=None)
     assert recall_guard.fork_record(SESSION, "agent-9", wait_s=0.1) is None
     assert recall_guard.judge_call(call("Write", agent="agent-9")) is None
     assert recall_guard.judge_ask(call("Write", agent="agent-9")) is None
@@ -270,11 +273,87 @@ def test_every_ask_of_a_fork_is_refused():
 
 
 def test_the_guards_are_well_formed_and_run_only_where_it_is_on():
-    assert [g.name for g in guards.GUARDS] == ["subconscious-fork", "subconscious-fork-ask"]
+    assert [g.name for g in guards.GUARDS] == ["subconscious-fork", "subconscious-fork-ask",
+                                               "subconscious-slot", "subconscious-slot-ask"]
     for guard in guards.GUARDS:
         assert guard.problems() == []
-    assert [g.on_error for g in guards.GUARDS] == ["allow", "deny"]
-    assert guards.GUARDS[1].step == "ask"
+    assert [g.on_error for g in guards.GUARDS[:3]] == ["allow", "deny", "deny"]
+    assert [g.step for g in guards.GUARDS] == ["call", "ask", "call", "ask"]
+    slot, slot_ask = guards.GUARDS[2:]
+    assert slot.sessions == slot_ask.sessions == "moxi_memory.recall_guard:slot_fork"
+    assert slot.who == slot_ask.who == "any"
+    assert slot_ask.judge is None and slot_ask.deny == recall_guard.ASK_REFUSED
+    assert set(slot.calls) == {"claude", "codex"}
+    fork = {recall_start.SUBCONSCIOUS_FORK_ENV: "r-1"}
+    assert recall_guard.slot_fork(fork) and not recall_guard.slot_fork({})
+    assert not recall_guard.guarded(fork)
     assert recall_guard.guarded({recall_start.SUBCONSCIOUS_ENV: "automatic"})
     assert recall_guard.guarded({recall_start.SUBCONSCIOUS_ENV: "on-demand"})
     assert not recall_guard.guarded({})
+
+
+# -- a slot fork ---------------------------------------------------------------------------
+
+
+def slot_call(tool, recall_id, **given):
+    return ToolCall(harness="claude", session_id="0190b000-0000-7000-8000-0000000000f0",
+                    agent_id=None, tool=tool, input=given,
+                    env={recall_start.SUBCONSCIOUS_FORK_ENV: recall_id})
+
+
+def test_a_slot_forks_calls_are_judged_against_the_record_its_stamp_names():
+    record = a_fork(route="slot", fork="0190b000-0000-7000-8000-0000000000f0")
+    rid = record["recall"]
+    assert recall_guard.judge_slot_call(slot_call("Read", rid, file_path="/x")) is None
+    assert recall_guard.judge_slot_call(slot_call("Bash", rid, command="grep x f")) is None
+    assert records.read(SESSION, rid)["tools"] == 2
+    assert recall_guard.judge_slot_call(slot_call("Write", rid, file_path="/x")) == Deny(
+        recall_guard.READ_ONLY)
+    assert recall_guard.judge_slot_call(slot_call("Bash", rid, command="rm f")) == Deny(
+        recall_guard.READ_ONLY)
+    records.update(SESSION, rid, tools=999)
+    assert recall_guard.judge_slot_call(slot_call("Read", rid, file_path="/x")) == Deny(
+        recall_guard.TIME_UP)
+
+
+def codex_call(recall_id, tool_name, tool_input):
+    """A Codex slot fork's call as turns' Codex host hands it to the guard: the tool's
+    name and input as Codex's `PreToolUse` hook carries them (its shell is `Bash`, the
+    command text under `command`; `apply_patch` the patch under the same key). turns'
+    own tests pin those names."""
+    return ToolCall(harness="codex", session_id="0190b000-0000-7000-8000-0000000000f0",
+                    agent_id=None, tool=tool_name, input=dict(tool_input),
+                    env={recall_start.SUBCONSCIOUS_FORK_ENV: recall_id})
+
+
+def test_a_codex_slot_forks_calls_are_judged_by_the_same_rule_as_turns_delivers_them():
+    record = a_fork(route="slot", fork="0190b000-0000-7000-8000-0000000000f0")
+    rid = record["recall"]
+    judge = recall_guard.judge_slot_call
+    assert judge(codex_call(rid, "Bash", {"command": "grep -n lock notes.md"})) is None
+    assert records.read(SESSION, rid)["tools"] == 1
+    refused = [("Bash", {"command": "rm notes.md"}),
+               ("Bash", {"command": "grep lock notes.md > out"}),
+               # Codex's hook hands the command as text; anything else is refused.
+               ("Bash", {"command": ["grep", "lock", "notes.md"]}),
+               ("apply_patch", {"command": "*** Begin Patch\n*** Delete File: a\n"
+                                           "*** End Patch"}),
+               ("spawn_agent", {"message": "dig"}),
+               ("write_stdin", {"session_id": 1, "chars": "q"}),
+               ("mcp__comms__send", {"to": "x", "text": "y"})]
+    for tool, given in refused:
+        assert judge(codex_call(rid, tool, given)) == Deny(recall_guard.READ_ONLY), tool
+    assert records.read(SESSION, rid)["tools"] == 1
+
+
+def test_a_slot_fork_whose_record_is_gone_is_refused_every_call():
+    assert recall_guard.judge_slot_call(slot_call("Read", "r-none", file_path="/x")) == \
+        Deny(recall_guard.TIME_UP)
+    assert recall_guard.judge_slot_call(slot_call("Read", "", file_path="/x")) == Deny(
+        recall_guard.TIME_UP)
+
+
+def test_a_record_is_found_by_its_recall_id_alone():
+    record = a_fork()
+    assert records.find(record["recall"])["session"] == SESSION
+    assert records.find("r-none") is None and records.find("../x") is None

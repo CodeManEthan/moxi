@@ -18,8 +18,10 @@ OPTIONAL = {
     "comms": "Each session's comms identity at start, so the start lists show an agent "
              "its own recent sessions and name the agent behind each project session.",
     "launcher": "Each session's launch kind, so scratch and fork launches stay out of "
-                "default search and out of the start lists, and the launcher's "
-                "subconscious row, which turns the subconscious on for a launch.",
+                "default search and out of the start lists; the launcher's "
+                "subconscious rows, which turn the subconscious on for a launch and "
+                "pick its route; and the slot route's fork of the session into a slot, "
+                "ended with the recall, where the launcher says tmux slots run.",
     "connector": "search_memory in the Claude apps, through the connector's MCP host, "
                  "each hit redacted for a chat.",
     "notes": "The notes a recall of the subconscious reads beside past sessions: the "
@@ -31,9 +33,17 @@ OPTIONAL = {
 GATED = {}
 SESSION_ENV = {"MOXI_MEMORY_SUBCONSCIOUS": "the session's subconscious mode, automatic or "
                                           "on-demand, stamped by the launcher's "
-                                          "subconscious row"}
+                                          "subconscious row",
+               "MOXI_MEMORY_SUBCONSCIOUS_ROUTE": "the route a session's recalls run on; "
+                                                "subagent when it is not set",
+               "MOXI_MEMORY_SUBCONSCIOUS_FORK": "the recall a slot fork serves, its id; "
+                                               "set on the fork by memory"}
 INTERNAL_ENV = {"MOXI_MEMORY_SUBCONSCIOUS": "set by the launcher for one launch; read from "
-                                            "the session's environment"}
+                                            "the session's environment",
+                "MOXI_MEMORY_SUBCONSCIOUS_ROUTE": "set by the launcher for one launch; read "
+                                                  "from the session's environment",
+                "MOXI_MEMORY_SUBCONSCIOUS_FORK": "set by memory on a recall's slot fork; "
+                                                 "read from the session's environment"}
 #: The config schema; every key is read at its use.
 SETTINGS = "settings.toml"
 #: The module's whole loader over a config text: the schema, then the rules it can't say.

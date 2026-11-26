@@ -23,8 +23,9 @@ set to the entry's launch; a refusal closes the entry `dropped` and names the se
 the launcher places a session in a slot, and at the start of each whole-run holder. A
 crashed slot with no open entry is a candidate when its last launch is a launcher slot
 launch, not failed, with a session id, whose session is not live and that no later launch
-holds (or whose liveness can't be read), and that a relaunch repair running the discovery
-does not bring back itself. A candidate is reserved (an open-ended hold
+holds (or whose liveness can't be read), that is no recall's slot fork
+(`fork.recall_fork`), and that a relaunch repair running the discovery does not bring
+back itself. A candidate is reserved (an open-ended hold
 `park-<id>`, `expect` set to its launch), given a `crash` entry, then settled, since the
 reservation now keeps it. A crashed slot with nothing to restore is settled with the
 reason; one another holder holds is left crashed, with no entry, for a later discovery.
@@ -49,7 +50,7 @@ from moxi import exit as codes
 from moxi import files
 from moxi.paths import Layout
 
-from . import catalog, first, slots, store
+from . import catalog, first, fork, slots, store
 
 log = logging.getLogger("moxi.launcher.parks")
 
@@ -344,6 +345,9 @@ def _session_of(conn: sqlite3.Connection, slot: Any,
         return "settle", f"launch {row.request_id} was not a slot launch", row, None, None
     if row.state == "failed":
         return "settle", f"launch {row.request_id} failed", row, None, None
+    if fork.recall_fork(row):
+        return ("settle", f"launch {row.request_id} was a recall's fork, which nothing "
+                "brings back", row, None, None)
     known = store.session_ids(conn, row.request_id)
     newest = known[-1][0] if known else row.session_id
     if not newest:

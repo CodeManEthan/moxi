@@ -692,7 +692,8 @@ def option_stamps(values: Mapping[str, object]) -> dict[str, str]:
     may recycle itself (`selfrecycle.missing` with `told`): its arm would be accepted and
     it warns at a mark. A stop (`stop_holds`) stamps its mark and the launch's handoff
     folder under usage's variables. The subconscious row stamps its mode under memory's
-    variable. A row at `off` stamps nothing."""
+    variable, and with it the route row its route (`subagent` when the row is unset). A
+    subconscious at `off` stamps neither."""
     env: dict[str, str] = {}
     if values.get("keep_warm") == "on":
         env[KEEP_WARM_ENV] = "on"
@@ -711,6 +712,8 @@ def option_stamps(values: Mapping[str, object]) -> dict[str, str]:
                                  create=False, create_own=False)))
     if values.get("subconscious") in ("automatic", "on-demand"):
         _stamp(env, "memory", 1, "SUBCONSCIOUS_ENV", str(values["subconscious"]))
+        _stamp(env, "memory", 1, "SUBCONSCIOUS_ROUTE_ENV",
+               str(values.get("subconscious_route") or "subagent"))
     return env
 
 

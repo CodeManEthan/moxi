@@ -145,9 +145,13 @@ def test_a_value_for_a_module_that_cannot_load_is_not_stamped_and_the_launch_goe
 
 
 @pytest.mark.parametrize("mode", ["automatic", "on-demand"])
-def test_the_subconscious_row_stamps_its_mode_under_memorys_variable(mode):
-    assert common.option_stamps({"subconscious": mode}) == {"MOXI_MEMORY_SUBCONSCIOUS": mode}
+def test_the_subconscious_row_stamps_its_mode_and_route_under_memorys_variables(mode):
+    assert common.option_stamps({"subconscious": mode}) == {
+        "MOXI_MEMORY_SUBCONSCIOUS": mode, "MOXI_MEMORY_SUBCONSCIOUS_ROUTE": "subagent"}
+    assert common.option_stamps({"subconscious": mode, "subconscious_route": "slot"}) == {
+        "MOXI_MEMORY_SUBCONSCIOUS": mode, "MOXI_MEMORY_SUBCONSCIOUS_ROUTE": "slot"}
     assert common.option_stamps({"subconscious": "off"}) == {}
+    assert common.option_stamps({"subconscious": "off", "subconscious_route": "slot"}) == {}
 
 
 @pytest.mark.parametrize("harness, extra", [("claude", {}), ("codex", {})])

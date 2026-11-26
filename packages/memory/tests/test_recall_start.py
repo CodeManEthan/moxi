@@ -2,12 +2,14 @@
 record and its child, and the child's first steps (its line, its config read, the first
 search and the brief)."""
 
+import re
 import types
+from pathlib import Path
 
 import pytest
 
-from moxi_memory import (listener, recall_brief, recall_child, recall_start, recalls,
-                         records)
+from moxi_memory import (listener, recall_brief, recall_child, recall_guard, recall_start,
+                         recalls, records)
 
 SESSION = "0190b000-0000-7000-8000-000000000001"
 
@@ -24,7 +26,7 @@ def event(*, mode="automatic", own=True, by=None, text="why did the ingest lock 
 def started(monkeypatch):
     """The listener's route is the subagent one, and children are recorded, not run."""
     spawned = []
-    monkeypatch.setattr(recall_start, "route", lambda harness, session_id: (
+    monkeypatch.setattr(recall_start, "route", lambda harness, session_id, env=None: (
         (recall_start.SUBAGENT, None) if harness == "claude" else (None, recall_start.CODEX)))
     monkeypatch.setattr(recall_start, "spawn_child",
                         lambda session_id, recall_id: spawned.append((session_id, recall_id)))
@@ -93,7 +95,7 @@ def test_a_session_with_no_route_logs_off_once_per_reason(started):
 
 def test_the_route_is_checked_at_every_try(started, monkeypatch):
     calls = []
-    monkeypatch.setattr(recall_start, "route", lambda harness, session_id: (
+    monkeypatch.setattr(recall_start, "route", lambda harness, session_id, env=None: (
         calls.append(1) or ((None, recall_start.NO_FORK) if len(calls) == 1
                             else (recall_start.SUBAGENT, None))))
     listener.subconscious(event())
@@ -117,8 +119,117 @@ def test_a_codex_or_other_session_has_no_route():
     assert recall_start.route("opencode", SESSION) == (None, recall_start.NO_FORK)
 
 
+@pytest.fixture
+def places(monkeypatch):
+    """Where each route can run, set per test: turns' fork, the launcher's interface
+    3, tmux slots, and the way back by comms."""
+    from moxi_memory import links
+
+    here = types.SimpleNamespace(fork=True, launcher=True, slots=True, comms=None)
+    monkeypatch.setattr(recall_start, "offers_fork", lambda session_id: here.fork)
+    monkeypatch.setattr(links, "launcher_forks", lambda: links.Link(
+        links.READY if here.launcher else links.NONE))
+    monkeypatch.setattr(recall_start, "slots_here", lambda launcher=None: here.slots)
+    monkeypatch.setattr(recall_start, "comms_why", lambda session_id, env=None: here.comms)
+    return here
+
+
+SLOT_STAMP = {recall_start.SUBCONSCIOUS_ROUTE_ENV: "slot"}
+
+
+def test_slots_here_is_the_launchers_read_and_an_older_launcher_has_none(monkeypatch):
+    from moxi_memory import links
+
+    asked = types.SimpleNamespace(slots_here=lambda: True)
+    monkeypatch.setattr(links, "launcher_forks", lambda: links.Link(links.READY, asked))
+    assert recall_start.slots_here() is True
+    asked.slots_here = lambda: False
+    assert recall_start.slots_here() is False
+    assert recall_start.slots_here(types.SimpleNamespace()) is False
+
+    def broke():
+        raise OSError("tmux gone")
+
+    assert recall_start.slots_here(types.SimpleNamespace(slots_here=broke)) is False
+    monkeypatch.setattr(links, "launcher_forks", lambda: links.Link(links.NONE))
+    assert recall_start.slots_here() is False
+
+
+def test_memory_has_no_slots_link_of_its_own():
+    import tomllib
+    from pathlib import Path
+
+    from moxi_memory import links, module
+
+    pyproject = tomllib.loads((Path(__file__).parents[1] / "pyproject.toml").read_text())
+    assert "slots" not in pyproject["project"]["optional-dependencies"]
+    assert "slots" not in module.OPTIONAL and not hasattr(links, "slots")
+
+
 def test_a_claude_session_with_no_endpoint_has_no_route():
-    assert recall_start.route("claude", SESSION) == (None, recall_start.NO_FORK)
+    assert recall_start.offers_fork(SESSION) is False
+
+
+def test_a_claude_session_runs_the_route_its_launch_picked(places):
+    assert recall_start.route("claude", SESSION) == (recall_start.SUBAGENT, None)
+    assert recall_start.route("claude", SESSION, {}) == (recall_start.SUBAGENT, None)
+    assert recall_start.route("claude", SESSION, SLOT_STAMP) == (recall_start.SLOT, None)
+
+
+@pytest.mark.parametrize("stamp", ["host-fork", "SLOT", "fork"])
+def test_a_route_stamp_naming_no_route_runs_no_recall_and_no_guard(places, stamp):
+    env = {recall_start.SUBCONSCIOUS_ENV: "automatic",
+           recall_start.SUBCONSCIOUS_ROUTE_ENV: stamp}
+    why = f"the launch's route {stamp!r} is not one of subagent, slot"
+    assert recall_start.route("claude", SESSION, env) == (None, why)
+    assert recall_start.route("codex", SESSION, env) == (None, why)
+    assert not recall_guard.guarded(env)
+    assert recall_guard.guarded({**env, recall_start.SUBCONSCIOUS_ROUTE_ENV: "subagent"})
+
+
+def test_a_claude_session_with_no_turns_fork_falls_back_to_the_slot_route(places):
+    places.fork = False
+    assert recall_start.route("claude", SESSION) == (recall_start.SLOT, None)
+    places.slots = False
+    assert recall_start.route("claude", SESSION) == (
+        None, f"{recall_start.NO_FORK}; the slot route: {recall_start.NO_SLOTS}")
+
+
+@pytest.mark.parametrize("missing, why", [
+    ("launcher", recall_start.NO_LAUNCHER), ("slots", recall_start.NO_SLOTS),
+    ("comms", "no comms name for this session")])
+def test_the_slot_route_says_why_it_cant_run(places, missing, why):
+    if missing == "comms":
+        places.comms = why
+    else:
+        setattr(places, missing, False)
+    assert recall_start.route("claude", SESSION, SLOT_STAMP) == (None, why)
+    assert recall_start.route("codex", SESSION, SLOT_STAMP) == (None, why)
+
+
+def test_a_codex_session_runs_only_the_slot_route_its_launch_picked(places):
+    assert recall_start.route("codex", SESSION) == (None, recall_start.CODEX)
+    assert recall_start.CODEX == "Codex: off unless the launch picks the slot route"
+    assert recall_start.route("codex", SESSION, SLOT_STAMP) == (recall_start.SLOT, None)
+    assert recall_start.route("opencode", SESSION, SLOT_STAMP) == (
+        None, recall_start.NO_FORK)
+
+
+def test_a_recalls_slot_fork_has_no_route(places):
+    stamp = {recall_start.SUBCONSCIOUS_FORK_ENV: "r-1"}
+    assert recall_start.route("claude", SESSION, stamp) == (None, recall_start.IN_FORK)
+
+
+def test_no_recall_starts_in_a_recalls_slot_fork(started):
+    stamp = {recall_start.SUBCONSCIOUS_FORK_ENV: "r-1"}
+    forked = event()
+    forked.env.update(stamp)
+    listener.subconscious(forked)
+    assert started == [] and recalls.read_lines(SESSION) == []
+    with pytest.raises(recall_start.Refused, match="a recall's fork, so it starts no "
+                                                    "recall"):
+        recall_start.ask("topic", session=(SESSION, "claude", {
+            recall_start.SUBCONSCIOUS_ENV: "on-demand", **stamp}, "/work"))
 
 
 def test_the_listener_keeps_its_last_good_settings_while_the_file_is_in_error(
@@ -194,54 +305,172 @@ class FakeSearch:
 
     def __call__(self, query, *, project=None, limit=10):
         self.asked.append((query, project))
-        return types.SimpleNamespace(hits=tuple(self.by_project.get(project, ())))
+        return types.SimpleNamespace(hits=tuple(self.by_project.get(project, ()))[:limit])
 
 
 def no_notes(cwd, override):
     return None, None
 
 
-def test_the_prefetch_leaves_out_this_session_and_stays_in_the_project(tmp_path,
-                                                                        monkeypatch):
+def test_project_first_runs_both_parts_every_time(tmp_path, monkeypatch):
     monkeypatch.setattr("moxi_memory.labels.project_label", lambda cwd: "shop")
-    search = FakeSearch({"shop": [hit(SESSION), hit("other-1")], None: [hit("wide-1")]})
+    search = FakeSearch({"shop": [hit(SESSION), hit("other-1")],
+                         None: [hit("other-1"), hit("wide-1", project="farm")]})
     found = recall_brief.prefetch("ingest lock stall", session_id=SESSION,
                                   cwd=str(tmp_path), notes_dir=None, scope="project-first",
                                   hits=8, search=search, places=no_notes)
-    assert [h.session_id for h in found.hits] == ["other-1"]
-    assert found.widened is False and found.project == "shop"
-    assert search.asked == [("ingest lock stall", "shop")]
+    assert [p.name for p in found.parts] == ["project", "beyond"]
+    # the project's part first; beyond it, the sessions it showed left out
+    assert [h.session_id for h in found.part("project").hits] == ["other-1"]
+    assert [h.session_id for h in found.part("beyond").hits] == ["wide-1"]
+    assert search.asked == [("ingest lock stall", "shop"), ("ingest lock stall", None)]
+    assert found.counts() == {"project": 1, "beyond": 1}
 
 
-def test_project_first_goes_wide_only_when_the_project_finds_nothing(tmp_path,
-                                                                     monkeypatch):
+def test_the_part_beyond_keeps_its_full_count_past_the_sessions_it_leaves_out(
+        tmp_path, monkeypatch):
     monkeypatch.setattr("moxi_memory.labels.project_label", lambda cwd: "shop")
-    search = FakeSearch({"shop": [hit(SESSION)], None: [hit("wide-1")]})
-    found = recall_brief.prefetch("ingest lock", session_id=SESSION, cwd=str(tmp_path),
-                                  notes_dir=None, scope="project-first", hits=8,
+    shown = [hit("own-0"), hit("own-1")]
+    wide = [hit(f"own-{i % 2}") for i in range(60)] + [hit("wide-1"), hit("wide-2")]
+    search = FakeSearch({"shop": shown, None: wide})
+    found = recall_brief.prefetch("ingest", session_id=SESSION, cwd=str(tmp_path),
+                                  notes_dir=None, scope="project-first", hits=2,
                                   search=search, places=no_notes)
-    assert [h.session_id for h in found.hits] == ["wide-1"]
-    assert found.widened is True and found.project is None
-    found = recall_brief.prefetch("ingest lock", session_id=SESSION, cwd=str(tmp_path),
-                                  notes_dir=None, scope="project", hits=8,
-                                  search=FakeSearch({}), places=no_notes)
-    assert found.hits == [] and found.widened is False
+    assert [h.session_id for h in found.part("beyond").hits] == ["wide-1", "wide-2"]
+    # the first ask (2 + 50 hits) held only shown sessions, so it asked for more
+    assert len(search.asked) == 3
 
 
-def test_a_notes_hit_in_the_project_keeps_the_search_there(tmp_path, monkeypatch):
+def test_project_and_everywhere_run_one_part(tmp_path, monkeypatch):
     monkeypatch.setattr("moxi_memory.labels.project_label", lambda cwd: "shop")
-    notes_dir = tmp_path / "notes"
-    notes_dir.mkdir()
-    (notes_dir / "a.md").write_text("one\nthe ingest lock stalled at noon\nthree\n")
-    (notes_dir / "b.md").write_text("nothing here\n")
+    search = FakeSearch({"shop": [hit("own-1")], None: [hit("wide-1")]})
+    found = recall_brief.prefetch("ingest", session_id=SESSION, cwd=str(tmp_path),
+                                  notes_dir=None, scope="project", hits=8, search=search,
+                                  places=no_notes)
+    assert [h.session_id for h in found.hits] == ["own-1"]
+    assert found.counts() == {"project": 1, "beyond": None}
+    found = recall_brief.prefetch("ingest", session_id=SESSION, cwd=str(tmp_path),
+                                  notes_dir=None, scope="everywhere", hits=8, search=search,
+                                  places=no_notes)
+    assert [h.session_id for h in found.hits] == ["wide-1"]
+    assert found.counts() == {"project": None, "beyond": 1}
+
+
+def test_a_session_with_no_project_label_searches_everywhere(monkeypatch):
+    search = FakeSearch({None: [hit("wide-1")]})
+    found = recall_brief.prefetch("ingest", session_id=SESSION, cwd=None, notes_dir=None,
+                                  scope="project-first", hits=8, search=search,
+                                  places=no_notes)
+    assert found.scope == "everywhere" and found.project is None
+    assert search.asked == [("ingest", None)]
+
+
+def notes_tree(tmp_path):
+    root = tmp_path / "notes"
+    own = root / "shop"
+    own.mkdir(parents=True)
+    (own / "a.md").write_text("one\nthe ingest lock stalled at noon\nthree\n")
+    (own / "b.md").write_text("nothing here\n")
+    (root / "farm").mkdir()
+    (root / "farm" / "c.md").write_text("ingest lock again\n")
+    (root / "farm" / "d.json").write_text('{"ingest": "lock"}\n')
+    return root, own
+
+
+def test_notes_come_from_the_project_then_the_root_less_what_it_showed(tmp_path,
+                                                                        monkeypatch):
+    monkeypatch.setattr("moxi_memory.labels.project_label", lambda cwd: "shop")
+    root, own = notes_tree(tmp_path)
     found = recall_brief.prefetch("ingest lock", session_id=SESSION, cwd=str(tmp_path),
                                   notes_dir=None, scope="project-first", hits=8,
                                   search=FakeSearch({}),
-                                  places=lambda cwd, o: (str(notes_dir), str(tmp_path)))
-    assert found.widened is False
-    [(path, lines)] = found.notes
+                                  places=lambda cwd, o: (str(own), str(root)))
+    [(path, lines)] = found.part("project").notes
     assert path.endswith("a.md")
     assert lines == ["1: one", "2: the ingest lock stalled at noon", "3: three"]
+    # the root's part leaves out a.md (shown) and reads only Markdown files
+    assert [p for p, _ in found.part("beyond").notes] == [str(root / "farm" / "c.md")]
+    assert found.notes_dirs == [str(root)] and found.project_dir == str(own)
+
+
+def test_a_file_already_shown_is_known_by_its_resolved_path(tmp_path, monkeypatch):
+    monkeypatch.setattr("moxi_memory.labels.project_label", lambda cwd: "shop")
+    root, own = notes_tree(tmp_path)
+    link = tmp_path / "shop-link"
+    try:
+        link.symlink_to(own, target_is_directory=True)
+    except OSError:
+        pytest.skip("this system makes no symlink here")
+    found = recall_brief.prefetch("ingest lock", session_id=SESSION, cwd=str(tmp_path),
+                                  notes_dir=None, scope="project-first", hits=8,
+                                  search=FakeSearch({}),
+                                  places=lambda cwd, o: (str(link), str(root)))
+    assert [p for p, _ in found.part("project").notes] == [str(link / "a.md")]
+    assert [p for p, _ in found.part("beyond").notes] == [str(root / "farm" / "c.md")]
+
+
+def test_the_notes_are_read_whole_and_each_line_cut(tmp_path):
+    root = tmp_path / "notes"
+    for i in range(30):
+        (root / f"d{i:02}").mkdir(parents=True)
+        for j in range(250):
+            (root / f"d{i:02}" / f"n{j:03}.md").write_text("nothing\n")
+    (root / "zz").mkdir()
+    (root / "zz" / "late.md").write_text("ingest " + "x" * 400 + "\n")
+    [(path, lines)] = recall_brief._notes(["ingest"], [str(root)])
+    assert path.endswith("late.md")
+    assert lines == ["1: " + ("ingest " + "x" * 400)[:200]]
+
+
+def test_the_notes_search_keeps_no_files_text_past_its_score(tmp_path, monkeypatch):
+    for i in range(6):
+        (tmp_path / f"n{i}.md").write_text("ingest lock\n" if i % 2 else "ingest\n")
+    read, held = [], []
+    real = recall_brief._note_text
+
+    def counted(path):
+        text = real(path)
+        read.append(path.name)
+        held.append(text)
+        return text
+
+    monkeypatch.setattr(recall_brief, "_note_text", counted)
+    shown = [Path(p).name for p, _ in recall_brief._notes(["ingest", "lock"],
+                                                          [str(tmp_path)])]
+    assert shown == ["n1.md", "n3.md", "n5.md"]
+    assert sorted(read) == sorted([f"n{i}.md" for i in range(6)] + shown)
+
+
+def test_files_that_match_alike_are_ordered_by_path(tmp_path):
+    for name in ("b.md", "a.md", "c.md", "d.md"):
+        (tmp_path / name).write_text("ingest\n")
+    shown = [p for p, _ in recall_brief._notes(["ingest"], [str(tmp_path)])]
+    assert shown == [str(tmp_path / n) for n in ("a.md", "b.md", "c.md")]
+
+
+def test_a_notes_dir_that_does_not_exist_is_none(tmp_path, monkeypatch):
+    monkeypatch.setattr("moxi_memory.labels.project_label", lambda cwd: "shop")
+    root, _own = notes_tree(tmp_path)
+    missing = tmp_path / "notes" / ".local" / "state" / "shop"
+    found = recall_brief.prefetch("ingest lock", session_id=SESSION, cwd=str(tmp_path),
+                                  notes_dir=None, scope="project-first", hits=8,
+                                  search=FakeSearch({}),
+                                  places=lambda cwd, o: (str(missing), str(root)))
+    assert found.project_dir is None and found.notes_dirs == [str(root)]
+    assert found.part("project").notes == []
+    assert len(found.part("beyond").notes) == 2
+
+
+def test_a_project_notes_dir_outside_the_root_is_named_too(tmp_path, monkeypatch):
+    monkeypatch.setattr("moxi_memory.labels.project_label", lambda cwd: "shop")
+    root, _own = notes_tree(tmp_path)
+    outside = tmp_path / "elsewhere"
+    outside.mkdir()
+    found = recall_brief.prefetch("ingest", session_id=SESSION, cwd=str(tmp_path),
+                                  notes_dir=None, scope="project-first", hits=8,
+                                  search=FakeSearch({}),
+                                  places=lambda cwd, o: (str(outside), str(root)))
+    assert found.notes_dirs == [str(root), str(outside)]
 
 
 def test_a_prompt_with_no_keyword_runs_no_search():
@@ -253,10 +482,15 @@ def test_a_prompt_with_no_keyword_runs_no_search():
     assert recall_brief.prefetch_text(found, 8) == recall_brief.NO_KEYWORD
 
 
-def brief(start="prompt", **changes):
+def brief(start="prompt", *, scope="project-first", project_dir="/notes/shop",
+          parts=None, **changes):
     settings = dict(recall_start.default_settings(), **changes)
-    found = recall_brief.Prefetch(["ingest"], hits=[hit("other-1")], project="shop",
-                                  notes_dirs=["/notes/shop"], notes_root="/notes")
+    if parts is None:
+        parts = [recall_brief.Part("project", hits=[hit("other-1")]),
+                 recall_brief.Part("beyond", hits=[hit("wide-1", project="farm")])]
+    found = recall_brief.Prefetch(["ingest"], scope=scope, parts=parts, project="shop",
+                                  project_dir=project_dir, notes_dirs=["/notes"],
+                                  notes_root="/notes")
     return recall_brief.brief(start=start, text="why did the ingest stall", session_id=SESSION,
                               found=found, settings=settings)
 
@@ -267,15 +501,65 @@ def test_the_brief_holds_the_prompt_the_hits_and_the_limits():
     assert "The prompt:\n<<<\nwhy did the ingest stall\n>>>" in text
     assert "- session other-1 (claude)" in text
     assert "moxi sessions read other-1" in text
-    assert 'moxi memory search "<a few keywords>" --project shop' in text
+    assert 'moxi memory search "<a few keywords>"\n' in text
     assert f"Skip any hit from session {SESSION}" in text
-    assert "- Notes: the files under /notes/shop." in text
-    assert "grep /notes." in text
+    assert "- Notes: the files under /notes." in text
     assert "at most 8 tool calls and about 60 seconds" in text
     assert "moxi memory search, moxi sessions read, grep" in text
     assert "End of recall." in text
     assert 'Recalled from past sessions and notes for "why did the ingest stall":' in text
-    assert "{" not in text
+    assert re.search(r"\{[a-z_]+\}", text) is None, "a placeholder left unfilled"
+
+
+def test_project_first_shows_the_project_first_and_names_it():
+    text = brief()
+    project_at = text.index("In this project, shop:\n- session other-1")
+    assert text.index("Beyond this project:\n- session wide-1") > project_at
+    assert ("These search past this project too. This project is shop: its hits are this "
+            "project's own record, and --project shop searches its sessions alone. Its "
+            "own notes are under /notes/shop.") in " ".join(text.split())
+    assert "--project shop\n" not in text
+
+
+def test_a_part_that_found_nothing_says_so():
+    text = brief(parts=[recall_brief.Part("project"),
+                        recall_brief.Part("beyond", hits=[hit("wide-1")])],
+                 project_dir=None)
+    assert "In this project, shop:\n(found nothing here)\nBeyond this project:" in text
+    assert "Its own notes" not in text
+
+
+def test_the_project_scope_searches_with_project_and_names_no_project_line():
+    text = brief(scope="project", parts=[recall_brief.Part("project",
+                                                           hits=[hit("other-1")])])
+    assert 'moxi memory search "<a few keywords>" --project shop\n' in text
+    assert "In this project" not in text and "These search past" not in text
+
+
+def test_the_brief_asks_for_a_first_answer_at_once_and_a_stream_after_it():
+    text = " ".join(brief().split())
+    assert ("Give a first answer as soon as you have one useful point: when the first "
+            "search above already holds one, answer from it at once, before any tool "
+            "call.") in text
+    assert "After each answer you are asked to keep digging" in text
+    assert "with only what is new since your last answer" in text
+    assert "End an answer with the line End of recall." in text
+    assert "never ends the recall" not in text
+
+
+def test_the_brief_says_a_backslash_is_refused():
+    text = " ".join(brief().split())
+    assert ("No ;, & or &&, redirection, variable or cd, and no backslash, (, ), {, }, `, "
+            "$ or ! anywhere, even inside quotes") in text
+    assert 'grep -E "one|other"' in text
+    assert "spell a repeat out (xx, not x{2})" in text
+    assert "the Grep tool, which takes any pattern" in text
+    shell = text[text.index("No ;"):text.index("anywhere, even inside quotes")]
+    for refused in recall_guard.REFUSED_CHARS - frozenset("<>\\"):
+        assert refused in shell
+    assert "redirection" in shell and "backslash" in shell
+    assert recall_guard.plain_read('grep -E "one|other" notes.md', ["grep"])
+    assert not recall_guard.plain_read('grep "one\\|other" notes.md', ["grep"])
 
 
 def test_an_asked_recall_and_one_round_change_the_brief():
@@ -303,7 +587,11 @@ def test_the_child_opens_its_line_with_its_identity_then_writes_the_brief(monkey
     assert line["head"] == "ingest lock stall" and line["route"] == "subagent"
     recall_child.write_brief(recall, search=FakeSearch({None: [hit("other-1")]}),
                              places=no_notes)
-    assert recalls.find_line(SESSION, record["recall"])["prefetch_hits"] == 1
+    line = recalls.find_line(SESSION, record["recall"])
+    # a record with no cwd has no project part: its one part is the one beyond
+    assert line["prefetch_hits"] == 1
+    assert line["project_hits"] is None and line["beyond_hits"] == 1
+    assert "widened" not in line
     assert "other-1" in records.read(SESSION, record["recall"])["brief"]
 
 
@@ -319,3 +607,99 @@ def test_a_child_whose_config_read_is_refused_loses_the_recall(monkeypatch):
 
 def test_the_child_refuses_an_unknown_recall():
     assert recall_child.main(["--session", SESSION, "--recall", "nope"]) == 2
+
+
+# -- memory's own earlier answers in a prompt ----------------------------------------
+
+def comms_event(senders, *, mode="automatic"):
+    found = event(mode=mode, own=False, by="comms",
+                  text="  - the lock is held by the writer\n  please also check the reader")
+    found.delivery_senders = senders
+    return found
+
+
+@pytest.fixture
+def recall_names(monkeypatch):
+    """comms reads `me-subconscious` back as this session's recall sender."""
+    from moxi_memory import recall_send
+
+    monkeypatch.setattr(recall_send, "session_parent", lambda session_id, env: "me")
+    monkeypatch.setattr(recall_send, "recall_senders", lambda senders, parent: [
+        s for s in senders if parent == "me" and s == "me-subconscious"])
+    monkeypatch.setattr(listener, "subconscious_settings", lambda: dict(
+        recall_start.default_settings(), trigger="user-and-comms"))
+
+
+def test_a_delivery_only_from_this_sessions_recalls_starts_no_recall(started, recall_names):
+    listener.subconscious(comms_event(["me-subconscious"]))
+    assert started == [] and recalls.logged_sessions() == []
+
+
+def test_a_delivery_only_from_recalls_resets_no_count(started, recall_names):
+    with recalls.session_lock(SESSION):
+        recall_start.write_asked(SESSION, 2)
+    listener.subconscious(comms_event(["me-subconscious"], mode="on-demand"))
+    assert recall_start.asked(SESSION) == 2
+    listener.subconscious(comms_event(["me-subconscious", "builder"], mode="on-demand"))
+    assert recall_start.asked(SESSION) == 0
+
+
+def test_a_name_of_the_form_comms_does_not_read_back_follows_the_trigger(started,
+                                                                         recall_names):
+    listener.subconscious(comms_event(["other-subconscious"]))
+    [(_, recall_id)] = started
+    assert records.read(SESSION, recall_id)["recall_senders"] == []
+
+
+def test_a_recall_with_other_mail_leaves_memorys_own_lines_to_recalled(started,
+                                                                       recall_names):
+    with recalls.session_lock(SESSION):
+        recalls.put_line(SESSION, {"recall": "earlier", "state": "back", "rounds": [
+            {"round": 1, "text": "Recalled ...:\n- the lock is held by the writer"}]})
+    listener.subconscious(comms_event(["me-subconscious", "builder"]))
+    [(_, recall_id)] = started
+    record = records.read(SESSION, recall_id)
+    assert record["recall_senders"] == ["me-subconscious"]
+    recall = recall_child.Recall(record)
+    search = FakeSearch({})
+    text = recall_child.write_brief(recall, search=search, places=no_notes)
+    assert all("writer" not in query for query, _ in search.asked)
+    assert "Already recalled for the main agent" in text
+    assert "<<<\n- the lock is held by the writer\n>>>" in text
+    prompt_part = text.split("Already recalled")[0]
+    assert "please also check the reader" in prompt_part
+    assert "held by the writer" not in prompt_part
+
+
+def test_under_the_user_trigger_a_comms_delivery_reads_no_senders(started, monkeypatch):
+    from moxi_memory import recall_send
+
+    asked = []
+    monkeypatch.setattr(recall_send, "session_parent",
+                        lambda session_id, env: asked.append(session_id) or "me")
+    monkeypatch.setattr(listener, "subconscious_settings", recall_start.default_settings)
+    listener.subconscious(comms_event(["me-subconscious"]))
+    assert asked == [] and started == []
+
+
+def test_a_comms_routes_record_keeps_the_sessions_comms_name(started, monkeypatch):
+    from moxi_memory import recall_send
+
+    monkeypatch.setattr(recall_start, "route", lambda harness, session_id, env=None: (
+        recall_start.SLOT, None))
+    monkeypatch.setattr(recall_send, "session_parent", lambda session_id, env: "me@acme")
+    listener.subconscious(event())
+    [(_, recall_id)] = started
+    assert records.read(SESSION, recall_id)["comms_name"] == "me@acme"
+
+
+def test_a_subagent_routes_record_keeps_no_comms_name(started):
+    listener.subconscious(event())
+    [(_, recall_id)] = started
+    assert records.read(SESSION, recall_id)["comms_name"] is None
+
+
+def test_split_recalled_matches_stripped_lines_only():
+    kept, recalled = recall_brief.split_recalled("  - a\n- b changed\n\n- c",
+                                                 frozenset({"- a", "- b", "- c"}))
+    assert kept == "- b changed\n" and recalled == ["- a", "- c"]
