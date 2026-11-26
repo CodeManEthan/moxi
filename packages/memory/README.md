@@ -1012,9 +1012,11 @@ hours is cut from later pieces and told to later recalls as already had. A piece
 handed within `subconscious.chat.drop_after_s` is dropped. At most 20 pieces go in one
 answer; `notes` says how many more wait.
 
-Every piece goes through secrets' `chat_redact`, and the text part, which joins them,
-again whole. A piece that comes back unscanned is held back with a note and tried again
-at the next call. It refuses `bad-input`, `not-started`, `redaction-off` and `config`
+Every piece, its words and each note go through secrets' `chat_redact` with sessions'
+path cut between its passes, as `search_memory`'s strings do, so no local path or
+loopback address leaves; the text part, which joins them, is redacted again whole. A
+piece that comes back unscanned is held back with a note and tried again at the next
+call, and so is every piece while the sessions installed can't cut paths. It refuses `bad-input`, `not-started`, `redaction-off` and `config`
 (memory's config can't be read), collecting and starting nothing; a recall that can't
 start is never a refusal. The tool is listed whether the chat recall is on or off, and
 each call reads `subconscious.chat.enabled` afresh, so turning it on needs no restart.

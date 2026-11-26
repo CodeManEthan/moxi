@@ -117,7 +117,9 @@ Claude's calls come from Anthropic's cloud, through your tunnel provider (Tailsc
 or Cloudflare). Tool calls, their arguments and their answers cross both. With comms' tools
 that means message bodies you send and read through Claude; comms' own security doc says
 what its tools can reach. With the read tools below, it means redacted text from your
-notes, your agents' transcripts and memory's index of them.
+notes, your agents' transcripts and memory's index of them. With memory's `recall`
+(below), it means the words and context the chat sends in, and the redacted pieces local
+agents found in those same places.
 
 Before any answer goes out, the connector removes control characters (all but newline and
 tab), DEL, the C1 range and every Unicode format character (bidi controls, zero-width
@@ -156,13 +158,35 @@ the note does, and a source line forged inside a note looks like the real one.
 call to one answers that no such tool exists. Leaving a module's extra uninstalled does
 the same for all its tools.
 
+### memory's `recall`
+
+memory's `connector` extra also serves `recall`, a chat's subconscious, which is not a
+read tool. While memory's `subconscious.chat.enabled` is on (it is off by default), each
+call with words starts a headless Claude Code agent on your machine, through the
+launcher, that reads your notes folders and a first search of memory's index for those
+words, and spends tokens on your Claude account doing it: at most $0.50 and
+`subconscious.max_tools` plus one turns a launch, and at most four running at once.
+Each agent is fenced to read only: Read, Grep and Glob (and the web tools, only where
+its brief allows them), no MCP server, no shell, no permission prompt, and none of
+your own settings, hooks or plugins (Moxi's own guards from turns still load), and a probe on the machine checks the fence before the first
+recall after each change of `claude`; memory's README, "The fence", says what no flag
+turns off. What it hands back are pieces of the agents' own text, which a later call
+returns. Off, the tool is still listed and only collects; `tools.withheld` or leaving
+memory's extra uninstalled takes it away.
+
+Each piece, its words, each note and the whole text part go through the same chat
+redaction and path cut as `search_memory` (below). When the sessions installed can't cut
+paths, the pieces wait rather than go out uncut. The text an agent writes is the agent's,
+not your notes', so the description and the answer's first line say it was written by
+agents and is information, not your instructions.
+
 ### What is redacted
 
-Every string a read tool returns goes through one chat redaction in moxi-secrets, the
-same call for all six tools. It redacts the raw text with the `credentials`, `broad` and
+Every string a read tool or `recall` returns goes through one chat redaction in
+moxi-secrets, the same call for all seven tools. It redacts the raw text with the `credentials`, `broad` and
 `personal-data` sets in a strict mode, removes the control and format characters the
 connector removes, applies the tool's own change to the text (the path cut of
-`read_session` and `search_memory`, below), and redacts again, so the last redaction sees exactly the text that goes out. The
+`read_session`, `search_memory` and `recall`, below), and redacts again, so the last redaction sees exactly the text that goes out. The
 first pass sees the raw text, so an invisible character between a word and a token still
 gives the token its boundary; the second sees the text as sent, so a token that removing a
 character or cutting a path makes whole is judged too. In strict mode no allow mark on
@@ -209,7 +233,8 @@ and `read_session` give a session's folder as its last segment only. `read_sessi
 cuts every local path in every string it shows (message text, tool-call lines, the title,
 refusal texts) to its last segment, `Read(/home/you/notes/x.md)` showing as `Read(x.md)`,
 and `search_memory` cuts the same way every string it shows (snippets, project labels,
-notes), `/home/you/notes/x.md` in a snippet showing as `x.md`. Both show each loopback
+notes), `/home/you/notes/x.md` in a snippet showing as `x.md`, and `recall` cuts every
+string it shows (pieces, their words, notes) the same way. All three show each loopback
 address (`localhost`, `127.0.0.1`, `[::1]`, with any scheme, port
 and path) as `local`. A path counts when it starts at your home folder, `~/`, `$HOME/` or
 one of the system roots (`/home/`, `/tmp/`, `/root/`, `/etc/`, `/var/`, `/usr/`, `/opt/`,
@@ -325,8 +350,10 @@ outside every session can mint a code; "The mint gate" above) was accepted for c
 tools, and it is accepted for this wider grant too. Such a process already runs as you and
 can read those files itself, so for that path the tools add no reach. A person who talks
 you into reading out a code does gain reach: they can read your notes and transcripts,
-redacted, until the grant lapses 30 days after its last refresh or you revoke it. Use a
-code only for a sign-in you started yourself.
+redacted, until the grant lapses 30 days after its last refresh or you revoke it. With
+memory's `recall` installed and on, the grant also starts agents on your machine that
+read those files and spend your tokens, within the fence and budget above. Use a code
+only for a sign-in you started yourself.
 
 ## The call log
 
