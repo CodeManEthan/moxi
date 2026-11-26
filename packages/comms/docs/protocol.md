@@ -374,8 +374,10 @@ so a read made in the same lag never leaves its row behind the release. A `[held
 takes no read and always waits for the next turn end.
 
 A row handed to a binding is handed to it again only after its adapter reports it
-unhandled or the binding ends, at the next release point. When a binding ends, every row
-it was handed and had not had acked waits again. An `agent-N` name has no rows while
+unhandled or the binding ends, at the next release point. A send that passes its read
+is pushed whatever rows wait for the name, rows a turn left unhandled included, so it can
+reach the session before an older message; each carries its id. When a binding ends,
+every row it was handed and had not had acked waits again. An `agent-N` name has no rows while
 unbound and loses them when its binding ends.
 
 `moxi comms send` asks the daemon for its read of each bound recipient's cache. A recipient
